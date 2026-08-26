@@ -1194,7 +1194,10 @@ pub enum Action {
     ///
     /// **It rearranges rows the frame already holds**, so it is
     /// [`Action::ToggleMasthead`]'s kind rather than [`Action::ToggleStaged`]'s:
-    /// nothing is re-walked, nothing is re-read, and the position is kept.
+    /// nothing is re-walked, nothing is re-read, and the position is kept. **The
+    /// position is kept except where the reader is resting on the diff's last
+    /// screenful**, where the clamp gives rows back so the last row stays on the
+    /// last row; the total the bar is drawn against is unmoved either way.
     ToggleWrap,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///

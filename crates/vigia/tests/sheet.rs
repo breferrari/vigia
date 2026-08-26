@@ -55,10 +55,14 @@ const WIDE: u16 = 80;
 ///
 /// **Was 26 with thirteen keyboard gestures**, and every added gesture moves it by
 /// one row: B17's `a` ([#313](https://github.com/breferrari/vigia/issues/313)) is
-/// what took it to 27.
+/// what took it to 27, and B19's `w`
+/// ([#272](https://github.com/breferrari/vigia/issues/272)) to 28.
 const WHOLE_TABLE: u16 = 28;
 
 /// Keyboard gestures the sheet's table holds, as a reader counts them on screen.
+///
+/// Fifteen since B19's `w` ([#272](https://github.com/breferrari/vigia/issues/272)),
+/// fourteen since B17's `a`.
 const KEYBOARD_ROWS: u16 = 15;
 const TALL: u16 = 24;
 const FILES: usize = 3;

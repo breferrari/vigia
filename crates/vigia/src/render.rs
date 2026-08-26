@@ -8642,6 +8642,13 @@ pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
         .iter()
         .filter_map(|row| match row {
             Row::Line { number, .. } => Some(*number),
+            // **A continuation carries no number and must not be counted**
+            // ([#272](https://github.com/breferrari/vigia/issues/272)), which is a
+            // decision rather than a wildcard sweeping it up: the blank where its
+            // number would be is what says the row is not a new line, so a
+            // `Row::Wrap` that ever carried one would widen the gutter for a
+            // number nobody draws.
+            Row::Wrap { .. } => None,
             _ => None,
         })
         .max()
@@ -8725,14 +8732,34 @@ struct Printed {
     /// differ exactly where it matters: a run that ends flush with the pane is
     /// indistinguishable by width from one that was cut there.
     clipped: bool,
-    /// Byte offset into the source where the walk stopped.
+    /// Byte offset after the last character that left the walk **inside** `room`.
     ///
     /// Equal to the source's length when nothing was left over. **What
     /// [`split_at`] reads**, and it is on this struct rather than recomputed by a
     /// second walk because the two would then be two spellings of one rule: the
     /// row count is taken from where the split lands and the pane is drawn from
     /// where the walk stops, and those have to be the same byte.
+    ///
+    /// **The last character that *fitted*, not the first that did not**, and the
+    /// difference is a whole glyph ([#272](https://github.com/breferrari/vigia/issues/272)).
+    /// The walk admits a character while `column < room` and only then charges
+    /// its width, so the last one admitted can be **two columns wide against one
+    /// column of room**. Splitting at the character after it put a head on the row
+    /// that was one column too wide: `Painter::put_runs_marked` then cut that
+    /// glyph and stamped `›` on a head whose tail is on the row below, which is
+    /// the one thing [`crate::view::Row::Wrap`]'s own docblock says cannot
+    /// happen, and the glyph was drawn on neither row. Found by an adversarial
+    /// audit on `abcdefgh` followed by two CJK characters at a content width of
+    /// nine.
     at: usize,
+    /// Columns the walk reached, so a caller can tell *the room ran out* from
+    /// *the character bound ran out*.
+    ///
+    /// **The two are one flag in [`Self::clipped`] and two different answers for
+    /// [`split_at`]**: a line made entirely of zero-width characters trips the
+    /// walk bound with `column` still at zero, and wrapping it would spend one of
+    /// the two rows the cap allows on a row that draws nothing.
+    column: usize,
 }
 
 /// Make one line of file content safe to write into terminal cells.
@@ -8797,7 +8824,12 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
 pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
     let mut column = 0usize;
     let walked = walk_printable(text, &mut column, room, None);
-    (walked.clipped && walked.at > 0 && walked.at < text.len()).then_some(walked.at)
+    // **`column >= room` as well as `clipped`.** The walk reports clipped for two
+    // reasons and only one of them is a line that ran out of pane: the other is
+    // the character bound, which a line of combining marks or zero-width spaces
+    // trips with the row still empty. See [`Printed::column`].
+    (walked.clipped && walked.column >= room && walked.at > 0 && walked.at < text.len())
+        .then_some(walked.at)
 }
 
 /// Columns a wrapped line's continuation stands in by, so a block keeps its shape.
@@ -8814,8 +8846,8 @@ pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
 /// indent would leave four columns of tail, and four columns of tail is not a
 /// route to the end of anything. The cap is the tail's floor rather than a
 /// preference, and
-/// `tests/legibility.rs::a_wrapped_continuation_keeps_the_text_its_floor` is what
-/// holds it.
+/// `tests/wrap.rs::a_wrapped_continuation_keeps_the_text_its_floor` is what holds
+/// it.
 ///
 /// Tabs count what they expand to, from the line's own origin, because that is
 /// what [`printable`] draws.
@@ -8854,12 +8886,11 @@ fn emit(out: &mut Option<String>, c: char, times: usize) {
 /// tab stop, a control character or a grapheme cluster resolved one way here and
 /// another way there is a row whose count and whose pixels disagree, which is
 /// invisible from either side.
-fn walk_printable(text: &str, column: &mut usize, room: usize, out: Option<String>) -> Printed {
+fn walk_printable(text: &str, column: &mut usize, room: usize, mut out: Option<String>) -> Printed {
     // `None` is [`split_at`] asking where the break falls, and it must stay
     // `None` all the way down rather than becoming an empty `String`: an empty
     // one allocates the moment anything is pushed into it, and this runs once per
     // drawn content row per frame.
-    let mut out = out;
     // The character bound, in the same terms as the column one so the two can be
     // read together.
     let walk = room
@@ -8883,6 +8914,10 @@ fn walk_printable(text: &str, column: &mut usize, room: usize, out: Option<Strin
     // ASCII stays off the measuring path: it opens a cluster and pays nothing.
     let mut cluster = 0usize;
     let mut cluster_width = 0usize;
+    // Where the walk still fitted. Advanced at the **end** of each character's
+    // arm, so a character that took the row past `room` leaves this on the byte
+    // before it. See [`Printed::at`].
+    let mut fitted = 0usize;
     for (i, c) in text.char_indices() {
         if *column >= room || examined >= walk {
             // Stopped with source left over, which is the caller's signal to
@@ -8891,7 +8926,8 @@ fn walk_printable(text: &str, column: &mut usize, room: usize, out: Option<Strin
                 text: out.unwrap_or_default(),
                 examined,
                 clipped: true,
-                at: i,
+                at: fitted,
+                column: *column,
             };
         }
         examined += 1;
@@ -8957,10 +8993,14 @@ fn walk_printable(text: &str, column: &mut usize, room: usize, out: Option<Strin
                 }
             }
         }
+        if *column <= room {
+            fitted = i + c.len_utf8();
+        }
     }
     Printed {
         text: out.unwrap_or_default(),
         at: text.len(),
+        column: *column,
         // The source ran out rather than the room, so the only way this row
         // still overflows is a two-column glyph that straddled the last cell.
         clipped: *column > room,

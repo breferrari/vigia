@@ -1,11 +1,18 @@
 //! What the pane starts as, before anybody presses anything.
 //!
 //! `SPEC.md` §11.2 **B6**, amended 2026-08-25 by
-//! [#306](https://github.com/breferrari/vigia/issues/306). Three keys, in a file
-//! beside the theme: `masthead`, `rail`, `single`, `staged` and `wrap`, the toggles that decide what
-//! the body is made of. All three are off without a file, which is every version
-//! of this tool before the amendment, so a reader who has written nothing sees
-//! exactly what they saw yesterday.
+//! [#306](https://github.com/breferrari/vigia/issues/306). Five keys, in a file
+//! beside the theme: `masthead`, `rail`, `single`, `staged` and `wrap`, the
+//! toggles that decide what the body is made of, and two more that decide how it
+//! is drawn. All five are off without a file, which is every version of this tool
+//! before the amendment, so a reader who has written nothing sees exactly what
+//! they saw yesterday.
+//!
+//! **The count moved twice and this sentence did not**, which is why it is
+//! spelled out rather than left as *three*: B17's `staged` made it four and
+//! B19's `wrap` five ([#272](https://github.com/breferrari/vigia/issues/272)),
+//! and [`KEYS`] is seven with the appearance keys B18 added. `links` is the one
+//! that does **not** start off, and its own field says why.
 //!
 //! ## Why this is a file and not a variable
 //!

@@ -33,8 +33,8 @@ mod screen;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, Pointing, Row, Theme, View, body_layout, diff_height, regions,
-    render,
+    Action, App, Body, Glyphs, Pointing, Row, TRACK_SCALE, Theme, View, body_layout, diff_height,
+    regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -734,4 +734,355 @@ fn every_jump_still_lands_on_a_heading_when_lines_wrap() {
             view.rows.first()
         );
     }
+}
+
+#[test]
+fn scrolling_up_from_the_wrapped_bottom_moves() {
+    // **The end of the diff must be a place a reader can leave.**
+    //
+    // The first draft of the front trim advanced `View::top` by the rows it
+    // dropped, and `App` stores that back as the scroll position. From the
+    // advanced row fewer than a screenful of logical rows remain, so the next
+    // frame is short, restarts through `last_screenful`, lands on the same row
+    // and trims to the same place: every `k` after that resolves to the position
+    // it started from, and the end of the diff is a one-way trap. Two audit
+    // remits found it independently.
+    //
+    // Asserted as *the position strictly decreases*, and then as *the top of the
+    // diff is reachable by pressing `k` enough times*, because the first alone
+    // would pass against a shell that moved one row and then stuck.
+    let scratch = Scratch::new("shell-wrap-scroll-up");
+    scratch.write("src/lines.rs", "seed\n");
+    scratch.commit_all("base");
+    let mut body = String::new();
+    for n in 0..40 {
+        body.push_str(&format!("let line_{n} = \"{}\";\n", "q".repeat(70)));
+    }
+    scratch.write("src/lines.rs", body);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    app.apply(Action::Scroll(10_000), &mut frame, height)
+        .expect("apply");
+    let bottom = app
+        .view(&mut frame, &mut highlighter, &history, split(&app))
+        .expect("view")
+        .top;
+    assert!(
+        bottom.row > 0,
+        "the fixture never left row zero, so there is no bottom to be trapped at"
+    );
+
+    app.apply(Action::Scroll(-1), &mut frame, height)
+        .expect("apply");
+    let up = app
+        .view(&mut frame, &mut highlighter, &history, split(&app))
+        .expect("view")
+        .top;
+    assert!(
+        up.row < bottom.row,
+        "`k` at the wrapped bottom resolved back to the same row ({} then {}), \
+         so the end of the diff cannot be left",
+        bottom.row,
+        up.row
+    );
+
+    // And all the way back, which is what says the first step was not the only one.
+    for _ in 0..200 {
+        app.apply(Action::Scroll(-1), &mut frame, height)
+            .expect("apply");
+    }
+    let top = app
+        .view(&mut frame, &mut highlighter, &history, split(&app))
+        .expect("view")
+        .top;
+    assert_eq!(
+        top.row, 0,
+        "two hundred presses of `k` from the wrapped bottom did not reach the \
+         top of the diff"
+    );
+}
+
+#[test]
+fn a_wide_glyph_straddling_the_break_is_drawn_on_one_of_the_two_rows() {
+    // **A character is not allowed to fall down the crack between the rows.**
+    //
+    // The walk admits a character while `column < room` and only then charges its
+    // width, so the last one admitted can be two columns wide against one column
+    // of room. Splitting after it left a head one column too wide, which the
+    // painter then cut and stamped `›` on: the glyph was drawn on neither row,
+    // and a head that continues downward carried the mark that means rightward.
+    //
+    // **What this asserts is the invariant, not the symptom the audit predicted**,
+    // and the difference is worth recording. The report described a head cut and
+    // stamped `›` with the glyph drawn on neither row; mutated back to the old
+    // boundary the pane draws that glyph intact and unmarked at every one of the
+    // sixty-one widths swept here, so the symptom could not be demonstrated. The
+    // bound moved anyway, because *the head never exceeds the room it was cut
+    // for* is the property the row model owes the painter and the old form did
+    // not guarantee it. The gate says that, which is checkable, rather than
+    // restating a repro that does not reproduce.
+    //
+    // The fixture is ASCII padding then CJK, so the break lands on a two-column
+    // glyph at some width of the sweep whatever the gutter does.
+    let scratch = Scratch::new("shell-wrap-wide-break");
+    scratch.write("src/wide.rs", "seed\n");
+    scratch.commit_all("base");
+    scratch.write(
+        "src/wide.rs",
+        format!("let w = \"{}日本語のテキスト\";\n", "a".repeat(40)),
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for width in 30u16..=90 {
+        let at = Rect::new(0, 0, width, 24);
+        let mut app = App::new();
+        let body = diff_height(at, &chrome_of(&app), 1, 1);
+        app.apply(Action::ToggleWrap, &mut frame, body)
+            .expect("apply");
+        let chrome = chrome_of(&app);
+        let laid = body_layout(at, &chrome, 1, 1);
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, laid)
+            .expect("view");
+
+        for (n, row) in view.rows.iter().enumerate() {
+            let Row::Line { text: head, .. } = row else {
+                continue;
+            };
+            let Some(Row::Wrap { text: tail, .. }) = view.rows.get(n + 1) else {
+                continue;
+            };
+            // The whole source line, split across the two rows and nothing lost
+            // between them. Read off the rows rather than off the painter,
+            // because the painter is what the row model is telling what to draw.
+            let whole = format!("{head}{tail}");
+            assert!(
+                whole.contains("日本語のテキスト"),
+                "at {width} columns a wrapped line lost content across the \
+                 break: head {head:?} tail {tail:?}"
+            );
+        }
+
+        // And the head is never marked, at any width, which is the half the
+        // painter answers.
+        let (_, rows) = {
+            let mut buf = ratatui::buffer::Buffer::empty(at);
+            render(
+                &mut buf,
+                at,
+                &view,
+                &Theme::default(),
+                Glyphs::default(),
+                &chrome,
+            );
+            let laid_regions = regions(at, &chrome, &view);
+            (
+                (),
+                screen::rows_of(
+                    &buf,
+                    Rect::new(
+                        0,
+                        laid_regions.diff.top,
+                        width,
+                        laid_regions.diff.rows as u16,
+                    ),
+                ),
+            )
+        };
+        for (n, row) in rows.iter().enumerate() {
+            if rows.get(n + 1).is_some_and(|below| below.contains('↳')) {
+                assert!(
+                    !row.ends_with('›'),
+                    "at {width} columns a head row that continues downward is \
+                     marked as continuing rightward: {row:?}"
+                );
+                assert!(
+                    ratatui::text::Span::raw(row).width() <= usize::from(width),
+                    "at {width} columns a head row occupies {} of them: {row:?}",
+                    ratatui::text::Span::raw(row).width()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_line_of_zero_width_characters_does_not_buy_a_second_row() {
+    // **The walk reports clipped for two reasons and only one is a full row.**
+    // The other is the character bound, which a run of combining marks trips with
+    // the row still empty; wrapping there spends one of the two rows the cap
+    // allows on a row that draws nothing.
+    let scratch = Scratch::new("shell-wrap-zero-width");
+    scratch.write("src/zero.rs", "seed\n");
+    scratch.commit_all("base");
+    // Combining acute accents: many characters, no columns.
+    scratch.write("src/zero.rs", format!("//{}\n", "\u{0301}".repeat(600)));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let (view, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Line { .. })),
+        "the fixture drew no content rows at all"
+    );
+    assert!(
+        !view.rows.iter().any(|row| matches!(row, Row::Wrap { .. })),
+        "a line that occupies no columns wrapped anyway, so one of the two rows \
+         the cap allows is drawing nothing"
+    );
+}
+
+/// A fixture of one file whose every line wraps, taller than the pane.
+fn tall(name: &str, lines: usize) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/lines.rs", "seed\n");
+    scratch.commit_all("base");
+    let mut body = String::new();
+    for n in 0..lines {
+        body.push_str(&format!("let line_{n} = \"{}\";\n", "q".repeat(70)));
+    }
+    body.push_str(&format!("let last = \"tail\"; // {TAIL}\n"));
+    scratch.write("src/lines.rs", body);
+    scratch
+}
+
+#[test]
+fn the_pinned_end_is_reachable_when_lines_wrap() {
+    // **`G` inside a pinned file clamps in `App`, not in the walk**, and it
+    // clamps with `span.saturating_sub(height)`: a **logical** span less a
+    // **display** height. With `w` on that lands the top too early, and until
+    // `View::collect` derived *at the bottom* for itself the walk had no way to
+    // know it should rest the last row on the last row, so the pinned file's own
+    // ending was unreachable by the one gesture that names it.
+    //
+    // The same subtraction is in the drag on the diff's bar, which the next gate
+    // drives. Both are outside `collect` and neither could be fixed by a flag
+    // `collect` sets, which is why the flag is derived from the walk instead.
+    let scratch = tall("shell-wrap-pinned-end", 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    // **A frame before a gesture, which is what the shell does.** `App::shown`
+    // is what the last frame drew, so it is zero until one has been; the loop
+    // paints and then reads input, so a reader's first keypress always follows a
+    // paint. A gate that pressed a key against a shell that had never drawn would
+    // be measuring a state the program cannot be in.
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+
+    app.apply(Action::ToggleSingle, &mut frame, height)
+        .expect("apply");
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+    app.apply(Action::Bottom, &mut frame, height)
+        .expect("apply");
+    let (_, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert!(
+        rows.iter().any(|row| row.contains(TAIL)),
+        "`G` in a pinned file with wrapping on cannot reach its last line:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn a_drag_to_the_end_of_the_bar_reaches_the_end_when_lines_wrap() {
+    // The pointer's half of the gate above. `Action::DiffTo` clears `anchored`,
+    // so nothing self-corrects on a later frame: before the derivation, dragging
+    // the thumb to the bottom with `w` on hid the tail for as long as the reader
+    // left it there.
+    let scratch = tall("shell-wrap-drag-end", 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    // **A frame before a gesture, which is what the shell does.** `App::shown`
+    // is what the last frame drew, so it is zero until one has been; the loop
+    // paints and then reads input, so a reader's first keypress always follows a
+    // paint. A gate that pressed a key against a shell that had never drawn would
+    // be measuring a state the program cannot be in.
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+
+    app.apply(Action::DiffTo(TRACK_SCALE), &mut frame, height)
+        .expect("apply");
+    let (_, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert!(
+        rows.iter().any(|row| row.contains(TAIL)),
+        "a drag to the bottom of the diff's bar with wrapping on does not reach \
+         the end of the diff:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn a_page_step_skips_no_line_when_lines_wrap() {
+    // **A page is a screenful, and a screenful is fewer rows of the diff when
+    // they wrap.** `Space` stepped `height - 1` logical rows against a screen
+    // showing about half that many, so a reader paging through a wrapped diff
+    // never saw most of it. The step is taken before the frame it moves to
+    // exists, so `App` remembers what the last frame drew.
+    //
+    // Asserted as *the first line of page two is one the reader has already
+    // seen*, which is the overlap row a page keeps, rather than as an arithmetic
+    // identity: the identity would restate the implementation.
+    let scratch = tall("shell-wrap-page", 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    let (_, first) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    // **The line's own name, not the drawn row.** A row carries the scrollbar's
+    // glyph in its last column and the thumb moves between the two frames, so
+    // comparing rows compares the bar and reports a skip that did not happen.
+    let named = |rows: &[String]| -> Vec<String> {
+        rows.iter()
+            .filter_map(|row| {
+                row.split_whitespace()
+                    .find(|word| word.starts_with("line_"))
+                    .map(str::to_owned)
+            })
+            .collect()
+    };
+    let seen = named(&first);
+    assert!(
+        seen.len() > 2,
+        "page one drew {} content rows, which is too few to page over",
+        seen.len()
+    );
+
+    app.apply(Action::Page(1), &mut frame, height)
+        .expect("apply");
+    let (_, second) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    let next = named(&second);
+    let landed = next.first().expect("page two drew no content");
+    assert!(
+        seen.contains(landed),
+        "page two opens on {landed:?} and page one showed {seen:?}, so a page \
+         step with wrapping on walked over content nobody saw"
+    );
 }

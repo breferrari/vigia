@@ -1833,20 +1833,27 @@ impl View {
         let mut index = view.top.file;
         let mut skip = position.row;
         let mut placed = false;
-        // **Whether the position this walk settled on is the diff's *bottom*,
-        // rather than somewhere in the middle of it.**
+        // **Whether the position this walk settled on is the diff's *bottom*.**
         //
-        // Set by the three places that rest the diff's last row on the last row
-        // of the pane, and read by nothing but [`Self::wrap_rows`]. It is a
-        // units question and it did not exist before
-        // [#272](https://github.com/breferrari/vigia/issues/272): all three
-        // compare a **logical** span against `height`, which is a count of
-        // **display** rows, and while the two were one number that was exact. It
-        // still is with wrapping off. With wrapping on the clamp lands too far
-        // back, the expansion below has more rows than the pane can hold, and
-        // dropping them off the bottom the way every other frame does would make
-        // the end of the diff unreachable by the gesture that exists to reach it.
-        // So this one case trims from the front instead. See `wrap_rows`.
+        // Set by the two places here that rest the diff's last row on the pane's
+        // last row, and read by nothing but [`Self::wrap_rows`]. It is a units
+        // question and it did not exist before
+        // [#272](https://github.com/breferrari/vigia/issues/272): both compare a
+        // **logical** span against `height`, a count of **display** rows, and
+        // while the two were one number that was exact. With wrapping on the
+        // clamp lands too far back, and dropping the excess off the bottom the
+        // way every other frame does would put the end of the diff out of reach
+        // of the gesture that exists to reach it.
+        //
+        // **Set rather than derived, and the derivation was tried first.**
+        // `index >= stop` after the walk reads as *the walk ran out of files* and
+        // is not: `take_file` breaks when the window fills and the walk increments
+        // `index` regardless, so the test is true whenever the walk merely
+        // **reached** the last file. A page step into the middle of a long file
+        // then trimmed as though it were the end, and the pane opened nine rows
+        // past where the position said. The three sites outside this function
+        // that clamp the same way are fixed where they are, by measuring a
+        // screenful in the rows a screen actually draws: see `App::screenful`.
         let mut at_bottom = false;
         // At most one restart, whichever of the two reasons below triggered it.
         // `last_screenful` resolves to a position that can fill the body whenever
@@ -2153,14 +2160,7 @@ impl View {
         // Before [`Self::take_list`] rather than after it, because the front trim
         // can move [`Self::top`] and the caret is drawn from where the diff
         // actually landed.
-        let trimmed = view.wrap_rows(width, wrap, height, at_bottom);
-        if trimmed {
-            // The trim crossed into a later file, so the block the viewport is
-            // inside is a different block. Re-read through the span cache, which
-            // is a `stat` against a height this tick has already proved rather
-            // than a second `Frame::diff` of the file an agent is writing.
-            view.current_span = block_rows(frame, view.top.file)?;
-        }
+        view.wrap_rows(width, wrap, height, at_bottom);
 
         // **After the walk, because only the walk knows where the diff landed.**
         // The position handed in may overshoot its file, point past a list the
@@ -2425,9 +2425,7 @@ impl View {
     /// measured against.
     ///
     /// **`SPEC.md` §11.2 B19**, from `w`
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Returns whether
-    /// the trim below moved the viewport into a **different file**, which is the
-    /// one thing the caller has to repair with the frame still in hand.
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)).
     ///
     /// **It reads nothing and asks the frame for nothing**, which is what keeps
     /// I4 exactly where it was. Wrapping only ever *grows* the row count, so the
@@ -2449,16 +2447,16 @@ impl View {
     /// row of the pane: a pre-sliced head with its continuation off screen would
     /// read as a complete line, which is the one thing §11.1's marking rule
     /// exists to prevent.
-    fn wrap_rows(&mut self, width: usize, wrap: bool, height: usize, at_bottom: bool) -> bool {
+    fn wrap_rows(&mut self, width: usize, wrap: bool, height: usize, at_bottom: bool) {
         // **Only where a width was passed**, so a caller that named none leaves
         // the decision where it has always been. See [`View::gutter`].
         self.gutter = (width > 0).then(|| crate::render::gutter_width(&self.rows, width));
         if !wrap || width == 0 || height == 0 || self.rows.is_empty() {
-            return false;
+            return;
         }
         let content = crate::render::content_width(self.gutter.unwrap_or(0), width);
         if content == 0 {
-            return false;
+            return;
         }
 
         // Where each logical row breaks, if it does. Taken once: the trim below
@@ -2483,7 +2481,7 @@ impl View {
         // draws no long line. The `!wrap` and `content == 0` arms above are the
         // same shape and this is the third of them.
         if total == splits.len() {
-            return false;
+            return;
         }
 
         // **The bottom clamp, in the units it now has to be in.**
@@ -2519,21 +2517,33 @@ impl View {
             }
         }
 
-        let was = self.top.file;
+        // **[`Self::top`] is not moved, and that is what makes the end of the
+        // diff a place a reader can leave.**
+        //
+        // The first draft advanced it by the rows the trim dropped, which reads
+        // as the tidy thing and is a **one-way trap**. `top` is stored back as the
+        // scroll position, and from the advanced row fewer than `height` logical
+        // rows remain, so the next frame is `short`, restarts through
+        // [`Self::last_screenful`], lands on the same row and trims to the same
+        // place: every `k` and every wheel-up after that resolves to the position
+        // it started from. Two audit remits found it independently, one as a cost
+        // (two walks and a `last_screenful`'s reads per frame) and one as the
+        // defect it is.
+        //
+        // So the trim is a **display** offset and nothing else. The stored
+        // position stays the row the walk placed, which is a row the walk can
+        // fill again, and `at_bottom` is re-derived from that same position on
+        // every frame, so the screen is stable without the position moving.
+        //
+        // **What it costs is one narrow thing, stated rather than hidden**: at a
+        // wrapped bottom whose last screenful spans two files, the first row
+        // drawn can belong to the file after the one `top` names, so the caret in
+        // the list marks the reader's position rather than the topmost drawn row.
+        // The bar is unaffected, because `rows_above` is `top`'s and `top` means
+        // *the last screenful* there exactly as it always did.
         let mut out: Vec<Row> = Vec::with_capacity(height);
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
-                // **Where the trim leaves the reader, in the units a `Position`
-                // is in**, folded into the walk that discards the rows rather
-                // than taken as a pass of its own. A [`Row::Gap`] is a block's
-                // last row ([#165](https://github.com/breferrari/vigia/issues/165)),
-                // so passing one is what moves the viewport into the next file.
-                if matches!(row, Row::Gap) {
-                    self.top.file += 1;
-                    self.top.row = 0;
-                } else {
-                    self.top.row += 1;
-                }
                 continue;
             }
             if out.len() >= height {
@@ -2588,7 +2598,6 @@ impl View {
             });
         }
         self.rows = out;
-        self.top.file != was
     }
 
     fn last_screenful(
