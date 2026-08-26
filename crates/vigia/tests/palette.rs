@@ -1507,7 +1507,7 @@ fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
     ];
 
     for (why, pairs) in cases {
-        let theme = theme::from_env(Depth::Ansi16, env_of(pairs)).expect("a theme");
+        let theme = theme::from_env(Depth::Ansi16, env_of(pairs), None).expect("a theme");
         assert!(
             !matches!(theme.added.fg, Some(Color::Rgb(..))),
             "{why}: reached the renderer unresolved"
@@ -1538,7 +1538,7 @@ fn a_theme_is_resolved_to_the_depth_it_will_be_drawn_at() {
     // palette already in colours this terminal can show, so the renderer never
     // converts anything.
     let env = |key: &str| (key == "VIGIA_THEME").then(|| "dark".to_owned());
-    let flat = theme::from_env(Depth::Ansi16, env).expect("a theme");
+    let flat = theme::from_env(Depth::Ansi16, env, None).expect("a theme");
     assert!(
         !matches!(flat.added.fg, Some(Color::Rgb(..))),
         "the palette reached the renderer unresolved"
@@ -1588,7 +1588,7 @@ added = #ff0000
     );
     let env = env_of(vec![("HOME".to_owned(), home.display().to_string())]);
 
-    let theme = theme::from_env(Depth::Truecolor, env).expect("a theme");
+    let theme = theme::from_env(Depth::Truecolor, env, None).expect("a theme");
     assert_eq!(theme.added.fg, Some(Color::Rgb(0xff, 0x00, 0x00)));
     assert_eq!(theme.keyword, Theme::dark().keyword, "the base was ignored");
 }
@@ -1610,7 +1610,7 @@ added = #ff0000
         ("VIGIA_THEME".to_owned(), "light".to_owned()),
     ]);
 
-    let theme = theme::from_env(Depth::Truecolor, env).expect("a theme");
+    let theme = theme::from_env(Depth::Truecolor, env, None).expect("a theme");
     assert_eq!(theme, Theme::light().resolve(Depth::Truecolor));
 }
 
@@ -1625,7 +1625,7 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
     let absent = home_with("absent", None);
     let env = env_of(vec![("HOME".to_owned(), absent.display().to_string())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
@@ -1637,7 +1637,7 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
         ),
     );
     let env = env_of(vec![("HOME".to_owned(), broken.display().to_string())]);
-    let err = theme::from_env(Depth::Truecolor, env).expect_err("refused");
+    let err = theme::from_env(Depth::Truecolor, env, None).expect_err("refused");
     assert!(err.to_string().contains("line 1"), "{err}");
 }
 
@@ -1655,14 +1655,14 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
     );
     let env = env_of(vec![("USERPROFILE".to_owned(), home.display().to_string())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor)
     );
 
     // And an empty one is no home at all, rather than a lookup rooted at `/`.
     let env = env_of(vec![("HOME".to_owned(), "  ".to_owned())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
@@ -1683,7 +1683,7 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
         ("USERPROFILE".to_owned(), home.display().to_string()),
     ]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "an empty HOME hid a good USERPROFILE"
     );
@@ -2014,5 +2014,36 @@ fn the_spark_ramp_interpolates_only_where_stops_are_rgb() {
             .spark_ramp()
             .is_none(),
         "`ansi` interpolated named colours"
+    );
+}
+
+#[test]
+fn the_detected_background_picks_the_showcase_and_never_outranks_a_word() {
+    use vigia::Background;
+    let none = |_: &str| None;
+
+    // A terminal that answered picks the showcase for its side.
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, none, Some(Background::Dark)).expect("a theme"),
+        Theme::dark().resolve(Depth::Truecolor),
+        "a dark answer did not pick the dark showcase"
+    );
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, none, Some(Background::Light)).expect("a theme"),
+        Theme::light().resolve(Depth::Truecolor),
+        "a light answer did not pick the light showcase"
+    );
+    // No answer keeps the palette that assumes nothing.
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, none, None).expect("a theme"),
+        Theme::ansi().resolve(Depth::Truecolor),
+        "silence did not keep the fallback"
+    );
+    // And a reader's own word still wins over any guess.
+    let named = |key: &str| (key == "VIGIA_THEME").then(|| "light".to_owned());
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, named, Some(Background::Dark)).expect("a theme"),
+        Theme::light().resolve(Depth::Truecolor),
+        "detection outranked VIGIA_THEME"
     );
 }

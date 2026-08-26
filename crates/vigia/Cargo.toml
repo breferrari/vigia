@@ -35,6 +35,7 @@ exclude = ["tests/**"]
 ratatui.workspace = true
 vigia-core.workspace = true
 
+
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:
 # SPEC.md section 6 keeps the core free of anything the shell decides, and a
 # number that exists to be painted is the shell's. Linux is deliberately absent
@@ -58,6 +59,10 @@ windows-sys.workspace = true
 # nobody typed is too, and SPEC.md section 6 puts terminal I/O outside
 # `vigia-core` entirely.
 [target.'cfg(unix)'.dependencies]
+# SPEC.md section 6 names rustix for one act: polling the tty for the OSC 11
+# background reply at startup (#325). Already in the graph beneath crossterm
+# and notify; declaring it makes the direct use deliberate.
+rustix = { version = "1", default-features = false, features = ["event", "std"] }
 signal-hook.workspace = true
 
 # The tests reach `vigia-core/tests/support` by `#[path]`, the way

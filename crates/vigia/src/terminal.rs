@@ -356,6 +356,182 @@ fn on_panic<T>(restore: impl Fn(), previous: impl Fn(T), info: T) {
     previous(info);
 }
 
+/// Which side of the luminance line the terminal's background sits on.
+///
+/// The answer to the one question the startup query asks, `SPEC.md` §11.2 B18
+/// ([#325](https://github.com/breferrari/vigia/issues/325)): with no
+/// `VIGIA_THEME` and no theme file, this picks `dark` or `light`, and no
+/// answer keeps `ansi`, whose whole contract is assuming nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Background {
+    /// Luminance at or below the line: the showcase dark palette fits.
+    Dark,
+    /// Above it: the light palette does.
+    Light,
+}
+
+/// Classify an OSC 11 reply, or say it is not one.
+///
+/// The reply is `ESC ] 11 ; rgb : RRRR / GGGG / BBBB ST` with one to four hex
+/// digits per channel and either `ESC \` or `BEL` closing it; every terminal
+/// in the 2026 matrix that answers at all answers in that shape, and the
+/// digit width varies, so each channel is scaled by its own width. The
+/// luminance rule is the field's (OpenCode's classifier, delta's and yazi's in
+/// mechanism): Rec. 601 weights against one half.
+pub fn background_of(reply: &[u8]) -> Option<Background> {
+    let text = std::str::from_utf8(reply).ok()?;
+    let at = text.find("]11;")?;
+    let body = &text[at + 4..];
+    let body = body.strip_prefix("rgb:")?;
+    let end = body
+        .find('\u{7}')
+        .or_else(|| body.find('\u{1b}'))
+        .unwrap_or(body.len());
+    let mut channels = body[..end].split('/');
+    let mut channel = || -> Option<f32> {
+        let raw = channels.next()?.trim();
+        if raw.is_empty() || raw.len() > 4 || !raw.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let value = u32::from_str_radix(raw, 16).ok()?;
+        let ceiling = (16u32.pow(raw.len() as u32) - 1) as f32;
+        Some(value as f32 / ceiling)
+    };
+    let (r, g, b) = (channel()?, channel()?, channel()?);
+    let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+    Some(if luminance > 0.5 {
+        Background::Light
+    } else {
+        Background::Dark
+    })
+}
+
+/// Ask the terminal its background colour, waiting at most `timeout`.
+///
+/// **Before the event reader exists, and never after**: crossterm's parser
+/// destroys any sequence it does not know (`event/sys/unix/parse.rs` clears
+/// the buffer on an unknown), so the only moment this reply can be read is
+/// before the takeover starts reading. That is also why the *live* flip is a
+/// separate, blocked issue rather than a missing loop here.
+///
+/// The tty is opened directly rather than through stdin, raw mode is borrowed
+/// for the exchange so the reply neither echoes nor waits for a newline, and
+/// every failure is `None`: a monitor that cannot ask still starts, on the
+/// palette that assumes nothing.
+#[cfg(unix)]
+pub fn background(timeout: std::time::Duration) -> Option<Background> {
+    use std::io::{Read, Write};
+    use std::os::fd::AsFd;
+
+    let mut tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    let raw = ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+    if !raw {
+        ratatui::crossterm::terminal::enable_raw_mode().ok()?;
+    }
+    let answer = (|| {
+        tty.write_all(b"\x1b]11;?\x1b\\").ok()?;
+        tty.flush().ok()?;
+        let deadline = std::time::Instant::now() + timeout;
+        let mut reply = Vec::with_capacity(64);
+        loop {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return background_of(&reply);
+            }
+            let fd = tty.as_fd();
+            let mut fds = [rustix::event::PollFd::new(
+                &fd,
+                rustix::event::PollFlags::IN,
+            )];
+            let waited =
+                rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
+            if waited == 0 {
+                return background_of(&reply);
+            }
+            let mut buffer = [0u8; 64];
+            let read = tty.read(&mut buffer).ok()?;
+            if read == 0 {
+                return background_of(&reply);
+            }
+            reply.extend_from_slice(&buffer[..read]);
+            if reply.contains(&0x07) || reply.windows(2).any(|w| w == b"\x1b\\") {
+                return background_of(&reply);
+            }
+        }
+    })();
+    if !raw {
+        let _ = ratatui::crossterm::terminal::disable_raw_mode();
+    }
+    answer
+}
+
+/// The Windows half: no query, no answer, today's posture.
+#[cfg(not(unix))]
+pub fn background(_timeout: std::time::Duration) -> Option<Background> {
+    None
+}
+
+#[cfg(test)]
+mod background_tests {
+    use super::{Background, background_of};
+
+    #[test]
+    fn every_reply_shape_the_matrix_saw_classifies() {
+        // Four-digit channels, ESC-backslash terminated: the common shape.
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:0d0d/1111/1717\x1b\\"),
+            Some(Background::Dark)
+        );
+        // BEL terminated, light.
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:ffff/ffff/eeee\x07"),
+            Some(Background::Light)
+        );
+        // Two-digit channels scale by their own width.
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:ff/ff/ff\x07"),
+            Some(Background::Light)
+        );
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:00/00/00\x07"),
+            Some(Background::Dark)
+        );
+        // The boundary leans dark: a gray at exactly one half is not light.
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:8000/8000/8000\x07"),
+            Some(Background::Light),
+            "0x8000 of 0xffff is just past one half"
+        );
+    }
+
+    #[test]
+    fn garbage_and_truncation_answer_nothing() {
+        assert_eq!(background_of(b""), None);
+        assert_eq!(background_of(b"\x1b]11;rgb:"), None);
+        assert_eq!(background_of(b"\x1b]11;rgb:zz/zz/zz\x07"), None);
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:ff/ff\x07"),
+            None,
+            "two channels are not three"
+        );
+        assert_eq!(
+            background_of(b"\x1b]10;rgb:ff/ff/ff\x07"),
+            None,
+            "OSC 10 is the foreground"
+        );
+        assert_eq!(background_of(b"hello"), None);
+        assert_eq!(
+            background_of(b"\x1b]11;rgb:fffff/ffff/ffff\x07"),
+            None,
+            "five digits is no channel the protocol has"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! I8, as the policy it is.
