@@ -8280,3 +8280,88 @@ fn a_continuation_mark_only_sits_against_content_that_reached_it() {
         );
     }
 }
+
+/// **No emoji presentation selector reaches the buffer.**
+///
+/// Reported against a real worktree on 2026-08-26: a file drew correctly until
+/// the line holding a warning emoji scrolled into view, and from there every
+/// row of that file broke. Spaces went missing (`row yet` drew as `rownyet`)
+/// and the continuation mark doubled.
+///
+/// The cause is in `ratatui-core` 0.1.2, not here. `U+FE0F` makes the
+/// character before it a two-column emoji, and `ratatui` claims a second cell
+/// for the pair. Its buffer diff has a dedicated path for that second cell
+/// which emits it whenever its symbol changed, without moving the cursor
+/// first, on the assumption that the terminal has not advanced past it. A
+/// terminal that drew the emoji two columns wide *has* advanced past it, so
+/// the write lands one column late and pushes the rest of the row right.
+///
+/// Confirmed on the wire rather than by reading: the bytes vigia emitted
+/// carried a bare style reset and a space directly after the emoji with no
+/// cursor move between them, and the row overflowed by exactly one column.
+///
+/// **The buffer is the only seam that can hold this.** `TestBackend` records
+/// cells and never replays the diff against a terminal that advances a cursor,
+/// so a rendered-row assertion draws the row *correctly* under the defect and
+/// proves nothing. What the fix actually guarantees, and what this pins, is
+/// that the selector never reaches a cell, which is what keeps `ratatui` off
+/// the broken path.
+#[test]
+fn no_emoji_presentation_selector_reaches_the_buffer() {
+    let theme = vigia::Theme::dark();
+    let shown = chrome();
+    let mut terminal = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+
+    let body = "  ? `\u{26a0}\u{fe0f} **Gym cashback**: no row yet in [[x]]";
+    let rows = vec![
+        file("a.ts", 1, 0),
+        Row::Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+        },
+        Row::Line {
+            kind: LineKind::Added,
+            number: 47,
+            text: body.to_string(),
+            spans: Vec::new(),
+            emph: Vec::new(),
+        },
+    ];
+    let view = View {
+        rows,
+        files: 1,
+        ..two_regions(1)
+    };
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &shown,
+            );
+        })
+        .expect("draw");
+    let backend = terminal.backend().clone();
+
+    let all: Vec<String> = (0..14u16).map(|y| row_text(&backend, y)).collect();
+    let drawn = all
+        .iter()
+        .find(|text| text.contains("Gym"))
+        .unwrap_or_else(|| panic!("the emoji row was never drawn:\n{all:#?}"));
+    assert!(
+        !drawn.contains('\u{fe0f}'),
+        "a presentation selector reached the buffer, so `ratatui` claims a \
+         second cell for the pair and its diff writes that cell without \
+         moving the cursor, shifting every column after it:\n{drawn:?}"
+    );
+    assert!(
+        drawn.contains('\u{26a0}'),
+        "the selector was dropped and took its glyph with it:\n{drawn:?}"
+    );
+}

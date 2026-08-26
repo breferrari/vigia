@@ -8571,6 +8571,23 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
         .saturating_mul(CHARS_PER_COLUMN)
         .saturating_add(TAB_STOP) as u64;
     let mut examined = 0u64;
+    // Where the grapheme being measured began, and what it has cost so far.
+    //
+    // **A column advance belongs to the grapheme, not to the characters in
+    // it.** `ratatui` places `⚠️` as one two-column grapheme, while its two
+    // `char`s measure 1 and 0 apart, because the variation selector `U+FE0F`
+    // is what asks for the emoji presentation and carries no width of its own.
+    // Summing per character therefore undercounted the row by one column per
+    // emoji, and every column after it was wrong: the row overflowed the pane,
+    // the clip decision was taken against a column that did not exist, and the
+    // painter dropped characters to fit a row it had already mismeasured.
+    //
+    // Re-measuring from the cluster's start whenever a zero-width character
+    // arrives is what agrees with `ratatui` again, and it covers combining
+    // marks and ZWJ sequences by the same rule rather than by naming them.
+    // ASCII stays off the measuring path: it opens a cluster and pays nothing.
+    let mut cluster = 0usize;
+    let mut cluster_width = 0usize;
     for (i, c) in text.char_indices() {
         if *column >= room || examined >= walk {
             // Stopped with source left over, which is the caller's signal to
@@ -8583,6 +8600,34 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
         }
         examined += 1;
         match c {
+            // **The emoji presentation selector is dropped, not drawn.**
+            //
+            // `U+FE0F` asks the terminal to draw the character before it as a
+            // two-column emoji rather than a one-column glyph, and `ratatui`
+            // honours that by claiming a second cell for the pair. Its buffer
+            // diff then has a dedicated path for that second cell which emits
+            // it whenever its symbol changed, *without moving the cursor
+            // first*, on the assumption the terminal has not advanced past it.
+            // A terminal that drew the emoji two columns wide has advanced past
+            // it, so the write lands one column late and every column after it
+            // on that row is pushed right: the row overflows the pane, the clip
+            // is decided against a column that is not there, and the
+            // continuation mark is drawn twice.
+            //
+            // Reported against a real worktree on 2026-08-26, where a file drew
+            // correctly until the line holding a warning emoji scrolled into
+            // view and then broke from there down. Confirmed on the wire: the
+            // bytes vigia emits carry a bare style reset and a space directly
+            // after the emoji, with no cursor move between them.
+            //
+            // `ratatui-core` 0.1.2 is the current release and still does this,
+            // so the fix is to not reach the path. Dropping the selector costs
+            // the text presentation of the glyph instead of the emoji one,
+            // which a monitor can afford; a shifted row is not. Characters that
+            // are wide without a selector (CJK, most emoji) take `ratatui`'s
+            // ordinary wide-character path, which is correct, and are
+            // untouched.
+            '\u{fe0f}' => {}
             '\t' => {
                 let stop = TAB_STOP - (*column % TAB_STOP);
                 out.extend(std::iter::repeat_n(' ', stop));
@@ -8595,12 +8640,25 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
             c if c.is_ascii() => {
                 out.push(c);
                 *column += 1;
+                (cluster, cluster_width) = (i, 1);
             }
             c => {
                 out.push(c);
                 // Only the non-ASCII tail pays for a width lookup, which keeps
                 // the common line off the measuring path entirely.
-                *column += width_of(&text[i..i + c.len_utf8()]);
+                let end = i + c.len_utf8();
+                let width = width_of(&text[i..end]);
+                if width == 0 && cluster_width > 0 {
+                    // A zero-width character joins what came before it and can
+                    // change what the pair is worth, so the pair is what gets
+                    // measured, and only the difference is charged.
+                    let joined = width_of(&text[cluster..end]);
+                    *column += joined.saturating_sub(cluster_width);
+                    cluster_width = joined;
+                } else {
+                    *column += width;
+                    (cluster, cluster_width) = (i, width);
+                }
             }
         }
     }
