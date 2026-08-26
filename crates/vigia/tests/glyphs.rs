@@ -7,11 +7,13 @@
 //! than by asserting each variable alone against an empty environment. That is
 //! `tests/colour.rs`'s shape and its reasoning is unchanged.
 //!
-//! **What this ladder has that the colour one does not** is a rung nothing can
-//! reach by detection at all. No font measured carries the Unicode 16 octants,
-//! so [`Glyphs::Octant`] is reachable only through [`GLYPHS_VAR`], and a sweep
-//! of the whole table asserting that is worth more than any single row: an
-//! accidental promotion would paint tofu on every terminal it reached.
+//! **What this ladder has that the colour one does not** is a rung that is
+//! never a font bet. No font measured carries the Unicode 16 octants, and the
+//! engines that draw them rasterise the range themselves (#324), so
+//! [`Glyphs::Octant`] is reachable only through [`GLYPHS_VAR`] or an engine
+//! naming itself *with a qualifying version*, and a sweep of the whole table
+//! asserting that is worth more than any single row: an accidental promotion
+//! would paint tofu on every terminal it reached.
 //!
 //! **The packing half is arithmetic**, and the property that matters most is not
 //! "a glyph came back". A packer that returned the full cell for everything
@@ -54,13 +56,14 @@ struct Row {
 /// Every row below the first sets the signals **above** it to something that
 /// would answer differently, so a rung that stopped being consulted in the right
 /// order fails here rather than in a screenshot.
-const TABLE: [Row; 12] = [
+const TABLE: [Row; 19] = [
     Row {
         why: "the override outranks every signal under it",
         windows: true,
         env: &[
             (GLYPHS_VAR, "block"),
             ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", "1.3.1"),
             ("WT_SESSION", "1"),
             ("TERM", "xterm-kitty"),
         ],
@@ -87,14 +90,76 @@ const TABLE: [Row; 12] = [
     Row {
         why: "a terminal saying it cannot draw takes the floor",
         windows: false,
-        env: &[("TERM", "dumb"), ("TERM_PROGRAM", "ghostty")],
+        env: &[
+            ("TERM", "dumb"),
+            ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", "1.3.1"),
+        ],
         want: Glyphs::Block,
     },
     Row {
         why: "the linux console has no braille in its bitmap font",
         windows: false,
-        env: &[("TERM", "linux"), ("TERM_PROGRAM", "ghostty")],
+        env: &[
+            ("TERM", "linux"),
+            ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", "1.3.1"),
+        ],
         want: Glyphs::Block,
+    },
+    Row {
+        why: "ghostty at 1.2+ draws octants itself, and says so with a version",
+        windows: false,
+        env: &[
+            ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", "1.3.1-arch2"),
+            ("TERM", "xterm-ghostty"),
+        ],
+        want: Glyphs::Octant,
+    },
+    Row {
+        why: "a ghostty before 1.2 takes octants from a font that lacks them",
+        windows: false,
+        env: &[
+            ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", "1.1.3"),
+            ("TERM", "xterm-ghostty"),
+        ],
+        want: Glyphs::Braille,
+    },
+    Row {
+        why: "kitty at 0.40+ draws octants itself",
+        windows: false,
+        env: &[("TERM", "xterm-kitty"), ("TERM_PROGRAM_VERSION", "0.42.1")],
+        want: Glyphs::Octant,
+    },
+    Row {
+        why: "a kitty with no version to show stays braille, which fails safe",
+        windows: false,
+        env: &[("TERM", "xterm-kitty")],
+        want: Glyphs::Braille,
+    },
+    Row {
+        why: "VTE says its version in its own convention, 7802 for 0.78.2",
+        windows: false,
+        env: &[("VTE_VERSION", "7802"), ("TERM", "xterm-256color")],
+        want: Glyphs::Octant,
+    },
+    Row {
+        why: "a VTE before 0.78 stays braille",
+        windows: false,
+        env: &[("VTE_VERSION", "7403"), ("TERM", "xterm-256color")],
+        want: Glyphs::Braille,
+    },
+    Row {
+        why: "a multiplexer hides the terminal, so the octant rung is never chosen behind one",
+        windows: false,
+        env: &[
+            ("TERM", "tmux-256color"),
+            ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", "1.3.1"),
+        ],
+        want: Glyphs::Braille,
     },
     Row {
         why: "a named program outranks the TERM under it",
@@ -163,25 +228,32 @@ fn an_override_that_is_not_a_rung_is_refused() {
 }
 
 #[test]
-fn detection_never_returns_octants() {
-    // **The sweep is the point, not any single row.** No font measured carries
-    // U+1CD00, including the newest Cascadia, so a signal that promoted to
-    // octants would paint tofu everywhere it reached and no gate over one
-    // terminal would see it. Every row of the table, on both platforms, with the
-    // override absent.
+fn octants_come_only_from_a_version_qualified_engine() {
+    // **The sweep is the point, not any single row**, and since
+    // [#324](https://github.com/breferrari/vigia/issues/324) its claim is
+    // narrower than the absolute it replaced: octants are never a *font* bet,
+    // so with the override and every engine-version signal stripped, no row of
+    // the table may promote. What remains reachable is exactly the engines
+    // that rasterise the range themselves, named with a qualifying version,
+    // which the positive rows above pin one by one. The old sweep said
+    // "detection never returns octants"; that sentence was a fact about fonts
+    // quoted as a fact about rendering, and SPEC.md section 10 carries the
+    // correction.
     for row in &TABLE {
         let stripped: Vec<(&str, &str)> = row
             .env
             .iter()
             .copied()
-            .filter(|(key, _)| *key != GLYPHS_VAR)
+            .filter(|(key, _)| {
+                *key != GLYPHS_VAR && *key != "TERM_PROGRAM_VERSION" && *key != "VTE_VERSION"
+            })
             .collect();
         for windows in [false, true] {
             let got = Glyphs::from_env(windows, env(&stripped)).expect("a rung");
             assert_ne!(
                 got,
                 Glyphs::Octant,
-                "{} on windows={windows} detected octants",
+                "{} on windows={windows} detected octants with no version to stand on",
                 row.why
             );
         }

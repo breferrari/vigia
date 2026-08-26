@@ -369,13 +369,13 @@ The per-file sparkline draws from the eighth-blocks `▁▂▃▄▅▆▇█` b
 ```sh
 VIGIA_GLYPHS=braille         # denser: 8 buckets in 4 columns
 VIGIA_GLYPHS=block           # the safe floor, if you see boxes
-VIGIA_GLYPHS=octant          # Unicode 16 solid 2x4, very few fonts have these yet
+VIGIA_GLYPHS=octant          # Unicode 16 solid 2x4, chosen for you where the terminal draws them
 VIGIA_GLYPHS=auto            # decide for me, which is the default
 ```
 
 **If the sparkline is a row of boxes, you want `block`.** That is a font without the braille patterns U+2800 to U+28FF, and it is the one direction detection cannot see. Windows is where this is most likely: the old console draws with Consolas, which carries none of them, so a bare `conhost` gets blocks and Windows Terminal gets braille.
 
-`octant` is deliberately never chosen for you. The Unicode 16 octants are newer than most fonts, including the current Cascadia, and terminals that draw them do so themselves rather than from your font, which nothing in the environment advertises.
+`octant` is chosen for you exactly where it is not a bet: ghostty 1.2+, kitty 0.40+ and VTE-based terminals from 0.78 draw the Unicode 16 octants themselves, the way every terminal draws box drawing, and each of those names itself and its version in the environment. Everywhere else the octants would come from your font, most fonts do not have them yet, and the answer stays braille; `VIGIA_GLYPHS=octant` remains your word for a terminal the table does not know. foot 1.20+ draws them too and exports no version, so it is deliberately not promoted: a foot one release older would get tofu, and that trade is recorded in the code rather than taken silently.
 
 </details>
 
