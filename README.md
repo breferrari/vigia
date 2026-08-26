@@ -113,7 +113,7 @@ Every file gets the same row in both regions:
 |---|---|---|
 | `▸` | **caret** | 📍 *where you are.* The diff below is inside this file |
 | `M` | **kind** | modified, added, deleted, renamed |
-| `src/…` | **path** | which file. How brightly it is drawn is how recently it changed |
+| `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
 | `●` | **pulse** | ⚡ it changed on the newest tick |
 | green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
@@ -138,7 +138,7 @@ A slice nothing touched is still drawn, in a dark track colour, because a strip 
 
 <br>
 
-Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
+Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds, and a busier one is a hotter colour: on a terminal with 24-bit colour the height and the ink climb the same ramp together, so the shape reads at a glance and the colour confirms it. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
 
 **Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means. The mockup drew these as waves before the first commit, and drawing the events raw was the defect.
 
@@ -183,6 +183,14 @@ The grammars are `bat`'s curated collection, which is the same set that tool hig
 A file type nothing recognises is not an error. It draws exactly as it did before there was highlighting at all, because a monitor that refused a file it could not colour would have inverted its own job.
 
 </details>
+
+### 🎯 And *what* changed inside the line
+
+A changed line sits on a calm wash of its own colour, and the words that actually changed sit in a **hotter patch of that same colour**. A renamed function in a long line reads as one bright token rather than a whole red line above a whole green one, and you find the edit without reading either line to its end.
+
+The pairing is bounded on purpose. A removed line and the added line under it are compared token by token, and a pair that differs too much is left as two whole lines rather than confettied into unrelated highlights: past that bound there is no shared shape left to point at. The line numbers of a changed row take a slightly darker tone of the same wash, so the gutter reads as its own column without a border being spent on one.
+
+All three are backgrounds, so they need 24-bit colour and they leave together below it. What is left there is what was always there: the `+` and `-` column, and the left bar beside it.
 
 ### 📈 And the masthead, which is the whole tree
 
@@ -235,8 +243,8 @@ The blank above the band is the row the header keeps between itself and the list
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
-| `?` | **all of this, on screen**, a page at a time where the pane is small |
-| `q` `Esc` `Ctrl+C` | quit |
+| `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
+| `q` `Ctrl+C` | quit |
 
 </td><td valign="top" width="50%">
 
@@ -311,10 +319,10 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 
 | | First answer wins |
 |---|---|
-| 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → `ansi` |
+| 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → **your terminal's own background** → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
-| ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
-| 🪟 **View** | `~/.config/vigia/config` → everything off |
+| ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
+| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` |
 
 ```sh
 VIGIA_THEME=ansi     # the fallback: the sixteen names, inherited from your scheme
@@ -461,11 +469,11 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 <br>
 
-**It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows and their left bars, the highlighted diff, and the status bar.
+**It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, and the status bar.
 
 **The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. **One is left**: the header reads the worktree's name rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree.
 
-Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them.
+Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them. **One more came forward in August 2026**: the sparklines are drawn in the cyan the binary has used since the ramp landed rather than the green they were first mocked in, which is the ruling that green already means *added* two rows down.
 
 </details>
 

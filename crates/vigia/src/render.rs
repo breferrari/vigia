@@ -4275,6 +4275,17 @@ pub fn render(
     let body = Body::split(area, footer.height(), view.files, view.list.len(), chrome)
         .clamped_to(view.list.len());
     let margins = margins_of(area.width);
+    // **Planned before anything is painted, and painted last**
+    // ([#340](https://github.com/breferrari/vigia/issues/340)). The sheet
+    // composites over the regions, so a row underneath it must not *claim*
+    // columns inside it: `ratatui`'s differ walks past every column a
+    // `CellDiffOption::ForcedWidth` covers, so a claim reaching in makes the
+    // sheet's own cells unemittable and the row shows through. Everything this
+    // needs is already decided here, so the painter can be told where the
+    // sheet will land rather than finding out after the fact.
+    let sheet = chrome
+        .sheet
+        .and_then(|page| sheet_plan(area, footer.height(), margins, page));
 
     let mut painter = Painter {
         buf,
@@ -4301,6 +4312,7 @@ pub fn render(
         hovered: chrome.hovered,
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
+        covered: sheet.as_ref().map(|plan| plan.area),
         icons: chrome.icons,
         link_root: (chrome.links && !chrome.root.is_empty()).then(|| chrome.root.clone()),
     };
@@ -4467,10 +4479,8 @@ pub fn render(
     // B12: the sheet is the one drawn thing on this pane that takes no row from
     // any region, so it is composited after all of them and the plan above is
     // untouched by whether it is up.
-    if let Some(page) = chrome.sheet {
-        if let Some(plan) = sheet_plan(area, footer.height(), margins, page) {
-            painter.sheet(&plan);
-        }
+    if let Some(plan) = sheet {
+        painter.sheet(&plan);
     }
 
     painter.paint
@@ -4571,11 +4581,19 @@ const KEYBOARD: [Gesture; 14] = [
         verb: ["show or hide staged changes", "staged changes"],
     },
     Gesture {
-        keys: ["?", "?"],
+        keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
     },
+    // **`Esc` moved up a row with [#340](https://github.com/breferrari/vigia/issues/340)**,
+    // where it stopped quitting outright and started leaving the frontmost
+    // thing. **No field maximum moves and so no width rung does**, which is
+    // what makes this a wording change rather than a layout one: the wide
+    // keys field is still 22, held by `J  K  Shift+↑  Shift+↓` which ties the
+    // old `q  Esc  Ctrl+C  Ctrl+D` exactly, and the tight field is still 11,
+    // held by `Space  PgDn`. `crates/vigia/tests/sheet.rs` walks the rungs and
+    // is what fails if that stops being true.
     Gesture {
-        keys: ["q  Esc  Ctrl+C  Ctrl+D", "q  Esc"],
+        keys: ["q  Ctrl+C  Ctrl+D", "q"],
         verb: ["quit", "quit"],
     },
 ];
@@ -5719,6 +5737,10 @@ struct Painter<'a> {
     spark_ramp: Option<[Color; 8]>,
     /// [`Chrome::icons`]: whether a listed path carries its type's glyph.
     icons: bool,
+    /// Where the gestures sheet will be composited, so nothing underneath it
+    /// claims a column it will draw over
+    /// ([#340](https://github.com/breferrari/vigia/issues/340)).
+    covered: Option<Rect>,
     /// [`Chrome::links`] with [`Chrome::root`]: the `file://` prefix every
     /// linked path shares, or `None` where links are off or rootless.
     link_root: Option<String>,
@@ -6024,73 +6046,49 @@ impl Painter<'_> {
         self.put_marked(text.x, text.y, rung, room, style);
     }
 
-    /// Paint the pills behind a status line's ` · `-separated segments.
-    ///
-    /// `SPEC.md` §11.2 B18 ([#323](https://github.com/breferrari/vigia/issues/323)),
-    /// crush's pill shape from the #318 survey: a background run per segment,
-    /// the separator's own `·` left on the pane between them, its flanking
-    /// spaces absorbed into the pills either side so the seams are seamless.
-    /// **No text moves and no ladder is consulted**: the pills are painted over
-    /// the cells the rung already occupies, so every width rung draws exactly
-    /// the words it drew before, and below truecolour the backgrounds are gone
-    /// and this is a no-op by the same resolve that blanks every wash.
-    ///
-    /// The first segment takes the louder pill: the worktree name is the one
-    /// fact a reader glances for.
-    fn chip_row(&mut self, area: Rect, drawn: &str) {
-        if self.theme.chip.bg.is_none() && self.theme.chip_accent.bg.is_none() {
-            return;
-        }
-        let text = self.text_area(area);
-        let mut x = text.x;
-        let mut first = true;
-        // Split and advanced by [`FACT_SEPARATOR`] itself rather than by a
-        // second spelling of it: `header_left` joins with that constant, and
-        // two literals that agree today are exactly what its own docblock
-        // warns about. A separator that changed would otherwise leave this
-        // painting pills over the wrong cells with nothing failing.
-        for segment in drawn.split(FACT_SEPARATOR) {
-            let width = width_of(segment) as u16;
-            let end = x
-                .saturating_add(width)
-                .min(text.x.saturating_add(text.width));
-            if x >= end {
-                break;
-            }
-            let pill = if first {
-                self.theme.chip_accent
-            } else {
-                self.theme.chip
-            };
-            // One cell of padding either side where the separator's spaces
-            // are, clamped to the text area, so a pill breathes without a
-            // character being added anywhere. Through `chip_span`, so both
-            // pill painters clip through one expression.
-            self.chip_span(
-                Rect { y: area.y, ..text },
-                x.saturating_sub(1).max(text.x),
-                end.saturating_add(1),
-                pill,
-            );
-            first = false;
-            // Past this segment and the separator that follows it.
-            x = end.saturating_add(width_of(FACT_SEPARATOR) as u16);
-        }
-    }
-
     /// Put `label` as one OSC 8 hyperlink to `root/path`, tui-link's shape.
     ///
     /// **One cell carries the whole wrapped string** with its width forced to
-    /// the label's, which is `CellDiffOption::ForcedWidth`'s documented job;
-    /// the covered cells behind it are reset so nothing stale can survive a
-    /// frame where the writer never visits them. A terminal without OSC 8
-    /// renders the label and swallows the wrapper, which the 2026 matrix
-    /// verified for every terminal it covers, and is why the `links` key
-    /// defaults on (#326).
+    /// the label's, which is `CellDiffOption::ForcedWidth`'s documented job. A
+    /// terminal without OSC 8 renders the label and swallows the wrapper,
+    /// which the 2026 matrix verified for every terminal it covers, and is why
+    /// the `links` key defaults on (#326).
+    ///
+    /// **The covered columns record the label rather than blanks, and that is
+    /// a correctness requirement rather than tidiness**
+    /// ([#340](https://github.com/breferrari/vigia/issues/340)). `ratatui`'s
+    /// differ walks straight past every column a `ForcedWidth` claims: its
+    /// arm advances `pos` and emits the first cell only, with none of the
+    /// shrink protection the `None` arm carries for wide graphemes. So the
+    /// buffer's record of those columns is the *only* thing that can ever
+    /// force them to be repainted, and blanking them made the buffer say
+    /// "empty" where the terminal was showing a path. A shorter path drawn
+    /// where a longer one had been then compared equal-to-equal across the
+    /// uncovered tail and left the old path's end on screen, which is what a
+    /// reader saw as `settings.jsonodebase.md`.
+    ///
+    /// The shadow is never emitted: the differ skips it by construction. It
+    /// exists so that the frame *after* this one can tell what these columns
+    /// are showing, which is exactly what a double-buffered diff needs and
+    /// what the wide-cell trick otherwise throws away.
     fn put_linked(&mut self, x: u16, y: u16, label: &str, root: &str, path: &str, ink: Style) {
         let width = width_of(label) as u16;
         if width == 0 {
             return;
+        }
+        // **A claim that reaches under the sheet is not made at all**, because
+        // the differ would then skip the sheet's own cells across it and the
+        // row would show through the overlay (#340). The row still draws, as
+        // plain text: what a reader loses is a link on a path the sheet is
+        // covering anyway, which is the cheaper half of the trade by a wide
+        // margin.
+        if let Some(sheet) = self.covered {
+            let rows = sheet.y..sheet.y.saturating_add(sheet.height);
+            let reaches = x.saturating_add(width) > sheet.x && x < sheet.right();
+            if rows.contains(&y) && reaches {
+                self.put(x, y, label, usize::from(width), ink);
+                return;
+            }
         }
         let mut uri = String::with_capacity(root.len() + path.len() + 8);
         uri.push_str("file://");
@@ -6108,9 +6106,18 @@ impl Painter<'_> {
             }
         }
         let wrapped = format!("\x1b]8;;{uri}\x1b\\{label}\x1b]8;;\x1b\\");
-        for offset in 1..width {
-            if let Some(cell) = self.buf.cell_mut((x + offset, y)) {
+        // The shadow: what the terminal will actually be showing in the columns
+        // the cell below claims. Styled like the label so a later `set_style`
+        // over the row cannot make the record disagree with the paint.
+        for (offset, grapheme) in label.chars().skip(1).enumerate() {
+            let at = x + 1 + offset as u16;
+            if at >= x + width {
+                break;
+            }
+            if let Some(cell) = self.buf.cell_mut((at, y)) {
                 cell.reset();
+                cell.set_char(grapheme);
+                cell.set_style(ink);
             }
         }
         if let Some(cell) = self.buf.cell_mut((x, y)) {
@@ -6119,19 +6126,6 @@ impl Painter<'_> {
             cell.diff_option = ratatui::buffer::CellDiffOption::ForcedWidth(
                 std::num::NonZeroU16::new(width).expect("width is checked nonzero above"),
             );
-        }
-    }
-
-    /// One pill over a column span, for the footer's readouts and state.
-    fn chip_span(&mut self, row: Rect, from: u16, to: u16, pill: Style) {
-        if pill.bg.is_none() {
-            return;
-        }
-        let edge = row.x.saturating_add(row.width).min(self.buf.area.right());
-        for x in from.min(edge)..to.min(edge) {
-            if let Some(cell) = self.buf.cell_mut((x, row.y)) {
-                cell.set_style(pill);
-            }
         }
     }
 
@@ -6186,15 +6180,6 @@ impl Painter<'_> {
             chrome.staged,
         );
         self.status_line(area, &rungs, self.theme.chrome, right, right_style);
-        // The pills, over the rung `status_line` just placed: recomputed with
-        // the same inputs and the same picker, so the two cannot disagree
-        // about which words are on the row.
-        let text = self.text_area(area);
-        // `saturating_sub` already floors at zero, so clamping the subtrahend
-        // to the width first was a no-op.
-        let room = usize::from(text.width).saturating_sub(width_of(right));
-        let drawn = widest_fitting_or_last(&rungs, room);
-        self.chip_row(area, drawn);
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -6273,40 +6258,11 @@ impl Painter<'_> {
             );
             // The inset row for the reason `placed` uses one: the walk is bounded
             // by its `row`'s right edge, and the text's edge is not the pane's.
-            let row = Rect { y: upper.y, ..text };
-            self.footer_chips(row, placed, readouts, &right);
-            self.tint_readouts(row, placed, readouts);
+            self.tint_readouts(Rect { y: upper.y, ..text }, placed, readouts);
             self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
         } else {
             self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
-            self.footer_chips(text, placed, readouts, &right);
             self.tint_readouts(text, placed, readouts);
-        }
-    }
-
-    /// The footer's two pills: the readouts in the quiet one, the state in the
-    /// loud one (#323). Painted before [`Painter::tint_readouts`], whose
-    /// foreground tints then land on the pill the way every run lands on a
-    /// wash; below truecolour both backgrounds are gone and nothing here
-    /// writes a cell.
-    fn footer_chips(&mut self, row: Rect, placed: u16, readouts: usize, right: &str) {
-        if readouts > 0 {
-            self.chip_span(
-                row,
-                placed.saturating_sub(1),
-                placed.saturating_add(readouts as u16),
-                self.theme.chip,
-            );
-        }
-        let total = width_of(right) as u16;
-        let state = total.saturating_sub(readouts as u16);
-        if state > 0 {
-            self.chip_span(
-                row,
-                placed.saturating_add(readouts as u16).saturating_add(1),
-                placed.saturating_add(total),
-                self.theme.chip_accent,
-            );
         }
     }
 
@@ -8730,6 +8686,7 @@ mod tests {
             hovered,
             scrolling,
             spark_ramp: None,
+            covered: None,
             icons: false,
             link_root: None,
         };
@@ -8937,7 +8894,7 @@ mod sheet_tables {
             .collect();
         assert_eq!(
             kept,
-            vec!["f", "m", "?"],
+            vec!["f", "m", "?  Esc"],
             "the rows the ladder keeps longest are not the three §11.1 names"
         );
     }
@@ -8948,7 +8905,7 @@ mod sheet_tables {
         // would break without touching the keep-set: `q` is on the hint bar at
         // every rung, so it is the row a sheet can most afford to lose.
         assert_eq!(
-            KEYBOARD[DROP_ORDER[0]].keys[0], "q  Esc  Ctrl+C  Ctrl+D",
+            KEYBOARD[DROP_ORDER[0]].keys[0], "q  Ctrl+C  Ctrl+D",
             "the first row the ladder gives up is not `q`"
         );
     }

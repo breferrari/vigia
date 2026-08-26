@@ -723,6 +723,16 @@ impl App {
 
         match action {
             Action::Quit => return Ok(false),
+            // **`Esc` leaves the frontmost thing, and the sheet is a thing**
+            // ([#340](https://github.com/breferrari/vigia/issues/340)).
+            // Reported from a real pane: a reader pressed `Esc` to put the
+            // help away and the monitor exited. `SPEC.md` §11.2 B12's rule
+            // that no key changes meaning while the sheet is up is intact,
+            // because `input::key_action` still maps this key to one action
+            // and is handed no state to branch on; what is frontmost is a
+            // question about this struct, so this struct answers it.
+            Action::Escape if self.sheet.is_some() => self.sheet = None,
+            Action::Escape => return Ok(false),
             Action::Redraw => {}
             // Re-engaging jumps rather than arming: `less +F` goes to the end
             // when you ask it to follow, and a reader who presses `f` is

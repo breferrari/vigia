@@ -481,15 +481,11 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
 
         // Exempt: backgrounds by contract, and unset on this palette anyway.
         // The word patch and the gutter tone exist only where the wash does,
-        // and `ansi` draws no wash at any depth. The chips are the same
-        // contract one row up: pills are backgrounds, and this palette draws
-        // flat chrome.
+        // and `ansi` draws no wash at any depth.
         added_word: _,
         removed_word: _,
         added_gutter: _,
         removed_gutter: _,
-        chip: _,
-        chip_accent: _,
 
         // Exempt: marks and fills, none of them text, none of them colour 8.
         pulse: _,

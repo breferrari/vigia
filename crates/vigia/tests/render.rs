@@ -7956,49 +7956,6 @@ fn icons_are_opt_in_and_every_row_gets_one() {
     );
 }
 
-/// #323: the chrome's pills. The header's first segment wears the loud one,
-/// its later segments the quiet one, the separator dot stays on the pane
-/// between them, and below truecolour there is no pill anywhere, through the
-/// same resolve that drops every background.
-#[test]
-fn the_chrome_wears_pills_at_truecolour_and_none_below() {
-    let view = emphasised_view();
-    let shown = chrome();
-
-    let theme = vigia::Theme::dark().resolve(vigia::Depth::Truecolor);
-    let backend = themed_screen(64, 18, &view, &shown, &theme);
-    let buffer = backend.buffer();
-    let header = row_text(&backend, 0);
-    let at = header.find("vigia").expect("the worktree name is drawn") as u16;
-    assert_eq!(
-        buffer[(at, 0)].bg,
-        theme.chip_accent.bg.expect("dark declares an accent pill"),
-        "the worktree segment does not wear the loud pill"
-    );
-    let dot = header.find(" · ").expect("a separator is drawn") as u16 + 1;
-    let pills = [theme.chip.bg.unwrap(), theme.chip_accent.bg.unwrap()];
-    assert!(
-        !pills.contains(&buffer[(dot, 0)].bg),
-        "the separator dot was swallowed by a pill"
-    );
-    let counted = header.find("changed").expect("the count is drawn") as u16;
-    assert_eq!(
-        buffer[(counted, 0)].bg,
-        theme.chip.bg.expect("dark declares a pill"),
-        "a later segment does not wear the quiet pill"
-    );
-
-    let flat = vigia::Theme::dark().resolve(vigia::Depth::Ansi256);
-    let backend = themed_screen(64, 18, &view, &shown, &flat);
-    let buffer = backend.buffer();
-    for x in 0..64u16 {
-        assert!(
-            !pills.contains(&buffer[(x, 0)].bg),
-            "a pill survived below truecolour at column {x}"
-        );
-    }
-}
-
 /// #326: a linked path is one cell carrying the whole OSC 8 wrapper with its
 /// width forced to the label's, tui-link's shape; rootless or switched off it
 /// is exactly the plain cells it always was.
@@ -8068,5 +8025,122 @@ fn a_linked_path_is_one_cell_carrying_the_uri() {
             !row_text(&plain, y).contains('\x1b'),
             "a rootless chrome leaked an escape into row {y}"
         );
+    }
+}
+
+/// A linked path claims its columns with `ForcedWidth`, and ratatui's differ
+/// walks straight past every column that claim covers: it emits the first cell
+/// and advances, with none of the shrink protection its `None` arm carries.
+/// So the **buffer's** record of those columns is the only thing that can ever
+/// force them repainted, and it had better be the truth.
+///
+/// Read against the buffer rather than the backend on purpose: the backend is
+/// what the terminal was *told*, and the skipped columns are exactly what it
+/// was never told about. The defect lived in the gap between the two
+/// ([#340](https://github.com/breferrari/vigia/issues/340)): a shorter path
+/// drawn where a longer one had been compared blank-to-blank across the
+/// uncovered tail, so nothing was emitted and the old path's end stayed on
+/// screen as `settings.jsonodebase.md`.
+#[test]
+fn a_linked_paths_covered_columns_record_what_the_terminal_shows() {
+    let area = Rect::new(0, 0, 80, 18);
+    let long = "src/engine/a-very-long-module-name.rs";
+    let short = "src/a.rs";
+    let mut shown = chrome();
+    shown.links = true;
+    shown.root = "/tree".to_owned();
+    let theme = vigia::Theme::dark();
+
+    let drawn = |path: &str, added: u32| {
+        let view = View {
+            rows: vec![file(path, added, 0)],
+            files: 1,
+            ..two_regions(1)
+        };
+        let mut buf = Buffer::empty(area);
+        vigia::render(&mut buf, area, &view, &theme, Glyphs::default(), &shown);
+        buf
+    };
+
+    let buf = drawn(long, 42);
+    let (at, row) = (0..18u16)
+        .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+        .find(|at| buf[*at].symbol().contains(long))
+        .expect("the long path was not linked at all");
+    let claimed = match buf[(at, row)].diff_option {
+        ratatui::buffer::CellDiffOption::ForcedWidth(width) => width.get(),
+        other => panic!("a linked path claimed nothing: {other:?}"),
+    };
+    // Every column the claim covers records the character the terminal shows
+    // there, so the frame after this one can tell what is on screen.
+    let shadow: String = (at + 1..at + claimed)
+        .map(|x| buf[(x, row)].symbol())
+        .collect();
+    let label: String = buf[(at, row)].symbol().to_owned();
+    let label = label
+        .rsplit_once("\u{1b}]8;;")
+        .expect("a closing wrapper")
+        .0
+        .rsplit_once("\u{1b}\\")
+        .expect("an opening wrapper")
+        .1
+        .to_owned();
+    assert_eq!(
+        shadow,
+        label.chars().skip(1).collect::<String>(),
+        "the covered columns do not record the label the terminal is showing"
+    );
+
+    // And a shorter path in the same slot leaves nothing of a longer one
+    // behind it: blanks in both frames are what the differ cannot see.
+    let buf = drawn(short, 1);
+    let (at, row) = (0..18u16)
+        .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+        .find(|at| buf[*at].symbol().contains(short))
+        .expect("the short path was not linked at all");
+    for x in at + short.chars().count() as u16..at + claimed {
+        assert!(
+            buf[(x, row)].symbol().trim().is_empty(),
+            "column {x} still records a longer path's tail"
+        );
+    }
+}
+
+/// The sheet composites over the regions, so nothing may claim columns inside
+/// it: a claim reaching in makes the differ skip the sheet's own cells, and the
+/// row underneath shows through. Reported from a real pane (#340).
+#[test]
+fn nothing_claims_columns_the_sheet_is_drawn_over() {
+    let view = View {
+        rows: vec![
+            file("src/engine/a-very-long-module-name-indeed.rs", 42, 7),
+            file("src/render/another-quite-long-name.rs", 11, 3),
+        ],
+        files: 2,
+        ..two_regions(2)
+    };
+    let mut shown = chrome();
+    shown.links = true;
+    shown.root = "/tree".to_owned();
+    shown.sheet = Some(0);
+    let theme = vigia::Theme::dark();
+    let backend = themed_screen(120, 30, &view, &shown, &theme);
+    let buffer = backend.buffer();
+
+    let sheet = vigia::regions(Rect::new(0, 0, 120, 30), &shown, &view)
+        .sheet
+        .expect("the fixture pane drew no sheet");
+    for y in sheet.top..sheet.top + sheet.height {
+        for x in 0..sheet.left {
+            let claimed = match buffer[(x, y)].diff_option {
+                ratatui::buffer::CellDiffOption::ForcedWidth(width) => u32::from(width.get()),
+                _ => 1,
+            };
+            assert!(
+                u32::from(x) + claimed <= u32::from(sheet.left),
+                "the cell at {x},{y} claims {claimed} columns and reaches into the \
+                 sheet, so the differ will skip the sheet's own cells there"
+            );
+        }
     }
 }
