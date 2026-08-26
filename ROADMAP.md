@@ -37,6 +37,8 @@ Milestone: [Phase 1](https://github.com/breferrari/vigia/milestone/1)
 
 Prove `gix` before anything is built on top, since everything sits on it. No TUI.
 
+**[#337](https://github.com/breferrari/vigia/issues/337) was shelved the day it was filed, 2026-08-26, and the reason is the rule rather than the severity.** It is an instrument defect (the macOS leg of the watch suite failing three different ways in one day, on three diffs that touch no watch code), and `CLAUDE.md` files instrument findings to the shelf so the queue serves the product rather than the mirror. It is also, unusually, *blocking*: PR #336 could not merge behind it. What that licenses is an unblock sized to the blockage and nothing more, which is what the #318 pass did: file the evidence, say so in the report, and leave the diagnosis to a pass that takes it deliberately. It is the exception the rule already names, taken as the rule describes.
+
 | | Task | Issue |
 |---|---|---|
 | ✅ | `gix` gives working-tree-vs-index diffs at fidelity and speed | closed by the Phase 1 spike, evidence in `SPEC.md` §10 |
@@ -620,6 +622,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | | Task | Issue |
 |---|---|---|
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
+| ⬜ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
