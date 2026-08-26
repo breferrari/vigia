@@ -879,18 +879,22 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
     // Rank, not identity: the claim is monotone, so it survives the stops moving.
     // Ranked once per bucket rather than once per comparison, which also puts the
     // "no stop of the ramp" panic on the bucket that caused it.
+    // Since #322 a truecolour palette interpolates its three stops into an
+    // eight-step ramp, so the rank comes from the ramp where one exists and
+    // from the stops where it does not; the claim below is the same either
+    // way, because it was always about order rather than identity.
+    let ramp = theme.spark_ramp();
     let stops = spark_stops(&theme);
     let ranked: Vec<(usize, usize)> = drawn
         .iter()
         .map(|&(rung, fg)| {
-            let rank = stops
-                .iter()
-                .position(|(_, style)| style.fg == fg)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "the bucket at rung {rung} is drawn in {fg:?}, which is no stop of the ramp"
-                    )
-                });
+            let rank = match ramp.as_ref() {
+                Some(ramp) => ramp.iter().position(|stop| Some(*stop) == fg),
+                None => stops.iter().position(|(_, style)| style.fg == fg),
+            }
+            .unwrap_or_else(|| {
+                panic!("the bucket at rung {rung} is drawn in {fg:?}, which is no stop of the ramp")
+            });
             (rung, rank)
         })
         .collect();
@@ -1963,4 +1967,42 @@ fn every_bar_style_says_what_bar_cell_reads() {
             );
         }
     }
+}
+
+#[test]
+fn the_spark_ramp_interpolates_only_where_stops_are_rgb() {
+    // #322: the ramp is derived from the three stop keys, so its ends must BE
+    // those stops, and it must refuse to exist where the stops are not RGB,
+    // which is the whole of how the depth ladder gates it.
+    let dark = Theme::dark().resolve(Depth::Truecolor);
+    let ramp = dark
+        .spark_ramp()
+        .expect("a truecolour palette must interpolate");
+    assert_eq!(
+        Some(ramp[0]),
+        dark.spark.fg,
+        "the ramp's floor is not `spark`"
+    );
+    assert_eq!(
+        Some(ramp[4]),
+        dark.spark_warm.fg,
+        "the ramp's middle is not `spark_warm`"
+    );
+    assert_eq!(
+        Some(ramp[7]),
+        dark.spark_hot.fg,
+        "the ramp's top is not `spark_hot`"
+    );
+
+    assert!(
+        Theme::dark().resolve(Depth::Ansi256).spark_ramp().is_none(),
+        "a 256-resolved palette interpolated indexed colours"
+    );
+    assert!(
+        Theme::ansi()
+            .resolve(Depth::Truecolor)
+            .spark_ramp()
+            .is_none(),
+        "`ansi` interpolated named colours"
+    );
 }

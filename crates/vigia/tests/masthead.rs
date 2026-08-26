@@ -1521,3 +1521,50 @@ fn the_band_and_the_sparklines_age_together() {
          was, so the two elements disagree about what time it is"
     );
 }
+
+#[test]
+fn the_band_climbs_the_ramp_toward_the_top() {
+    // #322, btop's multi-row rule: one colour per row against the vertical
+    // axis, quiet at the baseline and hot at the top, so a column that climbs
+    // reads hotter as it does. Read off the cells at a truecolour palette; the
+    // gate below it holds the ladder's other half.
+    let theme = vigia::Theme::dark().resolve(vigia::Depth::Truecolor);
+    let ramp = theme.spark_ramp().expect("dark at truecolour interpolates");
+
+    let shown = Chrome {
+        masthead: true,
+        ..chrome(&App::new())
+    };
+    let area = Rect::new(0, 0, WIDE, TALL);
+    let body = body_layout(area, &shown, 1, 1);
+    assert!(
+        body.graph > 1,
+        "the fixture band is one row, so nothing climbs"
+    );
+    let mut buf = Buffer::empty(area);
+    render(
+        &mut buf,
+        area,
+        &banded(QUARTERED),
+        &theme,
+        Glyphs::default(),
+        &shown,
+    );
+
+    let top = 1 + body.lead as u16;
+    let base = top + body.graph as u16 - 1;
+    // A column with ink in both rows: the tallest of the fixture's quarters.
+    let full = (0..WIDE).find(|x| {
+        !buf[(*x, top)].symbol().trim().is_empty() && !buf[(*x, base)].symbol().trim().is_empty()
+    });
+    let x = full.expect("no column filled the band, so nothing here is a gate");
+    let rank = |fg: Option<ratatui::style::Color>| {
+        ramp.iter()
+            .position(|stop| Some(*stop) == fg)
+            .unwrap_or_else(|| panic!("{fg:?} is no stop of the ramp"))
+    };
+    assert!(
+        rank(buf[(x, top)].style().fg) > rank(buf[(x, base)].style().fg),
+        "the top row of a full column is not hotter than its baseline"
+    );
+}
