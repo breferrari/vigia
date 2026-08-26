@@ -120,6 +120,38 @@ pub struct App {
     /// Off by default, which is the derived answer and also the ruled one: a
     /// reader who has pressed nothing gets the diff the tool has always drawn.
     single: bool,
+    /// Whether a content line too wide for the pane continues on the row below.
+    ///
+    /// `SPEC.md` §11.2 **B19**, from `w`
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off by default,
+    /// and that is a ruling rather than the derived answer: every neighbour that
+    /// wraps is given the whole terminal and this one is built for half of it, so
+    /// the mode with a price is the one asked for
+    /// ([#204](https://github.com/breferrari/vigia/issues/204)'s reasoning about
+    /// the masthead, applied to the same reader).
+    ///
+    /// **Like [`Self::single`] and unlike [`Self::rail`] there is no pane that
+    /// cannot honour it**, so this is a request and an answer at once: a pane too
+    /// narrow to wrap is a pane too narrow to draw a diff on at all.
+    wrap: bool,
+    /// Logical rows the last frame actually drew, or zero before the first one.
+    ///
+    /// **The screenful a page step is measured in**
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)), and it exists
+    /// because wrapping split one number into two. `height` is the region's
+    /// **display** rows, and with `w` on a screen of that many display rows holds
+    /// fewer rows of the diff, so `Space`, `d` and `u` stepped over content
+    /// nobody had seen. It is the same units bug as the three in `View::collect`
+    /// and it is in the one place the walk cannot reach, because a step is taken
+    /// before the frame it moves to is built.
+    ///
+    /// **Read only while wrapping is on**, so every step with `w` off is the
+    /// arithmetic every version before this one did, byte for byte.
+    ///
+    /// Zero before the first frame, which reads as *nobody has drawn yet* and
+    /// falls back to the region's height. That is the honest answer: a step taken
+    /// before anything is on screen has no drawn screenful to be measured in.
+    shown: usize,
     /// Whether the reader has asked for the staged run beside the unstaged one.
     ///
     /// `SPEC.md` §11.2 **B17**, from `a`
@@ -330,6 +362,12 @@ impl Default for App {
             // working tree against the index, which is what §11.1's opening
             // contract has always said and what #50 has not yet reopened.
             staged: false,
+            // Derived, and B19's ruling as well: an unpressed shell clips a long
+            // line and marks it, which is what §11.1 has always said, and the
+            // reader who wants the other mode asks for it once per session or
+            // once in `~/.config/vigia/config`.
+            wrap: false,
+            shown: 0,
             // Derived: an unpressed, unconfigured shell draws no icons, and off
             // is byte-identical to every version before the key existed.
             icons: false,
@@ -401,6 +439,8 @@ impl App {
             masthead: config.masthead,
             rail: config.rail,
             single: config.single,
+            wrap: config.wrap,
+            shown: 0,
             staged: config.staged,
             icons: config.icons,
             links: config.links,
@@ -803,6 +843,15 @@ impl App {
             // any screen at all the second on-and-off pair is. `SPEC.md` §11.2
             // B16 says so out loud and `tests/single.rs` holds both halves.
             Action::ToggleSingle => self.single = !self.single,
+            // **The bar's scale does not move.** The position is a logical row
+            // and stays one, so a reader who presses `w` is looking at the same
+            // line of the same file, drawn over more of the pane. That is
+            // `SPEC.md` §11.2 B19's own claim about the scrollbar restated where a
+            // reader can feel it. **The one place the row itself moves is the
+            // diff's last screenful**, where wrapping means fewer of the diff's
+            // rows fit and the clamp gives the difference back, which is the clamp
+            // keeping the last row on the last row rather than an exception.
+            Action::ToggleWrap => self.wrap = !self.wrap,
             // **The one toggle that changes what the frame *walks*.** The other
             // three rearrange rows the frame already holds; this one adds a second
             // status walk and a second set of diffs, so the frame is told rather
@@ -1016,7 +1065,7 @@ impl App {
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
-                self.step_by(pages, height.saturating_sub(1), frame)?;
+                self.step_by(pages, self.screenful(height).saturating_sub(1), frame)?;
             }
             // **And a half page keeps none, which is not an inconsistency with
             // the arm above.** The overlap row exists to leave a reader something
@@ -1030,7 +1079,7 @@ impl App {
             // The floor under the step itself is [`App::step_by`]'s, and it is
             // what keeps a body two rows tall moving at all.
             Action::HalfPage(halves) => {
-                self.step_by(halves, height / 2, frame)?;
+                self.step_by(halves, self.screenful(height) / 2, frame)?;
             }
             // **The first row of what the reader can reach**, which is the
             // first changed file unpinned and the pinned file's own heading
@@ -1113,6 +1162,19 @@ impl App {
                     let span = crate::view::span_in(frame, file)?;
                     self.position = Position {
                         file,
+                        // **Unchanged by B19, and that is a finding rather than
+                        // an oversight** ([#272](https://github.com/breferrari/vigia/issues/272)).
+                        // `span` is a count of the file's own rows and `height` a
+                        // count of the terminal's, which are the same number only
+                        // while nothing wraps, so this lands short with `w` on. A
+                        // branch asking for a row past the end was written, and
+                        // mutation then showed it changed nothing: `View::collect`
+                        // derives *at the bottom* from the walk having drawn the
+                        // block to its end, which is exactly this case, and rests
+                        // the last row on the last row whatever this arithmetic
+                        // said. Two answers to one question is what this repo has
+                        // been bitten by, so the walk keeps it and this stays the
+                        // subtraction it has always been.
                         row: span.saturating_sub(height),
                     };
                 } else {
@@ -1311,12 +1373,12 @@ impl App {
             let total = crate::view::span_in(frame, file)?;
             self.position = Position {
                 file,
-                row: scaled(at, total.saturating_sub(height)),
+                row: self.dragged_to(at, total, height),
             };
             return Ok(());
         }
         let total = crate::view::diff_rows(frame)?;
-        let target = scaled(at, total.saturating_sub(height));
+        let target = self.dragged_to(at, total, height);
         let mut seen = 0;
         let files = frame.files().len();
         let mut position = Position {
@@ -1325,11 +1387,19 @@ impl App {
         };
         for file in 0..files {
             let rows = crate::view::block_rows(frame, file)?;
+            // **Written every iteration rather than only on the hit**, which is
+            // what makes a target *past* the last row land past the last row
+            // ([#272](https://github.com/breferrari/vigia/issues/272)). The
+            // fall-through used to leave the initial `row: 0`, so a drag to the
+            // very end of the track, which [`Self::dragged_to`] deliberately maps
+            // past the end so the walk can clamp it in display rows, went to the
+            // **top** of the last file instead of its bottom. On a one-file diff
+            // that is the top of the diff, which is as wrong as a drag can be.
+            position = Position {
+                file,
+                row: target.saturating_sub(seen),
+            };
             if seen + rows > target {
-                position = Position {
-                    file,
-                    row: target - seen,
-                };
                 break;
             }
             seen += rows;
@@ -1509,6 +1579,13 @@ impl App {
                 // file it is inside, so the walk is where a pin can be enforced
                 // without asking the frame anything twice.
                 single: self.single,
+                // **From the layout rather than from this method's idea of the
+                // pane**, which is the reason `body` is a parameter at all: the
+                // width a row is laid out against decides where a line breaks,
+                // and a second derivation of it here is a pane whose rows were
+                // counted against one width and drawn against another.
+                width: body.diff_width,
+                wrap: self.wrap,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].
@@ -1548,7 +1625,82 @@ impl App {
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
+        // **What a page step is measured in, recorded where the frame is built**
+        // ([#272](https://github.com/breferrari/vigia/issues/272)). `View::rows`
+        // is display rows since B19 and a step moves the position, which is
+        // logical, so the two have to be told apart here rather than at the
+        // stepping site: a continuation is a row of the terminal that is not a
+        // row of the diff. See [`Self::shown`].
+        self.shown = view
+            .rows
+            .iter()
+            .filter(|row| !matches!(row, crate::view::Row::Wrap { .. }))
+            .count();
         Ok(view)
+    }
+
+    /// Where a drag on the diff's bar lands, in rows of the diff.
+    ///
+    /// **The track maps onto travel and not onto the whole**, which is the
+    /// arithmetic every scrollbar owes its reader and which this project has
+    /// already been corrected on once: mapping onto the total and clamping leaves
+    /// the last screenful of track dead.
+    ///
+    /// **And the far end of the track is the end of the diff, which only the walk
+    /// can place** ([#272](https://github.com/breferrari/vigia/issues/272)).
+    /// Travel is `total` less what one screen shows, and with `w` on what one
+    /// screen shows is a property of *where* in the diff it is: a screenful of
+    /// wrapped lines is fewer rows than a screenful that opens on a heading and a
+    /// hunk header. So an estimate lands near the bottom rather than on it, and a
+    /// reader who drags the thumb all the way down and cannot see the last line
+    /// is the exact defect the paragraph above records. At the end of the track
+    /// this therefore asks for a row **past** the end and lets `View::collect`
+    /// clamp it, which is the same clamp scrolling off the end already takes and
+    /// the only one measured in display rows. Everywhere else the mapping is
+    /// unchanged.
+    fn dragged_to(&self, at: u32, total: usize, height: usize) -> usize {
+        // **Only the far end is special, and the rest of the track is the
+        // thumb's own arithmetic** ([#272](https://github.com/breferrari/vigia/issues/272),
+        // corrected by the second audit round). The first draft measured the
+        // whole track in drawn rows, which is a *different* travel from the one
+        // the thumb is drawn against: the painter draws it from the region's
+        // height over the diff's rows, so a drag measured in drawn rows landed
+        // below the thumb everywhere but the ends. A readout and the gesture
+        // performed on it are one contract, and this repo has already been
+        // corrected once on exactly that.
+        //
+        // The far end stays special because it means something the arithmetic
+        // cannot express: *the end of the diff*, which only the walk can place in
+        // display rows. With `w` off it is not special at all, so a drag is what
+        // it was in every version before B19, byte for byte, and with `w` on
+        // every point of the track but that one is measured the same way too.
+        if self.wrap && at >= crate::input::TRACK_SCALE {
+            return total;
+        }
+        scaled(at, total.saturating_sub(height))
+    }
+
+    /// Rows of the **diff** one screenful holds, which is not `height` when
+    /// lines wrap.
+    ///
+    /// **`height` where nothing has been drawn and where wrapping is off**, so
+    /// every step this shell has ever taken is the step it took before B19. See
+    /// [`Self::shown`] for why the number cannot be derived at the stepping site.
+    fn screenful(&self, height: usize) -> usize {
+        if self.wrap && self.shown > 0 {
+            // **Clamped by the pane this step is being taken in.** `shown` is the
+            // last frame's and `height` is this batch's, and the two are measured
+            // at different moments: `lib.rs` drains a batch and paints once at the
+            // end of it, so a resize and a `Space` arriving together give a fresh
+            // height against a stale count. A fifty-row pane dragged to twelve
+            // would otherwise step forty-nine rows through a body of twelve and
+            // walk over what nobody saw. It can only ever be too large, because a
+            // screen of `height` display rows never holds more than `height` rows
+            // of the diff.
+            self.shown.min(height)
+        } else {
+            height
+        }
     }
 }
 

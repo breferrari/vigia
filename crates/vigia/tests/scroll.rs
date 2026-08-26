@@ -777,6 +777,7 @@ fn tag(action: Action) -> usize {
         Action::ToggleRail => 10,
         Action::ToggleSingle => 11,
         Action::ToggleStaged => 111,
+        Action::ToggleWrap => 112,
         Action::ToggleSheet => 12,
         Action::CloseSheet => 13,
         Action::ListTo(_) => 14,
@@ -1242,33 +1243,58 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
     // The total the bar is scaled against, blanks included.
     let total = vigia::diff_rows(&mut frame).expect("total");
 
-    // The rows the walk actually produces, given more room than the diff needs
-    // so nothing is clipped and the count is the whole stream.
-    let view = View::collect(
-        &mut frame,
-        &mut highlighter,
-        &history,
-        vigia::Viewport {
-            position: Position::default(),
-            anchored: false,
-            diff_rows: TOTAL * 2,
-            ..vigia::Viewport::default()
-        },
-    )
-    .expect("view");
+    // **In both modes since `SPEC.md` §11.2 B19**
+    // ([#272](https://github.com/breferrari/vigia/issues/272)), and the claim is
+    // the same claim in the units that survive the split: what the twins count is
+    // the diff's **logical** rows, and what the walk produces with wrapping on is
+    // display rows, of which the continuations are the difference. The bar is
+    // scaled against the first, so this compares the first with the first.
+    //
+    // Read against `Row::Wrap` rather than against a second total, because a gate
+    // that recomputed the logical count from the width would be recomputing the
+    // thing under test.
+    for wrap in [false, true] {
+        let view = View::collect(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            vigia::Viewport {
+                position: Position::default(),
+                anchored: false,
+                wrap,
+                // Narrow enough that the fixture's own lines wrap, so the `true`
+                // pass is not the `false` pass under another name.
+                width: if wrap { 30 } else { 0 },
+                diff_rows: TOTAL * 2,
+                ..vigia::Viewport::default()
+            },
+        )
+        .expect("view");
 
-    assert!(
-        view.rows.len() < TOTAL * 2,
-        "the walk filled the window it was given, so its row count is the \
-         window's rather than the diff's and this compares two different things"
-    );
-    assert_eq!(
-        total,
-        view.rows.len(),
-        "the scrollbar is scaled against {total} rows and the walk drew {}, so \
-         the bar cannot reach its own bottom",
-        view.rows.len()
-    );
+        let wrapped = view
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::Wrap { .. }))
+            .count();
+        assert_eq!(
+            wrapped > 0,
+            wrap,
+            "the wrap={wrap} pass drew {wrapped} continuations, so the two passes \
+             are not two modes"
+        );
+
+        assert!(
+            view.rows.len() < TOTAL * 2,
+            "the walk filled the window it was given, so its row count is the \
+             window's rather than the diff's and this compares two different things"
+        );
+        let logical = view.rows.len() - wrapped;
+        assert_eq!(
+            total, logical,
+            "the scrollbar is scaled against {total} rows and the walk drew \
+             {logical} of the diff's own, so the bar cannot reach its own bottom"
+        );
+    }
 }
 
 #[test]

@@ -937,3 +937,80 @@ them is a legitimate pane, which is not true of a pane that has stopped followin
 `s`, one press each and named on the gestures sheet, so a variable would be a
 second spelling of something the pane says better. B6's count of one is untouched;
 its count of files is what moved.
+
+---
+
+## B19 — the neighbour that already solved this, and the unit split the total could not survive
+
+`SPEC.md` §11.2 B19 is the ruling and §11.1 is the behaviour. This is the trail.
+
+**The field, read rather than remembered, on 2026-08-22.** Five tools were checked
+against their own source or their own `--help` on this machine, and one of them
+changed the proposal.
+
+- **`delta`** wraps, and `--wrap-max-lines` defaults to **2**, which a session
+  here read as a cap to adopt and the reader removed the next day: *"How often a line
+  should be wrapped if it does not fit. Zero means to never wrap. Any content
+  which does not fit after wrapping will be truncated."* That is a direct answer
+  to §11.1's objection rather than a way around it, and it is where the cap came
+  from. `--wrap-left-symbol` is `↵`, `--wrap-right-symbol` `↴` and
+  `--wrap-right-prefix-symbol` `…`, so the wrap is marked at the end of the line
+  it leaves rather than at the start of the one it enters.
+- **`ov`** binds `[w]`, `[W]` to a character-based wrap toggle and `[Alt+w]` to
+  word wrap, which is what confirmed the key rather than a preference for it.
+- **`bat`** reserves the gutter and leaves it **blank** on continuation rows, so
+  the absent line number is itself the signal, and spells the opposite state `-S`
+  / `--chop-long-lines`.
+- **`less`** wraps unless `-S`, and toggles the state at runtime.
+- **Neovim** keeps both axes and gives each its own motion, `gj` against `j`, and
+  indents continuations with `'breakindent'`: *"Every wrapped line will continue
+  visually indented… thus preserving horizontal blocks of text."*
+
+**And the neighbour that had to build it says why it is cheaper here.**
+[dandavison/delta#657](https://github.com/dandavison/delta/issues/657) is the
+request that produced delta's wrapping, and its problem statement is that the
+pager is the wrong layer: *"delta uses one of many various pagers, usually some
+form of less, which supports line-wrapping, but this breaks lots of things (like
+delta's line numbers)"*. This tool owns its painter and its gutter, so the hard
+part delta built around does not exist here. The same thread calls the
+horizontal-scroll alternative *"tedious"* and says it *"disrupts the viewing
+experience"*, which is a second-hand data point for wrapping over the pan §11.1
+named as the rejected alternative.
+
+**The total was tried the way the issue proposed and abandoned on a fact.** The
+issue asks for a wrapped height threaded through `view::rows_of`, with the
+measurement taken on the counting pass and cached per text width. Two things
+kill it, and only the second is decisive.
+
+The cheap objection is cost: `vigia_core::FileSpan` is four numbers today and a
+wrapped height is a function of the text **and** of the text width, so the span
+would have to carry either a per-width summary or a per-file re-measure. That is
+an argument about size and could have been answered with a measurement.
+
+The objection that ends it is that the dependency is **circular**.
+`render::gutter_width` sizes the gutter from *the largest line number on screen*,
+so the text width is a function of the drawn rows; a wrapped height is a function
+of the text width; the total is a function of the wrapped heights; and which rows
+are drawn is a function of the total. There is no order in which those four
+evaluate. It is not an expensive computation, it is not one.
+
+**So the split is made and one unit is given one owner.** A **logical row** is a
+row of the diff's model; a **display row** is a row of the terminal. The bar,
+every jump, every clamp and every counting twin stay logical. Display rows exist
+inside the viewport only. That is the shape the design record already names: when
+one quantity splits into two, every site that treats them as interchangeable
+becomes a defect at once, so the quantity gets one owner rather than a spelling
+at each site.
+
+**What the split made visible immediately** is that `View::last_screenful` and
+the overshoot branch in `View::collect` both compare a **logical** span against
+the **display** height, which is exactly the units bug that shape predicts. With
+wrapping off the two numbers are equal and nothing can see it; with wrapping on
+the top lands too far back and the last rows of the diff fall off the bottom, so
+the end of the diff becomes unreachable by the gesture that exists to reach it.
+`crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap`
+is what fails when it comes back, and
+`the_wrapped_bottom_survives_the_frame_after_the_gesture` beside it is what
+fails when the clamp holds for one frame and not for the next: the first draft
+of the fix fired on the frame the gesture produced and on no frame after it, so
+the end of the diff was visible until anything repainted.

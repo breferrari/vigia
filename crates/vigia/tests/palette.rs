@@ -135,6 +135,7 @@ fn three_kinds() -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -726,6 +727,7 @@ fn graded_heat() -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -849,6 +851,7 @@ fn climbing() -> View {
         })],
         files: 1,
         scale: Scale::spread(12),
+        gutter: None,
         worktree_churn: Default::default(),
         ..View::default()
     }

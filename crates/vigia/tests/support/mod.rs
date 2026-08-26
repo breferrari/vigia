@@ -47,6 +47,41 @@ use vigia::{FileEntry, ListRow, Theme, View};
 /// the widest rung, so a whole-row count passes a whole-rungs assertion on a
 /// renderer that had lost the ladder entirely. Callers that want the whole row
 /// pass its whole width and say so.
+/// The rows a reader would see, as plain strings with trailing blanks trimmed.
+///
+/// **Rebuilt from the cells rather than parsed out of `TestBackend`'s
+/// `Display`.** That `Display` appends `Hidden by multi-width symbols: [...]` to
+/// any row holding a two-column glyph, so every assertion about how a row *ends*
+/// was silently reading that note instead of the row. Walking the cells the way a
+/// terminal does, skipping what the previous symbol already covered, gives back
+/// exactly what a reader would see.
+///
+/// **Here rather than in each file that reads a screen**
+/// ([#272](https://github.com/breferrari/vigia/issues/272)), which is this
+/// module's own reason one paragraph up. `tests/wrap.rs` arrived with a second
+/// copy that did the naive thing, concatenating every cell's symbol: correct on
+/// an ASCII fixture and one wide glyph away from reintroducing the bug the
+/// paragraph above records fixing, in the file whose own subject is a pane
+/// drawing `↳` and `›`.
+pub fn rows_of(buf: &Buffer, area: ratatui::layout::Rect) -> Vec<String> {
+    (area.top()..area.bottom())
+        .map(|y| {
+            let mut row = String::new();
+            let mut covered = 0usize;
+            for x in area.left()..area.right() {
+                if covered > 0 {
+                    covered -= 1;
+                    continue;
+                }
+                let symbol = buf[(x, y)].symbol();
+                row.push_str(symbol);
+                covered = ratatui::text::Span::raw(symbol).width().saturating_sub(1);
+            }
+            row.trim_end().to_owned()
+        })
+        .collect()
+}
+
 pub fn columns_in(
     buf: &Buffer,
     y: u16,

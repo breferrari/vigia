@@ -927,6 +927,8 @@ fn collect_resolves_every_degenerate_viewport() {
                                 position: Position { file, row: 0 },
                                 anchored: false,
                                 diff_rows,
+                                width: 0,
+                                wrap: false,
                                 list_top,
                                 list_rows,
                                 list_follows,

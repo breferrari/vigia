@@ -308,23 +308,10 @@ fn drawn_at(width: u16, height: u16, view: &View, chrome: &Chrome, glyphs: Glyph
 /// exactly what a reader would see.
 fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String> {
     let backend = drawn(width, height, view, chrome);
-    let buffer = backend.buffer();
-    (0..height)
-        .map(|y| {
-            let mut row = String::new();
-            let mut covered = 0usize;
-            for x in 0..width {
-                if covered > 0 {
-                    covered -= 1;
-                    continue;
-                }
-                let symbol = buffer[(x, y)].symbol();
-                row.push_str(symbol);
-                covered = Span::raw(symbol).width().saturating_sub(1);
-            }
-            row.trim_end().to_owned()
-        })
-        .collect()
+    // The cell walk itself moved to `support` with
+    // [#272](https://github.com/breferrari/vigia/issues/272), which gave it a
+    // second caller; the docblock above is its reason and travelled with it.
+    support::rows_of(backend.buffer(), Rect::new(0, 0, width, height))
 }
 
 /// Columns a rendered row actually occupies.
@@ -712,6 +699,7 @@ fn every_row_kind() -> View {
         top: Position::default(),
         read: 3,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -747,6 +735,7 @@ fn awkward() -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -767,6 +756,7 @@ fn empty() -> View {
         top: Position::default(),
         read: 0,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -812,6 +802,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -1122,6 +1113,7 @@ fn glancing() -> View {
         top: Position::default(),
         read: 3,
         scale: Scale::spread(12),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -2884,6 +2876,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
     let long_name = Chrome {
@@ -3020,6 +3013,7 @@ fn a_clipped_content_line_says_it_continues() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
 
@@ -4524,6 +4518,7 @@ fn overlong(rows: usize) -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }

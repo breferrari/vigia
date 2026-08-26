@@ -809,6 +809,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleRail
         | Action::ToggleSingle
         | Action::ToggleStaged
+        | Action::ToggleWrap
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::Escape
@@ -1179,6 +1180,25 @@ pub enum Action {
     /// position to the top, which is the answer `Action::Top` already gives for
     /// *the map you were reading is not the map any more*.
     ToggleStaged,
+    /// Wrap a content line too wide for the pane onto the row below, or clip it.
+    ///
+    /// `SPEC.md` §11.2 **B19**, from `w`
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off on launch.
+    ///
+    /// **It is not a mode**, for the reason [`Action::ToggleRail`] and
+    /// [`Action::ToggleSingle`] are not: no key changes meaning while it is on.
+    /// `j` and `k` still scroll a row of the diff, a digit still jumps, `G` still
+    /// reaches the end. What moves is how much of the pane a long line is drawn
+    /// over, and the diff's own rows are exactly the rows they were, which is why
+    /// the scrollbar's thumb does not move when this is pressed.
+    ///
+    /// **It rearranges rows the frame already holds**, so it is
+    /// [`Action::ToggleMasthead`]'s kind rather than [`Action::ToggleStaged`]'s:
+    /// nothing is re-walked, nothing is re-read, and the position is kept. **The
+    /// position is kept except where the reader is resting on the diff's last
+    /// screenful**, where the clamp gives rows back so the last row stays on the
+    /// last row; the total the bar is drawn against is unmoved either way.
+    ToggleWrap,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///
     /// `SPEC.md` §11.2's B12 ruling, from `?` or from a click on the sheet's own
@@ -1327,6 +1347,7 @@ impl Action {
             | Self::ToggleRail
             | Self::ToggleSingle
             | Self::ToggleStaged
+            | Self::ToggleWrap
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Escape
@@ -1397,6 +1418,7 @@ impl Action {
             // useful in: follow chooses the file, the pin keeps the diff on it.
             | Self::ToggleSingle
             | Self::ToggleStaged
+            | Self::ToggleWrap
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
@@ -1485,6 +1507,7 @@ impl Action {
             | Self::ToggleRail
             | Self::ToggleSingle
             | Self::ToggleStaged
+            | Self::ToggleWrap
             | Self::ToggleSheet
             | Self::CloseSheet => false,
         }
@@ -1650,6 +1673,12 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // where in it the reader is. B16.
         KeyCode::Char('s') => Some(Action::ToggleSingle),
         KeyCode::Char('a') => Some(Action::ToggleStaged),
+        // **`w`, and it is the reflex rather than what was free.** `ov` binds
+        // `[w]`, `[W]` to a character-based wrap toggle, `bat` spells the
+        // opposite state `-S` / `--chop-long-lines`, and `less` toggles the same
+        // state with `-S`. It was also free, which is the weaker half of the
+        // case: `SPEC.md` §11.2 B19.
+        KeyCode::Char('w') => Some(Action::ToggleWrap),
         // **`?` and nothing else**, which is `SPEC.md` §11.2's B12: `btop`,
         // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
         // is refused because it is a vi motion everywhere else on a pane with no
