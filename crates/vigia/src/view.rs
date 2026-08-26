@@ -199,11 +199,13 @@ pub fn list_plan(files: &[vigia_core::FileChange], top: usize, rows: usize) -> V
 /// files, the staged run's heading, and **none of the staged files** — the run the
 /// reader pressed `a` for, announced and then empty.
 ///
-/// The two separators are drawn whenever both runs have files, which is the same
-/// condition [`list_plan`] groups on and is resolved the same way, so the request
-/// and the plan cannot disagree about how many rows a window needs.
+/// A separator is drawn per run that has files, which is the same condition
+/// [`list_plan`] groups on and is resolved the same way, so the request and the
+/// plan cannot disagree about how many rows a window needs. That is two for a
+/// list holding both runs and one for a list that is entirely staged.
 pub fn list_rows_wanted(files: &[vigia_core::FileChange]) -> usize {
-    files.len() + if Runs::of(files).grouped() { 2 } else { 0 }
+    let runs = Runs::of(files);
+    files.len() + runs.separators()
 }
 
 /// How many files each run holds, counted once.
@@ -243,8 +245,37 @@ impl Runs {
     }
 
     /// Whether the list draws run separators at all.
+    ///
+    /// **The question is whether a staged run exists, not whether both runs
+    /// do.** It used to be both, and that made the view which most needs to
+    /// announce itself, the one where *everything* is staged, the one that said
+    /// nothing: no heading, and `None` for
+    /// [`Heading::origin`](crate::render) to match on, which takes the ink for
+    /// unstaged. A reader could not tell it from the default view (reported
+    /// 2026-08-26).
+    ///
+    /// Dropping the labels is still right for a list that is entirely unstaged,
+    /// because unstaged is what a reader is looking at unless something says
+    /// otherwise, and a label on every row of the only run there is says
+    /// nothing. It is wrong for a list that is entirely staged, where the same
+    /// silence states the opposite of the truth.
     fn grouped(self) -> bool {
-        self.unstaged > 0 && self.staged > 0
+        self.staged > 0
+    }
+
+    /// How many separators a grouped list draws: one per run that has files.
+    ///
+    /// Two while both runs hold files, and one for a list that is entirely
+    /// staged. Kept here rather than spelled `2` at the call site because
+    /// [`list_rows_wanted`] sizes the region from it, and a region sized for
+    /// more separators than the plan draws leaves a blank row while one sized
+    /// for fewer drops the tail of the last run
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)).
+    fn separators(self) -> usize {
+        if !self.grouped() {
+            return 0;
+        }
+        usize::from(self.unstaged > 0) + usize::from(self.staged > 0)
     }
 
     fn count(self, origin: Origin) -> usize {
