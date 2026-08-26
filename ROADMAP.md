@@ -480,6 +480,9 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The columns left of the diff's scrollbar read as neither wash nor track | [#214](https://github.com/breferrari/vigia/issues/214) |
 | ✅ | The row wash has no left bar, and the reason it was refused expired with #119 | [#218](https://github.com/breferrari/vigia/issues/218) |
 | ⬜ | Text cannot be selected or copied, because the shell holds the mouse | [#177](https://github.com/breferrari/vigia/issues/177) |
+| ⬜ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
+| ⬜ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
+| ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
 | ⬜ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
 | ✅ | The pointer's mark is the loudest weight in the list, and the file the diff is inside has none | [#193](https://github.com/breferrari/vigia/issues/193) |
@@ -621,6 +624,10 @@ Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5)
 Everything on the deferral shelf below has a milestone here, so shelved work is still reachable by a milestone-filtered query rather than only readable in prose. The shelf carries the *reason*; this table carries the *state*.
 
 **It carried the name "Phase 5 — deferred findings" until 2026-08-06, and the number is retired because it was a lie with a good excuse.** A phase number claims a place in a sequence; this is a shelf, permanently open, never "next", and the file spent a paragraph fighting its own name. The sections above run 4 → 6 → 7 → 8 in the order they are meant to be taken, and the shelf sits after all of them because it holds no place among them at all. What survives the rename: the milestone URL keeps `/5`, and older issues, notes and the dated cells below cite "Phase 5" — every such citation means this shelf. The exclusion mechanism never rested on the name: `take-next` step 1 skips it by the `Shelf:` description prefix, which is unchanged, and a title with no phase number now also sorts last by that query's own fallback, so the two guards finally agree instead of one covering for the other.
+
+**A shelf item comes off it when daily use asks for it, and the asking is the whole test.** That sentence used to live here, was deleted at some point, and survives only as a quotation in two pull-forward rows below, which is a rule that exists solely as its own citation. Restated because a filter nobody can read is not one, and because the sixty-odd rows under it are what happens when the entry trigger fires on every audit and the exit trigger fires on a judgement nobody is scheduled to make.
+
+**The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask it of an item when something reaches for it, not on a schedule nobody keeps. An item that cannot answer yes is not waiting for a phase, it is declined, and closing it as such is a result rather than a loss. Five declines in a hundred and twenty-seven closed issues is not a shelf being filtered; it is a shelf being filled.
 
 **If a second shelf is ever created, its milestone description must begin `Shelf:`.** Until [#83](https://github.com/breferrari/vigia/issues/83) the never-next rule lived only in this paragraph, which is prose, and `take-next` step 1 is a query: it read the milestone list, saw three peers, and offered the shelf as the next phase. The marker is what a query can read, and this paragraph is where whoever creates the next one is standing, so it is stated here rather than only in the skill. Comparison 6 of that skill's pre-flight is the check that fires when the two disagree.
 

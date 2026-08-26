@@ -133,8 +133,35 @@ So, when a reader asks for something:
 - **A reason that collapses reopens the question.** It does not get replaced by a better reason for the same conclusion. That happened to [#123](https://github.com/breferrari/vigia/issues/123) and the decline outlived both of its bases.
 - **Reach a decline early or not at all.** The reason either holds under checking or it does not, and that is cheap. Hours spent after that point are spent justifying, and the tell is prose getting longer while the argument does not get stronger.
 - **Size the rigor to the surface, and do not escalate past it.** Look and feel is `/simplify` plus a screenshot; the audit loop is for the frame path and the invariants. `ROADMAP.md` has said so since Phase 8 opened and it was overridden anyway.
+- **A limit you were not asked for is a refusal wearing a yes.** Everything above covers *no*. It did not cover [#272](https://github.com/breferrari/vigia/issues/272): nobody declined to build wrapping, a session built it and imported `delta --wrap-max-lines`' default of two as a cap, and the reader had to say twice that he never asked for it. What ships is what was asked for and nothing narrower. A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here.
+- **Never cite a session's own prior decision as a constraint on the reader.** Evidence, yes. Decisions he made, yes, and naming them is a service. A ruling a session wrote is a record of what was done, not permission withheld.
 
-Refusals deserve more scrutiny than builds, not less: a bad build is loud and a bad refusal is silent, so the mistake that survives longest here is the one no gate can see.
+Refusals deserve more scrutiny than builds, not less, and an unrequested limit deserves the most of all: a refusal is at least visible, while a feature delivered narrower than it was asked for leaves nothing to see.
+
+## Rulings say who made them
+
+Every ruling and every constant in `SPEC.md` names its author:
+
+```
+Ruled 2026-08-26, reader.
+Ruled 2026-08-26, session.
+```
+
+**Unattributed means a session inferred it, and an inferred ruling does not bind the reader.** Two words, and it turns *"why will you not do this"* from an argument into a lookup.
+
+Mark the origin of the **ruling**, not of the symptom. "Reported from the pane" describes where a complaint came from and says nothing about who chose the constraint attached to it. #272's cap was reader-reported and session-decided, and writing only the first is what let it be quoted back at him as his own.
+
+## Rulings can be revoked
+
+When the reader overrules a ruling, **delete it in the same commit as the change.** Not annotated, not marked superseded, not kept with a note about what it used to say.
+
+A rule that survives being overruled re-fires on the next session, and he argues it again from zero. #272's cap was overruled and still sat in the source, the spec and a gate a day later. If it is not deleted, the override did not happen.
+
+## The spec is present tense
+
+`SPEC.md` says what holds now. When a ruling is replaced, the old text goes: git has it, and `RULINGS.md` takes the trail when the trail is still needed to apply the rule.
+
+**Annotating in place is not an option, and this is structural rather than a preference.** In any single case the argument for keeping the paragraph is the better one. Enough better arguments in a row is how a contract stops being readable, and how a commit that *removed* a feature still grew the file.
 
 ## Releasing
 
@@ -156,3 +183,6 @@ Pick the level from the diff. On `0.x` a new feature **and** a breaking public A
 - **No em-dashes** in anything published under Brenno's name: README prose, release notes, issue and PR bodies, commit messages. Use a period, a comma, a colon, or parentheses.
 - Probe capability by behaviour, never by asking. A single green run is not evidence when the defect is non-deterministic.
 - Verify the whole artifact, not just the property you were fixing.
+- **A comment exists where the code cannot explain itself.** Why the obvious approach is wrong, an invariant a caller must hold, a cost invisible at the call site. Not a restatement of the code, not issue numbers, not ruling ids, not the history of the comment's own corrections. Those belong in the commit message and the tracker, which already hold them. The test: would this make sense to a reader in two years with no knowledge of the session that wrote it? A docblock longer than the item it documents means one of the two is wrong.
+- **A title says what is broken or what to build.** One clause, no *because*. The body carries the reason. `Band saturates at half on a steady worktree`, not `A steady worktree saturates half the band, because the factor above the mean was never measured on this signal`.
+- **Prose width follows where it renders, never the file you were last reading.** GitHub turns a single newline in an issue or PR body into a real line break, so a body hard-wrapped at 80 arrives broken mid-sentence. One long line per paragraph there. Commit bodies wrap at 72. Check with `gh api repos/OWNER/REPO/pulls/N -H "Accept: application/vnd.github.html+json" --jq '.body_html' | grep -c '<br'`.

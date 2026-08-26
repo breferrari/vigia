@@ -217,7 +217,7 @@ Check the label before planning. An issue labelled **`decision`** is one whose a
 When the issue is labelled `decision`:
 
 - **The deliverable is the ruling and its reasoning**, written where the next reader will hit it — the `SPEC.md` section the issue names, plus its §10 bullet closed. A ruling filed only in the issue is not filed: the issue closes and `SPEC.md` still reads as an omission.
-- **Both branches get written.** *"Declined"* is a result, and the case for the road not taken is recorded rather than dropped, because it will be raised again. #50 says this in its own acceptance and it is the general rule.
+- **The ruling goes in the contract. The road not taken goes in `RULINGS.md`.** *"Declined"* is a result and the case for it is worth keeping, but keeping both branches in `SPEC.md` means the contract grows on a refusal as surely as on a build, so no outcome ever fails to add to it. `SPEC.md` gets the ruling in the fewest words that can be falsified; the rejected branch and its evidence go to the ledger, under its budget, or nowhere.
 - **A ruling of *yes* is the first half of the pass, not the end of it.** The build gets its **own issue and its own PR**, so the ruling is never blocked by an implementation, and then **this same pass takes that issue and ships it**. Stopping at the ruling is what this bullet used to say and it was wrong: #167 ruled that `?` opens a gestures sheet, filed #206 for the build, and released **0.11.1 with nothing on screen**. The reader pressed `?`, got nothing, and had to go and find out that the tool had been *told* about a feature it did not have. Two PRs, one pass, in that order.
 - **The only reason to stop after the ruling is size, and it is a claim about the build rather than about the rules.** If the build genuinely will not fit one fresh context (the test three sections down), stop there and say so — but say it in the **first line of the report**, in the form *"nothing the reader can see has changed yet; the build is #N"*. A pass that ends with the tool doing exactly what it did before is allowed. A pass that ends that way quietly is not.
 - **The report opens with what a reader can now do that they could not before.** If the honest answer is *nothing*, that is the first sentence, not a detail three paragraphs down. This is the line that would have caught the case above, and no gate can see it: the suite was green, the plan was delivered in full, and the feature did not exist.
@@ -469,12 +469,14 @@ Then polish, and let the **diff** pick the instrument rather than your appetite.
 - **Anything larger, or anything the rest of the system stands on** — `/harden` **until dry**. It runs `/simplify` as one of its own phases, so do not run one first and then the other. It also carries its own plan-fidelity phase: tell it the diff above was already done, so it records the result instead of repeating it.
 - **The surface picks the bar, the way the diff picks the instrument.** Engine and invariant work hardens until dry — that rigor earned its keep in the frame path and it stays. Look-and-feel work (the Phase 8 class: layout, colour, keys, chrome) defaults to `/simplify` plus snapshot review plus **a screenshot in the PR**, because the judge of feel is a human eye and it rules in five seconds; a three-agent audit loop on an inset spends a night where a look decides. The escalation is one-way: feel work that touches the frame path, the watch, or any invariant's surface takes the engine bar for that part.
 
-Whichever runs, pass the docs carve-out into the invocation, because `/simplify` reduces and the comments explaining *why* something works are the ones nobody can reconstruct from the code:
+Whichever runs, pass the docs rule into the invocation. `/simplify` is the only instrument that reduces, and freezing docs against it is what took the comments to 60% of the shell crate: the ratio could only ever climb. What actually needs protecting is a class, not a volume, so protect the class:
 
-> Documentation is non-negotiable during `/simplify`. Do not shorten, remove, or
-> fold module-header docblocks, function doc comments, or `Why:` / invariant
-> notes. If a simplification would delete context about why something works, skip
-> the simplification.
+> Documentation is in scope for `/simplify` and is judged by the same rule as
+> code: a comment exists where the code cannot explain itself. Keep why the
+> obvious approach is wrong, an invariant a caller must hold, and a cost invisible
+> at the call site. Where a comment exists because the code is unclear, the fix is
+> clearer code and the comment goes with it. Delete restatements of the code,
+> issue numbers, ruling ids, and any account of the change rather than the thing.
 
 **And pass the read-only carve-out, because an agent that builds competes with you for the machine.** On 2026-08-18 four review agents were told to measure and each ran an optimised build (`lto = "thin"`, `codegen-units = 1`) concurrently with the session's own, one against a probe worktree carrying a 3.4G `CARGO_TARGET_DIR`. The machine was audibly saturated before anything in the loop noticed, because a session's picture of the machine is its own actions only. It costs nothing in review quality to prevent: round 2 of #245's audit ran read-only with the numbers pasted into the brief and was just as sharp as the round that built.
 
