@@ -13,17 +13,22 @@
 //! a tint has to assume a background and that palette's whole contract is that it
 //! assumes none, while [`Theme::dark`] draws one wherever the depth can express it.
 //!
-//! ## Why `ansi` is still the default
+//! ## Why `ansi` is now the fallback rather than the default
 //!
-//! It is the only palette that is correct on a terminal whose background nothing
-//! has detected. The sixteen names resolve to whatever the reader's own scheme
-//! says, so `vigia` matches the pane beside it instead of fighting it, and a
-//! reader on a light terminal is not handed a screen authored for a dark one.
+//! **Since [#325](https://github.com/breferrari/vigia/issues/325)** the shell
+//! asks the terminal its background at startup (OSC 11, one poll, at most a
+//! breath), and with no `VIGIA_THEME` and no theme file a terminal that
+//! answers gets the showcase: `dark` or `light`, chosen by its own answer.
+//! That is B18's *nice theme as the default* qualifier landing where #320's
+//! PR said it would, and it removes the clause the old rule rested on: the
+//! background is no longer a thing "nothing has detected".
 //!
-//! The cost is real and is the reason `dark` exists: `ansi` cannot draw the row
-//! tint `assets/preview.svg` promises, so on the default palette the diff signal
-//! is still the sigil column that §11.1 records as a loss. A reader who knows
-//! their own background gets the picture by naming it.
+//! `ansi` keeps exactly the role its reasoning always earned: the only
+//! palette that is correct when the terminal does not answer, over ssh, under
+//! a multiplexer that swallows the query, on Windows where none is sent. The
+//! sixteen names resolve to the reader's own scheme, so the fallback matches
+//! the pane beside it instead of fighting it, and a reader who knows better
+//! still says so by name.
 //!
 //! ## Configuring it
 //!
@@ -1357,6 +1362,7 @@ impl std::error::Error for ThemeError {}
 pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
+    detected: Option<crate::terminal::Background>,
 ) -> Result<Theme, ThemeError> {
     // **Chosen here, resolved once on the way out.** `.resolve(depth)` used to be
     // written on each of three exits, which is a rule spelled out three times: a
@@ -1379,7 +1385,17 @@ pub fn from_env(
         // silently would have no way to find out why.
         load(&path)?
     } else {
-        Theme::default()
+        // **The detected background picks the showcase, and no answer keeps
+        // the palette that assumes nothing** (`SPEC.md` §11.2 B18,
+        // [#325](https://github.com/breferrari/vigia/issues/325)). An explicit
+        // name and the theme file both outrank this, exactly as before: a
+        // reader who said something is never overruled by a guess about their
+        // terminal, however good the guess.
+        match detected {
+            Some(crate::terminal::Background::Dark) => Theme::dark(),
+            Some(crate::terminal::Background::Light) => Theme::light(),
+            None => Theme::default(),
+        }
     };
     Ok(theme.resolve(depth))
 }

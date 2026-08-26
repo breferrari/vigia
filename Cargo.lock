@@ -2499,6 +2499,7 @@ dependencies = [
  "insta",
  "libc",
  "ratatui",
+ "rustix",
  "signal-hook",
  "vigia-core",
  "windows-sys 0.61.2",

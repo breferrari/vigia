@@ -115,7 +115,7 @@ pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
     diff_height, regions, render,
 };
-pub use terminal::{Screen, Session};
+pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
@@ -399,7 +399,15 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Resolved to the depth here as well, so the palette the renderer holds is
     // already in colours this terminal can show and the frame path never
     // quantises. I9 therefore sees none of it.
-    let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
+    // **The one question the shell asks its terminal** (`SPEC.md` §11.2 B18,
+    // [#325](https://github.com/breferrari/vigia/issues/325)): the background,
+    // OSC 11, before the event reader exists, because crossterm's parser
+    // destroys any reply it does not recognise once the takeover is reading.
+    // At most 150ms, and only where nothing has already chosen: the variable
+    // and the theme file still win inside `from_env`, and a terminal that
+    // stays silent costs the wait once and keeps the fallback.
+    let detected = terminal::background(std::time::Duration::from_millis(150));
+    let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok(), detected)?;
 
     // Beside the depth and for the same reason: a property of the terminal,
     // resolved once before the screen is taken, so the frame path never asks the
