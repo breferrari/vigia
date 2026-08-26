@@ -2471,3 +2471,61 @@ fn no_file_is_ever_planned_without_its_own_runs_label() {
     }
     assert!(saw_a_boundary, "the sweep never drew a label at all");
 }
+
+/// **A list that is entirely staged still says so, and its rows still read as
+/// staged.**
+///
+/// Reported from a real worktree on 2026-08-26: with both changed files staged
+/// and nothing unstaged, the list drew no `staged` heading at all and the kind
+/// letters took the ordinary ink rather than the staged one. Unstaging one file
+/// made both headings and both inks appear. So the view that most needs to
+/// announce itself, the one where *everything* is staged, was the one that said
+/// nothing, and it was indistinguishable from the default unstaged view.
+///
+/// One decision caused both halves. `Runs::grouped` asked whether **both** runs
+/// held files, and `Heading::origin` is `grouped.then_some(entry.origin)`, so a
+/// single-run view dropped its run's identity entirely: no label to draw, and
+/// `None` for the ink to match on, which falls to the unstaged case.
+///
+/// Dropping it is right for a list that is entirely unstaged, because unstaged
+/// is what a reader is looking at unless told otherwise. It is wrong for a list
+/// that is entirely staged, which is the one case where the absence of a label
+/// states the opposite of the truth. So the question is now whether a staged run
+/// exists at all.
+#[test]
+fn an_entirely_staged_list_announces_itself() {
+    let scratch = support::Scratch::new("list-all-staged");
+    for i in 0..3 {
+        scratch.write(&format!("src/f{i}.rs"), "one\ntwo\nthree\n");
+    }
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    for i in 0..3 {
+        scratch.write(&format!("src/f{i}.rs"), "one\nSTAGED\nthree\n");
+    }
+    scratch.git(&["add", "-A"]);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+    assert_eq!(files.len(), 3, "the fixture is not three staged files");
+
+    let plan = vigia::list_plan(files, 0, 8);
+    assert!(
+        plan.iter().any(|slot| matches!(
+            slot,
+            vigia::Slot::Group { origin: staged_origin, .. } if *staged_origin == vigia_core::Origin::Staged
+        )),
+        "an entirely staged list drew no staged heading, so it reads as the \
+         default unstaged view:\n{plan:?}"
+    );
+    // And the region must be sized for the heading it now draws, or the label
+    // is announced and the run's tail falls off the bottom (#313).
+    assert_eq!(
+        vigia::list_rows_wanted(files),
+        files.len() + 1,
+        "the list asks for a row count that does not include its one heading"
+    );
+}
