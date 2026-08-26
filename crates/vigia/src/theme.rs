@@ -602,15 +602,23 @@ impl Theme {
             let mix = |x: f32, y: f32| x + (y - x) * t;
             rgb_of(mix(la, lb), mix(aa, ab), mix(ba, bb))
         };
+        // Stops at 0, 4 and 7: the warm key sits where Band::of's middle
+        // third sits on the eight-level height ramp. The three stops
+        // themselves are placed, never round-tripped, so the ramp's ends are
+        // byte-identical to the keys on every platform: `powf` and `cbrt`
+        // round differently across libms, and an endpoint that drifted a byte
+        // on one platform is exactly the cross-platform flake the budget
+        // suite would catch last.
+        let colour = |(r, g, b)| Color::Rgb(r, g, b);
         let mut out = [Color::Reset; 8];
-        for (at, slot) in out.iter_mut().enumerate() {
-            // Stops at 0, 4 and 7: the warm key sits where Band::of's middle
-            // third sits on the eight-level height ramp.
-            *slot = if at <= 4 {
-                lerp(low, warm, at as f32 / 4.0)
-            } else {
-                lerp(warm, hot, (at - 4) as f32 / 3.0)
-            };
+        out[0] = colour(low);
+        out[4] = colour(warm);
+        out[7] = colour(hot);
+        for at in [1, 2, 3] {
+            out[at] = lerp(low, warm, at as f32 / 4.0);
+        }
+        for at in [5, 6] {
+            out[at] = lerp(warm, hot, (at - 4) as f32 / 3.0);
         }
         Some(out)
     }
