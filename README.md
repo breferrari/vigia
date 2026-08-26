@@ -101,6 +101,8 @@ cargo install --git https://github.com/breferrari/vigia vigia
    status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
+The header's facts sit in **pills**, one to a fact, so the worktree, the branch and the count read as three things rather than one run-on line.
+
 The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 134 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 134 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
 
 Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
@@ -113,7 +115,7 @@ Every file gets the same row in both regions:
 |---|---|---|
 | `▸` | **caret** | 📍 *where you are.* The diff below is inside this file |
 | `M` | **kind** | modified, added, deleted, renamed |
-| `src/…` | **path** | which file. How brightly it is drawn is how recently it changed |
+| `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
 | `●` | **pulse** | ⚡ it changed on the newest tick |
 | green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
@@ -138,7 +140,7 @@ A slice nothing touched is still drawn, in a dark track colour, because a strip 
 
 <br>
 
-Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
+Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds, and a busier one is a hotter colour: on a terminal with 24-bit colour the height and the ink climb the same ramp together, so the shape reads at a glance and the colour confirms it. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
 
 **Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means. The mockup drew these as waves before the first commit, and drawing the events raw was the defect.
 
@@ -183,6 +185,14 @@ The grammars are `bat`'s curated collection, which is the same set that tool hig
 A file type nothing recognises is not an error. It draws exactly as it did before there was highlighting at all, because a monitor that refused a file it could not colour would have inverted its own job.
 
 </details>
+
+### 🎯 And *what* changed inside the line
+
+A changed line sits on a calm wash of its own colour, and the words that actually changed sit in a **hotter patch of that same colour**. A renamed function in a long line reads as one bright token rather than a whole red line above a whole green one, and you find the edit without reading either line to its end.
+
+The pairing is bounded on purpose. A removed line and the added line under it are compared token by token, and a pair that differs too much is left as two whole lines rather than confettied into unrelated highlights: past that bound there is no shared shape left to point at. The line numbers of a changed row take a slightly darker tone of the same wash, so the gutter reads as its own column without a border being spent on one.
+
+All three are backgrounds, so they need 24-bit colour and they leave together below it. What is left there is what was always there: the `+` and `-` column, and the left bar beside it.
 
 ### 📈 And the masthead, which is the whole tree
 
