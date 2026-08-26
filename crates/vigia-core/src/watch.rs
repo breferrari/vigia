@@ -347,9 +347,12 @@ impl<'repo> Watcher<'repo> {
                     Ok(message) => {
                         self.stats.wakeups += 1;
                         match self.accept(message) {
-                            // Stopped mid-burst: report what we already have,
-                            // so the caller draws before it shuts down.
-                            None => break,
+                            // A stop ends the wait whether or not a burst is
+                            // open. Returning the partial burst instead would
+                            // make a stop mean "one more tick, then stop",
+                            // which is neither what `Stop` documents nor what a
+                            // timeout built on it can read.
+                            None => return None,
                             Some(accepted) if accepted.relevant => {
                                 events += 1;
                                 // Only an event that named a file adds one. An

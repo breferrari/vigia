@@ -409,3 +409,51 @@ fn a_stopper_unblocks_a_waiting_watcher() {
     );
     stopper.join().expect("stopper thread");
 }
+
+/// A stop unblocks with `None` even when a burst is already open.
+///
+/// The burst loop used to break out and fall through to its `Some(Tick)`, so a
+/// stop meant "one more tick, then stop" whenever anything was mid-arrival.
+/// `tick_within` builds its timeout on a stop, so a timeout could report a tick
+/// that had not arrived in time.
+///
+/// The quiet window is widened well past the default 16ms on purpose: the stop
+/// has to land *inside* the burst, and against the default it lands after the
+/// burst has already closed on its own and proves nothing.
+#[test]
+fn a_stop_that_lands_mid_burst_still_returns_none() {
+    const QUIET: Duration = Duration::from_millis(500);
+
+    let scratch = committed_scratch("watch-stop-midburst");
+    let worktree = scratch.worktree();
+    let mut watcher = worktree
+        .watch(WatchOptions {
+            quiet: QUIET,
+            max_delay: Duration::from_secs(5),
+        })
+        .expect("watch");
+
+    let stop = watcher.stopper();
+    // Opens a burst the quiet window will hold open long enough to stop inside.
+    scratch.write("a.txt", "y\n");
+    let stopper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        stop.stop();
+    });
+
+    let started = std::time::Instant::now();
+    let got = watcher.next_tick();
+    let waited = started.elapsed();
+    stopper.join().expect("stopper thread");
+
+    // Proves the stop is what ended the wait rather than the quiet window:
+    // closing on quiet would take QUIET, and this returns in about 60ms.
+    assert!(
+        waited < QUIET,
+        "the burst closed on its own after {waited:?}, so this never tested a stop"
+    );
+    assert_eq!(
+        got, None,
+        "a stop landed while a burst was open and returned a tick instead of ending the wait"
+    );
+}
