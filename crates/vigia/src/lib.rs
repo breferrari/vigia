@@ -500,6 +500,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         theme,
         glyphs,
         name: short_name(worktree.workdir()),
+        root: worktree.workdir().to_string_lossy().into_owned(),
         branch: None,
         elsewhere: 0,
         screen: View::default(),
@@ -1145,6 +1146,9 @@ struct Shell {
     glyphs: Glyphs,
     /// What the header calls the working tree.
     name: String,
+    /// The worktree's absolute path, spelled once for the links' `file://`
+    /// targets ([#326](https://github.com/breferrari/vigia/issues/326)).
+    root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     ///
     /// Refreshed per draw rather than held for the session, because an agent in
@@ -1325,6 +1329,7 @@ impl Shell {
             self.branch.as_deref(),
             self.pointing(),
             self.elsewhere,
+            &self.root,
         );
         let area = self.area()?;
         Ok(diff_height(
@@ -1640,6 +1645,7 @@ impl Shell {
             self.branch.as_deref(),
             self.pointing(),
             self.elsewhere,
+            &self.root,
         );
         let body = body_layout(
             self.area()?,
@@ -1715,6 +1721,7 @@ impl Shell {
             self.branch.as_deref(),
             self.pointing(),
             self.elsewhere,
+            &self.root,
         );
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach

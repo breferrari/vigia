@@ -164,7 +164,7 @@ fn layout(app: &App, files: usize) -> Body {
 fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
     body_layout(
         pane,
-        &app.chrome("fixture", None, Pointing::default(), 0),
+        &app.chrome("fixture", None, Pointing::default(), 0, ""),
         files,
         files,
     )
@@ -229,7 +229,7 @@ fn frame_body(
     screen: Body,
 ) {
     app.sample_memory();
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let view = app.view(frame, highlighter, history, screen).expect("view");
     // **The pane comes from the buffer being painted rather than from
     // [`area`]** ([#252](https://github.com/breferrari/vigia/issues/252)). The two
@@ -410,7 +410,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         );
     }
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     assert!(
         chrome.frame.is_some(),
         "the timed frame never recorded what it cost, so every wall-clock gate \
@@ -858,7 +858,7 @@ fn frame_budget_on(
         // where the hint bar's `q quit` scored on every frame.
         let laid = vigia::regions(
             pane,
-            &app.chrome("fixture", None, Pointing::default(), 0),
+            &app.chrome("fixture", None, Pointing::default(), 0, ""),
             &app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view"),
         );
@@ -1856,7 +1856,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
-        let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
         let (painted, paint, paint_cpu) = timed_cpu(|| {
             render(
                 &mut buf,
@@ -2381,7 +2381,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     let screen = layout_of(&app, pane, FILES);
     app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
         .expect("toggle the sheet");
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let laid = vigia::regions(pane, &chrome, &{
         let mut highlighter = Highlighter::eager();
         let history = History::new();

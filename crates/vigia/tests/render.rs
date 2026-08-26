@@ -309,6 +309,8 @@ fn chrome() -> Chrome {
         // which `lib.rs`'s `branch_for` gates.
         staged: None,
         icons: false,
+        links: false,
+        root: String::new(),
         elsewhere: 0,
         branch: None,
         mode: Mode::Watching,
@@ -7993,6 +7995,78 @@ fn the_chrome_wears_pills_at_truecolour_and_none_below() {
         assert!(
             !pills.contains(&buffer[(x, 0)].bg),
             "a pill survived below truecolour at column {x}"
+        );
+    }
+}
+
+/// #326: a linked path is one cell carrying the whole OSC 8 wrapper with its
+/// width forced to the label's, tui-link's shape; rootless or switched off it
+/// is exactly the plain cells it always was.
+#[test]
+fn a_linked_path_is_one_cell_carrying_the_uri() {
+    let view = View {
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            file("src/we ird%.rs", 1, 0),
+        ],
+        files: 2,
+        ..two_regions(2)
+    };
+    let mut shown = chrome();
+    shown.links = true;
+    shown.root = "/home/reader/tree".to_owned();
+    let theme = vigia::Theme::dark();
+    let backend = themed_screen(64, 18, &view, &shown, &theme);
+    let buffer = backend.buffer();
+
+    let row = (0..18u16)
+        .find(|y| (0..64u16).any(|x| buffer[(x, *y)].symbol().contains("watch.rs")))
+        .expect("the linked path was not drawn");
+    let (x, cell) = (0..64u16)
+        .map(|x| (x, &buffer[(x, row)]))
+        .find(|(_, c)| c.symbol().contains("watch.rs"))
+        .expect("fixture");
+    let symbol = cell.symbol();
+    assert!(
+        symbol.contains("\x1b]8;;file:///home/reader/tree/src/engine/watch.rs\x1b\\"),
+        "the cell does not open the link: {symbol:?}"
+    );
+    assert!(
+        symbol.ends_with("\x1b]8;;\x1b\\"),
+        "the cell does not close the link: {symbol:?}"
+    );
+    // The width the cell forces is the label's: the fixture's label is the
+    // path spelled whole, nineteen columns of ASCII.
+    assert_eq!(
+        cell.diff_option,
+        ratatui::buffer::CellDiffOption::ForcedWidth(
+            std::num::NonZeroU16::new("src/engine/watch.rs".len() as u16).expect("nonzero")
+        ),
+        "the forced width is not the label's"
+    );
+    assert_eq!(
+        buffer[(x + 1, row)].symbol(),
+        " ",
+        "the covered cell behind the link is not blank"
+    );
+
+    // Encoding: the space and the percent are escaped, nothing else invented.
+    let odd = (0..18u16)
+        .flat_map(|y| (0..64u16).map(move |x| (x, y)))
+        .map(|(x, y)| buffer[(x, y)].symbol().to_owned())
+        .find(|s| s.contains("ird%25.rs"))
+        .expect("the odd path was not linked");
+    assert!(
+        odd.contains("file:///home/reader/tree/src/we%20ird%25.rs"),
+        "the URI is not minimally encoded: {odd:?}"
+    );
+
+    // And the default fixture, rootless, draws not one escape anywhere.
+    let plain = washed_screen(64, 18, &view, &chrome());
+    for y in 0..18u16 {
+        assert!(
+            !row_text(&plain, y).contains('\x1b'),
+            "a rootless chrome leaked an escape into row {y}"
         );
     }
 }

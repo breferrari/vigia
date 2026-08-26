@@ -415,9 +415,12 @@ rail     = on     # the file list beside the diff, from 134 columns
 single   = on     # one file at a time
 staged   = on     # what is staged, beside what is not
 icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
+links    = off    # paths are clickable file:// links; this is the off switch
 ```
 
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
+
+**`links` is the one key that starts on**: every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor. A terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected and the key only exists to turn it off.
 
 **`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
 

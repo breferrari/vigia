@@ -1614,6 +1614,16 @@ pub struct Chrome {
     /// Whether listed paths carry a file-type icon, from the config file's
     /// `icons` key ([#323](https://github.com/breferrari/vigia/issues/323)).
     pub icons: bool,
+    /// Whether listed paths are OSC 8 hyperlinks, from the `links` key, on by
+    /// default ([#326](https://github.com/breferrari/vigia/issues/326)).
+    pub links: bool,
+    /// The worktree's absolute path, for the links' `file://` targets.
+    ///
+    /// **Empty means no links whatever `links` says**, which is also what
+    /// keeps every hand-built test fixture linkless without a flag to
+    /// remember: a URI with no root would point nowhere, and a link that
+    /// points nowhere is worse than the text alone.
+    pub root: String,
     /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
     ///
     /// `None` on the very first paint, when no frame has completed to have a
@@ -4292,6 +4302,7 @@ pub fn render(
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
         icons: chrome.icons,
+        link_root: (chrome.links && !chrome.root.is_empty()).then(|| chrome.root.clone()),
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -5701,6 +5712,9 @@ struct Painter<'a> {
     spark_ramp: Option<[Color; 8]>,
     /// [`Chrome::icons`]: whether a listed path carries its type's glyph.
     icons: bool,
+    /// [`Chrome::links`] with [`Chrome::root`]: the `file://` prefix every
+    /// linked path shares, or `None` where links are off or rootless.
+    link_root: Option<String>,
 }
 
 impl Painter<'_> {
@@ -6049,6 +6063,50 @@ impl Painter<'_> {
             first = false;
             // Past this segment and the ` · ` that follows it.
             x = end.saturating_add(3);
+        }
+    }
+
+    /// Put `label` as one OSC 8 hyperlink to `root/path`, tui-link's shape.
+    ///
+    /// **One cell carries the whole wrapped string** with its width forced to
+    /// the label's, which is `CellDiffOption::ForcedWidth`'s documented job;
+    /// the covered cells behind it are reset so nothing stale can survive a
+    /// frame where the writer never visits them. A terminal without OSC 8
+    /// renders the label and swallows the wrapper, which the 2026 matrix
+    /// verified for every terminal it covers, and is why the `links` key
+    /// defaults on (#326).
+    fn put_linked(&mut self, x: u16, y: u16, label: &str, root: &str, path: &str, ink: Style) {
+        let width = width_of(label) as u16;
+        if width == 0 {
+            return;
+        }
+        let mut uri = String::with_capacity(root.len() + path.len() + 8);
+        uri.push_str("file://");
+        for half in [root, "/", path] {
+            for byte in half.bytes() {
+                match byte {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                        uri.push(byte as char);
+                    }
+                    other => {
+                        uri.push('%');
+                        uri.push_str(&format!("{other:02X}"));
+                    }
+                }
+            }
+        }
+        let wrapped = format!("\x1b]8;;{uri}\x1b\\{label}\x1b]8;;\x1b\\");
+        for offset in 1..width {
+            if let Some(cell) = self.buf.cell_mut((x + offset, y)) {
+                cell.reset();
+            }
+        }
+        if let Some(cell) = self.buf.cell_mut((x, y)) {
+            cell.set_symbol(&wrapped);
+            cell.set_style(ink);
+            cell.diff_option = ratatui::buffer::CellDiffOption::ForcedWidth(
+                std::num::NonZeroU16::new(width).expect("width is checked nonzero above"),
+            );
         }
     }
 
@@ -7991,7 +8049,13 @@ impl Painter<'_> {
         } else {
             x
         };
-        self.put(x, area.y, &elide_head(label, room), room, ink);
+        let drawn = elide_head(label, room);
+        match self.link_root.clone() {
+            Some(root) => self.put_linked(x, area.y, &drawn, &root, heading.path, ink),
+            None => {
+                self.put(x, area.y, &drawn, room, ink);
+            }
+        }
     }
 
     /// Walk a line into styled runs, stopping at the pane's edge, and say
@@ -8642,6 +8706,7 @@ mod tests {
             scrolling,
             spark_ramp: None,
             icons: false,
+            link_root: None,
         };
         // Scrollable by a wide margin, so both bars draw a thumb well short of
         // their track and the arrows exist to be read.

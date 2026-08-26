@@ -85,7 +85,7 @@ const MANY: usize = 500;
 const DEEP: u16 = 50;
 
 fn chrome(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None, Pointing::default(), 0)
+    app.chrome("fixture", None, Pointing::default(), 0, "")
 }
 
 /// The same, with the rail asked for.
@@ -732,7 +732,7 @@ fn the_region_at_fifty_files() {
         let area = ratatui::layout::Rect::new(0, 0, 80, 24);
         let body = body_layout(
             area,
-            &app.chrome("vigia", None, Pointing::default(), 0),
+            &app.chrome("vigia", None, Pointing::default(), 0, ""),
             FILES,
             FILES,
         );
@@ -742,7 +742,7 @@ fn the_region_at_fifty_files() {
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let theme = Theme::default();
-        let chrome = app.chrome("vigia", None, Pointing::default(), 0);
+        let chrome = app.chrome("vigia", None, Pointing::default(), 0, "");
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -1831,7 +1831,7 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
 
     let chrome = vigia::Chrome {
         staged: Some(3),
-        ..vigia::App::new().chrome("fixture", None, vigia::Pointing::default(), 0)
+        ..vigia::App::new().chrome("fixture", None, vigia::Pointing::default(), 0, "")
     };
     // Both derived from the changed set the way `Shell::diff_rows_for` and
     // `Shell::paint` derive them, which is what the two seams now do by

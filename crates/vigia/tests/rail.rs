@@ -154,7 +154,7 @@ fn chrome() -> Chrome {
 
 /// A shell that has not asked, which is what ships.
 fn stacked_chrome() -> Chrome {
-    App::new().chrome("fixture", None, Pointing::default(), 0)
+    App::new().chrome("fixture", None, Pointing::default(), 0, "")
 }
 
 /// A file with a full history and a full heat strip, so every glance element has
@@ -1357,11 +1357,24 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
     );
 
     let wide = Rect::new(0, 0, 160, TALL);
-    let railed =
-        |app: &App| body_layout(wide, &app.chrome("f", None, Pointing::default(), 0), 3, 3).rail;
+    let railed = |app: &App| {
+        body_layout(
+            wide,
+            &app.chrome("f", None, Pointing::default(), 0, ""),
+            3,
+            3,
+        )
+        .rail
+    };
     assert!(!railed(&app), "a fresh shell drew a rail");
 
-    let height = body_layout(wide, &app.chrome("f", None, Pointing::default(), 0), 3, 3).diff;
+    let height = body_layout(
+        wide,
+        &app.chrome("f", None, Pointing::default(), 0, ""),
+        3,
+        3,
+    )
+    .diff;
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
     assert!(railed(&app), "`r` did not put the list beside the diff");
@@ -1407,7 +1420,8 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
     repo::materialise(&mut frame);
     let mut app = App::new();
     let wide = Rect::new(0, 0, arrives, TALL);
-    let of = |app: &App, at| body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3);
+    let of =
+        |app: &App, at| body_layout(at, &app.chrome("f", None, Pointing::default(), 0, ""), 3, 3);
 
     let height = of(&app, wide).diff;
     app.apply(Action::ToggleRail, &mut frame, height)
@@ -1459,12 +1473,12 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     let mut highlighter = vigia_core::Highlighter::eager();
     let history = vigia_core::History::new();
 
-    let height = body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3).diff;
+    let height = body_layout(at, &app.chrome("f", None, Pointing::default(), 0, ""), 3, 3).diff;
     app.apply(Action::Scroll(30), &mut frame, height)
         .expect("scroll");
 
     let mut top_row = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> String {
-        let chrome = app.chrome("f", None, Pointing::default(), 0);
+        let chrome = app.chrome("f", None, Pointing::default(), 0, "");
         let body = body_layout(at, &chrome, 3, 3);
         let view = app
             .view(frame, &mut highlighter, &history, body)
@@ -1494,7 +1508,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     // because the two rows are then identical and a string is trivially a prefix
     // of itself. Found by mutation.
     assert!(
-        body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3).rail,
+        body_layout(at, &app.chrome("f", None, Pointing::default(), 0, ""), 3, 3).rail,
         "the toggle did not reach the layout, so the comparison below is between \
          two stacked frames"
     );
@@ -1533,7 +1547,7 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     let at = Rect::new(0, 0, 160, TALL);
 
     let mut shape = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> (u16, u16) {
-        let chrome = app.chrome("f", None, Pointing::default(), 0);
+        let chrome = app.chrome("f", None, Pointing::default(), 0, "");
         let body = body_layout(at, &chrome, 3, 3);
         let view = app
             .view(frame, &mut highlighter, &history, body)
@@ -1545,7 +1559,7 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     };
 
     let stacked = shape(&mut app, &mut frame);
-    let height = body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3).diff;
+    let height = body_layout(at, &app.chrome("f", None, Pointing::default(), 0, ""), 3, 3).diff;
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
     let beside = shape(&mut app, &mut frame);
@@ -1601,7 +1615,7 @@ fn a_rail_draws_the_tail_of_the_staged_run() {
     let chrome = Chrome {
         rail: true,
         staged: Some(3),
-        ..App::new().chrome("fixture", None, Pointing::default(), 0)
+        ..App::new().chrome("fixture", None, Pointing::default(), 0, "")
     };
     let body = body_layout(
         at,

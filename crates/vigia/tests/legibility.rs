@@ -561,6 +561,8 @@ fn chrome() -> Chrome {
         // case that draws none since #158.
         staged: None,
         icons: false,
+        links: false,
+        root: String::new(),
         elsewhere: 0,
         branch: None,
         mode: Mode::Watching,

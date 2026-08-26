@@ -90,7 +90,7 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 /// It takes no area because `App::chrome` is width-independent; the first draft
 /// took one and ignored it, which read as a sweep and was not.
 fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
 }
 
@@ -157,6 +157,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
             single: true,
             staged: false,
             icons: false,
+            // Untouched by the file, so the hand-written default holds: on.
+            links: true,
         }
     );
 
@@ -181,6 +183,7 @@ fn the_key_still_toggles_from_the_configured_state() {
         single: true,
         staged: false,
         icons: false,
+        links: false,
     };
     let mut app = App::configured(config);
 
@@ -348,6 +351,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
             single: true,
             staged: false,
             icons: false,
+            // Untouched by the file, so the hand-written default holds: on.
+            links: true,
         }
     );
 
@@ -447,7 +452,7 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
         rail: true,
         ..Config::default()
     });
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     assert!(chrome.rail, "the file's request did not reach the chrome");
 
     let narrow = body_layout(Rect::new(0, 0, 100, 30), &chrome, 6, 6);
@@ -492,6 +497,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         rail: true,
         single: true,
         staged: true,
+        links: false,
         icons: false,
     });
 
@@ -519,7 +525,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // `App::configured` left all 945 tests green.
     let body = diff_height(
         Rect::new(0, 0, 80, 24),
-        &configured.chrome("fixture", None, Pointing::default(), 0),
+        &configured.chrome("fixture", None, Pointing::default(), 0, ""),
         6,
         6,
     );
@@ -567,6 +573,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             rail: true,
             single: true,
             staged: true,
+            links: true,
             icons: true,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
@@ -576,14 +583,17 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
     // say.** A name in `KEYS` with no arm in `Config::set` used to parse to
     // `Ok(Config::default())`: the key existed, the file was accepted, and the
     // setting did nothing. The comparison above cannot see it either, because an
-    // extra dead key leaves the all-true result unchanged. `assert_ne` against the
-    // default is what makes the drift red.
+    // extra dead key leaves the all-true result unchanged. **Compared as
+    // on-against-off rather than against the default since #326**, because
+    // `links` defaults on and `links = on` is legitimately the default spelled
+    // out; a dead arm still cannot make the two spellings differ.
     for key in vigia::config::KEYS {
-        let got = config::parse(&format!("{key} = on\n"))
+        let lit = config::parse(&format!("{key} = on\n"))
+            .unwrap_or_else(|why| panic!("KEYS names {key:?} and parse refuses it: {why}"));
+        let unlit = config::parse(&format!("{key} = off\n"))
             .unwrap_or_else(|why| panic!("KEYS names {key:?} and parse refuses it: {why}"));
         assert_ne!(
-            got,
-            Config::default(),
+            lit, unlit,
             "{key:?} is in KEYS and setting it changed nothing, so KEYS and \
              Config::set have drifted"
         );

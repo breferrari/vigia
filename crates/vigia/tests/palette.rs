@@ -70,6 +70,8 @@ fn chrome() -> Chrome {
         rail: false,
         sheet: None,
         icons: false,
+        links: false,
+        root: String::new(),
         frame: None,
         memory: None,
     }

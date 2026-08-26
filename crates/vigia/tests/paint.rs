@@ -81,7 +81,7 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let area = Rect::new(0, 0, width, height);
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let screen = body_layout(area, &chrome, FILES, FILES);
     let rows = screen.diff;
     let view = app
@@ -371,7 +371,7 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
         files: 1,
         ..View::default()
     };
-    let chrome = App::new().chrome("fixture", None, Pointing::default(), 0);
+    let chrome = App::new().chrome("fixture", None, Pointing::default(), 0, "");
     let mut buf = Buffer::empty(area);
     let stats = render(
         &mut buf,
@@ -436,7 +436,7 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
         gripped: None,
         scrolling: None,
         worktree: "fixture".to_owned(),
-        ..App::new().chrome("fixture", None, Pointing::default(), 0)
+        ..App::new().chrome("fixture", None, Pointing::default(), 0, "")
     };
     let mut buf = Buffer::empty(area);
     render(
@@ -497,7 +497,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let mut app = App::past_first_paint();
         let mut highlighter = Highlighter::eager();
         let history = History::new();
-        let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
         let screen = body_layout(area, &chrome, BURST_FILES, BURST_FILES);
         let rows = screen.diff;
         let mut buf = Buffer::empty(area);

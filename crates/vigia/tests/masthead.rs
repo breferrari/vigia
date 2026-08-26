@@ -93,7 +93,7 @@ fn area() -> Rect {
 }
 
 fn chrome(app: &App) -> Chrome {
-    app.chrome("fixture", None, Pointing::default(), 0)
+    app.chrome("fixture", None, Pointing::default(), 0, "")
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let drawn = app.chrome("fixture", Some(BRANCH), Pointing::default(), 0);
+    let drawn = app.chrome("fixture", Some(BRANCH), Pointing::default(), 0, "");
     assert!(
         !drawn.masthead,
         "the fixture asked for a masthead, so this proves nothing about a pane without one"

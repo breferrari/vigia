@@ -521,7 +521,7 @@ impl Rig<'_> {
     /// those mid-sequence. `budgets.rs` hoists its own because nothing in its loop
     /// changes either term.
     fn paint(&mut self) -> usize {
-        let chrome = self.app.chrome("fixture", None, Pointing::default(), 0);
+        let chrome = self.app.chrome("fixture", None, Pointing::default(), 0, "");
         let body = body_layout(
             area(),
             &chrome,
