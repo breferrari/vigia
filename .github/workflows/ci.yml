@@ -336,35 +336,27 @@ jobs:
   # notice an absent matrix would go absent with it, which is the failure it
   # exists to catch wearing the fix's clothes.
   #
-  # It carries no draft guard, deliberately. On a draft every `needs` job is
-  # skipped and this reports failure, which is correct: a draft has not been
-  # checked, and the check list should say so rather than showing seven skips that
-  # read as a clean run.
+  # It carries no draft guard and still runs on a draft, so the required check
+  # always reports rather than going absent. What it must not do is judge a
+  # draft's skips as failure: that turned the check red on every push to a
+  # draft, and a draft cannot be merged in any case, so the run it would be
+  # protecting cannot happen. `ready_for_review` is in this workflow's trigger
+  # list so the full matrix runs the moment the work is claimed finished.
   ci-complete:
     name: ci complete
     if: always()
     needs: [lint, test, benches, pure-rust, musl]
     runs-on: ubuntu-latest
     steps:
-      # Every result, not just failures: `skipped` and `cancelled` are the two
-      # this exists for and neither is a failure. Printed before it is judged, so
-      # a red build says which leg was missing rather than only that one was.
+      - uses: actions/checkout@v5
+      # The judgement lives in a script so a test can drive it with fabricated
+      # results. Inline, the draft case was unreachable from any gate.
       - name: every leg ran and passed
         run: |
-          echo 'lint=${{ needs.lint.result }}'
-          echo 'test=${{ needs.test.result }}'
-          echo 'benches=${{ needs.benches.result }}'
-          echo 'pure-rust=${{ needs.pure-rust.result }}'
-          echo 'musl=${{ needs.musl.result }}'
-          for result in \
+          sh .github/scripts/ci-complete.sh \
+            '${{ github.event.pull_request.draft }}' \
             '${{ needs.lint.result }}' \
             '${{ needs.test.result }}' \
             '${{ needs.benches.result }}' \
             '${{ needs.pure-rust.result }}' \
             '${{ needs.musl.result }}'
-          do
-            if [ "$result" != "success" ]; then
-              echo "::error::a required leg reported '$result' rather than success"
-              exit 1
-            fi
-          done
