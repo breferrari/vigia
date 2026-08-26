@@ -81,7 +81,11 @@ fn committed_scratch(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write("a.txt", "x\n");
     scratch.commit_all("initial");
-    scratch
+    // The watcher is created on the caller's next line, so the commit's own
+    // `.git/index`, `.git/HEAD` and `.git/refs` writes must have landed before
+    // it starts. They are relevant by `watched_in_git_dir`, and arriving late
+    // they open a burst the test then reads as its own subject.
+    scratch.settled()
 }
 
 #[test]
@@ -327,6 +331,7 @@ fn writes_to_ignored_paths_never_produce_a_tick() {
     scratch.write(".gitignore", "target/\n");
     scratch.write("a.txt", "x\n");
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
 
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
@@ -455,5 +460,51 @@ fn a_stop_that_lands_mid_burst_still_returns_none() {
     assert_eq!(
         got, None,
         "a stop landed while a burst was open and returned a tick instead of ending the wait"
+    );
+}
+
+/// `settled` returns only once the tree has stopped changing.
+///
+/// The fixtures it guards fail on a loaded runner and not on an idle one, so
+/// the symptom cannot be reproduced here. What can be pinned is the mechanism:
+/// a tree still being written to holds the wait open, and a still one does not.
+#[test]
+fn settling_waits_for_a_tree_that_is_still_being_written() {
+    let scratch = committed_scratch("watch-settle-mechanism");
+    let root = scratch.root().to_path_buf();
+
+    let writing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let stop = std::sync::Arc::clone(&writing);
+    let churn = std::thread::spawn(move || {
+        for i in 0..u32::MAX {
+            if !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            let _ = std::fs::write(root.join(format!("churn_{i}.txt")), "x");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+
+    // Long enough that a settle which never waits cannot span it.
+    std::thread::sleep(Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    writing.store(false, std::sync::atomic::Ordering::Relaxed);
+    churn.join().expect("churn thread");
+    let scratch = scratch.settled();
+    let waited = started.elapsed();
+
+    assert!(
+        waited >= Duration::from_millis(40),
+        "settling returned in {waited:?}, which is less than one sampling interval, \
+         so it never took a second reading and cannot have compared two"
+    );
+
+    // And a tree nobody is writing to settles without a second thought.
+    let quiet = std::time::Instant::now();
+    let _ = scratch.settled();
+    assert!(
+        quiet.elapsed() < Duration::from_secs(1),
+        "a still tree took {:?} to settle, so the wait is not bounded by the tree",
+        quiet.elapsed()
     );
 }
