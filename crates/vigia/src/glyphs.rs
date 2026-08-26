@@ -193,14 +193,20 @@ impl Glyphs {
     ///    512 glyph bitmap that has never held braille. This is the one rung
     ///    with no colour analogue, and it is why a monitor of this class carries
     ///    a console mode beside its braille and block ones.
-    /// 4. **`TERM_PROGRAM`**, a terminal naming itself. See [`program_glyphs`].
-    /// 5. **Windows with `WT_SESSION`**, which is Windows Terminal identifying
+    /// 4. **An engine that draws octants itself, at [`Glyphs::Octant`]**. See
+    ///    [`octant_of`]: ghostty, kitty and VTE rasterise U+1CD00 the way every
+    ///    terminal rasterises box drawing, so the font is never asked and the
+    ///    rung is decided by identity plus version, exactly how `Depth` decides
+    ///    truecolour. `SPEC.md` §10's Windows bullet carries the correction
+    ///    that licensed this ([#324](https://github.com/breferrari/vigia/issues/324)).
+    /// 5. **`TERM_PROGRAM`**, a terminal naming itself. See [`program_glyphs`].
+    /// 6. **Windows with `WT_SESSION`**, which is Windows Terminal identifying
     ///    itself, and it ships Cascadia. Measured: see the module docs.
-    /// 6. **`TERM` naming a terminal that ships its own entry.** See
+    /// 7. **`TERM` naming a terminal that ships its own entry.** See
     ///    [`BRAILLE_TERMS`].
-    /// 7. **Windows otherwise, at [`Glyphs::Block`]**, because the console this
+    /// 8. **Windows otherwise, at [`Glyphs::Block`]**, because the console this
     ///    reaches draws with Consolas and Consolas has no braille. Measured.
-    /// 8. **[`Glyphs::Braille`] otherwise**, which is the broad claim on this
+    /// 9. **[`Glyphs::Braille`] otherwise**, which is the broad claim on this
     ///    ladder and the one worth stating a reason for. Braille has been in
     ///    every mainstream Unix monospace face for twenty years, the one Unix
     ///    terminal that cannot draw it is caught at rung 3, and the reference
@@ -232,6 +238,10 @@ impl Glyphs {
         let term = lookup("TERM").unwrap_or_default().to_ascii_lowercase();
         if term == "dumb" || term == "linux" {
             return Ok(Self::Block);
+        }
+
+        if let Some(glyphs) = octant_of(&lookup, &term) {
+            return Ok(glyphs);
         }
 
         if let Some(glyphs) = lookup("TERM_PROGRAM")
@@ -361,6 +371,67 @@ impl Glyphs {
 /// here: a program not named returns nothing and falls through, because this is
 /// evidence about terminals somebody checked rather than a claim about the ones
 /// nobody has.
+/// The engines that draw the octant range themselves, by version.
+///
+/// **This is a rendering table, not a font table**, which is the correction
+/// `SPEC.md` §10 records: ghostty 1.2+, kitty 0.40+ and VTE 0.78+ rasterise
+/// U+1CD00 in the terminal, so the font is never consulted and "no font
+/// carries them" stops being the operative fact. The 2026 support matrix in
+/// `docs/research/318-drawing-vocabulary.md` §1.4 is the evidence, verified
+/// per terminal against its own source or release notes.
+///
+/// **foot is deliberately absent, and the absence is a decision.** foot 1.20+
+/// draws the range too, but foot exports no version signal at all, and a foot
+/// older than 1.20 (Debian stable ships one) takes octants from a font that
+/// does not have them. A bare-identity rung would hand tofu to exactly the
+/// readers who never chose anything. `VIGIA_GLYPHS=octant` stays one word
+/// away, and this table learns foot the day it exports a version.
+///
+/// **A multiplexer blanks the answer**: behind `tmux`/`screen` the outer
+/// terminal is invisible and glyph width tables can lag the Unicode the cell
+/// carries (tmux grew `codepoint-widths` overrides only in 3.6), so the rung
+/// is never chosen there. Braille is twenty years old and survives the same
+/// path unharmed.
+///
+/// **A version that cannot be parsed answers no**, which fails toward braille:
+/// the sparkline gets less density, never tofu.
+fn octant_of(lookup: &impl Fn(&str) -> Option<String>, term: &str) -> Option<Glyphs> {
+    if term.starts_with("tmux") || term.starts_with("screen") {
+        return None;
+    }
+    let version = |key: &str| lookup(key).and_then(|raw| version_of(&raw));
+    let program = lookup("TERM_PROGRAM")
+        .map(|p| p.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if (program == "ghostty" || names(term, "xterm-ghostty"))
+        && version("TERM_PROGRAM_VERSION").is_some_and(|v| v >= (1, 2))
+    {
+        return Some(Glyphs::Octant);
+    }
+    if (program == "kitty" || names(term, "xterm-kitty"))
+        && version("TERM_PROGRAM_VERSION").is_some_and(|v| v >= (0, 40))
+    {
+        return Some(Glyphs::Octant);
+    }
+    // VTE's own convention: a single number, 7802 for 0.78.2. Carried by every
+    // VTE terminal (GNOME Terminal, Ptyxis, and the rest of that family).
+    if let Some(raw) = lookup("VTE_VERSION") {
+        if raw.trim().parse::<u32>().is_ok_and(|v| v >= 7800) {
+            return Some(Glyphs::Octant);
+        }
+    }
+    None
+}
+
+/// `"1.3.1-arch2"` to `(1, 3)`: the leading major and minor, or `None`.
+fn version_of(raw: &str) -> Option<(u32, u32)> {
+    let mut parts = raw.trim().split(['.', '-']);
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor))
+}
+
 fn program_glyphs(program: &str) -> Option<Glyphs> {
     // Lowercased because the values are brand names and are spelled as such.
     match program.to_ascii_lowercase().as_str() {
