@@ -353,24 +353,6 @@ impl Glyphs {
         CLIMB[level] << col
     }
 }
-
-/// What `TERM_PROGRAM` names, and whether that terminal's font has braille.
-///
-/// **Deliberately a separate table from
-/// `colour.rs`'s `program_depth`, and the entries coinciding
-/// today is not a reason to share one.** The criterion is different: that one
-/// asks how many colours a terminal draws, this one asks what its font carries.
-/// `Apple_Terminal` is the proof rather than a hypothetical, because it already
-/// answers differently on the two ladders: it is the one entry there that is
-/// *not* truecolour, and it is braille here, since Menlo and SF Mono both carry
-/// U+2800. A shared table returning one rung could not express that, and a
-/// shared table of *names* would silently gain a wrong entry the first time
-/// somebody adds a terminal to the other list for the other reason.
-///
-/// **Only positive answers**, which is that table's discipline and matters more
-/// here: a program not named returns nothing and falls through, because this is
-/// evidence about terminals somebody checked rather than a claim about the ones
-/// nobody has.
 /// The engines that draw the octant range themselves, by version.
 ///
 /// **This is a rendering table, not a font table**, which is the correction
@@ -404,15 +386,18 @@ fn octant_of(lookup: &impl Fn(&str) -> Option<String>, term: &str) -> Option<Gly
         .map(|p| p.trim().to_ascii_lowercase())
         .unwrap_or_default();
 
-    if (program == "ghostty" || names(term, "xterm-ghostty"))
-        && version("TERM_PROGRAM_VERSION").is_some_and(|v| v >= (1, 2))
-    {
-        return Some(Glyphs::Octant);
-    }
-    if (program == "kitty" || names(term, "xterm-kitty"))
-        && version("TERM_PROGRAM_VERSION").is_some_and(|v| v >= (0, 40))
-    {
-        return Some(Glyphs::Octant);
+    // One row per engine that self-draws the range and says which version it
+    // is, so the table the docblock promises to grow grows by a row. `foot`
+    // joins the day it exports a version; see above for why not before.
+    for (named, term_entry, floor) in [
+        ("ghostty", "xterm-ghostty", (1, 2)),
+        ("kitty", "xterm-kitty", (0, 40)),
+    ] {
+        if (program == named || names(term, term_entry))
+            && version("TERM_PROGRAM_VERSION").is_some_and(|v| v >= floor)
+        {
+            return Some(Glyphs::Octant);
+        }
     }
     // VTE's own convention: a single number, 7802 for 0.78.2. Carried by every
     // VTE terminal (GNOME Terminal, Ptyxis, and the rest of that family).
@@ -432,6 +417,23 @@ fn version_of(raw: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
+/// What `TERM_PROGRAM` names, and whether that terminal's font has braille.
+///
+/// **Deliberately a separate table from
+/// `colour.rs`'s `program_depth`, and the entries coinciding
+/// today is not a reason to share one.** The criterion is different: that one
+/// asks how many colours a terminal draws, this one asks what its font carries.
+/// `Apple_Terminal` is the proof rather than a hypothetical, because it already
+/// answers differently on the two ladders: it is the one entry there that is
+/// *not* truecolour, and it is braille here, since Menlo and SF Mono both carry
+/// U+2800. A shared table returning one rung could not express that, and a
+/// shared table of *names* would silently gain a wrong entry the first time
+/// somebody adds a terminal to the other list for the other reason.
+///
+/// **Only positive answers**, which is that table's discipline and matters more
+/// here: a program not named returns nothing and falls through, because this is
+/// evidence about terminals somebody checked rather than a claim about the ones
+/// nobody has.
 fn program_glyphs(program: &str) -> Option<Glyphs> {
     // Lowercased because the values are brand names and are spelled as such.
     match program.to_ascii_lowercase().as_str() {

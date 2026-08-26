@@ -40,7 +40,7 @@ pub struct Line {
     /// Meaning rather than styling, which is why it lives here: `SPEC.md`
     /// §11.1 has the engine emit meanings and the shell colour them, and
     /// *these bytes are the change inside the change* is a meaning.
-    pub emph: Vec<std::ops::Range<u32>>,
+    pub emph: crate::emphasis::Emphasis,
 }
 
 /// A contiguous run of changes plus its surrounding context.
@@ -332,10 +332,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
             // so the frame path inherits the ranges for free.
             let removed_texts: Vec<String> = raw.before.clone().map(&line_before).collect();
             let added_texts: Vec<String> = raw.after.clone().map(&line_after).collect();
-            let (removed_emph, added_emph) = crate::emphasis::mark(
-                &removed_texts.iter().map(String::as_str).collect::<Vec<_>>(),
-                &added_texts.iter().map(String::as_str).collect::<Vec<_>>(),
-            );
+            let (removed_emph, added_emph) = crate::emphasis::mark(&removed_texts, &added_texts);
             for (text, emph) in removed_texts.into_iter().zip(removed_emph) {
                 lines.push(Line {
                     kind: LineKind::Removed,
