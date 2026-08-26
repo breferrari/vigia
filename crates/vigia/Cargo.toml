@@ -35,7 +35,6 @@ exclude = ["tests/**"]
 ratatui.workspace = true
 vigia-core.workspace = true
 
-
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:
 # SPEC.md section 6 keeps the core free of anything the shell decides, and a
 # number that exists to be painted is the shell's. Linux is deliberately absent

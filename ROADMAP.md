@@ -37,6 +37,8 @@ Milestone: [Phase 1](https://github.com/breferrari/vigia/milestone/1)
 
 Prove `gix` before anything is built on top, since everything sits on it. No TUI.
 
+**[#337](https://github.com/breferrari/vigia/issues/337) was shelved the day it was filed, 2026-08-26, and the reason is the rule rather than the severity.** It is an instrument defect (the macOS leg of the watch suite failing three different ways in one day, on three diffs that touch no watch code), and `CLAUDE.md` files instrument findings to the shelf so the queue serves the product rather than the mirror. It is also, unusually, *blocking*: PR #336 could not merge behind it. What that licenses is an unblock sized to the blockage and nothing more, which is what the #318 pass did: file the evidence, say so in the report, and leave the diagnosis to a pass that takes it deliberately. It is the exception the rule already names, taken as the rule describes.
+
 | | Task | Issue |
 |---|---|---|
 | ✅ | `gix` gives working-tree-vs-index diffs at fidelity and speed | closed by the Phase 1 spike, evidence in `SPEC.md` §10 |
@@ -489,10 +491,10 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The glance ramps become gradients and the band goes with them | [#322](https://github.com/breferrari/vigia/issues/322) |
 | ✅ | The chrome earns 2026: segmented bars, a spliced sheet title, opt-in icons | [#323](https://github.com/breferrari/vigia/issues/323) |
 | ✅ | The glyph ladder learns which terminals draw octants natively | [#324](https://github.com/breferrari/vigia/issues/324) |
-| 🔨 | The pane takes its colours from the terminal, and follows a theme flip live | [#325](https://github.com/breferrari/vigia/issues/325) |
+| ✅ | The pane takes its colours from the terminal, and follows a theme flip live | [#325](https://github.com/breferrari/vigia/issues/325) |
 | ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser | [#332](https://github.com/breferrari/vigia/issues/332) |
 | ⬜ | A system palette built from the terminal's own colours | [#333](https://github.com/breferrari/vigia/issues/333) |
-| 🔨 | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
+| ✅ | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
 
 **[#313](https://github.com/breferrari/vigia/issues/313) was the next row to take and shipped 2026-08-25.** The pane could not see staged files at all, because `SPEC.md` §11.1's opening contract was the working tree against the index, so an agent that staged its own work emptied it. `a` now draws the staged run beside the unstaged one as two labelled runs, with the staged rows marked; the ruling is §11.2 **B17**, and the second half the issue left open (how to tell one from the other on screen) was ruled by the reader as a union rather than a swap. The default is unchanged and off, so [#50](https://github.com/breferrari/vigia/issues/50) is narrowed rather than answered.
 
@@ -620,6 +622,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | | Task | Issue |
 |---|---|---|
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
+| ⬜ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |

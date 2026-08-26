@@ -53,11 +53,11 @@ pub type Emphasis = Vec<Range<u32>>;
 /// (the tail of the longer run, pairs past [`TOKEN_CAP`], pairs outside
 /// [`MAX_DISTANCE`]) get an empty emphasis, which the shell draws as the
 /// whole-line wash it always drew.
-pub fn mark(removed: &[&str], added: &[&str]) -> (Vec<Emphasis>, Vec<Emphasis>) {
+pub fn mark<S: AsRef<str>>(removed: &[S], added: &[S]) -> (Vec<Emphasis>, Vec<Emphasis>) {
     let mut out_removed = vec![Vec::new(); removed.len()];
     let mut out_added = vec![Vec::new(); added.len()];
     for i in 0..removed.len().min(added.len()) {
-        if let Some((r, a)) = pair(removed[i], added[i]) {
+        if let Some((r, a)) = pair(removed[i].as_ref(), added[i].as_ref()) {
             out_removed[i] = r;
             out_added[i] = a;
         }
@@ -92,13 +92,13 @@ fn pair(removed: &str, added: &str) -> Option<(Emphasis, Emphasis)> {
 /// Byte ranges of the tokens whose indices are *not* in `shared`, adjacent
 /// ranges merged so one edit reads as one patch rather than confetti.
 fn unshared(tokens: &[Range<u32>], shared: impl Iterator<Item = usize>) -> Emphasis {
-    let mut keep = vec![true; tokens.len()];
-    for index in shared {
-        keep[index] = false;
-    }
+    // `lcs` emits its indices in strictly ascending order (prefix, middle
+    // walk, then the suffix loop reversed back to ascending), so membership is
+    // one peek rather than a bool table per pair.
+    let mut shared = shared.peekable();
     let mut out: Emphasis = Vec::new();
     for (index, range) in tokens.iter().enumerate() {
-        if !keep[index] {
+        if shared.next_if_eq(&index).is_some() {
             continue;
         }
         match out.last_mut() {

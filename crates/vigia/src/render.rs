@@ -4896,6 +4896,13 @@ const SHEET_FRAME: usize = 2;
 /// What the sheet's own title bar spells, corner excluded.
 const SHEET_TITLE: &str = "─ gestures ";
 
+/// What the rounded rungs splice into the top border, `┐` and `┌` either side.
+///
+/// The same word [`SHEET_TITLE`] carries without its rule, spelled once so the
+/// border string, the styled overwrite and the width arithmetic cannot drift
+/// ([#323](https://github.com/breferrari/vigia/issues/323)).
+const SHEET_SPLICE: &str = " gestures ";
+
 /// What the mouse group's heading spells, spaces included.
 const SHEET_MOUSE_LABEL: &str = " mouse ";
 
@@ -6037,7 +6044,12 @@ impl Painter<'_> {
         let text = self.text_area(area);
         let mut x = text.x;
         let mut first = true;
-        for segment in drawn.split(" · ") {
+        // Split and advanced by [`FACT_SEPARATOR`] itself rather than by a
+        // second spelling of it: `header_left` joins with that constant, and
+        // two literals that agree today are exactly what its own docblock
+        // warns about. A separator that changed would otherwise leave this
+        // painting pills over the wrong cells with nothing failing.
+        for segment in drawn.split(FACT_SEPARATOR) {
             let width = width_of(segment) as u16;
             let end = x
                 .saturating_add(width)
@@ -6052,17 +6064,17 @@ impl Painter<'_> {
             };
             // One cell of padding either side where the separator's spaces
             // are, clamped to the text area, so a pill breathes without a
-            // character being added anywhere.
-            let from = x.saturating_sub(1).max(text.x);
-            let to = end.saturating_add(1).min(text.x.saturating_add(text.width));
-            for cell in from..to {
-                if let Some(cell) = self.buf.cell_mut((cell, area.y)) {
-                    cell.set_style(pill);
-                }
-            }
+            // character being added anywhere. Through `chip_span`, so both
+            // pill painters clip through one expression.
+            self.chip_span(
+                Rect { y: area.y, ..text },
+                x.saturating_sub(1).max(text.x),
+                end.saturating_add(1),
+                pill,
+            );
             first = false;
-            // Past this segment and the ` · ` that follows it.
-            x = end.saturating_add(3);
+            // Past this segment and the separator that follows it.
+            x = end.saturating_add(width_of(FACT_SEPARATOR) as u16);
         }
     }
 
@@ -6178,10 +6190,11 @@ impl Painter<'_> {
         // the same inputs and the same picker, so the two cannot disagree
         // about which words are on the row.
         let text = self.text_area(area);
-        let room =
-            usize::from(text.width).saturating_sub(width_of(right).min(usize::from(text.width)));
-        let drawn = widest_fitting_or_last(&rungs, room).to_owned();
-        self.chip_row(area, &drawn);
+        // `saturating_sub` already floors at zero, so clamping the subtrahend
+        // to the width first was a no-op.
+        let room = usize::from(text.width).saturating_sub(width_of(right));
+        let drawn = widest_fitting_or_last(&rungs, room);
+        self.chip_row(area, drawn);
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -6518,6 +6531,9 @@ impl Painter<'_> {
         // its dot rows less the baseline, and [`Glyphs::glyph`] already spells
         // both, floor included: level zero is the axis rather than nothing.
         let levels = rung.levels();
+        // The ramp's top row index, invariant across every cell and row of
+        // this band rather than recomputed inside both loops.
+        let top = rows.saturating_sub(1).max(1);
 
         for cell in 0..width {
             // A dense cell carries two sub-columns, left older than right, which
@@ -6552,14 +6568,14 @@ impl Painter<'_> {
                 // btop's own rule (#322): the baseline draws the quiet stop and
                 // the top row the hot one, one style per row, so the graph
                 // reads hotter as it climbs while costing one lookup. Without a
-                // ramp the column's band draws as it always did.
-                let ink = match self.spark_ramp.as_ref() {
-                    Some(ramp) => {
-                        let top = rows.saturating_sub(1).max(1);
-                        self.theme.spark_at(band).fg(ramp[(row * 7 / top).min(7)])
-                    }
-                    None => self.theme.spark_at(band),
-                };
+                // ramp the column's band draws as it always did. Written the
+                // way [`Bucket::drawn`] writes the same rule one screen away:
+                // the band's style keeps whatever modifier a theme set and the
+                // stop overrides only the ink.
+                let mut ink = self.theme.spark_at(band);
+                if let Some(ramp) = self.spark_ramp.as_ref() {
+                    ink = ink.fg(ramp[(row * 7 / top).min(7)]);
+                }
                 self.bar_cell(x, y, glyph, ink);
             }
         }
@@ -7203,10 +7219,15 @@ impl Painter<'_> {
         if rounded {
             top.push('╭');
             top.push('┐');
-            top.push_str(" gestures ");
+            top.push_str(SHEET_SPLICE);
             top.push_str(&counter);
             top.push('┌');
-            for _ in 0..width.saturating_sub(13 + width_of(&counter) + 4) {
+            // Corner, splice brackets, the title, the counter, then the three
+            // cells the control sits in and the closing corner: the same
+            // sixteen fixed cells the square spelling costs, which is what
+            // keeps every width rung where it was.
+            let fixed = 3 + width_of(SHEET_SPLICE) + width_of(&counter) + 4;
+            for _ in 0..width.saturating_sub(fixed) {
                 top.push(RULE);
             }
             top.push_str("   ╮");
@@ -7227,7 +7248,13 @@ impl Painter<'_> {
             // The spliced word in the chrome's own weight, over the border's
             // reserved gap: the splice is what makes the title read as a label
             // on the box rather than a break in it.
-            self.put(area.x + 2, area.y, " gestures ", 10, lit);
+            self.put(
+                area.x + 2,
+                area.y,
+                SHEET_SPLICE,
+                width_of(SHEET_SPLICE),
+                lit,
+            );
         }
         // **The control takes a hover rung, which is what says it is clickable.**
         // B10's ladder, minus its top rung: chrome at rest and [`Theme::bar_hover`]
@@ -8074,8 +8101,7 @@ impl Painter<'_> {
         text: &str,
         spans: &[Span],
         content: usize,
-        word: Option<Color>,
-        emph: &[std::ops::Range<u32>],
+        emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
         let mut column = 0usize;
         let mut at = 0usize;
@@ -8100,8 +8126,7 @@ impl Painter<'_> {
                 span.class,
                 &mut column,
                 content,
-                word,
-                emph,
+                emphasis,
             ) {
                 return true;
             }
@@ -8127,8 +8152,7 @@ impl Painter<'_> {
                 Class::Plain,
                 &mut column,
                 content,
-                word,
-                emph,
+                emphasis,
             );
         }
         false
@@ -8153,14 +8177,16 @@ impl Painter<'_> {
         class: Class,
         column: &mut usize,
         content: usize,
-        word: Option<Color>,
-        emph: &[std::ops::Range<u32>],
+        emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
         let plain = |painter: &mut Self, runs: &mut Vec<(String, Style)>, column: &mut usize| {
             let piece = text.get(range.start..range.end).unwrap_or_default();
             painter.push_run(runs, piece, class, column, content, None)
         };
-        let Some(word) = word.filter(|_| !emph.is_empty()) else {
+        // The colour and the ranges are one value: a patch with no ranges is
+        // not a patch, so the pairing is in the type rather than in a filter
+        // every caller has to remember.
+        let Some((word, emph)) = emphasis.filter(|(_, emph)| !emph.is_empty()) else {
             return plain(self, runs, column);
         };
         let mut at = range.start;
@@ -8331,11 +8357,9 @@ impl Painter<'_> {
                 LineKind::Removed => self.theme.removed_gutter,
                 LineKind::Context => Style::new(),
             };
-            let numbered_style = match tone.bg {
-                Some(_) => self.theme.gutter.patch(tone),
-                None => self.theme.gutter,
-            };
-            x = self.put(x, area.y, &numbered, room, numbered_style);
+            // `patch` on an unset style is the identity, so the context row
+            // and the palettes that draw no tone need no arm of their own.
+            x = self.put(x, area.y, &numbered, room, self.theme.gutter.patch(tone));
             room = room.saturating_sub(gutter + 1);
         }
 
@@ -8430,12 +8454,13 @@ impl Painter<'_> {
         // the resolved theme, so the depth ladder has already decided whether
         // it survives: below truecolour the background is gone and `word` is
         // `None` by the same rule that blanked the wash.
-        let word = match kind {
+        let emphasis = match kind {
             LineKind::Added => self.theme.added_word.bg,
             LineKind::Removed => self.theme.removed_word.bg,
             LineKind::Context => None,
-        };
-        let clipped = self.content_runs(&mut runs, text, spans, content, word, emph);
+        }
+        .map(|word| (word, emph));
+        let clipped = self.content_runs(&mut runs, text, spans, content, emphasis);
         self.paint.rows += 1;
 
         // Content is the one thing that can neither break nor elide: wrapping it
