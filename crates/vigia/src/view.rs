@@ -522,13 +522,21 @@ pub enum Row {
     /// `delta --wrap-max-lines`' own default and is what bounds the reflow §11.1
     /// refused to permit unbounded.
     ///
-    /// **A row of its own rather than a flag on [`Row::Line`]**, and that is the
-    /// whole of why the row arithmetic did not have to change. Every guard in
-    /// [`View::take_file`] and [`View::collect`] is `self.rows.len() < height`,
-    /// so a continuation that *is* a row makes `rows` a count of **display** rows
-    /// with no site restated. A flag would have left `rows.len()` counting
-    /// logical rows and made every one of those guards a units bug of exactly
-    /// the kind this project has already paid for once.
+    /// **A row of its own rather than a flag on [`Row::Line`]**, so that the one
+    /// thing downstream of the walk which counts rows, the painter, needs no
+    /// second rule: a continuation that *is* a row is drawn by the drawer that
+    /// draws the row it continues.
+    ///
+    /// **It did not make the row arithmetic free, and the first draft of this
+    /// paragraph said it had.** It claimed `rows` became a count of display rows
+    /// "with no site restated", which is false as built: [`View::wrap_rows`] runs
+    /// *after* the walk, so every guard inside the walk still counts the diff's
+    /// own rows, and four separate sites went on comparing those against a count
+    /// of the terminal's. Three audit rounds found them one at a time: `App`'s
+    /// pinned `G`, its drag on the diff's bar, its page steps, [`landing_of`], and
+    /// `collect`'s own `short` test. The sentence is kept in its corrected form
+    /// rather than deleted, because a confident wrong claim about which sites are
+    /// safe is precisely what stops the next reader checking them.
     ///
     /// **It carries the tail already sliced, and its [`Row::Line`] carries only
     /// the head.** [`View::wrap_rows`] decides the split once, so the painter
@@ -1226,16 +1234,6 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
     1 + diff.hunks.iter().map(hunk_span).sum::<usize>()
 }
 
-/// Rows one hunk occupies: its `@@` header and then its lines.
-///
-/// **Named because three places count it**, and [`gap_rows`] one function down
-/// records what happens when a quantity is spelled at each site instead: it
-/// drifted from the doc naming the sites, and that was the third time a
-/// quantity spelled at each site had drifted on this branch. [`span_of`]
-/// sums it, [`View::take_file`] steps over a hunk above the window with it, and
-/// [`landing_of`] walks to a hunk's header row with it. All three want the same
-/// number by the same route, unlike [`span_of`] and [`rows_of`], which are twins
-/// precisely because their routes differ.
 /// Split a line's syntax runs at a byte offset, for a wrapped row.
 ///
 /// [`vigia_core::Span`] carries a length rather than a range, so the runs are a
@@ -1299,6 +1297,16 @@ fn split_emph(
     (head, tail)
 }
 
+/// Rows one hunk occupies: its `@@` header and then its lines.
+///
+/// **Named because three places count it**, and [`gap_rows`] one function down
+/// records what happens when a quantity is spelled at each site instead: it
+/// drifted from the doc naming the sites, and that was the third time a
+/// quantity spelled at each site had drifted on this branch. [`span_of`]
+/// sums it, [`View::take_file`] steps over a hunk above the window with it, and
+/// [`landing_of`] walks to a hunk's header row with it. All three want the same
+/// number by the same route, unlike [`span_of`] and [`rows_of`], which are twins
+/// precisely because their routes differ.
 fn hunk_span(hunk: &Hunk) -> usize {
     1 + hunk.lines.len()
 }
@@ -1457,14 +1465,34 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> 
     // helps choose: the circularity §11.2 B19 records for the scrollbar's total,
     // one element over. What is available without it is the cap: a line occupies
     // at most two display rows, so a screen of `height` display rows always holds
-    // at least half that many rows of the diff. Erring here moves the reader onto
-    // the change they were not going to see, never away from one they were, which
-    // is the direction I5 is written in.
-    let height = if wrap { (height / 2).max(1) } else { height };
+    // at least half that many rows of the diff.
+    //
+    // **It applies to both tests, and the two audit remits disagreed about that**,
+    // which is worth recording because the argument decides the shape rather than
+    // the wording. Both tests are *guarantees of visibility*, and a guarantee
+    // needs the change's **largest** possible display row, which is twice its
+    // logical one: the first asks whether it is guaranteed drawn from the heading
+    // and the second whether it is guaranteed drawn from the landing. Halving is
+    // exactly that bound, twice.
+    //
+    // **The reading that halves only the first was tried and produces the defect
+    // this rule exists to prevent.** With it, a five-row pane took a landing whose
+    // change sat four logical rows below it, which is seven display rows down,
+    // and drew a `@@` and two rows of context with no changed line on the pane:
+    // the reader was moved off the heading for a change they still could not see.
+    //
+    // **What halving both costs is a landing sometimes withdrawn**, on a file
+    // whose lines are short enough that nothing would have wrapped: `w` is global,
+    // so a reader with it on is in that state for every file that fits. That is
+    // the lesser of the two errors and it is chosen deliberately. Declining keeps
+    // the heading, which carries the path, the counts, the sigil and the strip;
+    // landing without showing the change spends the heading and buys nothing,
+    // which is the sentence the second test is written from.
+    let visible = if wrap { (height / 2).max(1) } else { height };
 
     // Already drawn from the heading, so the jump would cost the heading and buy
     // nothing.
-    if change < height {
+    if change < visible {
         return 0;
     }
     // And still not drawn from the landing, which is `Body::split`'s floor: a
@@ -1473,7 +1501,7 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> 
     // path, the counts, the sigil and the strip. Moving the reader for a change
     // they still cannot see is the defect this whole rule exists to fix, so a
     // pane too short to show one keeps what it had.
-    if change - landing >= height {
+    if change - landing >= visible {
         return 0;
     }
     landing
@@ -2138,9 +2166,12 @@ impl View {
             // Counted rather than estimated, over rows the walk already holds and
             // with no file read, which is [`Self::wrap_rows`]' own arithmetic
             // asked one question earlier.
-            let filled = view.display_rows(width, wrap);
             let short = (anchored || landed_inside || single)
-                && filled < height
+                // **After the cheap terms**, so an ordinary follow frame never
+                // pays for it: this walks every collected row and the three
+                // conditions above are field reads. It is bounded by the window
+                // either way, and ordering it is free.
+                && view.display_rows(width, wrap) < height
                 && view.top
                     != Position {
                         file: first,
@@ -3214,6 +3245,47 @@ mod tests {
             landing_of(&ChangeKind::Modified, &three_hunks(), 8, false),
             10,
             "the landing is not the second hunk's header row"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_pane_follows_only_a_change_it_can_show() {
+        // **Both of `landing_of`'s tests are guarantees, so both take the halved
+        // budget**, and the two readings were each tried in one session. Halving
+        // only the first takes a landing whose change is still below the fold,
+        // which is the defect the second test exists to prevent; halving both
+        // withdraws a landing on a file that would not have wrapped, which keeps
+        // the heading. This gate pins the side that was chosen, in both
+        // directions, so neither can be reverted quietly.
+        //
+        // On an eight-row pane this fixture's change is seven rows past its
+        // landing, which is up to fourteen rows of terminal: not guaranteed drawn,
+        // so the pane keeps the heading rather than spending it.
+        assert!(
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, false) > 0,
+            "the fixture declines even unwrapped, so this compares two refusals"
+        );
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, true),
+            0,
+            "a pane that cannot guarantee the change is drawn from the landing \
+             moved the reader off the heading anyway"
+        );
+
+        // And the other direction: a change guaranteed drawn from the heading
+        // unwrapped can be below the fold once every line takes two rows, so the
+        // budget for *that* question halves and the landing is taken.
+        let tall = 18;
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &three_hunks(), tall, false),
+            0,
+            "the fixture does not draw its change from the heading at {tall} rows, \
+             so the wrapped answer below is not a comparison"
+        );
+        assert!(
+            landing_of(&ChangeKind::Modified, &three_hunks(), tall, true) > 0,
+            "a change drawn from the heading unwrapped is below the fold wrapped, \
+             and the pane did not move to it"
         );
     }
 

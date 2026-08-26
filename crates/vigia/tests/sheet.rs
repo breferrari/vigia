@@ -2549,8 +2549,8 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // **The other axis, and the one no gate walked.** `SPEC.md` §11.1 states the
     // rung needs "a body of thirty-five rows", and a body is the pane less the
     // header and less a footer whose height is its own ladder in the width. So the
-    // pane height it arrives at is not thirty-one and cannot be derived by
-    // reading: on this fixture at a hundred columns it is thirty-five, three rows
+    // pane height it arrives at is not thirty-five and cannot be derived by
+    // reading: on this fixture at a hundred columns it is thirty-eight, three rows
     // above the number the ruling names.
     //
     // That gap is exactly what produced #220's wrong arrival width, where the
