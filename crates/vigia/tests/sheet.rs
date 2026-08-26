@@ -1933,11 +1933,20 @@ const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
 /// the height at which the tallest rung fits.
 ///
 /// **Raised from 32 by [#285](https://github.com/breferrari/vigia/issues/285)**,
-/// and the old ceiling is why: the roomy rung needs a body of thirty-one rows,
-/// which this fixture reaches at a pane of thirty-four, so a sweep stopping at
+/// and the old ceiling is why: the roomy rung needed a body of thirty-one rows,
+/// which this fixture reached at a pane of thirty-four, so a sweep stopping at
 /// thirty-two would have covered the new rung at no height at all and called it
 /// swept.
-const LADDER_HEIGHTS: std::ops::RangeInclusive<u16> = 6..=38;
+///
+/// **Raised again to 44 by B19's `w`** ([#272](https://github.com/breferrari/vigia/issues/272)),
+/// and it is the same failure one gesture short of arriving. The rung is
+/// thirty-five rows now and this fixture reaches it at a pane of **thirty-eight**,
+/// which was the old ceiling exactly: the sweep covered the tallest rung at one
+/// height, so a defect that needed any room above it was outside the grid while
+/// the grid looked complete. Every gesture added since #285 has moved the arrival
+/// up by a row and none of them moved this, which is why the margin is six rather
+/// than one.
+const LADDER_HEIGHTS: std::ops::RangeInclusive<u16> = 6..=44;
 
 /// One materialised fixture, painted at many sizes.
 ///
@@ -2461,7 +2470,7 @@ fn roomy_shape() -> Vec<RoomyRow> {
 
 #[test]
 fn the_roomy_rung_is_the_size_the_ruling_states() {
-    // **`SPEC.md` §11.1 states 68 by 31, and Mock A drew 76 by 29.** The
+    // **`SPEC.md` §11.1 states 68 by 35, and Mock A drew 76 by 29.** The
     // difference is the twelve blank columns the mock leaves after its verb field
     // against the four before its keys, which is the box the reader drew rather
     // than a table they designed: §11.1's own rule for a mockup and a drawer that
@@ -2538,10 +2547,10 @@ fn the_roomy_rung_arrives_at_the_width_the_ruling_states() {
 #[test]
 fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // **The other axis, and the one no gate walked.** `SPEC.md` §11.1 states the
-    // rung needs "a body of thirty-one rows", and a body is the pane less the
+    // rung needs "a body of thirty-five rows", and a body is the pane less the
     // header and less a footer whose height is its own ladder in the width. So the
     // pane height it arrives at is not thirty-one and cannot be derived by
-    // reading: on this fixture at a hundred columns it is thirty-four, three rows
+    // reading: on this fixture at a hundred columns it is thirty-five, three rows
     // above the number the ruling names.
     //
     // That gap is exactly what produced #220's wrong arrival width, where the
@@ -3672,12 +3681,12 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     // **The same hole one rung up.** #220 wrote the gate below because every
     // behavioural gate ran at 80 by 24, where the sheet is 56 wide, so the
     // two-column rung was proven by geometry and by text alone. The roomy rung
-    // arrived the same way: nothing clicks or wheels inside a 68 by 31 sheet, and
+    // arrived the same way: nothing clicks or wheels inside a 68 by 35 sheet, and
     // narrowing `SheetPlan::target` for `Shape::Roomy` alone would pass every
     // other gate in this file.
     //
     // It is the rung where it matters most now, because it is what a full-screen
-    // pane draws, and it is thirty-one rows tall against the plain rung's
+    // pane draws, and it is thirty-five rows tall against the plain rung's
     // twenty-one: the rows a click can land on that no other rung reaches are
     // its own.
     let scratch = Scratch::large_diff("sheet-roomy-input", FILES, 40);

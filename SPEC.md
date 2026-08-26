@@ -667,7 +667,7 @@ Most of this was back-filled from the implementation on 2026-07-30 rather than n
 
 **What still drops is width, and there the drop order is unchanged.** A pane too narrow for the whole table at the tight spelling gives up the mouse group, and then keyboard rows in the drop order, leaving `f`, `m` and `?` last: the unguessable outlives the reflexive, which is the hint bar's own rule one surface over, and `q` goes first because the hint bar spells `q quit` on every frame. Measured over every width from 20 to 144 against every height from 6 to 38, and before the change over 20 to 140 against 3 to 40: **38 columns and up reach all twenty gestures**, 35 to 37 reach thirteen, 32 to 34 reach ten, 30 to 31 reach six, and below 30 no sheet is drawn. (Sixteen, eleven, eight and four before [#295](https://github.com/breferrari/vigia/issues/295) put `r` on the table, seventeen, twelve, nine and five before [#297](https://github.com/breferrari/vigia/issues/297) put `s` on it; **the boundaries are unmoved both times**, because neither key moved a width, and they were re-derived from a swept pane rather than incremented.) Forty is the width the promise is stated at, because forty is I6's. `crates/vigia/tests/sheet.rs::every_gesture_is_reachable_at_forty_columns_and_up` is that promise as a gate, walking `?` from the first page to the close on every pane in the sweep, and `the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable` pins the three narrow sets by name rather than by count.
 
-**The page counter rides the title bar, and it is what makes the omission stop being silent.** ` a-b of 21 ` between the title and its rule, drawn only when the page is not the whole table, so no screen that fits everything today gains a character. It costs no content row, which is the property B12 chose an overlay for and which a say-so taking a row would have spent on the gestures it was apologising for. The ordinals are positions **within what this pane can reach**, not within the twenty: a width-dropped set is not contiguous in display order, since `q` goes first and `q` is at the bottom of the table, so a last page reading `9-12 of 20` says *this pane reaches twelve of the twenty* and the reader's arithmetic is the say-so. True positions with gaps would read as a rendering fault rather than as a count. The total is `KEYBOARD.len() + MOUSE.len()` rather than a literal, because [#288](https://github.com/breferrari/vigia/issues/288) added a sixth **and seventh** mouse row and a counter reading *of 18* on a table of twenty is a lie no gate over the drawn output would catch. It has been right through four added rows on that alone.
+**The page counter rides the title bar, and it is what makes the omission stop being silent.** ` a-b of 22 ` between the title and its rule, drawn only when the page is not the whole table, so no screen that fits everything today gains a character. It costs no content row, which is the property B12 chose an overlay for and which a say-so taking a row would have spent on the gestures it was apologising for. The ordinals are positions **within what this pane can reach**, not within the twenty: a width-dropped set is not contiguous in display order, since `q` goes first and `q` is at the bottom of the table, so a last page reading `9-12 of 20` says *this pane reaches twelve of the twenty* and the reader's arithmetic is the say-so. True positions with gaps would read as a rendering fault rather than as a count. The total is `KEYBOARD.len() + MOUSE.len()` rather than a literal, because [#288](https://github.com/breferrari/vigia/issues/288) added a sixth **and seventh** mouse row and a counter reading *of 18* on a table of twenty is a lie no gate over the drawn output would catch. It has been right through four added rows on that alone.
 
 **Every rung charges the counter's widest spelling whether or not it draws one, and that is what turned a guard into a rung.** The floor is the title plus ` 18-20 of 21 ` plus a border, a space and the two-of-gap at each end: **thirty columns**. The charge is the counter's widest *spelling*, so a table growing from seventeen rows to twenty leaves it exactly where it was. What the charge buys is that the counter **fits**: the title bar's rule run is `width - title - counter - 5` through a saturating subtraction, so on a rung too narrow for it the rule goes silently to zero and the ordinals run into the close control. It is **not** what keeps the box the same size between pages, which is what this section said until a mutation checked it: `sheet_fields` measures over the whole row set and every page of a pane shares that set, so the width was page-independent already. It was seventeen columns and no rung reached it. Now the deepest dropping rungs are raised to it and a pane under thirty draws no sheet at all, where it used to draw five gestures of seventeen with nothing saying so. That is the trade B13 states out loud rather than discovering. `crates/vigia/tests/sheet.rs::the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_states` holds the three numbers: 30 narrowest anywhere, 38 narrowest at I6's forty and up, 71 narrowest two-column.
 
@@ -1085,13 +1085,13 @@ And a token that had to lose characters says so, in the direction it lost them. 
 
 **A continuation row blanks its gutter and draws `↳` in its sigil column, in the row's own diff ink.** The blank line number is `bat --style=numbers`' own signal and is the cheap half: a real line always has a number. It is not enough on its own, which is the correction worth recording, because `gutter_width` drops the gutter **entirely** below `MIN_TEXT_WIDTH`'s floor and that is precisely the narrow pane this gesture exists for, so at forty columns a continuation carrying a repeated `-` and no number reads as a **second removed line**. Repeating the sigil is refused for that; blanking the column is refused for the opposite reason, since §5.1 rules the sigil column **is** the diff signal at any depth or on any palette that cannot wash the row, which `crates/vigia/tests/colour.rs` gates, so an empty column would take the signal with it. The ink keeps the signal and the glyph adds the one fact the row has to carry. It needs no rung of its own for the reason `CONTINUES` and `ELIDED` need none, and it does not ladder for the reason the clear column beside it does not.
 
-**The trim at the bottom is a display offset and moves nothing stored**, which is what keeps the end of a wrapped diff a place a reader can scroll out of. It costs one narrow thing, stated rather than hidden: where a wrapped last screenful spans two files the first row drawn can belong to the file after the one the position names, so the caret in the map marks the reader's position rather than the topmost drawn row.
+**The trim at the bottom is a display offset and moves nothing stored**, which is what keeps the end of a wrapped diff a place a reader can scroll out of. It costs one narrow thing, stated rather than hidden: where a wrapped last screenful spans two files the first row drawn can belong to the file after the one the position names, so the caret in the list marks the reader's position rather than the topmost drawn row.
 
 **And the continuation is indented to its own line's indent, capped at half the content width.** Neovim's `'breakindent'`, and it is [#164](https://github.com/breferrari/vigia/issues/164) one rung down rather than a decoration: that ruling made a content row's origin uniform down the block, and an unindented continuation breaks the block shape of exactly the nested code this tool is pointed at. The cap is what stops a deeply indented line buying a second row with nothing on it.
 
 **The wash and the left bar cover both rows.** A band that stopped at the first would make a wrapped removal read as ending early, which is the same sentence §5.3 already carries about a band that stops where its text stops.
 
-**`w` wraps and unwraps, and it starts off.** §11.2 **B19**, ruled 2026-08-26, from the pane. A keystroke rather than a setting, which is §11.2 B6 keeping this tool configured by gesture, and off on launch for #204's reason rather than by inheritance: every neighbour that wraps (`bat`, `less`, `ov`, `lazygit`) is given the whole terminal and this one is built for half of it, so the mode with a price is the one asked for. **What it does not move is the scrollbar's scale**, and that is B19's own ruling rather than an omission: the bar counts the diff's rows and not the terminal's, so pressing `w` reflows the pane and the total it is drawn against is the total it was drawn against. **Where the reader is resting on the diff's last screenful the position does move**, by the rows the clamp gives back, and that is the clamp doing its job rather than an exception to the rule: the last row stays on the last row and the thumb stays at the bottom.
+**`w` wraps and unwraps, and it starts off.** §11.2 **B19**, ruled 2026-08-26, from the pane. A keystroke rather than a setting, which is §11.2 B6 keeping this tool configured by gesture, and off on launch for #204's reason rather than by inheritance: every neighbour that wraps (`bat`, `less`, `ov`, `lazygit`) is given the whole terminal and this one is built for half of it, so the mode with a price is the one asked for. **What it does not move is the scrollbar**, and that is B19's own ruling rather than an omission: the bar counts the diff's rows and not the terminal's, so pressing `w` reflows the pane and moves nothing the bar is drawn from. **A qualification was added here on 2026-08-26 and is removed again in the same day's work**, which is worth a sentence rather than a silent revert: while the bottom trim moved the stored position the claim was false, and the trim became a display offset for a different reason (the end of the diff was a one-way trap), which made it true again. A sentence describing behaviour that lasted one commit is the kind this document keeps finding.
 
 **The branch is drawn on every frame, and the empty state stopped drawing it.** Ruled 2026-08-17 ([#158](https://github.com/breferrari/vigia/issues/158)). B3 gave the branch to the empty state because nothing else on the pane named it, and it answers *which line of work*, which is the one thing here a reader cannot reconstruct from the body: the list says what changed and the diff says how, and neither says against what. The masthead's arrival made that line draw it **twice** on the one screen where both are visible, so it moved to the header, which is the better owner for being there always where the empty state is there once. Its rung sits **between the count and the name**: the count drops first because the list repeats it, the name drops last because B3 leans on it to say which repository this is, and the branch is in between, nowhere else on screen but not what identifies the pane. At a width too narrow for the rung nothing names the branch, which is already what happens to the count and the mode word. A detached HEAD draws no branch anywhere rather than inventing one, because `HEAD@abc123` would put a commit id in a monitor that shows no commits.
 
@@ -1167,7 +1167,7 @@ So **a projection re-projects rather than dropping items**: a narrower rung sums
 
 The amendment costs less than B6 assumed because **the format and the parser already existed**: `VIGIA_THEME` has always been able to point at a theme file. What was added is a place to look, not a surface. And it removes a step rather than adding one, since a preference set once now survives a new shell.
 
-**The view toggles are a preference too, so they live in a file as well: `~/.config/vigia/config`.** Added 2026-08-25 ([#306](https://github.com/breferrari/vigia/issues/306)). Four keys, `masthead`, `rail`, `single` and `staged` (the fourth added with §11.2 B17), each `on` or `off`, in the theme file's own grammar: one key per line, `#` comments, a byte order mark stripped, an unknown key **refused** rather than dropped, and every error naming its 1-based line. Absent is not an error; unreadable is. It is read where the palette is, before the terminal is taken, so a file that does not parse is said on a screen the reader can still see.
+**The view toggles are a preference too, so they live in a file as well: `~/.config/vigia/config`.** Added 2026-08-25 ([#306](https://github.com/breferrari/vigia/issues/306)). Five keys, `masthead`, `rail`, `single`, `staged` and `wrap` (the fourth added with §11.2 B17 and the fifth with B19), each `on` or `off`, in the theme file's own grammar: one key per line, `#` comments, a byte order mark stripped, an unknown key **refused** rather than dropped, and every error naming its 1-based line. Absent is not an error; unreadable is. It is read where the palette is, before the terminal is taken, so a file that does not parse is said on a screen the reader can still see.
 
 **A second file rather than three more keys in the first, and the reason is a defect rather than a preference.** `VIGIA_THEME` is resolved before the theme file is opened and a built-in name wins outright, so `VIGIA_THEME=dark` never reads that file at all. View keys inside it would be discarded, silently, by a reader naming a palette for one session — on a gesture with nothing to do with the settings it would lose. What the two files share is everything that costs something: one format, one discovery rule, one error path. What they do not share is a subject.
 
@@ -1472,16 +1472,22 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 │ m                       show or hide the churn band  │
 │ r                       show or hide the left rail   │
 │ s                       one file, or the whole diff  │
-│ ?                       this sheet                   │
-│ q  Esc  Ctrl+C  Ctrl+D  quit                         │
+│ a                       show or hide staged changes  │
+│ w                       wrap a long line, or clip it │
+│ ?  Esc                  this sheet                   │
+│ q  Ctrl+C  Ctrl+D       quit                         │
 │ mouse ────────────────────────────────────────────── │
 │ wheel                   scroll what you point at     │
 │ drag a scrollbar        move that region             │
 │ click a track           send that region there       │
 │ click  ▲ ▼              one row, and repeats held    │
 │ click a listed file     jump the diff to it          │
+│ click  ✕                close the sheet              │
+│ just point              it marks itself              │
 └──────────────────────────────────────────────────────┘
 ```
+
+**The three boxes below are re-rendered from the drawer rather than kept by hand** ([#272](https://github.com/breferrari/vigia/issues/272)). They drew an eighteen-gesture table until 2026-08-26, four gestures behind: #288's two mouse rows, B17's `a` and B19's `w` had each been added to the table and to the counter without the pictures moving, so the sentence above a box and the box under it disagreed about the sheet's own height. A picture in this document is evidence, and evidence that lags the drawer by four gestures is the shape §5.1 exists to prevent in the other direction.
 
 **And at forty columns**, thirty-eight wide, with a thirteen column keys field and nineteen for the verb. One rung of the ladder is visible here rather than described: the alias cells have dropped from the right, so `q  Esc  Ctrl+C  Ctrl+D` is `q  Esc` while the arrows survive on `j  k`, because they are the alias a reader is likeliest to try. **The mouse group used to be gone here too, and it is not any more**: [#286](https://github.com/breferrari/vigia/issues/286) shortened two tight mouse verbs so the whole table fits the width I6 is named for, which took this box from thirty-five wide and thirteen rows to thirty-eight and nineteen and took the pane from eleven gestures to sixteen.
 
@@ -1502,21 +1508,25 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 │ m              the churn band      │
 │ r              the left rail       │
 │ s              one file only       │
-│ ?              this sheet          │
-│ q  Esc         quit                │
+│ a              staged changes      │
+│ w              wrap long lines     │
+│ ?  Esc         this sheet          │
+│ q              quit                │
 │ mouse ──────────────────────────── │
 │ wheel          what you point at   │
 │ drag a bar     move that region    │
 │ click a track  send it there       │
 │ click  ▲ ▼     a row, held repeats │
 │ click a file   jump the diff to it │
+│ click  ✕       close the sheet     │
+│ just point     it marks itself     │
 └────────────────────────────────────┘
 ```
 
 **And the same forty columns on a pane of twelve rows, which is where B13 is visible**: four pages, the counter in the title bar, and `?` closing after the last. The mouse group's heading is a line the split can land on like any other, and the split has now moved twice under a picture that has to be re-rendered rather than re-reasoned: it ended page two until [#295](https://github.com/breferrari/vigia/issues/295) added `r`, then page three until [#297](https://github.com/breferrari/vigia/issues/297) added `s`, which also took the table past three pages of six and left an eighteenth gesture alone on a fourth. **A page of one is what a paged surface looks like at its tail**, and the box is the same size as every other page's with the remainder blank inside the frame, which is B13's own ruling after its audit found the last page shrinking and sliding out from under a resting pointer.
 
 ```
-┌─ gestures  1-6 of 18 ─────────── ✕ ┐
+┌─ gestures  1-6 of 22 ─────────── ✕ ┐
 │ j  k  ↓  ↑     scroll a row        │
 │ Space  PgDn    page                │
 │ d  u           half a page         │
@@ -1525,30 +1535,30 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 │ 1  to  6       jump to a list row  │
 └────────────────────────────────────┘
 
-┌─ gestures  7-12 of 18 ────────── ✕ ┐
+┌─ gestures  7-12 of 22 ────────── ✕ ┐
 │ J  K           scroll the list     │
 │ f              follow the newest   │
 │ m              the churn band      │
 │ r              the left rail       │
 │ s              one file only       │
-│ ?              this sheet          │
+│ a              staged changes      │
 └────────────────────────────────────┘
 
-┌─ gestures  13-17 of 18 ───────── ✕ ┐
-│ q  Esc         quit                │
+┌─ gestures  13-17 of 22 ───────── ✕ ┐
+│ w              wrap long lines     │
+│ ?  Esc         this sheet          │
+│ q              quit                │
 │ mouse ──────────────────────────── │
 │ wheel          what you point at   │
 │ drag a bar     move that region    │
-│ click a track  send it there       │
-│ click  ▲ ▼     a row, held repeats │
 └────────────────────────────────────┘
 
-┌─ gestures  18 of 18 ──────────── ✕ ┐
+┌─ gestures  18-22 of 22 ───────── ✕ ┐
+│ click a track  send it there       │
+│ click  ▲ ▼     a row, held repeats │
 │ click a file   jump the diff to it │
-│                                    │
-│                                    │
-│                                    │
-│                                    │
+│ click  ✕       close the sheet     │
+│ just point     it marks itself     │
 │                                    │
 └────────────────────────────────────┘
 ```
@@ -1651,13 +1661,13 @@ Four questions had to be ruled, and the answer to all four is the same sentence,
 
 **Every neighbour wraps by default and this one does not.** `bat --wrap` defaults to `auto`, `less` wraps unless told otherwise, `lazygit` ships `wrapLinesInStagingView: true`, `ov` wraps. Recorded so the default is a choice rather than an oversight: those four are given the whole terminal, and this one is built for half of it beside an agent, which is [#204](https://github.com/breferrari/vigia/issues/204)'s reasoning about the masthead applied to the same reader and the same kind of price.
 
-**What the scrollbar counts does not move, and that is the ruling most likely to be re-litigated, so here is the reason in full.** Wrapping splits one quantity into two: a **logical row** is a row of the diff's own model, a heading, a `@@`, a content line, a note or a blank, and a **display row** is a row of the terminal. Until now they were one number, and every quantity in the shell's row arithmetic was both. The bar goes on counting **logical** rows: `Frame::height`, `view::rows_of`, `view::span_of`, `view::hunk_span`, `view::diff_rows`, `view::block_rows` and `view::Position` are untouched, and pressing `w` reflows the pane without moving the total it is drawn against. **The position moves in one place and it is the clamp doing its job**: at the diff's last screenful wrapping means fewer of its rows fit, so the clamp gives the difference back and the last row stays on the last row.
+**What the scrollbar counts does not move, and that is the ruling most likely to be re-litigated, so here is the reason in full.** Wrapping splits one quantity into two: a **logical row** is a row of the diff's own model, a heading, a `@@`, a content line, a note or a blank, and a **display row** is a row of the terminal. Until now they were one number, and every quantity in the shell's row arithmetic was both. The bar goes on counting **logical** rows: `Frame::height`, `view::rows_of`, `view::span_of`, `view::hunk_span`, `view::diff_rows`, `view::block_rows` and `view::Position` are untouched, and pressing `w` reflows the pane without moving the thumb. **The clamp at the diff's last screenful gives rows back as a display offset and stores nothing**, which is what keeps that true and what keeps the end of a wrapped diff somewhere a reader can scroll out of.
 
 **The alternative was considered and is refused on a fact rather than on cost.** A display-row total is not merely O(content) where today it is O(spans); it is **circular**. `render::gutter_width` sizes the gutter from the largest line number *on screen*, so the text width moves as a reader scrolls; a wrapped height is a function of the text width; the total is a function of the wrapped heights; and the drawn rows are a function of the total. There is no order in which those four can be evaluated. So the unit that survives the split is the diff's own, which is also the one a reader can name: *how far through the changed lines am I*. Display rows exist **inside the viewport only**, bounded by the region, which is what keeps I4 exactly where it was: the walk reads what it draws and nothing further.
 
-**And the split reached three sites outside the walk, which is where it cost the most to find.** `App`'s pinned `G`, its drag on the diff's bar and its page steps each subtracted a display height from a logical span, and none of them is in `View::collect`, so no flag the walk sets could have reached them. A screenful has one owner now, `App::screenful`, which is the rows the last frame drew clamped by the pane the step lands in, and is exactly the region's height while `w` is off. The bar's far end is the exception and is deliberate: it means *the end of the diff*, which only the walk can place in display rows, so it asks for a row past the end and lets the clamp answer.
+**And the split reached three sites outside the walk, which is where it cost the most to find.** `App`'s pinned `G`, its drag on the diff's bar and its page steps each subtracted a display height from a logical span, and none of them is in `View::collect`, so no flag the walk sets could have reached them. The page steps take a screenful from `App::screenful`, the rows the last frame drew clamped by the pane the step lands in, which is exactly the region's height while `w` is off. **The other two are deliberately not re-united**: the bar's far end means *the end of the diff*, which only the walk can place in display rows, so it asks for a row past the end and lets the clamp answer; and the pinned `G` keeps its own subtraction because the walk's clamp already covers it, which mutation showed by deleting the branch that had been added for it and finding nothing changed. The bar's far end is the exception and is deliberate: it means *the end of the diff*, which only the walk can place in display rows, so it asks for a row past the end and lets the clamp answer.
 
-**What that costs is one exit criterion in the issue, rewritten rather than dropped.** `crates/vigia/tests/scroll.rs::the_counting_twins_agree_with_the_rows_drawn` asked that the twins agree with the rows drawn; it now asks that the walk's **logical** rows agree with `diff_rows`, in both modes, which is the same claim stated in the units that survive. **And the bottom of the diff needed a correction the units make visible**: `View::last_screenful` and the overshoot branch both rest the diff's last logical row on the bottom by comparing a logical span against the display height, so with wrapping on they place the top too far back and the tail falls off the screen. The expansion trims from the **front** in that one case instead of the back, which is the same rule those two already encode, paid in the units that now exist.
+**What that costs is one exit criterion in the issue, rewritten rather than dropped.** `crates/vigia/tests/scroll.rs::the_counting_twins_agree_with_the_rows_drawn` asked that the twins agree with the rows drawn; it now asks that the walk's **logical** rows agree with `diff_rows`, in both modes, which is the same claim stated in the units that survive. **And the bottom of the diff needed a correction the units make visible**: `View::last_screenful` and the overshoot branch both rest the diff's last logical row on the bottom by comparing a logical span against the display height, so with wrapping on they place the top too far back and the tail falls off the screen. The expansion trims from the **front** where the walk is at the bottom instead of the back, which is the same rule those two already encode, paid in the units that now exist. **Whether it is at the bottom is derived on every frame rather than remembered from the gesture**, because the clamp otherwise held for exactly one frame: the walk reached the last file it could, drew that file's block to the end, the reader is somewhere they scrolled or pinned rather than somewhere a jump put them, and the position is not the walk's own floor, where a trim would drop rows with nothing above them to scroll back to.
 
 **What it cost the sheet is height and nothing else, which is what a gesture always costs it.** `KEYBOARD` is fifteen and the counter counts to twenty-two, so every row figure §11.1 states moves by one: the roomy rung is `68 x 35`, the one-column rung twenty-three table lines in a twenty-five-row box, and the two-column rung `104 x 18` and `71 x 18`. **No width moves**, because `w`'s cells sit inside the field maxima, so 30, 38, 56, 68, 71 and 104 are what B13, B14, B16, #288 and B17 left them. `w` takes its rank in `DROP_ORDER` beside `r` and `s`, for B14's reason and with B14's caveat: the deepest rung a drawable pane reaches is still `from = 7`, so the ordering is defence rather than behaviour.
 

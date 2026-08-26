@@ -33,8 +33,8 @@ mod screen;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, Pointing, Row, TRACK_SCALE, Theme, View, body_layout, diff_height,
-    regions, render,
+    Action, App, Body, Glyphs, Pointing, Row, TRACK_SCALE, Theme, View, Viewport, body_layout,
+    diff_height, regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -1307,5 +1307,143 @@ fn a_page_step_after_a_resize_is_bounded_by_the_pane_it_lands_in() {
         stepped <= short_body,
         "a page on a {short_body}-row body stepped {stepped} rows of the diff, \
          so the step was measured in the pane the reader has left"
+    );
+}
+
+#[test]
+fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
+    // **The band no other fixture in this file sits in**: a diff whose *own* rows
+    // fit the pane and whose *display* rows do not. `tall()` overruns both and
+    // `fixture` overruns neither, which is why twenty-two gates missed this.
+    //
+    // One `j` there ran the walk short, restarted it through `last_screenful` to
+    // the walk's own floor, and trimmed from the front: the heading, the path,
+    // the counts and the heat strip went off the top, `k` at row zero moves
+    // nothing, and no scrollbar is drawn on a diff that short to say anything was
+    // hidden. A trim is only honest where there is somewhere above to scroll to.
+    //
+    // Driven with `j` then `k`, because the position the trim leaves has to be
+    // one the reader can get back from.
+    let scratch = Scratch::new("shell-wrap-short-band");
+    scratch.write("src/band.rs", "seed\n");
+    scratch.commit_all("base");
+    let mut body = String::new();
+    // Ten wrapped lines: thirteen of the diff's own rows against a body of
+    // eighteen, and twenty-three display rows, which is the band.
+    for n in 0..10 {
+        body.push_str(&format!("let band_{n} = \"{}\";\n", "b".repeat(70)));
+    }
+    scratch.write("src/band.rs", body);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    let (view, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    let logical = view
+        .rows
+        .iter()
+        .filter(|row| !matches!(row, Row::Wrap { .. }))
+        .count();
+    assert!(
+        logical < height && view.rows.len() >= height,
+        "the fixture is {logical} of the diff's own rows in {} display rows \
+         against a body of {height}, which is not the band this gate is about",
+        view.rows.len()
+    );
+
+    for gesture in [Action::Scroll(1), Action::Scroll(-1)] {
+        app.apply(gesture, &mut frame, height).expect("apply");
+        let (view, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+        assert!(
+            matches!(view.rows.first(), Some(Row::File(_))),
+            "a diff shorter than the pane in its own rows lost its heading off \
+             the top, and there is nothing above to scroll back to:\n{}",
+            rows.join("\n")
+        );
+    }
+}
+
+#[test]
+fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
+    // **I5's frame is the one frame that must not be trimmed.** Follow puts the
+    // viewport on what just changed; where that change sits exactly one screenful
+    // from the end of the diff, the bottom clamp's own conditions are all met and
+    // the front trim would drop the landing row itself. The single frame that
+    // exists to show a reader what an agent just did would then not show it.
+    //
+    // **Swept over heights rather than pinned at one**, because the case is an
+    // equality between the rows remaining and the rows a pane holds, and which
+    // height produces it is a function of the fixture's shape rather than
+    // something to compute here. The audit that raised this could not say whether
+    // any real pane reaches it; the sweep is what answers that.
+    let scratch = Scratch::new("shell-wrap-landing");
+    scratch.write("src/deep.rs", &{
+        let mut base = String::new();
+        for n in 0..20 {
+            base.push_str(&format!("let keep_{n} = \"{}\";\n", "k".repeat(70)));
+        }
+        base
+    });
+    scratch.commit_all("base");
+    // **Two hunks, and the busy one is the deep one.** `landing_of` lands on the
+    // *busiest* hunk's header, and a file with one hunk near its top always puts
+    // that header on row one, where the landing is row zero's neighbour and this
+    // gate's case cannot arise. One line changed at the top and eight at the
+    // bottom is what makes the landing a row deep in the block.
+    let mut edited = String::new();
+    for n in 0..20 {
+        if n == 1 || (12..16).contains(&n) {
+            edited.push_str(&format!("let CHANGED_{n} = \"{}\";\n", "c".repeat(70)));
+        } else {
+            edited.push_str(&format!("let keep_{n} = \"{}\";\n", "k".repeat(70)));
+        }
+    }
+    scratch.write("src/deep.rs", edited);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut served = 0usize;
+    for rows in 3usize..=40 {
+        let view = View::collect(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Viewport {
+                diff_rows: rows,
+                width: 78,
+                wrap: true,
+                landing: true,
+                measured: true,
+                ..Viewport::default()
+            },
+        )
+        .expect("view");
+        if !view.landed || view.top.row == 0 {
+            continue;
+        }
+        served += 1;
+        // The landing put the viewport on a `@@` header, and that header is what
+        // the reader is meant to be looking at. A trim would put a content row of
+        // the hunk above it on the top row instead.
+        assert!(
+            matches!(view.rows.first(), Some(Row::Hunk { .. })),
+            "at {rows} rows a served landing was trimmed off its own row: the top \
+             is {:?}",
+            view.rows.first()
+        );
+    }
+    assert!(
+        served > 0,
+        "no height in the sweep served a landing below row zero, so this gate \
+         never reached the case it is about"
     );
 }

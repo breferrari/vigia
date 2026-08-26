@@ -2160,7 +2160,19 @@ impl View {
             index = view.top.file;
             skip = view.top.row;
             placed = true;
-            at_bottom = true;
+            // **Except where the restart landed on the walk's own floor**, which
+            // is `last_screenful`'s answer for a diff shorter than the pane. A
+            // trim there drops rows with nothing above them to scroll back to,
+            // and one `j` on a diff that fits in the diff's own rows and not in
+            // the terminal's put the reader there permanently: the heading, the
+            // path and the counts were unreachable, with no bar drawn to say
+            // anything was hidden. The derived term below carries the same guard
+            // and for the same reason.
+            at_bottom = view.top
+                != Position {
+                    file: first,
+                    row: 0,
+                };
         }
 
         // **And the clamp has to be re-derived, not remembered**
@@ -2184,8 +2196,43 @@ impl View {
         // through `6` on the last file drew its ending and hid its heading, and
         // the heading could not be scrolled back to because the position was
         // already row zero.
-        let at_bottom =
-            at_bottom || (index >= stop && consumed && (anchored || single || view.top.row > 0));
+        //
+        // **And never at the walk's own floor**, which is the fourth term and the
+        // one the third does not imply. `single` alone satisfies *the reader is
+        // where they scrolled or pinned* at row zero, so pressing `s` on a file
+        // whose rows fit the pane and whose **display** rows do not trimmed its
+        // heading away on the frame the pin landed, and `k` at row zero moves
+        // nothing, so there was no gesture that could bring it back. A trim is
+        // only ever honest where there is somewhere above to scroll to. It is
+        // `short`'s floor guard, which this expression borrows the rest of its
+        // reasoning from and had left behind.
+        //
+        // **And a landing follow has just served is not a scroll.** I5 puts the
+        // viewport on what changed, and where the change sits exactly one
+        // screenful from the end the trim would drop the landing row itself, so
+        // the one frame that exists to show a reader what an agent just did would
+        // not show it.
+        //
+        // **That term is unproven, and saying so is the point.** The audit that
+        // raised it could not say whether any pane reaches the equality, and two
+        // fixtures built for it could not either: `a_landing_follow_served_is_not_trimmed_off_its_own_row`
+        // sweeps thirty-eight heights, serves landings at many of them, and the
+        // trim never fires there with the term removed. So it is a guard whose
+        // violation nobody has produced, which this repo treats as
+        // indistinguishable from a guard that cannot fire. It is kept because it
+        // is conservative in the one direction that matters, it costs a
+        // comparison, and the alternative is dropping a term nobody has shown to
+        // be safe to drop. A reader who finds the case should expect this comment
+        // to be the only thing that told them it was open.
+        let floor = Position {
+            file: first,
+            row: 0,
+        };
+        let at_bottom = at_bottom
+            || (index >= stop
+                && consumed
+                && (anchored || single || (view.top.row > 0 && !view.landed))
+                && view.top != floor);
 
         // **Here, and after the walk, because this is the first point at which
         // the rows exist and nothing more will be read.**
