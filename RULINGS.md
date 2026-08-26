@@ -948,7 +948,8 @@ its count of files is what moved.
 against their own source or their own `--help` on this machine, and one of them
 changed the proposal.
 
-- **`delta`** wraps, and `--wrap-max-lines` defaults to **2**: *"How often a line
+- **`delta`** wraps, and `--wrap-max-lines` defaults to **2**, which a session
+  here read as a cap to adopt and the reader removed the next day: *"How often a line
   should be wrapped if it does not fit. Zero means to never wrap. Any content
   which does not fit after wrapping will be truncated."* That is a direct answer
   to §11.1's objection rather than a way around it, and it is where the cap came

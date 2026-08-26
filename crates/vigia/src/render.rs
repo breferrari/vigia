@@ -601,7 +601,7 @@ const SIGIL_WIDTH: usize = 1 + SIGIL_GAP.len();
 /// The `+ 1` is the gutter's own trailing space, which lives inside a `format!`
 /// at the point of drawing and had no name until this. A zero gutter draws
 /// neither digits nor space, so it costs neither.
-const fn line_origin(gutter: usize) -> usize {
+pub(crate) const fn line_origin(gutter: usize) -> usize {
     if gutter == 0 {
         SIGIL_WIDTH
     } else {
@@ -8836,6 +8836,44 @@ pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
     // trips with the row still empty. See [`Printed::column`].
     (walked.clipped && walked.column >= room && walked.at > 0 && walked.at < text.len())
         .then_some(walked.at)
+}
+
+/// Every byte offset a line breaks at, in order, to fit `room` columns a row.
+///
+/// **The uncapped form of [`split_at`]**, and the cap it replaces was never asked
+/// for ([#272](https://github.com/breferrari/vigia/issues/272)). A first reading
+/// of the field took `delta --wrap-max-lines`' default of two and wrote it into
+/// the ruling; what a reader asking for `w` means is *show me the line*, and two
+/// rows of an eighty-column pane is a hundred and thirty-two columns of it. So a
+/// line breaks as many times as it needs.
+///
+/// **Bounded by `limit` rather than by the line**, which is what keeps the frame
+/// bounded by the window: a line taller than the pane cannot be made more useful
+/// by counting exactly how much taller, so the walk stops once it has produced
+/// that many. A caller passes the pane's own height.
+///
+/// Empty means the line fits and nothing wraps, which is the ordinary row and the
+/// case worth being cheap: one walk, no allocation.
+pub(crate) fn breaks_of(text: &str, room: usize, limit: usize) -> Vec<usize> {
+    let mut cuts = Vec::new();
+    let mut at = match split_at(text, room) {
+        Some(at) => at,
+        None => return cuts,
+    };
+    // The continuation stands in by the line's own indent, so every row after the
+    // first has that much less to give. `indent_of` caps it at half the content,
+    // so this cannot reach zero and the walk cannot fail to advance.
+    let tail = room.saturating_sub(indent_of(text, room)).max(1);
+    while cuts.len() < limit {
+        cuts.push(at);
+        match split_at(&text[at..], tail) {
+            // `+ at` because the split is measured from the tail's own start, and
+            // every offset this returns is into the whole line.
+            Some(next) => at += next,
+            None => break,
+        }
+    }
+    cuts
 }
 
 /// Columns a wrapped line's continuation stands in by, so a block keeps its shape.

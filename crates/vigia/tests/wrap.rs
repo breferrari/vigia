@@ -72,17 +72,24 @@ fn fixture(name: &str) -> Scratch {
 
     let long = format!("let value = \"{}\"; // {TAIL}", "x".repeat(70));
     let short = format!("let small = \"aa\"; // {SHORT_TAIL}");
-    // Far past the cap: two rows cannot hold it, so the lower row clips and says
-    // so. This is what makes the cap a *bound* here rather than a description.
-    let huge = format!("let huge = \"{}\"; // {TAIL}", "y".repeat(400));
+    // **Taller than the whole region**, which is the one case a mark still means
+    // something now that lines wrap as far as they need: scrolling steps over a
+    // line by whole rows of the diff, so nothing reaches the middle of one the
+    // pane cannot hold. Two thousand columns against a region of eighteen rows
+    // and sixty-odd columns of text is comfortably past it.
+    let huge = format!("let huge = \"{}\"; // {TAIL}", "y".repeat(2000));
     let deep = format!(
         "{}let deep = \"{}\"; // {TAIL}",
         " ".repeat(DEEP),
         "z".repeat(70)
     );
+    // **The huge line last, after the context row**, because it fills the region
+    // on its own: put anywhere earlier it leaves every gate below it looking at a
+    // pane that draws one line, and the unchanged `five` that several of them
+    // need as a *context* row is never reached.
     scratch.write(
         "src/lines.rs",
-        format!("{long}\n{short}\n{huge}\n{deep}\nfive\n"),
+        format!("{long}\n{short}\n{deep}\nfive\n{huge}\n"),
     );
     scratch
 }
@@ -156,20 +163,27 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
     let mut app = wrapped(&mut frame);
     let (view, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
 
-    let wraps = view
-        .rows
-        .iter()
-        .filter(|row| matches!(row, Row::Wrap { .. }))
-        .count();
-    let lines = view
-        .rows
-        .iter()
-        .filter(|row| matches!(row, Row::Line { .. }))
-        .count();
+    // **Some lines continue and some do not**, which is the property the gates
+    // below turn on. Counted as *lines that wrap* against *lines*, rather than as
+    // rows: a line takes as many rows as it needs since the cap was removed, so
+    // one long line can produce more continuations than there are lines and a
+    // count of rows says nothing about the mix.
+    let mut wrapped = 0usize;
+    let mut plain = 0usize;
+    for (n, row) in view.rows.iter().enumerate() {
+        if !matches!(row, Row::Line { .. }) {
+            continue;
+        }
+        if matches!(view.rows.get(n + 1), Some(Row::Wrap { .. })) {
+            wrapped += 1;
+        } else {
+            plain += 1;
+        }
+    }
     assert!(
-        wraps > 0 && wraps < lines,
-        "the fixture wraps {wraps} of {lines} content rows, so it cannot tell a \
-         line that continues from one that does not"
+        wrapped > 0 && plain > 0,
+        "the fixture draws {wrapped} lines that continue and {plain} that do not, \
+         so it cannot tell one from the other"
     );
     assert!(
         view.gutter.is_some(),
@@ -215,15 +229,21 @@ fn a_long_line_is_readable_to_its_end_only_when_wrapping_is_on() {
 }
 
 #[test]
-fn a_head_that_continues_is_not_marked_and_the_mark_moves_to_the_tail() {
+fn a_mark_means_the_line_is_taller_than_the_pane_and_nothing_else() {
     // **`›` says *rightward*, and there is nothing to the right of a row whose
-    // content is on the row below.** So the head loses the mark and the lower row
-    // keeps it, but only where the cap actually cuts something: the huge line is
-    // past two rows and the long one is not.
+    // content is on the row below.** So no row that continues downward carries
+    // it.
     //
-    // The two lines are checked together rather than separately, because a build
-    // that never marked anything satisfies the first assertion and a build that
-    // marked every head satisfies the second.
+    // **What the mark means now is narrower than it was, because the cap is
+    // gone**: a line takes as many rows as it needs, so nothing is truncated by
+    // a rule any more. The one case left is a line **taller than the whole pane**,
+    // which scrolling steps over whole, since the viewport moves by rows of the
+    // diff. Nothing reaches such a line's middle, and the reader has to be told.
+    // A line that merely runs past the fold carries no mark, because that is what
+    // every row below the last one already is.
+    //
+    // Both halves are asserted, because a build that never marks satisfies the
+    // first and a build that marks every continuation satisfies the second.
     let (scratch, mut highlighter, history) = open("shell-wrap-marks");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -247,14 +267,24 @@ fn a_head_that_continues_is_not_marked_and_the_mark_moves_to_the_tail() {
         rows[head + 1]
     );
 
-    let huge = rows
-        .iter()
-        .position(|row| row.contains("let huge"))
-        .expect("the huge line's head row");
+    // The huge line is four hundred columns of `y` against a pane of eighty, so
+    // it is taller than the region and its last drawn row says so.
     assert!(
-        rows[huge + 1].ends_with('›'),
-        "a line past the cap was cut on its lower row without saying so:\n{}",
-        rows[huge + 1]
+        rows.iter().any(|row| row.ends_with('›')),
+        "a line taller than the pane was cut with no row saying so, and nothing \
+         scrolls to its middle:\n{}",
+        rows.join("\n")
+    );
+    // And the rows above that one continue downward without claiming to continue
+    // rightward.
+    let marked = rows
+        .iter()
+        .position(|row| row.ends_with('›'))
+        .expect("a marked row");
+    assert!(
+        rows[..marked].iter().all(|row| !row.ends_with('›')),
+        "a row that continues downward is marked as continuing rightward:\n{}",
+        rows[..marked].join("\n")
     );
 }
 
@@ -392,15 +422,16 @@ fn a_wash_covers_both_display_rows_of_a_wrapped_change() {
 }
 
 #[test]
-fn no_line_ever_occupies_more_than_the_cap() {
-    // **`delta --wrap-max-lines` defaults to 2 and this takes that number.** The
-    // ceiling is written from the ruling's own words, *a line displaces at most
-    // one row*, rather than from the constant that implements it: an assertion
-    // that read the cap out of the code would move with a mutation of it and stay
-    // green against the regression it exists to catch.
+fn a_line_takes_as_many_rows_as_it_needs_and_never_more_than_the_pane() {
+    // **There is no cap, and the only ceiling is the pane.** A reader who presses
+    // `w` means *show me the line*; a mode that shows two rows of it is the
+    // defect the issue was opened about, one rung smaller. So the assertions are
+    // the two halves that survive removing it: a long line really does take more
+    // than two rows, and no screen ever draws more rows than the region has.
     //
-    // Swept over widths, because the pathological case is a narrow pane and a
-    // long line, which is exactly where an unbounded wrap would eat the region.
+    // Swept over widths, because the narrow pane is where a line needs the most
+    // rows and where an unbounded expansion would eat the region if the second
+    // half did not hold.
     // **The fixture is taller than the pane, and it has to be.** The shared one
     // is nine rows against a region of twenty-odd, so the expansion never
     // approaches the region's last row and the over-occupation this gate exists
@@ -413,7 +444,11 @@ fn no_line_ever_occupies_more_than_the_cap() {
     for n in 0..60 {
         body.push_str(&format!(
             "let line_{n} = \"{}\"; // {TAIL}\n",
-            "q".repeat(70)
+            // **Long enough to need three rows at the widest pane swept.** Seventy
+            // characters is two rows at sixty columns and one at a hundred and
+            // twenty, so a gate built on it would only ever see two and would pass
+            // against the cap it exists to prove gone.
+            "q".repeat(400)
         ));
     }
     scratch.write("src/lines.rs", body);
@@ -436,19 +471,21 @@ fn no_line_ever_occupies_more_than_the_cap() {
             .expect("view");
 
         let mut run = 0usize;
+        let mut longest = 0usize;
         for row in &view.rows {
             match row {
                 Row::Wrap { .. } => {
                     run += 1;
-                    assert!(
-                        run <= 1,
-                        "a line at {width} columns displaces {run} rows, where the \
-                         ruling allows one"
-                    );
+                    longest = longest.max(run);
                 }
                 _ => run = 0,
             }
         }
+        assert!(
+            longest > 1,
+            "no line at {width} columns took more than two rows, so this pane \
+             cannot tell an uncapped wrap from the capped one it replaced"
+        );
         assert!(
             view.rows.len() <= laid.diff,
             "a {width} column pane drew {} rows into a region of {}",
@@ -810,7 +847,7 @@ fn scrolling_up_from_the_wrapped_bottom_moves() {
 }
 
 #[test]
-fn a_wide_glyph_straddling_the_break_is_drawn_on_one_of_the_two_rows() {
+fn a_wide_glyph_straddling_a_break_is_drawn_on_one_of_the_rows() {
     // **A character is not allowed to fall down the crack between the rows.**
     //
     // The walk admits a character while `column < room` and only then charges its
@@ -860,17 +897,25 @@ fn a_wide_glyph_straddling_the_break_is_drawn_on_one_of_the_two_rows() {
             let Row::Line { text: head, .. } = row else {
                 continue;
             };
-            let Some(Row::Wrap { text: tail, .. }) = view.rows.get(n + 1) else {
+            if !matches!(view.rows.get(n + 1), Some(Row::Wrap { .. })) {
                 continue;
-            };
-            // The whole source line, split across the two rows and nothing lost
-            // between them. Read off the rows rather than off the painter,
+            }
+            // The whole source line, across **every** row it takes and nothing
+            // lost between them. Read off the rows rather than off the painter,
             // because the painter is what the row model is telling what to draw.
-            let whole = format!("{head}{tail}");
+            let mut whole = head.clone();
+            for row in view.rows[n + 1..]
+                .iter()
+                .take_while(|row| matches!(row, Row::Wrap { .. }))
+            {
+                if let Row::Wrap { text, .. } = row {
+                    whole.push_str(text);
+                }
+            }
             assert!(
                 whole.contains("日本語のテキスト"),
                 "at {width} columns a wrapped line lost content across the \
-                 break: head {head:?} tail {tail:?}"
+                 break: the rows join to {whole:?}"
             );
         }
 

@@ -518,9 +518,9 @@ pub enum Row {
     /// **`SPEC.md` §11.2 B19**, from `w`
     /// ([#272](https://github.com/breferrari/vigia/issues/272)). It exists only
     /// while wrapping is on, it always follows the [`Row::Line`] it belongs to,
-    /// and there is never more than one: the cap is two display rows, which is
-    /// `delta --wrap-max-lines`' own default and is what bounds the reflow §11.1
-    /// refused to permit unbounded.
+    /// and there are as many as the line needs: a reader who presses `w` means
+    /// *show me the line*. It was capped at two for one day and the cap was never
+    /// asked for, which `SPEC.md` §11.2 B19 records rather than tidies away.
     ///
     /// **A row of its own rather than a flag on [`Row::Line`]**, so that the one
     /// thing downstream of the walk which counts rows, the painter, needs no
@@ -1234,67 +1234,55 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
     1 + diff.hunks.iter().map(hunk_span).sum::<usize>()
 }
 
-/// Split a line's syntax runs at a byte offset, for a wrapped row.
+/// The syntax runs covering one byte range of a line, re-based onto it.
 ///
 /// [`vigia_core::Span`] carries a length rather than a range, so the runs are a
-/// tiling read forward from zero, and the run the cut lands inside becomes two.
-/// The alternative, handing the whole list to both rows and letting the painter
-/// offset it, was refused for the reason [`Row::Wrap`] carries its tail already
-/// sliced: one decision, taken where the row count is taken.
+/// tiling read forward from zero, and the runs the range starts and ends inside
+/// are cut. **A range rather than a split point**
+/// ([#272](https://github.com/breferrari/vigia/issues/272)): a line breaks as
+/// many times as it needs, so what a row wants is the piece it draws rather than
+/// the two halves of one cut.
 ///
-/// A cut past the end leaves the tail empty, which is legal and draws nothing:
-/// an empty span list and an uncovered tail already reach the screen identically
-/// ([`Row::Line::spans`]).
-fn split_spans(spans: &[Span], at: usize) -> (Vec<Span>, Vec<Span>) {
-    let mut head = Vec::with_capacity(spans.len());
-    let mut tail = Vec::with_capacity(spans.len());
+/// The alternative, handing the whole list to every row and letting the painter
+/// offset it, was refused for the reason [`Row::Wrap`] carries its text already
+/// sliced: one decision, taken where the row count is taken.
+fn spans_in(spans: &[Span], from: usize, to: usize) -> Vec<Span> {
+    let mut kept = Vec::with_capacity(spans.len());
     let mut pos = 0usize;
     for span in spans {
         let end = pos + span.len;
-        if end <= at {
-            head.push(*span);
-        } else if pos >= at {
-            tail.push(*span);
-        } else {
-            head.push(Span {
-                len: at - pos,
-                class: span.class,
-            });
-            tail.push(Span {
-                len: end - at,
+        let start = pos.max(from);
+        let stop = end.min(to);
+        if stop > start {
+            kept.push(Span {
+                len: stop - start,
                 class: span.class,
             });
         }
         pos = end;
+        if pos >= to {
+            break;
+        }
     }
-    (head, tail)
+    kept
 }
 
-/// Split a line's word-emphasis ranges at a byte offset, for a wrapped row.
+/// The word-emphasis ranges covering one byte range of a line, re-based onto it.
 ///
-/// The tail's ranges are re-based onto the tail, because that is what the tail
-/// row's `text` is: a range left in the whole line's coordinates would paint the
-/// hot background somewhere else entirely, and `Painter::push_split` has no way
-/// to know which of the two rows it is drawing.
-///
-/// A range straddling the cut becomes two, one on each side, which is what keeps
-/// a word that wraps looking like one word.
-fn split_emph(
-    emph: &[std::ops::Range<u32>],
-    at: usize,
-) -> (Vec<std::ops::Range<u32>>, Vec<std::ops::Range<u32>>) {
-    let cut = at as u32;
-    let mut head = Vec::with_capacity(emph.len());
-    let mut tail = Vec::with_capacity(emph.len());
-    for range in emph {
-        if range.start < cut {
-            head.push(range.start..range.end.min(cut));
-        }
-        if range.end > cut {
-            tail.push(range.start.max(cut) - cut..range.end - cut);
-        }
-    }
-    (head, tail)
+/// Re-based because that is what the row's `text` is: a range left in the whole
+/// line's coordinates would paint the hot background somewhere else entirely, and
+/// `Painter::push_split` has no way to know which piece of the line it is
+/// drawing. A range straddling either edge is cut, which is what keeps a word
+/// that wraps looking like one word.
+fn emph_in(emph: &[std::ops::Range<u32>], from: usize, to: usize) -> Vec<std::ops::Range<u32>> {
+    let (from, to) = (from as u32, to as u32);
+    emph.iter()
+        .filter_map(|range| {
+            let start = range.start.max(from);
+            let end = range.end.min(to);
+            (end > start).then(|| start - from..end - from)
+        })
+        .collect()
 }
 
 /// Rows one hunk occupies: its `@@` header and then its lines.
@@ -1404,7 +1392,7 @@ fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> u
 /// Ties keep the earlier hunk, because a reader scrolls forward more readily
 /// than back. A note block ([`note_for`]) and a file with no hunks have nothing
 /// to land on and stay on their heading.
-fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> usize {
+fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: usize) -> usize {
     if note_for(kind, diff).is_some() {
         return 0;
     }
@@ -1412,23 +1400,27 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> 
     // Row zero is the heading, so the first header sits at one. Walked rather
     // than indexed because a hunk's height is its own line count, which is
     // exactly the sum `span_of` takes.
+    // **A second counter, in display rows.** `row` is what the walk skips to and
+    // is a row of the diff; `seen` is what the terminal spends getting there. The
+    // two are the same number until a line wraps, and a `content` of zero is a
+    // caller that is not wrapping, where every line is one row and they stay
+    // equal for the life of the walk.
+    let rows_of_line = |text: &str| {
+        if content == 0 {
+            1
+        } else {
+            1 + crate::render::breaks_of(text, content, height).len()
+        }
+    };
+
     let mut row = 1;
+    let mut seen = 1;
     let mut busiest = 0;
     let mut landing = 0;
-    // Two rows per hunk, and they answer different questions: the header is
-    // where the viewport goes, and the first changed line under it is what has
-    // to be on screen for going there to be unnecessary.
-    let mut change = 0;
+    let mut landing_seen = 0;
+    let mut change_seen = 0;
     for hunk in &diff.hunks {
-        // One pass for both, because the second one cannot fail once the first
-        // has counted anything: a hunk with a changed line has a first changed
-        // line. Written as a pair rather than as a `position` with an
-        // `unwrap_or` under the `changed > busiest` guard, which is the same
-        // claim expressed as a branch nothing can reach.
         let mut changed = 0;
-        // A hunk opens with up to `CONTEXT` unchanged lines, and with fewer at
-        // the very start of a file, so the lead-in is counted rather than
-        // assumed.
         let mut lead = None;
         for (at, line) in hunk.lines.iter().enumerate() {
             if line.kind != LineKind::Context {
@@ -1436,15 +1428,25 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> 
                 lead.get_or_insert(at);
             }
         }
-        // Strictly greater, which is what keeps the earlier of two equal hunks.
         if let Some(lead) = lead
             && changed > busiest
         {
             busiest = changed;
             landing = row;
-            change = row + 1 + lead;
+            landing_seen = seen;
+            change_seen = seen
+                + 1
+                + hunk.lines[..lead]
+                    .iter()
+                    .map(|line| rows_of_line(&line.text))
+                    .sum::<usize>();
         }
         row += hunk_span(hunk);
+        seen += 1 + hunk
+            .lines
+            .iter()
+            .map(|line| rows_of_line(&line.text))
+            .sum::<usize>();
     }
 
     // **Two questions, and a landing has to answer both.** `height` is the diff
@@ -1464,35 +1466,24 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> 
     // needs the gutter, and the gutter is taken from the rows this decision
     // helps choose: the circularity §11.2 B19 records for the scrollbar's total,
     // one element over. What is available without it is the cap: a line occupies
-    // at most two display rows, so a screen of `height` display rows always holds
-    // at least half that many rows of the diff.
+    // as many display rows as its text needs, which is why this is measured
+    // rather than divided by a factor that no longer exists.
     //
-    // **It applies to both tests, and the two audit remits disagreed about that**,
-    // which is worth recording because the argument decides the shape rather than
-    // the wording. Both tests are *guarantees of visibility*, and a guarantee
-    // needs the change's **largest** possible display row, which is twice its
-    // logical one: the first asks whether it is guaranteed drawn from the heading
-    // and the second whether it is guaranteed drawn from the landing. Halving is
-    // exactly that bound, twice.
+    // **Measured in display rows, which the removal of the wrap cap forced.**
+    // While a line took at most two rows, halving `height` was an exact guarantee
+    // and cost nothing: a change at logical offset `d` sat at display row at most
+    // `2d`. Without a cap there is no such factor, so the lines between the
+    // landing and the change are the only thing that can answer it, and this
+    // function already walks every one of them to find the busiest hunk.
     //
-    // **The reading that halves only the first was tried and produces the defect
-    // this rule exists to prevent.** With it, a five-row pane took a landing whose
-    // change sat four logical rows below it, which is seven display rows down,
-    // and drew a `@@` and two rows of context with no changed line on the pane:
-    // the reader was moved off the heading for a change they still could not see.
-    //
-    // **What halving both costs is a landing sometimes withdrawn**, on a file
-    // whose lines are short enough that nothing would have wrapped: `w` is global,
-    // so a reader with it on is in that state for every file that fits. That is
-    // the lesser of the two errors and it is chosen deliberately. Declining keeps
-    // the heading, which carries the path, the counts, the sigil and the strip;
-    // landing without showing the change spends the heading and buys nothing,
-    // which is the sentence the second test is written from.
-    let visible = if wrap { (height / 2).max(1) } else { height };
+    // **Both tests are guarantees of visibility and both use it.** The first asks
+    // whether the change is already drawn from the heading, the second whether it
+    // would be drawn from the landing, and moving a reader off the heading for a
+    // change they still cannot see is the defect the second exists to prevent.
 
     // Already drawn from the heading, so the jump would cost the heading and buy
     // nothing.
-    if change < visible {
+    if change_seen < height {
         return 0;
     }
     // And still not drawn from the landing, which is `Body::split`'s floor: a
@@ -1501,7 +1492,7 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, wrap: bool) -> 
     // path, the counts, the sigil and the strip. Moving the reader for a change
     // they still cannot see is the defect this whole rule exists to fix, so a
     // pane too short to show one keeps what it had.
-    if change - landing >= visible {
+    if change_seen - landing_seen >= height {
         return 0;
     }
     landing
@@ -1901,6 +1892,18 @@ impl View {
         // past where the position said. The three sites outside this function
         // that clamp the same way are fixed where they are, by measuring a
         // screenful in the rows a screen actually draws: see `App::screenful`.
+        // **The narrowest a content row can be on this pane**, which is what a
+        // follow landing has to measure against and cannot ask the gutter for:
+        // the gutter is sized from the rows the walk produces, and the landing
+        // helps choose them. Ten is the digits of the largest line number a `u32`
+        // can hold, so this is the floor across every file, and a floor
+        // over-states the wrapping rather than under-stating it. Zero when `w` is
+        // off, which is the caller saying *nothing wraps*.
+        let landing_content = if wrap && width > 0 {
+            crate::render::content_width(10, width)
+        } else {
+            0
+        };
         let mut at_bottom = false;
         // Whether the last file the walk touched was drawn to the end of its
         // block. See the assignment for what it is for.
@@ -1948,7 +1951,7 @@ impl View {
                 // below resolving it a second time, and what tells the caller it
                 // may forget the request.
                 if landing && !view.landed {
-                    skip = landing_of(&change.kind, diff, height, wrap);
+                    skip = landing_of(&change.kind, diff, height, landing_content);
                     view.landed = true;
                 }
 
@@ -2641,28 +2644,35 @@ impl View {
             return;
         }
 
-        // Where each logical row breaks, if it does. Taken once: the trim below
-        // reads it backwards and the expansion reads it forwards, and a second
-        // walk is a second chance to disagree.
-        let splits: Vec<Option<usize>> = self
+        // Where each collected row breaks, and how many rows of terminal it
+        // therefore takes. Taken once: the trim below reads it backwards and the
+        // expansion reads it forwards, and a second walk is a second chance to
+        // disagree.
+        //
+        // **Counting stops at `height`**, which is not a cap on what is drawn: a
+        // line taller than the pane cannot be made more useful by knowing exactly
+        // how much taller, and stopping there keeps this bounded by the window
+        // rather than by the longest line in the diff.
+        let breaks: Vec<Vec<usize>> = self
             .rows
             .iter()
             .map(|row| match row {
-                Row::Line { text, .. } => crate::render::split_at(text, content),
-                _ => None,
+                Row::Line { text, .. } => {
+                    crate::render::breaks_of(text, content, height.saturating_add(1))
+                }
+                _ => Vec::new(),
             })
             .collect();
-        let cost = |at: usize| 1 + usize::from(splits[at].is_some());
-        let total: usize = (0..splits.len()).map(cost).sum();
+        let cost = |at: usize| breaks[at].len() + 1;
+        let total: usize = (0..breaks.len()).map(cost).sum();
 
         // **Nothing on this screen wraps, so nothing below it has anything to
         // do.** The ordinary screenful of an ordinary diff, and it is worth an
         // early return rather than falling through: the walk below rebuilds the
         // row vector unconditionally, so without this a reader with `w` on paid
         // one `Vec<Row>` allocation and one deallocation on every frame that
-        // draws no long line. The `!wrap` and `content == 0` arms above are the
-        // same shape and this is the third of them.
-        if total == splits.len() {
+        // draws no long line.
+        if total == breaks.len() {
             return;
         }
 
@@ -2676,27 +2686,24 @@ impl View {
         // put the end of the diff out of reach of the gesture that exists to
         // reach it.
         //
-        // So this one case trims from the **front**: the smallest number of
-        // leading logical rows whose removal lets the rest fit. Removing one costs
-        // one row or two, so the last removal can overshoot by exactly one and
-        // leave a blank at the bottom, which §11.1 rules the diff does not end
-        // with. `unwrapped` is that case and it is the same rule as the last row
-        // of an ordinary screen: keep the row, draw it whole, let it clip and say
-        // so.
+        // So this one case trims from the **front**, and it trims in display rows
+        // rather than logical ones: `above` is how many rows of the first kept
+        // line to pass over. A cap of two once made that a whole-row decision with
+        // an awkward overshoot of one; with no cap the overshoot is the line's own
+        // height, so the offset is the only honest form. The top of the pane
+        // can therefore be a continuation, which is what the anchor being the
+        // **logical** line means in practice.
         let mut from = 0usize;
-        let mut unwrapped = false;
+        let mut above = 0usize;
         if at_bottom && total > height {
             let mut tail = 0usize;
-            let mut at = splits.len();
-            while at > 0 && tail + cost(at - 1) <= height {
+            let mut at = breaks.len();
+            while at > 0 && tail < height {
                 at -= 1;
                 tail += cost(at);
             }
             from = at;
-            if tail < height && from > 0 {
-                from -= 1;
-                unwrapped = true;
-            }
+            above = tail.saturating_sub(height);
         }
 
         // **[`Self::top`] is not moved, and that is what makes the end of the
@@ -2709,8 +2716,7 @@ impl View {
         // [`Self::last_screenful`], lands on the same row and trims to the same
         // place: every `k` and every wheel-up after that resolves to the position
         // it started from. Two audit remits found it independently, one as a cost
-        // (two walks and a `last_screenful`'s reads per frame) and one as the
-        // defect it is.
+        // and one as the defect it is.
         //
         // So the trim is a **display** offset and nothing else. The stored
         // position stays the row the walk placed, which is a row the walk can
@@ -2721,8 +2727,6 @@ impl View {
         // wrapped bottom whose last screenful spans two files, the first row
         // drawn can belong to the file after the one `top` names, so the caret in
         // the list marks the reader's position rather than the topmost drawn row.
-        // The bar is unaffected, because `rows_above` is `top`'s and `top` means
-        // *the last screenful* there exactly as it always did.
         let mut out: Vec<Row> = Vec::with_capacity(height);
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
@@ -2742,13 +2746,7 @@ impl View {
                 out.push(row);
                 continue;
             };
-            // Two rows or none. `out.len() + 2 <= height` is the last row of the
-            // pane, and `at == from && unwrapped` is the first, which the trim
-            // above chose deliberately.
-            let split = splits[at]
-                .filter(|_| !(at == from && unwrapped))
-                .filter(|_| out.len() + 2 <= height);
-            let Some(cut) = split else {
+            if breaks[at].is_empty() {
                 out.push(Row::Line {
                     kind,
                     number,
@@ -2757,27 +2755,66 @@ impl View {
                     emph,
                 });
                 continue;
-            };
+            }
+
             let indent = crate::render::indent_of(&text, content);
-            let (head_spans, tail_spans) = split_spans(&spans, cut);
-            let (head_emph, tail_emph) = split_emph(&emph, cut);
-            let tail = text[cut..].to_owned();
-            let mut head = text;
-            head.truncate(cut);
-            out.push(Row::Line {
-                kind,
-                number,
-                text: head,
-                spans: head_spans,
-                emph: head_emph,
-            });
-            out.push(Row::Wrap {
-                kind,
-                text: tail,
-                spans: tail_spans,
-                emph: tail_emph,
-                indent,
-            });
+            // Rows of this line to pass over, which is the display offset above.
+            let skip = if at == from { above } else { 0 };
+            // **A line taller than the pane is the one case a mark is still
+            // honest** ([#272](https://github.com/breferrari/vigia/issues/272)).
+            // Scrolling moves by rows of the **diff**, so a line the pane cannot
+            // hold is stepped over whole: no gesture reaches its middle, and the
+            // reader has to be told. A line that merely runs past the fold is a
+            // different thing and carries no mark, because that is what every row
+            // below the last one already is.
+            //
+            // It is said by handing the painter the **rest of the line** on the
+            // last row there is room for, rather than by a flag: the painter
+            // already clips what does not fit and stamps `›`, which is the rule
+            // §11.1 has had since before wrapping existed.
+            let taller_than_pane = breaks[at].len() + 1 > height;
+            let mut start = 0usize;
+            let cuts: Vec<usize> = breaks[at]
+                .iter()
+                .copied()
+                .chain(std::iter::once(text.len()))
+                .collect();
+            for (piece, cut) in cuts.iter().copied().enumerate() {
+                if out.len() >= height {
+                    break;
+                }
+                if piece < skip {
+                    start = cut;
+                    continue;
+                }
+                let last = out.len() + 1 == height && piece + 1 < cuts.len();
+                let cut = if last && taller_than_pane {
+                    text.len()
+                } else {
+                    cut
+                };
+                let kept = spans_in(&spans, start, cut);
+                let kept_emph = emph_in(&emph, start, cut);
+                let slice = text[start..cut].to_owned();
+                if piece == 0 {
+                    out.push(Row::Line {
+                        kind,
+                        number,
+                        text: slice,
+                        spans: kept,
+                        emph: kept_emph,
+                    });
+                } else {
+                    out.push(Row::Wrap {
+                        kind,
+                        text: slice,
+                        spans: kept,
+                        emph: kept_emph,
+                        indent,
+                    });
+                }
+                start = cut;
+            }
         }
         self.rows = out;
     }
@@ -3242,50 +3279,82 @@ mod tests {
     #[test]
     fn the_busiest_hunk_is_where_a_tall_file_lands() {
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), 8, false),
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, 0),
             10,
             "the landing is not the second hunk's header row"
         );
     }
 
+    /// [`three_hunks`] with every line long enough to wrap at a narrow content.
+    ///
+    /// The shared fixture's lines carry no text at all, so nothing in it can tell
+    /// a measured landing from an unmeasured one: every line is one row at every
+    /// width. This is the same shape with sixty columns of content on each line.
+    fn three_hunks_wide() -> FileDiff {
+        let mut diff = three_hunks();
+        for hunk in &mut diff.hunks {
+            for line in &mut hunk.lines {
+                line.text = "x".repeat(60);
+            }
+        }
+        diff
+    }
+
     #[test]
     fn a_wrapped_pane_follows_only_a_change_it_can_show() {
-        // **Both of `landing_of`'s tests are guarantees, so both take the halved
-        // budget**, and the two readings were each tried in one session. Halving
-        // only the first takes a landing whose change is still below the fold,
-        // which is the defect the second test exists to prevent; halving both
-        // withdraws a landing on a file that would not have wrapped, which keeps
-        // the heading. This gate pins the side that was chosen, in both
-        // directions, so neither can be reverted quietly.
+        // **The budget is measured, not halved**, which is what removing the wrap
+        // cap forced: with a cap of two rows a change at logical offset `d` sat at
+        // display row at most `2d`, and halving `height` was an exact guarantee
+        // for nothing. With no cap there is no such factor, so the lines between
+        // the landing and the change are the only thing that can answer it.
         //
-        // On an eight-row pane this fixture's change is seven rows past its
-        // landing, which is up to fourteen rows of terminal: not guaranteed drawn,
-        // so the pane keeps the heading rather than spending it.
+        // Both directions are pinned, because the halving got each of them wrong
+        // in turn during one session: it withdrew landings on files that would
+        // never have wrapped, and a version that halved only the first test took
+        // a landing whose change was still below the fold.
+
+        // A file whose lines do not wrap is followed exactly as it is unwrapped.
+        // The halving failed this, and it is the common case: `w` is global, so a
+        // reader with it on is in this state for every file that fits.
+        let plain = landing_of(&ChangeKind::Modified, &three_hunks(), 8, 0);
         assert!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), 8, false) > 0,
+            plain > 0,
             "the fixture declines even unwrapped, so this compares two refusals"
         );
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), 8, true),
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, 200),
+            plain,
+            "a file whose lines all fit was followed differently with wrapping on"
+        );
+
+        // And a file whose lines do wrap pushes the change further down the pane,
+        // so a landing the same height honoured is withdrawn once it cannot be
+        // guaranteed drawn.
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &three_hunks_wide(), 8, 20),
             0,
             "a pane that cannot guarantee the change is drawn from the landing \
              moved the reader off the heading anyway"
         );
 
-        // And the other direction: a change guaranteed drawn from the heading
-        // unwrapped can be below the fold once every line takes two rows, so the
-        // budget for *that* question halves and the landing is taken.
-        let tall = 18;
+        // The other end of the same rule: a change guaranteed drawn from the
+        // heading unwrapped can be below the fold once its lines take three rows
+        // each, and then the pane does move to it.
+        // Twenty-four: the change is nineteen display rows below its landing on the
+        // wide fixture, so the pane has to be taller than that to reach it, and
+        // seventeen rows of the diff means the unwrapped pane draws it from the
+        // heading already.
+        let tall = 24;
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), tall, false),
+            landing_of(&ChangeKind::Modified, &three_hunks(), tall, 0),
             0,
-            "the fixture does not draw its change from the heading at {tall} rows, \
-             so the wrapped answer below is not a comparison"
+            "the fixture draws its change from the heading at {tall} rows, so the \
+             wrapped answer below is not a comparison"
         );
         assert!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), tall, true) > 0,
-            "a change drawn from the heading unwrapped is below the fold wrapped, \
-             and the pane did not move to it"
+            landing_of(&ChangeKind::Modified, &three_hunks_wide(), tall, 20) > 0,
+            "a change drawn from the heading unwrapped is below the fold once \
+             every line takes three rows, and the pane did not move to it"
         );
     }
 
@@ -3298,7 +3367,7 @@ mod tests {
         let tall_and_quiet = diff(400, vec![hunk(10, &kinds(40, 1)), hunk(200, &kinds(6, 9))]);
 
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &tall_and_quiet, 8, false),
+            landing_of(&ChangeKind::Modified, &tall_and_quiet, 8, 0),
             43,
             "the landing followed the tallest hunk rather than the busiest"
         );
@@ -3321,7 +3390,7 @@ mod tests {
             ],
         );
 
-        assert_eq!(landing_of(&ChangeKind::Modified, &even, 8, false), 9);
+        assert_eq!(landing_of(&ChangeKind::Modified, &even, 8, 0), 9);
     }
 
     #[test]
@@ -3336,8 +3405,8 @@ mod tests {
         // seventeen-row one does not.
         let file = three_hunks();
 
-        assert_eq!(landing_of(&ChangeKind::Modified, &file, 18, false), 0);
-        assert_eq!(landing_of(&ChangeKind::Modified, &file, 17, false), 10);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 18, 0), 0);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 17, 0), 10);
     }
 
     #[test]
@@ -3353,7 +3422,7 @@ mod tests {
 
         for height in 11..=17 {
             assert_eq!(
-                landing_of(&ChangeKind::Modified, &file, height, false),
+                landing_of(&ChangeKind::Modified, &file, height, 0),
                 10,
                 "a {height}-row region draws the busiest hunk's header and none \
                  of what it changed, and the heading was kept anyway"
@@ -3377,7 +3446,7 @@ mod tests {
 
         for height in 1..=7 {
             assert_eq!(
-                landing_of(&ChangeKind::Modified, &file, height, false),
+                landing_of(&ChangeKind::Modified, &file, height, 0),
                 0,
                 "a {height}-row region cannot draw the change from the landing, \
                  so the landing costs the heading and buys nothing"
@@ -3385,7 +3454,7 @@ mod tests {
         }
         // And one row further up it is worth it again: the header and its six
         // context lines fit in seven, so the eighth row is the first removal.
-        assert_eq!(landing_of(&ChangeKind::Modified, &file, 8, false), 10);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 8, 0), 10);
     }
 
     #[test]
@@ -3404,12 +3473,12 @@ mod tests {
         // pins the edge itself rather than a point to one side of it, which is
         // what every other case in this battery does.
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &file, 14, false),
+            landing_of(&ChangeKind::Modified, &file, 14, 0),
             10,
             "the busiest hunk is nine additions and the landing went elsewhere"
         );
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &file, 15, false),
+            landing_of(&ChangeKind::Modified, &file, 15, 0),
             0,
             "the ninth addition is drawn from the heading and the heading was \
              spent anyway"
@@ -3427,27 +3496,21 @@ mod tests {
         // the early return was doing nothing the test could see and deleting it
         // left the suite green. `three_hunks` lands on row 10 from an eight-row
         // region.
-        assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), 8, false),
-            10
-        );
+        assert_eq!(landing_of(&ChangeKind::Modified, &three_hunks(), 8, 0), 10);
 
-        assert_eq!(
-            landing_of(&ChangeKind::Conflict, &three_hunks(), 8, false),
-            0
-        );
+        assert_eq!(landing_of(&ChangeKind::Conflict, &three_hunks(), 8, 0), 0);
         // A real binary diff carries no hunks either, so it reaches the same
         // answer by the ordinary route. Pinned so that stays true.
         let mut binary = three_hunks();
         binary.binary = true;
         binary.hunks.clear();
-        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 8, false), 0);
+        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 8, 0), 0);
     }
 
     #[test]
     fn a_file_with_no_hunks_has_nowhere_to_land() {
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &diff(400, Vec::new()), 1, false),
+            landing_of(&ChangeKind::Modified, &diff(400, Vec::new()), 1, 0),
             0
         );
     }
