@@ -7461,7 +7461,8 @@ impl Painter<'_> {
     /// fit would mean the plan was wrong rather than that the pane is narrow.
     ///
     /// Both columns come from the [`Group`] the layout placed, so the drawer never
-    /// works out where a group starts. That is #158's rule on the sheet: geometry
+    /// works out where a group starts. That is the layout's rule on the sheet:
+    /// geometry
     /// the painter honours belongs to the plan.
     fn sheet_row(&mut self, y: u16, row: &Gesture, level: usize, group: Group, left: u16) {
         self.put(
@@ -7532,9 +7533,9 @@ impl Painter<'_> {
         let inner = planning_width(full.width, pane.width, 0);
         let columns = Columns::plan(inner, self.glyphs);
 
-        // **The gutter comes from the same width, and that is
-        // [#77](https://github.com/breferrari/vigia/issues/77)'s ruling one
-        // element over.** `area` has already lost the scrollbar's columns when
+        // **The gutter comes from the same width, and that is the fixed-slot
+        // ruling one element over.** `area` has already lost the scrollbar's
+        // columns when
         // a bar was drawn, and the stream's bar appears when the diff outgrows
         // the pane, so measuring the gutter against it made the line numbers a
         // function of the *diff's height*. At 29 and 30 columns a diff crossing
@@ -7742,9 +7743,9 @@ impl Painter<'_> {
     ) {
         let mut right = area;
 
-        // **Every slot is subtracted whether or not this row fills it**, which is
-        // the whole of [#77](https://github.com/breferrari/vigia/issues/77)'s
-        // ruling: otherwise a row without a sparkline lets its neighbours'
+        // **Every slot is subtracted whether or not this row fills it**, which
+        // is the whole of the fixed-slot ruling: otherwise a row without a
+        // sparkline lets its neighbours'
         // elements slide right into the space, and a row with a
         // two-column-narrower counts cell moves everything outside it.
         // Both were ordinary rather than exotic, since `spark_of` yielded nothing
@@ -7752,8 +7753,8 @@ impl Painter<'_> {
         // file with no line diff.
         //
         // **The sparkline half of that is gone and the ruling is what survives
-        // it.** Since [#78](https://github.com/breferrari/vigia/issues/78)
-        // `spark_of` is total, so no row can fail to fill that slot; the strip's
+        // it.** `spark_of` is total, so no row can fail to fill that slot; the
+        // strip's
         // can still be empty, and reserving from the pane is what keeps the two
         // cases from being visible to a reader as two different layouts.
         if columns.cell > 0 {
@@ -7793,14 +7794,12 @@ impl Painter<'_> {
         past(&mut right, counts_width(columns.cell));
 
         // Drawn right to left, so each block knows where the one outside it
-        // ended. The strip drawn is the **whole** window at every rung since
-        // [#234](https://github.com/breferrari/vigia/issues/234), rather than
-        // the tail of one with the oldest on the left.
+        // ended. The strip drawn is the **whole** window at every rung, rather
+        // than the tail of one with the oldest on the left.
         //
         // **Unconditional past the width check**, rather than skipping a row
-        // whose file has no history: since
-        // [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket
-        // draws the track, so the reserved slot is always filled and a launch
+        // whose file has no history: an empty bucket draws the track, so the
+        // reserved slot is always filled and a launch
         // into a worktree that was already dirty draws the column rather than a
         // blank.
         // **Resolved once for the row, in cells.** `Columns::spark` counts
@@ -7823,9 +7822,8 @@ impl Painter<'_> {
             // `ROW_LAYOUTS` is a hand-written table and `Columns::new` takes a
             // bare `usize`.
             //
-            // **On the ladder rather than merely dividing, since
-            // [#234](https://github.com/breferrari/vigia/issues/234)**, and the
-            // difference is a silent wrong picture rather than a loud one.
+            // **On the ladder rather than merely dividing**, and the difference
+            // is a silent wrong picture rather than a loud one.
             // [`spark_of`] groups `HISTORY_BUCKETS / rung`, and [`Scale::at`]
             // looks the yardstick up by that grouping: a rung of eight divides
             // twenty-four perfectly well, groups to three, finds no such grouping
@@ -7849,9 +7847,8 @@ impl Painter<'_> {
             // twice as far as it drew and slide every element left of it.
             let strip = spark_of(heading.spark, columns.spark, scale, self.glyphs);
             // The cells `spark_of` actually filled. **This rung rather than the
-            // whole window since
-            // [#234](https://github.com/breferrari/vigia/issues/234)**: the
-            // projection happens in there now, so a narrower rung fills fewer
+            // whole window**: the projection happens in there, so a narrower
+            // rung fills fewer
             // cells with wider buckets instead of filling the same cells and
             // handing back a tail to slice.
             //
@@ -8038,8 +8035,7 @@ impl Painter<'_> {
         // Hover answers on the **list's** rows only: the diff is not clickable and
         // a mark there would imply it is.
         //
-        // **Confined by a parameter rather than by geometry, since
-        // [#252](https://github.com/breferrari/vigia/issues/252).** Reading
+        // **Confined by a parameter rather than by geometry.** Reading
         // `self.hovered == Some(Hovered::Row(area.y))` alone rests on *"a diff
         // heading's row is never inside the list region"*, which holds for
         // exactly as long as the two regions are stacked. Beside a rail they
@@ -8140,7 +8136,8 @@ impl Painter<'_> {
             // Styled through `class` rather than reaching for `context`
             // directly, so that "an empty span list and one `Plain` span reach
             // the screen identically" stays one rule instead of two expressions
-            // that happen to agree. #11 gives the classes their own palette, and
+            // that happen to agree. A palette gives the classes their own
+            // colours, and
             // the first `Plain` that is not `context` would otherwise leave this
             // path quietly on the old colour.
             //
@@ -8254,8 +8251,8 @@ impl Painter<'_> {
     /// context lines are highlighted identically, and only the `+` or `-` says
     /// which is which.
     ///
-    /// What the picture adds on top is a **row wash and a left bar**, and #11
-    /// landed both. The wash is painted first, across the whole row including the
+    /// What the picture adds on top is a **row wash and a left bar**. The wash is
+    /// painted first, across the whole row including the
     /// gutter and every trailing blank, which is what makes it read as a band
     /// rather than as a highlight behind some text. It survives everything written
     /// over it because `ratatui`'s `Cell::set_style` only overwrites the fields a
@@ -8271,8 +8268,8 @@ impl Painter<'_> {
     /// bar instead of a column being found for it.
     ///
     /// Both are absent on a palette that declines them and on a depth that cannot
-    /// express them, and then this draws exactly what it drew before #11: the sigil
-    /// alone, which is the loss §11.1 records.
+    /// express them, and then this draws the sigil alone, which is the loss
+    /// §11.1 records.
     #[allow(clippy::too_many_arguments)]
     fn line_row(
         &mut self,
@@ -8337,16 +8334,15 @@ impl Painter<'_> {
         // one**, which is the half of `SPEC.md` §5.3 that makes the inset design
         // rather than padding: a band the content sits *on* reads as a band, and
         // a band that stopped where the text stopped would read as a highlight
-        // someone misaligned. [#119](https://github.com/breferrari/vigia/issues/119)
-        // is explicit that it is the pane's furniture that bleeds and only its
-        // text that stands back.
+        // someone misaligned. The margin ladder is explicit that it is the
+        // pane's furniture that bleeds and only its text that stands back.
         //
         // The wash is still `area` rather than the pane on a screen with a
         // scrollbar, and that is the existing ruling
         // `a_wash_runs_under_the_scrollbar_column` rather than something this
-        // changed. That gate was `a_wash_stops_before_the_scrollbar_column` until
-        // [#239](https://github.com/breferrari/vigia/issues/239) inverted it; the
-        // sentence above is unaffected either way, because `area` is the region
+        // changed. `a_wash_stops_before_the_scrollbar_column` is that gate
+        // inverted; the sentence above is unaffected either way, because `area`
+        // is the region
         // and the question is only how much of it the wash covers.
         let mut x = glyphs.x;
         let mut room = usize::from(glyphs.width);
@@ -8360,7 +8356,7 @@ impl Painter<'_> {
                 Some(number) => format!("{number:>gutter$} "),
                 None => " ".repeat(gutter + 1),
             };
-            // crush's two-tone gutter (`SPEC.md` §11.2 B18, #321): on a changed
+            // crush's two-tone gutter (`SPEC.md` §11.2 B18): on a changed
             // row the number cells take a tone one step off the wash, so the
             // gutter reads as a column with no border spent. A background
             // patch, so it drops out on exactly the rungs the wash does, and a
@@ -8383,8 +8379,8 @@ impl Painter<'_> {
         // pushed at all advances `column` by at least one, so the pane bounds the
         // count too.
         //
-        // **Three fixed runs and not two**, which #164 moved and which is worth
-        // the word because the term is invisible from outside: the sigil, its
+        // **Three fixed runs and not two**, which is worth the word because the
+        // term is invisible from outside: the sigil, its
         // gap, and the tail `content_runs` pushes for whatever the spans did not
         // reach. Left at two the hint was a run short exactly when `spans` is
         // empty, which is **every content row of a process's first frame** (the
@@ -8516,9 +8512,9 @@ fn span(start: u32, lines: u32) -> String {
 /// Sized from the largest number actually on screen rather than from the file,
 /// so the gutter does not widen for content nobody can see.
 ///
-/// **Called by [`crate::view::View::wrap_rows`] rather than by the painter since
-/// [#272](https://github.com/breferrari/vigia/issues/272)**, and it takes rows
-/// rather than a `View` for that reason: wrapping needs the text bound *before*
+/// **Called by [`crate::view::View::wrap_rows`] rather than by the painter**, and
+/// it takes rows rather than a `View` for that reason: wrapping needs the text
+/// bound *before*
 /// the painter exists, because the width left for text is what decides whether a
 /// line wraps, and by the time the painter runs the row set has already been
 /// truncated by that decision. The answer is carried on
@@ -8543,9 +8539,9 @@ pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
         .unwrap_or(0);
 
     let digits = largest.max(1).ilog10() as usize + 1;
-    // **Through [`line_origin`] rather than a literal**, which is #164's own
-    // correction: this was `digits + 2`, exact while the sigil stood alone and a
-    // column behind the moment the sigil got its gap, so the gutter survived on
+    // **Through [`line_origin`] rather than a literal**: `digits + 2` is exact
+    // while the sigil stands alone and a column behind the moment it gets its
+    // gap, so the gutter survives on
     // 23 columns of text where `MIN_TEXT_WIDTH` rules 24. It is the one site
     // reading this quantity as a *threshold* rather than drawing with it, which
     // is why no drawing gate could see it.
@@ -8559,8 +8555,8 @@ pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
 /// Columns a content row has for its text, once the gutter and the sigil are paid.
 ///
 /// **The same expression [`Painter::line_row`] reaches in two steps**, named
-/// because [#272](https://github.com/breferrari/vigia/issues/272) gave it a
-/// second caller outside this module: the wrap decision is taken against exactly
+/// because wrapping gives it a second caller outside this module: the wrap
+/// decision is taken against exactly
 /// this bound, and a second spelling of it is a pane whose rows were counted
 /// against one width and drawn against another. `line_row`'s `debug_assert_eq!`
 /// is what holds the two together.
@@ -8765,8 +8761,8 @@ pub(crate) fn breaks_of(text: &str, room: usize, limit: usize) -> Vec<usize> {
 /// Neovim's `'breakindent'`: *"Every wrapped line will continue visually
 /// indented (same amount of space as the beginning of that line), thus
 /// preserving horizontal blocks of text."* It matters more here than in a pager
-/// because [#164](https://github.com/breferrari/vigia/issues/164) already ruled a
-/// content row's origin uniform down the block, and an unindented continuation
+/// because a content row's origin is already ruled uniform down the block, and
+/// an unindented continuation
 /// would break the shape of exactly the nested code this tool is pointed at.
 ///
 /// **Capped at half the content width**, which is what stops a deeply indented
@@ -8944,9 +8940,8 @@ mod tests {
     //! private, so a bar can only be reached through a screen: every fixture in
     //! it that draws two bars is a stacked one, where `list.y < diff.y`. A drawer
     //! that told the two apart by the `y` of the rect it was handed was therefore
-    //! correct on every screen those fixtures draw and wrong on the one
-    //! [#252](https://github.com/breferrari/vigia/issues/252) draws, and no gate
-    //! above this level could see the difference.
+    //! correct on every screen those fixtures draw and wrong on the one a rail
+    //! draws, and no gate above this level could see the difference.
     //!
     //! This calls the private drawer with the rail's own shape: same `y`, same
     //! height, different columns. It is the smallest thing that can express the
@@ -9117,8 +9112,7 @@ mod tests {
     /// The rail's floor is the sum it is written as, checked against a
     /// **computed** glance cluster rather than against its own expansion.
     ///
-    /// **The gate [`SETTLED_CELLS`]'s docblock names, and it did not exist until
-    /// [#252](https://github.com/breferrari/vigia/issues/252).** That constant is a
+    /// **The gate [`SETTLED_CELLS`]'s docblock names.** That constant is a
     /// hand-written sum standing in
     /// for `SETTLED.width(Glyphs::Block)`, which cannot be `const` because a
     /// display width is a table lookup; the docblock said this test held the two
@@ -9182,8 +9176,7 @@ mod sheet_tables {
     //!
     //! **`tests/sheet.rs` can only see what a pane draws**, and every claim here
     //! is about the tables *before* a rung has chosen which of them to draw.
-    //! Until [#285](https://github.com/breferrari/vigia/issues/285) that was one
-    //! claim, because there was one order: `KEYBOARD`'s array order was the order
+    //! With one order that is one claim: `KEYBOARD`'s array order is the order
     //! a reader read and the order the height ladder gave rows up, and the two
     //! agreed by construction rather than by evidence.
     //!
@@ -9207,8 +9200,8 @@ mod sheet_tables {
     #[test]
     fn the_last_rows_to_go_are_the_unguessable_three() {
         // §11.1: the unguessable outlives the reflexive. `SHEET_KEEP` is a count
-        // and a count alone cannot say *which* three, which is precisely what the
-        // #285 reorder was free to change: with the two orders conflated the last
+        // and a count alone cannot say *which* three, which is precisely what a
+        // reorder is free to change: with the two orders conflated the last
         // three of the reader's order are `?`, `q` and whatever precedes them.
         let kept: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP..]
             .iter()
@@ -9272,10 +9265,10 @@ mod sheet_tables {
         // never takes that spelling, which is why its chain is the one that can
         // be deleted unseen.
         //
-        // So what is pinned is the slack, not the reach. The day
-        // [#288](https://github.com/breferrari/vigia/issues/288) adds a `MOUSE`
-        // row wider than `J  K  Shift+↑  Shift+↓` or than `next / previous
-        // changed file`, this reddens, the reach becomes load-bearing, and a gate
+        // So what is pinned is the slack, not the reach. The day a `MOUSE` row
+        // arrives wider than `J  K  Shift+↑  Shift+↓` or than `next / previous
+        // changed file`, this reddens, the reach becomes load-bearing, and a
+        // gate
         // over the drawn sheet can be written for it. Until then there is nothing
         // on a screen to gate.
         let (kb_keys, kb_verb) = fields_of(&KEYBOARD, 0);
@@ -9369,11 +9362,7 @@ mod sheet_tables {
         // row. A `const` cannot compare two `&str`, which is the same reason the
         // rest of this module exists.
         //
-        // **Why outside the keep-set and in this order**
-        // ([#295](https://github.com/breferrari/vigia/issues/295),
-        // [#297](https://github.com/breferrari/vigia/issues/297),
-        // [#313](https://github.com/breferrari/vigia/issues/313),
-        // [#272](https://github.com/breferrari/vigia/issues/272)): `f`, `m`, `?`,
+        // **Why outside the keep-set and in this order**: `f`, `m`, `?`,
         // `r`, `s`, `w` and `a` are seven gestures a reader cannot guess at and
         // `SHEET_KEEP` keeps three, so four have to go first. `r` goes before `s`
         // because it is the only one of the seven that does nothing at all below
@@ -9393,9 +9382,8 @@ mod sheet_tables {
         // cell says nothing about the one beside it: the version of this that
         // asserted `r` alone would have gone green with `s` ranked anywhere above
         // it, including above `q`. **And the window is `EXPECTED.len()` rather
-        // than a repeated literal**, which is [#272](https://github.com/breferrari/vigia/issues/272)'s
-        // own correction: it was a hand-written `3` in two places, and adding `w`
-        // between `s` and `a` slid `r` out of a window that went on being three
+        // than a repeated literal**: a hand-written `3` in two places lets an
+        // added row slide `r` out of a window that goes on being three
         // wide, so the gate reddened by *losing* the row it was written to pin
         // rather than by that row moving.
         const EXPECTED: [&str; 4] = ["r", "s", "w", "a"];
@@ -9423,9 +9411,9 @@ mod sheet_tables {
         //
         // `margin_of(40)` is zero, so a forty column pane has forty columns of
         // room and this is the whole of what "reachable at forty columns" means.
-        // Before #286 it was forty-three, the wheel's tight verb was
-        // `scroll what you point at` at twenty-four columns, and the mouse group
-        // was unreachable at every height a forty column pane has.
+        // With the wheel's tight verb at `scroll what you point at`, twenty-four
+        // columns, it is forty-three and the mouse group is unreachable at every
+        // height a forty column pane has.
         let (keys, verb, total) = sheet_fields(1, 0, true);
         assert_eq!(
             (keys, verb),

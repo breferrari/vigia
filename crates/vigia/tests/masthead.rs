@@ -1,8 +1,7 @@
 //! The masthead's default and its one gesture.
 //!
 //! `SPEC.md` §11.1 rules the worktree churn band **hidden until a reader asks
-//! for it**, which is [#204](https://github.com/breferrari/vigia/issues/204)
-//! reversing the default the toggle shipped under.
+//! for it**, which reverses the default the toggle first shipped under.
 //!
 //! > `m` shows the masthead and hides it again, and it starts hidden.
 //!
@@ -188,8 +187,8 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
     // **What keeps the every-frame `.git/HEAD` read honest.** `Shell::paint`
     // reads the branch on every frame under the rule *never touch a file the
     // frame does not draw*, and what satisfies that rule is the header's ladder
-    // rather than the masthead: #158 moved the branch to the header, and #204
-    // makes the difference load bearing, since the masthead is now absent unless
+    // rather than the masthead: the branch belongs to the header, and the
+    // difference is load bearing because the masthead is absent unless
     // a reader asks for it. A branch that had stayed up there would make most
     // frames read a file they draw nothing from.
     let scratch = Scratch::large_diff("masthead-branch", FILES, 20);
@@ -428,7 +427,8 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
     );
 }
 
-/// A worktree written in bursts, which is the shape #223 was reported on.
+/// A worktree written in bursts, which is the shape the hairline was reported
+/// on.
 const BURSTY: [u32; HISTORY_SAMPLES] = {
     let mut s = [0; HISTORY_SAMPLES];
     s[8] = 6;
@@ -440,10 +440,10 @@ const BURSTY: [u32; HISTORY_SAMPLES] = {
     s
 };
 
-/// A wider pane buys finer time, which is the opposite of what #223 ruled.
+/// A wider pane buys finer time, which is the opposite of coarsening.
 ///
-/// **[#223](https://github.com/breferrari/vigia/issues/223) is replaced here
-/// and the correction is stated rather than absorbed.** That row saw a real
+/// **Coarsening is replaced here and the correction is stated rather than
+/// absorbed.** It saw a real
 /// defect: at one column a second, a save drew a hairline between two blanks and
 /// the whole band read as scatter. It reached for a wider column. What fixes the
 /// same defect on the same shape of signal is the **axis**: one mark on the
@@ -470,9 +470,8 @@ fn a_wider_pane_buys_finer_time() {
         let rows = band_strip(width, BURSTY);
         let ink: usize = rows.iter().map(|row| drawn_ink(row)).sum();
         // **Distinct glyphs, and this field is named for that now.** It was
-        // called `heights`, which is the conflation
-        // [#244](https://github.com/breferrari/vigia/issues/244) corrects in
-        // `SPEC.md` §5.1: a glyph is one cell of one row, so counting glyphs is
+        // called `heights`, which is the conflation `SPEC.md` §5.1 corrects: a
+        // glyph is one cell of one row, so counting glyphs is
         // not counting column heights, and at a dense rung it is not even
         // counting one column. What it does measure is how much of the ramp the
         // shape uses, which is what the assertion below wants.
@@ -524,16 +523,17 @@ fn a_wider_pane_buys_finer_time() {
 
 #[test]
 fn an_empty_column_draws_the_axis() {
-    // **The reversal of [#158](https://github.com/breferrari/vigia/issues/158),
-    // and it is the whole of why the band reads as a graph.** That ruling gave an
-    // empty column nothing, because a full track of `_` "reads as a dashed rule
+    // **The reversal of the empty-column rule, and it is the whole of why the
+    // band reads as a graph.** Giving an empty column nothing rests on a full
+    // track of `_` "reading as a dashed rule
     // across the pane". It does, and that is what a graph's axis is, and what
     // every graph of a signal that is zero most of the time draws. Without
     // it, the filled columns float with nothing to stand on and the element reads
     // as separated blocks, which is what was reported from a live pane.
     //
-    // The band has edges the sparkline does not, which is #158's own reason for
-    // treating the two differently, and it cuts the other way once the element is
+    // The band has edges the sparkline does not, which is the reason for
+    // treating the two differently, and it cuts the other way once the element
+    // is
     // a graph rather than a strip.
     let rows = band_strip(WIDE, BURSTY);
     let baseline = rows.last().expect("a band row");
@@ -590,11 +590,10 @@ fn the_band_reaches_both_edges_of_its_slot() {
     }
 }
 
-/// Two columns of known height against one peak, which is what #225 needed.
+/// Two columns of known height against one peak.
 ///
 /// **Mixed rather than uniform, and that is the whole point of the fixture.**
-/// The gate withdrawn during [#159](https://github.com/breferrari/vigia/issues/159)
-/// used a series that was full everywhere, where every row sits at its ceiling
+/// A series that is full everywhere puts every row at its ceiling,
 /// and flattening the stack changes nothing, so it passed against the very
 /// mutation it was written for.
 ///
@@ -606,9 +605,8 @@ fn the_band_reaches_both_edges_of_its_slot() {
 /// bar it was not written for.
 const QUARTERED: [u32; HISTORY_SAMPLES] = {
     let mut s = [0; HISTORY_SAMPLES];
-    // **Plateaus rather than two lone samples**, since
-    // [#242](https://github.com/breferrari/vigia/issues/242) made the band draw a
-    // level: two isolated writes smooth into one another's tails and the graded
+    // **Plateaus rather than two lone samples**, the band drawing a level: two
+    // isolated writes smooth into one another's tails and the graded
     // column this gate needs disappears. Sustained runs at a four-to-one ratio
     // hold their heights through the kernel, which is what "quartered" always
     // meant and what a lone sample only approximated.
@@ -637,9 +635,9 @@ const GRAPH_ROWS: usize = 2;
 
 #[test]
 fn the_band_stacks_its_rows_from_the_bottom() {
-    // **[#225](https://github.com/breferrari/vigia/issues/225), re-aimed at the
-    // drawer that replaced `band_cell`.** The rule is unchanged and its code
-    // moved: a column's height climbs a whole ramp per row, so a column that does
+    // **Aimed at the drawer that replaced `band_cell`.** The rule is unchanged
+    // and its code moved: a column's height climbs a whole ramp per row, so a
+    // column that does
     // not fill the baseline row may not put anything in the row above it. Every
     // other band gate reads presence, ink, axis or span and none reads a drawn
     // column's glyph, so without this the hero element of the pane can stack
@@ -749,9 +747,8 @@ fn the_band_draws_the_newest_writes_on_the_right() {
         *sample = 50;
     }
 
-    // Both rungs, which draw the same band since
-    // [#244](https://github.com/breferrari/vigia/issues/244) and are kept here as
-    // the cheapest possible statement of that: if the ruling is ever undone in
+    // Both rungs, which draw the same band, kept here as the cheapest possible
+    // statement of that: if the ruling is ever undone in
     // the drawer, this asserts time order on whatever replaces it rather than on
     // one rung only.
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
@@ -781,9 +778,9 @@ fn the_band_draws_the_newest_writes_on_the_right() {
     }
 }
 
-/// A wave, which is the shape the picture specifies and
-/// [#242](https://github.com/breferrari/vigia/issues/242) made these elements
-/// draw: monotone up then monotone down, with every sample non-zero so the
+/// A wave, which is the shape the picture specifies and the levelling makes
+/// these elements draw: monotone up then monotone down, with every sample
+/// non-zero so the
 /// series exercises the ramp rather than the axis.
 ///
 /// **Not the step [`the_band_stacks_its_rows_from_the_bottom`] uses.** A step is
@@ -810,9 +807,8 @@ fn wave() -> [u32; HISTORY_SAMPLES] {
 /// separately and could be wrong about either.
 ///
 /// **`pane` is both what the terminal detected and what the band draws with**,
-/// which is where [#244](https://github.com/breferrari/vigia/issues/244) put it
-/// back. It briefly was not: that row took the band off the ladder and this
-/// decoded with a fixed rung, so a braille pane's heights were read out of block
+/// which is one thing rather than two. Taking the band off the ladder and
+/// decoding with a fixed rung reads a braille pane's heights out of block
 /// glyphs. Decoding with the pane's own rung is what lets a caller ask what a
 /// *braille* reader sees, which is the question this element was reported on.
 fn column_heights(width: u16, series: [u32; HISTORY_SAMPLES], pane: Glyphs) -> Vec<usize> {
@@ -851,12 +847,12 @@ fn column_heights(width: u16, series: [u32; HISTORY_SAMPLES], pane: Glyphs) -> V
 }
 
 /// A worktree written in one burst and then edited ordinarily, which is the
-/// shape [#256](https://github.com/breferrari/vigia/issues/256) was reported on.
+/// shape the collapsing wave was reported on.
 ///
 /// **Not [`BURSTY`], whose values are all within an order of magnitude of each
 /// other.** That fixture is bursty in *time* and flat in magnitude, which is the
 /// signal the mean-based rule was chosen for and cannot show this defect at all.
-/// The distinction is the whole of #256: agent work is heavy tailed, a test run
+/// The distinction is the whole of it: agent work is heavy tailed, a test run
 /// rewriting thousands of bytes sits in the same window as the ordinary edits
 /// around it, and it is the **ratio** rather than the spacing that collapses the
 /// graph.
@@ -904,8 +900,8 @@ const LONG_BURST_THEN_ORDINARY: [u32; HISTORY_SAMPLES] = {
 
 /// One loud burst does not press every ordinary write onto the floor.
 ///
-/// **[#256](https://github.com/breferrari/vigia/issues/256), reported from a live
-/// pane**: *"It has a nice wave, but the wave goes missing after"*, then *"Just
+/// **Reported from a live pane**: *"It has a nice wave, but the wave goes
+/// missing after"*, then *"Just
 /// spikes"*. The band's yardstick was thirteen tenths of the mean of the window's
 /// non-empty values, and a mean is not robust: one write an order of magnitude
 /// above the rest raised the denominator until every ordinary edit rounded onto
@@ -931,9 +927,9 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
         ("reported", BURST_THEN_ORDINARY),
         ("long burst", LONG_BURST_THEN_ORDINARY),
     ] {
-        // **Both rungs, because the band follows the pane again** since #244 was
-        // reopened, so a braille reader's band is a different picture and is the
-        // one that row is about. This swept one rung while the band was pinned to
+        // **Both rungs, because the band follows the pane**, so a braille
+        // reader's band is a different picture. Sweeping one rung covers only a
+        // band pinned to
         // blocks, correctly: the two vectors were identical then.
         for pane in [Glyphs::Block, Glyphs::Braille] {
             let ceiling = GRAPH_ROWS * pane.levels();
@@ -1035,8 +1031,7 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
 /// of them are satisfied by a band dividing by *some* plausible number, and a
 /// mutation proved it, walking straight through the whole file with
 /// `Painter::band` pointed back at `scale_of` over its own projection, which is
-/// the exact defect [#256](https://github.com/breferrari/vigia/issues/256)'s
-/// second half removed.
+/// the exact defect the projection-side cut removes.
 ///
 /// So this reproduces the drawer's arithmetic from `Churn::scale_at` and compares
 /// cell for cell. `Painter::band` draws `ceil(value * levels / scale)` clamped
@@ -1053,8 +1048,8 @@ fn the_band_divides_by_the_stores_own_figure() {
         QUARTERED,
         wave(),
     ] {
-        // **Every rung, because the band follows the pane again** since #244 was
-        // reopened. While it was pinned to blocks one rung was enough; a braille
+        // **Every rung, because the band follows the pane.** Pinned to blocks
+        // one rung is enough; a braille
         // reader's band is a different picture and is the one that row is about.
         for pane in [Glyphs::Block, Glyphs::Braille] {
             let ceiling = GRAPH_ROWS * pane.levels();
@@ -1100,9 +1095,9 @@ fn the_band_divides_by_the_stores_own_figure() {
 
 /// The band's yardstick does not lurch when the pane is resized by a column.
 ///
-/// **The defect this catches was introduced by
-/// [#256](https://github.com/breferrari/vigia/issues/256) and found by measuring
-/// rather than by a gate.** The cut needs a population, and the band's first
+/// **The defect this catches came in with the cut itself and was found by
+/// measuring rather than by a gate.** The cut needs a population, and the
+/// band's first
 /// shape took it over the series it draws. That series is a *projection*:
 /// `Churn::projected` sums where the pane holds fewer columns than the window
 /// holds samples, so which values were outlying changed with the pane. A second
@@ -1162,8 +1157,8 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
             masthead: true,
             ..chrome(&App::new())
         };
-        // Both rungs, because the band follows the pane again since #244 was
-        // reopened, and a dense cell resizes on a different grid: its sub-column
+        // Both rungs, because the band follows the pane, and a dense cell
+        // resizes on a different grid: its sub-column
         // count is twice the pane's, so it crosses the window's sample count at
         // half the width blocks do.
         for pane in [Glyphs::Block, Glyphs::Braille] {
@@ -1266,8 +1261,8 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
 /// A window with a legitimate dynamic range is scaled exactly as it always was.
 ///
 /// **The fixture that binds the *lower* end of the outlier multiple**, and the
-/// promise that keeps [#256](https://github.com/breferrari/vigia/issues/256) a
-/// repair rather than a redesign: the cut is a no-op wherever the values are
+/// promise that keeps the cut a repair rather than a redesign: it is a no-op
+/// wherever the values are
 /// within an order of magnitude of each other. [`QUARTERED`] is a deliberate
 /// four-to-one series, and below eight times the median it stops drawing what it
 /// drew before, at sixty and a hundred and nine columns.
@@ -1318,8 +1313,8 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
                 );
                 let levelled = Churn(series).levels(slots);
                 // **`Churn::scale_at`, which is what the band calls**, and not
-                // `scale_of` over the same series. The two are the whole subject of
-                // #256's second half: one cuts the samples and projects what is left,
+                // `scale_of` over the same series. The two are the whole
+                // subject: one cuts the samples and projects what is left,
                 // the other cuts the projection, and only the first is a no-op here.
                 assert_eq!(
                     Churn(series).scale_at(slots),
@@ -1334,18 +1329,15 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
 
 #[test]
 fn the_band_follows_the_rung_the_pane_detects() {
-    // **[#244](https://github.com/breferrari/vigia/issues/244), reopened, and
-    // this gate is the reverse of the one it replaces.** That row took the band
-    // off the glyph ladder and pinned it to blocks; the band follows the pane
+    // **The reverse of pinning the band to blocks.** Taking it off the glyph
+    // ladder pins it there; the band follows the pane
     // again, so a reader whose font carries braille gets a braille band.
     //
     // **The evidence the removal rested on was a misquote.** It cited a live
     // report as "the masthead read as scattered dots", where what was reported
     // was scattered *waves* that had become spikes. Dots are glyph texture and
     // point at a rung; waves becoming spikes are the signal's shape and point at
-    // the denominator, which is
-    // [#256](https://github.com/breferrari/vigia/issues/256) and is the rest of
-    // this branch.
+    // the denominator, which is the rest of this branch.
     //
     // **Blocks are more faithful and that did not decide it.** Measured on a
     // fixed denominator, mean absolute error between the drawn column and the
@@ -1407,8 +1399,8 @@ fn a_dense_band_is_drawn_in_the_glyphs_its_pane_detected() {
 /// sample and it is exactly the quantum every gate below measures in.
 ///
 /// Built through `History` rather than by writing a `Churn` array directly,
-/// because what [#243](https://github.com/breferrari/vigia/issues/243) is about
-/// is the *store* moving: a hand-built series is already whatever shape the test
+/// because what the ageing clock is about is the *store* moving: a hand-built
+/// series is already whatever shape the test
 /// wanted and cannot show that anything aged.
 ///
 /// The burst's span was a parameter and both callers passed the same six
@@ -1433,8 +1425,8 @@ fn burst_at(now: Instant) -> History {
 
 #[test]
 fn a_quiet_window_slides_left_rather_than_freezing() {
-    // **The defect [#243](https://github.com/breferrari/vigia/issues/243) was
-    // reported for.** The window's axis is time, so a burst that has not moved is
+    // **The reported defect.** The window's axis is time, so a burst that has
+    // not moved is
     // a burst still claiming to be happening now. Rolling it thirty seconds with
     // nothing written has to move the ink left, and the gate reads the drawn
     // band rather than the store, because a store that rolls while the paint
@@ -1490,8 +1482,8 @@ fn a_quiet_window_slides_left_rather_than_freezing() {
 
 #[test]
 fn the_band_and_the_sparklines_age_together() {
-    // **[#234](https://github.com/breferrari/vigia/issues/234)'s coherence
-    // requirement, stated as a gate rather than left as a mechanism.** One store
+    // **The coherence requirement, stated as a gate rather than left as a
+    // mechanism.** One store
     // and one roll is *why* they agree; this is what fails if the band ever gets
     // a clock of its own. Both elements read the same window, so a roll that
     // moved one and not the other would leave the pane saying two different
@@ -1525,7 +1517,7 @@ fn the_band_and_the_sparklines_age_together() {
 
 #[test]
 fn the_band_climbs_the_ramp_toward_the_top() {
-    // #322, btop's multi-row rule: one colour per row against the vertical
+    // btop's multi-row rule: one colour per row against the vertical
     // axis, quiet at the baseline and hot at the top, so a column that climbs
     // reads hotter as it does. Read off the cells at a truecolour palette; the
     // gate below it holds the ladder's other half.
