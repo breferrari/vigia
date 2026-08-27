@@ -25,7 +25,7 @@ pub struct Line {
     /// Line content with any trailing `\n` or `\r\n` stripped.
     pub text: String,
     /// Byte ranges of `text` that are not shared with this line's partner on the other
-    /// side of the change, per [`crate::emphasis`].
+    /// side of the change, per the crate's `emphasis` module.
     pub emph: crate::emphasis::Emphasis,
 }
 

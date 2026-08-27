@@ -287,7 +287,7 @@ pub enum Row {
         emph: Vec<std::ops::Range<u32>>,
         /// Columns of leading blank before the tail, so nested code keeps its
         /// block shape: Neovim's `'breakindent'`, capped at half the content
-        /// width. [`indent_of`] is the rule.
+        /// width. `render::indent_of` is the rule.
         indent: usize,
     },
     /// Why a file has no lines under it.
@@ -720,7 +720,7 @@ pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> 
 /// # Panics
 ///
 /// If `index` is out of range, the same way [`vigia_core::Frame::rows_of`] does.
-/// [`crate::App::pinned_file`] keeps the pinned callers off that index.
+/// `App::pinned_file` keeps the pinned callers off that index.
 pub fn span_in(frame: &mut Frame, index: usize) -> Result<usize> {
     frame.rows_of(index, rows_of)
 }

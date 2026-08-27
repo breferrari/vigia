@@ -455,21 +455,45 @@ fn a_comment_cites_no_more_of_the_tracker_than_it_did() {
     );
 }
 
-/// Every tracked markdown file, so the gate reads what a session reads.
+/// Every markdown file in the repository, so the gate reads what a session reads.
+///
+/// Walked rather than asked of `git`, which is [`sources`]'s own idiom: a gate
+/// that shells out cannot run where the shell is absent, and this one has no
+/// reason to know what is tracked.
 fn markdown() -> Vec<(String, String)> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == ".git" || name == "node_modules" || name == "target" {
+                continue;
+            }
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "md") && !name.contains("NOTICE") {
+                out.push(path);
+            }
+        }
+    }
+
     let root = crates_root().join("..");
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&root)
-        .args(["ls-files", "*.md"])
-        .output()
-        .expect("git ls-files");
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|name| !name.contains("NOTICE"))
-        .filter_map(|name| {
-            let body = std::fs::read_to_string(root.join(name)).ok()?;
-            Some((name.to_owned(), body))
+    let mut paths = Vec::new();
+    walk(&root, &mut paths);
+    paths.sort();
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let body = std::fs::read_to_string(&path).ok()?;
+            let name = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some((name, body))
         })
         .collect()
 }
