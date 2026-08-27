@@ -87,6 +87,23 @@ const EDITED_PATH: &str = "src/mod_0.rs";
 /// is, which is the whole reason to prefer a frame count over a duration here.
 const REWRITE_EVERY: usize = 50;
 
+/// How long the bulk rewrite may go unrefreshed before the files it wrote start
+/// settling underneath the window that is supposed to be measuring them.
+///
+/// Wall time rather than a frame count, because settling is a wall-time
+/// property and a frame count is not. At fifty frames a rewrite the premise
+/// held on a fast runner and failed on a slow one: the forty-nine frames after
+/// the last rewrite took longer than the engine's margin, the hundred files
+/// settled, and the tail of the window stopped being the event the gate says it
+/// measured. Rewriting on the clock instead costs the same write-back per
+/// second on every runner, which is what kept the sibling gates in this binary
+/// from being starved when the alternative of rewriting every frame was tried.
+///
+/// Comfortably inside the engine's own margin, which `support::SETTLE_WAIT` is
+/// sized just above. A literal here would not move when that does, so
+/// `REWRITE_EVERY` stays as the frame-count floor and this is the ceiling.
+const REWRITE_WITHIN: Duration = Duration::from_millis(1_000);
+
 /// Frames discarded before sampling, and frames sampled.
 ///
 /// The same numbers the core's gate uses, and for the same two reasons: I9 is a
@@ -1311,9 +1328,13 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let before = frame.stats();
     let highlighted = highlighter.stats();
     let mut frames = Samples::new(SAMPLED_FRAMES);
+    let mut rewrites = 0;
+    let mut rewritten_at = Instant::now();
     for at in 0..SAMPLED_FRAMES {
-        if at % REWRITE_EVERY == 0 {
-            scratch.rewrite_all(FILES, LINES, at / REWRITE_EVERY + 1);
+        if at % REWRITE_EVERY == 0 || rewritten_at.elapsed() >= REWRITE_WITHIN {
+            rewrites += 1;
+            scratch.rewrite_all(FILES, LINES, rewrites);
+            rewritten_at = Instant::now();
             draw(&mut frame, &mut app, &mut highlighter, &mut history);
         }
         // The drawn file, rewritten before each frame. One file rather than a
@@ -1368,11 +1389,14 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     frame.diff(undrawn).expect("diff");
     frame.diff(undrawn).expect("diff");
     let probe = delta(probed, frame.stats());
+    let since = rewritten_at.elapsed();
     assert_eq!(
         probe.reused, 0,
-        "a file the viewport never drew was reusable after {SAMPLED_FRAMES} \
-         frames, so the bulk rewrite settled part-way through and the tail of \
-         this window was not the event"
+        "a file the viewport never drew was reusable {since:?} after the last of \
+         {rewrites} rewrites, across {SAMPLED_FRAMES} frames, so the bulk rewrite \
+         settled part-way through and the tail of this window was not the event. \
+         A gap past {REWRITE_WITHIN:?} means the runner outran the rewrite cadence \
+         rather than the shell doing anything wrong"
     );
 
     // And the screen has to have been full, for the reason the gate above gives.
@@ -1419,8 +1443,10 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
             )
         },
         || {
-            if at % REWRITE_EVERY == 0 {
-                scratch.rewrite_all(FILES, LINES, at / REWRITE_EVERY + 1);
+            if at % REWRITE_EVERY == 0 || rewritten_at.elapsed() >= REWRITE_WITHIN {
+                rewrites += 1;
+                scratch.rewrite_all(FILES, LINES, rewrites);
+                rewritten_at = Instant::now();
                 draw(&mut frame, &mut app, &mut highlighter, &mut history);
             }
             scratch.edit_line(
