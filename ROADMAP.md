@@ -180,7 +180,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
 | ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
 | ✅ | Nothing pins the pane to one file, so reading a file means scrolling past its end into the next | [#297](https://github.com/breferrari/vigia/issues/297) |
-| ✅ | decision: nothing carries a view default, so every pane starts with the toggles a reader has already chosen turned off. **Ruled: a second file**, `~/.config/vigia/config` | [#306](https://github.com/breferrari/vigia/issues/306) |
+| ✅ | decision: nothing carries a view default. **Ruled: a second file**, `~/.config/vigia/config` | [#306](https://github.com/breferrari/vigia/issues/306) |
 | ✅ | Build: the ruling says a reader can set view defaults and nothing reads the file | [#309](https://github.com/breferrari/vigia/issues/309) |
 | ✅ | Braille returns to the band, and the rung stops being a constant | [#244](https://github.com/breferrari/vigia/issues/244) |
 | ✅ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
@@ -233,6 +233,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ⬜ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
+| ⬜ | Turning wrap off leaves the scroll range at the wrapped row count, so scrolling goes erratic. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
 | ✅ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
@@ -342,7 +343,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | §5.1 says the deliberate departures are two, and enumerates four | [#156](https://github.com/breferrari/vigia/issues/156) |
 | ✅ | The absolute frame budgets flake on shared runners, and the failure reads as a regression | [#178](https://github.com/breferrari/vigia/issues/178) |
 | ⬜ | Under a default tmux, a non-active pane may get no mouse events at all | [#188](https://github.com/breferrari/vigia/issues/188) |
-| ✅ | `App::chrome` takes four pointer marks positionally, and every new mark churns thirty call sites. **Fixed in passing by [#313](https://github.com/breferrari/vigia/issues/313)**, which added the fifth and hit the churn | [#191](https://github.com/breferrari/vigia/issues/191) |
+| ✅ | `App::chrome` takes four pointer marks positionally, and every new mark churns thirty call sites | [#191](https://github.com/breferrari/vigia/issues/191) |
 | ✅ | The churn band's heights are ungated, so three mutations to its stacking survive | [#225](https://github.com/breferrari/vigia/issues/225) |
 | ⬜ | WSL inside Windows Terminal gets no row wash, because `WT_SESSION` is read only on Windows | [#226](https://github.com/breferrari/vigia/issues/226) |
 | ✅ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
