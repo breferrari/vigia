@@ -13,15 +13,15 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 >
 > I1's row reads *"Redraw is **event-driven**, never a fixed timer. No filesystem event and no git index change means no work."* Its budget cell is *"**0 wakeups** while idle"* and its measure cell is *"CPU sampled over a 60s idle window; assert no render calls"* — three separate cells, quoted separately here because splicing them reads as one sentence the table does not contain. What was not written down anywhere is that the process **is woken, and draws, for a class of event the row never mentions**, and has been since the mouse was taken in Phase 2.
 
-**The mechanism.** `crossterm`'s `EnableMouseCapture` is a bundle, not a switch: it writes `\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h`, and `?1003h` is **any-event tracking**, motion whether or not a button is held. Each one arrives as `Wake::Input`, and `crates/vigia/src/lib.rs` calls `Shell::regions` (a `Copy` field read: no syscall, no allocation), calls `action_for`, gets `None`, and `continue`s.
+**The mechanism.** `crossterm`'s `EnableMouseCapture` is a bundle, not a switch: it writes `\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h`, and `?1003h` is **any-event tracking**, motion whether or not a button is held. `1000` is press and release, `1002` is motion during a drag; `1003` is the one nothing in this program consumes. A pointer crossing the pane therefore delivers an event **per character cell it crosses** — any-event mode inherits button-event mode's cell granularity, so a sub-cell nudge delivers nothing and the rate is bounded by cells rather than by samples. Each one arrives as `Wake::Input`, and `crates/vigia/src/lib.rs` calls `Shell::regions` (a `Copy` field read: no syscall, no allocation), calls `action_for`, gets `None`, and `continue`s. The comment on that arm named the concern before this ruling existed: *"Redrawing for a key release or a mouse move would make the idle cost non-zero for a reason nobody asked for."*
 
-**And that comment describes the arm rather than the frame, which is where the first draft of this entry was wrong.** `continue` leaves the wake, not the batch.
+**And that comment describes the arm rather than the frame, which is where the first draft of this entry was wrong.** `continue` leaves the wake, not the batch. Once `for wake in batch.drain(..)` closes, `sample_memory`, `shell.draw` and `record_frame` all run **unconditionally** — the paint's own comment says why, *"Once per batch, not once per wake… only the paint is shared"* — so a batch containing nothing but pointer motion performs a memory read (a `/proc/self/status` read on Linux, a syscall on the other two tier-1 targets), a whole-frame collect and paint, and a frame recorded into the p99 the status bar draws. The claim that a motion wake "performs no render" was read off the arm and is false of the loop.
 
-**So this is a gap in the row's letter, not a mis-measurement of it.** *"No filesystem event and no git index change means no work"*: a pointer nudge is neither, and a paint is work. What survives intact is the **measure**, because a sixty-second *idle* window never has a pointer moving in it, so the gate is silent here by construction and in both directions. The distinction I1 is written on — work done rather than packets received — is still the right one, and it is the same distinction the watch engine already turned on, where an idle tree is not a tree the kernel is silent about and the assertion had to move from events delivered to **changes accepted** (`vigia-core` has no renderer, so `stats.ticks` and `stats.filtered` are its form of the same move).
+**So this is a gap in the row's letter, not a mis-measurement of it.** *"No filesystem event and no git index change means no work"*: a pointer nudge is neither, and a paint is work. What survives intact is the **measure**, because a sixty-second *idle* window never has a pointer moving in it, so the gate is silent here by construction and in both directions. The distinction I1 is written on — work done rather than packets received — is still the right one, and it is the same distinction the watch engine already turned on, where an idle tree is not a tree the kernel is silent about and the assertion had to move from events delivered to **changes accepted** (`vigia-core` has no renderer, so `stats.ticks` and `stats.filtered` are its form of the same move). It is only that on this axis the answer comes out the other way. The size is unmeasured and deliberately not guessed at: `ratatui` diffs, so an unchanged buffer writes no bytes to the terminal, and what is real here is work performed rather than output. [#154](https://github.com/breferrari/vigia/issues/154) tracks it.
 
-**What held §11.2 B10, and still holds it after the reversal**, is `crates/vigia/tests/input.rs::pointer_motion_over_a_laid_out_screen_is_still_no_action`, which asserts that motion over a *laid-out* screen produces no action. The fixture matters: the older inert list hands `action_for` a `Regions::default()`, against which every region-gated arm returns `None` whatever it does in production, so a hover written the way the click arm is written would have left it green. **The reason it survives B10 going the other way is worth one line, because it looks like luck and is not**: hover is view state rather than a keymap entry, so the assertion written to catch a hover *being built* is the assertion that keeps hover *out of the keymap*. A gate that forbids a mechanism outlives the ruling that motivated it; one that forbids an outcome does not.
+**What held §11.2 B10, and still holds it after the reversal**, is `crates/vigia/tests/input.rs::pointer_motion_over_a_laid_out_screen_is_still_no_action`, which asserts that motion over a *laid-out* screen produces no action. The fixture matters: the older inert list hands `action_for` a `Regions::default()`, against which every region-gated arm returns `None` whatever it does in production, so a hover written the way the click arm is written would have left it green. That is an *actions* gate and not a paints gate, and nothing in the suite is the latter, because the honest count today is one paint per motion batch rather than zero. **The reason it survives B10 going the other way is worth one line, because it looks like luck and is not**: hover is view state rather than a keymap entry, so the assertion written to catch a hover *being built* is the assertion that keeps hover *out of the keymap*. A gate that forbids a mechanism outlives the ruling that motivated it; one that forbids an outcome does not.
 
-**It cannot be given back.** The obvious repair is to request `1000`, `1002` and `1006` and leave `1003` off, keeping click and drag and losing only the wake. On Windows `EnableMouseCapture::is_ansi_code_supported()` is `false` and `execute!` routes the bundle through the console API, writing **zero bytes**, so hand-written DEC modes would work on Unix and do nothing on Windows. The cost of the repair is the mouse on a tier-1 target, or a second mechanism inside I8's takeover, against a wake that is a channel receive and two pure calls.
+**It cannot be given back.** The obvious repair is to request `1000`, `1002` and `1006` and leave `1003` off, keeping click and drag and losing only the wake. That is not portably available. On Windows `EnableMouseCapture::is_ansi_code_supported()` is `false` and `execute!` routes the bundle through the console API, writing **zero bytes**, so hand-written DEC modes would work on Unix and do nothing on Windows. The cost of the repair is the mouse on a tier-1 target, or a second mechanism inside I8's takeover, against a wake that is a channel receive and two pure calls. It is recorded rather than repaired.
 
 **What it changed.** §5.3 had priced a hover highlight as *"a wake class I1 currently never pays"*, and §11.2 B10 was opened to weigh that trade. The trade did not exist: the wake is sunk either way, so B10 was decided on what hover would *show* instead. `crates/vigia/src/terminal.rs::every_command_is_the_escape_sequence_it_is_named_for` asserts the bundle byte for byte, so if `?1003h` ever stops being requested, this entry stops being true loudly rather than quietly.
 
@@ -34,7 +34,7 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 
 Ruled 2026-08-21 with [#129](https://github.com/breferrari/vigia/issues/129). The frame path stopped parsing under grammars nothing has compiled, which means a hunk can be on screen in plain text with its colour owed; something has to tell a loop blocked on `recv` that the colour has arrived.
 
-**Quoted before it was cited, which is the rule this repository keeps having to relearn.** I1's row: *"Redraw is **event-driven**, never a timer that runs unbidden.
+**Quoted before it was cited, which is the rule this repository keeps having to relearn.** I1's row: *"Redraw is **event-driven**, never a timer that runs unbidden. No filesystem event and no git index change means no work."* Budget: *"**0 wakeups** while idle."* Measure: *"CPU sampled over a 60s idle window; assert no render calls"*, plus `nothing_held_means_no_timer_at_all` on the untimed wait.
 
 **It does not reach a warm.** A warm exists only because a file was written or because a diff was already on screen when the process opened; on a tree nobody touches, nothing is spawned and nothing is ever sent, so *no filesystem event means no work* holds literally. It is bounded by the number of distinct grammars a session meets rather than by time, so it cannot repeat. And it leaves the wait untimed, so the structural half of the measure is untouched: `Shell::patience` still returns `None` with nothing held, and a warm arriving is a `recv` returning rather than a `recv_timeout` expiring.
 
@@ -42,7 +42,7 @@ Ruled 2026-08-21 with [#129](https://github.com/breferrari/vigia/issues/129). Th
 
 **What it is, structurally, is the third sender becoming a fourth.** `crates/vigia/src/lib.rs` already describes the signal handler as *"a **third wake source on the same channel** rather than a new mechanism"*. This is the same move: `Highlighter::warm_ahead` takes a callback, the shell hands it one that sends `Wake::Warmed`, and the arm for it does **nothing**, because the paint after the batch is the whole response.
 
-**The bound is `Shell::request_warm`, and it is one warm in flight.** A demand raised while a warm is running is not queued: the running warm ends with a wake, that wake paints, that paint raises the demand again if it is still true, and the next warm starts.
+**The bound is `Shell::request_warm`, and it is one warm in flight.** A demand raised while a warm is running is not queued: the running warm ends with a wake, that wake paints, that paint raises the demand again if it is still true, and the next warm starts. The loop terminates because the warmer marks every grammar it *had a run at*, including one whose file had vanished by the time it opened it. Otherwise a hunk drawn from a diff whose file is gone would be demanded on every frame forever, which is a livelock with a wake attached; `a_path_that_vanished_does_not_leave_the_frame_asking` is that case, and it was watched failing.
 
 ---
 
@@ -54,7 +54,7 @@ Corrected 2026-08-21 with [#129](https://github.com/breferrari/vigia/issues/129)
 
 **The second reason still holds and was not relitigated.** #129 defers once per **grammar** per session, not once per hunk, so a scroll into new territory under a grammar already met parses inline exactly as it does today.
 
-**The first reason rested on a number measured at the wrong scale.** Those residuals are **whole-file** parses, so each carries a large parse beside the compile it was meant to isolate, and a frame parses one screenful.
+**The first reason rested on a number measured at the wrong scale.** Those residuals are **whole-file** parses, so each carries a large parse beside the compile it was meant to isolate, and a frame parses one screenful. Re-measured at frame scale, twenty-four lines, release, fresh `SyntaxSet` per case:
 
 | | cold | after the warmer read one real 64KB sibling | floor |
 |---|---|---|---|
@@ -64,15 +64,15 @@ Corrected 2026-08-21 with [#129](https://github.com/breferrari/vigia/issues/129)
 
 The middle column **is** the floor. The compile is fully paid by one real sibling, and what the old table was reporting was the cost of parsing another whole file.
 
-**The half of #51's finding that survives, because it decides the implementation.** A *small* sibling is not enough: over a 2.5KB hand-written sample the residual is real, `.js` 80.49ms above floor, `.html` 40.10ms, `.cpp` 37.55ms.
+**The half of #51's finding that survives, because it decides the implementation.** A *small* sibling is not enough: over a 2.5KB hand-written sample the residual is real, `.js` 80.49ms above floor, `.html` 40.10ms, `.cpp` 37.55ms. So the warmer reads `WARM_BYTES` of a real file, and a fixture would not have done.
 
-**And the claim the frame path actually acts on is not the one #51 rejected.** *This grammar is warm* is unavailable at any price and nothing asserts it. Checked against the source rather than assumed: `SyntaxReference::contexts` is private, `ContextId`'s fields are `pub(crate)`, and `Regex::try_compile` compiles a throwaway rather than filling the set's own cell, so there is no eager path to reach for.
+**And the claim the frame path actually acts on is not the one #51 rejected.** *This grammar is warm* is unavailable at any price and nothing asserts it. *Nothing has ever parsed under this grammar* is exact: `syntect` holds every pattern in its own `OnceCell` and exposes no way to fill one but a parse, so the two places in `vigia-core` that build a `ParseState` are the whole population. Checked against the source rather than assumed: `SyntaxReference::contexts` is private, `ContextId`'s fields are `pub(crate)`, and `Regex::try_compile` compiles a throwaway rather than filling the set's own cell, so there is no eager path to reach for.
 
 **The cliff is flat in content size**, which is the observation that separates a compile from a parse and which nothing had recorded: a 594-byte Markdown screenful costs **631.46ms cold and 0.97ms warm**, a 650x penalty on half a kilobyte.
 
-**Why the population is warmed to three grammars and no further.** Measured over this repository, warming one grammar at a time and reading RSS after each: baseline **6.73 MiB**, ten grammars later **64.73 MiB**, with Rust +12.43 MiB and Markdown +19 to +35 MiB. I3's budget is drift rather than a plateau, so that is a bad trade rather than a breach.
+**Why the population is warmed to three grammars and no further.** Measured over this repository, warming one grammar at a time and reading RSS after each: baseline **6.73 MiB**, ten grammars later **64.73 MiB**, with Rust +12.43 MiB and Markdown +19 to +35 MiB. I3's budget is drift rather than a plateau, so that is a bad trade rather than a breach. What a repository *leads* with is different in kind: the agent is near-certain to write the language the repository is mostly made of, so those megabytes are spent within seconds either way and the sweep only moves them earlier. The tail is the speculative part and the cap is what removes it.
 
-**And what "leads with" counts is a grammar, which the index cannot see.** A tally of `.git/index` can only key on the extension, because §6 keeps `syntect` out of `worktree.rs`, and that proxy is sound for one path and unsound for the *selection*: a repository whose YAML is split evenly across `.yml` and `.yaml` has each spelling counted separately at the one moment the counts decide which three grammars are compiled, so it loses to a smaller single-extension language.
+**And what "leads with" counts is a grammar, which the index cannot see.** A tally of `.git/index` can only key on the extension, because §6 keeps `syntect` out of `worktree.rs`, and that proxy is sound for one path and unsound for the *selection*: a repository whose YAML is split evenly across `.yml` and `.yaml` has each spelling counted separately at the one moment the counts decide which three grammars are compiled, so it loses to a smaller single-extension language. The first implementation ranked and truncated in `worktree.rs` on the many-to-one-proxy argument, and the altitude review found it with no failing test behind it. The tally now comes back complete and unranked, the merge happens in `highlight.rs` where a `Scope` is available, and `a_language_spelled_two_ways_is_counted_once` is the gate, watched failing against the per-extension ranking.
 
 **One finding turned up beside this one and is not it.** A 16.8KB Markdown screenful costs **117.00ms with every pattern already compiled**, which is the opposite shape to the cliff above: it tracks bytes on screen instead of being flat in them, and it survives every warm. That is a long-line parse cost, it is I2b and I4 territory rather than I7's, and it is [#261](https://github.com/breferrari/vigia/issues/261). **Closed 2026-08-22, and the shape recorded here is falsified.** Cost does *not* track bytes on screen: 24 empty lines inside a fence cost 25.3ms for 28 bytes of content, and the same 10,288 bytes reflowed from 24 long lines to 138 short ones cost 5.47ms against 5.85ms. What tracked was the number of **block starts**, because Markdown's block-start lookahead ran an exponential table-row test on lines that could never be table rows. See the I9 entries below, which are this finding's actual answer and supersede the mechanism guessed at here.
 
@@ -95,25 +95,25 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 > [!NOTE]
 > **Measured 2026-08-15 while building [#166](https://github.com/breferrari/vigia/issues/166).** The scrollbar's step buttons were asked for as ordinary buttons, and the first question a button raises is whether holding it repeats. It cannot, and the reason is not this program's design but the protocol's: there is no event to hang the repeat on.
 
-**The mechanism, read from `crossterm`'s source rather than assumed.** `MouseEventKind` has exactly eight variants: `Down(button)`, `Up(button)`, `Drag(button)`, `Moved`, and the four `Scroll*`.
+**The mechanism, read from `crossterm`'s source rather than assumed.** `MouseEventKind` has exactly eight variants: `Down(button)`, `Up(button)`, `Drag(button)`, `Moved`, and the four `Scroll*`. There is no variant meaning *the button is still down*, and there is no lower layer carrying one either: the entry above records that the bundle sets `?1003h`, so the terminal is already reporting the most it reports, and `?1003h` is **motion**. A finger resting on a button with the pointer stationary produces the single `Down` and then nothing at all until the pointer moves or the button is released.
 
 **So repeat has to come from a clock, and building one is what the reversal above authorises.** The only implementations available are a timer that fires while a flag says a button is held, or a loop that re-reads the button's state on a schedule, and both are a fixed cadence by another name.
 
-**And which half of I1 refuses that is worth getting right, because the obvious citation is the wrong one.** The first draft of this entry said the clock is "what I1 exists to refuse", and I1's *budget* does not refuse it at all: **0 wakeups while idle**, measured over a sixty-second idle window. That is the same structural blindness the entry above this one records for pointer motion, where the measure is *"silent here by construction"* — and a refusal resting on it would be checkable and wrong, which is worse than no citation. What actually reaches a held-button clock is **I1's first sentence**, which is a claim about mechanism rather than about idleness: *"Redraw is event-driven, never a fixed timer."* A repeat clock is a fixed timer producing redraws whoever is holding what, and no measure needs to catch it for the sentence to hold.
+**And which half of I1 refuses that is worth getting right, because the obvious citation is the wrong one.** The first draft of this entry said the clock is "what I1 exists to refuse", and I1's *budget* does not refuse it at all: **0 wakeups while idle**, measured over a sixty-second idle window. A timer that runs only while a button is held is not idle, nobody holds a mouse button through a sixty-second window, and the gate would therefore stay green whatever the timer did. That is the same structural blindness the entry above this one records for pointer motion, where the measure is *"silent here by construction"* — and a refusal resting on it would be checkable and wrong, which is worse than no citation. What actually reaches a held-button clock is **I1's first sentence**, which is a claim about mechanism rather than about idleness: *"Redraw is event-driven, never a fixed timer."* A repeat clock is a fixed timer producing redraws whoever is holding what, and no measure needs to catch it for the sentence to hold.
 
-**This is not a correction to the phrase everywhere else it appears.** *"The timer I1 forbids"* is this repo's own shorthand and is used correctly in every other place it occurs: the pulse decay, the header's idle word, the memory readout, the poll loop `lib.rs` rejects and §10's highlight tail are all clocks that would run **while nothing is happening**, which is precisely the state the budget measures and precisely where it bites.
+**This is not a correction to the phrase everywhere else it appears.** *"The timer I1 forbids"* is this repo's own shorthand and is used correctly in every other place it occurs: the pulse decay, the header's idle word, the memory readout, the poll loop `lib.rs` rejects and §10's highlight tail are all clocks that would run **while nothing is happening**, which is precisely the state the budget measures and precisely where it bites. A held-button repeat is the one instance where the clock is bounded by an active gesture, so it slips under the measure while still failing the sentence. Worth writing down because the shorthand is otherwise reliable, and a reader who has seen it used well five times will not stop to check the sixth.
 
 §5.3 refused the same thing for animation — *"snap, never ease"* — **reversed 2026-08-27 by the reader** on this entry's own ground: a clock that cannot start on its own never touches I1's idle measure.
 
-**The first ruling made one step per click the affordance, on the grounds that there is no trick that is not a clock.** That half was right and is worth keeping: nobody should go looking for a protocol feature that would give repeat for free, because there is none. What the ruling got wrong was treating "it needs a clock" as the end of the argument rather than the beginning, when the question it should have asked next is *which* clock, and whether a clock bounded by a press is the thing I1's budget was written against.
+**The first ruling made one step per click the affordance, on the grounds that there is no trick that is not a clock.** That half was right and is worth keeping: nobody should go looking for a protocol feature that would give repeat for free, because there is none. What the ruling got wrong was treating "it needs a clock" as the end of the argument rather than the beginning, when the question it should have asked next is *which* clock, and whether a clock bounded by a press is the thing I1's budget was written against. It is not. See the callout at the top of this entry.
 
-**What the reversal did not change** is that the button is not the travel affordance.
+**What the reversal did not change** is that the button is not the travel affordance. The wheel, `j`/`k`, `d`/`u`, `n`/`p`, the digits, `g`, `G` and a draggable thumb are, and the button is for the step none of them expresses with a pointer. That is why the repeat holds a constant rate instead of accelerating: acceleration serves travel and costs precision, and precision is what this control is for.
 
-**The same finding decides the drag.** `input.rs` is a pure function of an event and a layout, with no state between calls, so it cannot know that a drag *began* on a button rather than on the thumb.
+**The same finding decides the drag.** `input.rs` is a pure function of an event and a layout, with no state between calls, so it cannot know that a drag *began* on a button rather than on the thumb. Given that, a `Drag` over a button row has two candidate meanings and both are wrong: stepping makes a press-and-jiggle walk the view a row per twitch, and clamping to the end teleports it there. It is inert instead, which costs nothing real because the last track row already reaches the last window. Holding that reading stateless is what keeps the whole map a table test, and it is the reason the asymmetry between `Down` and `Drag` is a ruling rather than an oversight.
 
 **What holds it** is `crates/vigia/tests/input.rs::a_drag_onto_a_step_button_is_inert`, which asserts the same cell answers a press and refuses a drag, so the two gestures are being told apart rather than the row being dead. The drag ruling survived the reversal untouched, because it never rested on the clock: it rests on `input.rs` having no state, and the repeat's state lives in the loop rather than in that module.
 
-**What holds the reversal** is a different gate, and it is the one to break first if this is ever revisited: `nothing_held_means_no_timer_at_all` asserts that `Held::wait(None, _)` is `None`, which is what makes the loop's receive untimed on an idle monitor.
+**What holds the reversal** is a different gate, and it is the one to break first if this is ever revisited: `nothing_held_means_no_timer_at_all` asserts that `Held::wait(None, _)` is `None`, which is what makes the loop's receive untimed on an idle monitor. Everything else about the repeat is a feel decision; that one is the invariant. A version that returned some large timeout instead would look harmless, pass every other gate in the file, and quietly put this program on a poll loop.
 
 ---
 
@@ -121,23 +121,23 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 **Ruled 2026-08-22 for [#243](https://github.com/breferrari/vigia/issues/243), which parked itself as an I1 amendment and is one.** Asked for from use: *the graph should age*. `History::roll` has a single caller, the tick path, so a quiet worktree left the window frozen.
 
-**The framing that carries it is not staleness.** The window's axis is time. That is I5, and this is a case where two product-class claims pull against each other rather than a case where one of them is being spent for a convenience.
+**The framing that carries it is not staleness.** The window's axis is time. A frozen window keeps its newest sample at the right edge, so a burst from ninety seconds ago draws as *just now*, and `Recency` freezes with it so a file that went quiet keeps its pulse. A monitor advertised as *correct with zero interaction* was incorrect with zero interaction. That is I5, and this is a case where two product-class claims pull against each other rather than a case where one of them is being spent for a convenience.
 
-**Why it is the licence's own purpose rather than a widening of it.** The entry above records the distinction the first clock was admitted on: *every other timer this spec refuses would run while nothing is happening*. This one cannot.
+**Why it is the licence's own purpose rather than a widening of it.** The entry above records the distinction the first clock was admitted on: *every other timer this spec refuses would run while nothing is happening*. This one cannot. It runs while a burst is still decaying through the window, and the window empties `HISTORY_WINDOW` after the last write, so the state a monitor left open overnight is in is an empty window and an untimed wait. Measured rather than assumed: at `t+119s` the window holds one live sample and the path is tracked; at `t+120s` it holds none and the path is gone, because `roll` clears every track once the whole window has turned over.
 
-**The second condition is restated, not dropped.** It read *"it may not outlive the gesture that armed it"*. `SCROLL_LINGER` is `now + 220ms`, so the direction arrows' clock has always outlived the gesture that armed it and nobody called that an amendment: the condition has meant a *bounded* outliving since the day it was written.
+**The second condition is restated, not dropped.** It read *"it may not outlive the gesture that armed it"*. `SCROLL_LINGER` is `now + 220ms`, so the direction arrows' clock has always outlived the gesture that armed it and nobody called that an amendment: the condition has meant a *bounded* outliving since the day it was written. What #243 changes is that the thing which arms a clock may be a change in the worktree as well as a reader's gesture, and the bound is the window rather than a release.
 
 **Three measurements, because a ruling that touches I1 should carry them.** An ageing wake, in release, at the 256-path cap with a sample boundary crossed on every round: **165µs**, against I9's 16ms, which is 1% of one frame budget. An ordinary tick on the same fixture is **529µs**, and the difference is the status walk, which an ageing wake does not do because it is not a filesystem event. And the drain is bounded at `HISTORY_SAMPLES`, so ageing one burst to nothing costs about **19.8ms of CPU spread over two minutes**.
 
-**Those figures are corrected from the ones this ruling was first written with**, and the correction is the reason the gate over them was rebuilt. They read 89.9µs against 458µs, measured on a twenty-path fixture whose rounds all landed inside one second: no sample boundary was crossed, so neither arm paid the projection an ageing wake actually causes, and the store held a twelfth of the paths the walk is priced at.
+**Those figures are corrected from the ones this ruling was first written with**, and the correction is the reason the gate over them was rebuilt. They read 89.9µs against 458µs, measured on a twenty-path fixture whose rounds all landed inside one second: no sample boundary was crossed, so neither arm paid the projection an ageing wake actually causes, and the store held a twelfth of the paths the walk is priced at. The conclusion did not move and the margin narrowed from a fifth to a third.
 
-**What was declined, and on which number.** A period derived from the drawn cell rather than from the store's sample: a band cell at 109 columns covers 1.1 seconds and a sparkline bucket covers five, so a coarser tick would skip wakes that change no pixel. It is refused because it would cap a cost measured at 165µs, and `CLAUDE.md` holds a cap to a refusal's bar.
+**What was declined, and on which number.** A period derived from the drawn cell rather than from the store's sample: a band cell at 109 columns covers 1.1 seconds and a sparkline bucket covers five, so a coarser tick would skip wakes that change no pixel. It is refused because it would cap a cost measured at 165µs, and `CLAUDE.md` holds a cap to a refusal's bar. The period is `HISTORY_SAMPLE`, which is the finest interval at which any drawn cell can change.
 
-**And what was declined on a reason rather than a number.** #243 proposed running the clock while the masthead is up, on the ground that `m` is a gesture.
+**And what was declined on a reason rather than a number.** #243 proposed running the clock while the masthead is up, on the ground that `m` is a gesture. The sparklines and the pulse are drawn whether or not the masthead is and are on the same window, so a clock gated on the band would leave the two elements disagreeing about what time it is, which is the thing [#234](https://github.com/breferrari/vigia/issues/234) exists to forbid. One store, one roll, and coherence by construction.
 
-**What it costs the pulse, recorded because a reader will notice it. Reversed 2026-08-26 by [#345](https://github.com/breferrari/vigia/issues/345), and the paragraph is kept rather than rewritten because the reader did notice: everything below is true of the row's *ink* and was true of the `●` for four days. The mark is `History::newest` now and has no decay of its own.** `Recency::Pulse` means a path was named by the newest burst and has ink in the newest sample, so with the window ageing on its own the mark now expires at the next sample boundary instead of surviving until something else is written. **Amended 2026-08-25 by [#313](https://github.com/breferrari/vigia/issues/313), and it is the "arbitrarily short" clause that was wrong rather than the shape.** Reported from a live pane as the dot no longer showing up. Measured across the grid: a write at +0ms into a sample pulsed for 1s, at +500ms for 500ms, at **+990ms for 10ms** and at **+999ms for 5ms**. **The mark now survives the newest `PULSE_SAMPLES` samples rather than the newest one**, so its life is `[HISTORY_SAMPLE, PULSE_SAMPLES x HISTORY_SAMPLE]`, closed at both ends and the *worst* case is what the best case used to be. **What is untouched is this paragraph's refusal of a duration**, which was and is the right refusal: a sample count needs no second clock, no wall time beside the grid, and no wake that was not already going to happen — the roll that ages the window is still the only thing that retires the mark. Giving the mark a duration of its own means a second clock per track running on wall time beside an element running on the sample grid, so the two would disagree about how long ago *now* was, which is what #234 forbids. **The frame a burst causes always keeps its pulse**, held by construction: one instant per turn of the loop, read by both the tick and the roll, so a boundary cannot fall between a write and the paint it triggered.
+**What it costs the pulse, recorded because a reader will notice it. Reversed 2026-08-26 by [#345](https://github.com/breferrari/vigia/issues/345), and the paragraph is kept rather than rewritten because the reader did notice: everything below is true of the row's *ink* and was true of the `●` for four days. The mark is `History::newest` now and has no decay of its own.** `Recency::Pulse` means a path was named by the newest burst and has ink in the newest sample, so with the window ageing on its own the mark now expires at the next sample boundary instead of surviving until something else is written. Its life is uniform on `(0, HISTORY_SAMPLE]`: half a second on average, and arbitrarily short for a write landing just before a boundary. Preferred to both alternatives. **Amended 2026-08-25 by [#313](https://github.com/breferrari/vigia/issues/313), and it is the "arbitrarily short" clause that was wrong rather than the shape.** Reported from a live pane as the dot no longer showing up. Measured across the grid: a write at +0ms into a sample pulsed for 1s, at +500ms for 500ms, at **+990ms for 10ms** and at **+999ms for 5ms**. An agent saving files continuously lands wherever it lands, so the mark was a coin toss and the reader was losing it — and *"arbitrarily short"* was written down here as a cost that had been weighed, when what it actually described was the element failing to exist about half the time. **The mark now survives the newest `PULSE_SAMPLES` samples rather than the newest one**, so its life is `[HISTORY_SAMPLE, PULSE_SAMPLES x HISTORY_SAMPLE]`, closed at both ends and the *worst* case is what the best case used to be. **What is untouched is this paragraph's refusal of a duration**, which was and is the right refusal: a sample count needs no second clock, no wall time beside the grid, and no wake that was not already going to happen — the roll that ages the window is still the only thing that retires the mark. What moved is a count, not a mechanism. Not expiring at all is the freeze itself, and it drew a two-minute-old file at full brightness beside a nearly drained band. Giving the mark a duration of its own means a second clock per track running on wall time beside an element running on the sample grid, so the two would disagree about how long ago *now* was, which is what #234 forbids. The mark means *there is ink in the newest cells*, and since the amendment above there are `PULSE_SAMPLES` of them at a second each. **The frame a burst causes always keeps its pulse**, held by construction: one instant per turn of the loop, read by both the tick and the roll, so a boundary cannot fall between a write and the paint it triggered. That was a real defect for one commit, found by two review agents on disjoint remits, and the parameter that closed it is the gate.
 
-**What holds it** is `an_empty_window_and_nothing_held_means_no_timer_at_all`, written the way `nothing_held_means_no_timer_at_all` is: it asserts the *value* the loop's wait is given rather than a behaviour observed around it.
+**What holds it** is `an_empty_window_and_nothing_held_means_no_timer_at_all`, written the way `nothing_held_means_no_timer_at_all` is: it asserts the *value* the loop's wait is given rather than a behaviour observed around it. A version that returned a large timeout for an empty window would look harmless and put an idle monitor on a poll loop.
 
 ---
 
@@ -219,32 +219,32 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 **`crossterm` has shipped the mechanism for years.** `EnableFocusChange` writes `?1004h` and `DisableFocusChange` writes `?1004l`; `Event::FocusGained` and `Event::FocusLost` already exist and the keymap already answers both with `None`, which `crates/vigia/tests/input.rs::nothing_a_reader_did_not_ask_for_becomes_an_action` asserts by listing them among the inert events. So the missing piece was one step in `TAKEOVER`, never a capability.
 
-**And it is portable by a route that is the *opposite* of the mouse bundle's**, which is the trap for anyone reasoning from `terminal.rs`'s module header.
+**And it is portable by a route that is the *opposite* of the mouse bundle's**, which is the trap for anyone reasoning from `terminal.rs`'s module header. `EnableMouseCapture` overrides `is_ansi_code_supported` to `false` on Windows, so `execute!` diverts it to the console API and writes zero bytes. `EnableFocusChange` carries **no such override**, so on Windows with ANSI it really does emit `?1004h`; and where ANSI is unavailable its `execute_winapi` is a deliberate no-op, commented *"Focus events are always enabled on Windows"*, because `event/source/windows.rs` maps `InputRecord::FocusEvent` to the two events unasked. Two mouse-adjacent commands in one crate, two different platform stories. Do not generalise from the one this repo happened to take first.
 
-**The Windows half is true and its obvious citation is a code comment, which is not evidence about Windows. Worse, Microsoft's own reference says the opposite**: `FOCUS_EVENT_RECORD` is documented as *"used internally and should be ignored"* with `bSetFocus` marked *"Reserved"*. What actually supports the claim is conhost: `microsoft/terminal`'s `InputBuffer::WriteFocusEvent` pushes a synthesized focus event unconditionally when the console is **not** in VT input mode, and `crossterm`'s raw mode clears only the line, echo and processed-input flags and never sets `ENABLE_VIRTUAL_TERMINAL_INPUT`, so this program is on exactly that branch.
+**The Windows half is true and its obvious citation is a code comment, which is not evidence about Windows. Worse, Microsoft's own reference says the opposite**: `FOCUS_EVENT_RECORD` is documented as *"used internally and should be ignored"* with `bSetFocus` marked *"Reserved"*. What actually supports the claim is conhost: `microsoft/terminal`'s `InputBuffer::WriteFocusEvent` pushes a synthesized focus event unconditionally when the console is **not** in VT input mode, and `crossterm`'s raw mode clears only the line, echo and processed-input flags and never sets `ENABLE_VIRTUAL_TERMINAL_INPUT`, so this program is on exactly that branch. Recorded with the contradiction visible, because a reader who meets the Microsoft page first will otherwise conclude this entry is wrong, and *"the published doc is stale, here is the source that supersedes it"* is the finding rather than an embarrassment.
 
-**No terminal that was checked is the gap, and the six are named because the count is the claim.** Alacritty was the one the reopening could not confirm and it does support the mode: its terminfo declares `XF, kxIN=\E[I, kxOUT=\E[O` and `alacritty_terminal` carries `NamedPrivateMode::ReportFocusInOut`.
+**No terminal that was checked is the gap, and the six are named because the count is the claim.** Alacritty was the one the reopening could not confirm and it does support the mode: its terminfo declares `XF, kxIN=\E[I, kxOUT=\E[O` and `alacritty_terminal` carries `NamedPrivateMode::ReportFocusInOut`. WezTerm **implements** it (`wezterm-escape-parser`'s `FocusTracking = 1004`), which is the citable form; its *docs* do not mention 1004 outside a 2020 changelog line that adds its own caveat, *"local (not multiplexer) terminal sessions"*. xterm originated it, in patch #224 of 2007. iTerm2 handles `case 1004` in `VT100Terminal.m` and lists focus reporting in its published feature spec. kitty defines `FOCUS_TRACKING (1004 << 5)` in `modes.h` and declares `XF` in its terminfo. So the evidence is source and terminfo for four of them and a published spec for two, which is worth saying because an earlier draft claimed all six were *"confirmed against their own specifications"* and two of them publish none.
 
-**And the list stops there on purpose.** §11.1's colour ladder already rules that a terminal list is *"evidence about terminals someone checked rather than a claim about the ones nobody has"*, and the first draft of the ruling said *every tier-1 terminal implements the mode* — a quantifier over a set this repository has never defined, since "tier-1" here means a build target. Terminal.app was not checked and is the nearest unexamined case, given §11.1 already singles `Apple_Terminal` out as the entry that breaks the colour table; no `nsterm` entry in ncurses' terminfo uses `xterm+focus`. ncurses also records terminals that implement the mode *badly* (its own comment: *"Some terminal emulators implement xterm focus in/out, but do it incorrectly, interfering with user applications"*, with notes against xterm.js, mlterm and st).
+**And the list stops there on purpose.** §11.1's colour ladder already rules that a terminal list is *"evidence about terminals someone checked rather than a claim about the ones nobody has"*, and the first draft of the ruling said *every tier-1 terminal implements the mode* — a quantifier over a set this repository has never defined, since "tier-1" here means a build target. Terminal.app was not checked and is the nearest unexamined case, given §11.1 already singles `Apple_Terminal` out as the entry that breaks the colour table; no `nsterm` entry in ncurses' terminfo uses `xterm+focus`. ncurses also records terminals that implement the mode *badly* (its own comment: *"Some terminal emulators implement xterm focus in/out, but do it incorrectly, interfering with user applications"*, with notes against xterm.js, mlterm and st). None of that changes the ruling, because the ladder's bottom rung is the residual and these terminals land on it; it changes what may be *said*.
 
-**The Alacritty changelog silence is not explained, and the explanation first offered was wrong.** The draft said *"a feature present since before a changelog started is invisible in it"*.
+**The Alacritty changelog silence is not explained, and the explanation first offered was wrong.** The draft said *"a feature present since before a changelog started is invisible in it"*. That does not fit: Alacritty's changelog begins in 2018, and the terminfo capabilities cited above were added in 2023 and are unmentioned in it. The useful half survives without the mechanism: **an absence in a changelog is not evidence about a feature**, and treating it as evidence is what nearly kept Alacritty on the unsupported list.
 
 **The gap is a multiplexer default.** tmux's `focus-events` defaults to **off** (`options-table.c`, `.default_num = 0`), and `tty.c::tty_update_features` gates the enable sequence on that option, which is the direct evidence that under a default tmux the outer terminal's focus reports are neither requested nor forwarded. That is not every reader: §1 asks for a pane beside an agent and names no multiplexer, so a terminal's own split has the rung and tmux without that setting does not.
 
 **A second tmux default may be larger than this one, and it is a question about the mouse this program already has rather than about hover.** Read in `server-client.c`: `server_client_reset_state` takes its mode from the **active** pane, and the loop that unions `MODE_MOUSE_ALL` across every pane sits inside a guard on the session's `mouse` option, which itself defaults to off (`tmux.h`, `TMUX_MOUSE 0`). If that reading is right, then under a default tmux a pane that is not the active one never has `?1003h` requested on its behalf, so `vigia` sitting beside the agent the reader is typing in would receive no motion at all: no wheel, no click, no hover. **This was read from source and not reproduced**, one `tmux new-session` would settle it, and it is [#188](https://github.com/breferrari/vigia/issues/188) rather than a sentence in a ruling, because it is a claim about shipped behaviour that predates B10 and is not this ruling's to assert.
 
-**One citation is weaker than it looks and is stated at its real strength.** tmux issue 4909 reports terminal-level focus-out being absorbed rather than relayed with several panes and `focus-events on`. It was reported against 3.4 and the reporter said it reproduced on master; it was **closed for want of requested logs, never diagnosed and never reproduced by a maintainer**.
+**One citation is weaker than it looks and is stated at its real strength.** tmux issue 4909 reports terminal-level focus-out being absorbed rather than relayed with several panes and `focus-events on`. It was reported against 3.4 and the reporter said it reproduced on master; it was **closed for want of requested logs, never diagnosed and never reproduced by a maintainer**. So it is a report and not evidence, and it is kept only because a reader following the link would otherwise find a closed issue and quietly downgrade the whole survey.
 
-**What that changed in the ruling, stated so nobody re-derives it as an objection.** It did not restore the decline: inside the pane `?1003h` reports at cell granularity and retires the mark without any of this. It bounded the residual to one case (the pointer leaves the pane with the window still focused, on an idle tree) and made that case *ordinary* for one common setup rather than exotic, which is what forced the constraint the ruling turns on: the mark must be quiet enough that a stale one costs nothing.
+**What that changed in the ruling, stated so nobody re-derives it as an objection.** It did not restore the decline: inside the pane `?1003h` reports at cell granularity and retires the mark without any of this. It bounded the residual to one case (the pointer leaves the pane with the window still focused, on an idle tree) and made that case *ordinary* for one common setup rather than exotic, which is what forced the constraint the ruling turns on: the mark must be quiet enough that a stale one costs nothing. A survey that had come back clean would have produced a weaker ruling.
 
 ## B10 — what the mark is drawn in, and the contradiction it shipped with
 
 > [!NOTE]
 > **Read 2026-08-16 while ruling [#193](https://github.com/breferrari/vigia/issues/193).** The section above is about whether a hover mark can be *cleared*. This one is about what it is *drawn in*, which the adoption pass got wrong in a way no gate could see, and it is here rather than in `SPEC.md` because the contrast numbers date.
 
-**§5.3 shipped two sentences that contradict each other, one day apart in the same section.** B10's derivation rules that a mark about an input device *"must be the quietest thing still visible in that region"*, and gives the reason: *"a glance has to reach the worktree first and the pointer never"*, because the mark can go stale where a recency cannot. The colour paragraph two below it ruled `Theme::path_hover` to sit *"above all three"* recency weights, *"brighter than `Theme::path`'s pulse weight"*.
+**§5.3 shipped two sentences that contradict each other, one day apart in the same section.** B10's derivation rules that a mark about an input device *"must be the quietest thing still visible in that region"*, and gives the reason: *"a glance has to reach the worktree first and the pointer never"*, because the mark can go stale where a recency cannot. The colour paragraph two below it ruled `Theme::path_hover` to sit *"above all three"* recency weights, *"brighter than `Theme::path`'s pulse weight"*. The shell implemented the second, so the pane's most perishable claim was its loudest text. Nothing failed. Every gate over it asserted **separation** from the recency ladder, which the loud form satisfies perfectly, so the defect was invisible to eleven green assertions and visible to one reader looking at the screen.
 
-**The correction keeps the half that had a reason and drops the half that had a placement.** Quietness is derived from staleness; *above all three* was derived from anti-collision, and anti-collision was never being done by the brightness. `SPEC.md` §5.3 already named the real channel in the same paragraph: *"it underlines, which is what keeps the two apart where colour runs out"*, and observed that on `ansi` the brightest path *"has nowhere further to go"*.
+**The correction keeps the half that had a reason and drops the half that had a placement.** Quietness is derived from staleness; *above all three* was derived from anti-collision, and anti-collision was never being done by the brightness. `SPEC.md` §5.3 already named the real channel in the same paragraph: *"it underlines, which is what keeps the two apart where colour runs out"*, and observed that on `ansi` the brightest path *"has nowhere further to go"*. That observation was treated as a difficulty the brightness had to survive; it is the proof the brightness was not load-bearing.
 
 **The value is `Theme::bar_hover`'s, so the pointer reads as one mark rather than as two.** A step button, a thumb and a listed path are three surfaces one gesture crosses, and until this they answered it in two different visual languages.
 
@@ -258,17 +258,17 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 The `ansi` row is the one to read twice. Sixteen names hold nothing between colour 8 and `Gray`, so a quiet mark on that palette is the cold rung's colour exactly, and a reader hovering an already-cold file sees only the underline change. That is a real narrowing and it is accepted rather than hidden: it is the case §5.3 nominates the underline for, and the alternative is the loud form that ranked the pointer above the worktree.
 
-**The lesson is the same one B10 has now taught three times**, and it is worth the third telling because the shape changed: the first two were a *reason* that expired, and this is two reasons that never agreed. **Where a document rules twice on one thing, the second ruling is not a restatement and should be read as a claim.**
+**The lesson is the same one B10 has now taught three times**, and it is worth the third telling because the shape changed: the first two were a *reason* that expired, and this is two reasons that never agreed. A section can be internally inconsistent and every test still pass, because tests assert against the implementation and the implementation can only follow one of the sentences. **Where a document rules twice on one thing, the second ruling is not a restatement and should be read as a claim.**
 
 ## I9 — #261's stated cause was wrong in every part, and what it cost to find out
 
 Recorded 2026-08-22, closing [#261](https://github.com/breferrari/vigia/issues/261). It is here rather than only in the issue because the wrong explanations are plausible, they were each believed for a while, and the next reader who meets a slow Markdown frame will reach for them in roughly this order.
 
-**What was claimed.** A screenful of this repository's prose cost 117ms fully warm. The issue was filed undiagnosed on purpose, with a guess attached: the prose here is one line per paragraph, Markdown parses at roughly 7ms/KB against Rust's 2ms/KB, and a 24-line screenful of `SPEC.md` is therefore 16.8KB of genuine work.
+**What was claimed.** A screenful of this repository's prose cost 117ms fully warm. The issue was filed undiagnosed on purpose, with a guess attached: the prose here is one line per paragraph, Markdown parses at roughly 7ms/KB against Rust's 2ms/KB, and a 24-line screenful of `SPEC.md` is therefore 16.8KB of genuine work. The suggested remedy was a bound on what a frame parses.
 
 **What was true.** Bytes do not predict the cost at all. Twenty-four *empty* lines inside a fence cost 25.3ms for 28 bytes of content; the same 10,288 bytes of `SPEC.md` reflowed from 24 long lines to 138 short ones cost 5.47ms against 5.85ms, so a display-line bound would not have helped either; and per-byte cost across this repository's own Markdown varies 100x line to line. "7ms/KB" is not a rate. The real mechanism is Markdown's block-start lookahead, whose last alternative tests for a table row: both of its branches require a literal `|`, so a line without one can never match, and the engine established that by exploring the embedded inline-content alternation first, at roughly 4x per code span until `fancy-regex`'s backtrack limit truncated it.
 
-**The one thing the title got right for the wrong reason.** One-line-paragraph prose really is the shape that hurts, and not because of line length: Markdown runs the block-start lookahead only on a block's **first** line, so a continuous paragraph pays once and a screenful of one-line paragraphs pays every row. Eleven rows of one continuous paragraph measured **cheaper in the frame (15.30ms) than a single row of the same content parsed alone (16.88ms)**, which is the tell that ten of them never reached the pattern.
+**The one thing the title got right for the wrong reason.** One-line-paragraph prose really is the shape that hurts, and not because of line length: Markdown runs the block-start lookahead only on a block's **first** line, so a continuous paragraph pays once and a screenful of one-line paragraphs pays every row. This was measured while building the gate, and it is why the gate's fixture separates its lines with blank lines. Eleven rows of one continuous paragraph measured **cheaper in the frame (15.30ms) than a single row of the same content parsed alone (16.88ms)**, which is the tell that ten of them never reached the pattern. A fixture written the obvious way would have been green against the very defect it was built for, and was, twice.
 
 **Four mechanisms that were proposed and are refuted.** Re-running them is pure cost.
 
@@ -285,14 +285,14 @@ Recorded 2026-08-22, closing [#261](https://github.com/breferrari/vigia/issues/2
 
 Same pass. `codegen-units = 1` had been in `[profile.release]` since the budgets were first written, on the ordinary reasoning that fewer codegen units optimise harder.
 
-**On Windows it was making `fancy-regex` compilation roughly 6x slower**, and because `syntect` compiles patterns lazily on first use, that landed on frames a reader was waiting for: a 24-line `sh` fenced block cost 286.91ms of parse at 1 and 22.39ms at 2.
+**On Windows it was making `fancy-regex` compilation roughly 6x slower**, and because `syntect` compiles patterns lazily on first use, that landed on frames a reader was waiting for: a 24-line `sh` fenced block cost 286.91ms of parse at 1 and 22.39ms at 2. It is a cliff at 1, not a gradient, and `lto` is irrelevant either way.
 
 **On Linux it does nothing at all**, which is the part worth recording. Re-measured 2026-08-22 interleaved over three rounds against three separately built binaries, `codegen-units` 1, 2 and 16 sit within 3% on every fixture, and the cold parse (which is where a compile would show) is 11.999ms at 1 against 12.113ms at 2, within 1%. The toggle was applying: the binary went 3,493,720 to 3,604,896 to 4,077,632 bytes. macOS has never been measured by anyone.
 
 Two lessons, and the second is the general one:
 
 - **A number measured on one target is a claim about that target.** The whole of the original write-up was going to be entered as a property of the profile, and it would have been wrong on two of the three tier-1 targets. `SPEC.md` §9 ships four; a `[profile.release]` key is shared by all of them and a measurement is not.
-- **A gate calibrated against a platform-specific artefact encodes that artefact as a requirement.** `warm.rs` asserted a 10x cold-to-warm ratio, sized against a Windows cold parse that was mostly the codegen penalty. The first time the suite ran on Linux it failed, at 5.70x, and it failed identically at `codegen-units` 1 and 2, so it had never been this platform's number: nothing had ever run it here.
+- **A gate calibrated against a platform-specific artefact encodes that artefact as a requirement.** `warm.rs` asserted a 10x cold-to-warm ratio, sized against a Windows cold parse that was mostly the codegen penalty. The first time the suite ran on Linux it failed, at 5.70x, and it failed identically at `codegen-units` 1 and 2, so it had never been this platform's number: nothing had ever run it here. Lowering the constant would have kept the shape and moved the edge. It now asserts what `warm` actually claims, in absolute terms that no codegen setting can re-invalidate: the warmed parse fits inside a frame, and warming removed a frame's worth of work from the one behind it.
 
 ## B13 — the sheet's height axis dropped gestures in silence, and the width axis still can
 
@@ -322,7 +322,8 @@ group was 43 columns wide and a 40 column pane has 40 to give.
 
 **The one string that made it 43.** `MOUSE`'s tight verbs topped out at
 `scroll what you point at` (24) and `one row, repeats held` (21); the keyboard
-group's topped out at 18, and keys at `click a track` (13). At 17 and 19 the field is 19, the sheet is
+group's topped out at 18, and keys at `click a track` (13). So the table's verb
+field was the wheel's alone. At 17 and 19 the field is 19, the sheet is
 `13 + 2 + 19 + 4 = 38`, and 40 columns of room takes it with two to spare.
 
 **After.** Every pane of 38 columns and up reaches all sixteen, at every height
@@ -331,9 +332,16 @@ and below 30 nothing is drawn. The narrowest sheet the ladder draws went from 24
 columns to 30, because every rung charges the page counter's widest spelling so the
 ordinals can never run into the close control.
 
-**And that reason is the second one this ledger has recorded for the same charge.** The first was that it keeps a centred box the same size between pages.
+**And that reason is the second one this ledger has recorded for the same charge.**
+The first was that it keeps a centred box the same size between pages. A mutation
+removing the charge left `the_box_does_not_resize_between_pages` green and reddened
+two width gates, which is the opposite of what the claim predicted: `sheet_fields`
+measures over the whole row set and every page of a pane shares that set, so the
+width was page-independent already. Both claims are about the same line and only
+one of them is true.
 
-**The two-column rung moved with the copy and the plan did not predict it.** `sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
+**The two-column rung moved with the copy and the plan did not predict it.**
+`sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
 its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew
 eleven gestures and drew sixteen on one page after it. (**B13's counts throughout
 this section are B13's own and are not current**: `r` and then `s` were added
@@ -345,7 +353,11 @@ this ledger exists to catch.
 **What the counter cost, found by a gate rather than by reading.** The first
 `sheet_counter_floor` asked the formatter for `(16, 16)` and got the *short*
 spelling, ten columns rather than thirteen, because that pair is the one case the
-range form never draws.
+range form never draws. Every rung was then three columns narrower than the counter
+it had to fit and the sheet drew at 27 where the ruling says 30. The fix is a
+maximum over the pairs the planner can actually return, taken once per process.
+Deriving the width arithmetically instead would have been the same defect one layer
+over: two expressions agreeing about a sum by hand.
 
 ## B13 — what the audit found that the ruling had shipped
 
@@ -353,7 +365,9 @@ Both defects are B13's own, both were introduced by the change that made the
 sheet page, and neither was visible to the suite that shipped it.
 
 **The close control advanced.** A click on `✕` returned `Action::ToggleSheet`,
-which is the action `?` sends, and once `?` meant *advance* the control did too. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both
+which is the action `?` sends, and once `?` meant *advance* the control did too.
+On a six-page pane a reader needed six clicks to leave, and the pointer has no `?`
+to fall back on. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both
 stated the opposite while it did this, which makes it the fourth false claim in
 this element's documentation inside one pass.
 
@@ -368,7 +382,10 @@ An identity is not an outcome.
 
 **The last page's box moved.** `paged_fit` sized the frame from `take`, which is a
 remainder on the last page, and `sheet_plan` centres the box on its height, so the
-final page shrank by the remainder and slid down half of it.
+final page shrank by the remainder and slid down half of it. The close control went
+with it, and the row it vacated fell through to a scrollbar the reader could not
+see. The box is `capacity + SHEET_FRAME` on every page now, with the tail blank
+inside the frame.
 
 `the_box_does_not_resize_between_pages` recorded `(left, width)` and those are
 exactly the two edges that did not move. It now records all four, and a second gate
@@ -378,7 +395,10 @@ once and paints, so the blank tail is outside its reach by construction.
 
 **Twenty mutations, twenty killed.** Four of them are the four above and the
 fixes' own gates; the rest cover the ladder, the clamp, the counter, the drop
-order and the drain. A mutation that never applied and a mutation the suite failed to kill
+order and the drain. Two survived their first run and both were instrument
+failures rather than gaps: one ran against a test binary that did not contain the
+test, and one applied to a file a previous iteration's `git checkout` had already
+reverted. A mutation that never applied and a mutation the suite failed to kill
 report identically, and they call for opposite responses.
 
 ## B14 — the rail arrived on its own, and one number is the whole argument
@@ -387,12 +407,19 @@ The ruling is `SPEC.md` §11.2 B14 and what the shell does is §11.1. This is th
 trade it rests on, kept here because the reversal is narrow and the part that is
 *not* reversed is the part most likely to be re-argued.
 
-**What was reversed.** Not the width.
+**What was reversed.** Not the width. [#252](https://github.com/breferrari/vigia/issues/252)
+derived 134 rather than choosing it, and that derivation stands: both regions read
+one glance ladder, so splitting a pane costs each half the width the whole had, and
+a split costs no rung only where both halves and the undivided pane one column
+below sit on the same plateau. There are two plateaus and the other needs a
+328-column pane, so 134 is the only answer. What was reversed is that **crossing it
+was automatic**.
 
 **The number that decides it, and §11.1 already stated it.** At 133 the diff plans
 against 129 columns; at 134 against 60. Widening a terminal past a threshold nobody
 chose more than halved the region this tool exists to show. §11.1 called that "the
-feature rather than a defect", and it is, *for a reader who asked*.
+feature rather than a defect", and it is, *for a reader who asked*. The same
+sentence describing a reader who did not is the reason this reopened.
 
 **Why an opt-out was rejected rather than an opt-in.** Both need the same discovery
 path: the gestures sheet names the key either way. Given that, the question is only
@@ -401,7 +428,8 @@ that changes nothing.
 
 **And the picture stopped being an exception.** `assets/preview.svg` is a
 109-column render, so §5.1 could only say the picture and the code "describe the
-same pane" by noting the picture sits below the arrival width.
+same pane" by noting the picture sits below the arrival width. With the rail asked
+for, they describe the same pane at every width.
 
 **What it cost, which is the sheet and not the pane.** A key is a row, so the
 gestures table went from eleven keyboard rows to twelve and every row count in
@@ -411,9 +439,11 @@ are not current**: B15 and then B16 moved them again. The current ones are in
 §11.1.) **No width moved**, and that is what
 kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left
 rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28
-wide, 13 and 18 tight.
+wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording
+because the plan made them before the run rather than after.
 
-**The keep-set did not move, and the reason first written for that was false.** `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and
+**The keep-set did not move, and the reason first written for that was false.**
+`r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and
 `SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at
 rank eight of `DROP_ORDER`, two before `f`, with `s` between them since B16.
 
@@ -434,7 +464,10 @@ the second where the sentence was checkable against a table in the same reposito
 
 **One instrument note, from the pass rather than the ruling.** `cargo test
 --workspace` stops at the first failing binary, so a grep for `FAILED` over its
-output reports only that binary's failures and reads as green once it passes. `--no-fail-fast` is the flag, and a count that cannot
+output reports only that binary's failures and reads as green once it passes. Two
+counts in this pass were taken that way and both were wrong: the first was a
+*compile* failure with no `FAILED` line at all, and the second hid twenty-nine
+failures in later binaries. `--no-fail-fast` is the flag, and a count that cannot
 see a compile error is not a count.
 
 ## B15 — the arrows were free, and the only thing they cost is a spelling on the sheet
@@ -451,12 +484,16 @@ sentence after the one ruling a long line clipped rather than wrapped. (The firs
 draft of this section said "the same sentence"; it is the adjacent one, and being
 precise about that is cheaper than being caught being loose about it.) So the arrows
 were contested by a rejected alternative rather than by an open row, and the ruling
-is cheaper than the issue that asked for it.
+is cheaper than the issue that asked for it. Recorded because the pattern is now
+familiar here: a premise written into an issue reads as settled the next day, and
+the issue's author is the least likely person to re-check it.
 
 **The one measured cost is the tight spelling of one keys cell.** The gestures
-sheet's tight keyboard keys field is eleven columns, on `Space  PgDn`. Carrying it at the tight spelling would take the
+sheet's tight keyboard keys field is eleven columns, on `Space  PgDn`. The arrowed
+cell `n  →  /  p  ←` is thirteen. Carrying it at the tight spelling would take the
 keyboard-only rung from **35 columns to 37**, so panes of 35 and 36 would fall to
-the next rung down and lose their twelve gestures.
+the next rung down and lose their twelve gestures. The whole-table rung is unmoved
+either way, because the mouse group's `click a track` is already thirteen.
 
 Two columns of pane losing gestures to an **alias** is the wrong trade, so the
 arrows are named at the wide spelling only. That is also the established
@@ -464,7 +501,8 @@ convention: `q  Esc  Ctrl+C  Ctrl+D` becomes `q  Esc` and `g  Home  /  G  End`
 becomes `g  /  G`. `j  k  ↓  ↑` is the exception and it keeps its arrows because
 there they cost nothing, which is the same test applied and answered differently.
 
-**No row was added, and that is why this diff is small where #295's was large.** An alias goes in an existing cell, so `KEYBOARD` was still twelve rows, the counter
+**No row was added, and that is why this diff is small where #295's was large.**
+An alias goes in an existing cell, so `KEYBOARD` was still twelve rows, the counter
 still counted to seventeen, and every rung height and reachability boundary §11.1
 states was untouched. #295 added a row and moved every one of them. (**Those
 numbers are B15's own and are not current**: B16 added `s` the next day and moved
@@ -480,7 +518,8 @@ inherited, and what a thirteenth key did to the sheet.
 backs a short screen up so the diff's last row rests on the bottom, and it skips
 that when the position is already the first one the walk can reach. That test is
 spelled `view.top != Position::default()`, and `Position::default()` is *file
-zero, row zero*. Under a pin it does not: the first position a pinned walk
+zero, row zero*. It has been correct for as long as the walk always started at
+the first changed file. Under a pin it does not: the first position a pinned walk
 can reach is the pinned file's own row zero, so on any pinned file but the first
 the guard cannot fire, and a pinned file shorter than the pane is `short` on every
 frame, restarts on every frame, and pays what that guard's own paragraph records
@@ -502,7 +541,8 @@ may reach, every such literal is part of the change, and the ones that are
 
 **The premise checked rather than inherited is B14's.** That ruling ranks `r`
 outside the sheet's keep-set and its **first** stated reason was false: it said
-`r` cannot fire on the pane that drops it, and no drawable pane drops it at all. The correction is in B14. Ranking `s` at nine raised exactly the same question, and
+`r` cannot fire on the pane that drops it, and no drawable pane drops it at all.
+The correction is in B14. Ranking `s` at nine raised exactly the same question, and
 the answer was taken from drawn output rather than from B14's conclusion: swept
 over every width from 20 to 45, the deepest rung a drawable pane reaches is still
 `from = 7`, so the `NARROW` table now shows both `r` and `s` **kept** at thirty
@@ -512,7 +552,8 @@ columns, and both reorders remain defence rather than behaviour.
 and the same shape of cost: every row count moves and no width does. The four
 reachability boundaries sit at 30, 32, 35 and 38 columns and have not moved
 through either, and the counts behind them went 16, 11, 8, 4 to 17, 12, 9, 5 to
-18, 13, 10, 6.
+18, 13, 10, 6. They were re-derived from a swept pane both times rather than
+incremented, which is the only way a boundary that *did* move would be noticed.
 
 **The one number that goes the other way.** Every feature added to this pane so
 far has cost the frame path something. A pin removes I4's single exception from
@@ -538,19 +579,19 @@ The ruling is `SPEC.md` §11.2 B16. Eight rounds ran over it and **every serious
 | six | the pin's clamp gated on a flag the pin did not set |
 | seven and eight | a reverted fix leaving its description behind in two places |
 
-**Round one: three gates passed against a `vigia` with the pin removed**, each vacuous for its own reason, which is why noticing one would not have found the others. *The file-changing gate never left row zero*, where `n`, `p`, a digit and a click all land on a heading and every fixture file is taller than the body. **A fourth gap was worse, because nothing covered it at all: `s` was never proven bound to a key.** Deleting the `KeyCode::Char('s')` arm left the whole workspace green, since every gate constructed `Action::ToggleSingle` directly. B16 could have shipped a gesture no keyboard could reach — and [#295](https://github.com/breferrari/vigia/issues/295) had closed exactly that hole for `r` with a gate of its own, so the lesson did not travel.
+**Round one: three gates passed against a `vigia` with the pin removed**, each vacuous for its own reason, which is why noticing one would not have found the others. *The toggle gate discarded the middle draw* — it pressed `s`, wrote `let _ = draw(...)`, pressed `s` again and compared the ends, which asserts only that doing nothing twice does nothing. *The follow gate followed the last file*, and nothing comes after the last file, so a screen resting in it draws one file whether or not anything is pinned. *The file-changing gate never left row zero*, where `n`, `p`, a digit and a click all land on a heading and every fixture file is taller than the body. **A fourth gap was worse, because nothing covered it at all: `s` was never proven bound to a key.** Deleting the `KeyCode::Char('s')` arm left the whole workspace green, since every gate constructed `Action::ToggleSingle` directly. B16 could have shipped a gesture no keyboard could reach — and [#295](https://github.com/breferrari/vigia/issues/295) had closed exactly that hole for `r` with a gate of its own, so the lesson did not travel.
 
-**The one behavioural defect of round one is an input defect, not a drawing one.** The shell drains actions in a batch and paints once at the end, so `G` and a held `k` arrive together with no frame between them. `G` under a pin wrote the pinned file's whole height and let `View::collect` clamp it on the way to the screen: the right rows are drawn, and the *position* left behind is one nothing can move from, so every `k` in the same batch clamped to the same screen. `Action::Bottom` writes the resting row now, and pays with a staleness correction it used to get free from the clamp: a file that grew since the bar was drawn rests slightly short of its true bottom for one tick, which is invisible and self-correcting where swallowed keystrokes are neither.
+**The one behavioural defect of round one is an input defect, not a drawing one.** The shell drains actions in a batch and paints once at the end, so `G` and a held `k` arrive together with no frame between them. `G` under a pin wrote the pinned file's whole height and let `View::collect` clamp it on the way to the screen: the right rows are drawn, and the *position* left behind is one nothing can move from, so every `k` in the same batch clamped to the same screen. Nine keystrokes swallowed on a 22-row file at a 13-row body. `Action::Bottom` writes the resting row now, and pays with a staleness correction it used to get free from the clamp: a file that grew since the bar was drawn rests slightly short of its true bottom for one tick, which is invisible and self-correcting where swallowed keystrokes are neither.
 
 **Rounds two to four are one defect walking outward through the layers.** `Action::needs_height` classified `Bottom` as reading no height, which was true while `G` was a jump to a heading and false once B16 made it rest the pinned file's last row on the bottom; `crate::run` hands a zero to anything the predicate calls false, so `span.saturating_sub(0)` is the whole span and the round-one fix was still shipping broken while its own gate went green. **The gate went green because a test calls `App::apply` with a height a shell never passes — the suite modelled the function, not the program.** Round three then found the fix had reached two of three call sites, the third being the held-repeat path, benign only because `Regions::step_at` yields no height-reading action. Round four found the fourth layer: `Shell::diff_rows_for` builds the chrome to size the body *before* `App::apply` runs, and `Bottom` is a manual scroll, so `apply` turns follow off underneath it and `Footer::plan` sizes its rungs from a `Chrome::following` that is about to be false. Between **31 and 40 columns** that decides a one-line footer against a two-line one, so the region drawn is thirteen rows where `span - height` was taken against twelve. Every one of those lives inside `crate::run`, the loop no test enters, **and the answer is not a better gate but one function every site calls**, so there is one place that can be wrong instead of three answers that can drift.
 
-**The coverage claim that made it possible.** `only_the_action_that_reads_the_height_is_given_one` is the gate written for exactly a wrongly classified height, and its docblock said *"every action, so a new variant reaches this list by failing to be in it"*. **That is how `Bottom` shipped misclassified in the first place** — the shape this file calls worse than no claim at all, inside a gate whose subject is that shape. It is exhaustive by construction now in two steps that cannot be satisfied by prose: a `tag` function matching every variant, so a new one is a **compile error**, and a count assertion under it.
+**The coverage claim that made it possible.** `only_the_action_that_reads_the_height_is_given_one` is the gate written for exactly a wrongly classified height, and its docblock said *"every action, so a new variant reaches this list by failing to be in it"*. Nothing made that true: it was a plain array naming eight of the seventeen variants that existed then, and one of the nine it omitted was the second wrong height this branch found. **That is how `Bottom` shipped misclassified in the first place** — the shape this file calls worse than no claim at all, inside a gate whose subject is that shape. It is exhaustive by construction now in two steps that cannot be satisfied by prose: a `tag` function matching every variant, so a new one is a **compile error**, and a count assertion under it.
 
 **Round six is the last behavioural one and the clearest statement of the family: the pin's clamp was gated on a flag the pin did not set.** `View::collect`'s back-up rests a short screen's last row on the bottom and fired only for `anchored || landed_inside`, because a position a *jump* placed is a claim about the top row. `ToggleSingle` is not a manual scroll, so it inherited whatever set the position, and `App::diff_to` sets `anchored` false. A reader who dragged the bar into the middle of a tall file and pressed `s` got a short screen with trailing blanks that jumped upward on their next `j`. **Three places said the opposite, including this ruling's own §11.2 text**, and the claim was true — but only for a reader who had arrived by scrolling, and every straddle in `tests/single.rs` was reached with `Action::Scroll`, which anchors. **A suite that reaches one state four ways, all of them the same way, cannot see the fifth.** The licence is a term in the guard now, `anchored || landed_inside || single`, rather than a flag written from the toggle's arm: the flag outlives the pin and the term does not.
 
-**And rounds seven and eight are why this entry exists rather than a quiet fix.** Round seven replaced round six's mechanism and corrected `app.rs`, `view.rs`, `reads.rs` and `scroll.rs`, and left `SPEC.md` §11.2 B16 and this file's own round-six section describing the mechanism it had just removed.
+**And rounds seven and eight are why this entry exists rather than a quiet fix.** Round seven replaced round six's mechanism and corrected `app.rs`, `view.rs`, `reads.rs` and `scroll.rs`, and left `SPEC.md` §11.2 B16 and this file's own round-six section describing the mechanism it had just removed. Code and `SPEC.md` disagreeing is a stop condition in `CLAUDE.md`, and it went one round undetected.
 
-**The rule this branch earns.** No gate can read a comment, so the only instrument is a reader holding the sentence against the code — and every one of these was found only after the previous was fixed, because **a wrong docblock answers the question a reader would otherwise have gone and checked**.
+**The rule this branch earns.** No gate can read a comment, so the only instrument is a reader holding the sentence against the code — and every one of these was found only after the previous was fixed, because **a wrong docblock answers the question a reader would otherwise have gone and checked**. The count of *statement* sites was consistently larger than the count of *implementation* sites: one arm, three prose sites; one guard, two rulings. So: **when a behaviour moves, grep for the places that state the rule it obeyed, not only the places that implement it** — and when a fix is *reverted* rather than extended, grep again, because a revert leaves a description of something that no longer exists and reads exactly like a description of something that does.
 
 ## B6 — the amendment the ruling predicted, and the one-line defect that shaped it
 
@@ -560,7 +601,8 @@ is two files rather than three more keys in one.
 **B6 predicted this amendment and named the test it would have to pass.** Its
 closing line reads *"there is nowhere to put a setting that is neither of those…
 the next setting that is neither a preference about you nor a fact about the
-terminal in front of you will find it again."* A view default is not in that gap. It is B6's **first** kind without strain, a preference about you, and B6 already
+terminal in front of you will find it again."* A view default is not in that gap.
+It is B6's **first** kind without strain, a preference about you, and B6 already
 rules that those live in a file. So the amendment **applies** the taxonomy rather
 than widening it, and B7 remains the only candidate that has ever been in the gap.
 
@@ -591,14 +633,21 @@ would not have been enough on its own.
 
 **What the two files share is everything that costs something**: one format, one
 discovery rule (`HOME` then `USERPROFILE`, each checked for emptiness before the
-next is tried), one error path, one report-before-the-takeover order.
+next is tried), one error path, one report-before-the-takeover order. What they do
+not share is a subject. The amendment therefore adds a place to look and three
+keys to look for, which is the same shape the `VIGIA_GLYPHS` amendment took when
+it added a detector rather than a surface.
 
-**`follow` is excluded, and that is I5 doing work rather than an omission.** *Correct with zero interaction* is a promise about the program; a file able to
+**`follow` is excluded, and that is I5 doing work rather than an omission.**
+*Correct with zero interaction* is a promise about the program; a file able to
 turn following off would quietly make it a promise about one reader's
-configuration.
+configuration. The three keys that are in have in common that every combination of
+them is a legitimate pane, which is not true of a pane that has stopped following.
 
 **And no variable joins them.** A variable exists for *not this time*, which is
-`VIGIA_THEME`'s whole job. B6's count of one is untouched;
+`VIGIA_THEME`'s whole job. Here that sentence is already spoken by `m`, `r` and
+`s`, one press each and named on the gestures sheet, so a variable would be a
+second spelling of something the pane says better. B6's count of one is untouched;
 its count of files is what moved.
 
 ---
@@ -611,24 +660,39 @@ its count of files is what moved.
 against their own source or their own `--help` on this machine, and one of them
 changed the proposal.
 
-- **`delta`** wraps, and `--wrap-max-lines` defaults to **2**, which a session   here read as a cap to adopt and the reader removed the next day: *"How often a line   should be wrapped if it does not fit. Zero means to never wrap. Any content   which does not fit after wrapping will be truncated."* That is a direct answer   to §11.1's objection rather than a way around it, and it is where the cap came   from.
-- **`ov`** binds `[w]`, `[W]` to a character-based wrap toggle and `[Alt+w]` to   word wrap, which is what confirmed the key rather than a preference for it.
-- **`bat`** reserves the gutter and leaves it **blank** on continuation rows, so   the absent line number is itself the signal, and spells the opposite state `-S`   / `--chop-long-lines`.
+- **`delta`** wraps, and `--wrap-max-lines` defaults to **2**, which a session
+  here read as a cap to adopt and the reader removed the next day: *"How often a line
+  should be wrapped if it does not fit. Zero means to never wrap. Any content
+  which does not fit after wrapping will be truncated."* That is a direct answer
+  to §11.1's objection rather than a way around it, and it is where the cap came
+  from. `--wrap-left-symbol` is `↵`, `--wrap-right-symbol` `↴` and
+  `--wrap-right-prefix-symbol` `…`, so the wrap is marked at the end of the line
+  it leaves rather than at the start of the one it enters.
+- **`ov`** binds `[w]`, `[W]` to a character-based wrap toggle and `[Alt+w]` to
+  word wrap, which is what confirmed the key rather than a preference for it.
+- **`bat`** reserves the gutter and leaves it **blank** on continuation rows, so
+  the absent line number is itself the signal, and spells the opposite state `-S`
+  / `--chop-long-lines`.
 - **`less`** wraps unless `-S`, and toggles the state at runtime.
-- **Neovim** keeps both axes and gives each its own motion, `gj` against `j`, and   indents continuations with `'breakindent'`: *"Every wrapped line will continue   visually indented… thus preserving horizontal blocks of text."*
+- **Neovim** keeps both axes and gives each its own motion, `gj` against `j`, and
+  indents continuations with `'breakindent'`: *"Every wrapped line will continue
+  visually indented… thus preserving horizontal blocks of text."*
 
-**And the neighbour that had to build it says why it is cheaper here.** [dandavison/delta#657](https://github.com/dandavison/delta/issues/657) is the
+**And the neighbour that had to build it says why it is cheaper here.**
+[dandavison/delta#657](https://github.com/dandavison/delta/issues/657) is the
 request that produced delta's wrapping, and its problem statement is that the
 pager is the wrong layer: *"delta uses one of many various pagers, usually some
 form of less, which supports line-wrapping, but this breaks lots of things (like
-delta's line numbers)"*. The same thread calls the
+delta's line numbers)"*. This tool owns its painter and its gutter, so the hard
+part delta built around does not exist here. The same thread calls the
 horizontal-scroll alternative *"tedious"* and says it *"disrupts the viewing
 experience"*, which is a second-hand data point for wrapping over the pan §11.1
 named as the rejected alternative.
 
 **The total was tried the way the issue proposed and abandoned on a fact.** The
 issue asks for a wrapped height threaded through `view::rows_of`, with the
-measurement taken on the counting pass and cached per text width.
+measurement taken on the counting pass and cached per text width. Two things
+kill it, and only the second is decisive.
 
 The cheap objection is cost: `vigia_core::FileSpan` is four numbers today and a
 wrapped height is a function of the text **and** of the text width, so the span
@@ -643,11 +707,20 @@ are drawn is a function of the total. There is no order in which those four
 evaluate. It is not an expensive computation, it is not one.
 
 **So the split is made and one unit is given one owner.** A **logical row** is a
-row of the diff's model; a **display row** is a row of the terminal.
+row of the diff's model; a **display row** is a row of the terminal. The bar,
+every jump, every clamp and every counting twin stay logical. Display rows exist
+inside the viewport only. That is the shape the design record already names: when
+one quantity splits into two, every site that treats them as interchangeable
+becomes a defect at once, so the quantity gets one owner rather than a spelling
+at each site.
 
 **What the split made visible immediately** is that `View::last_screenful` and
 the overshoot branch in `View::collect` both compare a **logical** span against
-the **display** height, which is exactly the units bug that shape predicts. `crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap`
+the **display** height, which is exactly the units bug that shape predicts. With
+wrapping off the two numbers are equal and nothing can see it; with wrapping on
+the top lands too far back and the last rows of the diff fall off the bottom, so
+the end of the diff becomes unreachable by the gesture that exists to reach it.
+`crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap`
 is what fails when it comes back, and
 `the_wrapped_bottom_survives_the_frame_after_the_gesture` beside it is what
 fails when the clamp holds for one frame and not for the next: the first draft
