@@ -206,7 +206,7 @@ fn a_comment_carries_no_record_of_its_own_change() {
         }
     }
 
-    worst.sort_by(|a, b| b.0.cmp(&a.0));
+    worst.sort_by_key(|(count, _)| std::cmp::Reverse(*count));
     let top: Vec<String> = worst
         .iter()
         .take(6)
