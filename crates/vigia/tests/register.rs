@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 /// naming every file would need editing whenever one is added, and the ones
 /// worth bounding are the ones that were furthest out when the ratchet landed.
 const RATIO_CEILING: [(&str, u64); 8] = [
-    ("vigia-core/src/change.rs", 268),
+    ("vigia-core/src/change.rs", 192),
     ("vigia/src/input.rs", 259),
     ("vigia/src/app.rs", 249),
     ("vigia-core/src/history.rs", 236),
@@ -61,7 +61,7 @@ const SESSION_CONTEXT_CEILING: usize = 1_646;
 /// `//!` is deliberately outside it. A module header is the one place RFC 505
 /// asks for length — it documents a file rather than an item, so there is no
 /// item for it to be longer than.
-const DOCBLOCK_LINES_CEILING: usize = 74;
+const DOCBLOCK_LINES_CEILING: usize = 70;
 
 fn crates_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
