@@ -528,7 +528,8 @@ fn no_prose_paragraph_is_hard_wrapped() {
         // Frontmatter is `key: value` structure. Joining it once made a skill's
         // name and description one field.
         let body = body.strip_prefix("---\n").map_or(body.as_str(), |rest| {
-            rest.find("\n---\n").map_or(body.as_str(), |at| &rest[at + 5..])
+            rest.find("\n---\n")
+                .map_or(body.as_str(), |at| &rest[at + 5..])
         });
         let mut fence = false;
         // An HTML comment is not prose either. The issue template's `<!-- -->`
