@@ -1,32 +1,9 @@
-//! `SPEC.md` §11.2 **B19**: a long line continues on the row below, on `w`.
-//!
-//! Every gate here is one line of [#272](https://github.com/breferrari/vigia/issues/272)'s
-//! own exit criteria, and the list is worth restating because it is what the
-//! ruling promised rather than what the code happens to do: `w` toggles wrapping
-//! and nothing else, off on launch; a line longer than the text width is readable
-//! to its end; no row over-occupies its region at any width; every jump still
-//! lands where it landed; and the diff's own rows are exactly the rows they were,
-//! so the thumb does not move when the key is pressed.
-//!
-//! **The fixture is one file with lines of known width**, which is the whole of
-//! what separates this from `legibility.rs`. There the sweep is over widths with
-//! a hand-built view; here the width is fixed and the *content* is chosen so that
-//! "fits", "wraps once" and "wraps past the cap" are three distinguishable
-//! things. A fixture whose lines were all far past the cap would satisfy every
-//! gate below while never once drawing a tail a reader could finish.
-//!
-//! **And it is driven through `App::view` rather than by building a `View`**,
-//! because the width a row is laid out against reaches the walk through
-//! `Body::diff_width`, and a hand-built `Viewport` would be the gate choosing the
-//! number the code is supposed to derive.
+//! `SPEC.md` §11.2 B19: a long line continues on the row below, on `w`.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
-// **The screen selectors, under a second name.** `support` is already bound to
-// `vigia-core`'s fixture module above, and this file needs both: a repository to
-// drive and a cell walk to read the pane back with. See `screen::rows_of` for why
-// that walk is shared rather than written here.
+// The screen selectors, under a second name.
 #[path = "support/mod.rs"]
 mod screen;
 
@@ -41,15 +18,9 @@ use vigia_core::{Frame, Highlighter, History};
 use support::{Scratch, materialise};
 
 /// The pane every gate here draws on.
-///
-/// Eighty by twenty-four: the pane a reader is likeliest to be on, and the one
-/// §11.1 measures its own clipping figures against.
 const PANE: Rect = Rect::new(0, 0, 80, 24);
 
-/// A token nothing else in the fixture spells, at the **end** of the long line.
-///
-/// The oracle for *readable to its end*. Asserting the line's own prefix proves
-/// nothing: the prefix is what a clipped row already draws.
+/// A token nothing else in the fixture spells, at the end of the long line.
 const TAIL: &str = "ZOMBIE";
 
 /// A token at the end of a line that is short enough to fit.
@@ -61,10 +32,6 @@ const DEEP: usize = 60;
 
 /// Build the fixture: one committed file, then a rewrite whose lines are chosen
 /// widths.
-///
-/// `long` is the line the gates wrap. It is a little over one text width and well
-/// under two, so its tail fits the continuation exactly and `›` on the lower row
-/// would be a defect rather than the cap.
 fn fixture(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write("src/lines.rs", "one\ntwo\nthree\nfour\nfive\n");
@@ -72,18 +39,16 @@ fn fixture(name: &str) -> Scratch {
 
     let long = format!("let value = \"{}\"; // {TAIL}", "x".repeat(70));
     let short = format!("let small = \"aa\"; // {SHORT_TAIL}");
-    // **Taller than the whole region**, which is the one case a mark still means
-    // something now that lines wrap as far as they need: scrolling steps over a
-    // line by whole rows of the diff, so nothing reaches the middle of one the
-    // pane cannot hold. Two thousand columns against a region of eighteen rows
-    // and sixty-odd columns of text is comfortably past it.
+    // Taller than the whole region, which is the one case a mark still means something
+    // now that lines wrap as far as they need: scrolling steps over a line by whole
+    // rows of the diff, so nothing reaches the middle of one the pane cannot hold.
     let huge = format!("let huge = \"{}\"; // {TAIL}", "y".repeat(2000));
     let deep = format!(
         "{}let deep = \"{}\"; // {TAIL}",
         " ".repeat(DEEP),
         "z".repeat(70)
     );
-    // **The huge line last, after the context row**, because it fills the region
+    // The huge line last, after the context row, because it fills the region
     // on its own: put anywhere earlier it leaves every gate below it looking at a
     // pane that draws one line, and the unchanged `five` that several of them
     // need as a *context* row is never reached.
@@ -150,12 +115,7 @@ fn open(name: &str) -> (Scratch, Highlighter, History) {
 
 #[test]
 fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
-    // **Three widths of line, and the gates below cannot tell them apart without
-    // it.** A fixture whose lines were all past the cap would let *every* gate
-    // here pass against a build that drew a mark and no tail, because there would
-    // be no line whose tail a reader could reach. The short line is the other
-    // half: it is what says the continuation is a property of the line rather
-    // than of the mode.
+    // Three widths of line, and the gates below cannot tell them apart without it.
     let (scratch, mut highlighter, history) = open("shell-wrap-shape");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -163,11 +123,8 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
     let mut app = wrapped(&mut frame);
     let (view, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
 
-    // **Some lines continue and some do not**, which is the property the gates
-    // below turn on. Counted as *lines that wrap* against *lines*, rather than as
-    // rows: a line takes as many rows as it needs since the cap was removed, so
-    // one long line can produce more continuations than there are lines and a
-    // count of rows says nothing about the mix.
+    // Some lines continue and some do not, which is the property the gates below turn
+    // on.
     let mut wrapped = 0usize;
     let mut plain = 0usize;
     for (n, row) in view.rows.iter().enumerate() {
@@ -194,13 +151,9 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
 
 #[test]
 fn a_long_line_is_readable_to_its_end_only_when_wrapping_is_on() {
-    // **The whole of the issue, as one comparison.** Off, the tail of the long
+    // The whole of the issue, as one comparison. Off, the tail of the long
     // line is nowhere on the pane and there is no route to it: no wrap, no pan,
     // and the takeover holds the mouse. On, it is drawn.
-    //
-    // Both halves are asserted because either alone is satisfied by a build that
-    // ignores the mode: a gate that only checked "on" would pass against a shell
-    // that wrapped unconditionally, which is the default #204's reasoning refuses.
     let (scratch, mut highlighter, history) = open("shell-wrap-readable");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -230,20 +183,9 @@ fn a_long_line_is_readable_to_its_end_only_when_wrapping_is_on() {
 
 #[test]
 fn a_mark_means_the_line_is_taller_than_the_pane_and_nothing_else() {
-    // **`›` says *rightward*, and there is nothing to the right of a row whose
-    // content is on the row below.** So no row that continues downward carries
+    // `›` says *rightward*, and there is nothing to the right of a row whose
+    // content is on the row below. So no row that continues downward carries
     // it.
-    //
-    // **What the mark means now is narrower than it was, because the cap is
-    // gone**: a line takes as many rows as it needs, so nothing is truncated by
-    // a rule any more. The one case left is a line **taller than the whole pane**,
-    // which scrolling steps over whole, since the viewport moves by rows of the
-    // diff. Nothing reaches such a line's middle, and the reader has to be told.
-    // A line that merely runs past the fold carries no mark, because that is what
-    // every row below the last one already is.
-    //
-    // Both halves are asserted, because a build that never marks satisfies the
-    // first and a build that marks every continuation satisfies the second.
     let (scratch, mut highlighter, history) = open("shell-wrap-marks");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -290,14 +232,7 @@ fn a_mark_means_the_line_is_taller_than_the_pane_and_nothing_else() {
 
 #[test]
 fn a_continuation_blanks_its_gutter_and_marks_its_sigil() {
-    // **The two cells that say *this is not a new line*.** A real line always has
-    // a number, so the blank is the cheap half; the `↳` is what survives the
-    // gutter being dropped entirely, which is what happens at the narrow widths
-    // this gesture is for.
-    //
-    // Read against the row above it rather than against a column literal, because
-    // a literal would restate the layout arithmetic instead of checking that the
-    // two rows share it.
+    // The two cells that say *this is not a new line*.
     let (scratch, mut highlighter, history) = open("shell-wrap-gutter");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -339,10 +274,9 @@ fn a_continuation_blanks_its_gutter_and_marks_its_sigil() {
 
 #[test]
 fn a_wash_covers_both_display_rows_of_a_wrapped_change() {
-    // **A band that stopped at the first row would make a wrapped removal read as
-    // ending early**, which is the same sentence §5.3 already carries about a
-    // band that stops where its text stops. Read as backgrounds rather than as
-    // text, because that is the only thing that can see it.
+    // A band that stopped at the first row would make a wrapped removal read as ending
+    // early, which is the same sentence §5.3 already carries about a band that stops
+    // where its text stops.
     let (scratch, mut highlighter, history) = open("shell-wrap-wash");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -354,12 +288,8 @@ fn a_wash_covers_both_display_rows_of_a_wrapped_change() {
     let view = app
         .view(&mut frame, &mut highlighter, &history, laid)
         .expect("view");
-    // **A palette that actually washes a row, which `Theme::default()` at this
-    // depth does not.** Probed rather than assumed: the default resolves to a
-    // pane whose changed rows carry only the left bar, so
-    // `Painter::line_row`'s `set_style(area, wash)` is a no-op on it and a
-    // continuation that lost its band read identically. Mutation found that too,
-    // after the non-vacuity guard below had already been strengthened once.
+    // A palette that actually washes a row, which `Theme::default()` at this depth does
+    // not.
     let theme = Theme::dark().resolve(vigia::Depth::Truecolor);
     let mut buf = Buffer::empty(PANE);
     render(&mut buf, PANE, &view, &theme, Glyphs::default(), &chrome);
@@ -386,15 +316,7 @@ fn a_wash_covers_both_display_rows_of_a_wrapped_change() {
     let above = backgrounds(head);
     let below = backgrounds(tail);
 
-    // **The non-vacuity guard is a *comparison*, not a presence.** The first
-    // spelling asked whether the head row carried any background other than
-    // `Reset`, and the pane's own background satisfies that at every column, so a
-    // continuation that lost its band read identically and the gate stayed green
-    // against exactly the defect it was written for. Mutation found it: gating
-    // `set_style(area, wash)` on `number.is_some()` survived.
-    //
-    // A context row is what a row with no wash looks like on this pane, so the
-    // claim is that a changed row does not look like one.
+    // The non-vacuity guard is a *comparison*, not a presence.
     let plain = view
         .rows
         .iter()
@@ -423,20 +345,7 @@ fn a_wash_covers_both_display_rows_of_a_wrapped_change() {
 
 #[test]
 fn a_line_takes_as_many_rows_as_it_needs_and_never_more_than_the_pane() {
-    // **There is no cap, and the only ceiling is the pane.** A reader who presses
-    // `w` means *show me the line*; a mode that shows two rows of it is the
-    // defect the issue was opened about, one rung smaller. So the assertions are
-    // the two halves that survive removing it: a long line really does take more
-    // than two rows, and no screen ever draws more rows than the region has.
-    //
-    // Swept over widths, because the narrow pane is where a line needs the most
-    // rows and where an unbounded expansion would eat the region if the second
-    // half did not hold.
-    // **The fixture is taller than the pane, and it has to be.** The shared one
-    // is nine rows against a region of twenty-odd, so the expansion never
-    // approaches the region's last row and the over-occupation this gate exists
-    // to catch cannot happen on it. Mutation found that: relaxing the room test
-    // from `+ 2 <= height` to `+ 1 <= height` survived every gate in this file.
+    // There is no cap, and the only ceiling is the pane.
     let scratch = Scratch::new("shell-wrap-cap");
     scratch.write("src/lines.rs", "seed\n");
     scratch.commit_all("base");
@@ -444,10 +353,7 @@ fn a_line_takes_as_many_rows_as_it_needs_and_never_more_than_the_pane() {
     for n in 0..60 {
         body.push_str(&format!(
             "let line_{n} = \"{}\"; // {TAIL}\n",
-            // **Long enough to need three rows at the widest pane swept.** Seventy
-            // characters is two rows at sixty columns and one at a hundred and
-            // twenty, so a gate built on it would only ever see two and would pass
-            // against the cap it exists to prove gone.
+            // Long enough to need three rows at the widest pane swept.
             "q".repeat(400)
         ));
     }
@@ -497,10 +403,7 @@ fn a_line_takes_as_many_rows_as_it_needs_and_never_more_than_the_pane() {
 
 #[test]
 fn a_wrapped_continuation_keeps_the_text_its_floor() {
-    // **Breakindent has a cap and the cap is the tail's floor.** At eighty columns
-    // a sixty-space indent would leave a continuation with a handful of columns,
-    // which is not a route to the end of anything. Neovim's `'breakindent'` with
-    // the half-width cap `indent_of` states.
+    // Breakindent has a cap and the cap is the tail's floor.
     let (scratch, mut highlighter, history) = open("shell-wrap-indent");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -533,14 +436,8 @@ fn a_wrapped_continuation_keeps_the_text_its_floor() {
 
 #[test]
 fn wrapping_off_is_the_pane_a_caller_that_named_no_width_draws() {
-    // **The mode is inert when it is off**, which is the claim the whole shipped
-    // default rests on. Two collections of the same frame: one at the pane's real
-    // width with wrapping off, one at no width at all, which is what every caller
-    // before this change passed. The rows have to be the same rows.
-    //
-    // It is not a tautology: `wrap_rows` runs on both, takes the gutter on one and
-    // not on the other, and a build that split rows regardless of the flag would
-    // differ here on the first long line.
+    // The mode is inert when it is off, which is the claim the whole shipped default
+    // rests on.
     let (scratch, mut highlighter, history) = open("shell-wrap-inert");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -549,10 +446,7 @@ fn wrapping_off_is_the_pane_a_caller_that_named_no_width_draws() {
     let chrome = chrome_of(&app);
     let laid = body_layout(PANE, &chrome, 1, 1);
 
-    // **A warm-up frame first, and it is not ceremony.** The first frame of a
-    // process is drawn plain (`Viewport::highlight`), so comparing frame one
-    // against frame two would report a difference in `spans` and say nothing at
-    // all about wrapping.
+    // A warm-up frame first, and it is not ceremony.
     app.view(&mut frame, &mut highlighter, &history, laid)
         .expect("view");
     let sized = app
@@ -579,15 +473,7 @@ fn wrapping_off_is_the_pane_a_caller_that_named_no_width_draws() {
 
 #[test]
 fn the_bottom_of_the_diff_is_reachable_when_lines_wrap() {
-    // **The units bug the split makes visible.** `View::last_screenful` and
-    // `collect`'s overshoot branch both rest the diff's last **logical** row on
-    // the pane's last **display** row, which is exact while the two are one
-    // number. With wrapping on the clamp lands too far back, and dropping the
-    // excess off the bottom the way every other frame does puts the end of the
-    // diff out of reach of `G`, which is the gesture that exists to reach it.
-    //
-    // The fixture is deliberately taller than the pane: on a short diff there is
-    // no clamp to get wrong and this passes against the defect.
+    // The units bug the split makes visible.
     let scratch = Scratch::new("shell-wrap-bottom");
     scratch.write("src/lines.rs", "seed\n");
     scratch.commit_all("base");
@@ -605,11 +491,8 @@ fn the_bottom_of_the_diff_is_reachable_when_lines_wrap() {
     let history = History::new();
     let mut app = wrapped(&mut frame);
 
-    // **Scrolled rather than jumped, because `G` unpinned is a jump to the last
-    // *file*** and this fixture has one. The bottom clamp is what a reader
-    // reaches by scrolling off the end, which is `View::last_screenful` and the
-    // overshoot branch: the two places that compare a logical span against a
-    // display height.
+    // Scrolled rather than jumped, because `G` unpinned is a jump to the last *file*
+    // and this fixture has one.
     let height = diff_height(PANE, &chrome_of(&app), 1, 1);
     app.apply(Action::Scroll(10_000), &mut frame, height)
         .expect("apply");
@@ -634,10 +517,7 @@ fn the_bottom_of_the_diff_is_reachable_when_lines_wrap() {
 
 #[test]
 fn w_toggles_wrapping_and_leaves_the_thumb_where_it_was() {
-    // **B19's own claim about the scrollbar.** The bar counts the diff's rows and
-    // not the terminal's, so pressing `w` reflows the pane and moves nothing the
-    // bar is drawn from. A build that made the total display-rows would pass every
-    // other gate here and fail this one.
+    // B19's own claim about the scrollbar.
     let (scratch, mut highlighter, history) = open("shell-wrap-thumb");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -668,17 +548,7 @@ fn w_toggles_wrapping_and_leaves_the_thumb_where_it_was() {
 
 #[test]
 fn a_wrapped_row_still_costs_the_pane_rather_than_the_line() {
-    // **I4's shape, and the one an unbounded wrap would break first.**
-    // [#45](https://github.com/breferrari/vigia/issues/45) bounded a row's walk at
-    // the pane, and `SPEC.md` §10 records the measurement: a 22-row body of
-    // Japanese examined 8231 characters to fill 1600 columns before the bound
-    // existed. A second row per line is allowed to double the walk and is not
-    // allowed to make it follow the *line*, so the ceiling is written in rows and
-    // columns, which are both the pane's.
-    //
-    // The fixture is `Scratch::wide_lines_as`, whose lines are 531 columns: the
-    // same one `tests/paint.rs` uses, so the two bounds are over the same
-    // workload and the difference between them is the mode.
+    // I4's shape, and the one an unbounded wrap would break first.
     let scratch = Scratch::wide_lines_as("shell-wrap-cost", 3, 12, "rs");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -720,16 +590,7 @@ fn a_wrapped_row_still_costs_the_pane_rather_than_the_line() {
 
 #[test]
 fn every_jump_still_lands_on_a_heading_when_lines_wrap() {
-    // **`scroll.rs`'s own gate, in the mode that could break it.** Every jump on
-    // this map resolves through `App::jump_to` to `Position { file, row: 0 }`,
-    // and row zero of a file is its heading. Wrapping cannot move that by itself,
-    // because a heading is not a content row and never continues; what *can* move
-    // it is the front trim, which is the one place in this change that rewrites
-    // `View::top` after the walk has placed it.
-    //
-    // So the fixture is several files and the gate jumps to each in turn, which
-    // is the shape that would catch a trim firing on a frame that is not at the
-    // diff's bottom.
+    // `scroll.rs`'s own gate, in the mode that could break it.
     let scratch = Scratch::new("shell-wrap-jumps");
     scratch.write("src/a.rs", "one\n");
     scratch.write("src/b.rs", "one\n");
@@ -775,19 +636,7 @@ fn every_jump_still_lands_on_a_heading_when_lines_wrap() {
 
 #[test]
 fn scrolling_up_from_the_wrapped_bottom_moves() {
-    // **The end of the diff must be a place a reader can leave.**
-    //
-    // The first draft of the front trim advanced `View::top` by the rows it
-    // dropped, and `App` stores that back as the scroll position. From the
-    // advanced row fewer than a screenful of logical rows remain, so the next
-    // frame is short, restarts through `last_screenful`, lands on the same row
-    // and trims to the same place: every `k` after that resolves to the position
-    // it started from, and the end of the diff is a one-way trap. Two audit
-    // remits found it independently.
-    //
-    // Asserted as *the position strictly decreases*, and then as *the top of the
-    // diff is reachable by pressing `k` enough times*, because the first alone
-    // would pass against a shell that moved one row and then stuck.
+    // The end of the diff must be a place a reader can leave.
     let scratch = Scratch::new("shell-wrap-scroll-up");
     scratch.write("src/lines.rs", "seed\n");
     scratch.commit_all("base");
@@ -848,26 +697,7 @@ fn scrolling_up_from_the_wrapped_bottom_moves() {
 
 #[test]
 fn a_wide_glyph_straddling_a_break_is_drawn_on_one_of_the_rows() {
-    // **A character is not allowed to fall down the crack between the rows.**
-    //
-    // The walk admits a character while `column < room` and only then charges its
-    // width, so the last one admitted can be two columns wide against one column
-    // of room. Splitting after it left a head one column too wide, which the
-    // painter then cut and stamped `›` on: the glyph was drawn on neither row,
-    // and a head that continues downward carried the mark that means rightward.
-    //
-    // **What this asserts is the invariant, not the symptom the audit predicted**,
-    // and the difference is worth recording. The report described a head cut and
-    // stamped `›` with the glyph drawn on neither row; mutated back to the old
-    // boundary the pane draws that glyph intact and unmarked at every one of the
-    // sixty-one widths swept here, so the symptom could not be demonstrated. The
-    // bound moved anyway, because *the head never exceeds the room it was cut
-    // for* is the property the row model owes the painter and the old form did
-    // not guarantee it. The gate says that, which is checkable, rather than
-    // restating a repro that does not reproduce.
-    //
-    // The fixture is ASCII padding then CJK, so the break lands on a two-column
-    // glyph at some width of the sweep whatever the gutter does.
+    // A character is not allowed to fall down the crack between the rows.
     let scratch = Scratch::new("shell-wrap-wide-break");
     scratch.write("src/wide.rs", "seed\n");
     scratch.commit_all("base");
@@ -900,7 +730,7 @@ fn a_wide_glyph_straddling_a_break_is_drawn_on_one_of_the_rows() {
             if !matches!(view.rows.get(n + 1), Some(Row::Wrap { .. })) {
                 continue;
             }
-            // The whole source line, across **every** row it takes and nothing
+            // The whole source line, across every row it takes and nothing
             // lost between them. Read off the rows rather than off the painter,
             // because the painter is what the row model is telling what to draw.
             let mut whole = head.clone();
@@ -964,10 +794,7 @@ fn a_wide_glyph_straddling_a_break_is_drawn_on_one_of_the_rows() {
 
 #[test]
 fn a_line_of_zero_width_characters_does_not_buy_a_second_row() {
-    // **The walk reports clipped for two reasons and only one is a full row.**
-    // The other is the character bound, which a run of combining marks trips with
-    // the row still empty; wrapping there spends one of the two rows the cap
-    // allows on a row that draws nothing.
+    // The walk reports clipped for two reasons and only one is a full row.
     let scratch = Scratch::new("shell-wrap-zero-width");
     scratch.write("src/zero.rs", "seed\n");
     scratch.commit_all("base");
@@ -1008,16 +835,8 @@ fn tall(name: &str, lines: usize) -> Scratch {
 
 #[test]
 fn the_pinned_end_is_reachable_when_lines_wrap() {
-    // **`G` inside a pinned file clamps in `App`, not in the walk**, and it
-    // clamps with `span.saturating_sub(height)`: a **logical** span less a
-    // **display** height. With `w` on that lands the top too early, and until
-    // `View::collect` derived *at the bottom* for itself the walk had no way to
-    // know it should rest the last row on the last row, so the pinned file's own
-    // ending was unreachable by the one gesture that names it.
-    //
-    // The same subtraction is in the drag on the diff's bar, which the next gate
-    // drives. Both are outside `collect` and neither could be fixed by a flag
-    // `collect` sets, which is why the flag is derived from the walk instead.
+    // `G` inside a pinned file clamps in `App`, not in the walk, and it clamps with
+    // `span.saturating_sub(height)`: a logical span less a display height.
     let scratch = tall("shell-wrap-pinned-end", 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1027,11 +846,7 @@ fn the_pinned_end_is_reachable_when_lines_wrap() {
     let mut app = wrapped(&mut frame);
     let height = diff_height(PANE, &chrome_of(&app), 1, 1);
 
-    // **A frame before a gesture, which is what the shell does.** `App::shown`
-    // is what the last frame drew, so it is zero until one has been; the loop
-    // paints and then reads input, so a reader's first keypress always follows a
-    // paint. A gate that pressed a key against a shell that had never drawn would
-    // be measuring a state the program cannot be in.
+    // A frame before a gesture, which is what the shell does.
     drawn(&mut app, &mut frame, &mut highlighter, &history);
 
     app.apply(Action::ToggleSingle, &mut frame, height)
@@ -1049,10 +864,7 @@ fn the_pinned_end_is_reachable_when_lines_wrap() {
 
 #[test]
 fn a_drag_to_the_end_of_the_bar_reaches_the_end_when_lines_wrap() {
-    // The pointer's half of the gate above. `Action::DiffTo` clears `anchored`,
-    // so nothing self-corrects on a later frame: before the derivation, dragging
-    // the thumb to the bottom with `w` on hid the tail for as long as the reader
-    // left it there.
+    // The pointer's half of the gate above.
     let scratch = tall("shell-wrap-drag-end", 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1062,11 +874,7 @@ fn a_drag_to_the_end_of_the_bar_reaches_the_end_when_lines_wrap() {
     let mut app = wrapped(&mut frame);
     let height = diff_height(PANE, &chrome_of(&app), 1, 1);
 
-    // **A frame before a gesture, which is what the shell does.** `App::shown`
-    // is what the last frame drew, so it is zero until one has been; the loop
-    // paints and then reads input, so a reader's first keypress always follows a
-    // paint. A gate that pressed a key against a shell that had never drawn would
-    // be measuring a state the program cannot be in.
+    // A frame before a gesture, which is what the shell does.
     drawn(&mut app, &mut frame, &mut highlighter, &history);
 
     app.apply(Action::DiffTo(TRACK_SCALE), &mut frame, height)
@@ -1082,15 +890,7 @@ fn a_drag_to_the_end_of_the_bar_reaches_the_end_when_lines_wrap() {
 
 #[test]
 fn a_page_step_skips_no_line_when_lines_wrap() {
-    // **A page is a screenful, and a screenful is fewer rows of the diff when
-    // they wrap.** `Space` stepped `height - 1` logical rows against a screen
-    // showing about half that many, so a reader paging through a wrapped diff
-    // never saw most of it. The step is taken before the frame it moves to
-    // exists, so `App` remembers what the last frame drew.
-    //
-    // Asserted as *the first line of page two is one the reader has already
-    // seen*, which is the overlap row a page keeps, rather than as an arithmetic
-    // identity: the identity would restate the implementation.
+    // A page is a screenful, and a screenful is fewer rows of the diff when they wrap.
     let scratch = tall("shell-wrap-page", 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1101,7 +901,7 @@ fn a_page_step_skips_no_line_when_lines_wrap() {
     let height = diff_height(PANE, &chrome_of(&app), 1, 1);
 
     let (_, first) = drawn(&mut app, &mut frame, &mut highlighter, &history);
-    // **The line's own name, not the drawn row.** A row carries the scrollbar's
+    // The line's own name, not the drawn row. A row carries the scrollbar's
     // glyph in its last column and the thumb moves between the two frames, so
     // comparing rows compares the bar and reports a skip that did not happen.
     let named = |rows: &[String]| -> Vec<String> {
@@ -1134,23 +934,8 @@ fn a_page_step_skips_no_line_when_lines_wrap() {
 
 #[test]
 fn the_wrapped_bottom_survives_the_frame_after_the_gesture() {
-    // **The gate every other one in this file was missing, and it catches the
-    // same defect three ways.**
-    //
-    // A monitor repaints without being touched: a filesystem event, an ageing
-    // wake, a pointer crossing the pane. So a screen that is only correct on the
-    // frame a gesture produced is not correct at all, and every gate here drew
-    // **once** after its gesture, which is exactly the frame that cannot see it.
-    //
-    // The defect: the bottom clamp fires on the frame a reader reaches the end
-    // and stores a position from which the next walk collects exactly a
-    // screenful, so nothing overshoots, nothing is short, and the second frame
-    // dropped the tail off the bottom again. The reader saw the last line, did
-    // nothing, and watched it go.
-    //
-    // Driven three ways because the three gestures reach the end by three
-    // different roads: the scroll clamp, the pinned `G`, and a drag to the far
-    // end of the bar.
+    // The gate every other one in this file was missing, and it catches the
+    // same defect three ways.
     for way in ["scroll", "pinned G", "drag"] {
         let scratch = tall(&format!("shell-wrap-steady-{}", way.replace(' ', "-")), 40);
         let worktree = scratch.worktree();
@@ -1187,7 +972,7 @@ fn the_wrapped_bottom_survives_the_frame_after_the_gesture() {
             landing.join("\n")
         );
 
-        // **No gesture between the two frames**, which is the whole of it: this is
+        // No gesture between the two frames, which is the whole of it: this is
         // the repaint a monitor does on its own.
         let (_, settled) = drawn(&mut app, &mut frame, &mut highlighter, &history);
         assert!(
@@ -1201,14 +986,7 @@ fn the_wrapped_bottom_survives_the_frame_after_the_gesture() {
 
 #[test]
 fn a_press_of_w_at_the_bottom_keeps_the_last_line_on_screen() {
-    // **The mode changing under a reader who is resting at the end.** Wrapping
-    // means fewer of the diff's rows fit, so the clamp has to give the difference
-    // back; without that the last line a reader was looking at scrolls off the
-    // bottom on the keystroke that was supposed to show them more of it.
-    //
-    // `w_toggles_wrapping_and_leaves_the_thumb_where_it_was` presses `w` from row
-    // zero, where there is nothing to trim, so it holds for a narrower reason
-    // than its name and cannot see this.
+    // The mode changing under a reader who is resting at the end.
     let scratch = tall("shell-wrap-press-at-bottom", 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1241,18 +1019,10 @@ fn a_press_of_w_at_the_bottom_keeps_the_last_line_on_screen() {
 
 #[test]
 fn the_bar_is_drawn_from_the_travel_a_drag_is_resolved_against() {
-    // **A readout and the gesture performed on it are one contract**, which this
+    // A readout and the gesture performed on it are one contract, which this
     // project has been corrected on once already: a bar drawn from one quantity
     // and dragged against another agrees at the two ends and comes apart in the
     // middle, so a gate that checks only the ends passes against the defect.
-    //
-    // The first draft of `App::dragged_to` measured the track in the rows a frame
-    // *drew*, while the painter goes on drawing the thumb from the region's
-    // height. Pressing inside the thumb's own body then sent it to the bottom of
-    // the track from under the pointer.
-    //
-    // Asserted at the **middle** of the track, and as a round trip: where the
-    // thumb is drawn after a drag has to be where the drag was aimed.
     let scratch = tall("shell-wrap-bar-contract", 60);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1289,16 +1059,7 @@ fn the_bar_is_drawn_from_the_travel_a_drag_is_resolved_against() {
 
 #[test]
 fn a_page_step_after_a_resize_is_bounded_by_the_pane_it_lands_in() {
-    // **A screenful measured on the departing screen, spent in the arriving
-    // one.** `App::shown` is what the last frame drew and `height` is this
-    // batch's: `lib.rs` drains a batch of events and paints once at the end of
-    // it, so a resize and a `Space` arriving together give a fresh height against
-    // a stale count. Dragged from fifty rows to twelve, the step would otherwise
-    // be measured in the fifty-row screen and walk over everything the twelve-row
-    // one could have shown.
-    //
-    // Asserted as *the step is no larger than the pane it lands in*, which is the
-    // claim, rather than as an exact row, which would restate the arithmetic.
+    // A screenful measured on the departing screen, spent in the arriving one.
     let scratch = tall("shell-wrap-resize-page", 80);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1314,10 +1075,6 @@ fn a_page_step_after_a_resize_is_bounded_by_the_pane_it_lands_in() {
         .expect("apply");
 
     // One frame on the tall pane, which is what leaves a large `shown` behind.
-    // **And it is the last frame before the step**, which is the whole case: a
-    // frame drawn on the small pane first would refresh the count and the gate
-    // would be measuring a state the defect cannot reach. Mutation caught that:
-    // with a small-pane frame in between, removing the clamp survived.
     let chrome = chrome_of(&app);
     let before = app
         .view(
@@ -1357,18 +1114,9 @@ fn a_page_step_after_a_resize_is_bounded_by_the_pane_it_lands_in() {
 
 #[test]
 fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
-    // **The band no other fixture in this file sits in**: a diff whose *own* rows
+    // The band no other fixture in this file sits in: a diff whose *own* rows
     // fit the pane and whose *display* rows do not. `tall()` overruns both and
     // `fixture` overruns neither, which is why twenty-two gates missed this.
-    //
-    // One `j` there ran the walk short, restarted it through `last_screenful` to
-    // the walk's own floor, and trimmed from the front: the heading, the path,
-    // the counts and the heat strip went off the top, `k` at row zero moves
-    // nothing, and no scrollbar is drawn on a diff that short to say anything was
-    // hidden. A trim is only honest where there is somewhere above to scroll to.
-    //
-    // Driven with `j` then `k`, because the position the trim leaves has to be
-    // one the reader can get back from.
     let scratch = Scratch::new("shell-wrap-short-band");
     scratch.write("src/band.rs", "seed\n");
     scratch.commit_all("base");
@@ -1401,10 +1149,7 @@ fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
         view.rows.len()
     );
 
-    // **Down one, then back.** Scrolling down is *supposed* to take the heading
-    // off the top; the defect was that it could not be brought back, because the
-    // walk restarted to its own floor and trimmed from the front, where `k` at
-    // row zero moves nothing. So the claim is the return, not the departure.
+    // Down one, then back.
     app.apply(Action::Scroll(1), &mut frame, height)
         .expect("apply");
     let (down, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
@@ -1427,11 +1172,8 @@ fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
         rows.join("\n")
     );
 
-    // **And the overshoot road to the same floor**, which the two gestures above
-    // do not take. Scrolling far past the end of a diff this short overshoots the
-    // last file rather than running the walk short, and that path restarts through
-    // `last_screenful` too: it is the second of the two places that can land the
-    // reader on the walk's own floor with more display rows than the pane holds.
+    // And the overshoot road to the same floor, which the two gestures above do not
+    // take.
     app.apply(Action::Scroll(10_000), &mut frame, height)
         .expect("apply");
     let (over, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
@@ -1450,17 +1192,7 @@ fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
 
 #[test]
 fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
-    // **I5's frame is the one frame that must not be trimmed.** Follow puts the
-    // viewport on what just changed; where that change sits exactly one screenful
-    // from the end of the diff, the bottom clamp's own conditions are all met and
-    // the front trim would drop the landing row itself. The single frame that
-    // exists to show a reader what an agent just did would then not show it.
-    //
-    // **Swept over heights rather than pinned at one**, because the case is an
-    // equality between the rows remaining and the rows a pane holds, and which
-    // height produces it is a function of the fixture's shape rather than
-    // something to compute here. The audit that raised this could not say whether
-    // any real pane reaches it; the sweep is what answers that.
+    // I5's frame is the one frame that must not be trimmed.
     let scratch = Scratch::new("shell-wrap-landing");
     scratch.write("src/deep.rs", &{
         let mut base = String::new();
@@ -1470,11 +1202,7 @@ fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
         base
     });
     scratch.commit_all("base");
-    // **Two hunks, and the busy one is the deep one.** `landing_of` lands on the
-    // *busiest* hunk's header, and a file with one hunk near its top always puts
-    // that header on row one, where the landing is row zero's neighbour and this
-    // gate's case cannot arise. One line changed at the top and eight at the
-    // bottom is what makes the landing a row deep in the block.
+    // Two hunks, and the busy one is the deep one.
     let mut edited = String::new();
     for n in 0..20 {
         if n == 1 || (12..16).contains(&n) {
@@ -1511,17 +1239,6 @@ fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
             continue;
         }
         served += 1;
-        // **I5's promise is that the change is drawn, not that a particular row
-        // is on top**, which is #257's own ruling and the reason a landing that
-        // runs short is allowed to be superseded by the back-up that fills the
-        // pane. So the assertion is the promise: a frame that served a landing
-        // draws the change it landed for.
-        // **A changed line, either side of it.** The oracle was the added
-        // lines' own text at first, and that is not the change: a hunk draws its
-        // removals before its additions, so a pane resting on the removed side is
-        // showing the reader exactly what the agent did and the gate called it a
-        // failure. I5 says the viewport goes to what changed, not to the half of
-        // it that is green.
         assert!(
             view.rows.iter().any(|row| matches!(
                 row,
@@ -1541,16 +1258,11 @@ fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
 
 #[test]
 fn a_band_of_three_row_lines_scrolls_and_stays_scrolled() {
-    // **Every other wrapped fixture in this file takes two rows a line**, which is
-    // the shape the cap left behind, and two is exactly the number that hides this
-    // defect: `View::display_rows` went on counting *at most one break* after the
-    // cap was removed, so a screen of two-row lines was counted right by accident
-    // and a screen of three-row lines read as short. The walk then backed up every
-    // frame and undid a `j` as fast as a reader could press it, on a diff too
-    // short in its own rows for a scrollbar to say anything was hidden.
-    //
-    // So the fixture's lines take **three** rows, and the gate presses `j` and
-    // asserts the pane stayed where it was put.
+    // Every other wrapped fixture in this file takes two rows a line, which is the
+    // shape the cap left behind, and two is exactly the number that hides this defect:
+    // `View::display_rows` went on counting *at most one break* after the cap was
+    // removed, so a screen of two-row lines was counted right by accident and a screen
+    // of three-row lines read as short.
     let scratch = Scratch::new("shell-wrap-three-row-band");
     scratch.write("src/band.rs", "seed\n");
     scratch.commit_all("base");
@@ -1601,14 +1313,9 @@ fn a_band_of_three_row_lines_scrolls_and_stays_scrolled() {
 
 #[test]
 fn the_two_row_counters_agree_on_the_same_screen() {
-    // **`View::display_rows` and `View::wrap_rows` count the same thing twice**,
-    // once before the walk decides it came up short and once when it expands, and
-    // nothing tied them together until one of them was left behind by the cap's
-    // removal. This is the tie: expand a screen, then count it the other way, and
-    // the two must agree.
-    //
-    // Swept over widths and heights, because the disagreement was a function of
-    // how many rows a line took and appeared at three.
+    // `View::display_rows` and `View::wrap_rows` count the same thing twice, once
+    // before the walk decides it came up short and once when it expands, and nothing
+    // tied them together until one of them was left behind by the cap's removal.
     let scratch = Scratch::new("shell-wrap-counters");
     scratch.write("src/c.rs", "seed\n");
     scratch.commit_all("base");

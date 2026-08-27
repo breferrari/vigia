@@ -1,19 +1,4 @@
 //! What a view builds out of a real diff.
-//!
-//! `render.rs` builds its rows by hand, because `vigia_core::FileChange` keeps a
-//! private field and cannot be constructed outside its crate. That makes the
-//! renderer testable and leaves a hole exactly where the rows come from: every
-//! snapshot in that file agrees with a derivation nothing checks.
-//!
-//! The hole is not hypothetical. `Row::Line` carries a line number, and the core
-//! carries line numbers per *hunk*, so the shell counts the two sides forward
-//! from each hunk header itself. Found by mutation: stopping the old side from
-//! advancing over context lines left the whole suite green, and would have put
-//! the wrong number against every removed line on screen.
-//!
-//! So the numbers here are checked against the file rather than against the
-//! arithmetic that produced them. A row's number is right when the line it names
-//! really is that line, on the side that line exists on.
 
 use std::time::Instant;
 
@@ -44,12 +29,6 @@ fn numbered(lines: usize) -> String {
 
 /// A file whose lines are unique to it, so rename tracking cannot pair it with
 /// another.
-///
-/// Worth its own helper. Rename detection is on by default and it works on
-/// similarity, so an added file and a deleted one that happen to share boilerplate
-/// are reported as one rename rather than two changes. Two four-line files of
-/// `line 1`, `line 2` are similar enough to pair, which is not a defect in the
-/// engine and is a trap for a fixture.
 fn unique(tag: &str, lines: usize) -> String {
     (1..=lines)
         .map(|n| format!("{tag} line {n}\n"))
@@ -62,15 +41,6 @@ fn lines_of(text: &str) -> Vec<String> {
 
 /// Two changed files and a third left alone, which is the smallest tree with an
 /// inter-file boundary in it.
-///
-/// **Named because two gates need the same shape and a fixture built twice
-/// drifts.** `a_real_repository_draws` reads the cells this produces and
-/// `a_files_block_ends_in_a_blank_row` reads the rows, so a change to one copy
-/// would leave the other asserting against a screen nobody draws. Every sibling
-/// test file here names its scratch shape for the same reason.
-///
-/// `README.md` is committed and never touched, so it is the file that must
-/// **not** appear: it is what stops a walk over every tracked file passing.
 fn two_changed(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write("src/lib.rs", numbered(12));
@@ -83,11 +53,9 @@ fn two_changed(name: &str) -> Scratch {
 
 #[test]
 fn every_line_number_names_the_line_it_is_on() {
-    // The fixture is built so the two sides cannot agree by accident: two lines
-    // are deleted near the top, which offsets every later line, and a separate
-    // edit far enough below to make a second hunk. A same-length one-line change
-    // would leave old and new numbering identical and the assertion would hold
-    // against a shell that counted only one side.
+    // The fixture is built so the two sides cannot agree by accident: two lines are
+    // deleted near the top, which offsets every later line, and a separate edit far
+    // enough below to make a second hunk.
     let scratch = Scratch::new("shell-rows-numbers");
     scratch.write(PATH, numbered(40));
     scratch.commit_all("baseline");
@@ -234,14 +202,7 @@ fn a_file_is_its_heading_then_its_hunks() {
 
 #[test]
 fn each_kind_of_change_gets_its_own_letter() {
-    // Git's letters, because they are the ones a reader already knows. Asserted
-    // against changes a real repository produces rather than against the mapping
-    // function, so a kind the core reports and the shell does not recognise shows
-    // up here as a wrong letter instead of never being noticed.
-    // Every file's content is unique to it except the pair meant to be a rename.
-    // With shared content the deletion and the addition below get paired into one
-    // rename, and the assertion fails for a reason that is about the fixture and
-    // not about the shell.
+    // Git's letters, because they are the ones a reader already knows.
     let scratch = Scratch::new("shell-rows-letters");
     scratch.write("src/kept.rs", unique("kept", 4));
     scratch.write("src/gone.rs", unique("gone", 4));
@@ -251,10 +212,7 @@ fn each_kind_of_change_gets_its_own_letter() {
     scratch.edit_line("src/kept.rs", 0, "changed");
     scratch.remove("src/gone.rs");
     scratch.write("src/fresh.rs", unique("fresh", 2));
-    // `I` is the one letter here that is not git's. Git renders an intent-to-add
-    // as a staged addition, and a monitor of the working tree has to distinguish
-    // it from content that is really in the index, so the choice is ours and gets
-    // its own case.
+    // `I` is the one letter here that is not git's.
     scratch.write("src/promised.rs", unique("promised", 2));
     scratch.git(&["add", "-N", "--", "src/promised.rs"]);
     // A rename is a deletion paired with an addition, which the core reports as
@@ -318,16 +276,7 @@ fn each_kind_of_change_gets_its_own_letter() {
 
 #[test]
 fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
-    // The property that pins the windowing arithmetic. Rows above the window are
-    // counted rather than built, and a hunk entirely above it is skipped by
-    // arithmetic rather than walked, because cloning a hundred thousand lines to
-    // show twenty-four of them is a per-frame cost that grows with the file. Two
-    // separate places to be off by one, and neither is reachable from a fixture
-    // with one hunk or a view that starts at the top.
-    //
-    // Stepping every offset through a multi-hunk file and demanding each window
-    // match the same slice of the full row list catches any of them, without the
-    // test having to restate the arithmetic it is checking.
+    // The property that pins the windowing arithmetic.
     let scratch = Scratch::new("shell-rows-window");
     scratch.write(PATH, numbered(60));
     scratch.commit_all("baseline");
@@ -352,10 +301,8 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         &history,
         Viewport {
             position: Position { file: 0, row: 0 },
-            // Unanchored, because this slides a window and compares it against
-            // slices of the whole. Letting the viewport back up to fill a short
-            // tail would be comparing a different window from the one the offset
-            // names.
+            // Unanchored, because this slides a window and compares it against slices
+            // of the whole.
             anchored: false,
             wrap: false,
             width: 0,
@@ -415,18 +362,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
 #[test]
 fn a_real_repository_draws() {
     // The only test that runs the whole composition: a working tree, a frame, the
-    // scroll position, the rows, and the cells. Everything else in the suite cuts
-    // it somewhere. `render.rs` hand-builds its rows because `FileChange` cannot
-    // be constructed outside the core, so nothing there proves the rows a real
-    // frame produces are the ones the renderer was designed against; the rest of
-    // this file builds rows and never draws them.
-    //
-    // What it still does not cover is the terminal itself: raw mode, the
-    // alternate screen, mouse capture and the panic hook are all outside a
-    // `TestBackend`, so none of them can be reached from here.
-    // [#8](https://github.com/breferrari/vigia/issues/8) proves them where they
-    // live instead, in `crates/vigia/src/terminal.rs`, against a recorded console
-    // rather than a real one.
+    // scroll position, the rows, and the cells.
     let scratch = two_changed("shell-rows-draw");
 
     let worktree = scratch.worktree();
@@ -438,11 +374,7 @@ fn a_real_repository_draws() {
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
-    // **The shipped split, because this is the only whole-composition test.**
-    // Everything else in the suite holds the pinned list out on purpose, to keep
-    // some other measurement clean. If this one did too, no test anywhere would
-    // draw a real frame's two regions together and the snapshot would be a
-    // picture of a screen nobody gets.
+    // The shipped split, because this is the only whole-composition test.
     let split = body_layout(
         area,
         &app.chrome("fixture", None, Pointing::default(), 0, ""),
@@ -483,57 +415,8 @@ fn a_real_repository_draws() {
 #[test]
 fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// The figure the store answers with at each grouping, finest first.
-    ///
-    /// **Three since [#234](https://github.com/breferrari/vigia/issues/234)**,
-    /// where this pinned one number. The middle entry is that number: `4_667` was
-    /// measured over twelve buckets, and twelve buckets is what a drawn one holds
-    /// at the settled rung, so the value did not move, it acquired an index.
-    ///
-    /// **And the set is what the gate is now for.** `418` and `837` are not one
-    /// figure and its double, which is exactly the point: `scale_of` averages the
-    /// non-empty values and grouping merges empties into their neighbours, so a
-    /// coarser figure is never the finest one multiplied. A store that returned
-    /// one figure three times, or one figure scaled by the grouping, fails here.
-    ///
-    /// **They were `[2_333, 4_667, 7_779]` until
-    /// [#256](https://github.com/breferrari/vigia/issues/256)**, and they moved
-    /// because the rule acquired an outlier cut. This fixture is one path with
-    /// one write, so its levelled buckets are the kernel's own geometric ramp,
-    /// `[5, 10, 22, 49, 114, 266, 622, 1489, 3785, 11590]`, where every value is
-    /// about two and a half times its neighbour. A ramp has no bulk, so the cut
-    /// reads its top as outlying and takes the two tallest out of the mean.
-    ///
-    /// **What that costs on screen is two cells, and on this pane none at all**,
-    /// which is worth stating because the finest figure moved by 5.6x. At that
-    /// rung the strip goes from `______________▁▁▁▁▁▁▃▆██` to
-    /// `______________▁▁▁▁▃▆████`; at the rung eighty columns affords it does not
-    /// move, and the snapshot below is unchanged.
-    ///
-    /// **The set is non-decreasing, and `vigia-core`'s
-    /// `a_coarser_rung_is_never_measured_against_less` is what asserts it.** A coarser
-    /// rung sums more source buckets into each drawn one, so its figure cannot be
-    /// smaller, and `History::repeak` gets that from arithmetic rather than from a
-    /// clamp: what is outlying is decided once at the source resolution, so every
-    /// rung sums one kept series and the shared total cancels. Deciding it per
-    /// grouping instead was the first shape of #256 and it read
-    /// `[418, 837, 302]` here, a coarser rung drawing *taller* bars than a finer
-    /// one.
     const PINNED: [u32; 3] = [418, 837, 1_116];
-    // **The producer, not the decider.** `spark_of` and the painter are mutation
-    // tested from every side in `render.rs`, and every one of those fixtures
-    // hands `View` a `peak` by hand. Nothing drove a *recorded* one through
-    // `App::view`, so `View::peak = history.scale()` was untested: hardcoding it
-    // to zero passed the entire workspace suite, all 426 tests, while making
-    // every sparkline on every screen draw pure track forever.
-    //
-    // That failure is invisible in the worst possible way after
-    // [#78](https://github.com/breferrari/vigia/issues/78): a screen of pure
-    // track is exactly what a correct launch looks like, so the tool would look
-    // right and say nothing, which is the defect that issue exists to remove
-    // rather than a new one it introduced.
-    //
-    // Asserted through the drawn cells rather than off `view.scale`, so it covers
-    // the whole path a bucket takes from the store to the screen.
+    // The producer, not the decider.
     let scratch = Scratch::new("shell-rows-recorded-tick");
     scratch.write("src/lib.rs", numbered(12));
     scratch.commit_all("baseline");
@@ -541,11 +424,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 
     let now = Instant::now();
     let mut history = History::starting_at(now);
-    // **Sized writes rather than bare ticks.** A sample weighs a difference, and
-    // the sparkline draws a *level* since #242, so two unsized ticks weigh one
-    // each, spread to a scale of exactly 1: the value a hardcoded denominator
-    // would reach for, which is the one thing this gate exists to tell apart.
-    // A first write is a baseline, so the weight is the second one's growth.
+    // Sized writes rather than bare ticks.
     history.record_sized([("src/lib.rs", Some(4_000))], now);
     history.record_sized([("src/lib.rs", Some(28_000))], now);
 
@@ -569,20 +448,6 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 
     // Non-vacuity, and it is the assertion that would have caught the hardcode
     // on its own: the store was asked and answered.
-    //
-    // **Two recorded ticks rather than one**, so the expected peak is 2 and not
-    // 1. A one-tick fixture asserts `peak == 1`, which a renderer hardcoding the
-    // *ramp's* denominator to one would also satisfy: the value a store returns
-    // has to differ from every constant a mutation would reach for, or the gate
-    // that exists to kill a hardcode is one.
-    //
-    // **Thirteen rather than two since [#242](https://github.com/breferrari/vigia/issues/242).**
-    // The sparkline draws a *level*, so its denominator is measured over the same
-    // levelled buckets rather than over the raw ones: two ticks spread by the
-    // kernel light many buckets at a low value, and the mean-based scale over
-    // those is what the bars are actually divided by. Pinned rather than loosened
-    // because this gate's whole point is that the value differs from every
-    // constant a hardcode would reach for, and it still does.
     assert_eq!(
         view.scale,
         Scale(PINNED),
@@ -613,7 +478,6 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
         .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
         .filter(|&at| {
             let cell = &buffer[at];
-            // Any stop of the ramp, which is three since #196.
             "▁▂▃▄▅▆▇█".contains(cell.symbol())
                 && [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg]
                     .contains(&cell.style().fg)
@@ -627,38 +491,9 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 }
 
 /// Every rung draws from the store's own figures, not a fixture's.
-///
-/// **The coverage-shape gap [#234](https://github.com/breferrari/vigia/issues/234)
-/// left, closed here.** Every gate that reaches the twenty-four bucket rung does
-/// it with a hand-set `Scale` on a literal `View`, because the sweeps live in
-/// `tests/legibility.rs` and build their fixtures directly. The only test that
-/// drives a *recorded* store all the way to a drawn row renders at eighty
-/// columns, which is the twelve-bucket rung. So the widest rung had never been
-/// drawn against a denominator the store actually computed, and the denominator
-/// is the half of this feature that is not a width: `History::scales` returns one
-/// figure per grouping precisely because multiplying the finest by the grouping
-/// is wrong on a quiet worktree, and nothing end to end was checking that the
-/// right one of the three arrives.
-///
-/// A hundred and sixty-four columns is the first pane whose share affords the
-/// widest layout at the block rung, which
-/// `tests/legibility.rs::the_glance_columns_collapse_in_one_order` derives and
-/// pins.
 #[test]
 fn every_rung_draws_from_the_stores_own_figures() {
     /// A pane per rung, widest first, with the buckets that rung must draw.
-    ///
-    /// **Every grouping, not just the widest.** Round 1 closed this gap at the
-    /// twenty-four end and left it open at the other: the six-bucket rung was
-    /// reached only by `tests/legibility.rs` fixtures carrying a hand-set
-    /// `Scale`, and `Scale::spread`'s own docblock says it is exact for the
-    /// fixtures this suite writes rather than for what the store computes. The
-    /// coarsest grouping is the one least like a multiplied figure, so it is the
-    /// one a fixture is least able to stand in for.
-    ///
-    /// The widths are the ones
-    /// `tests/legibility.rs::the_glance_columns_collapse_in_one_order` derives
-    /// and pins.
     const RUNGS: [(u16, usize); 3] = [(164, 24), (80, 12), (45, 6)];
 
     let scratch = Scratch::new("shell-rows-every-rung");
@@ -682,12 +517,7 @@ fn every_rung_draws_from_the_stores_own_figures() {
     let ink = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
 
     for (pane, rung) in RUNGS {
-        // **A fresh `App` per width, so each iteration is its own observation.**
-        // One shared across the loop carries `App::paint` forward, so the first
-        // pane draws plain and the rest draw coloured, and it carries the scroll
-        // position and the follow state with it. None of that reaches a glance
-        // slot today, which is exactly the kind of accident a later assertion
-        // added to this loop would inherit without noticing.
+        // A fresh `App` per width, so each iteration is its own observation.
         let mut app = App::new();
         let mut terminal = Terminal::new(TestBackend::new(pane, 12)).expect("terminal");
         let area = Rect::new(0, 0, pane, 12);
@@ -729,10 +559,7 @@ fn every_rung_draws_from_the_stores_own_figures() {
              rather than the {rung} its rung asks for"
         );
 
-        // **And the heights came from the store rather than from nothing.** A
-        // denominator of zero draws pure track, which is what a hardcode or the
-        // wrong entry of `Scale` would most easily produce, and it is
-        // indistinguishable from a correct launch by eye.
+        // And the heights came from the store rather than from nothing.
         let bars: usize = (0..buffer.area.height).map(|y| count(y, &bar)).sum();
         assert!(
             bars > 0,
@@ -785,24 +612,6 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
 
 #[test]
 fn a_files_block_ends_in_a_blank_row() {
-    // [#165](https://github.com/breferrari/vigia/issues/165). A file's last
-    // content row and the next file's heading sat on adjacent rows, and a
-    // heading is a `Painter::file_row` carrying the kind letter, the path, the
-    // pulse, the heat strip, the sparkline and the counters, so a dense row
-    // landed directly under a dense row and the only thing marking the boundary
-    // was the content itself.
-    //
-    // **Trailing, and on every file but the last**, which is the ruling rather
-    // than an implementation detail, so the gate is written against all three of
-    // its halves: every heading after the first is preceded by a gap, the
-    // **first** row of the stream is a heading and not a gap, and the **last**
-    // file does **not** get one. Dropping any of the three is a different ruling
-    // that would otherwise pass this test, and the third is the one that was
-    // reversed while this was being built (the reason is at the assertion).
-    //
-    // Against a real frame rather than hand-built rows, because the claim is
-    // about what `View::take_file` produces from a diff, which is exactly what
-    // this file exists to cover.
     let scratch = two_changed("shell-rows-gap");
 
     let worktree = scratch.worktree();
@@ -863,14 +672,7 @@ fn a_files_block_ends_in_a_blank_row() {
             view.rows.get(at - 1)
         );
     }
-    // **And the last file does not get one.** That is the exception rather than
-    // an oversight, and it is the half of this ruling that was reversed while it
-    // was being built: `SPEC.md` §11.1 rules the bottom of the diff is
-    // **content**, `scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank`
-    // is the gate over it, and that gate carries its own warning about having
-    // once been weakened. A blank there would separate the diff from nothing,
-    // since the footer is chrome with a row of its own. Asserted here as well,
-    // because this is the file that would notice a uniform gap coming back.
+    // And the last file does not get one.
     assert!(
         !matches!(view.rows.last(), Some(Row::Gap)),
         "the stream ends on a blank, so the gap has gone uniform and the bottom \

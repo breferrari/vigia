@@ -1,15 +1,4 @@
 //! The frame path, behaviourally: I2a.
-//!
-//! `tests/budgets.rs` gates the *cost* of a frame, which is the half of I2a that
-//! can be satisfied by a cache that reuses too much. This file gates the other
-//! half. Every test here asks the same question in a different way: is what the
-//! frame handed back still true?
-//!
-//! That asymmetry is the whole risk in this invariant. A frame path that never
-//! reuses anything is slow, and the budget gate catches it loudly. A frame path
-//! that reuses something it should not is *fast*, passes every budget, and shows
-//! the reader a diff that no longer exists. The second failure is the one worth
-//! building tests around.
 
 mod support;
 
@@ -25,9 +14,6 @@ const FIRST: &str = "src/mod_0.rs";
 const SECOND: &str = "src/mod_1.rs";
 
 /// Every diff the frame currently reports, in file order.
-///
-/// Takes the diffs by value so the frame is free afterwards; a test that wants
-/// to compare against a fresh computation needs both at once.
 fn diffs(frame: &mut Frame) -> Vec<FileDiff> {
     frame.advance().expect("advance");
     (0..frame.files().len())
@@ -46,11 +32,6 @@ fn fresh(worktree: &Worktree) -> Vec<FileDiff> {
 
 /// Assert two sets of diffs are identical, reporting the first disagreement
 /// compactly.
-///
-/// `assert_eq!` over `Vec<FileDiff>` is correct and unreadable: one wrong line
-/// prints both diffs in full, which on these fixtures is tens of thousands of
-/// characters and buries the one line that matters. This keeps the strength of
-/// full equality and loses the wall of text.
 fn assert_same(reused: &[FileDiff], fresh: &[FileDiff], what: &str) {
     assert_eq!(
         reused.len(),
@@ -84,12 +65,6 @@ fn assert_same(reused: &[FileDiff], fresh: &[FileDiff], what: &str) {
 }
 
 /// Where two diffs of one file first disagree, in one line.
-///
-/// **Every scalar field is checked before the lines are**, and that is not
-/// belt-and-braces. `assert_same` compares whole structs, so a field this
-/// function does not know about still fails the assertion, and the message would
-/// then read "no line differs" and send a reader looking in the wrong place. It
-/// happened to `lines` the moment that field was added.
 fn first_difference(left: &FileDiff, right: &FileDiff) -> String {
     for (field, a, b) in [
         ("binary", u32::from(left.binary), u32::from(right.binary)),
@@ -237,17 +212,8 @@ fn an_idle_frame_recomputes_nothing() {
 
 #[test]
 fn a_file_written_moments_ago_is_never_reused() {
-    // The *producer* half of the racily-clean rule, and the half nothing else
-    // here reaches. The unit tests over `settled` check the arithmetic; this
-    // checks that the code recording a fingerprint actually consults it. Hard
-    // code the answer to "trusted" and this is the test that goes red.
-    //
-    // Deterministic, with no race to lose: a filesystem floors the modification
-    // time it stamps, so the granule a just-written file was stamped in may still
-    // be open, and no fingerprint taken inside it can be trusted however much it
-    // matches. The frame therefore has to re-read a recently written file on
-    // *every* frame until its granule has provably closed, not merely on the
-    // first frame after the write.
+    // The *producer* half of the racily-clean rule, and the half nothing else here
+    // reaches.
     let scratch = Scratch::large_diff("frame-recent", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -283,10 +249,7 @@ fn a_file_written_moments_ago_is_never_reused() {
 
 #[test]
 fn touching_a_file_costs_one_redundant_diff() {
-    // Documenting the trade rather than complaining about it. The rule is
-    // "reuse only what can be proved unchanged", and a new modification time is
-    // not proof of anything either way. Erring towards a redundant diff is the
-    // side that cannot show a stale frame.
+    // Documenting the trade rather than complaining about it.
     let scratch = Scratch::large_diff("frame-touch", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -309,10 +272,9 @@ fn touching_a_file_costs_one_redundant_diff() {
 
 #[test]
 fn a_path_that_stops_changing_is_evicted() {
-    // I3 forbids unbounded growth over days, and a monitor watching an agent
-    // will see thousands of paths become changed and then clean again as work
-    // is staged and committed. Holding every diff ever computed is the shape
-    // that fails a soak test.
+    // I3 forbids unbounded growth over days, and a monitor watching an agent will see
+    // thousands of paths become changed and then clean again as work is staged and
+    // committed.
     let scratch = Scratch::large_diff("frame-evict", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -351,36 +313,17 @@ fn a_path_that_stops_changing_is_evicted() {
 }
 
 /// Total rows over every changed file, from spans alone.
-///
-/// One row per diff line, which is the shape the shell's `rows_of` reduces to
-/// once chrome is taken out. It does not have to match what `vigia` draws; it
-/// has to be the *same* function on both sides of every comparison below.
 fn total_height(frame: &mut Frame) -> usize {
     frame.height(|_, span| span.lines as usize).expect("height")
 }
 
 #[test]
 fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
-    // **The too-eager direction of [#101](https://github.com/breferrari/vigia/issues/101).**
-    // Carrying a span across a tick makes the walk incremental, and the way to
-    // get that wrong is to carry one whose file has since been rewritten: the
-    // scrollbar is then scaled against a diff that no longer exists, silently,
-    // for as long as nothing else touches that file.
-    //
-    // The edit is to a file **nothing has diffed**, which is the only case where
-    // a carried span is the sole source of that file's height. A file on screen
-    // is re-diffed anyway and its span is rebuilt from the fresh diff.
-    //
-    // This is the shape the whole module doc describes: reusing too little is
-    // slow and loud, reusing too much is fast and wrong.
     let scratch = Scratch::large_diff("frame-span-edit", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
 
-    // Settle without materialising: every span comes from a read, no file has a
-    // diff. `settle` would defeat this by diffing everything. The shared helper
-    // rather than a sleep of its own, because the wait has to exceed the
-    // engine's `SETTLE_MARGIN` and a literal here would not move when that does.
+    // Settle without materialising: every span comes from a read, no file has a diff.
     let primed = settle_spans(&mut frame);
     let before = total_height(&mut frame);
     assert_eq!(
@@ -391,12 +334,7 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
         frame.tracked()
     );
 
-    // **The premise this test is named for, and without it the whole thing is
-    // vacuous.** Every assertion below is about a span that was *carried*, and a
-    // frame that carries nothing satisfies all of them: it re-measures, gets the
-    // right answer, and looks identical from the outside. So prove a carry
-    // happened first. An idle tick over files nothing touched must measure
-    // nothing, which it can only do by trusting what it kept.
+    // The premise this test is named for, and without it the whole thing is vacuous.
     assert_eq!(
         primed, FILES as u64,
         "priming measured {primed} of {FILES} files, so there was no walk here \
@@ -414,12 +352,7 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
     );
     assert_eq!(unchanged, before, "an idle tick changed the diff's height");
 
-    // **And it proved them with a `stat` each, which nothing else asserts.**
-    // Every other `probes` assertion in the repo covers `Frame::diff` or asserts
-    // zero, so deleting `fill_span`'s own `probes` accounting left the suite
-    // green — and `a_height_taken_from_a_diff_in_hand_costs_no_stat` is written
-    // as `probes == 0`, so it is hollowed out by exactly that deletion. Found by
-    // mutation.
+    // And it proved them with a `stat` each, which nothing else asserts.
     assert_eq!(
         idle.probes, FILES as u64,
         "an idle tick took {} stat calls to re-prove {FILES} carried spans, \
@@ -452,32 +385,7 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
 
 #[test]
 fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
-    // **The order of `fill_span`'s three sources, held structurally.** A file
-    // whose diff the frame already holds needs no evidence: its height is a fold
-    // over hunks the frame owns, which is free and is what this cost before
-    // [#101](https://github.com/breferrari/vigia/issues/101) existed. Asking for
-    // a fingerprint first reads as "cheapest first" and is a syscall bought for
-    // nothing.
-    //
-    // **Written because the wrong order shipped and the wall clock nearly let it
-    // through.** With the stat first,
-    // `budgets.rs::the_frame_budget_holds_through_a_bulk_rewrite` went from
-    // 8.27ms p50 to 11.12ms and from passing 4 of 4 local runs to 2 of 4: a
-    // flake, which is the failure mode a percentile gate reports least clearly
-    // and which a hosted runner would have blamed on itself. A count cannot be
-    // flaky.
-    //
-    // The bulk rewrite is the shape that makes it visible: every print moves at
-    // once, so every carried span mismatches, and the mismatch repeats on every
-    // later frame because the span is rebuilt from the same stale diff each time.
-    //
-    // **In this crate rather than in the shell's `reads.rs`**, where it was first
-    // written. It touches no `App`, no `Highlighter`, no viewport and no paint,
-    // and its assertions are core counters over a core-private ordering. A gate
-    // that pins a `vigia-core` function has to be able to fail in
-    // `cargo test -p vigia-core`, or the crate can be reordered green. Its
-    // sibling `reads.rs::a_tick_re_measures_only_what_changed` stays there
-    // because it genuinely needs a drawn screen to make the drawn/undrawn split.
+    // The order of `fill_span`'s three sources, held structurally.
     const REWRITTEN: usize = FILES;
     let scratch = Scratch::large_diff("frame-inhand", REWRITTEN, LINES);
     let worktree = scratch.worktree();
@@ -524,22 +432,7 @@ fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
 
 #[test]
 fn a_failed_measure_is_asked_again_rather_than_carried() {
-    // **The narrowest arm in `fill_span`, and the one where carrying is
-    // wrong.** A read that failed describes nothing, so its span is zero. Zero is
-    // the right answer for *this* tick — a file that vanished has no height — and
-    // the wrong thing to inherit.
-    //
-    // The hazard is specific to a change with **no working-tree side**. For every
-    // other kind the evidence refuses itself: `reusable` treats a missing
-    // fingerprint as unprovable. A `Removed` diff is computed from the index
-    // alone, so `reusable` answers on the kind and the blob and returns **true**,
-    // and a zero row-count would then be pinned for the life of the frame with no
-    // retry. `Measured::taken` is `None` on this path precisely to stop that.
-    //
-    // Reaching it needs an object the repository cannot read, which is
-    // `Error::MissingBlob`: legitimate during a `git gc` or over a partial clone,
-    // and reproducible here by deleting the loose object a removed file's index
-    // entry points at.
+    // The narrowest arm in `fill_span`, and the one where carrying is wrong.
     let scratch = Scratch::new("frame-failed-measure");
     scratch.write(FIRST, support::numbered_lines(40));
     // Different content from FIRST on purpose: identical files share one
@@ -596,25 +489,8 @@ fn a_failed_measure_is_asked_again_rather_than_carried() {
 
 #[test]
 fn an_attributes_file_rewritten_inside_one_granule_still_drops_the_caches() {
-    // **The racily-clean case, on the one file whose staleness invalidates every
-    // other file's answer.** Two writes of the same length inside one
-    // modification-time granule are indistinguishable by `stat`, which is what
-    // [`settled`] exists for, and 13 bytes of `a.txt binary` becoming 13 bytes of
-    // `b.txt binary` is exactly that shape. Comparing bare fingerprints calls the
-    // attributes unchanged and leaves every cached diff and span computed under
-    // rules that moved, permanently, because nothing will touch that file again.
-    //
-    // **Forced rather than raced.** The gap between two writes here is a few
-    // milliseconds and the granule observed on this volume is about one, so a
-    // natural attempt misses: the mutation that drops the `settled` term survived
-    // forty of forty tries. Stamping both writes with the same modification time
-    // makes the collision certain, which is what a one or two second granule
-    // (ext3, HFS+, FAT, exFAT) does on its own, and those are the volumes
-    // `SETTLE_MARGIN` is sized against.
-    //
-    // What is still uncovered is a writer that restores an *older* modification
-    // time, which is [#16](https://github.com/breferrari/vigia/issues/16) and is a
-    // limit of every reuse decision in this file rather than of this one.
+    // The racily-clean case, on the one file whose staleness invalidates every other
+    // file's answer.
     let scratch = Scratch::large_diff("frame-attrs-granule", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -677,12 +553,6 @@ fn stamp_write(path: &std::path::Path, contents: &str, at: std::time::SystemTime
 
 #[test]
 fn a_span_for_a_path_that_stops_changing_is_dropped() {
-    // I3's half of #101. Spans used to be cleared whole on every `advance`, so
-    // they could not accumulate; carrying them across ticks makes the map a
-    // **fourth** retained cache, and every retained cache in this repo has to be
-    // bounded by something and asserted rather than trusted.
-    //
-    // The bound is the changed set, exactly as it is for the diffs beside it.
     let scratch = Scratch::large_diff("frame-span-evict", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -715,10 +585,8 @@ fn a_span_for_a_path_that_stops_changing_is_dropped() {
 
 #[test]
 fn staging_a_file_recomputes_the_files_still_changed() {
-    // Staging rewrites the index, and the index is the left-hand side of every
-    // diff on screen. Nothing on disk moved, so a frame path that only watched
-    // the working tree would keep showing diffs against a blob that is no
-    // longer staged.
+    // Staging rewrites the index, and the index is the left-hand side of every diff on
+    // screen.
     let scratch = Scratch::large_diff("frame-stage", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -737,13 +605,9 @@ fn staging_a_file_recomputes_the_files_still_changed() {
 
 #[test]
 fn a_new_index_blob_invalidates_a_diff_the_worktree_never_touched() {
-    // The index is the left-hand side of every diff on screen, and it moves
-    // without the working tree moving: `git add`, `git reset` and `git stash`
-    // all rewrite entries under files nobody edited. `update-index` is that
-    // operation with nothing else going on, which is what makes this testable
-    // at all. Staging normally makes a path clean, and a clean path leaves the
-    // frame through a different door entirely (eviction), so it can never
-    // exercise this branch.
+    // The index is the left-hand side of every diff on screen, and it moves without the
+    // working tree moving: `git add`, `git reset` and `git stash` all rewrite entries
+    // under files nobody edited.
     let scratch = Scratch::large_diff("frame-index-blob", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -752,10 +616,7 @@ fn a_new_index_blob_invalidates_a_diff_the_worktree_never_touched() {
     let before = diffs(&mut frame);
     let stat_before = std::fs::metadata(scratch.path_of(FIRST)).expect("stat");
 
-    // Point the first file's index entry at some other content entirely. Not
-    // another fixture file's blob: every generated file holds identical bytes,
-    // so they all share one object id and swapping between them changes
-    // nothing at all.
+    // Point the first file's index entry at some other content entirely.
     let other = scratch.hash_object("fn staged_from_somewhere_else() {}\n");
     scratch.git(&[
         "update-index",
@@ -840,26 +701,13 @@ fn a_failed_advance_leaves_the_frame_intact() {
     let files = frame.files().to_vec();
     let tracked = frame.tracked();
 
-    // Garbage of a plausible length, and the length is not incidental. `gix`
-    // 0.86 reads the index's trailing checksum as `data[data.len() - 20..]`
-    // with no lower bound, so an index file shorter than the object hash
-    // *panics* instead of returning an error: 19 bytes and below abort, 20 and
-    // above report cleanly. That is a `gix` defect rather than something the
-    // frame path can catch, since the release profile sets `panic = "abort"`.
-    // See ROADMAP.md's deferral shelf. This test gates what vigia controls:
-    // given an error, the previous frame survives it.
+    // Garbage of a plausible length, and the length is not incidental.
     std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 128]).expect("corrupt the index");
 
     let error = frame
         .advance()
         .expect_err("a corrupt index was walked without complaint");
 
-    // Pin the boundary itself, so a `gix` bump that fixes #13 makes this test
-    // say so instead of leaving the comment above quietly wrong. Twenty bytes is
-    // the first length that reports rather than aborts, so it must still report.
-    // The panicking side cannot be asserted from here: the release profile sets
-    // `panic = "abort"`, so a `#[should_panic]` test would take the whole binary
-    // with it.
     std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 20]).expect("truncate the index");
     worktree
         .frame()
@@ -885,17 +733,6 @@ fn a_failed_advance_leaves_the_frame_intact() {
 }
 
 /// The cache-key gate for `FileDiff::lines`.
-///
-/// #39 asked for a line count cached per `(path, blob id)`. It is cached with
-/// the **diff** instead, which is the stricter key: a blob id names the index
-/// side, and a working-tree edit does not touch it. This is the case that
-/// separates the two, and it is the case a byte-length check cannot see.
-///
-/// The file keeps its length in bytes and changes its length in lines. A
-/// fingerprint is `(len, mtime)`, so the length half says nothing here and the
-/// whole question is whether the diff was invalidated at all. If it was not, the
-/// heat strip would go on projecting hunk positions across a file length that
-/// stopped being true.
 #[test]
 fn a_same_length_edit_that_changes_the_line_count_is_not_reused() {
     let scratch = Scratch::large_diff("frame-line-count", FILES, LINES);
@@ -944,25 +781,8 @@ fn a_same_length_edit_that_changes_the_line_count_is_not_reused() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Symlinks: the half of [#15](https://github.com/breferrari/vigia/issues/15)
-// that lives here rather than in `fidelity.rs`.
-//
-// The read and the fingerprint had to move together. `Worktree::read_worktree`
-// now takes a link's content from `read_link`, so a `fingerprint` that still
-// followed the link would fingerprint one file and diff another, and the
-// staleness rule would be reading a term that has nothing to do with what it
-// governs. Neither direction of that is visible in a diff's *contents* with the
-// read already fixed, which is why both gates below read `FrameStats` instead:
-// what changed is whether the frame recomputed, not what it computed.
-// ---------------------------------------------------------------------------
-
-/// A worktree whose link target is **ignored**, so editing it never enters the
+/// A worktree whose link target is ignored, so editing it never enters the
 /// changed set.
-///
-/// That is what makes `computed` an exact per-file number in the gates below
-/// rather than a total two files contribute to. Returns `None` when the platform
-/// or git declines to hold a symlink, already having said so.
 fn ignored_target_link(name: &str, target: &str) -> Option<Scratch> {
     let scratch = Scratch::new(name);
     scratch.write(".gitignore", "blob/\n");
@@ -973,31 +793,14 @@ fn ignored_target_link(name: &str, target: &str) -> Option<Scratch> {
 
 #[test]
 fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
-    // **Mutation-sensitive on all three tier-1 targets, and for two different
-    // reasons, which is worth recording rather than leaving to be rediscovered.**
-    // Restore the following `fs::metadata` and on Linux and macOS this fails at
-    // its own assertion: the old fingerprint resolved the link, found an
-    // untouched file, and reused a diff that no longer described anything.
-    //
-    // On **Windows** it fails earlier and louder, inside `settle`, with "the
-    // frame was still re-reading after 8 idle frames". That is not this test
-    // being flaky, it is a second defect the same line carried: Windows refuses
-    // to resolve a symlink whose stored target uses forward slashes, and forward
-    // slashes are exactly what git stores. So `fs::metadata` returned `Err`, the
-    // fingerprint was `None`, and **every symlink in a Windows worktree was
-    // re-diffed on every frame, indefinitely** (I2a). Nothing measured that,
-    // because no fixture in this repository held a symlink until now, which is
-    // `SPEC.md` §7's fixture-axis rule naming `core.symlinks` and then this being
-    // what was behind it.
+    // Mutation-sensitive on all three tier-1 targets, and for two different reasons,
+    // which is worth recording rather than leaving to be rediscovered.
     let Some(scratch) = ignored_target_link("frame-symlink-repoint", "blob/a.txt") else {
         return;
     };
 
-    // Two spellings of **one file**, so the followed metadata is byte-identical
-    // by construction. Two genuinely different targets would differ in mtime by
-    // microseconds and a fingerprint that followed the link would invalidate by
-    // accident, which makes the gate flaky rather than red: it would pass for
-    // the wrong reason on a slow machine and fail to reproduce on a fast one.
+    // Two spellings of one file, so the followed metadata is byte-identical by
+    // construction.
     assert!(scratch.symlink_file("blob/b.txt", "link.txt"));
 
     let worktree = scratch.worktree();
@@ -1005,11 +808,7 @@ fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
     settle(&mut frame);
     let before = diffs(&mut frame);
 
-    // Stat the target **directly** rather than through the link. It is the same
-    // number a following fingerprint would have taken, and it is the only
-    // spelling of that question that works everywhere: Windows refuses to
-    // resolve a symlink whose stored target uses forward slashes at all
-    // (`ERROR_INVALID_NAME`), and forward slashes are what git stores.
+    // Stat the target directly rather than through the link.
     let target = || {
         let meta = std::fs::metadata(scratch.path_of("blob/b.txt")).expect("stat the target");
         (meta.len(), meta.modified().expect("mtime"))
@@ -1018,10 +817,8 @@ fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
 
     assert!(scratch.symlink_file("blob/../blob/b.txt", "link.txt"));
 
-    // The non-vacuity that makes this gate about the fingerprint and nothing
-    // else: the file both spellings name did not move. A frame path that still
-    // followed has no term left that could tell these two apart, so if the
-    // assertion below passes it is because the link's own metadata was read.
+    // The non-vacuity that makes this gate about the fingerprint and nothing else: the
+    // file both spellings name did not move.
     assert_eq!(
         resolved_before,
         target(),
@@ -1041,12 +838,8 @@ fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
 
 #[test]
 fn editing_a_symlinks_target_does_not_invalidate_the_links_diff() {
-    // The other direction, and `SPEC.md` §7 asks for it by name: an invariant
-    // whose two failure modes are not symmetrical gets a gate for each. Reusing
-    // too little is the cheap failure here, and it is still a failure, because a
-    // fingerprint that moves when git reports no change is a term that does not
-    // mean what the rule reads as. `fidelity.rs` holds the walk's half of this;
-    // this is the frame's.
+    // The other direction, and `SPEC.md` §7 asks for it by name: an invariant whose two
+    // failure modes are not symmetrical gets a gate for each.
     let Some(scratch) = ignored_target_link("frame-symlink-target-edit", "blob/a.txt") else {
         return;
     };
@@ -1086,18 +879,8 @@ fn editing_a_symlinks_target_does_not_invalidate_the_links_diff() {
 
 #[test]
 fn a_symlink_read_reports_the_type_probe_it_spent() {
-    // **The gate over the counting itself, and without it the counting has no
-    // failing test of its own.** Round 1 of this branch's audit found that a
-    // type probe taken in `Worktree` and counted nowhere made
-    // `FileChange::maybe_symlink` deletable with the whole suite green. Round 2
-    // found the same criticism one level down: every fixture that asserts on
-    // `probes` is built from *regular files*, so the new term is identically
-    // zero in all of them and deleting the counting is green too.
-    //
-    // A symlink is what makes the term non-zero, so this is the only fixture in
-    // the repository that can hold it. Delete the `*probes += 1` in
-    // `read_worktree`, or the `stats.probes += probes` in either `Frame::diff`
-    // or `Frame::fill_span`, and this goes red on its own.
+    // The gate over the counting itself, and without it the counting has no failing
+    // test of its own.
     let Some(scratch) = ignored_target_link("frame-symlink-probe", "blob/a.txt") else {
         return;
     };

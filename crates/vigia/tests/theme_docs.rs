@@ -1,15 +1,5 @@
 //! `docs/THEME.md` documents every theme key, and this gate is what makes that
 //! sentence stay true instead of rotting the way per-hand checklists do.
-//!
-//! Both directions, for `preflight.sh`'s reason: a drift check has a direction,
-//! chosen by whichever collection it iterates. Iterating the code finds the key
-//! somebody added without documenting; iterating the document finds the key
-//! somebody renamed or removed while its row outlived it. Either alone reads
-//! clean through the other's failure.
-//!
-//! The document's keys are read from its own table rows, `| `key` | ...`, so
-//! prose mentioning a key does not count as documenting it: a key is documented
-//! when it has a row saying what it colours.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -63,10 +53,9 @@ fn every_row_in_the_reference_is_a_key() {
 
 #[test]
 fn the_reference_reads_keys_from_rows_at_all() {
-    // The extractor above is the load-bearing part of both gates, and a change
-    // to the document's table style would empty it, making both pass over a
-    // document that documents nothing. Mutation-proofing per the house rule: a
-    // check that cannot fail has not been written.
+    // The extractor above is the load-bearing part of both gates, and a change to the
+    // document's table style would empty it, making both pass over a document that
+    // documents nothing.
     assert!(
         documented(&doc()).len() >= Theme::KEYS.len(),
         "the table extractor found fewer rows than there are keys; \

@@ -40,11 +40,6 @@ use vigia_core::{ChangeOptions, Error, Frame, FrameStats, Samples, Worktree};
 const WARM_SWEEPS: usize = 20;
 
 /// Frames allowed for a working tree's recent writes to settle.
-///
-/// A file written moments ago cannot be *proved* unchanged, so a frame taken
-/// right after a save re-reads it by design. This is not a retry loop: it stops
-/// as soon as a frame reuses everything, and the report names anything still
-/// being re-read.
 const SETTLE_FRAMES: usize = 8;
 
 /// Files a first paint is assumed to need. A tall terminal shows fewer.
@@ -141,10 +136,7 @@ fn main() -> ExitCode {
         }
     }
 
-    // Deliberately not labelled I9. These are the raw primitives with no memory
-    // of the previous frame, which is the floor a frame cannot beat rather than
-    // any frame a monitor has. The frame path is measured below, and it is what
-    // `tests/budgets.rs` gates I9 over.
+    // Deliberately not labelled I9.
     println!("primitives, the floor  (warm, n={WARM_SWEEPS})");
     if let (Some(p50), Some(p99)) = (incremental.percentile(0.50), incremental.percentile(0.99)) {
         println!(
@@ -270,13 +262,6 @@ struct FrameCosts {
 }
 
 /// Advance one frame and fetch every diff in it.
-///
-/// This, `delta` and the settle loop below also exist in
-/// `crates/vigia-core/tests/support/mod.rs`, which an example *can* reach by
-/// `#[path]` the way `benches/engine.rs` does. Kept separate anyway: that module
-/// exists to build fixture repositories by shelling out to `git`, and linking a
-/// fixture builder into a tool pointed at someone's real worktree buys three
-/// shared helpers at the price of a confusing one. Keep them in step by hand.
 fn materialise(frame: &mut Frame) -> Result<(), Error> {
     frame.advance()?;
     for i in 0..frame.files().len() {
@@ -298,11 +283,6 @@ fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
 }
 
 /// Measure I2a against this repository: the same frame, with and without memory.
-///
-/// The warm frame is settled first. A file written moments ago cannot be proved
-/// unchanged, so a frame taken immediately after a save legitimately re-reads
-/// it; measuring that as steady state would understate incrementality for a
-/// reason that is not about the code.
 fn frame_costs(worktree: &Worktree) -> Result<FrameCosts, Error> {
     let mut cold = Samples::new(WARM_SWEEPS);
     let mut warm = Samples::new(WARM_SWEEPS);
@@ -360,10 +340,6 @@ struct Sweep {
 }
 
 /// Enumerate every change, then diff at most `diff_limit` of them.
-///
-/// The limit is what separates a first-paint measurement from a whole-diff
-/// one. Enumeration always runs to completion because a monitor has to know
-/// the full file list to draw a scrollbar, even when it only renders the top.
 fn sweep(worktree: &Worktree, options: ChangeOptions, diff_limit: usize) -> Result<Sweep, Error> {
     let start = Instant::now();
 

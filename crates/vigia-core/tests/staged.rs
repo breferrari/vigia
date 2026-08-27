@@ -1,15 +1,4 @@
-//! The staged run: `SPEC.md` §11.2 **B17**.
-//!
-//! Every test here is about the same claim, from a different side: **a change is
-//! in exactly the run it belongs to, and the diff drawn for it is that run's own**.
-//! Both halves matter, and the second is the one with teeth. A frame that put a
-//! staged file in the unstaged run would be visibly wrong within a second; a frame
-//! that put it in the right run and handed back the *other* run's diff for it
-//! looks perfectly ordinary and is a lie about the reader's worktree.
-//!
-//! The fixtures are built by real `git` for the reason `tests/support` gives: the
-//! question is whether `gix` reads an index the way git wrote it, and a fixture
-//! written by the library under test cannot answer that.
+//! The staged run: `SPEC.md` §11.2 B17.
 
 mod support;
 
@@ -30,10 +19,6 @@ fn fixture(name: &str) -> Scratch {
 }
 
 /// Every change the frame holds, as `(origin, path)`, in the order it reports.
-///
-/// Order is asserted rather than sorted away: the runs are drawn in the order
-/// `advance` concatenates them, and a reader reads down from what the agent has
-/// just written to what it has already put away.
 fn runs(frame: &Frame) -> Vec<(Origin, String)> {
     frame
         .files()
@@ -59,9 +44,6 @@ fn only<'f>(frame: &'f Frame, origin: Origin, path: &str) -> &'f FileChange {
 }
 
 /// The issue's own acceptance, both directions on one worktree.
-///
-/// [#313](https://github.com/breferrari/vigia/issues/313): *"a test that fails
-/// when a staged file is drawn in the unstaged view or the reverse."*
 #[test]
 fn a_staged_change_is_absent_from_the_unstaged_walk_and_present_in_the_staged_one() {
     let scratch = fixture("staged-absent");
@@ -95,10 +77,6 @@ fn a_staged_change_is_absent_from_the_unstaged_walk_and_present_in_the_staged_on
 }
 
 /// The case the union exists for: one path, changed on both sides.
-///
-/// Staged content and a further edit on top are **two different diffs of two
-/// different pairs of bytes**, so the pane draws two rows and each says what it
-/// actually shows. This is what a single `MM` row cannot do.
 #[test]
 fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_content() {
     let scratch = fixture("staged-both-sides");
@@ -132,10 +110,8 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
     let added_unstaged = frame.diff(unstaged).expect("unstaged diff").1.added;
     let added_staged = frame.diff(staged).expect("staged diff").1.added;
 
-    // The unstaged run holds the one line added since the file was staged; the
-    // staged run holds the line staged before that. A cache keyed by path alone
-    // hands the same number back twice, which is exactly the failure this pair
-    // of assertions exists to catch.
+    // The unstaged run holds the one line added since the file was staged; the staged
+    // run holds the line staged before that.
     assert_eq!(
         (added_unstaged, added_staged),
         (1, 1),
@@ -150,12 +126,7 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
             .any(|line| line.text.contains("AND UNSTAGED")),
         "the unstaged run draws the edit that is not staged yet"
     );
-    // **Which side each line is on, not merely that it appears.** Found by
-    // mutation: swapping `before` and `after` on a staged modification left the
-    // whole suite green, because a fixture that rewrites one line is +1/-1 either
-    // way and the word is in the hunk whichever side it lands on. A diff drawn
-    // backwards shows every staged addition as a removal, in green and red, on
-    // every row of the run.
+    // Which side each line is on, not merely that it appears.
     let (_, staged_diff) = frame.diff(staged).expect("staged diff");
     let side = |want: &str| {
         staged_diff
@@ -178,23 +149,8 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
     );
 }
 
-/// **A staged diff reads no file at all**, which is what makes the second walk
+/// A staged diff reads no file at all, which is what makes the second walk
 /// affordable and is the premise the whole design rests on.
-///
-/// **Proved by deleting the file rather than by counting bytes**, and the reason is
-/// worth stating because the obvious instrument does not work.
-/// [`FrameStats::bytes`] counts what the diff *compared*, which for a staged change
-/// is two blobs out of the object database — so it is non-zero here and says
-/// nothing about the filesystem. [`FrameStats::probes`] is a `stat` counter and it
-/// is only spent where [`FileChange::maybe_symlink`] is set, so a zero there is
-/// consistent with an ordinary read too.
-///
-/// What *is* decisive is the content. With the file gone from disk, a diff that
-/// consulted the working tree would compare `HEAD`'s three lines against nothing
-/// and report a whole-file **deletion**; only a diff computed from the index blob
-/// reports the one line the index rewrote. So the assertion is on the answer, which no
-/// implementation can produce by accident, with the syscall count beside it as
-/// corroboration rather than as the claim.
 #[test]
 fn a_staged_diff_reads_no_file_from_the_working_tree() {
     let scratch = fixture("staged-no-read");
@@ -263,11 +219,6 @@ fn a_staged_rename_reads_as_one_change_rather_than_a_delete_and_an_add() {
 }
 
 /// An unborn `HEAD` is where an agent's first minute actually is.
-///
-/// There is no tree to compare against, so the comparison is against the empty
-/// one and every indexed path is a staged addition. That is what
-/// `git diff --cached` reports there, and the alternative — refusing to draw
-/// because a ref would not resolve — is a monitor that has stopped doing its job.
 #[test]
 fn a_repository_with_no_commits_reads_its_whole_index_as_staged_additions() {
     let scratch = Scratch::new("staged-unborn");
@@ -299,12 +250,6 @@ fn a_repository_with_no_commits_reads_its_whole_index_as_staged_additions() {
 }
 
 /// Turning the run off must not leave its diffs behind to be handed back later.
-///
-/// A staged artefact's freshness rests on object ids the *walk* supplies, and no
-/// staged walk runs while the toggle is off — so a diff kept across an off stretch
-/// would be vouched for by evidence nobody re-checked, under a `HEAD` that may
-/// have moved. [`Frame::show_staged`] drops both caches, and this is what fails if
-/// it stops.
 #[test]
 fn hiding_the_staged_run_discards_the_diffs_taken_for_it() {
     let scratch = fixture("staged-hide");
@@ -336,11 +281,6 @@ fn hiding_the_staged_run_discards_the_diffs_taken_for_it() {
 }
 
 /// The cache key, asserted through behaviour rather than by reading it.
-///
-/// One path in both runs holds **two** diffs, not one. Keyed by path alone the
-/// second entry overwrites or reads back the first, and the pane draws one run's
-/// content under the other run's row: a stale pane that no budget gate can see,
-/// because it is exactly as fast as a correct one.
 #[test]
 fn two_entries_for_one_path_do_not_share_a_cached_diff() {
     let scratch = fixture("staged-two-keys");
@@ -381,10 +321,6 @@ fn two_entries_for_one_path_do_not_share_a_cached_diff() {
 }
 
 /// The unstaged run is untouched by any of this.
-///
-/// The regression this guards is the quiet one: a generalisation that makes the
-/// new case work by changing what the old case computes. Same worktree, same
-/// assertions the rest of the suite makes about it, with the toggle on.
 #[test]
 fn drawing_the_staged_run_changes_nothing_about_the_unstaged_one() {
     let scratch = fixture("staged-no-side-effect");
@@ -422,10 +358,6 @@ fn drawing_the_staged_run_changes_nothing_about_the_unstaged_one() {
 }
 
 /// The count the empty state's second fact is drawn from.
-///
-/// Cheap on purpose — rename tracking off, since a count does not care whether a
-/// deletion and an addition are one change or two — and asked only on a frame that
-/// has no diff to compute.
 #[test]
 fn a_run_can_be_counted_without_being_walked_for_content() {
     let scratch = fixture("staged-count");
@@ -447,23 +379,9 @@ fn a_run_can_be_counted_without_being_walked_for_content() {
     );
 }
 
-/// **The whole staged run survives the working tree being deleted**, which is the
+/// The whole staged run survives the working tree being deleted, which is the
 /// same claim as the test above made over one file, made over every file and
 /// without naming a counter.
-///
-/// **It exists because a mutation survived.** `FileChange::maybe_symlink` is set to
-/// `true` on every staged change and setting it to `false` changed nothing
-/// anywhere in the suite — correctly, because a staged change has both sides in
-/// the object database and so never reaches the read that field decides. An inert
-/// field is only safe while the invariant *making* it inert is gated, and it was
-/// not: what held it was a docblock.
-///
-/// **Stated as "the answers do not move" rather than as a syscall count**, because
-/// the counters cannot carry it. `FrameStats::bytes` counts what a diff *compared*,
-/// which for a staged change is two blobs and therefore non-zero; `probes` is spent
-/// only where `maybe_symlink` is set, so a zero there is equally consistent with an
-/// ordinary read. Comparing every diff across a worktree that no longer exists is
-/// the one form with nothing left to be satisfied by accident.
 #[test]
 fn the_staged_run_is_unchanged_by_the_working_tree_disappearing() {
     let scratch = fixture("staged-tree-gone");
@@ -535,20 +453,7 @@ fn the_staged_run_is_unchanged_by_the_working_tree_disappearing() {
     }
 }
 
-/// **A sparse index yields no staged run rather than a dead pane.**
-///
-/// `gix_diff::index` refuses outright on a sparse index (`Error::IsSparse`), and
-/// the index-worktree walk beside it has no such refusal — so this is a failure
-/// mode the staged run introduced. Before the arm that handles it, pressing `a` in
-/// a `git sparse-checkout --sparse-index` repository made **every** later
-/// `Frame::advance` fail for as long as the toggle stayed on.
-///
-/// **The core leaving a frame intact on failure is what made that bad**, which is
-/// the right rule and is why this needed catching rather than surfacing: the pane
-/// kept its pre-`a` contents and silently stopped updating, on a tree the reader
-/// was watching precisely because it was changing. Measured before the fix:
-/// *"could not read working tree status: Cannot diff indices that contain sparse
-/// entries"*, on every tick.
+/// A sparse index yields no staged run rather than a dead pane.
 #[test]
 fn a_sparse_index_leaves_the_unstaged_run_drawn() {
     let scratch = Scratch::new("staged-sparse");
@@ -608,17 +513,7 @@ fn a_sparse_index_leaves_the_unstaged_run_drawn() {
     );
 }
 
-/// **A staged submodule bump does not take the process with it.**
-///
-/// A gitlink is an ordinary index entry whose id names a **commit**, and `gix`'s
-/// `Object::into_blob` is documented as *"or panic if it is none"*. On a
-/// repository whose object database can resolve that commit — a clone made with
-/// `--reference`, or any alternates setup — `find_object` succeeds and the
-/// conversion aborts the process. A monitor that panics is the worst failure this
-/// product has: it takes the reader's whole terminal, not one row.
-///
-/// The staged run made it commoner rather than possible: the right-hand side of a
-/// staged change is an index id too, so both sides can now name one.
+/// A staged submodule bump does not take the process with it.
 #[test]
 fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     let inner = Scratch::new("staged-submodule-inner");
@@ -651,13 +546,7 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     frame.show_staged(true);
     frame.advance().expect("advance");
 
-    // **Every staged row must diff without an error, not merely without a panic.**
-    // That is the claim, and asserting only "no panic" is what let a mutation
-    // removing the gitlink drop survive: `try_into_blob` refuses safely either
-    // way, so both arms are panic-free and only one is usable. An `Err` here is
-    // not benign — `View::collect` propagates it with `?`, so the whole collect
-    // fails, the shell keeps the previous screen, and the pane freezes exactly the
-    // way a sparse index made it freeze.
+    // Every staged row must diff without an error, not merely without a panic.
     for at in 0..frame.files().len() {
         let path = frame.files()[at].path.clone();
         let origin = frame.files()[at].origin;
@@ -668,15 +557,10 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
         );
     }
 
-    // **And the same when the submodule is replaced by a real file**, which is the
-    // case a one-sided guard lets through: the destination is an ordinary blob and
-    // the *source* is the commit, so a guard that asks only about the destination
-    // passes it to a read that must then refuse it. Same freeze, by the door the
-    // first fix left open.
-    // **Committed first**, so `HEAD` really holds the gitlink and the staged change
-    // is a modification *from* it. Without that the tree has no `sub` at all and
-    // the change is an ordinary addition, which is the case a one-sided guard
-    // already handles: the fixture would pass while proving nothing.
+    // And the same when the submodule is replaced by a real file, which is the case a
+    // one-sided guard lets through: the destination is an ordinary blob and the
+    // *source* is the commit, so a guard that asks only about the destination passes it
+    // to a read that must then refuse it.
     scratch.git(&["commit", "-m", "the submodule"]);
     scratch.git(&["rm", "-f", "--cached", "sub"]);
     std::fs::remove_dir_all(scratch.path_of("sub")).ok();
@@ -709,13 +593,7 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     );
 }
 
-/// **The run boundary is the walk's own answer, on every path out of it.**
-///
-/// `Frame::staged_at` exists so the shell stops recovering the partition by
-/// scanning the changed set, and five call sites now trust it. What makes that
-/// safe is that it is written in the same statement as the file list, so the two
-/// cannot describe different frames: an advance that fails leaves both, and a
-/// toggle that has not been walked yet leaves both.
+/// The run boundary is the walk's own answer, on every path out of it.
 #[test]
 fn the_run_boundary_agrees_with_the_files_it_partitions() {
     let scratch = fixture("staged-boundary");
@@ -744,7 +622,7 @@ fn the_run_boundary_agrees_with_the_files_it_partitions() {
     frame.advance().expect("advance");
     boundary_agrees(&frame);
 
-    // **Flipped but not yet walked**: the pair still describes the frame that is
+    // Flipped but not yet walked: the pair still describes the frame that is
     // actually in hand, which is what everything reading it between a keypress
     // and its walk depends on.
     frame.show_staged(false);

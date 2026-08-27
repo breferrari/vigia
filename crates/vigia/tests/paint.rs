@@ -1,31 +1,4 @@
-//! I4's shape, held over the **paint** rather than over the collect.
-//!
-//! > Streams, never buffers. First paint is independent of total diff size.
-//!
-//! `reads.rs` holds the half about *files*: a screenful reads the files it draws
-//! and not the rest of the worktree. This file holds the half about *lines*: a
-//! drawn row costs the pane it is drawn into, not the length of the line behind
-//! it. They are the same invariant one term apart, and the second half went
-//! unmeasured for two phases for a reason worth stating at the top:
-//!
-//! **no budget gate in this repo had ever painted.** `budgets.rs` timed
-//! `Frame::advance` plus `App::view` and stopped there, so `render` — and with it
-//! every character walked to fill a row — sat outside both tiers. A row carrying
-//! 7x more line than pane therefore passed a 16ms gate that could not see it,
-//! and what found it was a reader scrolling a Japanese README
-//! ([#45](https://github.com/breferrari/vigia/issues/45)).
-//!
-//! Structural, not wall-clock: [`PaintStats`] is an exact counter, so this is
-//! hardware-independent, takes no slack, and runs in every `cargo test`. The
-//! bound is derived from the run — rows drawn times the pane's width — rather
-//! than written as a constant, because a constant is a bound no input can
-//! approach and an assertion against one is documentation.
-//!
-//! **Why the fixture has to be Japanese.** Over ASCII a character is a column, so
-//! "bounded by the pane" and "unbounded" produce the *same* count and no fixture
-//! made of `generated()` can tell them apart. The gap only opens where a
-//! character is two columns wide or where a line is longer than a screen, and the
-//! wide fixture is both.
+//! I4's shape, held over the paint rather than over the collect.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -50,18 +23,9 @@ const FILES: usize = 3;
 const LINES: usize = 60;
 
 /// The mark the renderer writes where a row runs past its edge.
-///
-/// Restated rather than imported, for the reason `tests/render.rs` gives: it is
-/// one character of published behaviour, and a test sharing the constant would
-/// agree with the renderer by construction.
 const CONTINUES: char = '›';
 
 /// One screenful, and everything a gate here asks about it.
-///
-/// A struct rather than a tuple because the fourth member is what lets the
-/// grammarless baseline use this helper at all: it needs the highlighter's
-/// counters, and restating the setup to reach them cost that test `painted`'s
-/// own two non-vacuity assertions.
 struct Painted {
     stats: PaintStats,
     highlight: vigia_core::HighlightStats,
@@ -125,12 +89,6 @@ fn longest_line(view: &View) -> usize {
 }
 
 /// The fixture's own arithmetic, checked rather than trusted.
-///
-/// Every number the gates below report is relative to the shape `wide_line`
-/// documents, and that shape is three string literals in a support module: an
-/// editor that reflows one of them, or a `git` config that rewrites the line
-/// endings, would leave every assertion here passing against a fixture that no
-/// longer has the property they are about.
 #[test]
 fn the_wide_fixture_is_the_shape_it_says_it_is() {
     let text = wide_generated(1, "after");
@@ -169,15 +127,8 @@ fn the_wide_fixture_is_the_shape_it_says_it_is() {
     );
 }
 
-/// The prose fixture's own shape, checked rather than trusted, for the reason
-/// the wide one is: every number the #261 gates report is relative to it.
-///
-/// **This one guards a steeper cliff than the wide fixture's.** A wide line that
-/// lost a unit would weaken its gate proportionally. A prose line that loses two
-/// code spans weakens its gate by roughly fifty times, because the cost is
-/// exponential in the span count, and nothing else in the suite would notice: the
-/// content still reads as prose, the file still resolves as Markdown, and every
-/// downstream assertion still passes.
+/// The prose fixture's own shape, checked rather than trusted, for the reason the wide
+/// one is: every number the gates report is relative to it.
 #[test]
 fn the_prose_fixture_is_the_shape_it_says_it_is() {
     let text = prose_generated(1, "after");
@@ -204,10 +155,6 @@ fn the_prose_fixture_is_the_shape_it_says_it_is() {
         spans / 2,
     );
 
-    // The property the #261 gates rest on, and the one an innocent edit removes.
-    // A pipe anywhere on the line reaches Markdown's table-row test on its
-    // merits, so the guard lets it through and the fixture silently stops
-    // exercising the path it was built for.
     assert!(
         !line.contains('|'),
         "a prose line contains a pipe: {line:?}. The whole fixture is lines that \
@@ -221,11 +168,9 @@ fn a_drawn_row_costs_the_pane_rather_than_the_line() {
     let painted = painted("paint-pane", WIDE_EXT, width, 24);
     let (stats, view) = (painted.stats, &painted.view);
 
-    // Non-vacuity first, because the bound below is trivially satisfied by a
-    // screen with nothing on it, by a counter nobody increments, and by a
-    // fixture whose lines fit. The middle one is the easiest to lose: `examined`
-    // is counted inside the walk, and a counter left at zero would make this
-    // gate pass loudest exactly when the walk is worst.
+    // Non-vacuity first, because the bound below is trivially satisfied by a screen
+    // with nothing on it, by a counter nobody increments, and by a fixture whose lines
+    // fit.
     assert!(stats.rows > 0, "no content rows were drawn");
     assert!(
         stats.examined > 0,
@@ -256,21 +201,13 @@ fn a_drawn_row_costs_the_pane_rather_than_the_line() {
 
 #[test]
 fn the_paint_narrows_with_the_pane() {
-    // Two widths rather than one, and the second is not decoration: a bound
-    // hardcoded to any single number satisfies a one-width gate exactly as well
-    // as the real thing. What distinguishes them is that the count *moves* with
-    // the pane.
-    //
-    // Forty is I6's floor and two hundred is a wide terminal, so the two are far
-    // enough apart that the gutter and sigil, which differ between them by a
-    // column or two, cannot account for the gap.
+    // Two widths rather than one, and the second is not decoration: a bound hardcoded
+    // to any single number satisfies a one-width gate exactly as well as the real
+    // thing.
     let narrow = painted("paint-narrow", WIDE_EXT, 40, 24).stats;
     let wide = painted("paint-wide", WIDE_EXT, 200, 24).stats;
 
-    // Per row, not in total. The two panes do not draw the same number of rows:
-    // at forty columns the footer takes a second line (I6), so the body is one
-    // row shorter. Comparing totals would let a real regression hide behind that
-    // one row, and comparing at one width would not be this gate at all.
+    // Per row, not in total.
     assert!(narrow.rows > 0 && wide.rows > 0, "a pane drew no content");
     let per_narrow = narrow.examined / narrow.rows;
     let per_wide = wide.examined / wide.rows;
@@ -296,27 +233,13 @@ fn the_paint_narrows_with_the_pane() {
 
 #[test]
 fn a_clipped_wide_row_still_says_it_continues() {
-    // The failure a bound introduces if it is written carelessly: stop walking at
-    // the pane's edge and the renderer no longer knows there was more, so a
-    // clipped row draws as one that simply ended. That is worse than the cost it
-    // was fixing, because a reader cannot see it.
-    //
-    // Swept across widths rather than checked at one, because the case that
-    // breaks is a two-column glyph landing on the last cell, and which width
-    // does that depends on the gutter.
+    // The failure a bound introduces if it is written carelessly: stop walking at the
+    // pane's edge and the renderer no longer knows there was more, so a clipped row
+    // draws as one that simply ended.
     let buf = painted("paint-mark", WIDE_EXT, 80, 24).buf;
     let area = *buf.area();
 
-    // **The content's last column, which is not always the pane's.** `SPEC.md`
-    // §11.1 gives the diff region a scrollbar, and it takes the rightmost column
-    // whenever there is anywhere to scroll. Reading the pane's edge unconditionally
-    // would then be reading the bar and reporting every row as unmarked, which is
-    // this gate failing for a reason that has nothing to do with what it asserts.
-    //
-    // The last three columns rather than a computed one: which of them holds the
-    // mark depends on whether the bar is drawn, and the bar reserves a gap before
-    // itself so the mark can be two columns in. Recomputing that here would be
-    // restating the renderer's own rule instead of checking its output.
+    // The content's last column, which is not always the pane's.
     let mut marked = 0usize;
     for y in 1..area.height.saturating_sub(1) {
         let tail: Vec<String> = (1..=3)
@@ -339,18 +262,6 @@ fn a_clipped_wide_row_still_says_it_continues() {
 fn a_row_of_zero_width_characters_still_costs_the_pane() {
     // The hole a column bound leaves on its own, and the reason `printable`
     // carries a second one in characters.
-    //
-    // `unicode-width` measures a combining mark, a zero-width joiner, a
-    // variation selector and `U+200B` as **zero columns**. A run of them never
-    // advances `column`, so a bound written only in columns is satisfied
-    // forever and the walk runs to the end of the line: the exact unbounded
-    // shape the bound removes, still present for content that is ordinary
-    // rather than hostile. Decomposed Unicode, emoji built from joiners, and
-    // anything pasted out of a web page all reach it.
-    //
-    // Built by hand rather than from a fixture, for the reason the tab row
-    // below gives: `wide_line` has none of these, and a fixture that had them
-    // would be testing the fixture.
     let area = Rect::new(0, 0, 80, 6);
     let zero_width = "\u{200b}\u{200d}\u{fe0f}\u{0301}".repeat(500);
     let chars = zero_width.chars().count();
@@ -383,13 +294,7 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
     );
 
     // A looser bound than `a_drawn_row_costs_the_pane_rather_than_the_line`'s,
-    // deliberately, and the two are not in tension. That gate holds real text to
-    // one character a column and the wide fixture reaches 76% of it. Nothing can
-    // hold *this* row to that, because a zero-width character produces no column
-    // to be bounded by: what is claimed here is only that the walk stops at a
-    // constant multiple of the pane instead of running to the end of the line.
-    // Restated as a literal rather than imported, for the reason `CONTINUES` is:
-    // a test sharing the constant would agree with the renderer by construction.
+    // deliberately, and the two are not in tension.
     const CHARS_PER_COLUMN: u64 = 4;
     let bound = stats.rows * u64::from(area.width) * CHARS_PER_COLUMN;
     assert!(
@@ -412,13 +317,8 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
 
 #[test]
 fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
-    // Tab stops are counted from the start of the line, across span boundaries,
-    // so the counter the bound is written in terms of is the same counter tab
-    // expansion reads. Getting that wrong misaligns indentation on every row of
-    // a tab-indented file, and it is invisible until one is drawn.
-    //
-    // Built by hand rather than from a fixture: `wide_line` has no tabs, and a
-    // fixture that had them would be testing the fixture.
+    // Tab stops are counted from the start of the line, across span boundaries, so the
+    // counter the bound is written in terms of is the same counter tab expansion reads.
     let area = Rect::new(0, 0, 40, 6);
     let view = View {
         rows: vec![Row::Line {
@@ -464,21 +364,6 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
 #[test]
 fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
     // The premise behind coalescing input, held where the cost actually is.
-    //
-    // A trackpad reports one flick as a stream of scroll events. The shell drains
-    // them and paints once (`drain` in `lib.rs`), and this is why that is worth
-    // doing: moving the viewport is free, and *drawing* is what costs, so one
-    // gesture is one screenful of work however many events carried it. Painting
-    // per event walks every position in between, and over a large diff most of
-    // those positions enter a hunk nothing has parsed.
-    //
-    // Structural rather than timed: the comparison is lines highlighted and
-    // characters painted, so it holds on any machine.
-    // Many short files rather than the wide fixture's usual few tall ones, and
-    // that is the term that decides the whole comparison. A forward-only parse
-    // is *cumulative within a hunk*: drawing row 90 of one hunk needs the ninety
-    // above it whether that took one frame or thirty. The saving is entirely in
-    // the hunks a batched gesture never enters, so the travel has to cross them.
     const BURST_FILES: usize = 24;
     const BURST_LINES: usize = 6;
     let scratch = Scratch::wide_lines_as("paint-burst", BURST_FILES, BURST_LINES, WIDE_EXT);
@@ -558,16 +443,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
 
 #[test]
 fn an_unparsed_extension_costs_no_parse() {
-    // The baseline the wall-clock gates attribute the parse by subtracting. It
-    // is only a baseline while `syntect` really has no grammar for the
-    // extension, and that is a property of a dependency rather than of this
-    // repo, so it is asserted rather than assumed: the day a grammar appears
-    // this fails instead of quietly becoming a second measurement of the same
-    // thing.
-    // Through the same helper as every gate above, so the baseline is the
-    // measurement they take minus one term rather than a second setup that
-    // happens to resemble it. It also inherits `painted`'s own two non-vacuity
-    // assertions, which a hand-rolled copy of it silently did without.
+    // The baseline the wall-clock gates attribute the parse by subtracting.
     let plain = painted("paint-unparsed", WIDE_UNPARSED_EXT, 80, 24);
 
     assert_eq!(

@@ -1,49 +1,5 @@
-//! The left rail: the layout where the pinned list sits **beside** the diff
-//! rather than above it, `SPEC.md` §11.1's widest arrangement
-//! ([#252](https://github.com/breferrari/vigia/issues/252)).
-//!
-//! On a wide pane a path ends near column 40 and its glance cluster is pinned to
-//! the right edge, up to 150 cells away. The columnar slots
-//! [#77](https://github.com/breferrari/vigia/issues/77) bought keep rows
-//! comparable *down* the list and the void between path and cluster destroys the
-//! association *across* one, which is the thing a reader actually looks for.
-//!
-//! The claims live here and they fail in different ways.
-//!
-//! **The rail arrives where the stacked ladder would have climbed.** That width
-//! is a derivation rather than a preference, and the gate re-derives it from a
-//! drawn screen rather than restating the constant.
-//!
-//! **Widening into it takes nothing away, at the block rung.** Both regions read
-//! one glance ladder, so splitting a pane costs each of them width; the arrival
-//! width is the one place below three hundred columns where neither loses a rung.
-//! At a dense glyph rung the ladder climbs earlier and the crossing does cost one,
-//! which is [#284](https://github.com/breferrari/vigia/issues/284); what holds
-//! everywhere is the floor the published picture sets, and that has a gate of its
-//! own.
-//!
-//! **Crossing costs no rows either.** Not the diff's, which a rail's lead blank
-//! and its band's arrival can both take, and not the map's.
-//!
-//! **The two regions are two regions.** Separate scrollbars, separate widths,
-//! separate ladders, and a pointer that is told the same geometry the painter
-//! drew into. The tiling half lives in
-//! `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`,
-//! which was written as a partition for this layout before it existed.
-//!
-//! **A mark for one region stays in it.** Hover is the list's and the diff is not
-//! clickable, and beside a rail the two share every row.
-//!
-//! **The rail keeps a path**, and grows with the pane without climbing off the
-//! pictured complement before a 402-column pane. A rail whose paths have lost the
-//! directory they are in has given up half of what it was built to show.
-//!
-//! **And it deepens with the pane**, falling only where the band arrives and only
-//! by the band's own rows, which is the one exception to §11.1's clamp order.
-//!
-//! What is deliberately *not* here is the arithmetic that makes those true at
-//! widths nothing draws: `render.rs` carries that in a `const` block, because a
-//! claim about an unreachable case cannot be a test.
+//! The left rail: the layout where the pinned list sits beside the diff
+//! rather than above it, `SPEC.md` §11.1's widest arrangement.
 
 mod support;
 
@@ -67,10 +23,6 @@ fn press(code: KeyCode) -> Event {
 use vigia_core::{Origin, Recency};
 
 /// The block one heat slice is drawn as, restated rather than imported.
-///
-/// A test sharing the renderer's own constant would agree with it by
-/// construction, which is `tests/legibility.rs`'s reason for restating the same
-/// two glyphs.
 const HEAT_SLICE: char = '■';
 
 /// The eighth-blocks a sparkline is drawn from, restated for [`HEAT_SLICE`]'s
@@ -86,28 +38,15 @@ const MIN_PATH_WIDTH: usize = 12;
 
 /// The caret's own column and the kind letter's cell with its gap, restated from
 /// `render.rs`'s private `CARET_WIDTH` and `KIND_WIDTH`.
-///
-/// A rail row opens with these and the path begins after them. Counted rather
-/// than matched, for the reason `KIND_WIDTH`'s own docblock gives: the opening is
-/// an allowance, and a helper that recognised the kind letter by its glyph would
-/// eat the head of any path beginning with one.
 const CARET_WIDTH: usize = 1;
 const KIND_WIDTH: usize = 2;
 
 /// The path columns the rail promises beside a settled glance cluster, restated
 /// from `render.rs`'s private `RAIL_PATH`.
-///
-/// Twice the floor, because at exactly the floor a path elides to its bare tail
-/// and a rail exists so a reader can join a path to its own numbers.
 const RAIL_PATH: usize = MIN_PATH_WIDTH * 2;
 
 /// The pane `assets/preview.svg` is measured from, which §5.1 makes the picture's
 /// own width.
-///
-/// Used here to read the **settled** glance complement off a drawn screen rather
-/// than restating a slice count: what the picture draws is what the ladder's
-/// settled rung is, and a test that named twelve would be asserting a number
-/// against itself.
 const PICTURED_PANE: u16 = 109;
 
 /// Well past the widest pane anyone runs, so a sweep measures the rule rather
@@ -116,36 +55,15 @@ const WIDEST: u16 = 240;
 
 /// Past the width at which the rail's own ladder would climb off the settled
 /// rung, which is a pane of about four hundred.
-///
-/// **`SPEC.md` §11.1 claims the rail does not climb past the pictured complement
-/// at any pane anyone runs, and [`WIDEST`] cannot reach the width where that
-/// could be false.** The rail's planning width is `pane / 3 - 4`, so it leaves the
-/// settled plateau's 129 columns at about 402 columns of pane. A sweep that stops
-/// at 240 asserts the claim nowhere it could fail, which is the shape `SPEC.md` §7
-/// keeps finding; this is the width that makes it falsifiable.
 const PAST_THE_CLIMB: u16 = 420;
 
 /// The pane at which the rail's own glance ladder leaves the settled rung.
-///
-/// **Derived, and it is what `SPEC.md` §11.1's ceiling means.** The rail's
-/// planning width is `rail_of(pane) - BAR_WIDTH - inset`, and the rung above the
-/// settled one arrives when the share clamp can spare its 52 columns, which needs
-/// 130 planning columns and therefore a rail of 134: `pane / 3 >= 134` is a pane of
-/// 402. Below it the rail draws exactly what the picture draws; at it the rail is
-/// wide enough to be worth more, and drawing more is what §5.3 rules space earns.
 const THE_CLIMB: u16 = 402;
 
 /// A pane tall enough that neither region is the thing giving way.
 const TALL: u16 = 24;
 
 /// A shell that has asked for the rail, which is what every gate below is about.
-///
-/// **The gesture, not the width, since `SPEC.md` §11.2 B14**
-/// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived on
-/// its own until then, so `App::new()` was enough and the width alone decided the
-/// layout. It is a request now, and this file's subject is the rail that a reader
-/// asked for: the width is a precondition and the gesture is the cause. The one
-/// gate about the *default* builds its own chrome and says so.
 fn chrome() -> Chrome {
     let mut chrome = stacked_chrome();
     chrome.rail = true;
@@ -186,19 +104,10 @@ fn entry(path: &str) -> FileEntry {
 }
 
 /// The longest path in the fixture, and the one every path assertion reads.
-///
-/// Long enough that no rail width can draw it whole, which is what makes
-/// `the_rail_keeps_a_path_and_not_just_a_filename` a claim about the *budget*
-/// rather than about this string.
 const LONG: &str = "crates/vigia-core/src/engine/incremental/watch.rs";
 
 /// A screen with both regions carrying a file heading, which is the only screen
 /// this file is about.
-///
-/// **The diff's first row is a heading rather than a content line**, because the
-/// rung a region draws is readable off a heading and off nothing else. Both
-/// regions therefore have a glance cluster on their own first row, and in the
-/// rail those are the same row of the pane.
 fn beside() -> View {
     View {
         list_span: 3,
@@ -225,16 +134,6 @@ fn beside() -> View {
 
 /// The same screen with no pinned entries, so no rail can be drawn whatever the
 /// pane is wide enough for.
-///
-/// This is how the *stacked* ladder is read at widths where the shipped layout
-/// is a rail: `clamped_to` collapses a body whose view holds no entries back to
-/// the whole-pane diff, so the heading in it is planned against the pane exactly
-/// as it was before this row landed.
-///
-/// **`files` stays at three**, which is the difference between a view with an
-/// empty list and an empty worktree: at zero, B3 replaces the whole region with a
-/// sentence and there is no heading to read a rung off at all. The first draft
-/// zeroed it and the gate's own non-vacuity guard caught it.
 fn streamed() -> View {
     View {
         list_span: 0,
@@ -251,13 +150,6 @@ fn drawn(width: u16, height: u16, view: &View) -> Buffer {
 }
 
 /// The same, at a named glyph rung.
-///
-/// **The rung is an input to the glance ladder and every gate here used to pin it
-/// to blocks** ([#252](https://github.com/breferrari/vigia/issues/252)'s fourth
-/// audit round). `Columns::plan` takes `glyphs`, a denser cell draws two buckets
-/// per column, so the same layout table is reached at a *different width* on a
-/// terminal that carries braille or octants. A sweep at one rung is a sweep of one
-/// of three ladders, which is the shape `SPEC.md` §7 keeps finding.
 fn drawn_at(width: u16, height: u16, view: &View, glyphs: Glyphs) -> Buffer {
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
@@ -266,35 +158,19 @@ fn drawn_at(width: u16, height: u16, view: &View, glyphs: Glyphs) -> Buffer {
 }
 
 /// Every glyph rung the sparkline can be drawn from.
-///
-/// `Glyphs::auto` resolves to one of these from the terminal, so all three are
-/// screens a reader gets rather than options nobody takes.
 const RUNGS: [Glyphs; 3] = [Glyphs::Block, Glyphs::Braille, Glyphs::Octant];
 
 /// What one region draws on one row: whether the counts cell is there, how many
 /// heat slices, how many sparkline cells.
-///
-/// Named rather than written out at each use, because it is the triple every
-/// monotonicity claim below compares and a bare tuple in five signatures is five
-/// places to get the order wrong.
 type Rung = (bool, usize, usize);
 
 /// What one region draws on one row: whether the counts cell is there, how many
 /// heat slices, how many sparkline cells.
-///
-/// The triple the glance ladder walks, and the thing every monotonicity claim in
-/// this repo is about.
 fn rung(buf: &Buffer, theme: &Theme, y: u16, columns: std::ops::Range<u16>) -> Rung {
     rung_at(buf, theme, y, columns, Glyphs::Block)
 }
 
 /// The same, reading the alphabet a named glyph rung draws from.
-///
-/// The block rung keeps the restated `RAMP` and `TRACK`, which is this suite's
-/// convention and its reason: a test importing the renderer's own table would
-/// agree with it by construction. A dense rung's alphabet is *derived*, because
-/// there is no table to restate: the glyphs are a function of two sub-column
-/// levels and `Glyphs::glyph` is the only thing that knows them.
 fn rung_at(
     buf: &Buffer,
     theme: &Theme,
@@ -328,19 +204,12 @@ fn rung_at(
 }
 
 /// The columns one region holds, from the geometry the painter drew into.
-///
-/// Asked of `regions` rather than derived, so a gate reading a rung is reading
-/// the same rect the renderer painted. Four hand-spelled copies of this
-/// expression were what it replaced.
 fn columns_of(region: vigia::Region) -> std::ops::Range<u16> {
     region.left..region.left + region.width
 }
 
-/// The rung each region draws at this width, read at each region's **own** first
+/// The rung each region draws at this width, read at each region's own first
 /// row.
-///
-/// Beside a rail those are the same row of the pane and in the stacked layout
-/// they are not, which is exactly why the row is asked for rather than assumed.
 fn rungs(width: u16, view: &View) -> (Rung, Rung) {
     rungs_at(width, view, Glyphs::Block)
 }
@@ -351,10 +220,8 @@ fn rungs_at(width: u16, view: &View, glyphs: Glyphs) -> (Rung, Rung) {
     let theme = Theme::default();
     let buf = drawn_at(width, TALL, view, glyphs);
     let told = regions(area, &chrome(), view);
-    // **Both regions have to hold rows**, or a "list" rung read at the diff's own
-    // first row across the whole pane would pass for a rung this layout never
-    // drew. Asserted rather than assumed: it is a property of the fixture, and a
-    // fixture is the thing most likely to change under a gate.
+    // Both regions have to hold rows, or a "list" rung read at the diff's own first row
+    // across the whole pane would pass for a rung this layout never drew.
     assert!(
         told.list.rows > 0 && told.diff.rows > 0,
         "at {width} columns a region drew no rows, so its rung is being read off \
@@ -374,23 +241,6 @@ fn first_rail() -> u16 {
 
 /// The rail arrives exactly where the stacked list would have left the settled
 /// ladder, and that is a derivation rather than a chosen number.
-///
-/// **Both regions read one glance ladder**, so splitting a pane in two costs each
-/// half the width the whole had. A split therefore costs no rung only where both
-/// halves *and* the undivided pane one column below sit on the same plateau of
-/// that ladder. The settled rung's plateau ends at 133 columns; the only other
-/// plateau is the ladder's top, which needs 160 planning columns in **each** half
-/// and therefore a pane of 328. So there is one width, and this is the gate that
-/// says the renderer picked it.
-///
-/// **Derived from a drawn screen rather than from the constant.** The stacked
-/// ladder's climb is read off a listless view, which draws the whole-pane diff at
-/// every width and is therefore the *old* layout measured at the *new* widths.
-/// The settled complement itself is read at `PICTURED_PANE`, so §5.1's picture is
-/// what the comparison is anchored to and no slice count is written down here.
-///
-/// A renderer that moved the arrival width by a column, in either direction,
-/// reddens this without any snapshot moving.
 #[test]
 fn the_rail_arrives_where_the_stacked_list_would_have_climbed() {
     let theme = Theme::default();
@@ -439,15 +289,6 @@ fn the_rail_arrives_where_the_stacked_list_would_have_climbed() {
 
 /// Widening a pane into the rail takes no glance element away, from either
 /// region.
-///
-/// **The hardest case the layout table has**, which #252 says in its own words:
-/// the two shapes allocate differently and the boundary is where they meet. Every
-/// other monotonicity gate in this repo sweeps one shape.
-///
-/// Asserted per region and per element, over a sweep that crosses the boundary
-/// with room on both sides. The non-vacuity guard at the end is what stops it
-/// passing on a build where the rail is never drawn at all: a sweep that only
-/// ever saw one shape would be asserting the stacked ladder a second time.
 #[test]
 fn widening_into_the_rail_takes_no_glance_element_away() {
     let view = beside();
@@ -491,12 +332,6 @@ fn widening_into_the_rail_takes_no_glance_element_away() {
 
 /// Beside a rail the two regions are two regions: same rows, different columns,
 /// each with its own bar and its own ladder.
-///
-/// **The claim `tests/list.rs::each_region_reports_its_own_bar_column` records as
-/// unmakeable until this row landed.** On every layout that shipped before it,
-/// `Body::areas` spread `..area` to both regions, so their rects shared an `x`
-/// and a `width` and therefore a bar column: a `regions` handing `Bar::region` the
-/// wrong rect produced the right two numbers. Here it does not.
 #[test]
 fn the_two_regions_are_two_regions() {
     let view = beside();
@@ -571,15 +406,6 @@ fn the_two_regions_are_two_regions() {
 }
 
 /// The rail keeps a path, not just a filename.
-///
-/// `MIN_PATH_WIDTH` outranks every glance element and is what stops a row naming
-/// nothing; `RAIL_PATH` is the stronger promise the rail's own floor makes, and it
-/// is what the rail is *for*. A rail at the floor that had spent its columns on a
-/// wider strip would draw `…watch.rs` beside a cluster, which is a row that has
-/// given up the association the rail was built to restore.
-///
-/// Measured as drawn columns rather than as arithmetic, and against a path no
-/// rail width can draw whole, so the number is the budget rather than the string.
 #[test]
 fn the_rail_keeps_a_path_and_not_just_a_filename() {
     let view = beside();
@@ -592,17 +418,8 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
         let told = regions(area, &chrome(), &view);
         let buf = drawn(width, TALL, &view);
 
-        // **The path's own columns: from after the kind letter to the pulse that
-        // opens the glance cluster.** Bounded on the right by an *element* rather
-        // than by a blank run, which is the correction that made this gate able to
-        // fail at all. The first draft split on a double space, and there is no
-        // double space between a path and the pulse, so it measured the path plus
-        // the whole cluster and stayed green while the floor was two columns short.
-        //
-        // Read against `LONG`, which no rail width can draw whole, so the count is
-        // the budget rather than the string. Where a rail is wide enough to draw it
-        // whole the count is the string and is comfortably over the floor, which is
-        // the direction that cannot hide a defect.
+        // The path's own columns: from after the kind letter to the pulse that opens
+        // the glance cluster.
         let row: String = columns_of(told.list)
             .map(|x| buf[(x, told.list.top)].symbol().to_owned())
             .collect::<Vec<_>>()
@@ -612,11 +429,7 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
             .find(|(_, glyph)| *glyph == '●')
             .map(|(at, _)| at)
             .expect("the rail's first row draws a pulse");
-        // **The kind letter is skipped by position, never by glyph.** Trimming a
-        // leading `M` would eat the first character of a path that happens to
-        // begin with one, and `KIND_WIDTH`'s own docblock in `render.rs` is about
-        // exactly this: the row's opening cell is a fixed allowance, not something
-        // to be recognised.
+        // The kind letter is skipped by position, never by glyph.
         let opening: String = row.chars().take(CARET_WIDTH + KIND_WIDTH).collect();
         let path = row[opening.len()..cluster].trim();
         assert!(
@@ -637,11 +450,6 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
 
 /// No pane below the rail's arrival width changes shape, including the one the
 /// published picture is measured from.
-///
-/// **The half that says every other fixture in this repo is untouched.**
-/// `assets/preview.svg` is a stacked screen and §5.1 makes it a specification, so
-/// a rail reaching it would make the picture false. I6's forty-column pane is
-/// three rungs of ladder below that again.
 #[test]
 fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
     let arrives = first_rail();
@@ -652,11 +460,9 @@ fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
          describes what the tool draws"
     );
 
-    // **Read off the drawn screen rather than from `Body`**, because
-    // `body_layout(..).rail` and `first_rail()` both reduce to the same predicate
-    // and comparing them is comparing an expression with itself. What a reader
-    // gets below the arrival width is a *rule* between the regions and one column
-    // of content, and that is what this asserts.
+    // Read off the drawn screen rather than from `Body`, because `body_layout(..).rail`
+    // and `first_rail()` both reduce to the same predicate and comparing them is
+    // comparing an expression with itself.
     let view = beside();
     for width in [40u16, 80, PICTURED_PANE, arrives - 1] {
         let area = Rect::new(0, 0, width, TALL);
@@ -681,20 +487,6 @@ fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
 }
 
 /// A hover in the rail underlines the rail's own row and nothing in the diff.
-///
-/// **The fourth surface of the same defect, and the one that reaches a reader.**
-/// [#251](https://github.com/breferrari/vigia/issues/251) made every hit-test in
-/// `input.rs` column-aware and [#254](https://github.com/breferrari/vigia/issues/254)
-/// did the paint marks; `Hovered::Row` still carries a bare screen row, and
-/// `Painter::file_row` compares it against the row it is drawing on. That
-/// comparison is written for **both** regions, and the comment over it justified
-/// itself with *"a diff heading's row is never inside"* the list region. True
-/// while the two were stacked. Beside a rail they share every row, so hovering
-/// the third file in the rail underlined the third file heading in the diff.
-///
-/// `SPEC.md` §5.3's B10 adopted hover on the list's rows alone, because the diff
-/// is not clickable and a mark there would imply it is. This gate is that ruling
-/// asserted rather than described.
 #[test]
 fn a_hover_in_the_rail_does_not_light_the_diff() {
     use ratatui::style::Modifier;
@@ -756,50 +548,14 @@ fn a_hover_in_the_rail_does_not_light_the_diff() {
 }
 
 /// Crossing into the rail never hands the diff fewer rows.
-///
-/// **The bigger-container-holds-less failure, at the one boundary this row
-/// introduces.** The margin ladder is written out as a table to refuse it and
-/// `list_cap`'s step is argued for it; both are about *one* layout, and crossing
-/// between two is a third place it can happen. The first draft of this row did
-/// it: a rail charges `LEAD_ROWS` where the stacked layout at the same height
-/// returns the whole-body diff and charges nothing, so at 133 columns and six
-/// rows the diff had three rows and at 134 it had two.
-///
-/// **The claim is about the crossing and about the rail, and deliberately not
-/// about every width step.** A first draft swept all widths and reddened twice on
-/// the *stacked* layout, at widths no rail can reach: the footer's ladder takes a
-/// second line at eight columns and shortens the whole body, and at forty-five
-/// columns the body gains a row, the pinned list takes its first, and the diff
-/// pays that row plus the rule's. The second is the shipped design of regions
-/// arriving as space appears; the first is a real defect and is filed as
-/// [#283](https://github.com/breferrari/vigia/issues/283), on the shelf with the
-/// evidence and the reason it was not taken here. Asserting them here would have
-/// been asserting something the product does not do, which is how a gate ends up
-/// being weakened until it says nothing.
-///
-/// **Swept with the masthead off**, which is what keeps the assertion strict: the
-/// band's arrival is a genuine step back for the diff, bounded by `GRAPH_KEEP`,
-/// and `the_rail_is_monotone_in_pane_height` owns it on the axis it belongs to.
 #[test]
 fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     let arrives = first_rail();
     let mut heights = 0usize;
     let mut banded = 0usize;
 
-    // **Both masthead settings, every file count that changes the answer, and
-    // every height to two hundred rows.** A first draft swept one file count and
-    // one masthead setting and the defect it was written for survived in the cell
-    // it did not look at: beside a rail `after` still holds the row the stacked
-    // list would have taken and the rule's, so the band's fit test sees more rows
-    // and the band can arrive *earlier* than on the strip the rail replaces. With
-    // one changed file the strip costs two rows and the band costs three, so the
-    // rail came out a row short.
-    //
-    // The sample is written out rather than narrowed to the boundary that failed,
-    // because the bound `Body::beside` rests on is a claim about *every* file
-    // count: the file counts here are the ones where `files`, `list_cap` and
-    // `affordable` each take their turn at deciding the strip's height, and two
-    // hundred rows is well past any pane that could saturate them.
+    // Both masthead settings, every file count that changes the answer, and every
+    // height to two hundred rows.
     for masthead in [false, true] {
         let chrome = Chrome {
             masthead,
@@ -824,11 +580,8 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
                     rail.diff
                 );
 
-                // **The map's own crossing**, which nothing asserted until the
-                // exhaustive sweep went looking for it. A rail exists to show more
-                // of the changed set, so a pane widened into one handing back
-                // *fewer* files would be the same failure on the region the layout
-                // is named for.
+                // The map's own crossing, which nothing asserted until the exhaustive
+                // sweep went looking for it.
                 assert!(
                     rail.list >= stacked.list,
                     "with masthead {masthead} over {files} files at {height} rows, \
@@ -839,12 +592,7 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
                     rail.list
                 );
 
-                // **And the same failure mirrored.** `Body::beside` charges the
-                // band against fewer rows than it has, so it can only ever band
-                // *later* than the stacked layout; if it ever banded so much later
-                // that the stacked layout had one and the rail did not, a reader
-                // narrowing the pane would gain a band. The delay is bounded by
-                // two rows and this is what says so.
+                // And the same failure mirrored.
                 assert!(
                     !(stacked.graph > 0 && rail.rail && rail.graph == 0),
                     "with masthead {masthead} over {files} files at {height} rows, \
@@ -904,18 +652,6 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
 }
 
 /// The rail deepens with the pane and falls only where the band arrives.
-///
-/// **Two claims, because the honest property has two halves.** With the masthead
-/// off the rail's rows are the body's less one lead blank, so the map is strictly
-/// monotone in pane height and a taller pane always shows more files. With it on
-/// the band spans the pane above both columns, so its rows are unavailable to the
-/// map as well as to the diff, and the map falls by exactly the band's rows at
-/// the one height the band arrives at.
-///
-/// That second half is an exception to `SPEC.md` §11.1's clamp order and it is
-/// recorded there as one. It is not a defect and it is not free either: an
-/// earlier draft of `Body::beside`'s docblock claimed monotonicity outright, and
-/// this gate is what would have caught the claim.
 #[test]
 fn the_rail_is_monotone_in_pane_height() {
     let width = first_rail();
@@ -984,21 +720,6 @@ fn the_rail_is_monotone_in_pane_height() {
 
 /// Both regions grow with the pane, and the rail draws the pictured complement
 /// at every width it is drawn at.
-///
-/// **The width axis of the two claims above.** `rail_of` is a share floored at a
-/// constant and its docblock says both halves are monotone by construction; that
-/// is an argument, and this is the evidence. What it also pins is the ceiling:
-/// `SPEC.md` §11.1 rules the rail draws twelve slices and twelve buckets, exactly
-/// what `assets/preview.svg` draws, and does not climb past it at any pane anyone
-/// runs. A change to the share that let it climb early would make the picture and
-/// the rail disagree with nothing else noticing.
-///
-/// **Swept to [`PAST_THE_CLIMB`] rather than to [`WIDEST`]**, because the rail's
-/// planning width leaves the settled plateau at [`THE_CLIMB`] and a sweep stopping
-/// at 240 asserts the ceiling nowhere it could fail. That is the difference
-/// between a gate and a claim, and this file has already been the place it was got
-/// wrong. Widening the sweep turned *"does not climb at any pane anyone runs"*
-/// into a number, which is what it should always have been.
 #[test]
 fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
     let view = beside();
@@ -1052,12 +773,7 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
         }
     }
 
-    // **The ceiling is a pinned width, not a phrase.** `SPEC.md` §11.1 said the
-    // rail keeps the pictured complement *at any pane anyone runs*, which is a
-    // claim no sweep can fail: the width where it stops being true is simply
-    // outside the sweep. It is 402 columns, the rail's share reaching the 130
-    // planning columns the ladder's next rung asks for, and naming it is what
-    // makes the sentence checkable. If the share moves, this reddens.
+    // The ceiling is a pinned width, not a phrase.
     assert!(
         climbed,
         "the rail never left the pictured complement by {PAST_THE_CLIMB} columns, \
@@ -1066,13 +782,6 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
 }
 
 /// A stale view shortens the rail and moves nothing else.
-///
-/// `render` and `regions` both take `Body::split(..).clamped_to(view.list.len())`,
-/// and beside a rail the rows the list does not use are in its own column with
-/// nothing below them: handing them back to the diff would draw the diff twice,
-/// once in each region. The tiling gate in `tests/legibility.rs` only ever sees a
-/// view whose entries match what the pane afforded, which is the shipped path and
-/// not the one this is about.
 #[test]
 fn a_stale_view_shortens_the_rail_and_moves_nothing_else() {
     let width = first_rail();
@@ -1120,26 +829,7 @@ fn a_stale_view_shortens_the_rail_and_moves_nothing_else() {
 }
 
 /// Crossing into the rail never removes a glance element, and never takes either
-/// region below the complement the published picture draws, **at any glyph rung**.
-///
-/// **The claim `widening_into_the_rail_takes_no_glance_element_away` makes is the
-/// block rung's, and this is what is true of the other two.** `Columns::plan`
-/// takes `glyphs`; a braille or octant cell draws two buckets per column, so the
-/// same layout table is reached at different widths and the stacked ladder climbs
-/// at a pane of **119** rather than 134. By 133 a dense terminal is already on the
-/// wider strip, and the rail cannot match it: keeping that rung would need 119
-/// columns of rail out of a 134-column pane. So on those terminals the crossing
-/// **does** cost a rung, from twenty-four heat slices to twelve, in both regions.
-///
-/// That is a real cost and it is recorded rather than hidden: `SPEC.md` §11.1
-/// carries it, and [#284](https://github.com/breferrari/vigia/issues/284) is the
-/// row for an arrival width that knows which rung it is on, which needs the glyph
-/// rung to reach the layout and is a signature this row cannot absorb.
-///
-/// **What holds at every rung is the floor**, and it is the one §5.1 anchors: no
-/// element is taken away, and neither region falls below what
-/// `assets/preview.svg`'s own complement is at that rung. Twelve slices is the
-/// pictured strip, and twelve is where a dense terminal lands.
+/// region below the complement the published picture draws, at any glyph rung.
 #[test]
 fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
     let view = beside();
@@ -1190,10 +880,7 @@ fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
         }
     }
 
-    // **The dense rungs' cost, pinned rather than merely allowed.** Two rungs,
-    // two regions, one fall each: the block rung must not fall and the other two
-    // must, or the ladder has moved and `SPEC.md` §11.1's paragraph about it has
-    // gone stale without anything saying so.
+    // The dense rungs' cost, pinned rather than merely allowed.
     assert_eq!(
         fell, 4,
         "the crossing cost a rung in {fell} region-rung pairs; blocks should cost \
@@ -1202,17 +889,6 @@ fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
 }
 
 /// A pointer at the rail's real geometry routes to the region it is over.
-///
-/// **The seam between what this row changed and what consumes it, which nothing
-/// crossed.** `tests/rail.rs` asserted the *shape* `regions` reports and
-/// `tests/input.rs` asserted routing against hand-built numbers; the rail's own
-/// boundary columns had never been through `action_for`. That is the coverage
-/// shape `SPEC.md` §7 keeps finding: two halves each tested against its own idea
-/// of the other, with production the only place they meet.
-///
-/// [#251](https://github.com/breferrari/vigia/issues/251) made every hit-test
-/// column-aware and could not test it against a layout that did not exist. This
-/// is that test, at the geometry the layout actually produces.
 #[test]
 fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
     use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -1233,10 +909,8 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         boundary, told.diff.left,
         "the two regions do not meet, so there is no boundary to probe"
     );
-    // **And the boundary is interior**, or the columns probed below are off the
-    // pane and every routing assertion is about a cell nobody can point at. Found
-    // by mutation: widening the rail to the whole pane left this gate green while
-    // four of its neighbours reddened.
+    // And the boundary is interior, or the columns probed below are off the pane and
+    // every routing assertion is about a cell nobody can point at.
     assert!(
         told.diff.width > 0 && boundary < area.x + area.width,
         "the diff has no columns of its own at {width}, so the boundary is the \
@@ -1253,7 +927,7 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
     };
     let row = told.list.top;
 
-    // **The last column of the rail and the first of the diff**, which is the one
+    // The last column of the rail and the first of the diff, which is the one
     // pair a row cannot tell apart in this layout and the only pair that could
     // ever have been got wrong.
     assert!(
@@ -1273,7 +947,7 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         action_for(&event(boundary, row), told)
     );
 
-    // **A click on a listed file, at the rail's own columns.** The pointer has to
+    // A click on a listed file, at the rail's own columns. The pointer has to
     // land on the file the rail drew there rather than on the row of a region
     // seventy columns away.
     let click = |column: u16, row: u16| {
@@ -1298,10 +972,8 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         action_for(&click(boundary + 2, told.list.top + 1), told)
     );
 
-    // **The rail's column below its last file belongs to neither region**, which
-    // is the shipped common case: three changed files in a body of twenty. It
-    // falls through to the diff exactly as the band's rows do, and saying so here
-    // is what makes it a decision rather than an accident nobody noticed.
+    // The rail's column below its last file belongs to neither region, which is the
+    // shipped common case: three changed files in a body of twenty.
     let empty = told.list.top + told.list.rows;
     assert!(
         empty < told.diff.top + told.diff.rows,
@@ -1317,15 +989,7 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
 
 #[test]
 fn the_rail_is_off_until_the_reader_asks_for_it() {
-    // **`SPEC.md` §11.2 B14's whole claim.** The rail arrives at 134 columns and
-    // until this row it arrived on its own, so a reader who had not asked for a
-    // narrower diff got one: at 133 the diff plans against 129 columns and at 134
-    // against 60. #252's derivation of *where* the split can happen is untouched;
-    // what changes is that crossing it is a gesture.
-    //
-    // Swept across every width the gate can reach rather than sampled at 134,
-    // because a default that held at the arrival width and lapsed at 200 is the
-    // shape a single screen cannot see.
+    // `SPEC.md` §11.2 B14's whole claim.
     let files = 3;
     for width in 1..=WIDEST {
         let at = Rect::new(0, 0, width, TALL);
@@ -1338,13 +1002,9 @@ fn the_rail_is_off_until_the_reader_asks_for_it() {
 
 #[test]
 fn r_asks_for_the_rail_and_r_puts_it_back() {
-    // **The gesture, end to end**: the key resolves to the action, the action moves
+    // The gesture, end to end: the key resolves to the action, the action moves
     // the state, and the state reaches the layout. Three links, and the gate above
     // reads only the last of them, so a key bound to nothing would leave it green.
-    //
-    // Driven through `App::apply` rather than by setting the field, which is what
-    // `chrome()` does above and is right for gates about the *rail*; this one is
-    // about the *toggle*.
     let scratch = repo::Scratch::large_diff("rail-gesture", 3, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1390,13 +1050,10 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
 
 #[test]
 fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
-    // **`m`'s own behaviour one region over**: a pane that cannot carry the thing
+    // `m`'s own behaviour one region over: a pane that cannot carry the thing
     // draws nothing different, and the request is still kept, so a reader who
     // narrows a railed pane and widens it again gets the rail back rather than the
     // question.
-    //
-    // Asserted as *the whole body is identical*, not as `!body.rail`, because the
-    // second would pass against a layout that had quietly changed something else.
     let arrives = first_rail();
     for width in 1..arrives {
         let at = Rect::new(0, 0, width, TALL);
@@ -1407,14 +1064,9 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
         );
     }
 
-    // **The request survives a pane that cannot honour it**, which is the half
+    // The request survives a pane that cannot honour it, which is the half
     // that would be lost by clearing the flag instead of ignoring it, and it is
     // driven through an `App` rather than through a chrome built railed.
-    //
-    // The first spelling of this asserted `body_layout(.., &chrome(), .., ..).rail` at
-    // `arrives` and `arrives - 1`, which is the predicate `first_rail` is *defined
-    // by*: neither assert could fail. What it has to test is the **state**, so a
-    // mutation that cleared `App::rail` on a resize would be caught.
     let scratch = repo::Scratch::large_diff("rail-survives-narrow", 3, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1444,27 +1096,9 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
 
 #[test]
 fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
-    // **`ToggleMasthead`'s own promise one region over**, and the half the gesture
-    // gate above does not reach: a reader asking where the map goes is not asking
-    // to be moved inside the diff. A rail narrows the diff rather than reflowing
-    // it, so a preserved position looks like the same line clipped shorter, and
-    // the narrower row is a **prefix** of the wider one.
-    //
-    // Read after a scroll rather than at the top, because the top is where a lost
-    // position lands: a gate that only ever looked there could not tell a kept
-    // position from a reset one.
-    //
-    // **The leading columns, not the whole row.** The scrollbar is pinned to each
-    // region's right edge, so the wider row ends `…spaces…▲` and the narrower one
-    // ends `…▲` sooner: neither is a prefix of the other, and the first spelling of
-    // this gate failed on that furniture while the position it is about was
-    // preserved.
-    //
-    // **Derived from the narrower region rather than chosen.** A hand-tuned
-    // constant compares whatever it happens to reach: thirty was inside the railed
-    // diff at this pane and would have compared half of what it safely could, and
-    // it loosens silently if the pane or the margins move. `lead_of` asks the
-    // railed layout how wide its diff is and stops one column short of its bar.
+    // `ToggleMasthead`'s own promise one region over, and the half the gesture gate
+    // above does not reach: a reader asking where the map goes is not asking to be
+    // moved inside the diff.
     let scratch = repo::Scratch::large_diff("rail-keeps-the-row", 3, 200);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1505,7 +1139,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
 
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
-    // **Without this the gate passes against a `ToggleRail` that does nothing**,
+    // Without this the gate passes against a `ToggleRail` that does nothing,
     // because the two rows are then identical and a string is trivially a prefix
     // of itself. Found by mutation.
     assert!(
@@ -1515,10 +1149,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     );
     let beside = top_row(&mut app, &mut frame);
 
-    // **The comparison length comes from the drawn row, not from a constant.** A
-    // hand-tuned number compares whatever it happens to reach and loosens silently
-    // when the pane or the margins move; the railed row's own content, once its
-    // right-edge furniture is off it, is exactly the overlap the two layouts have.
+    // The comparison length comes from the drawn row, not from a constant.
     let content = beside.trim_end_matches([' ', '▲', '▼', '█', '│']);
     assert!(
         content.chars().count() > 20,
@@ -1533,11 +1164,9 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
 
 #[test]
 fn r_reaches_the_painted_screen_and_not_only_the_layout() {
-    // **Every other gesture gate here stops at `Body::rail`**, so a painter that
-    // ignored the flag entirely would leave the whole file green: the layout would
-    // say rail, the regions would say rail, and the screen would draw a strip.
-    // Read off the buffer instead, at the one place the two shapes differ most
-    // plainly: whether the row under the header carries a file path or the diff.
+    // Every other gesture gate here stops at `Body::rail`, so a painter that ignored
+    // the flag entirely would leave the whole file green: the layout would say rail,
+    // the regions would say rail, and the screen would draw a strip.
     let scratch = repo::Scratch::large_diff("rail-painted", 3, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1582,18 +1211,8 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     );
 }
 
-/// **The rail draws both runs whole, and it was the layout the row-budget fix
-/// missed.**
-///
-/// `Body::split` takes a list *row* budget since
-/// [#313](https://github.com/breferrari/vigia/issues/313), because a grouped list
-/// draws a separator per run and a region sized from its files alone is short by
-/// exactly those rows. The stacked branch was given it and `Body::beside` was not,
-/// so #313's own headline defect stayed live in one of the two shapes this tool
-/// draws: the staged run was announced and its tail was not there.
-///
-/// Nothing in this file had ever called `show_staged`, which is why a round of
-/// auditing did not reach it.
+/// The rail draws both runs whole, and it was the layout the row-budget fix
+/// missed.
 #[test]
 fn a_rail_draws_the_tail_of_the_staged_run() {
     let scratch = repo::Scratch::large_diff("rail-staged-tail", 6, 8);

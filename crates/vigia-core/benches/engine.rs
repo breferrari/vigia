@@ -1,12 +1,4 @@
 //! `criterion` benchmarks for the engine, named by `SPEC.md` §7.
-//!
-//! These track and report; they do not gate. The gates live in
-//! `tests/budgets.rs`, because criterion measures change against a baseline
-//! while the budgets in `SPEC.md` are absolute. Both are wanted: criterion says
-//! "this got 20% slower", the budget test says "this is now over the line".
-//!
-//! The fixture is shared with the test suite rather than duplicated, so a
-//! benchmark and a gate can never drift into measuring different things.
 
 #[path = "../tests/support/mod.rs"]
 mod support;
@@ -71,10 +63,7 @@ fn engine(c: &mut Criterion) {
         })
     });
 
-    // I4: open cold, then paint the first file. **Not I7**, which is a claim
-    // about the shell first paint and is gated in
-    // `crates/vigia/tests/first_paint.rs`: nothing here builds a `Highlighter`,
-    // and a grammar first parse is 74-362ms of what a real first paint costs.
+    // I4: open cold, then paint the first file.
     let root = scratch.path_of(".");
     group.bench_function("open_and_first_paint", |b| {
         b.iter(|| {

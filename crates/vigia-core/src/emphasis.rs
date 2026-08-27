@@ -1,37 +1,8 @@
 //! Which bytes of a changed line actually changed.
-//!
-//! A removed line and the added line that replaced it usually differ in a few
-//! tokens, and painting both whole says less than the diff knows. This module
-//! pairs the removal run of a hunk with its addition run and marks, per line,
-//! the byte ranges that are not common to its partner. `SPEC.md` §11.2 B18 is
-//! the ruling; [#321](https://github.com/breferrari/vigia/issues/321) is the
-//! build.
-//!
-//! The shape is delta's, read from its source rather than reinvented
-//! (`docs/research/318-drawing-vocabulary.md` §1.3): lines pair index-wise
-//! inside one change block, a pair only qualifies when the token-level edit
-//! distance is inside a bound, and the bound is what keeps emphasis from
-//! smearing across unrelated lines when a block of code is replaced wholesale.
-//! delta ships 0.6 as `--max-line-distance` and this module adopts it as the
-//! researched default rather than a taste.
-//!
-//! **Cost rides the diff path, not the frame path.** Pairing runs once per
-//! computed diff, inside [`crate::hunk::compute`], so a settled worktree pays
-//! nothing per frame; the numbers are in #321's PR. The token walk is linear
-//! and the alignment is one LCS table per pair, quadratic in *tokens of one
-//! line*, which [`TOKEN_CAP`] bounds so a minified line cannot buy a
-//! megabyte-scale table: past the cap a pair is left unpaired, whole-line
-//! emphasis being the honest reading of a line nothing sensible can align.
 
 use std::ops::Range;
 
 /// Most tokens a line may hold and still be aligned.
-///
-/// The LCS table is `O(n * m)` in tokens; two lines at the cap cost a 160k-cell
-/// table of `u16`, transiently, which is the top of what a glance element's
-/// preprocessing should spend. A line past the cap is almost certainly
-/// generated or minified, and word-level emphasis inside one carries no signal
-/// a reader can use at a glance anyway.
 const TOKEN_CAP: usize = 400;
 
 /// delta's `--max-line-distance`: the fraction of the two lines' combined
@@ -39,20 +10,11 @@ const TOKEN_CAP: usize = 400;
 /// a pair.
 const MAX_DISTANCE: f32 = 0.6;
 
-/// One side's within-line changes: byte ranges of `text` that are not shared
-/// with the partner line. Empty means the line is identical to its partner in
-/// content terms, which for a changed pair means the difference is invisible
-/// at token level (whitespace shape inside tokens is a token too, so in
-/// practice: never for a real pair).
+/// One side's within-line changes: byte ranges of `text` that are not shared with the
+/// partner line.
 pub type Emphasis = Vec<Range<u32>>;
 
 /// Pair `removed[i]` with `added[i]` and mark each side's unshared bytes.
-///
-/// Returns one entry per input line, in order: first `removed.len()` results
-/// for the removed side, then `added.len()` for the added side. Unpaired lines
-/// (the tail of the longer run, pairs past [`TOKEN_CAP`], pairs outside
-/// [`MAX_DISTANCE`]) get an empty emphasis, which the shell draws as the
-/// whole-line wash it always drew.
 pub fn mark<S: AsRef<str>>(removed: &[S], added: &[S]) -> (Vec<Emphasis>, Vec<Emphasis>) {
     let mut out_removed = vec![Vec::new(); removed.len()];
     let mut out_added = vec![Vec::new(); added.len()];
@@ -112,11 +74,6 @@ fn unshared(tokens: &[Range<u32>], shared: impl Iterator<Item = usize>) -> Empha
 }
 
 /// Token boundaries of `line`, as byte ranges.
-///
-/// A token is a run of alphanumerics or underscores, or a single other
-/// non-whitespace character. Whitespace separates and is nobody's token: a
-/// reindented line pairs cleanly and its emphasis is the code that moved, not
-/// the spaces in front of it.
 fn tokens(line: &str) -> Vec<Range<u32>> {
     let mut out = Vec::new();
     let mut word_start: Option<u32> = None;
@@ -144,14 +101,6 @@ fn tokens(line: &str) -> Vec<Range<u32>> {
 
 /// Longest common subsequence over token *content*, returned as index pairs
 /// `(removed_token, added_token)` in order.
-///
-/// Two things keep this affordable on the diff path, and both were bought by a
-/// measurement rather than assumed (the numbers are in #321's PR): tokens are
-/// compared as borrowed slices, never allocated, and the common prefix and
-/// suffix are stripped before the table is built, so the quadratic part runs
-/// over the middle the two lines actually disagree on. A changed line's edit
-/// is usually a few tokens inside a long shared frame, which makes the trim
-/// the difference between a table over the line and a table over the edit.
 fn lcs(
     r_text: &str,
     r_tokens: &[Range<u32>],

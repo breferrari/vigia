@@ -1,35 +1,4 @@
 //! The covered grammar set is a ruling, and these are its gates.
-//!
-//! `SPEC.md` §6 (via [#235](https://github.com/breferrari/vigia/issues/235))
-//! rules that `vigia` covers every modern language, names the mechanism (the
-//! dump `xtask` builds from `two-face`'s `fancy`-vetted set plus the locally
-//! vendored extras under `assets/syntaxes/`), and demands four things no
-//! other test asserts:
-//!
-//! 1. **The set is pinned.** An upgrade that silently drops or gains a grammar
-//!    goes red here and forces a deliberate re-pin, because a covered set that
-//!    can drift is an inheritance again, which is exactly what the ruling
-//!    ended.
-//! 2. **No shipped pattern may fail to compile.** `syntect` compiles patterns
-//!    lazily behind an `expect`, the workspace builds with `panic = "abort"`,
-//!    so one incompatible pattern in a vendored grammar aborts the monitor on
-//!    the first file that reaches it. `two-face` guarantees its own set by
-//!    construction; the extras are guaranteed here.
-//! 3. **A covered language actually colours.** A grammar can load and still
-//!    draw plain if the scope table never matches what it emits, which is how
-//!    Markdown drew at 4.5% while being a "covered" language. So every ruled
-//!    format has a snippet gate asserting a spread of classes, not merely
-//!    resolution.
-//! 4. **The committed dump was built from the committed sources.** The checks
-//!    above read the dump and the sources separately, so a grammar edited
-//!    without rerunning `xtask` satisfied both while the shipped bytes still
-//!    held the old one. `xtask` writes two records beside the sources in the
-//!    same run as the dump — `NOTICE.md`'s per-file hashes and
-//!    `GRAMMARS.txt`'s sorted name list, both beside the dump so they ship
-//!    with it — and these gates recompute both.
-//!
-//! The dump is read here exactly as the crate reads it — same bytes, same
-//! loader — so what these gates pass is what a reader gets.
 
 use std::collections::HashSet;
 
@@ -38,19 +7,6 @@ use syntect::parsing::{Regex, SyntaxSet};
 
 /// Whether this test is running inside the repository rather than inside a
 /// published `.crate`.
-///
-/// **The two gates below read `assets/syntaxes/`, which is outside the
-/// package**, and `vigia-core` deliberately publishes its own test suite
-/// (see its manifest). So a consumer running `cargo test` on the published
-/// crate has the dump and no sources, which is not the same state as a
-/// contributor deleting the sources, and must not be asserted against as
-/// though it were. The repository is identified by a file only it has;
-/// `SPEC.md` sits two levels up from this crate and never ships in the
-/// package.
-///
-/// This is a skip with a provable condition rather than a shrug, and it is
-/// the narrow form: inside the repository the gates always run, so nothing a
-/// contributor can do makes them quietly stop.
 fn in_repository() -> bool {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../SPEC.md")
@@ -63,12 +19,8 @@ fn embedded() -> SyntaxSet {
         .expect("the embedded dump deserialises")
 }
 
-/// Every format the ruling names, as (what a reader would call it, the grammar
-/// name in the dump). One row per formerly missing format from #235's survey,
-/// plus the covered-before set that must never regress.
-///
-/// `xtask` prints the full name list after a rebuild; a rename upstream shows
-/// up as a red row here with the old name in the message.
+/// Every format the ruling names, as (what a reader would call it, the grammar name in
+/// the dump).
 const RULED: &[(&str, &str)] = &[
     // The 2026 survey's missing languages, now covered.
     ("TypeScript", "TypeScript"),
@@ -108,7 +60,6 @@ const RULED: &[(&str, &str)] = &[
     ("v.mod", "V Module"),
     ("Gleam", "Gleam"),
     ("PowerShell", "PowerShell"),
-    // Covered before #235, and covered still: the set may only grow.
     ("Rust", "Rust"),
     ("Python", "Python"),
     ("JavaScript", "JavaScript"),
@@ -135,26 +86,10 @@ const RULED: &[(&str, &str)] = &[
 
 /// The committed roster: every grammar in the dump, sorted, one per line,
 /// written by `xtask` in the same run that writes the dump.
-///
-/// This is the "may not silently change" half of the pin, and it replaced a
-/// count. A count plus [`RULED`]'s named rows protected the 56 grammars
-/// somebody had thought to name: an upgrade swapping one of the other 161 for
-/// a different grammar left the count identical and every named row present,
-/// so the pin's own claim — that a silent drop or gain goes red — was false
-/// for three quarters of the set. A committed list is diffable, so the change
-/// arrives in review as the grammar it is rather than as a number moving.
-/// [`RULED`] stays because it makes a different claim: it maps what a reader
-/// calls a format onto the grammar that has to exist for it.
 const ROSTER: &str = include_str!("../assets/GRAMMARS.txt");
 
 /// The grammars that come from `assets/syntaxes/` rather than from
 /// `two-face`, by the name they carry in the dump.
-///
-/// It exists so the gates below can act on the **absence** of their sources.
-/// Deleting the extras directory without rebuilding used to satisfy every
-/// gate by early return: the walk found nothing to check and the committed
-/// dump still held them, so a dump shipping four grammars with no sources was
-/// invisible.
 const VENDORED: [&str; 4] = ["Gleam", "PowerShell", "V", "V Module"];
 
 #[test]
@@ -184,16 +119,6 @@ fn every_ruled_format_is_in_the_dump_and_the_roster_is_pinned() {
 }
 
 /// The abort-on-first-use gate for the locally vendored grammars.
-///
-/// Walks `assets/syntaxes/*.sublime-syntax` — the sources `xtask` compiled
-/// into the dump — and force-compiles every pattern of every context under the
-/// engine this crate ships. `two-face`'s `fancy` build guarantees the same
-/// property for the base set by excluding what cannot comply, so between the
-/// two, no pattern in the dump can reach `syntect`'s lazy-compile `expect`.
-///
-/// A grammar that fails here in CI is a grammar `xtask` should already have
-/// refused; the gate exists so a dump regenerated by hand cannot dodge that
-/// refusal.
 #[test]
 fn every_vendored_pattern_compiles_under_the_shipped_engine() {
     if !in_repository() {
@@ -201,18 +126,14 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
     }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        // No extras directory means the dump should be exactly two-face's
-        // set, whose guarantee is upstream's. That is a legal state — but
-        // only if the dump agrees, so the absence is asserted rather than
-        // returned on.
+        // No extras directory means the dump should be exactly two-face's set, whose
+        // guarantee is upstream's.
         assert_no_orphan_vendored_grammars();
         return;
     };
 
-    // Collected once, then every collected path is checked or the loop
-    // panics, so nothing can be skipped by construction. The vendored tail is
-    // four grammars today; a count pin here would just restate the roster the
-    // pin gate already holds.
+    // Collected once, then every collected path is checked or the loop panics, so
+    // nothing can be skipped by construction.
     let sources: Vec<_> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -261,7 +182,7 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
     }
 }
 
-/// The other half of the abort-on-first-use guarantee, over the **whole**
+/// The other half of the abort-on-first-use guarantee, over the whole
 /// dump rather than the extras: `find_syntax_by_first_line` compiles each
 /// grammar's `first_line_match` behind the same lazy `expect` as any match
 /// pattern, `two-face`'s vetting covers match patterns, and a first-line
@@ -289,13 +210,6 @@ fn every_first_line_regex_in_the_dump_compiles() {
 }
 
 /// The committed dump was built from the committed sources.
-///
-/// The pattern gate checks the *sources* and the pin gate checks the *dump*;
-/// neither ties one to the other, so a source edited without rerunning
-/// `cargo run -p xtask` passed both while the shipped dump still carried the
-/// old grammar. `xtask` writes an FNV-1a 64 of each source into
-/// `NOTICE.md`'s Sources table in the same run that writes the dump, and this
-/// recomputes them: table and sources must match exactly, both directions.
 #[test]
 fn the_committed_dump_matches_its_sources() {
     if !in_repository() {
@@ -333,12 +247,9 @@ fn the_committed_dump_matches_its_sources() {
         .collect();
     sources.sort();
 
-    // The notice lives beside the dump rather than beside the sources, because
-    // it has to ship: a crates.io consumer and a release archive both get the
-    // grammars, so they both have to get the attribution. `include_str!` would
-    // read it at compile time, and a plain read is used instead so that this
-    // gate fails with the path when the file has moved rather than failing the
-    // build for every consumer.
+    // The notice lives beside the dump rather than beside the sources, because it has
+    // to ship: a crates.io consumer and a release archive both get the grammars, so
+    // they both have to get the attribution.
     let notice_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/NOTICE.md");
     let notice = std::fs::read_to_string(&notice_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", notice_path.display()));
@@ -357,11 +268,8 @@ fn the_committed_dump_matches_its_sources() {
         "the vendored sources and NOTICE.md's Sources table disagree, so the          committed dump was not built from these sources; run `cargo run -p          xtask` and commit what it writes"
     );
 
-    // The hashes above tie the sources to `NOTICE.md`, which `xtask` writes in
-    // the same run as the dump. This ties [`VENDORED`] to the sources, which
-    // is the half nothing else could see: the roster is hand-written, so a
-    // fifth vendored grammar nobody added to it would simply never be checked
-    // by the absence direction.
+    // The hashes above tie the sources to `NOTICE.md`, which `xtask` writes in the same
+    // run as the dump.
     let mut parsed: Vec<String> = paths
         .iter()
         .map(|path| {
@@ -383,12 +291,7 @@ fn the_committed_dump_matches_its_sources() {
          looking for the wrong set"
     );
 
-    // **And every vendored grammar's attribution reaches the notice.** The
-    // dump is a copy of somebody else's work, so the upstream it came from and
-    // the licence it came under have to travel with it. Both live in the
-    // vendored file's header, which is outside the package and reaches nobody
-    // who installs the crate; the notice is the copy that ships. A name in a
-    // list is not attribution, which is what this file said for one release.
+    // And every vendored grammar's attribution reaches the notice.
     for path in &paths {
         let text = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
@@ -418,21 +321,8 @@ fn the_committed_dump_matches_its_sources() {
         }
     }
 
-    // **And the licence text, per upstream, driven from the grammars rather
-    // than from the licence files.**
-    //
-    // The direction matters and the first spelling of this had it backwards: it
-    // walked `licences/` and checked each file reached the notice, which is a
-    // check that cannot see a *missing* licence. Delete one and regenerate, and
-    // the walk simply had one less thing to look at. Driving it from the
-    // vendored grammars is what makes "somebody added a grammar and not its
-    // licence" the red case.
-    //
-    // A licence file is named after its upstream repository, so two grammars
-    // from one repository share one file, and the association needs no second
-    // list to maintain. `bat` is the exception with a reason: `two-face`
-    // reproduces a `LICENSE` per grammar for everything in its curation, so a
-    // second copy here would be two texts to drift apart.
+    // And the licence text, per upstream, driven from the grammars rather
+    // than from the licence files.
     let mut upstreams: Vec<(String, String)> = Vec::new();
     for path in &paths {
         let text = std::fs::read_to_string(path)
@@ -501,7 +391,7 @@ fn the_committed_dump_matches_its_sources() {
         );
     }
 
-    // And to the **dump**, which is the artefact that actually ships.
+    // And to the dump, which is the artefact that actually ships.
     let names: HashSet<String> = embedded()
         .syntaxes()
         .iter()
@@ -569,16 +459,8 @@ const fn snip(
     }
 }
 
-/// A representative snippet per ruled format, with the bar set to **what the
-/// snippet actually reaches**, measured rather than chosen.
-///
-/// A floor of "three or so" is the loose bound this repo already has a rule
-/// about: a bound no input can approach is decorative, and a Kotlin snippet
-/// reaching six classes against a bar of three still passes with half its
-/// highlighting gone. Pinned at the measured number, any class a grammar or a
-/// scope-table change stops producing turns this red, and the number moves
-/// the way the count pin moves: deliberately, in the commit that changed the
-/// answer.
+/// A representative snippet per ruled format, with the bar set to what the
+/// snippet actually reaches, measured rather than chosen.
 const SNIPPETS: &[Snippet] = &[
     snip(
         "TypeScript",
@@ -991,10 +873,8 @@ const SNIPPETS: &[Snippet] = &[
     ),
 ];
 
-/// Parse every snippet through the crate's own public path — the same
-/// resolution, the same scope table, the same parser a frame uses — and
-/// assert the spread. A resolution-only test would pass while a language
-/// draws plain, which is #235's second half.
+/// Parse every snippet through the crate's own public path — the same resolution, the
+/// same scope table, the same parser a frame uses — and assert the spread.
 #[test]
 fn every_ruled_format_reaches_a_spread_of_classes() {
     use vigia_core::{Class, Highlighter, Hunk, Line, LineKind};
@@ -1054,35 +934,13 @@ fn every_ruled_format_reaches_a_spread_of_classes() {
 
 /// The guard `xtask` inserts into Markdown's table-detection lookahead, and the
 /// two alternatives it is inserted before.
-///
-/// Duplicated from `xtask/src/main.rs::TABLE_ANCHORS` rather than shared,
-/// because `vigia-core` cannot depend on `xtask` and the dump is the only thing
-/// that crosses between them. That duplication is the reason these gates read
-/// the *artefact* rather than the builder: what ships is the dump, and a rewrite
-/// that ran correctly into a dump nobody committed is not a fix.
 const TABLE_GUARD: &str = r"(?=[^|\n]*\|)";
 
 /// Lines per file compared by
 /// [`the_repositorys_own_markdown_parses_identically_under_the_guard`].
-///
-/// Sized so the gate stays under a few seconds in an unoptimised binary
-/// while still comparing tens of thousands of ops. See that gate's
-/// docblock for what the cap gives up.
 const FIDELITY_LINES: usize = 250;
 
 /// Exactly one pattern carries the guard, and carries it twice.
-///
-/// **The count is the gate.** A `two-face` upgrade that reflows or splits
-/// Markdown's block-start lookahead makes `xtask`'s anchors miss, and a rewrite
-/// that silently matches nothing looks exactly like a rewrite that worked: the
-/// dump rebuilds, the roster is unchanged, 217 syntaxes still load, and the only
-/// symptom is a frame budget going red with nothing pointing here.
-///
-/// Twice and not once, because alternation binds loosest: a single guard covers
-/// only the first alternative and leaves the second exploring exponentially, at
-/// 13.56ms against an unguarded 12.995ms, which is no change at all. That
-/// mutation is invisible to any timing gate with slack in it and is exactly what
-/// this assertion exists to kill.
 #[test]
 fn exactly_one_pattern_carries_the_table_guard_twice() {
     // `SyntaxSet::syntaxes` hands back `SyntaxReference`, which carries no
@@ -1123,21 +981,8 @@ fn exactly_one_pattern_carries_the_table_guard_twice() {
     );
 }
 
-/// The guard changes what the grammar costs and **nothing about what it
-/// matches**.
-///
-/// Reconstructs the unguarded pattern by deleting the guard from the shipped
-/// dump, then asserts the full `(offset, ScopeStackOp)` stream is identical
-/// across a corpus. Comparing against the live artefact rather than a recorded
-/// hash is deliberate: a hash pins today's `two-face`, so it goes red on every
-/// upgrade whether or not the guard is still sound, and a gate that cries on
-/// unrelated changes is one somebody eventually re-records without reading.
-///
-/// The corpus leads with the cases the guard could plausibly break: a line that
-/// *does* contain a pipe reaches the expensive alternation exactly as before,
-/// and a table is the thing the pattern exists to find. A non-Markdown control
-/// is there so a mistake that somehow reached every grammar is visible as a
-/// mismatch rather than as a uniform absence.
+/// The guard changes what the grammar costs and nothing about what it
+/// matches.
 #[test]
 fn the_guarded_grammar_highlights_identically() {
     let guarded = embedded();
@@ -1225,23 +1070,6 @@ fn the_guarded_grammar_highlights_identically() {
 
 /// The repository's own Markdown, which is what a reader watching this project
 /// actually has on screen, parses identically guarded and unguarded.
-///
-/// The corpus above is hand-written and therefore only carries the shapes
-/// somebody thought of. These five files carry every shape this project has
-/// actually written, and they are the fixtures the 229.48ms measurement came
-/// from.
-///
-/// **Capped at [`FIDELITY_LINES`] lines per file, and the cap is not free
-/// coverage.** The control arm is the *unguarded* grammar, which is the slow one
-/// by construction, so this gate pays the full pre-fix cost twice over in an
-/// unoptimised test binary: uncapped it ran 82s, which is the kind of number
-/// that gets a suite reached for less often. At 250 it compares about 1,200
-/// lines of the roughly 3,000 these files hold (deliberately imprecise: an exact
-/// denominator is wrong the moment anyone edits one of these files, and this
-/// loop's own commits moved it twice), so **the tail of every file over 250
-/// lines is not covered here** and a pathological shape written below that
-/// line would be missed. The hand-written corpus covers shapes by kind; this
-/// one covers them by volume, and neither covers the other's blind spot.
 #[test]
 fn the_repositorys_own_markdown_parses_identically_under_the_guard() {
     if !in_repository() {
@@ -1292,29 +1120,6 @@ fn the_repositorys_own_markdown_parses_identically_under_the_guard() {
 
 /// The shipped dump with [`TABLE_GUARD`] deleted: what shipped before the
 /// rewrite, reconstructed from what ships now.
-///
-/// **Reconstructed rather than recorded, and that is a deliberate trade with a
-/// known limit.** A recorded hash of the expected op stream would pin today's
-/// `two-face` and go red on every upgrade whether or not the guard was still
-/// sound, and a gate that cries on unrelated changes is one somebody eventually
-/// re-records without reading.
-///
-/// The limit is that this control is derived from the same artefact it checks,
-/// so it can only prove the guard is inert **relative to the guarded dump**. Any
-/// further change the rewrite made would sit in both arms and compare equal.
-/// What closes that hole is upstream, in `xtask`, which asserts that deleting
-/// the guard from its rewritten pattern yields the `two-face` string byte for
-/// byte before it writes the dump at all. The two together are what make this
-/// non-circular; neither is sufficient alone.
-///
-/// # Panics
-///
-/// Unless exactly two guards were removed. Without this the gate passes on a
-/// dump that was never rewritten, and it did: against the pre-fix dump the
-/// control strips nothing, both arms are the same set, and every corpus
-/// compares equal. A fidelity check that cannot tell "identical because the
-/// guard is sound" from "identical because there is no guard" is measuring its
-/// own reconstruction.
 fn unguarded() -> SyntaxSet {
     let mut builder = syntect::parsing::SyntaxSetBuilder::new();
     let mut stripped = 0;
@@ -1343,12 +1148,6 @@ fn unguarded() -> SyntaxSet {
 
 /// Every `(offset, ScopeStackOp)` `set` produces for `body`, plus the scope
 /// depth after each line.
-///
-/// The depth marker is why this is one function rather than two closures. It
-/// was dropped from the second of the two copies this replaced, so the gate
-/// over this repository's own Markdown was comparing strictly fewer signals
-/// than the one over the hand-written corpus — weaker by accident rather than
-/// by decision, and invisible because both were green.
 fn op_stream(set: &SyntaxSet, ext: &str, body: &str) -> Vec<String> {
     use syntect::parsing::{ParseState, ScopeStack};
 
@@ -1358,8 +1157,8 @@ fn op_stream(set: &SyntaxSet, ext: &str, body: &str) -> Vec<String> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut ops = Vec::new();
-    // **`split_inclusive`, not `lines`, and it is the guard's own alphabet that
-    // makes the difference.** The dump is the `extra_newlines` variant and the
+    // `split_inclusive`, not `lines`, and it is the guard's own alphabet that
+    // makes the difference. The dump is the `extra_newlines` variant and the
     // shipped path hands `syntect` newline-terminated lines (`Side::spans`, and
     // the warmer's own `split_inclusive('\n')`). The guard is `(?=[^|\n]*\|)`,
     // so half of its character class is the newline: stripping the terminator

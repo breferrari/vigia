@@ -1,23 +1,4 @@
 //! I10, as an invariant over the public store rather than over its arithmetic.
-//!
-//! > Churn history is bounded by a fixed window and a fixed cap on tracked
-//! > paths, independent of how many files the session changed. A path that ages
-//! > out of the window is dropped entirely.
-//!
-//! The unit tests inside `src/history.rs` cover the rules one step at a time:
-//! one path aging out, one eviction picking the right victim, one bucket
-//! rolling. This file covers the claim those rules add up to, and it covers it
-//! **at the scale I10 is written against**, which is the part no arithmetic test
-//! reaches. `SPEC.md` §5.2 names the case in as many words: *a bulk operation
-//! touching ten thousand files must not grow it past the cap.*
-//!
-//! Every gate here drives the clock by handing an [`Instant`] in rather than by
-//! sleeping. The window is two minutes long, so a suite that waited for real
-//! time could not assert the time rule at all, and one that shortened the window
-//! for testing would be gating a constant the product does not ship.
-//!
-//! Structural throughout: counts and bounds, hardware-independent, no slack.
-//! There is nothing to time here, because I10 is a claim about size.
 
 use std::time::Duration;
 use std::time::Instant;
@@ -28,10 +9,6 @@ use vigia_core::{
 };
 
 /// Paths a bulk operation invents, well past the cap.
-///
-/// `SPEC.md` §5.2's own number. It matters that it is far above
-/// [`HISTORY_PATHS`] rather than just above: a fixture that only grazed the cap
-/// would pass against an off-by-one in the eviction rule.
 const BULK: usize = 10_000;
 
 /// A base far enough ahead that a gate can step forward through a whole window
@@ -47,11 +24,6 @@ fn bulk_paths() -> Vec<String> {
 }
 
 /// The case `SPEC.md` §5.2 names, driven rather than approximated.
-///
-/// Both halves are asserted, and the second is the one that matters. A store
-/// nothing ever filled satisfies a cap the way an empty room satisfies a fire
-/// code, so the bound is only evidence when the eviction counter says the cap
-/// was doing the bounding.
 #[test]
 fn ten_thousand_distinct_paths_leave_the_store_at_the_cap() {
     let now = base();
@@ -76,10 +48,6 @@ fn ten_thousand_distinct_paths_leave_the_store_at_the_cap() {
 }
 
 /// The bound has to hold *throughout*, not only when the dust settles.
-///
-/// A store that collected everything and pruned at the end would pass the gate
-/// above while allocating for ten thousand paths, which is the cost I10 exists
-/// to prevent rather than to clean up after.
 #[test]
 fn the_store_never_grows_past_the_cap_at_any_point_during_the_bulk() {
     let now = base();
@@ -96,10 +64,6 @@ fn the_store_never_grows_past_the_cap_at_any_point_during_the_bulk() {
 }
 
 /// The time rule, which is the half a cap cannot provide.
-///
-/// A worktree that goes quiet must empty the store rather than hold its last
-/// picture for ever: `SPEC.md` §5.2 asks for history that survives a file
-/// settling, and I10 is what stops "survives" from meaning "never leaves".
 #[test]
 fn a_window_of_silence_empties_the_store() {
     let now = base();
@@ -121,12 +85,7 @@ fn a_window_of_silence_empties_the_store() {
     assert!(history.stats().evicted_by_window >= HISTORY_PATHS as u64);
     assert_eq!(history.scale(), 0, "the shared scale outlived its samples");
 
-    // **Every figure, not only the finest**, and the band's series with them.
-    // `History::repeak` leaves early when the window holds nothing, and that exit
-    // has to set exactly what the long one sets: it took a second assignment of
-    // the worktree series to do it, and dropping that line would freeze the band
-    // on the last shape it had while every number beside it read zero. Nothing
-    // asserted it, because this gate stopped at the first figure.
+    // Every figure, not only the finest, and the band's series with them.
     assert_eq!(
         history.scales(),
         [0; SPARK_GROUPS.len()],
@@ -141,17 +100,6 @@ fn a_window_of_silence_empties_the_store() {
 }
 
 /// The same claim, reached one bucket at a time.
-///
-/// **This is a different code path from the gate above and mutation testing is
-/// what found that.** A gap of a whole window or more is a special case: nothing
-/// tracked can have a sample left, so the store clears outright rather than
-/// shifting anything. Every gate here jumped a full window, so the ordinary path
-/// (shift the buckets, drop whatever came out empty) was never run, and breaking
-/// it left the whole suite green.
-///
-/// A monitor beside a working agent takes exactly this shape: ticks arrive
-/// steadily, each one a fraction of the window, and a path ages out through
-/// accumulated shifts rather than through one long silence.
 #[test]
 fn a_path_ages_out_through_ordinary_ticks_and_not_only_through_one_long_gap() {
     let now = base();
@@ -184,12 +132,7 @@ fn a_path_ages_out_through_ordinary_ticks_and_not_only_through_one_long_gap() {
     assert!(history.stats().evicted_by_window > 0);
 }
 
-/// A path that ages out is **dropped**, not drawn empty.
-///
-/// The distinction is the whole of I10's second sentence, and it is
-/// observable: a path drawn empty would still occupy a slot the cap counts, so
-/// a store that zeroed instead of removing would be bounded by paths-ever-seen
-/// rather than by the window.
+/// A path that ages out is dropped, not drawn empty.
 #[test]
 fn a_path_that_ages_out_is_dropped_rather_than_kept_empty() {
     let now = base();
@@ -209,10 +152,6 @@ fn a_path_that_ages_out_is_dropped_rather_than_kept_empty() {
 }
 
 /// Churn survives a file settling, which is the reason this store exists at all.
-///
-/// `SPEC.md` §5.2: the frame path's cache empties the moment a path stops being
-/// changed, and a sparkline built on that would show nothing worth glancing at.
-/// This is the property that had to be added rather than reused.
 #[test]
 fn a_path_keeps_its_churn_after_it_stops_changing() {
     let now = base();
@@ -240,18 +179,6 @@ fn a_path_keeps_its_churn_after_it_stops_changing() {
 }
 
 /// The buckets have to tile the window exactly.
-///
-/// [`HISTORY_BUCKET`] is an integer division of [`HISTORY_WINDOW`], so a window
-/// that is not a multiple of the bucket count leaves a remainder no bucket
-/// covers, and the strip would silently describe a shorter span than the
-/// gradient's boundary uses. Cheap to check and impossible to notice by reading.
-///
-/// **This is the *drawn* grid, and since
-/// [#198](https://github.com/breferrari/vigia/issues/198) it is no longer the one
-/// the window rolls on.** That is the sample grid, which is private and therefore
-/// out of this crate's reach; it is asserted at compile time beside
-/// `SAMPLES_PER_BUCKET` instead, along with the exactness of the projection
-/// between the two.
 #[test]
 fn the_window_is_exactly_the_buckets_it_is_divided_into() {
     assert_eq!(
@@ -263,29 +190,11 @@ fn the_window_is_exactly_the_buckets_it_is_divided_into() {
 }
 
 /// Everything a path has inside the window, across every drawn column.
-///
-/// Named for the reason [`base`] and [`bulk_paths`] are: the gates below both ask
-/// "did anything leak or vanish", and a spelled-out fold in each is the third
-/// copy this file would carry.
 fn total(drawn: &[u32; HISTORY_BUCKETS]) -> u32 {
     drawn.iter().copied().sum()
 }
 
-/// A drawn column is the **sum** of the samples under it, not one of them.
-///
-/// **The gate [#198](https://github.com/breferrari/vigia/issues/198) exists
-/// for.** The store samples fifteen times finer than the sparkline draws, and
-/// the projection is what hides that. Two writes a second apart used to land in
-/// one bucket and add up because the bucket *was* the sample; now they land in
-/// two samples of one column, and only summing keeps the answer the same.
-///
-/// Every other spelling of the projection fails here and passes everything else:
-/// taking the newest sample draws one, taking the max draws one, taking the
-/// first draws one. That is why this is asserted on the total rather than on
-/// the shape.
-///
-/// Driven entirely through the public store, so it says nothing about how the
-/// samples are held and keeps saying it if that changes again.
+/// A drawn column is the sum of the samples under it, not one of them.
 #[test]
 fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
     let now = base();
@@ -313,15 +222,6 @@ fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
 }
 
 /// One [`HISTORY_BUCKET`] of elapsed time moves a write exactly one column.
-///
-/// The other half of the projection's contract, and the one that would break
-/// silently: a store sampling finer than it draws could roll on the fine grid and
-/// still report the coarse one, but only if the two agree about how many samples
-/// a column is. If they ever disagree, a write slides by the wrong number of
-/// columns and the sparkline becomes a different picture of the same worktree.
-///
-/// Asserted at the boundary rather than at a fraction of it, because that is
-/// where an off-by-one lives.
 #[test]
 fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
     let now = base();
@@ -348,47 +248,16 @@ fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
 
 #[test]
 fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
-    // **The period the spec names, gated where it is computed.** `SPEC.md`
-    // §5.1 says a source bucket is five seconds, and it is a division of one
-    // window by one constant. A `const` block already refuses a division that is
-    // not exact; this refuses one that is exact and wrong, which is the case that
-    // would leave the spec's numbers false while everything still compiled.
-    //
-    // **Five since [#234](https://github.com/breferrari/vigia/issues/234)**, from
-    // ten, because this constant became the resolution the shell projects *from*
-    // rather than the one it draws: the drawn period is this times the source
-    // buckets a rung groups, so it is ten seconds at the settled rung still.
+    // The period the spec names, gated where it is computed.
     assert_eq!(HISTORY_BUCKET, Duration::from_secs(5));
 
     // And it tiles the window, which is what makes a drawn bucket mean the same
     // amount of time wherever it sits.
     assert_eq!(HISTORY_BUCKET * HISTORY_BUCKETS as u32, HISTORY_WINDOW);
 
-    // **The band half of this gate is gone with the constants it read**
-    // ([#232](https://github.com/breferrari/vigia/issues/232)). It asserted
-    // `GRAPH_PERIOD < HISTORY_BUCKET`, "the band stopped being finer than the
-    // sparkline, which is the whole reason they are two elements", against a band
-    // that drew fifteen fixed columns. The band draws one value per sub-column
-    // now, so its period is a property of the pane rather than a constant, and at
-    // any wide pane it is the store's own one-second resolution. It is therefore
-    // finer than a drawn bucket at every width, and the comparison has nothing
-    // left to compare.
+    // The band half of this gate is gone with the constants it read
+    // ([#232](https://github.com/breferrari/vigia/issues/232)).
 }
-
-// **The sparkline's ceiling gate is gone, and #161's ruling with it**
-// ([#232](https://github.com/breferrari/vigia/issues/232)).
-//
-// It searched for the largest division of the window whose period still exceeded
-// `GRAPH_PERIOD` and asserted `HISTORY_BUCKETS` was already it, which is how
-// [#161](https://github.com/breferrari/vigia/issues/161) closed its sparkline
-// half by ruling rather than by a rung: a drawn bucket could not go finer than a
-// band column without the two elements drawing one store at crossed scales.
-//
-// **That bound was a property of the band's fixed period and the band no longer
-// has one.** It draws one value per sub-column, so at any wide pane its period
-// is the store's own second, which is finer than any bucket the sparkline could
-// ask for. The constraint is gone rather than merely restated, so the ruling it
-// carried is reopened rather than defended, and the follow-up says so.
 
 /// The newest drawn bucket of a path, which is where a write just landed.
 fn newest(history: &History, path: &str) -> u32 {
@@ -400,16 +269,6 @@ fn newest(history: &History, path: &str) -> u32 {
 }
 
 /// A write weighs the bytes it moved, not the fact that it happened.
-///
-/// **[#232](https://github.com/breferrari/vigia/issues/232), reported from a live
-/// pane.** A sample used to be a count of files written, so a worktree where one
-/// file is saved repeatedly put exactly one in every sample and made itself the
-/// peak, and both the band and the sparkline drew every active column at full
-/// height. The element could say *when* and never *how much*, which is the
-/// opposite of the "change density over time" `SPEC.md` §5.1 names it for.
-///
-/// The first write of a path is a baseline rather than a change, so the gate
-/// takes three: one to establish the size, then a small edit and a large one.
 #[test]
 fn a_larger_write_weighs_more_than_a_smaller_one() {
     let now = base();
@@ -441,9 +300,6 @@ fn a_larger_write_weighs_more_than_a_smaller_one() {
 }
 
 /// A file that shrinks moved as much as one that grew.
-///
-/// Deleting five thousand bytes is the larger of the two edits a reader can make
-/// and signing the difference would draw it as the quieter one.
 #[test]
 fn a_write_that_shrinks_a_file_weighs_what_it_removed() {
     let now = base();
@@ -456,11 +312,6 @@ fn a_write_that_shrinks_a_file_weighs_what_it_removed() {
 }
 
 /// A size that could not be read still counts the write.
-///
-/// A file can vanish between the watch naming it and the `stat`, and it was
-/// still written. It weighs the floor rather than nothing, which is exactly what
-/// [`History::record`] does for every caller that supplies no size at all, so the
-/// unsized entry point keeps the behaviour every gate written before #232 holds.
 #[test]
 fn a_write_whose_size_cannot_be_read_still_counts_one() {
     let now = base();
@@ -482,10 +333,6 @@ fn a_write_whose_size_cannot_be_read_still_counts_one() {
 }
 
 /// The peak follows the weight, which is what makes the drawn heights differ.
-///
-/// The store's own half of #232: heights are scaled against the busiest drawn
-/// bucket, so a peak that stayed at the file count would leave every active
-/// column at the ceiling however the samples were weighed.
 #[test]
 fn the_peak_follows_the_weight_rather_than_the_write_count() {
     let now = base();
@@ -503,18 +350,6 @@ fn the_peak_follows_the_weight_rather_than_the_write_count() {
 }
 
 /// Two large writes of different sizes stay different sizes.
-///
-/// **The ceiling is part of the unit, and changing the unit moved it.** Sixteen
-/// bits was ample while a sample counted writes: sixty-five thousand saves inside
-/// one second is not a thing anyone can do. It is one ordinary save of a lockfile
-/// once the unit is bytes, and two saves either side of that ceiling would both
-/// peg, become indistinguishable, and hold the peak at its maximum for the whole
-/// two-minute window, scaling every other row on screen to nothing. That is
-/// exactly the flattening [#232](https://github.com/breferrari/vigia/issues/232)
-/// exists to remove, re-entered through the type rather than through the count.
-///
-/// Both deltas here are past `u16::MAX`, so this is the gate that separates a
-/// `u32` sample from a `u16` one; nothing else in this file does.
 #[test]
 fn two_large_writes_of_different_sizes_do_not_both_peg() {
     let now = base();
@@ -542,13 +377,6 @@ fn two_large_writes_of_different_sizes_do_not_both_peg() {
 }
 
 /// The worktree sum saturates rather than wrapping.
-///
-/// **The widening put this back in play** ([#232](https://github.com/breferrari/vigia/issues/232)).
-/// While a sample was a `u16` and the sum a `u32`, 256 paths at their ceiling
-/// could not reach it and a plain `+=` was safe by arithmetic. A sample is a
-/// `u32` of bytes now, so two paths at [`Track::bump`]'s own ceiling in one
-/// second overflow the sum: a panic in debug, and in release the busiest worktree
-/// there has ever been drawn as the quietest.
 #[test]
 fn the_worktree_sum_saturates_rather_than_wrapping() {
     let now = base();
@@ -572,9 +400,6 @@ fn the_worktree_sum_saturates_rather_than_wrapping() {
 }
 
 /// `scale_of` at its edges, driven directly rather than through a rendered frame.
-///
-/// It is public API and every other gate reaches it through a screen, which is
-/// how the empty case and the floor stayed unexercised.
 #[test]
 fn the_scale_rule_holds_at_its_edges() {
     assert_eq!(
@@ -597,7 +422,7 @@ fn the_scale_rule_holds_at_its_edges() {
     assert_eq!(scale_of([10, 10, 10].into_iter()), 13);
     assert_eq!(scale_of([0, 10, 0, 10].into_iter()), 13);
 
-    // **Above every input by design**, which is what stops a uniformly busy
+    // Above every input by design, which is what stops a uniformly busy
     // worktree drawing as a solid block.
     assert!(scale_of([10, 10].into_iter()) > 10);
 
@@ -607,23 +432,9 @@ fn the_scale_rule_holds_at_its_edges() {
 
 /// The multiple of the median a value may reach before it stops setting the
 /// scale, restated rather than imported.
-///
-/// A gate reading the crate's own constant would agree with it by construction,
-/// which is this suite's standing rule for every tuned number.
 const OUTLIER: u32 = 10;
 
 /// One loud value does not set the yardstick for the ones around it.
-///
-/// **[#256](https://github.com/breferrari/vigia/issues/256), reported from a live
-/// pane**: a test run rewriting thousands of bytes sat in the same window as the
-/// ordinary edits around it, and the mean it dragged up put every one of them on
-/// the band's lowest level, which at the baseline row is not distinguishable from
-/// the axis.
-///
-/// Asserted as an *equality against the window without the outlier in it*, which
-/// is the strongest form available and the one a threshold cannot fake: the
-/// figure is not merely lower, it is the figure the ordinary writes would have
-/// set on their own.
 #[test]
 fn a_lone_outlier_does_not_set_the_yardstick() {
     let ordinary = [40u32; 12];
@@ -646,13 +457,6 @@ fn a_lone_outlier_does_not_set_the_yardstick() {
 }
 
 /// A window with nothing outlying in it is scaled exactly as it always was.
-///
-/// **The half of [#256](https://github.com/breferrari/vigia/issues/256) that is a
-/// promise rather than a fix.** The cut is a no-op wherever the values are within
-/// an order of magnitude of each other, which is by construction: nothing exceeds
-/// the cut, so the arithmetic is the plain thirteen tenths it has always been.
-/// Stated as a gate anyway, because "by construction" is what every silently
-/// broken invariant was before it broke.
 #[test]
 fn a_window_with_no_outlier_scales_as_it_always_did() {
     /// The plain rule, written out: thirteen tenths of the mean of the non-empty
@@ -686,9 +490,6 @@ fn a_window_with_no_outlier_scales_as_it_always_did() {
 }
 
 /// The cut is at the multiple itself, and the boundary is inclusive.
-///
-/// Both directions, because a threshold gate that only tests the far side passes
-/// against a rule that never fires and against one that always does.
 #[test]
 fn the_cut_is_ten_times_the_median() {
     // An odd count so the median is a value rather than a choice between two,
@@ -714,35 +515,17 @@ fn the_cut_is_ten_times_the_median() {
 }
 
 /// What the cut keeps, pinned by the figure it produces rather than by a floor.
-///
-/// **This asserted `> 0` and could not fail.** Every non-empty value is at least
-/// one, so thirteen tenths of any mean of them floors to at least one whatever
-/// the pivot is: the gate passed for a median, for a maximum, for a minimum and
-/// for no cut at all. A test that cannot fail is worse than no test, and this one
-/// was guarding the claim the whole rule rests on.
-///
-/// So it pins the **kept mean**, which is the only observable that moves when the
-/// kept set does, and it pins the two ends the rule has to get right: a
-/// population the cut bites, and one it cannot.
 #[test]
 fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
-    // Three values, median 1, cut 10. The million is dropped, so the figure is
-    // thirteen tenths of the mean of the two ones, which floors to one. Leave the
-    // cut out and it is 433_334, so this cannot pass against a rule that does not
-    // cut.
+    // Three values, median 1, cut 10.
     assert_eq!(
         scale_of([1u32, 1, 1_000_000].into_iter()),
         1,
         "the outlier set the yardstick for the two values beside it"
     );
 
-    // **And one whose answer is mid-range, because the assertion above lands on
-    // the arithmetic floor.** Any rule that keeps a small enough set answers one
-    // there, so it kills "no cut" and not much else. Here the pivot is the whole
-    // question: the median is 40 and drops the 2_000, leaving 281 over 8; a mean
-    // pivot is 253 and its cut of 2_530 keeps everything, leaving 2_281 over 9; a
-    // minimum pivot is 1 and its cut of 10 keeps only the 1. Three different
-    // figures, so this fixture tells them apart where the first cannot.
+    // And one whose answer is mid-range, because the assertion above lands on the
+    // arithmetic floor.
     let bulk = [1u32, 40, 40, 40, 40, 40, 40, 40, 2_000];
     assert_eq!(
         scale_of(bulk.into_iter()),
@@ -751,11 +534,8 @@ fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
          minimum pivot answers 1"
     );
 
-    // **A population of two never cuts, and that is the median's rounding rather
-    // than an accident.** `len / 2` lands in the upper half, so the larger of a
-    // pair is the median and nothing can exceed ten times itself. Stated as a
-    // gate because it is the one size at which the rule is inert, and a reader
-    // meeting it should find it asserted rather than be surprised by it.
+    // A population of two never cuts, and that is the median's rounding rather than an
+    // accident.
     assert!(
         scale_of([1u32, 1_000_000].into_iter()) > 500_000,
         "a population of two cut something, where the larger value is the median"
@@ -778,12 +558,6 @@ fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
 }
 
 /// When the loud writes are the majority, they are the ordinary write.
-///
-/// **The case the cut must not fire on**, and the one that says this is a robust
-/// statistic rather than a ceiling. A reader watching an agent mid-burst is
-/// looking at a worktree where the large writes *are* what is happening, and a
-/// rule that excluded them would scale the band against the quiet between them
-/// and draw the whole burst saturated.
 #[test]
 fn a_majority_burst_still_sets_the_yardstick() {
     let mut window = vec![2_000u32; 14];
@@ -799,31 +573,6 @@ fn a_majority_burst_still_sets_the_yardstick() {
 }
 
 /// A coarser rung's yardstick is never below a finer rung's.
-///
-/// **A fact about the quantity, not about the estimator**: a drawn bucket that
-/// sums more source buckets cannot be worth less than one that sums fewer, so the
-/// figures are non-decreasing down [`SPARK_GROUPS`]. It is what `SPEC.md` §11.1
-/// needs for a width rung to be a change of resolution rather than of height,
-/// and until
-/// [#256](https://github.com/breferrari/vigia/issues/256) nothing asserted it,
-/// because a plain mean could not violate it.
-///
-/// **It is arithmetic rather than a clamp, and the difference is what this gate
-/// is really for.** Grouping puts every source bucket in exactly one group, so
-/// the kept sum is the same whichever rung is drawn, and merging buckets can only
-/// reduce the number of non-empty ones; thirteen tenths of sum over count is
-/// therefore non-decreasing as the rung coarsens. That proof needs the outlying
-/// set decided **once**, at the source resolution, so that the sum is shared.
-/// Decide it per grouping and each rung keeps a different sum, the shared term is
-/// gone, and the ordering goes with it: that was the first shape of
-/// [#256](https://github.com/breferrari/vigia/issues/256) and it produced 418,
-/// 837 and **302** on the one-path fixture below, a coarser rung drawing every
-/// bar taller.
-///
-/// **One tracked path with one write is where it breaks first**, and it is not
-/// exotic: the kernel spreads a lone write into a geometric ramp, the coarsest
-/// grouping has three buckets of it, and three points of a ramp read as a bulk of
-/// two and an outlier.
 #[test]
 fn a_coarser_rung_is_never_measured_against_less() {
     let now = base();
@@ -874,11 +623,6 @@ fn a_coarser_rung_is_never_measured_against_less() {
 }
 
 /// A projection returns exactly the width it was asked for.
-///
-/// **The contract this gained in #232**, and the reason: the band asks for one
-/// value per sub-column, which past a wide pane is more than the window holds
-/// samples. It used to clamp and hand back a short `Vec`, and the band drew a
-/// graph that stopped partway across the pane with bare axis after it.
 #[test]
 fn a_projection_returns_the_width_it_was_asked_for() {
     let mut samples = [0u32; HISTORY_SAMPLES];
@@ -920,14 +664,6 @@ fn a_projection_returns_the_width_it_was_asked_for() {
 }
 
 /// A deletion weighs what it removed, and the file after it weighs itself.
-///
-/// **`Track::wrote`'s docblock claimed this and only the shrink half was gated**
-/// ([#232](https://github.com/breferrari/vigia/issues/232)). A path that vanishes
-/// has a size of zero rather than an unknown one, and treating the two the same
-/// left the baseline at whatever the file last held: the delete weighed the floor
-/// and the *next* file at that path weighed the dead one's whole size. The
-/// largest edit a reader can make drawn as the smallest, and a trivial one drawn
-/// as a spike.
 #[test]
 fn deleting_a_file_weighs_what_it_removed() {
     let now = base();
@@ -952,26 +688,9 @@ fn deleting_a_file_weighs_what_it_removed() {
     );
 }
 
-// ── #242: the glance elements draw a level ───────────────────────────────────
-//
-// `assets/preview.svg` draws each sparkline as a **wave**, monotone up then
-// monotone down, and `SPEC.md` §5.1 rules that a published artifact answering an
-// open question is the answer. A write is a point event, so the retained samples
-// are zero almost everywhere and drawing them raw is a spike train. These gates
-// are the picture's own property, asserted the way the picture states it.
-
 /// A store holding one agent burst centred `ago` seconds back.
-///
-/// Written through `record_sized` rather than by poking samples, so the gates
-/// below run against the store a reader actually gets. The sizes are the shape
-/// of a save: a couple of small writes around one large one.
 fn burst_at(history: &mut History, now: Instant, ago: u64, grown: u64) -> u64 {
-    // **Cumulative sizes, because a sample weighs a difference.** `Track::wrote`
-    // charges the change in a file's size, so handing the same four sizes twice
-    // would make the second burst weigh nothing and handing four constants would
-    // make it weigh whatever the gap between them happened to be. `grown` is what
-    // the file already held, so each burst adds the same four deltas and two
-    // bursts really are two of the same thing.
+    // Cumulative sizes, because a sample weighs a difference.
     let mut size = grown;
     for (offset, delta) in [(3u64, 1_000u64), (2, 3_500), (1, 4_500), (0, 9_000)] {
         size += delta;
@@ -985,21 +704,11 @@ fn burst_at(history: &mut History, now: Instant, ago: u64, grown: u64) -> u64 {
 }
 
 /// Roll the window forward to `now` without touching the path under test.
-///
-/// The store ages on `record`, so a burst written at `now - 60` sits at the
-/// newest sample until something later moves the window past it. A second path
-/// is what does that here: it rolls every track and leaves this one's samples
-/// where they were, which is exactly the ageing a real worktree would apply.
 fn roll_to(history: &mut History, now: Instant) {
     history.record_sized([("src/other/untouched.rs", Some(1))], now);
 }
 
 /// The drawn buckets rise to a peak and fall away from it.
-///
-/// **The picture's property, not a preference.** Extracted from
-/// `assets/preview.svg`, the eight sparkline bars of its first row are
-/// `4 8 14 20 24 16 8 4`: strictly up, then strictly down. Raw samples cannot do
-/// that from one burst, which is what this fails against.
 #[test]
 fn a_single_burst_draws_a_wave_rather_than_a_spike() {
     let now = base();
@@ -1017,14 +726,8 @@ fn a_single_burst_draws_a_wave_rather_than_a_spike() {
         .map(|(at, _)| at)
         .expect("a peak");
 
-    // Non-vacuity first: a wave needs more than one non-empty bucket, and a
-    // spike train is exactly the case where it has one.
-    // **And the far end of the window is empty.** Without this the gate passes
-    // against a floor that lights every sample: a solid bar rises to a peak and
-    // falls back to the bar, which is monotone in both directions and is the
-    // defect this feature removes. Measured, that bug drew
-    // `[10, 12, 58, 302, 1594, 8015, 5698, 1077, 204, 38, 10, 10]` and satisfied
-    // every other assertion here.
+    // Non-vacuity first: a wave needs more than one non-empty bucket, and a spike train
+    // is exactly the case where it has one.
     assert_eq!(
         (drawn[0], drawn[HISTORY_BUCKETS - 1]),
         (0, 0),
@@ -1053,22 +756,6 @@ fn a_single_burst_draws_a_wave_rather_than_a_spike() {
 }
 
 /// Two bursts thirty seconds apart still read as two.
-///
-/// **This is what defends the constant.** A level is a trade between shape and
-/// resolution, and a kernel wide enough to make one burst pretty will merge two.
-/// Measured across candidates on this gate's own fixture, the trough between two
-/// bursts thirty seconds apart sits at **0.23** of the peak at six seconds, 0.39
-/// at eight, 0.52 at ten and 0.62 at twelve, where they stop being two things.
-/// Half is the line, and this gate is what fails if the constant is raised past
-/// it.
-///
-/// **Re-derived at the finer source resolution**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)), because these
-/// numbers are read through a bucket and the bucket halved. They moved in the
-/// direction that matters and not the one that decides: six seconds went from
-/// 0.36 to 0.23, so the shipped constant has half again the margin it was
-/// credited with, while the *line* is where it was, between eight seconds and
-/// ten. A finer bucket smears less, which is the whole of it.
 #[test]
 fn two_bursts_thirty_seconds_apart_still_read_as_two() {
     let now = base();
@@ -1080,10 +767,7 @@ fn two_bursts_thirty_seconds_apart_still_read_as_two() {
     let drawn = history
         .level("src/engine/watch.rs")
         .expect("the path is tracked");
-    // Each burst's own peak, found in its own half. **Not one global maximum
-    // over both**: a sample weighs the *difference* a write made to a file's
-    // size, so two identical bursts do not weigh the same, and a gate keyed on
-    // equal peaks would read one bucket twice and see no trough at all.
+    // Each burst's own peak, found in its own half.
     let split = HISTORY_BUCKETS / 2;
     let argmax = |slice: &[u32]| {
         slice
@@ -1120,15 +804,6 @@ fn two_bursts_thirty_seconds_apart_still_read_as_two() {
 }
 
 /// A burst at the newest sample reads at full height.
-///
-/// There are no samples after the newest one, so half the kernel falls outside
-/// the window and the level would droop there. `levelled` divides by the weight
-/// **actually available** at each sample, which is what stops it.
-///
-/// What was tried and rejected is the naive form of that, dividing by the whole
-/// kernel's weight everywhere: it flattens the mid-window wave instead of lifting
-/// the edges. An early reading of this recorded "edge normalisation rejected",
-/// which was the wrong lesson from the right measurement.
 #[test]
 fn a_burst_at_the_newest_sample_reads_full_height() {
     let now = base();
@@ -1156,16 +831,6 @@ fn a_burst_at_the_newest_sample_reads_full_height() {
 
 #[test]
 fn an_empty_window_is_never_due() {
-    // **The half of [#243](https://github.com/breferrari/vigia/issues/243) that
-    // keeps I1.** The clock the shell runs to age this window is admissible only
-    // because it stops, and what stops it is this answering `None`. Asserted on
-    // the value rather than on anything downstream, because the loop's receive
-    // branches on exactly this and a plausible-looking duration here is a poll
-    // loop on an idle monitor.
-    // `starting_at`, not `new`: `new` opens the window at its own
-    // `Instant::now()`, so a second sample taken on the next line leaves
-    // `opened < start` and every offset below is measured against a boundary
-    // that has already moved.
     let start = base();
     let mut history = History::starting_at(start);
 
@@ -1185,7 +850,7 @@ fn an_empty_window_is_never_due() {
          the grid it rolls on"
     );
 
-    // **Overdue asks for zero rather than panicking**, which is the ordinary
+    // Overdue asks for zero rather than panicking, which is the ordinary
     // case on the first wake after the process was busy elsewhere: the roll is
     // already late and the answer is to do it now.
     assert_eq!(
@@ -1197,15 +862,8 @@ fn an_empty_window_is_never_due() {
 
 #[test]
 fn a_drained_window_stops_asking_to_age() {
-    // **The bound, and the reason the amendment to I1 is one sentence rather
-    // than a licence to run a timer.** A burst arms the clock; the window empties
-    // `HISTORY_WINDOW` after it, and the clock has to stop with it or the budget
-    // is *some wakeups forever* rather than *at most `HISTORY_SAMPLES` after a
-    // burst*.
-    // `starting_at`, not `new`: `new` opens the window at its own
-    // `Instant::now()`, so a second sample taken on the next line leaves
-    // `opened < start` and every offset below is measured against a boundary
-    // that has already moved.
+    // The bound, and the reason the amendment to I1 is one sentence rather than a
+    // licence to run a timer.
     let start = base();
     let mut history = History::starting_at(start);
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
@@ -1229,11 +887,8 @@ fn a_drained_window_stops_asking_to_age() {
          everything it had to show"
     );
 
-    // **And it stays stopped across an ageing wake, which is the property this
-    // was written for.** Asking `ages_in` a second time does not test it:
-    // the method takes `&self`, so with nothing mutating between the two calls
-    // the answer cannot differ and the line could not fail. What can re-arm the
-    // clock is a roll, so the roll has to happen first.
+    // And it stays stopped across an ageing wake, which is the property this was
+    // written for.
     history.record_sized([], start + HISTORY_WINDOW * 2);
     assert_eq!(
         history.ages_in(start + HISTORY_WINDOW * 2),
@@ -1245,28 +900,6 @@ fn a_drained_window_stops_asking_to_age() {
 
 #[test]
 fn a_tick_that_moves_nothing_does_no_work() {
-    // **The guard [#277](https://github.com/breferrari/vigia/issues/277) needed
-    // once it put `record_sized` on the shell loop's timeout arm.** That arm also
-    // fires every `STEP_REPEAT` while a scrollbar button is held, twenty times a
-    // second, and nineteen of those cross no sample boundary. Without the guard
-    // each one paid `repeak`, priced in its own docblock at 150.1µs p50 at the
-    // path cap, to recompute an answer that cannot have changed.
-    // Measured at the cap after it: a same-sample timeout is **20ns** against
-    // **137µs** for one that crosses a boundary.
-    //
-    // **Asserted on `repeaks` rather than on the projection**, and the first
-    // draft of this test got that wrong in the way that matters: `repeak` is
-    // idempotent over unchanged tracks, so `scales` and the worktree series are
-    // identical whether the walk ran or not. Reverting the guard to an
-    // unconditional call left every assertion green, which made this a gate that
-    // the skip is *safe* and never that it *happens*. The counter is the only
-    // observable that separates the two.
-    // `starting_at`, not `new`: `new` opens the window at its own
-    // `Instant::now()`, so a second sample taken on the next line leaves
-    // `opened < start` and every offset below is measured against a boundary
-    // that has already moved. This test had the smallest margin of the three:
-    // it asks about `start + HISTORY_SAMPLE / 2`, so 500ms of wall clock between
-    // two statements was enough to cross a boundary and redden it.
     let start = base();
     let mut history = History::starting_at(start);
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
@@ -1287,16 +920,8 @@ fn a_tick_that_moves_nothing_does_no_work() {
         "a timeout inside one sample walked every track, which is the 150µs a \
          held scrollbar button would pay for it nineteen times a second"
     );
-    // **Read through `recency`, which is sample-granular, rather than through
-    // `scales` and `worktree_churn`, which `repeak` caches.** The cached pair
-    // cannot move while the counter above says no walk happened, so comparing
-    // them here was a line that could not fail while its predecessor passed.
-    //
-    // `churn` was the first replacement and it is not enough either:
-    // [`HISTORY_SAMPLES`] over [`HISTORY_BUCKETS`] is five samples to a bucket,
-    // so a window that shifted by one and reported no steps stays inside the same
-    // bucket four times in five and the projection does not move. `recency`
-    // reads the newest sample itself, which is the cell such a shift zeroes.
+    // Read through `recency`, which is sample-granular, rather than through `scales`
+    // and `worktree_churn`, which `repeak` caches.
     assert_eq!(
         history.recency("src/a.rs"),
         Recency::Pulse,
@@ -1304,7 +929,7 @@ fn a_tick_that_moves_nothing_does_no_work() {
          mark it had just earned and the skipped walk was hiding a real roll"
     );
 
-    // **Both halves of the guard, or it is half a guard.** A tick that names a
+    // Both halves of the guard, or it is half a guard. A tick that names a
     // path inside the same sample changed a track without moving the window, and
     // skipping the walk there would freeze the projection against live data.
     history.record_sized([("src/a.rs", Some(9_000u64))], start + HISTORY_SAMPLE / 2);
@@ -1334,21 +959,7 @@ fn a_tick_that_moves_nothing_does_no_work() {
 
 #[test]
 fn a_burst_lands_in_the_sample_the_roll_opened() {
-    // **Order inside `record_sized`: the window rolls, and *then* the burst is
-    // written.** Swap those and the write lands in the sample the roll is about
-    // to shift out of, so it moves one cell left the instant it arrives and the
-    // newest sample is zero: the path is `Live` on the frame it was written on,
-    // and every drawn cell is one sample stale forever after.
-    //
-    // Gated here because nothing else reaches it. Reversing the two is caught
-    // today by exactly one assertion, in
-    // `a_path_that_ages_out_is_dropped_rather_than_kept_empty`, and only because
-    // that fixture jumps a whole `HISTORY_WINDOW` and takes `roll`'s *clear*
-    // branch, which wipes the just-written track. Its failure message then talks
-    // about a path occupying a slot, which is not what happened. The ordinary
-    // shift path is the production case and had no gate at all: the fixtures near
-    // it assert totals, and a total is exactly what moving a sample sideways
-    // preserves.
+    // Order inside `record_sized`: the window rolls, and *then* the burst is written.
     let start = base();
     let mut history = History::starting_at(start);
     history.record(["src/a.rs"], start);
@@ -1365,21 +976,8 @@ fn a_burst_lands_in_the_sample_the_roll_opened() {
 
 #[test]
 fn a_write_after_the_whole_window_turned_over_still_accumulates() {
-    // **The overnight case, and the branch that serves it is the one branch that
-    // re-bases the window's origin.** `roll` clears every track when the whole
-    // window has turned over rather than shifting each one past its own length,
-    // and it has to move `opened` to `now` on the way out. Leave that line off
-    // and the store still *looks* right for one call: the clear happens, the
-    // window reads empty, and the next write lands. It is the call after that
-    // one which never recovers, because `opened` is still pointing at whenever
-    // the session began, so every later roll measures the same overnight gap and
-    // clears the store again. The graph can then never hold more than the burst
-    // being written at that instant, forever, on a monitor whose whole job is to
-    // be left open for days.
-    //
-    // Nothing else here reaches it: every other gate over the drain asserts what
-    // the window looks like *after* the turnover and stops, and the defect only
-    // shows on the second roll past it.
+    // The overnight case, and the branch that serves it is the one branch that re-bases
+    // the window's origin.
     let start = base();
     let mut history = History::starting_at(start);
     history.record(["src/a.rs"], start);
@@ -1399,13 +997,6 @@ fn a_write_after_the_whole_window_turned_over_still_accumulates() {
     // And it has to still be there one sample later. This is the assertion the
     // missing re-base fails: with `opened` left behind, this roll measures the
     // overnight gap a second time and clears the write above.
-    //
-    // **Asserted as "still tracked" rather than as a rung**, which is the
-    // correction this gate needed when [`PULSE_SAMPLES`] widened the mark: it read
-    // `Live` after one roll, which was the *mark's* lifetime rather than this
-    // test's subject, so a change to that number reddened a test about something
-    // else. What the missing re-base actually destroys is the track, and
-    // `tracked` says so without borrowing a rule from the row above.
     history.record_sized([], woke + HISTORY_SAMPLE);
     assert_eq!(
         history.tracked(),
@@ -1424,28 +1015,14 @@ fn a_write_after_the_whole_window_turned_over_still_accumulates() {
 
 #[test]
 fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
-    // **[#243](https://github.com/breferrari/vigia/issues/243) one field over.**
-    // The mark was the burst ordinal alone, which only advances when a burst
-    // names something, so an empty roll left it lit: a file written a hundred and
-    // nineteen seconds ago drew at full brightness beside a band that had almost
-    // drained, and then lost the mark all at once when its track was evicted.
-    // Once the window ages on its own that is visible every second.
     let start = base();
     let mut history = History::starting_at(start);
     history.record(["src/a.rs"], start);
     assert_eq!(history.recency("src/a.rs"), Recency::Pulse);
 
-    // **[`PULSE_SAMPLES`] boundaries, and the mark expires by construction rather
-    // than by anything retiring it**: `Track::shift` walks the write out of the
+    // [`PULSE_SAMPLES`] boundaries, and the mark expires by construction rather
+    // than by anything retiring it: `Track::shift` walks the write out of the
     // newest end of the track and the mark goes with it.
-    //
-    // **The number was one until 2026-08-25 and is two now**, which is the floor
-    // [`a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`]
-    // exists for: at one sample the lifetime was whatever was left of the second
-    // the write landed in, measured as low as 5ms, and the reader stopped seeing
-    // the dot. What this gate holds is unchanged and is the half #243 was about —
-    // the mark **expires** rather than freezing — and the assertion below is what
-    // fails if it stops.
     for step in 1..PULSE_SAMPLES as u32 {
         history.record_sized([], start + HISTORY_SAMPLE * step);
         assert_eq!(
@@ -1463,38 +1040,12 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
          it just wrote"
     );
 
-    // **The rung above already carries "still tracked", so nothing asserts it
-    // separately.** Two attempts did. The first asked `recency` again and
-    // compared it to the same rung. The second asked `churn(..).is_some()`, on
-    // the stated ground that "a `Live` that came from an eviction would read
-    // identically", which is not true of this enum: `recency` returns `Cold` for
-    // a path it cannot find and `Live` only for one it can, so `Live` is the
-    // evidence and a second line restating it is a line that cannot fail.
+    // The rung above already carries "still tracked", so nothing asserts it separately.
     history.record_sized([], start + HISTORY_WINDOW * 2);
     assert_eq!(history.recency("src/a.rs"), Recency::Cold);
 }
 
-/// **The pulse must last long enough to be seen, whenever the write lands.**
-///
-/// `SPEC.md` §11.2 **B2** makes the mark the whole of *it changed on the newest
-/// tick*: the label went in [#99](https://github.com/breferrari/vigia/issues/99)
-/// and the dot is all that is left, so a dot nobody catches is the element gone.
-///
-/// **Reported from a live pane on 2026-08-25** as *"the dot showing a file was
-/// changed recently isn't showing up anymore"*, and it is a regression from
-/// [#279](https://github.com/breferrari/vigia/issues/279), which gave the window
-/// a clock of its own. Before it the window rolled only on a tick, so the mark
-/// survived until the next write; after it the mark dies at the next boundary of
-/// a **fixed one-second grid**, and where a write falls in that grid is
-/// arbitrary. Measured across the grid before the fix: a write at +0ms pulsed for
-/// 1s, at +500ms for 500ms, at +990ms for **10ms** and at +999ms for **5ms**. An
-/// agent saving files continuously lands wherever it lands, so the mark was a
-/// coin toss and the reader was losing it.
-///
-/// **The floor is what this asserts and the ceiling is what makes it honest.**
-/// A mark with no upper bound is the frozen clock §5.3 refuses and #243 removed;
-/// a mark with no lower bound is the one nobody sees. Both are gated, and the
-/// span between them is `PULSE_SAMPLES` samples by construction.
+/// The pulse must last long enough to be seen, whenever the write lands.
 #[test]
 fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
     // Every corner of the grid, including the two that measured 10ms and 5ms.
@@ -1530,20 +1081,8 @@ fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
              The mark is the whole of B2 and one this short is one a reader \
              never catches"
         );
-        // **The ceiling is written out rather than computed from
-        // [`PULSE_SAMPLES`], and that is the whole difference between a gate and
-        // a tautology.** Stated as `HISTORY_SAMPLE * PULSE_SAMPLES` it adds the
-        // constant under test to both sides: widening the window to three
-        // samples widened the assertion with it and this test stayed green,
-        // which is exactly what happened when it was mutated. A bound on a
-        // constant has to come from somewhere the constant cannot reach.
-        //
-        // **Two seconds because that is the ruling**, not because it is twice
-        // one sample: a mark saying *it changed on the newest tick* has to be
-        // gone while that is still true of the pane, and one to two seconds is
-        // where the terminal's own transient marks sit (`tmux`'s `display-time`
-        // is 750ms, its `display-panes-time` 1s, vim's `matchtime` 500ms). Move
-        // `PULSE_SAMPLES` and this reddens, which is the point.
+        // The ceiling is written out rather than computed from [`PULSE_SAMPLES`], and
+        // that is the whole difference between a gate and a tautology.
         assert!(
             alive <= Duration::from_secs(2),
             "a write at +{offset}ms into the sample pulsed for {alive:?}, which \
@@ -1553,11 +1092,7 @@ fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
     }
 }
 
-/// And a newer burst still takes the mark from an older one **immediately**.
-///
-/// The widened lifetime must not turn into two files pulsing at once: *newest*
-/// is the whole meaning of the mark, and two of them says nothing. This is what
-/// fails if the fix reaches for the samples alone and drops the ordinal.
+/// And a newer burst still takes the mark from an older one immediately.
 #[test]
 fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
     let start = base();
@@ -1585,17 +1120,6 @@ fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
 }
 
 /// `SPEC.md` §11.1's `●`: the file the newest burst named, until another arrives.
-///
-/// **Reported from the pane 2026-08-26** ([#345](https://github.com/breferrari/vigia/issues/345)):
-/// the mark did not stay long enough, and it used to never go away. Both halves
-/// of that were true. It was the ordinal alone until 2026-08-22, when ageing the
-/// churn window gave `History::recency` a second term and the mark went with the
-/// ink, on a complaint that was about **brightness** rather than about the mark.
-///
-/// The two questions are separate now, and this gate is the one that keeps them
-/// separate: it asserts the mark **survives** exactly where
-/// `a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`
-/// asserts the ink expires. Neither can be satisfied by the other.
 #[test]
 fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
     let start = base();
@@ -1607,11 +1131,7 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
         "a write does not carry the mark at all"
     );
 
-    // **Ten seconds of quiet, rolled the way `Shell::draw` rolls it.** The number
-    // is written from the ruling rather than from `PULSE_SAMPLES`: a gate stated
-    // in terms of the constant it pins moves with it, which `RULINGS.md` records
-    // this very mark having been caught by once. What a reader means by "it stays"
-    // is measured in seconds of watching an agent, not in samples.
+    // Ten seconds of quiet, rolled the way `Shell::draw` rolls it.
     let mut now = wrote;
     for _ in 0..2_000u32 {
         now += Duration::from_millis(5);
@@ -1628,7 +1148,7 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
         now.duration_since(wrote)
     );
 
-    // **And the ink is gone by then, which is what says the two are separate.**
+    // And the ink is gone by then, which is what says the two are separate.
     // A build that answered the mark out of `recency` would fail here rather than
     // above, and a build that never expired the ink would fail here too.
     assert_ne!(
@@ -1652,12 +1172,6 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
 }
 
 /// Every file one burst names carries the mark, which is what *newest* means.
-///
-/// **Deliberately not narrowed to one file** ([#345](https://github.com/breferrari/vigia/issues/345)).
-/// A formatter, a branch switch or a multi-file agent edit writes several paths
-/// in one tick, and choosing which of them is "the" last edited one would be a
-/// second ruling with no basis in what happened. Recorded as a gate so the next
-/// reader finds a decision rather than an omission.
 #[test]
 fn every_file_a_burst_names_carries_the_newest_mark() {
     let start = base();
@@ -1678,13 +1192,6 @@ fn every_file_a_burst_names_carries_the_newest_mark() {
 }
 
 /// And the mark's real bound is I10's, which is not eternity.
-///
-/// **The correction to the sentence the row was written from**
-/// ([#345](https://github.com/breferrari/vigia/issues/345)). *"Until another
-/// write arrives"* is what a reader means and not quite the whole rule: the mark
-/// is a property of a tracked path, and I10 retires a track two ways. This gates
-/// the one a quiet worktree reaches, so the sticky mark is bounded rather than
-/// frozen, which is the difference §5.3 turns on.
 #[test]
 fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
     let start = base();
