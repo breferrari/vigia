@@ -59,9 +59,9 @@ const TAB_STOP: usize = 4;
 /// character that occupies none. Combining marks, zero-width joiners, variation
 /// selectors and `U+200B` all measure zero, so a run of them leaves `column`
 /// where it was and the walk runs to the end of the line however long it is.
-/// That is the unbounded shape the bound was added to remove, and it is ordinary
-/// content rather than an attack: decomposed Unicode, emoji built from joiners,
-/// and text pasted out of a web page all reach it.
+/// That is the unbounded shape, and it is ordinary content rather than an
+/// attack: decomposed Unicode, emoji built from joiners, and text pasted out of
+/// a web page all reach it.
 ///
 /// Four, because a grapheme the pane can actually show is a base character plus
 /// a handful of marks, and `ratatui` measures a grapheme's width as its base's.
@@ -153,13 +153,11 @@ const HINT_RUNGS: [&str; 4] = [
 
 /// The rung whose fit decides whether the footer takes a second line.
 ///
-/// **Rung zero since [#80](https://github.com/breferrari/vigia/issues/80), and it
-/// used to be rung one.** The constant exists because the footer grows when the bar
-/// cannot sit beside the state on one line, and measuring that against a rung
-/// nobody is owed would let an optional hint buy a body row: `JK files` did exactly
-/// that, making the widest bar forty columns so the footer took a second line at
-/// the width I6 is named for, for every reader including the ones who never
-/// pressed `J`.
+/// **Rung zero.** The footer grows when the bar cannot sit beside the state on
+/// one line, and measuring that against a rung nobody is owed would let an
+/// optional hint buy a body row: a bonus `JK files` made the widest bar forty
+/// columns, so the footer took a second line at the width I6 is named for, for
+/// every reader including the ones who never pressed `J`.
 ///
 /// **There is no bonus rung left to guard.** The bar is three items a reader is
 /// owed at every width that can hold them, twenty-three columns at its widest, and
@@ -528,13 +526,13 @@ const MIN_PATH_WIDTH: usize = 12;
 
 /// Columns the kind letter and its gap take at the head of every file row.
 ///
-/// **Named because three places need it and two of them used to guess.** It is
-/// the `2` in [`Painter::file_row`]'s own floor, and both [`affords_caret`] and
-/// [`BAR_FLOOR`] are defined as "a glance element on top of what that row will
-/// already refuse to go below". Before this had a name one floor wrote it as a
-/// bare literal and the other borrowed [`CARET_WIDTH`], which is a different
-/// quantity that happens to equal the same number, so widening the caret gutter
-/// would silently have moved the kind letter's allowance too.
+/// **Named because three places need it and a literal would let two of them
+/// drift.** It is the `2` in [`Painter::file_row`]'s own floor, and both
+/// [`affords_caret`] and [`BAR_FLOOR`] are defined as "a glance element on top
+/// of what that row will already refuse to go below". Borrowing
+/// [`CARET_WIDTH`] instead — a different quantity that happens to equal the
+/// same number — means widening the caret gutter silently moves the kind
+/// letter's allowance too.
 const KIND_WIDTH: usize = 2;
 
 /// The narrowest a file row can be and still name its own file.
@@ -559,9 +557,8 @@ const ROW_FLOOR: usize = KIND_WIDTH + MIN_PATH_WIDTH;
 /// change that derivation rather than ride through it.
 ///
 /// A `&str` rather than a `char` for that derivation, and **not** because runs
-/// are `String`s, which an earlier draft of this said. The sigil beside it is a
-/// `char` pushed the same way through `to_string()`, so the run type forces
-/// nothing; `.len()` is what needs the `&str`.
+/// are `String`s: the sigil beside it is a `char` pushed the same way through
+/// `to_string()`, so the run type forces nothing. `.len()` is what needs it.
 const SIGIL_GAP: &str = " ";
 
 /// Columns a content row spends on the sigil and the gap after it.
@@ -629,9 +626,8 @@ const GRAPH_ROWS: usize = 2;
 /// **scrolling text** region. A graph has a baseline and cannot be mistaken for
 /// an empty one.
 ///
-/// **Below only, since [#174](https://github.com/breferrari/vigia/issues/174).**
-/// The blank this used to keep *above* the band is [`LEAD_ROWS`] now, which the
-/// body opens with whether or not a band is drawn. Nothing moved: the sum above
+/// **Below only.** The blank above the band is [`LEAD_ROWS`], which the body
+/// opens with whether or not a band is drawn. Nothing moved: the sum above
 /// the list is `LEAD_ROWS + GRAPH_ROWS + GRAPH_AIR`, which is the four rows the
 /// two-sided version already spent, so no pane height gains or loses the band.
 const GRAPH_AIR: usize = 1;
@@ -723,7 +719,7 @@ const fn band_fits(pane: u16) -> bool {
 /// legibility with the content it exists to make legible.
 const MIN_BODY: u16 = 2;
 
-/// The deepest pinned file list that shipped before a rung was added above it.
+/// The deepest pinned file list drawn below the rung above it.
 ///
 /// **A cap rather than a height**, which is the difference between this and a
 /// fixed region: three changed files draw three rows, matching
@@ -823,10 +819,9 @@ const fn list_cap(height: u16) -> usize {
 
 /// Columns the caret glyph itself occupies.
 ///
-/// **One, and the gap it used to carry is the pane's own inset now**
-/// ([#173](https://github.com/breferrari/vigia/issues/173)). This was `2` — a
-/// glyph and a trailing space — and the list was indented by the pair, which put
-/// its status sigil two columns right of the same sigil on the diff's headings.
+/// **One.** The gap belongs to the pane's own inset: a glyph plus a trailing
+/// space indents the list by the pair, which puts its status sigil two columns
+/// right of the same sigil on the diff's headings.
 /// Reported from use, and visible in a snapshot this repo had been committing all
 /// along.
 ///
@@ -1133,12 +1128,11 @@ const RAIL_PATH: usize = MIN_PATH_WIDTH * 2;
 /// opens with, a path that names its directory, and the glance cluster
 /// `assets/preview.svg` draws.
 ///
-/// **[`KIND_WIDTH`] is in the sum and was left out of the first draft**, which is
-/// the exact hazard that constant's own docblock names: two floors here already
-/// had to be told that a row's opening cell is not part of its path. Left out, a
-/// rail at this floor drew twenty-two columns of path where [`RAIL_PATH`]
-/// promises twenty-four, and the gate written for that promise could not see it
-/// because it was measuring the wrong span.
+/// **[`KIND_WIDTH`] is in the sum**, which is the hazard that constant's own
+/// docblock names: a row's opening cell is not part of its path. Left out, a
+/// rail at this floor draws twenty-two columns of path where [`RAIL_PATH`]
+/// promises twenty-four, and the gate written for that promise cannot see it,
+/// because it measures the wrong span.
 ///
 /// [`inset_of`] is asked at [`RAIL_FROM`] rather than written as a `2`, because
 /// that is the number it *is* at every width from seventy-nine up and the margin
@@ -1289,11 +1283,9 @@ const MEMORY_CELL: usize = 6;
 /// `follow ▶  N/M` before this existed, and one status bar with two join styles
 /// on it would be the second dialect §11.1 keeps rejecting.
 ///
-/// This cell used to give `watching · 3 files` as its example of one subject,
-/// which was the wrong example for the right rule and is exactly what
-/// [#67](https://github.com/breferrari/vigia/issues/67) found: those were two
-/// subjects joined by a separator that promises one. The rule is unchanged and
-/// the header now draws a pair that keeps it.
+/// The test is whether a participle could govern what follows: `watching · 3
+/// files` reads as one claim and is two, which is a separator promising a
+/// subject the pair does not share.
 const CELL_GAP: &str = "  ";
 
 /// Shown on the footer while the viewport is moving itself.
@@ -1343,8 +1335,8 @@ const FACT_SEPARATOR: &str = " · ";
 
 /// What the body says when there is no diff at all.
 ///
-/// **Not `working tree clean`**, which is what this used to say and which is
-/// wrong rather than merely plain. That is git's phrase, and git means
+/// **Not `working tree clean`**, which is wrong rather than merely plain.
+/// That is git's phrase, and git means
 /// index-against-HEAD as well as tree-against-index; this diff is only the
 /// second, so a worktree with every change staged draws nothing here and was
 /// being told it was clean while `git status` said the opposite. `SPEC.md` §11.1
@@ -1469,10 +1461,8 @@ pub struct Chrome {
     pub worktree: String,
     /// The branch the empty state names, when there is one.
     ///
-    /// **`None` means a detached HEAD and nothing else, since
-    /// [#158](https://github.com/breferrari/vigia/issues/158).** It used to cover
-    /// a second case — a populated frame, which never asked — and that half is
-    /// gone: the *header* draws the branch on every frame, so the read is
+    /// **`None` means a detached HEAD and nothing else.** The *header* draws
+    /// the branch on every frame, so the read is
     /// unconditional and I4 is **satisfied** rather than guarded, because the
     /// thing read is the thing drawn. The claim survived the change it was made
     /// false by, and `Chrome::elsewhere` below then cited it as precedent for a
@@ -1843,8 +1833,8 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
 /// has more than three files in it. `changed` is what makes the count a fact
 /// about the tree rather than a description of it.
 ///
-/// One rule where there used to be two: `changed` is a participle with no plural
-/// to inflect, so `1 changed` and `3 changed` need no singular case.
+/// One rule rather than two: `changed` is a participle with no plural to
+/// inflect, so `1 changed` and `3 changed` need no singular case.
 fn count_of(files: usize, staged: Option<usize>) -> String {
     let changed = match files {
         0 => String::new(),
@@ -1873,8 +1863,8 @@ fn count_of(files: usize, staged: Option<usize>) -> String {
 /// **Both rungs are facts about the tree**, which is what puts them on one side.
 /// `SPEC.md` §11.1 lays the footer out by subject — advice, then what the tree is
 /// doing, then what `vigia` itself is doing — and the header has the same three
-/// subjects available. It used to seat a tree-fact next to the self-fact, and
-/// that adjacency is what let English fuse them.
+/// subjects available. Seating a tree-fact next to the self-fact is the
+/// adjacency that lets English fuse them.
 ///
 /// **The count is the rung that drops and the name is the token that marks its
 /// edge**, which is §11.1's rule applied inside one clause: a thing made of items
@@ -2403,7 +2393,7 @@ const ROW_LAYOUTS: [Columns; 9] = [
     Columns::NOTHING,
 ];
 
-/// The widest layout that shipped before a rung was added above it.
+/// The widest layout below the rung above it.
 ///
 /// **What makes "no boundary below the new rung moves" true by construction
 /// rather than by a swept comparison.** [`Columns::plan`]'s share clamp is
@@ -2607,9 +2597,9 @@ fn counts_of(churn: Option<(u32, u32)>, theme: &Theme) -> (Half, Half) {
 /// Where each glance element sits on **every** file row of one region.
 ///
 /// `assets/preview.svg` puts the same element at the same `x` on every row, and
-/// [`Painter::file_row`] used to right-pack, so each element's position was a
-/// function of the widths of the elements outside it on that row. Three
-/// sparklines then failed to read as one small-multiples chart, which is the
+/// Right-packing makes each element's position a function of the widths of the
+/// elements outside it on that row, so three sparklines fail to read as one
+/// small-multiples chart, which is the
 /// thing a file *list* exists to be ([#77](https://github.com/breferrari/vigia/issues/77)).
 ///
 /// So the ladder runs **once for the region** and every row draws into the slots
@@ -2801,9 +2791,8 @@ pub enum Heat {
 ///
 /// Three, because that is what the depth ladder can draw, which is
 /// [`Theme::heat_added`]'s own reasoning. `assets/preview.svg` ramps across
-/// three greens and asks for it, and the sentence that used to stand here made
-/// the strip *"the one element whose intensity the picture actually specifies"*,
-/// which was never true: the picture ramps its sparkline across five greens too,
+/// three greens and asks for it. The strip is **not** the only element whose
+/// intensity the picture specifies: it ramps its sparkline across five greens too,
 /// and #196 is the row that noticed. It used to be two: sixteen
 /// foreground-only colours hold a normal and a bright of each hue and no third
 /// stop, so the ramp was as wide as the palette could draw rather than as wide as
@@ -3179,9 +3168,9 @@ fn fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> Option<&str> {
 /// asking for, which is why these are two names over one predicate rather than
 /// one function with a flag.
 ///
-/// **It is reached from two call sites, both through [`Painter::status_line`],
-/// and the doc used to credit one**, which is worth stating because the missing
-/// one is what makes the `or_else` arm look like scaffolding.
+/// **It is reached from two call sites, both through [`Painter::status_line`]**,
+/// which is worth stating because with one in mind the `or_else` arm looks
+/// like scaffolding.
 /// The header's left ends in the worktree name, which marks its edge instead of
 /// being dropped, so falling through to the empty string would delete the one
 /// fact on the row a reader cannot recover by looking at the body. **And the
@@ -3589,9 +3578,8 @@ impl Body {
     /// with a keystroke: none of them changes except when the diff does or when a
     /// reader asks.
     ///
-    /// **That invariant used to be enforced by the signature and is now prose**,
-    /// because taking `&Chrome` puts the notice within reach where a `bool` did
-    /// not ([#295](https://github.com/breferrari/vigia/issues/295)). What holds it
+    /// **That invariant is prose rather than a signature**, because taking
+    /// `&Chrome` puts the notice within reach where a `bool` does not. What holds it
     /// is `crates/vigia/tests/list.rs`'s gate that a notice moves no region, which
     /// is where a future reader should look before reaching for another field.
     ///
@@ -3778,8 +3766,7 @@ impl Body {
     /// So this layout is **monotone in the pane height with the masthead off**,
     /// and with it on falls only where the band arrives and only by the band's own
     /// rows. `the_rail_is_monotone_in_pane_height` asserts both halves, because
-    /// an earlier draft of this paragraph claimed monotonicity outright and was
-    /// wrong.
+    /// the unqualified claim is false.
     fn beside(body: usize, width: u16, list_rows: usize, masthead: bool) -> Self {
         // **The rail is drawn only where a list would have been drawn at all**, and
         // that is [`Body::split`]'s own `affordable` test rather than a floor of
