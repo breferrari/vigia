@@ -90,8 +90,7 @@ const CONTINUES: &str = "›";
 
 /// What a wrapped content line's continuation draws in the sigil column.
 ///
-/// **`SPEC.md` §11.2 B19**, from `w`
-/// ([#272](https://github.com/breferrari/vigia/issues/272)). [`CONTINUES`] says
+/// **`SPEC.md` §11.2 B19**, from `w`. [`CONTINUES`] says
 /// *rightward* and this says *downward*, which is the second axis the marking
 /// rule gained rather than a reversal of it: content still marks its edge.
 ///
@@ -442,8 +441,7 @@ const CARET: &str = "▸";
 
 /// The weight that row's **path** takes on top of whatever recency gave it.
 ///
-/// **The caret's second channel, not a second mark**
-/// ([#193](https://github.com/breferrari/vigia/issues/193)). `SPEC.md` §5.3 makes
+/// **The caret's second channel, not a second mark.** `SPEC.md` §5.3 makes
 /// every other durable distinction in that region a matter of weight, and the one
 /// row a reader most needs to find carried a glyph alone. This is drawn where and
 /// only where [`CARET`] is, so the two are one statement said twice: the tie is
@@ -541,7 +539,7 @@ const ROW_FLOOR: usize = KIND_WIDTH + MIN_PATH_WIDTH;
 /// every content origin at x=88, so the sigil's one cell ends at 80.1 and a clear
 /// column stands after it. [`Painter::line_row`] carries the argument for why it
 /// does not degrade with width, which is the only thing about it that needed
-/// deciding ([#164](https://github.com/breferrari/vigia/issues/164)).
+/// deciding.
 ///
 /// **One ASCII byte, one column, and the two have to stay the same number**,
 /// because [`SIGIL_WIDTH`] derives from `len()`, which counts bytes where every
@@ -627,8 +625,8 @@ const GRAPH_AIR: usize = 1;
 
 /// Rows of air the body opens with, under the header.
 ///
-/// **The one boundary on this pane that was drawn with nothing**
-/// ([#174](https://github.com/breferrari/vigia/issues/174)). The header states a
+/// **The one boundary on this pane that would otherwise be drawn with
+/// nothing.** The header states a
 /// fact about the worktree as a whole and the list is a map of it, which are
 /// different classes, and the boundary *below* the list already spends a whole
 /// [`RULE`] saying so. This one had neither a rule nor a blank.
@@ -722,7 +720,7 @@ const MIN_BODY: u16 = 2;
 /// neither can jog a reader's diff.
 ///
 /// **Six, and the reason recorded for it was a proportion wearing an absolute's
-/// clothes** ([#160](https://github.com/breferrari/vigia/issues/160)). §11.1
+/// clothes.** §11.1
 /// derived it as *the largest block that still reads as a glance*, and then gave
 /// the working: *on the 24-row pane this tool is built for it leaves fourteen
 /// rows of diff after the header, the rule and a one-line footer*. That is
@@ -945,8 +943,7 @@ const fn affords_bar(width: u16) -> bool {
 /// to it: the ladder is about text, and the sentence above is still what the picture
 /// says about text.) The shell drew everything from column 0, and by
 /// §5.1's own law a picture in a public README is a specification, so that was a
-/// fourth undocumented departure from it rather than a choice
-/// ([#119](https://github.com/breferrari/vigia/issues/119)).
+/// fourth undocumented departure from it rather than a choice.
 ///
 /// **Nothing below forty-three columns**, and that floor is the ladder's point
 /// rather than a rounding. I6 is named for forty and every column there is
@@ -1049,11 +1046,10 @@ const fn inset_of(pane: u16) -> u16 {
 }
 
 /// The pane width from which the pinned list may stop being a strip above the diff
-/// and become a **left rail** beside it
-/// ([#252](https://github.com/breferrari/vigia/issues/252)).
+/// and become a **left rail** beside it.
 ///
-/// **May, since `SPEC.md` §11.2 B14** ([#295](https://github.com/breferrari/vigia/issues/295)):
-/// this decides where the gesture can be honoured, and `Chrome::rail` decides
+/// **May, per `SPEC.md` §11.2 B14**: this decides where the gesture can be
+/// honoured, and `Chrome::rail` decides
 /// whether it is. The derivation below is untouched by that and is what makes the
 /// width the right one to offer at.
 ///
@@ -1210,8 +1206,8 @@ const _: () = {
         "the first rail leaves the diff too little for the glance cluster its \
          headings drew one column of pane ago"
     );
-    // **The caret's affordance reads the region and not the pane**
-    // ([#252](https://github.com/breferrari/vigia/issues/252)). Unreachable
+    // **The caret's affordance reads the region and not the pane.**
+    // Unreachable
     // through the layout, because [`RAIL_FLOOR`] is far above the seventeen
     // columns the caret needs, and worth pinning anyway: reverting
     // [`affords_caret`]'s first argument to the pane is a one-word mutation that
@@ -1609,10 +1605,10 @@ pub struct Chrome {
     /// pointer can be told it is over one.
     pub sheet: Option<usize>,
     /// Whether listed paths carry a file-type icon, from the config file's
-    /// `icons` key ([#323](https://github.com/breferrari/vigia/issues/323)).
+    /// `icons` key.
     pub icons: bool,
     /// Whether listed paths are OSC 8 hyperlinks, from the `links` key, on by
-    /// default ([#326](https://github.com/breferrari/vigia/issues/326)).
+    /// default.
     pub links: bool,
     /// The worktree's absolute path, for the links' `file://` targets.
     ///
@@ -1984,8 +1980,7 @@ fn header_left(
 /// A detached HEAD is still not invented anywhere: `HEAD@abc123` would put a
 /// commit id in a monitor that shows no commits.
 ///
-/// **Three cases in one function since §11.2 B17**
-/// ([#313](https://github.com/breferrari/vigia/issues/313)), which is also what
+/// **Three cases in one function, per §11.2 B17**, which is also what
 /// makes visible that the two arguments are mutually exclusive by construction:
 /// `staged` is `Some` only while the run is drawn, and `elsewhere` is non-zero
 /// only while it is not.
@@ -2035,10 +2030,9 @@ struct Heading<'r> {
     recency: Recency,
     /// Whether the newest burst named this file, which is what carries the `●`.
     ///
-    /// **Its own field rather than read off `recency`**
-    /// ([#345](https://github.com/breferrari/vigia/issues/345)): the ink and the
-    /// mark answer different questions, and while one value answered both, ageing
-    /// the row's brightness silently took the mark with it.
+    /// **Its own field rather than read off `recency`**: the ink and the mark
+    /// answer different questions, and with one value answering both, ageing the
+    /// row's brightness silently takes the mark with it.
     newest: bool,
     heat: &'r [HeatBucket; HEAT_BUCKETS],
 }
@@ -4468,8 +4462,8 @@ pub fn render(
         // it.
         //
         // **The bar draws after the content here, and that order is the fix rather
-        // than a detail.** It drew first at the start of #239, on the reading that
-        // `Buffer::set_style` merges and so the wash would repaint only the
+        // than a detail.** Drawing it first rests on the reading that
+        // `Buffer::set_style` merges and so the wash repaints only the
         // background and leave the track's glyph and colour alone. That is true of
         // `fg` and `bg` and **false of modifiers**: `Cell::set_style` inserts
         // `add_modifier` unconditionally, so a wash carrying one hands it to
@@ -6603,8 +6597,9 @@ impl Painter<'_> {
         //
         // **Flush at the edge rather than one cell in, and that is the reader's
         // call rather than the picture's.** The mockup keeps a cell to the left of
-        // its caret, on a canvas about a hundred and nine columns wide; #173 asks
-        // for the marker *"flush against the pane's left edge with no margin of
+        // its caret, on a canvas about a hundred and nine columns wide; the
+        // reader asked for the marker *"flush against the pane's left edge with
+        // no margin of
         // its own"*, and taking it literally is what makes the gap between caret
         // and sigil grow with the pane instead of appearing and vanishing. §5.3
         // rules the picture binds the element set and each element's promises,
@@ -6651,9 +6646,8 @@ impl Painter<'_> {
         // ever exercise.
         let origin_x = area.x.saturating_add(self.inset).saturating_add(gutter);
 
-        // **The file index is walked rather than added to the offset**, and that
-        // is [#313](https://github.com/breferrari/vigia/issues/313): with run
-        // separators in the window a drawn row and a file are no longer the same
+        // **The file index is walked rather than added to the offset**: with run
+        // separators in the window a drawn row and a file are not the same
         // ordinal, so `list_top + offset` names the wrong file from the first
         // separator onwards — and it names it *silently*, putting the caret on a
         // neighbour. `View::list` is built from `list_plan` in file order starting
@@ -6703,8 +6697,8 @@ impl Painter<'_> {
                     // function reads `pane` precisely because `area` cannot be trusted for a
                     // width.
                     //
-                    // **It is the pane's leading column too, and that is a coincidence of
-                    // this layout rather than a rule** ([#252](https://github.com/breferrari/vigia/issues/252)).
+                    // **It is the pane's leading column too, and that is a
+                    // coincidence of this layout rather than a rule.**
                     // The list is flush left in both shapes the tool draws, stacked and as a
                     // rail, so the caret standing on the pane's own edge and standing on the
                     // region's own edge are the same cell. §11.1 licenses the *pane's* edge;
@@ -6732,9 +6726,9 @@ impl Painter<'_> {
 
     /// One run's separator: `──  staged  2 ─────────`.
     ///
-    /// **What makes two comparisons on one map readable as two**, `SPEC.md` §11.2
-    /// **B17** ([#313](https://github.com/breferrari/vigia/issues/313)). The reader
-    /// asked for both lists in the same space, and a run is a run because something
+    /// **What makes two comparisons on one map readable as two**, `SPEC.md`
+    /// §11.2 **B17**. Both lists share one space, and a run is a run because
+    /// something
     /// says where it starts.
     ///
     /// **A rule with a word in it, and B11 does not reach it.** That ruling refused
@@ -6841,9 +6835,8 @@ impl Painter<'_> {
     ///
     /// `wide` is whether **this region** can afford a bar at all, from
     /// [`Areas::bars`], which asks it once for both so the painter and the pointer
-    /// cannot disagree. It was the *pane's* answer until
-    /// [#252](https://github.com/breferrari/vigia/issues/252), when two regions
-    /// stopped being one width.
+    /// cannot disagree. The *pane's* answer is the same answer only while the
+    /// two regions are one width.
     ///
     /// **The deciding half now lives in [`bar_for`]**, which is the same
     /// consolidation one layer out: `regions` asks it too, so the pointer and the
@@ -6934,9 +6927,9 @@ impl Painter<'_> {
         //
         // Inventing a fourth style is what `SPEC.md` §5.3 refuses (a colour is
         // taken by taking a role, never by being distinct), and adding a theme
-        // key is exactly the cost that put the list rows in
-        // [#189](https://github.com/breferrari/vigia/issues/189) rather than
-        // here. **So the thumb is the same finding as a list row, one element
+        // key is exactly the cost that puts the list rows on their own ruling
+        // rather than here. **So the thumb is the same finding as a list row,
+        // one element
         // over**: it is a surface a click acts on with nowhere to draw a mark,
         // and it waits for the same ruling.
         // **Three rungs here too, now that there is one to spend.** A drag beats
@@ -6944,9 +6937,8 @@ impl Painter<'_> {
         // brighter reading has to mean *you are doing this*, or the two states
         // stop being tellable apart on the element a reader is actually moving.
         //
-        // [#186](https://github.com/breferrari/vigia/issues/186) shipped this
-        // with no hover mark at all, reasoning that the thumb rests at
-        // [`Theme::bar`] and drags at [`Theme::bar_active`] with nothing
+        // Shipping this with no hover mark at all rests on the thumb resting at
+        // [`Theme::bar`] and dragging at [`Theme::bar_active`] with nothing
         // between. That was true and the conclusion drawn from it was wrong: the
         // missing rung was a thing to build rather than a reason to decline.
         let dragging = self.gripped == Some(whose);
@@ -7009,8 +7001,9 @@ impl Painter<'_> {
                     && self.gripped != Some(whose);
                 // **Three rungs, and a press beats a hover.** `bar_track` at
                 // rest, `bar` under a pointer, `bar_active` while a gesture is
-                // on it. The ordering is the load-bearing half: #166 added the
-                // pressed mark for the case where nothing else can answer, since
+                // on it. The ordering is the load-bearing half: the pressed
+                // mark exists for the case where nothing else can answer,
+                // since
                 // pressing *up* at the top of a diff moves no row, and a hover
                 // that outranked it would take that answer away in exactly the
                 // case it was built for.
@@ -7048,9 +7041,8 @@ impl Painter<'_> {
             // **The band's background is kept; the bar owns everything else.**
             //
             // Written field by field rather than through `set_style`, and that is
-            // the whole point rather than a style preference. Since
-            // [#239](https://github.com/breferrari/vigia/issues/239) the row wash
-            // runs under this column, so the cell arrives already painted, and
+            // the whole point rather than a style preference. The row wash runs
+            // under this column, so the cell arrives already painted, and
             // `Cell::set_style` would leave two of the wash's marks on it:
             // `bg`, which is wanted, and any **modifier**, which is not.
             // `ratatui-core-0.1.2/src/buffer/cell.rs:204` does
@@ -7159,14 +7151,14 @@ impl Painter<'_> {
 
         // The title bar, with the close control's cell left blank and written
         // after it in its own weight: a control is not part of the frame it sits
-        // in, which is [#166](https://github.com/breferrari/vigia/issues/166)'s
-        // rule for the step buttons one element over.
-        // **The counter rides the title bar, so it costs no content row.** That is
-        // the property B12 chose the sheet for and #286 had to keep: a say-so that
+        // in, which is the step buttons' rule one element over.
+        // **The counter rides the title bar, so it costs no content row.** That
+        // is the property B12 chose the sheet for and B13 had to keep: a say-so
+        // that
         // took a row would take it from the gestures it is apologising for.
         let counter = plan.shape.shown().map(sheet_counter).unwrap_or_default();
         // **The corners follow the glyph rung, and the splice goes with them**
-        // (`SPEC.md` §11.2 B18, [#323](https://github.com/breferrari/vigia/issues/323)).
+        // (`SPEC.md` §11.2 B18).
         // At the dense rungs the box is rounded and the title is spliced into
         // the border btop's way, `╭┐ gestures ┌`, so the frame visually opens
         // around the words; the Block rung keeps the square corners and the
@@ -7222,10 +7214,9 @@ impl Painter<'_> {
         // under the pointer. A close control that never brightened was a glyph a
         // reader had to guess at, reported from use with the wash defect above.
         //
-        // **Two rungs where the step buttons take three, ruled by
-        // [#298](https://github.com/breferrari/vigia/issues/298).** This drew
-        // [`Theme::bar_active`] on `self.pressed == Some(plan.close)` and nothing
-        // ever produced that state, so the arm was unreachable while its own comment
+        // **Two rungs where the step buttons take three.** Drawing
+        // [`Theme::bar_active`] on `self.pressed == Some(plan.close)` is an arm
+        // nothing produces, so it is unreachable while its own comment
         // and `SPEC.md` §11.1 both described a ladder of three. Two independent
         // reasons, and the second is the one that makes it a ruling rather than a
         // deletion:
@@ -7327,7 +7318,7 @@ impl Painter<'_> {
     }
 
     /// Every section headed, with air around it, which is the rung a pane with
-    /// room to spare buys ([#285](https://github.com/breferrari/vigia/issues/285)).
+    /// room to spare buys.
     ///
     /// **The headings are plain text and not rules.** Every other rung separates
     /// its two groups with a rule to the frame, because a labelled rule is the
@@ -7370,8 +7361,7 @@ impl Painter<'_> {
         }
     }
 
-    /// The two groups side by side, which is the rung a wide pane buys
-    /// ([#220](https://github.com/breferrari/vigia/issues/220)).
+    /// The two groups side by side, which is the rung a wide pane buys.
     ///
     /// **The split is the seam the sheet already drew.** One column had a `mouse`
     /// heading between the groups, so putting the second group in a second column
@@ -7455,7 +7445,7 @@ impl Painter<'_> {
 
     /// The frame down both edges of one row.
     ///
-    /// Split from [`Painter::sheet_row`] by #220: in two columns a single row
+    /// Split from [`Painter::sheet_row`]: in two columns a single row
     /// carries two groups' cells and still only two pipes, so the caller owns
     /// them.
     fn sheet_pipes(&mut self, area: Rect, y: u16) {
