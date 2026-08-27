@@ -432,7 +432,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
     // **The view defaults reach the frame before its first walk, not just the
-    // shell**. Three of
+    // shell** ([#313](https://github.com/breferrari/vigia/issues/313)). Three of
     // the four keys decide how rows the frame already holds are arranged, so
     // setting them on `App` is all they need. `staged` decides what the frame
     // *walks*, so a reader whose file says `staged = on` has to be honoured here
@@ -647,7 +647,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // scroll arms the direction mark and it dies `SCROLL_LINGER` later. And a
     // write arms the ageing roll, which dies when the history window empties
     // `HISTORY_WINDOW` after the last one
-    //. **This comment
+    // ([#243](https://github.com/breferrari/vigia/issues/243)). **This comment
     // said "the only clock" through two of those three**, which is what a header
     // describing a mechanism costs when the mechanism grows underneath it.
     'awake: loop {
@@ -1152,7 +1152,7 @@ struct Shell {
     /// What the header calls the working tree.
     name: String,
     /// The worktree's absolute path, spelled once for the links' `file://`
-    /// targets.
+    /// targets ([#326](https://github.com/breferrari/vigia/issues/326)).
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     ///
@@ -1365,7 +1365,7 @@ impl Shell {
     /// Which region's bar is being dragged, for the frame that draws its thumb
     /// lit.
     ///
-    /// A plain read:
+    /// A plain read ([#254](https://github.com/breferrari/vigia/issues/254)):
     /// converting the [`Grabbed`] it holds into that region's first row is an
     /// identity only while the regions are stacked.
     fn gripped(&self) -> Option<Grabbed> {
@@ -1408,7 +1408,7 @@ impl Shell {
         // The history's own deadline joins the two gesture clocks here rather
         // than at the receive, so `patience` stays the one place that decides
         // whether this program owns a timer at all
-        //.
+        // ([#243](https://github.com/breferrari/vigia/issues/243)).
         input::patience(
             self.held,
             self.scrolling_until,
@@ -1571,7 +1571,7 @@ impl Shell {
         now: Instant,
     ) -> Result<(), Failure> {
         // **The window is rolled here because this is where every frame passes**
-        //. It sat on the
+        // ([#243](https://github.com/breferrari/vigia/issues/243)). It sat on the
         // loop's timeout arm first, which is where the ageing clock's own wake
         // lands, and that was wrong in a way only an audit found: `recv_timeout`
         // returns `Ok` whenever anything is queued, so a stream of wakes that are
@@ -1613,7 +1613,7 @@ impl Shell {
         // own file count so the read happens on exactly the frames that draw the
         // answer. That is the whole of I4 for this read.
         // **Read on every draw, because every frame draws it**
-        //. This went
+        // ([#158](https://github.com/breferrari/vigia/issues/158)). This went
         // through a `branch_for` seam whose whole job was the guard *only the
         // empty state names a branch, so a populated frame must not read a file
         // it will not draw*. The **header** draws it always, so that premise is
@@ -2137,7 +2137,7 @@ mod tests {
         );
 
         // **Every frame rolls the window before it paints, and `Shell::draw` is
-        // where every frame passes**.
+        // where every frame passes** ([#243](https://github.com/breferrari/vigia/issues/243)).
         // Position is the whole of it: a roll after the paint draws the picture
         // it was woken to change, and a roll on only one of the loop's paths
         // leaves the other redrawing a frozen window. This lived on the timeout

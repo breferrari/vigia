@@ -91,7 +91,7 @@ const CONTINUES: &str = "›";
 /// What a wrapped content line's continuation draws in the sigil column.
 ///
 /// **`SPEC.md` §11.2 B19**, from `w`
-///. [`CONTINUES`] says
+/// ([#272](https://github.com/breferrari/vigia/issues/272)). [`CONTINUES`] says
 /// *rightward* and this says *downward*, which is the second axis the marking
 /// rule gained rather than a reversal of it: content still marks its edge.
 ///
@@ -446,7 +446,7 @@ const CARET: &str = "▸";
 /// The weight that row's **path** takes on top of whatever recency gave it.
 ///
 /// **The caret's second channel, not a second mark**
-///. `SPEC.md` §5.3 makes
+/// ([#193](https://github.com/breferrari/vigia/issues/193)). `SPEC.md` §5.3 makes
 /// every other durable distinction in that region a matter of weight, and the one
 /// row a reader most needs to find carried a glyph alone. This is drawn where and
 /// only where [`CARET`] is, so the two are one statement said twice: the tie is
@@ -544,7 +544,7 @@ const ROW_FLOOR: usize = KIND_WIDTH + MIN_PATH_WIDTH;
 /// every content origin at x=88, so the sigil's one cell ends at 80.1 and a clear
 /// column stands after it. [`Painter::line_row`] carries the argument for why it
 /// does not degrade with width, which is the only thing about it that needed
-/// deciding.
+/// deciding ([#164](https://github.com/breferrari/vigia/issues/164)).
 ///
 /// **One ASCII byte, one column, and the two have to stay the same number**,
 /// because [`SIGIL_WIDTH`] derives from `len()`, which counts bytes where every
@@ -631,7 +631,7 @@ const GRAPH_AIR: usize = 1;
 /// Rows of air the body opens with, under the header.
 ///
 /// **The one boundary on this pane that was drawn with nothing**
-///. The header states a
+/// ([#174](https://github.com/breferrari/vigia/issues/174)). The header states a
 /// fact about the worktree as a whole and the list is a map of it, which are
 /// different classes, and the boundary *below* the list already spends a whole
 /// [`RULE`] saying so. This one had neither a rule nor a blank.
@@ -726,7 +726,7 @@ const MIN_BODY: u16 = 2;
 /// neither can jog a reader's diff.
 ///
 /// **Six, and the reason recorded for it was a proportion wearing an absolute's
-/// clothes**. §11.1
+/// clothes** ([#160](https://github.com/breferrari/vigia/issues/160)). §11.1
 /// derived it as *the largest block that still reads as a glance*, and then gave
 /// the working: *on the 24-row pane this tool is built for it leaves fourteen
 /// rows of diff after the header, the rule and a one-line footer*. That is
@@ -953,7 +953,7 @@ const fn affords_bar(width: u16) -> bool {
 /// says about text.) The shell drew everything from column 0, and by
 /// §5.1's own law a picture in a public README is a specification, so that was a
 /// fourth undocumented departure from it rather than a choice
-///.
+/// ([#119](https://github.com/breferrari/vigia/issues/119)).
 ///
 /// **Nothing below forty-three columns**, and that floor is the ladder's point
 /// rather than a rounding. I6 is named for forty and every column there is
@@ -1055,9 +1055,9 @@ const fn inset_of(pane: u16) -> u16 {
 
 /// The pane width from which the pinned list may stop being a strip above the diff
 /// and become a **left rail** beside it
-///.
+/// ([#252](https://github.com/breferrari/vigia/issues/252)).
 ///
-/// **May, since `SPEC.md` §11.2 B14**:
+/// **May, since `SPEC.md` §11.2 B14** ([#295](https://github.com/breferrari/vigia/issues/295)):
 /// this decides where the gesture can be honoured, and `Chrome::rail` decides
 /// whether it is. The derivation below is untouched by that and is what makes the
 /// width the right one to offer at.
@@ -1215,7 +1215,7 @@ const _: () = {
          headings drew one column of pane ago"
     );
     // **The caret's affordance reads the region and not the pane**
-    //. Unreachable
+    // ([#252](https://github.com/breferrari/vigia/issues/252)). Unreachable
     // through the layout, because [`RAIL_FLOOR`] is far above the seventeen
     // columns the caret needs, and worth pinning anyway: reverting
     // [`affords_caret`]'s first argument to the pane is a one-word mutation that
@@ -1604,7 +1604,7 @@ pub struct Chrome {
     /// the same pairing one region over.
     ///
     /// `SPEC.md` §11.2 **B14**
-    ///. Until then the
+    /// ([#295](https://github.com/breferrari/vigia/issues/295)). Until then the
     /// rail arrived on its own at 134, and #252's derivation of that width is kept
     /// intact: what it decides now is where the gesture can be honoured rather than
     /// where the layout changes underneath a reader.
@@ -1618,10 +1618,10 @@ pub struct Chrome {
     /// pointer can be told it is over one.
     pub sheet: Option<usize>,
     /// Whether listed paths carry a file-type icon, from the config file's
-    /// `icons` key.
+    /// `icons` key ([#323](https://github.com/breferrari/vigia/issues/323)).
     pub icons: bool,
     /// Whether listed paths are OSC 8 hyperlinks, from the `links` key, on by
-    /// default.
+    /// default ([#326](https://github.com/breferrari/vigia/issues/326)).
     pub links: bool,
     /// The worktree's absolute path, for the links' `file://` targets.
     ///
@@ -1998,7 +1998,7 @@ fn header_left(
 /// commit id in a monitor that shows no commits.
 ///
 /// **Three cases in one function since §11.2 B17**
-///, which is also what
+/// ([#313](https://github.com/breferrari/vigia/issues/313)), which is also what
 /// makes visible that the two arguments are mutually exclusive by construction:
 /// `staged` is `Some` only while the run is drawn, and `elsewhere` is non-zero
 /// only while it is not.
@@ -2050,7 +2050,7 @@ struct Heading<'r> {
     /// Whether the newest burst named this file, which is what carries the `●`.
     ///
     /// **Its own field rather than read off `recency`**
-    ///: the ink and the
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)): the ink and the
     /// mark answer different questions, and while one value answered both, ageing
     /// the row's brightness silently took the mark with it.
     newest: bool,
@@ -2540,7 +2540,7 @@ struct Half {
 ///
 /// **A half takes its diff colour where it has something to say, and the row's
 /// dim grey where it does not**, which is `SPEC.md` §5.1's third departure
-/// closed on its colour half.
+/// closed on its colour half ([#157](https://github.com/breferrari/vigia/issues/157)).
 /// The picture has drawn `+42` in `.grn` and `-7` in `.red` from the start, and
 /// §5.3 licenses the loan in the same sentence that licenses the footer's follow
 /// marker: green and red are lent out "only where they restate the same fact".
@@ -2593,7 +2593,7 @@ fn counts_of(churn: Option<(u32, u32)>, theme: &Theme) -> (Half, Half) {
 /// Right-packing makes each element's position a function of the widths of the
 /// elements outside it on that row, so three sparklines fail to read as one
 /// small-multiples chart, which is the
-/// thing a file *list* exists to be.
+/// thing a file *list* exists to be ([#77](https://github.com/breferrari/vigia/issues/77)).
 ///
 /// So the ladder runs **once for the region** and every row draws into the slots
 /// it produced, keeping a slot a row cannot fill rather than letting its
@@ -2679,7 +2679,7 @@ impl Columns {
     ///
     /// **Every slot is reserved whether or not anything can fill it**, including
     /// the sparkline in a region where no file has a history yet, which at launch
-    /// is every file. The
+    /// is every file ([#78](https://github.com/breferrari/vigia/issues/78)). The
     /// alternative was tried: reserving only what some drawn row could fill moves
     /// every column on the tick the first file is written, which is precisely the
     /// moment a reader is looking at the screen.
@@ -2712,7 +2712,7 @@ impl Columns {
     /// what `tests/legibility.rs` sweeps rather than assumes.
     ///
     /// **Two floors, because the table answers two questions**
-    ///. [`ROW_FLOOR`] is
+    /// ([#161](https://github.com/breferrari/vigia/issues/161)). [`ROW_FLOOR`] is
     /// what survival costs and it decides every rung the tool shipped with.
     /// [`generous_of`] is what generosity costs and it decides only the rungs
     /// above [`SETTLED`], because "does it fit" stops being the right test
@@ -3003,7 +3003,7 @@ fn level_to(total: u32, scale: u32, levels: usize) -> usize {
 /// made every caller destructure a pair to learn something it already knew.
 ///
 /// **A narrower rung re-projects rather than dropping**
-///: `rung` divides
+/// ([#234](https://github.com/breferrari/vigia/issues/234)): `rung` divides
 /// [`HISTORY_BUCKETS`], and each drawn bucket is the sum of the source buckets
 /// under it, so every rung covers the whole window at a lower resolution. It took
 /// a suffix until then, which drew the newest half of the window beside a churn
@@ -3435,7 +3435,7 @@ pub struct Body {
     /// Rows left for the diff, which is what [`View::collect`] is asked for.
     pub diff: usize,
     /// Whether the list is a **left rail** beside the diff rather than a strip
-    /// above it.
+    /// above it ([#252](https://github.com/breferrari/vigia/issues/252)).
     ///
     /// **A shape rather than a size, which is why it is a field and not a
     /// width.** [`Body::areas`] recomputes the rail's columns from the pane it is
@@ -3487,7 +3487,7 @@ pub struct Body {
     /// this type is that [`body_layout`] is the one function that sees the whole
     /// pane every frame, and `?` advancing needs a count that was measured against
     /// the pane the reader is looking at rather than one the state guessed
-    ///.
+    /// ([#286](https://github.com/breferrari/vigia/issues/286)).
     ///
     /// **An `Option` because three of the four constructors cannot answer**, and a
     /// `0` from them reads as *no sheet is drawable here* rather than as *nobody
@@ -3606,7 +3606,7 @@ impl Body {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // **The rail is decided before the row clamps, because it removes two of
-        // them**. Beside
+        // them** ([#252](https://github.com/breferrari/vigia/issues/252)). Beside
         // the diff the list costs the diff no rows at all, so neither
         // [`list_cap`] nor the `affordable` floor below has anything to protect:
         // the map is not squeezing the thing it maps. What is left is the pane's
@@ -3673,7 +3673,7 @@ impl Body {
         // nothing. `diff_only` above is that path and draws neither.
         //
         // **The band's own cost is one air row now, not two, and the condition is
-        // arithmetically unchanged**.
+        // arithmetically unchanged** ([#174](https://github.com/breferrari/vigia/issues/174)).
         // `after` is one smaller because the lead was charged above, and `framed`
         // is one smaller because the blank over the band is that lead, so
         // `after >= framed + GRAPH_KEEP` picks out exactly the pane heights it
@@ -3698,7 +3698,7 @@ impl Body {
     /// The rows the band takes out of `after`, drawn and blank, or zero twice.
     ///
     /// **One expression for two layouts**
-    ///. [`Body::split`]
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)). [`Body::split`]
     /// and [`Body::beside`] ask the same question of the same three inputs, and the
     /// second carried the answer as a copy with a comment saying *"verbatim from
     /// `Body::split`"*. A comment naming a duplication is not a defence against
@@ -3719,7 +3719,7 @@ impl Body {
     }
 
     /// The same body, laid out as a rail beside the diff rather than a strip
-    /// above it.
+    /// above it ([#252](https://github.com/breferrari/vigia/issues/252)).
     ///
     /// **Split out of [`Body::split`] rather than branched inside it**, because
     /// the two shapes share only the band: everything else in that function is
@@ -3738,7 +3738,7 @@ impl Body {
     /// diff, so its rows are not the diff's to lose, and [`list_cap`] has nothing
     /// to cap. A pane fifty rows tall draws forty-six files where the stacked layout
     /// draws twelve, which is what a rail is for. Both at the masthead setting that
-    /// ships, which is off;
+    /// ships, which is off ([#204](https://github.com/breferrari/vigia/issues/204));
     /// with the band drawn the rail's figure is forty-three and the stacked one is
     /// unchanged, because a capped list never pays for the band.
     ///
@@ -3810,7 +3810,7 @@ impl Body {
             air,
             // **`list_rows` rather than `files`**, for the reason
             // [`Body::split`]'s stacked branch takes it
-            //: a grouped
+            // ([#313](https://github.com/breferrari/vigia/issues/313)): a grouped
             // list draws a separator per run and a region sized from the files
             // alone is short by exactly those rows, so the last run is announced
             // and its tail is not drawn. The stacked layout was fixed and this one
@@ -3842,7 +3842,7 @@ impl Body {
     ///
     /// **This was `masthead()` and it counted the leading blank too.** Renamed
     /// rather than left in place beside a new method
-    ///: every caller
+    /// ([#174](https://github.com/breferrari/vigia/issues/174)): every caller
     /// asking where the list starts wanted the sum *including* that blank, and a
     /// method that quietly stopped counting one row would have been right at every
     /// call site that was rewritten and wrong at every one that was not. Deleting
@@ -3866,7 +3866,7 @@ impl Body {
     /// had each written out for themselves.
     ///
     /// **Beside a rail the two regions share their rows rather than following
-    /// each other**, so
+    /// each other** ([#252](https://github.com/breferrari/vigia/issues/252)), so
     /// the sum is over the band and one of them. The diff is the taller of the
     /// two whenever they differ, because [`Body::clamped_to`] only ever shortens
     /// the list, so it is the one the body's height is read from.
@@ -3895,7 +3895,7 @@ impl Body {
     /// the diff.
     pub fn clamped_to(self, have: usize) -> Self {
         // **Beside a rail there is nothing to give back**
-        //. The rows the
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). The rows the
         // list does not use are in the rail's own column, and the diff is not
         // below them: handing them over would draw the diff twice, once in each
         // region. So the list simply ends where its entries do and the rest of the
@@ -3957,7 +3957,7 @@ impl Body {
             rule,
             diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
             // **Carried, for [`Body::sheet_pages`]' reason two fields down**, and
-            // it was `0` for one commit.
+            // it was `0` for one commit ([#272](https://github.com/breferrari/vigia/issues/272)).
             // A clamp re-divides rows and never moves a column, so the width
             // [`Body::split`] measured is still this pane's. Zeroing it here was
             // not merely stale: `render` always clamps, so the width reaching its
@@ -4018,7 +4018,7 @@ impl Areas {
     /// Whether each region is wide enough for a scrollbar at all.
     ///
     /// **One derivation, read by the painter and the pointer**
-    ///, which is the same
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)), which is the same
     /// consolidation [`Body::areas`] itself is. [`affords_bar`] is a question
     /// per region rather than per pane, because beside a rail the two regions
     /// are different widths, and asking it per region in both [`render`] and
@@ -4069,7 +4069,7 @@ impl Body {
         let under_band = top.saturating_add(self.above_list() as u16);
 
         // **The rail, where the two regions share a `y` range and differ in `x`**
-        //. This is the
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). This is the
         // arrangement [`Areas`] was retyped from row offsets to `Rect`s to be able
         // to say at all, and saying it is the whole of the change: everything that
         // reads these rects, the painter and the pointer alike, was made
@@ -4187,7 +4187,7 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
 /// pair is load bearing: this and the paint path both split the body, and a scroll
 /// step measured in a taller diff than the reader is looking at pages past its
 /// end. They took the same input until the list's row budget stopped being its
-/// file count; passing
+/// file count ([#313](https://github.com/breferrari/vigia/issues/313)); passing
 /// `files` for both here computed a diff up to two rows taller than the paint laid
 /// out, on exactly the frames drawing both runs. See
 /// [`crate::view::list_rows_wanted`], and
@@ -4258,7 +4258,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let body = Body::split(area, footer.height(), view.files, view.list.len(), chrome)
         .clamped_to(view.list.len());
     // **The same geometry the painter draws into**, asked for by name rather than
-    // rebuilt here. This
+    // rebuilt here ([#251](https://github.com/breferrari/vigia/issues/251)). This
     // was two offsets computed from `Body` a second time, which kept the pointer
     // and the screen one answer only while both expressions stayed correct: a
     // hover resolved against a stale row offset lights the file above the one
@@ -4272,7 +4272,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // which is the part a pointer cannot derive for itself.
     //
     // **`affords_bar` is asked of each region rather than once of the pane**
-    //. It was one rule
+    // ([#252](https://github.com/breferrari/vigia/issues/252)). It was one rule
     // for the whole screen so a reader never sees half a pair, and that argument
     // held while both regions spanned the pane and were therefore the same width.
     // Beside a rail they are not, and a rail narrow enough to fail the floor while
@@ -4343,7 +4343,7 @@ pub fn render(
         .clamped_to(view.list.len());
     let margins = margins_of(area.width);
     // **Planned before anything is painted, and painted last**
-    //. The sheet
+    // ([#340](https://github.com/breferrari/vigia/issues/340)). The sheet
     // composites over the regions, so a row underneath it must not *claim*
     // columns inside it: `ratatui`'s differ walks past every column a
     // `CellDiffOption::ForcedWidth` covers, so a claim reaching in makes the
@@ -4396,7 +4396,7 @@ pub fn render(
     // written correctly.
     //
     // **The body still opens with air, band or no band**
-    //, and that blank is
+    // ([#174](https://github.com/breferrari/vigia/issues/174)), and that blank is
     // inside `Body::lead` rather than drawn. Skipped rather than painted is what a
     // blank row is here: the pane's own background, with no furniture claiming a
     // row it does not use. Nothing below has to know whether the row is the
@@ -4493,11 +4493,11 @@ pub fn render(
         let (region, bar) =
             painter.with_bar(region, diff_bars, body.diff as u64, view.total_rows as u64);
         // **The wash spans the region's whole width, the bar's own column
-        // included**.
+        // included** ([#239](https://github.com/breferrari/vigia/issues/239)).
         //
         // It reached one column further than the content until then, filling the
         // blank `reserved` keeps in front of the bar
-        //, and stopped at
+        // ([#214](https://github.com/breferrari/vigia/issues/214)), and stopped at
         // the bar. #214's reason is *"one column of pane background between the
         // band and the bar, so the band reads as clipped and the bar as standing
         // in a notch"*, and that reason reaches its own remainder: the bar's
@@ -4527,7 +4527,7 @@ pub fn render(
         //
         // **The wash follows the region and not the screen, and beside a rail
         // that is finally a distinction rather than a seam**
-        //. `washed` is
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). `washed` is
         // kept separate from the pane's width even where the two are the same
         // number, which is what left this rung somewhere to land instead of a
         // defect to fix. The diff no longer spans the pane, and the ruling is in
@@ -4608,7 +4608,7 @@ const KEYBOARD: [Gesture; 15] = [
     },
     Gesture {
         // **The arrows at the wide spelling and not at the tight one, and that is
-        // measured rather than preferred**.
+        // measured rather than preferred** ([#296](https://github.com/breferrari/vigia/issues/296)).
         // The tight keyboard keys field is eleven, on `Space  PgDn`; this cell is
         // thirteen, so keeping the arrows there takes the keyboard-only rung from
         // thirty-five columns to thirty-seven and costs panes of 35 and 36 their
@@ -4999,7 +4999,7 @@ const SHEET_TITLE: &str = "─ gestures ";
 ///
 /// The same word [`SHEET_TITLE`] carries without its rule, spelled once so the
 /// border string, the styled overwrite and the width arithmetic cannot drift
-///.
+/// ([#323](https://github.com/breferrari/vigia/issues/323)).
 const SHEET_SPLICE: &str = " gestures ";
 
 /// What the mouse group's heading spells, spaces included.
@@ -5285,7 +5285,7 @@ fn sheet_rows(from: usize, mouse: bool) -> usize {
 /// One drawn line of a one-column rung.
 ///
 /// **A type rather than an index, because the rung is now paged**
-///. A page is a slice of
+/// ([#286](https://github.com/breferrari/vigia/issues/286)). A page is a slice of
 /// this sequence, and the mouse group's heading is a line the slice can land on
 /// like any other: the painter has to know which kind it drew, and an offset into
 /// two tables plus a rule about where the heading falls is the arithmetic that
@@ -5431,7 +5431,7 @@ fn sheet_beside_rows() -> usize {
 /// that constant's own docblock says survive.
 ///
 /// **Above every one of those sits the roomy rung**
-///: the same one column
+/// ([#285](https://github.com/breferrari/vigia/issues/285)): the same one column
 /// with its sections headed and air around them, at sixty-eight columns by
 /// thirty-one rows. It is **first** and that is what makes it additive, for the
 /// reason the widening rung is additive by being third: it needs strictly more of
@@ -5440,7 +5440,7 @@ fn sheet_beside_rows() -> usize {
 /// take it is untouched.
 ///
 /// **Between those two lies the widening rung**
-///: where the full
+/// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
 /// one-column sheet is too tall for the pane but the pane is wide enough to put
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
 /// columns for five rows at the wide spelling (104 against 56, twenty-one rows
@@ -5490,7 +5490,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     // width, then the paged rungs, widest row set first.
     //
     // **The paged rungs come last, and that is what keeps them additive**
-    //: every pane that
+    // ([#286](https://github.com/breferrari/vigia/issues/286)): every pane that
     // draws one of the first three today draws exactly it, with one page, so a
     // reader whose pane already showed every gesture presses `?` twice as before.
     //
@@ -5587,7 +5587,7 @@ fn column_fit(level: usize, from: usize, mouse: bool) -> Fit {
 /// One column, `capacity` rows of it at a time, showing page `page`.
 ///
 /// **The one constructor both the whole-table rung and the paged rungs use**
-///: a rung whose capacity
+/// ([#286](https://github.com/breferrari/vigia/issues/286)): a rung whose capacity
 /// is its own row count is a single page by arithmetic rather than by a second
 /// code path, so there is no version of "draws everything" that can drift from
 /// "draws a page".
@@ -5819,7 +5819,7 @@ struct Painter<'a> {
     icons: bool,
     /// Where the gestures sheet will be composited, so nothing underneath it
     /// claims a column it will draw over
-    ///.
+    /// ([#340](https://github.com/breferrari/vigia/issues/340)).
     covered: Option<Rect>,
     /// [`Chrome::links`] with [`Chrome::root`]: the `file://` prefix every
     /// linked path shares, or `None` where links are off or rootless.
@@ -6132,7 +6132,7 @@ impl Painter<'_> {
     ///
     /// **The covered columns record the label rather than blanks, and that is
     /// a correctness requirement rather than tidiness**
-    ///. `ratatui`'s
+    /// ([#340](https://github.com/breferrari/vigia/issues/340)). `ratatui`'s
     /// differ walks straight past every column a `ForcedWidth` claims: its
     /// arm advances `pos` and emits the first cell only, with none of the
     /// shrink protection the `None` arm carries for wide graphemes. So the
@@ -6432,7 +6432,7 @@ impl Painter<'_> {
     ///
     /// **The hero element, and the only drawn thing on this pane that is about
     /// the worktree rather than about a file in it**
-    ///. Every other
+    /// ([#158](https://github.com/breferrari/vigia/issues/158)). Every other
     /// glance element answers *which file*; this answers *how hot is this tree
     /// now, and was it hotter a minute ago*.
     ///
@@ -6507,7 +6507,7 @@ impl Painter<'_> {
         // short series, which drew a graph that stopped partway across the pane
         // and left bare axis after it.
         let slots = width * density;
-        // **The level, not the events**.
+        // **The level, not the events** ([#242](https://github.com/breferrari/vigia/issues/242)).
         // `assets/preview.svg` draws this as a wave and a write is a point event,
         // so the raw series is zero almost everywhere and an area chart of it is a
         // spike train. `Churn::levels` reads it as a density through the same
@@ -6622,7 +6622,7 @@ impl Painter<'_> {
     /// ignorant of the layout above it.
     ///
     /// **The inset is [`caret_gutter`] and is usually zero**
-    ///. The caret is
+    /// ([#173](https://github.com/breferrari/vigia/issues/173)). The caret is
     /// drawn at the pane's own leading column, into the blank [`margin_of`]
     /// already keeps there, so from forty-three columns up this region's origin
     /// and width are the stream's exactly and the two sigils sit in one column.
@@ -6643,7 +6643,7 @@ impl Painter<'_> {
     /// that moved. `View::collect` resolves `top` before this ever runs.
     ///
     /// **`available` is this region's own full width and `pane` is the screen**
-    ///. They are the same
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)). They are the same
     /// number on every stacked layout and they are not beside a rail, where this
     /// region is seventy columns of a two-hundred column pane. The ladder rung
     /// comes from the pane, as [`margin_of`] rules; what the row has to spend
@@ -6771,7 +6771,7 @@ impl Painter<'_> {
                     // width.
                     //
                     // **It is the pane's leading column too, and that is a coincidence of
-                    // this layout rather than a rule**.
+                    // this layout rather than a rule** ([#252](https://github.com/breferrari/vigia/issues/252)).
                     // The list is flush left in both shapes the tool draws, stacked and as a
                     // rail, so the caret standing on the pane's own edge and standing on the
                     // region's own edge are the same cell. §11.1 licenses the *pane's* edge;
@@ -6800,7 +6800,7 @@ impl Painter<'_> {
     /// One run's separator: `──  staged  2 ─────────`.
     ///
     /// **What makes two comparisons on one map readable as two**, `SPEC.md` §11.2
-    /// **B17**. The reader
+    /// **B17** ([#313](https://github.com/breferrari/vigia/issues/313)). The reader
     /// asked for both lists in the same space, and a run is a run because something
     /// says where it starts.
     ///
@@ -7394,7 +7394,7 @@ impl Painter<'_> {
     }
 
     /// Every section headed, with air around it, which is the rung a pane with
-    /// room to spare buys.
+    /// room to spare buys ([#285](https://github.com/breferrari/vigia/issues/285)).
     ///
     /// **The headings are plain text and not rules.** Every other rung separates
     /// its two groups with a rule to the frame, because a labelled rule is the
@@ -7438,7 +7438,7 @@ impl Painter<'_> {
     }
 
     /// The two groups side by side, which is the rung a wide pane buys
-    ///.
+    /// ([#220](https://github.com/breferrari/vigia/issues/220)).
     ///
     /// **The split is the seam the sheet already drew.** One column had a `mouse`
     /// heading between the groups, so putting the second group in a second column
@@ -7620,7 +7620,7 @@ impl Painter<'_> {
         // edit made the diff long.
         // **The painter reads the gutter where one was decided, and takes it
         // where none was**
-        //. The wrap
+        // ([#272](https://github.com/breferrari/vigia/issues/272)). The wrap
         // decision is taken against this number before these rows exist, so a
         // second derivation here is a pane whose text bound and whose gutter come
         // apart by a column. `None` is a view nobody wrapped, which is a
@@ -7665,7 +7665,7 @@ impl Painter<'_> {
                     // **And the same literal for the hover mark**, which is the
                     // sentence above coming true: beside a rail the two regions
                     // *do* share a `y`, and the mark that was confined by geometry
-                    // reached this row.
+                    // reached this row ([#252](https://github.com/breferrari/vigia/issues/252)).
                     false,
                 ),
                 Row::Hunk {
@@ -7696,7 +7696,7 @@ impl Painter<'_> {
                 }
                 // **Empty on purpose, and the arm exists to say so.** A gap is
                 // the blank that closes a file's block
-                //, and
+                // ([#165](https://github.com/breferrari/vigia/issues/165)), and
                 // an unwritten row is already blank: it is what every row below
                 // a short diff has always been. Writing spaces would be the same
                 // screen at the cost of a row of cells, and leaving the variant
@@ -7758,7 +7758,7 @@ impl Painter<'_> {
                 // **The same drawer, told it has no number**, which is what keeps
                 // the wash, the left bar, the two-tone gutter, the word patch and
                 // the degradation ladder one rule rather than two
-                //. A
+                // ([#272](https://github.com/breferrari/vigia/issues/272)). A
                 // second drawer for a continuation is exactly the shape §11.1
                 // refuses one region over, where the list and the stream draw a
                 // heading through one function so the two cannot disagree.
@@ -7804,7 +7804,7 @@ impl Painter<'_> {
     /// it. What it puts there differs by element and that difference is a ruling
     /// rather than an inconsistency: the sparkline fills its slot with track, so
     /// the two leading `_` above are a window with no writes in its oldest
-    /// quarter, while a
+    /// quarter ([#78](https://github.com/breferrari/vigia/issues/78)), while a
     /// file with no line diff leaves the heat strip's slot blank for the reason
     /// [`heat_at`] gives. The drawn order, left to right, is pulse, heat strip,
     /// sparkline, counters; the order they *survive* narrowing in is the layout
@@ -8045,7 +8045,7 @@ impl Painter<'_> {
         let at = area.x;
 
         // **The kind letter carries the staged mark rather than a column beside it
-        // carrying one**.
+        // carrying one** ([#316](https://github.com/breferrari/vigia/issues/316)).
         // B17 first spent a gutter column on a `\u{2502}`, and the column was the whole
         // cost: it was taken on *every* row of *both* runs, because a mark that
         // appears and disappears per row would slide every path beside it one cell
@@ -8114,7 +8114,7 @@ impl Painter<'_> {
         // touched. [`Theme::path_hover`] answers that with the **underline**,
         // which no recency weight carries at any depth. Answering with
         // brightness as well is refused
-        //: a mark that
+        // ([#193](https://github.com/breferrari/vigia/issues/193)): a mark that
         // can go stale outranking every claim about the worktree is the thing
         // §5.3's own B10 rule forbids.
         //
@@ -8374,7 +8374,7 @@ impl Painter<'_> {
             LineKind::Context => (self.theme.context, ' '),
         };
         // **`None` is a continuation, and it changes exactly two cells**
-        //: the sigil
+        // ([#272](https://github.com/breferrari/vigia/issues/272)): the sigil
         // becomes [`WRAPPED`] and the gutter goes blank. Everything else on this
         // row is the row it continues, which is the point: a wrapped removal that
         // stopped being washed halfway down would read as ending early.
@@ -8391,7 +8391,7 @@ impl Painter<'_> {
         }
 
         // **§5.1's left bar, and it costs no column**
-        //. The pane's
+        // ([#218](https://github.com/breferrari/vigia/issues/218)). The pane's
         // leading cell is blank margin that the wash above has already bled under,
         // so setting its background spends nothing that was carrying content. It is
         // therefore a **width rung**: drawn wherever [`inset_of`] lends a column,
@@ -8410,7 +8410,7 @@ impl Painter<'_> {
         // moving the origin, so it is the origin `render` handed down. It is also
         // the pane's for the rail and for every stacked region, and is not for the
         // diff beside a rail
-        //, which is why
+        // ([#252](https://github.com/breferrari/vigia/issues/252)), which is why
         // this says region rather than pane.
         if bar.bg.is_some() && self.inset > 0 {
             if let Some(cell) = self.buf.cell_mut((area.x, area.y)) {
@@ -8483,7 +8483,7 @@ impl Painter<'_> {
         runs.push((sigil.to_string(), sigil_style));
 
         // **The gap `assets/preview.svg` has drawn since before any of this
-        // existed**.
+        // existed** ([#164](https://github.com/breferrari/vigia/issues/164)).
         // The picture states its own grid in a comment, one cell at 13.5px being
         // ~8.1px, and it puts the sigil at x=72 and every content origin at
         // x=88: the sigil is one cell, 72 to 80.1, so a clear column has always
@@ -8559,7 +8559,7 @@ impl Painter<'_> {
         }
         .map(|word| (word, emph));
         // **Neovim's `'breakindent'`, paid out of the tail's own budget**
-        //. Pushed as a
+        // ([#272](https://github.com/breferrari/vigia/issues/272)). Pushed as a
         // run rather than folded into the text so the column counter
         // [`Painter::content_runs`] keeps stays the tail's own: a tab in the tail
         // then aligns to where the tail starts, which is the only origin a
@@ -8617,7 +8617,7 @@ pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
         .filter_map(|row| match row {
             Row::Line { number, .. } => Some(*number),
             // **A continuation carries no number**, named rather than swept up by
-            // the arm below.
+            // the arm below ([#272](https://github.com/breferrari/vigia/issues/272)).
             // It adds no protection today and is not pretending to: both arms
             // answer `None` and deleting this one changes nothing. What it does is
             // put the variant in front of the next reader of this function, whose
@@ -8721,7 +8721,7 @@ struct Printed {
     /// where the walk stops, and those have to be the same byte.
     ///
     /// **The last character that *fitted*, not the first that did not**, and the
-    /// difference is a whole glyph.
+    /// difference is a whole glyph ([#272](https://github.com/breferrari/vigia/issues/272)).
     /// The walk admits a character while `column < room` and only then charges
     /// its width, so the last one admitted can be **two columns wide against one
     /// column of room**. Splitting at the character after it put a head on the row
@@ -8785,7 +8785,7 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
 /// Where a line has to break to fit `room` columns, or `None` when it fits.
 ///
 /// **The row model's half of the wrap**
-///, and it is
+/// ([#272](https://github.com/breferrari/vigia/issues/272)), and it is
 /// [`printable`]'s own walk with the string thrown away rather than a second
 /// measurement of the same thing. `SPEC.md` §11.2 B19 is the ruling; what makes
 /// this the shape rather than a `width_of` comparison is tabs, control
@@ -8815,7 +8815,7 @@ pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
 /// Every byte offset a line breaks at, in order, to fit `room` columns a row.
 ///
 /// **The uncapped form of [`split_at`]**, and the cap it replaces was never asked
-/// for. A first reading
+/// for ([#272](https://github.com/breferrari/vigia/issues/272)). A first reading
 /// of the field took `delta --wrap-max-lines`' default of two and wrote it into
 /// the ruling; what a reader asking for `w` means is *show me the line*, and two
 /// rows of an eighty-column pane is a hundred and thirty-two columns of it. So a
@@ -8884,7 +8884,7 @@ pub(crate) fn indent_of(text: &str, content: usize) -> usize {
 /// Write `times` copies of `c` into the walk's output, where there is one.
 ///
 /// **Named because the guard is what varies and the payload is not**
-///. Every arm of
+/// ([#272](https://github.com/breferrari/vigia/issues/272)). Every arm of
 /// [`walk_printable`]'s match ends in the same `if let Some(out)`, and four
 /// copies of a conditional is four chances for one of them to stop being
 /// conditional: an arm that pushed unguarded would allocate on the measuring

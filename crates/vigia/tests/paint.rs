@@ -13,7 +13,7 @@
 //! every character walked to fill a row — sat outside both tiers. A row carrying
 //! 7x more line than pane therefore passed a 16ms gate that could not see it,
 //! and what found it was a reader scrolling a Japanese README
-//!.
+//! ([#45](https://github.com/breferrari/vigia/issues/45)).
 //!
 //! Structural, not wall-clock: [`PaintStats`] is an exact counter, so this is
 //! hardware-independent, takes no slack, and runs in every `cargo test`. The

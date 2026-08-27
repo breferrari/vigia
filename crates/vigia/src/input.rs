@@ -61,7 +61,7 @@ pub struct Region {
     /// router and the click arm asked it too. That is sound only while the list
     /// sits *above* the diff, which is the vertical stack this type exists to
     /// stop assuming. Beside a rail
-    /// both regions hold
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)) both regions hold
     /// every row of the body and only the column says which one a pointer is in.
     ///
     /// Bare `u16`s rather than a `Rect`, matching [`Sheet`] one type down and for
@@ -88,7 +88,7 @@ pub struct Region {
     /// span the pane and their bars land on the same right edge, and every reader
     /// then told the two apart **by row**, which is the vertical stack written
     /// into the hit-test model. Beside a rail
-    /// the two regions
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)) the two regions
     /// share their rows and differ in their columns, so the row can no longer
     /// answer it and the column already can.
     ///
@@ -384,7 +384,7 @@ impl Regions {
     /// region however far the pointer travels afterwards.
     ///
     /// **The sheet guard is [`Regions::step_at`]'s and arrived with it**
-    ///. These two are the
+    /// ([#298](https://github.com/breferrari/vigia/issues/298)). These two are the
     /// only geometry the loop asks `Regions` for directly, outside [`action_for`],
     /// and guarding one and not the other is how the class recurs rather than
     /// closes, leaving the unguarded method holding the identical shape.
@@ -497,7 +497,7 @@ pub struct Pointing {
 /// the way `Chrome::pressed` does, so the drawer compares one kind of thing;
 /// what is not here yet is a variant for the thumb and one for a list row, both
 /// of which are surfaces a click acts on and both of which are waiting on the
-/// same ruling about
+/// same ruling ([#189](https://github.com/breferrari/vigia/issues/189)) about
 /// what mark a region with no spare rung gets. A bare `Option<(u16, u16)>` would
 /// say the mark is always a cell, which is the thing that is about to stop being
 /// true.
@@ -788,7 +788,7 @@ pub fn settled(linger: Option<Instant>, now: Instant) -> bool {
 ///
 /// `ageing` is [`vigia_core::History::ages_in`], which is `None` for a window
 /// holding nothing and so cannot arm this on an idle tree
-///. It is passed as a
+/// ([#243](https://github.com/breferrari/vigia/issues/243)). It is passed as a
 /// duration rather than as a `History` so this stays a free function over three
 /// values, which is what lets a test drive every combination of them.
 pub fn patience(
@@ -997,7 +997,7 @@ pub enum Action {
     /// `App::apply`, one rule, and no way for the two directions to drift apart.
     ///
     /// **`←` and `→` are aliases of `p` and `n` since `SPEC.md` §11.2 B15**
-    ///: vertical keys move
+    /// ([#296](https://github.com/breferrari/vigia/issues/296)): vertical keys move
     /// inside the diff and horizontal keys move between files, so the four arrows
     /// are one set rather than half of one. A reader reaching for an arrow was
     /// getting `Shift+↑`'s list scroll, which is `Action::ScrollList` doing exactly
@@ -1043,7 +1043,7 @@ pub enum Action {
     /// Put the pinned list beside the diff as a left rail, or back above it.
     ///
     /// `SPEC.md` §11.2 **B14**, from `r`
-    ///.
+    /// ([#295](https://github.com/breferrari/vigia/issues/295)).
     /// [#252](https://github.com/breferrari/vigia/issues/252) shipped the rail
     /// arriving on its own at 134 columns, and what that meant is that a reader who
     /// had not asked for a narrower diff got one: at 133 the diff plans against 129
@@ -1063,7 +1063,7 @@ pub enum Action {
     /// Pin the diff to the file the viewport is inside, or unpin it.
     ///
     /// `SPEC.md` §11.2 **B16**, from `s`
-    ///. While it is on,
+    /// ([#297](https://github.com/breferrari/vigia/issues/297)). While it is on,
     /// the diff is the one file the caret marks: scrolling clamps at that file's
     /// two ends instead of carrying on into the file below, and the scrollbar
     /// measures the file rather than the changeset.
@@ -1093,7 +1093,7 @@ pub enum Action {
     /// Show the staged run beside the unstaged one, or stop showing it.
     ///
     /// `SPEC.md` §11.2 **B17**, from `a`
-    ///. `a` for *all*:
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)). `a` for *all*:
     /// with it on the pane holds everything uncommitted, and the issue's own key
     /// note names it for exactly this case — `i` for *index* was the proposal
     /// while the toggle was expected to swap one comparison for the other, and it
@@ -1116,7 +1116,7 @@ pub enum Action {
     /// Wrap a content line too wide for the pane onto the row below, or clip it.
     ///
     /// `SPEC.md` §11.2 **B19**, from `w`
-    ///. Off on launch.
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off on launch.
     ///
     /// **It is not a mode**, for the reason [`Action::ToggleRail`] and
     /// [`Action::ToggleSingle`] are not: no key changes meaning while it is on.
@@ -1141,7 +1141,7 @@ pub enum Action {
     /// whole reason the keymap went over the pane rather than into the footer.
     ///
     /// **Three outcomes since §11.2 B13**
-    ///, and which one it
+    /// ([#286](https://github.com/breferrari/vigia/issues/286)), and which one it
     /// takes is the receiving state's rather than this variant's: closed opens the
     /// first page, a page with another after it advances, and the last page
     /// closes. On every pane whose sheet is one page, which is every pane the
@@ -1177,7 +1177,7 @@ pub enum Action {
     /// program if none is. `Esc`.
     ///
     /// **One key, one meaning, and the state is resolved where state lives**
-    ///. `SPEC.md`
+    /// ([#340](https://github.com/breferrari/vigia/issues/340)). `SPEC.md`
     /// §11.2 B12 rules that no key changes meaning while the sheet is up, and
     /// [`key_action`] is handed no shell state so that the rule is structural
     /// rather than remembered. Both survive: this action *is* one meaning, the
@@ -1401,7 +1401,7 @@ impl Action {
             // height passed to it.
             //
             // **`Bottom` joined them with `SPEC.md` §11.2 B16**
-            //, and this
+            // ([#297](https://github.com/breferrari/vigia/issues/297)), and this
             // arm is the whole of what makes that ruling reach a reader. Unpinned
             // it is `jump_to(len - 1)`, which lands on a heading and is measured
             // in files exactly as the comment below says; **pinned it rests the

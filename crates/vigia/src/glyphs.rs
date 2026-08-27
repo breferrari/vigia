@@ -86,7 +86,7 @@ pub(crate) const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '�
 /// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
 /// the heat strip and [`Theme::bar_track`](crate::Theme::bar_track) the scrollbar, reaching it last
 /// though §5 lists it first
-///.
+/// ([#78](https://github.com/breferrari/vigia/issues/78)).
 /// A file with no history at all is the *all*-empty case, so a worktree that was
 /// already dirty when `vigia` started draws a full track on every row, which is
 /// the ordinary first frame: history is fed from the watch, so nothing a reader
@@ -198,7 +198,7 @@ impl Glyphs {
     ///    terminal rasterises box drawing, so the font is never asked and the
     ///    rung is decided by identity plus version, exactly how `Depth` decides
     ///    truecolour. `SPEC.md` §10's Windows bullet carries the correction
-    ///    that licensed this.
+    ///    that licensed this ([#324](https://github.com/breferrari/vigia/issues/324)).
     /// 5. **`TERM_PROGRAM`**, a terminal naming itself. See [`program_glyphs`].
     /// 6. **Windows with `WT_SESSION`**, which is Windows Terminal identifying
     ///    itself, and it ships Cascadia. Measured: see the module docs.

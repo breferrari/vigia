@@ -1,6 +1,6 @@
 //! Which Nerd Font glyph names a file's type, when a reader has asked for one.
 //!
-//! `SPEC.md` §11.2 B18,
+//! `SPEC.md` §11.2 B18 ([#323](https://github.com/breferrari/vigia/issues/323)),
 //! and the shape is the field's (`docs/research/318-drawing-vocabulary.md`
 //! §1.3): lazygit ships icons off by default behind a version key, yazi ships
 //! them theme-driven, and every serious tool keeps a clean glyphless mode. Here

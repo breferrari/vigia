@@ -132,11 +132,11 @@ fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
 /// Each region reports its **own** bar's column, not the pane's.
 ///
 /// **The claim the removed field could not make**
-///. One `Option<u16>`
+/// ([#251](https://github.com/breferrari/vigia/issues/251)). One `Option<u16>`
 /// documented as *"the column both scrollbars are drawn in"* is true only while
 /// both regions span the pane and their bars
 /// land on the same right edge. Beside a rail
-/// they do not.
+/// ([#252](https://github.com/breferrari/vigia/issues/252)) they do not.
 ///
 /// **What this proves, and what it does not.** The expected column is restated
 /// from the pane rather than read off the renderer's ladder, so a bar drawn in
@@ -445,7 +445,7 @@ fn a_notice_does_not_change_the_list_height() {
     for height in 3..=40u16 {
         // The rail's widths too: a notice changes the footer's height, which
         // changes the body, and beside a rail the body divides differently
-        //.
+        // ([#252](https://github.com/breferrari/vigia/issues/252)).
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);
@@ -825,7 +825,7 @@ fn the_two_regions_tile_the_body_exactly() {
 
     for height in 1..=40u16 {
         // **Two widths past the rail's arrival**
-        //, so the one
+        // ([#252](https://github.com/breferrari/vigia/issues/252)), so the one
         // subtraction this gate exists for is exercised in both shapes.
         // `clamped_to`'s rail arm shortens the list and gives nothing back,
         // because beside a rail there is no region below it to give to, and that

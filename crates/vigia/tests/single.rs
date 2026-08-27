@@ -1283,7 +1283,7 @@ fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
     //
     // Two things have to hold, and they are on opposite sides of the walk.
     // `landing_of` has to place the viewport at the busiest hunk of the pinned
-    // file, and the
+    // file ([#257](https://github.com/breferrari/vigia/issues/257)), and the
     // `landed_inside` restart has to back a short screen up against the *pinned*
     // floor rather than the diff's, which is the bound whose earlier reading was
     // this ruling's recorded defect.
@@ -1456,7 +1456,7 @@ fn a_straddle_reached_by_a_drag_pins_to_the_bottom_too() {
 fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
     // **The state that made the pin's first two licences leak.** `SPEC.md` §11.1
     // keeps a deliberate exception for a jump onto a tail shorter than the pane
-    //: the file the jump
+    // ([#59](https://github.com/breferrari/vigia/issues/59)): the file the jump
     // was for keeps the top row and the blanks under it stay, because a jump is a
     // claim about the top and backing up would move the file off it.
     //

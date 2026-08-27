@@ -863,7 +863,7 @@ impl Pane<'_> {
     fn draw(&mut self, worktree: &Worktree, now: Instant) {
         // **The roll, because `Shell::draw` does it and this file's whole claim
         // is that it does what the shell does**
-        //. Without it
+        // ([#277](https://github.com/breferrari/vigia/issues/277)). Without it
         // this harness models a window that never ages, so `tracked_history`
         // reports a store that only ever grows and the sampled readout draws a
         // burst pinned where it was: the freeze that row removed, preserved in

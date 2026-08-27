@@ -280,7 +280,7 @@ impl Runs {
     /// [`list_rows_wanted`] sizes the region from it, and a region sized for
     /// more separators than the plan draws leaves a blank row while one sized
     /// for fewer drops the tail of the last run
-    ///.
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)).
     fn separators(self) -> usize {
         if !self.grouped() {
             return 0;
@@ -524,7 +524,7 @@ pub enum Row {
     /// The tail of a [`Row::Line`] that did not fit, on the row below it.
     ///
     /// **`SPEC.md` §11.2 B19**, from `w`
-    ///. It exists only
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). It exists only
     /// while wrapping is on, it always follows the [`Row::Line`] it belongs to,
     /// and there are as many as the line needs: a reader who presses `w` means
     /// *show me the line*. It was capped at two for one day and the cap was never
@@ -614,7 +614,7 @@ impl Row {
     /// A file heading row.
     ///
     /// **A constructor because the variant is boxed**
-    ///, and it exists so
+    /// ([#234](https://github.com/breferrari/vigia/issues/234)), and it exists so
     /// the box is written once rather than at every one of the thirty-odd places
     /// that build one. `Row::File` is still the pattern to match on, which is
     /// where the box is invisible anyway.
@@ -626,7 +626,7 @@ impl Row {
 /// Slices a file's length is divided into for the heat strip.
 ///
 /// **The source resolution, which is a different number from what any pane
-/// draws**. The renderer
+/// draws** ([#161](https://github.com/breferrari/vigia/issues/161)). The renderer
 /// sums adjacent slices down to the rung its width affords, so this is the
 /// ceiling on that ladder rather than a column count: `heat_at` groups
 /// `HEAT_BUCKETS / width`, and a rung wider than this divides to zero.
@@ -847,7 +847,7 @@ pub struct Viewport {
     /// Whether a content line too wide for the pane continues on the row below.
     ///
     /// `SPEC.md` §11.2 **B19**, from `w`
-    ///. Off on launch.
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off on launch.
     ///
     /// A flag beside [`Self::single`] rather than something this function could
     /// work out, for the plainest of the reasons those fields give: it is a
@@ -920,7 +920,7 @@ pub struct Viewport {
     /// Whether the diff is pinned to the one file [`Self::position`] is inside.
     ///
     /// `SPEC.md` §11.2 **B16**, from `s`
-    ///. The walk stops
+    /// ([#297](https://github.com/breferrari/vigia/issues/297)). The walk stops
     /// at that file rather than carrying the remainder into the one below it, so
     /// the rows this frame can reach are the file's own, and the reader changes
     /// file through the list rather than by scrolling off the end of one.
@@ -993,7 +993,7 @@ pub struct View {
     /// Digits reserved for line numbers on every content row, or zero for none.
     ///
     /// **Decided where the rows are decided, and carried rather than
-    /// re-derived**.
+    /// re-derived** ([#272](https://github.com/breferrari/vigia/issues/272)).
     /// [`crate::render::gutter_width`] is safe as the painter's alone only
     /// while nothing else needs it. Wrapping needs it *before* the painter
     /// runs, because the width left for text is what decides whether a line
@@ -1062,7 +1062,7 @@ pub struct View {
     pub list_top: usize,
     /// Rows the block the diff is inside contributes: heading, content, and the
     /// blank that closes it where one does
-    ///.
+    /// ([#165](https://github.com/breferrari/vigia/issues/165)).
     ///
     /// The **block** rather than the file, because `rows_above` clamps against
     /// it and is positioned in the same units the total is.
@@ -1171,7 +1171,7 @@ pub struct View {
     pub scale: Scale,
     /// The whole worktree's churn over the window, oldest sample first.
     ///
-    /// **What the masthead's band draws**,
+    /// **What the masthead's band draws** ([#158](https://github.com/breferrari/vigia/issues/158)),
     /// and the one thing on the pane that is about the worktree rather than
     /// about a file in it. Every other glance element answers *which file*; this
     /// answers *how hot is this tree right now, and was it hotter a minute ago*.
@@ -1237,7 +1237,7 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
 /// [`vigia_core::Span`] carries a length rather than a range, so the runs are a
 /// tiling read forward from zero, and the runs the range starts and ends inside
 /// are cut. **A range rather than a split point**
-///: a line breaks as
+/// ([#272](https://github.com/breferrari/vigia/issues/272)): a line breaks as
 /// many times as it needs, so what a row wants is the piece it draws rather than
 /// the two halves of one cut.
 ///
@@ -1300,7 +1300,7 @@ fn hunk_span(hunk: &Hunk) -> usize {
 /// The blank row closing the block of the file at `index`, as a count.
 ///
 /// One row after every file **but the last**
-///; [`Row::Gap`] carries
+/// ([#165](https://github.com/breferrari/vigia/issues/165)); [`Row::Gap`] carries
 /// why there is one at all and why it trails rather than leads.
 ///
 /// **Not uniform, and the last file is the whole of the exception.** `SPEC.md`
@@ -1404,7 +1404,7 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: Option
     // caller that is not wrapping, where every line is one row and they stay
     // equal for the life of the walk.
     // **`None` is *not wrapping*, and it is a state of its own rather than a
-    // content of zero**.
+    // content of zero** ([#272](https://github.com/breferrari/vigia/issues/272)).
     // The floor below is `width` less the widest gutter a `u32` line number can
     // need, which is thirteen columns, so on a very narrow diff region the
     // subtraction saturates and a zero meaning *this pane has no room* would have
@@ -1467,7 +1467,7 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: Option
     // why a reader who makes the pane taller stops being moved off the heading.
     //
     // **And the rows a pane holds are not the rows the terminal has once lines
-    // wrap**. Both tests
+    // wrap** ([#272](https://github.com/breferrari/vigia/issues/272)). Both tests
     // below compare a row of this file's block, which is a *logical* row, against
     // `height`, which counts the terminal's, and the two are one number only
     // while nothing wraps. With `w` on a change judged visible from the heading
@@ -1863,7 +1863,7 @@ impl View {
         // ends and so cannot move it either.
         //
         // **[`gap_rows`] reads it too, which is what drops the closing blank.**
-        // That row separates two *drawn* files
+        // That row separates two *drawn* files ([#165](https://github.com/breferrari/vigia/issues/165))
         // and a pinned frame draws one, so the file's last content row is the
         // last row a reader can reach: the same rule the last file of an
         // unpinned diff already gets, applied to the only file there is.
@@ -2101,7 +2101,7 @@ impl View {
             // this is a parameter rather than something inferable here.
             //
             // **A landing is the third case and it goes with the scroll**
-            //. Its claim
+            // ([#257](https://github.com/breferrari/vigia/issues/257)). Its claim
             // is weaker than a jump's: it is that the change is *visible*, not
             // that a particular row is at the top, and it is satisfied from any
             // row the change is drawn from. So the pane is filled and the change
@@ -2167,7 +2167,7 @@ impl View {
             // file `n`, `p`, a digit or a click asked for keeps the top row.
             let landed_inside = view.landed && view.top.row > 0;
             // **A screen that is display-full is not short, however few of the
-            // diff's own rows it holds**.
+            // diff's own rows it holds** ([#272](https://github.com/breferrari/vigia/issues/272)).
             // This compared the rows collected, which are the diff's, against
             // `height`, which counts the terminal's, and the two are one number
             // only while nothing wraps. With `w` on a full pane read as short, so
@@ -2445,7 +2445,7 @@ impl View {
         // validity, and holds however the window got there.
         // **The furthest start that still reaches the last file, which is not
         // `files - rows` once a window can hold rows that are not files**
-        //. See
+        // ([#313](https://github.com/breferrari/vigia/issues/313)). See
         // [`last_top`].
         let ceiling = last_top(frame.files(), rows);
         // A screenful in files, taken from the ceiling so the bar's travel is the
@@ -2541,7 +2541,7 @@ impl View {
     /// How many rows of the terminal the rows this walk has collected would take.
     ///
     /// **The same arithmetic [`Self::wrap_rows`] does, asked before the walk
-    /// decides whether it came up short**.
+    /// decides whether it came up short** ([#272](https://github.com/breferrari/vigia/issues/272)).
     /// It reads no file and asks the frame for nothing: the rows are in hand and
     /// the width is the caller's, so this is bounded by the window exactly as the
     /// expansion is.
@@ -2562,7 +2562,7 @@ impl View {
             .iter()
             .map(|row| match row {
                 // **`breaks_of`, not `split_at`**, and it was the second for one
-                // commit.
+                // commit ([#272](https://github.com/breferrari/vigia/issues/272)).
                 // Removing the wrap cap moved `wrap_rows` and `landing_of` onto
                 // the uncapped walk and left this one counting at most two rows a
                 // line, so a screen of three-row lines read as short, backed the
@@ -2580,7 +2580,7 @@ impl View {
     /// measured against.
     ///
     /// **`SPEC.md` §11.2 B19**, from `w`
-    ///.
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)).
     ///
     /// **It reads nothing and asks the frame for nothing**, which is what keeps
     /// I4 exactly where it was. Wrapping only ever *grows* the row count, so the
@@ -2731,7 +2731,7 @@ impl View {
             // Rows of this line to pass over, which is the display offset above.
             let skip = if at == from { above } else { 0 };
             // **A line taller than the pane is the one case a mark is still
-            // honest**.
+            // honest** ([#272](https://github.com/breferrari/vigia/issues/272)).
             // Scrolling moves by rows of the **diff**, so a line the pane cannot
             // hold is stepped over whole: no gesture reaches its middle, and the
             // reader has to be told. A line that merely runs past the fold is a

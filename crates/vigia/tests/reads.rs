@@ -115,7 +115,7 @@ fn layout_at(height: u16) -> Body {
 /// being an arbitrary fixture width the day the pinned list became a *rail* on a
 /// wide pane: eighty columns is the stacked shape, and a file whose every gate
 /// measured one width was measuring one of two layouts
-///. Same argument
+/// ([#252](https://github.com/breferrari/vigia/issues/252)). Same argument
 /// [`ORDINARY`] carries one axis over.
 const ORDINARY_WIDTH: u16 = 80;
 
@@ -139,7 +139,7 @@ fn layout_on(width: u16, height: u16) -> Body {
 /// A chrome that has asked for the rail.
 ///
 /// **The rail is a gesture since `SPEC.md` §11.2 B14**
-///, so the arm of this
+/// ([#295](https://github.com/breferrari/vigia/issues/295)), so the arm of this
 /// file that is about the deeper region beside a rail has to ask for one. The
 /// stacked arm reads the same layout at eighty columns, where the request cannot
 /// be honoured and changes nothing.
@@ -192,7 +192,7 @@ fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
 
 /// [`one_screen_at`] on a named pane, so the read bound can be held beside a rail
 /// as well as under a stacked list
-///.
+/// ([#252](https://github.com/breferrari/vigia/issues/252)).
 fn one_screen_on(name: &str, files: usize, width: u16, height: u16) -> Screen {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
@@ -1239,7 +1239,7 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     );
 
     // **And again on a pane where the region is deeper than the cap that
-    // shipped**. Every
+    // shipped** ([#160](https://github.com/breferrari/vigia/issues/160)). Every
     // gate in this file measures `ORDINARY`, which is the one height where the
     // list's share *is* `LIST_SETTLED`, so before this the claim above was held
     // at exactly one rung of a ladder and it was the rung that was already
@@ -1269,7 +1269,7 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     );
 
     // **And once more beside a rail**
-    //, which is the same
+    // ([#252](https://github.com/breferrari/vigia/issues/252)), which is the same
     // argument on the other axis and the one `SPEC.md` §11.1 names this file for.
     // From 134 columns the list sits beside the diff and its height cap does not
     // apply at all, so the region is deeper again: the claim that a visible row
@@ -1739,7 +1739,7 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     // gate green while the thumb stopped moving inside a file.
     const FILES: usize = 12;
     /// A file's whole block: heading, hunk header, two content rows, and the
-    /// blank that closes it.
+    /// blank that closes it ([#165](https://github.com/breferrari/vigia/issues/165)).
     /// `rows_above` is what the scrollbar is positioned from, so it counts the
     /// blank exactly as the total does, and a `4` here would be asserting the
     /// desynchronised arithmetic rather than the drawn one.
