@@ -39,10 +39,10 @@
 //! [`History::record`] ran once per coalesced tick and nothing on screen changed
 //! without an event.
 //!
-//! **[#243](https://github.com/breferrari/vigia/issues/243) reversed that on
-//! 2026-08-22, and the paragraph it replaced is worth keeping in view because
-//! its conclusion was the defect.** *A tree that has gone quiet holds its last
-//! picture* is not what a monitor is supposed to do when the picture's own axis
+//! **[#243](https://github.com/breferrari/vigia/issues/243) reverses that, and
+//! the argument it replaced is worth keeping in view because its conclusion was
+//! the defect.** *A tree that has gone quiet holds its last picture* is not what
+//! a monitor is supposed to do when the picture's own axis
 //! is time: a frozen window keeps its newest sample at the right edge, so a
 //! burst from ninety seconds ago draws as *just now*. The window ages on a clock
 //! now, and I1's licence is what permits it rather than what forbids it, because
@@ -129,10 +129,9 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 /// rate is untouched at 120, and twenty-four divides it exactly.
 pub const HISTORY_BUCKETS: usize = 24;
 
-// Eight until 2026-08-18, then twelve
-// ([#161](https://github.com/breferrari/vigia/issues/161)), then twenty-four
-// ([#234](https://github.com/breferrari/vigia/issues/234)), and the three steps
-// were argued from three different things. Eight was one element's column count.
+// Eight, twelve ([#161](https://github.com/breferrari/vigia/issues/161)) and
+// twenty-four ([#234](https://github.com/breferrari/vigia/issues/234)) were each
+// argued from a different thing. Eight was one element's column count.
 // Twelve was a period: a fifteen-second bucket is coarse enough that a steady
 // worktree drew five and a half of the ramp's nine rungs, which is a block rather
 // than a shape, and ten seconds took it to 6.5 without crossing into scatter.
@@ -235,7 +234,7 @@ pub const HISTORY_BUCKET: Duration =
 // is the **window** they cover. The band covers all of it at every width, and
 // since #234 so does the sparkline at every rung. `SPEC.md` §11.1 states it and
 // `crates/vigia/tests/masthead.rs` gates the comparison the retired constant
-// used to make.
+// made.
 
 /// Samples the store keeps per path, oldest first.
 ///
@@ -292,9 +291,9 @@ pub const HISTORY_SAMPLE: Duration =
 /// the newest slot, so with a single sample its lifetime is *whatever was left of
 /// the second the write landed in* — a fixed grid, an arbitrary arrival, and
 /// therefore a uniform draw over `(0, HISTORY_SAMPLE]`. Measured across the grid:
-/// a write at +0ms pulsed for 1s, at +500ms for 500ms, at +990ms for **10ms**, at
-/// +999ms for **5ms**. Reported from a live pane on 2026-08-25 as the dot no
-/// longer showing up, which is exactly what a coin-toss lifetime looks like from
+/// a write at +0ms pulses for 1s, at +500ms for 500ms, at +990ms for **10ms**,
+/// at +999ms for **5ms**. Reported from a live pane as the dot no longer showing
+/// up, which is exactly what a coin-toss lifetime looks like from
 /// the outside, and it is a regression from
 /// [#279](https://github.com/breferrari/vigia/issues/279) giving the window a
 /// clock of its own — before that the window rolled only on a tick, so the mark
@@ -309,8 +308,7 @@ pub const HISTORY_SAMPLE: Duration =
 /// instead needs no new wake, no new clock and no new state: the roll that was
 /// already going to happen is still the only thing that retires it. The lifetime
 /// becomes `[HISTORY_SAMPLE, PULSE_SAMPLES x HISTORY_SAMPLE]`, closed at both ends,
-/// so the **worst** case is now
-/// what the best case used to be.
+/// so the **worst** case is what the unclosed form's best case was.
 ///
 /// **It is still bounded, which is the half that matters to §5.3.** A mark with no
 /// ceiling is the frozen clock [#243](https://github.com/breferrari/vigia/issues/243)
@@ -387,10 +385,11 @@ pub enum Recency {
     /// Named by the most recent tick **and** holding ink in the newest sample.
     /// Drawn brightest.
     ///
-    /// **It stopped carrying the `●` on 2026-08-26**
-    /// ([#345](https://github.com/breferrari/vigia/issues/345)). This rung is how
-    /// brightly a row is drawn; [`History::newest`] is which file was written
-    /// last, and one value answering both is what quietly retired a mark the
+    /// **It does not carry the `●`**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)). This rung is
+    /// how brightly a row is drawn; [`History::newest`] is which file was
+    /// written last, and one value answering both is what quietly retires a mark
+    /// the
     /// reader relied on.
     ///
     /// Both halves, since [#243](https://github.com/breferrari/vigia/issues/243).
@@ -490,9 +489,9 @@ pub struct Churn(pub [u32; HISTORY_SAMPLES]);
 /// **Re-derived when the source halved**
 /// ([#234](https://github.com/breferrari/vigia/issues/234)) rather than carried
 /// over, because every one of those numbers is read through a bucket. This
-/// docblock and the gate's also used to quote *different* figures for eight
-/// seconds, 0.54 against 0.40, having been taken from two fixtures; they are one
-/// measurement on one fixture now. The constant did not move and its margin
+/// docblock and the gate's are one measurement on one fixture, not two — taken
+/// from separate fixtures they quote 0.54 against 0.40 for eight seconds. The
+/// constant did not move and its margin
 /// improved: a finer bucket smears less, so six seconds is 0.23 where it was
 /// 0.36.
 ///
@@ -622,10 +621,10 @@ impl Churn {
     /// matters at or below [`HISTORY_SAMPLES`], which is the range every caller
     /// but the churn band asks for.
     ///
-    /// **Exactly `width` values, whatever `width` is.** This used to clamp to
-    /// [`HISTORY_SAMPLES`] and hand back a short `Vec`, which was fine while
-    /// every caller drew one column per cell and became a trap when the churn
-    /// band started asking for one per braille sub-column: a pane wide enough
+    /// **Exactly `width` values, whatever `width` is.** Clamping to
+    /// [`HISTORY_SAMPLES`] and handing back a short `Vec` is fine while every
+    /// caller draws one column per cell and is a trap the moment the churn band
+    /// asks for one per braille sub-column: a pane wide enough
     /// wanted more columns than the window holds samples, got fewer, and drew a
     /// graph that stopped partway across and left bare axis after it. The caller
     /// then re-derived the mapping to work around it, so this formula existed
@@ -760,9 +759,9 @@ impl Churn {
 /// `scale_from` directly. What is left here is the rule over a single population,
 /// which is what the suite exercises and what a caller with no projection wants.
 ///
-/// **This entry point materialises the non-empty values, and it used to be
-/// written so it need not.** A median cannot be taken from a running pair, so the
-/// iterator is collected here. The caller that sentence was written for is
+/// **This entry point materialises the non-empty values.** A median cannot be
+/// taken from a running pair, so the iterator is collected here. The caller that
+/// makes it worth avoiding is
 /// [`History::repeak`], which walks every bucket of every tracked path on the
 /// frame path and keeps a scratch between ticks instead.
 ///
@@ -913,10 +912,10 @@ struct Track {
     /// Bytes this path held when it was last weighed, if it ever has been.
     ///
     /// **What turns a count of writes into a measure of change**
-    /// ([#232](https://github.com/breferrari/vigia/issues/232)). A sample used to
-    /// be how many files moved, so a worktree where one file is saved repeatedly
-    /// put exactly one in every sample, made itself the peak, and drew every
-    /// active column at full height. The element said *when* and could not say
+    /// ([#232](https://github.com/breferrari/vigia/issues/232)). A sample of
+    /// how many files moved lets a worktree where one file is saved repeatedly
+    /// put exactly one in every sample, make itself the peak, and draw every
+    /// active column at full height. The element says *when* and cannot say
     /// *how much*, which is the opposite of the "change density over time"
     /// `SPEC.md` §5.1 names it for.
     ///
@@ -1327,19 +1326,17 @@ impl History {
     /// **The ordinal alone, and that is the whole of the fix**
     /// ([#345](https://github.com/breferrari/vigia/issues/345)). [`Self::recency`]
     /// answers *how brightly to draw this row* and this answers *which file was
-    /// written last*, and those are two questions that one value used to answer
-    /// at once.
+    /// written last*, which are two questions.
     ///
-    /// **They were separated because joining them lost a mark nobody meant to
-    /// retire.** Until 2026-08-22 a pulse was this predicate and nothing else, so
-    /// the dot sat on the last edited file until another write arrived, which is
-    /// what a reader watching an agent actually reads it for. `b80a1d5` added a
-    /// second term to `recency` while ageing the churn window, on the complaint
+    /// **They are separate because joining them loses a mark nobody means to
+    /// retire.** A pulse that is this predicate and nothing else sits on the
+    /// last edited file until another write arrives, which is what a reader
+    /// watching an agent actually reads it for. Adding a second term to
+    /// `recency` while ageing the churn window, on the complaint
     /// that "a file written two minutes ago drew at full brightness beside a band
-    /// that had almost drained". That complaint is about **brightness** and it is
-    /// a fair one; the mark came along because one enum decided both, and the dot
-    /// then expired after a second or so of quiet. Reported from the pane
-    /// 2026-08-26, four days later, by the only reader there is.
+    /// that had almost drained", takes the mark along with it: that complaint is
+    /// about **brightness** and is a fair one, but with one enum deciding both
+    /// the dot expires after a second or so of quiet. Reported from the pane.
     ///
     /// **Several files in one burst all answer true**, which is what *named by the
     /// newest tick* means. Narrowing it to one would be a second ruling about
@@ -1442,10 +1439,10 @@ impl History {
     /// the sparkline divides by the same store and needed it too.
     ///
     /// **Zero when nothing is tracked, which is a scale a caller must not divide
-    /// by.** It used to say the caller must treat it as "draw nothing", and that
-    /// is no longer what the shell does: since
-    /// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
-    /// a track, so zero means every bucket is empty and every one of them is
+    /// by — and not an instruction to draw nothing.** Since
+    /// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket
+    /// draws a track, so zero means every bucket is empty and every one of them
+    /// is
     /// still drawn. The constraint this states is arithmetic and belongs here;
     /// what to draw is the shell's and belongs in `SPEC.md` §5.1.
     pub fn scale(&self) -> u32 {
@@ -1933,10 +1930,10 @@ mod tests {
         assert!(ordinary > 0, "an ordinary window produced no scale at all");
 
         // **The claim, asserted by moving the outlier rather than by comparing
-        // against one bucket.** This used to read `scale < busiest`, which was a
-        // true consequence of a mean-based scale while the buckets were spiky and
-        // stopped being one when [#242](https://github.com/breferrari/vigia/issues/242)
-        // made them a level: a smooth series has few outliers, so a mean is
+        // against one bucket.** `scale < busiest` is a true consequence of a
+        // mean-based scale while the buckets are spiky and stops being one once
+        // [#242](https://github.com/breferrari/vigia/issues/242) makes them a
+        // level: a smooth series has few outliers, so a mean is
         // representative and thirteen tenths of it sits *above* a typical bucket
         // rather than below the tallest. The property that actually matters never
         // depended on which side it landed: one enormous write must not drag the

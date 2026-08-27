@@ -33,10 +33,10 @@ const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia-core/src/change.rs", 192),
     ("vigia/src/input.rs", 240),
     ("vigia/src/app.rs", 246),
-    ("vigia-core/src/history.rs", 236),
+    ("vigia-core/src/history.rs", 233),
     ("vigia/src/render.rs", 194),
     ("vigia/src/glyphs.rs", 191),
-    ("vigia/src/lib.rs", 187),
+    ("vigia/src/lib.rs", 185),
     ("vigia/src/config.rs", 163),
     ("vigia/src/view.rs", 159),
 ];
@@ -52,7 +52,7 @@ const RATIO_CEILING: [(&str, u64); 9] = [
 /// from such a probe, and it left 161 of slack, so the gate stayed green
 /// against a deliberate mutation. A ceiling above the measurement is a bound
 /// nothing can reach.
-const SESSION_CONTEXT_CEILING: usize = 1_503;
+const SESSION_CONTEXT_CEILING: usize = 1_422;
 
 /// The longest `///` run in the tree, in lines.
 ///

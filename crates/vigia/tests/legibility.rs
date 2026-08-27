@@ -111,9 +111,8 @@ const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4
 /// the same number it drew before. The rung that was the top is the second entry
 /// now, and every boundary below it is untouched.
 ///
-/// The docblock here used to say the top rung was *"a ceiling rather than a
-/// choice"*, because a drawn bucket had to stay coarser than the churn band's own
-/// column period. That period is retired
+/// The top rung is a choice rather than a ceiling. A drawn bucket had to stay
+/// coarser than the churn band's own column period; that period is retired
 /// ([#232](https://github.com/breferrari/vigia/issues/232)) and the bound with
 /// it; what replaced it is the **window**, which every rung covers, and
 /// `the_sparkline_reprojects_rather_than_dropping_buckets` below is what holds
@@ -511,9 +510,9 @@ fn alphabet(glyphs: Glyphs) -> (Vec<char>, char) {
 /// Every row the body holds, across every region it has.
 ///
 /// **Named because two gates recover the footer's height by subtracting this**,
-/// and both got it wrong the same way when a region was added: they each summed
-/// `list + rule + diff` inline, so #158's masthead made them read the footer as
-/// four rows taller than it is. A region added to `Body` is one edit here now.
+/// and summing `list + rule + diff` inline in each is how both read the footer
+/// as four rows taller than it is the moment a region is added. A region added
+/// to `Body` is one edit here.
 fn body_rows(split: &vigia::Body) -> usize {
     split.rows()
 }
@@ -1053,10 +1052,9 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// differ, so the shared scale is exercised down the list. The third row is all
 /// zeroes, because a cold file is what the ladder has to keep drawing too.
 ///
-/// This used to say every bucket was non-zero *because* an empty one drew a
-/// space, which made a strip's width unreadable off the row and left the ladder
-/// gate below unable to tell four buckets from eight. Both halves are now
-/// wrong: since [#78](https://github.com/breferrari/vigia/issues/78) an empty
+/// An empty bucket drawing a *space* would make a strip's width unreadable off
+/// the row and leave the ladder gate below unable to tell four buckets from
+/// eight. Since [#78](https://github.com/breferrari/vigia/issues/78) an empty
 /// bucket draws the track, so the width is readable off any fixture, and the
 /// third row was never non-zero anyway. `spark_slot` counts the whole slot for
 /// exactly this reason. **This is the sentence the two gates below took their
@@ -1643,10 +1641,11 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 
 /// The body's parts tile the pane: no gap, no overlap, nothing outside it.
 ///
-/// **The property that used to be true by two functions being written correctly**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)). `render` walked a
-/// running `y` cursor down the body and `regions` rebuilt the same offsets from
-/// the same `Body`, so the painter and the pointer agreed because both were
+/// **The property that is otherwise true only by two functions being written
+/// correctly** ([#251](https://github.com/breferrari/vigia/issues/251)). With
+/// `render` walking a running `y` cursor down the body and `regions` rebuilding
+/// the same offsets from the same `Body`, the painter and the pointer agree
+/// because both are
 /// right, and nothing would have said so if one stopped being. `Body::areas` is
 /// now the single answer and this is the gate over it.
 ///
@@ -1871,11 +1870,11 @@ fn the_glance_columns_collapse_in_one_order() {
     // differs from 5 only by the pulse mark, and the pulse is read by neither of
     // the two counts.
     //
-    // **The table lost a row on 2026-08-03 and the walk did not move**, which is
-    // the check that ruling owed this test. A seventh layout used to sit above
-    // layout 0 carrying `● just changed`, which is fourteen columns of text and
-    // fifteen of slot once `reserved` adds its gap, so it read `15` in the pulse
-    // column of this table. From 65 columns up, and it went with the label along
+    // **The table has six layouts and not seven**, which is the check the pulse
+    // ruling owes this test. A seventh above layout 0 would carry
+    // `● just changed`, fourteen columns of text and fifteen of slot once
+    // `reserved` adds its gap, reading `15` in the pulse column from 65 columns
+    // up. It went with the label along
     // with the only rung that column ever had. Every `width` here is the sum of one
     // layout's own slots, so dropping the widest one cannot shift the five below
     // it, and the boundaries below are unchanged rather than re-derived.
@@ -1890,8 +1889,8 @@ fn the_glance_columns_collapse_in_one_order() {
     //   became 28, 37, 42). It bought a layout that cannot be moved by a seventh
     //   changed file appearing.
     //
-    // The bill for both lands on the sparkline, which now needs 42 columns where
-    // it used to need 36. §11.1 carries the argument.
+    // The bill for both lands on the sparkline, which needs 42 columns rather
+    // than 36. §11.1 carries the argument.
     //
     // - **One more on the top two rungs only** when the pane took #119's inset
     //   (48, 52 became 49, 53). Nothing under 44 columns moved, because the
@@ -3064,10 +3063,10 @@ fn a_clipped_content_line_says_it_continues() {
 /// `the_sparkline_reprojects_rather_than_dropping_buckets` below is the gate for
 /// that half. What this one still owns is the half the rule shares with the hint
 /// bar and the heat strip: a strip is drawn at a **whole rung** and never at a
-/// count between two. This used to say it was observable only because [`glancing`]'s
-/// buckets are all non-zero, an empty one being a space; since
-/// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
-/// the track, so the strip's width is readable off any fixture and the gate no
+/// count between two. It does not rest on [`glancing`]'s buckets all being
+/// non-zero: since [#78](https://github.com/breferrari/vigia/issues/78) an empty
+/// bucket draws the track, so the strip's width is readable off any fixture and
+/// the gate no
 /// longer rests on a property of the data.
 ///
 /// The rungs are read off the screen rather than imported. A test comparing the
@@ -3147,11 +3146,10 @@ fn the_sparkline_draws_whole_rungs_and_never_a_count_between_two() {
 /// names its file or says which end it lost. A glance element that reduced a row
 /// to `M …` would have spent the content to decorate it.
 ///
-/// **This used to assert that the pulse is never drawn part-way**, back when its
-/// widest rung was the fourteen-column `● just changed`. That rung went on
-/// 2026-08-03 and the assertion went with it rather than being kept as
-/// decoration: one glyph cannot be cut, so the check would have passed against
-/// any renderer and gated nothing. What the ladder still owes is the same rule
+/// **It does not assert that the pulse is never drawn part-way.** That check
+/// belongs to a fourteen-column `● just changed` rung; with one glyph it passes
+/// against any renderer and gates nothing. What the ladder still owes is the
+/// same rule
 /// stated for a strip made of many glyphs, and
 /// `the_glance_columns_collapse_in_one_order` is where that lives.
 #[test]
@@ -3185,8 +3183,8 @@ fn the_pulse_never_pushes_a_path_off_its_own_row() {
 
 /// The pulse is a mark, and a mark is one column.
 ///
-/// `SPEC.md` §5.1's 2026-08-03 ruling, which without this is a wish: the
-/// `just changed` label is gone from the picture and from the shell, and the dot
+/// `SPEC.md` §5.1's ruling, which without this is a wish: there is no
+/// `just changed` label in the picture or in the shell, and the dot
 /// carries the top rung of the recency ladder alone. The ruling is about what a
 /// monitor asks a reader to *read*, so the gate is over text rather than over
 /// width: any letter drawn in the pulse colour is a caption on a signal that has
@@ -3425,8 +3423,8 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
 /// `SPEC.md` §11.2 B8 and B9, and the mechanism is what is gated rather than
 /// either affordance.
 ///
-/// > B8 — OSC 8 hyperlinks on drawn paths. Ruled 2026-08-15: no.
-/// > B9 — a yank key over OSC 52. Ruled 2026-08-15: no.
+/// > B8 — OSC 8 hyperlinks on drawn paths. Ruled: no.
+/// > B9 — a yank key over OSC 52. Ruled: no.
 ///
 /// **A hyperlink is not nameable from the drawn output**, which is the whole
 /// reason this gate is shaped the way it is. A terminal that renders OSC 8
@@ -3770,20 +3768,19 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     // a ladder that simply never draws the extra hint: somewhere wide enough, the
     // bar really is wider than the baseline.
     //
-    // **The claim inverted on 2026-08-17, and this is the same fact from the other
-    // side.** It used to be *somewhere wide enough the bar really is wider than
-    // the baseline*, which is what made the rule above worth gating: a bonus rung
-    // existed and had to be kept from buying a row. [#80](https://github.com/breferrari/vigia/issues/80)
-    // cut the bar to three items a reader is owed at every width, so `HINT_BASELINE`
+    // **The same fact from the other side.** While a bonus rung exists it has to
+    // be kept from buying a row, which is what makes the rule above worth
+    // gating. [#80](https://github.com/breferrari/vigia/issues/80) cut the bar
+    // to three items a reader is owed at every width, so `HINT_BASELINE`
     // is rung zero and **no rung above it exists**. The assertion is therefore that
     // the widest pane draws exactly what the forty-column pane draws: nothing is
     // held back for a wide screen, so nothing can be spent on a row.
     //
-    // Both sides are extracted the same way, which is a correction B12 forced: the
-    // forty-column side used to be the whole trimmed footer *line*, state included,
-    // compared against the hint bar alone at 120. That passed only while the bonus
-    // bar was wide enough to beat a narrow bar plus its state, and a comparison
-    // whose two sides are not the same quantity is a gate that happens to be green.
+    // Both sides are extracted the same way. Taking the forty-column side as the
+    // whole trimmed footer *line*, state included, and comparing it against the
+    // hint bar alone at 120 passes only while the bonus bar is wide enough to
+    // beat a narrow bar plus its state, and a comparison whose two sides are not
+    // the same quantity is a gate that happens to be green.
     let bar_at = |width: u16| {
         let line = rows_at(width, tall, &view, &chrome())
             .last()
@@ -3852,10 +3849,10 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
 /// because a hint was paid for out of a readout, which is the case this exists
 /// for.
 ///
-/// **They have moved twice on 2026-08-17, from 69 and 77 to 67 and 75 and then to
-/// here, and both moves are hints being paid *back*.** B12 swapped `JK files` for
-/// the two-columns-narrower `? keys`, and [#80](https://github.com/breferrari/vigia/issues/80)
-/// then cut `jk scroll` as well, taking the widest bar from 38 columns to 26, so
+/// **These figures move whenever a hint is paid back.** B12 swapped `JK files`
+/// for the two-columns-narrower `? keys`, and
+/// [#80](https://github.com/breferrari/vigia/issues/80) cut `jk scroll` as well,
+/// taking the widest bar from 38 columns to 26, so
 /// each cell arrives about eleven columns of pane earlier than
 /// [#147](https://github.com/breferrari/vigia/issues/147) measured it. **That issue
 /// is not answered, it has lost its subject**: with every rung one a reader is owed,
@@ -4011,10 +4008,10 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // `the_caret_does_not_vanish_because_another_file_changed`; this gate is
         // about the bar and must not be measuring both at once.
         //
-        // **Asked of the glyph, not of the indent, and it used to be the indent**
-        // ([#173](https://github.com/breferrari/vigia/issues/173)). This read
-        // `row.trim_start().len() != row.len()`, which meant *has a caret* only
-        // while the caret was a two-column inset on the row. The marker sits on
+        // **Asked of the glyph, not of the indent**
+        // ([#173](https://github.com/breferrari/vigia/issues/173)). Reading
+        // `row.trim_start().len() != row.len()` means *has a caret* only while
+        // the caret is a two-column inset on the row. The marker sits on
         // the pane's own leading column now, so a caret row has **no** leading
         // blank and a plain one has the pane's inset: the proxy inverted, and the
         // guard went on compiling, running and skipping exactly the wrong widths.
@@ -4158,9 +4155,9 @@ fn the_pane_insets_its_text_at_every_rung() {
                     // **The caret is the one *glyph* licensed to stand on the
                     // pane's own edge** ([#173](https://github.com/breferrari/vigia/issues/173)),
                     // and `SPEC.md` §11.1 records it as such so it reads as a
-                    // decision rather than as drift. The reader asked for the
-                    // marker flush against the edge with no margin of its own,
-                    // and that is what puts it inside the ladder this gate pins.
+                    // decision rather than as drift. The marker is flush
+                    // against the edge with no margin of its own, which is what
+                    // puts it inside the ladder this gate pins.
                     //
                     // **Exempted by stripping it, never by skipping the row**,
                     // which is the difference between narrowing this gate and
@@ -4445,9 +4442,9 @@ fn the_hint_bar_never_marks_its_own_edge() {
 
 #[test]
 fn the_pane_holds_its_trailing_margin_off_the_chrome() {
-    // The half of the ladder no drawn glance row can report, found by round 5 of
-    // #119's audit as a mutation nothing killed: widening the source's trailing
-    // half at a single rung survives the whole workspace suite.
+    // The half of the ladder no drawn glance row can report: widening the
+    // source's trailing half at a single rung survives the whole workspace suite
+    // without this.
     //
     // **Why the glance rows cannot see it.** A file row's right-hand blank is the
     // scrollbar's reserve of two columns, drawn or not, at every width. The
@@ -4708,10 +4705,9 @@ fn sigil_column(row: &str) -> Option<usize> {
 /// file.
 ///
 /// **Found by walking, never derived as `sigil + KIND`**, and the difference is
-/// the whole reason this exists. The first draft of
-/// `the_path_starts_in_one_column_in_both_regions` asserted
-/// `listed + KIND == streamed + KIND + owed`, which cancels to the assertion the
-/// gate above it already makes: it added a constant to both sides and never
+/// the whole reason this exists. Asserting
+/// `listed + KIND == streamed + KIND + owed` instead cancels to the assertion
+/// the gate above it already makes: it adds a constant to both sides and never
 /// looked at a path at all, so the failure its own docblock claimed (a region
 /// whose paths were narrowed) could not reach it. Caught by review rather than
 /// by any run, because a gate that restates its neighbour is green for the same
@@ -4729,12 +4725,10 @@ fn path_column(row: &str) -> Option<usize> {
 
 /// The row a pinned list starts on, given its layout.
 ///
-/// **One line, and it is the fourth site to have written it out.** [`body_rows`]
-/// exists for exactly this reason one region over, and its own doc records that
-/// two gates open-coded that sum and both got it wrong the same way when a
-/// region was added. The masthead is the region that did it, and the lead blank
-/// [#174](https://github.com/breferrari/vigia/issues/174) added is the second,
-/// so the sum has now moved twice under call sites that spell it by hand.
+/// **One line, and it is the fourth site to spell this sum.** [`body_rows`]
+/// exists for the same reason one region over: two gates open-coding it both
+/// read the footer wrongly the moment a region is added, and this sum has moved
+/// twice under call sites that spell it by hand.
 fn list_top(split: &Body) -> usize {
     1 + split.above_list()
 }
@@ -4859,8 +4853,8 @@ fn the_sigil_sits_in_one_column_in_both_regions() {
     );
 }
 
-/// The same claim one element over, and what it reaches is stated narrowly
-/// because the first draft of it reached nothing at all.
+/// The same claim one element over, stated narrowly because the obvious
+/// spelling of it reaches nothing at all.
 ///
 /// A sigil that moved without the path following would be a **new** departure
 /// rather than the fix. `Painter::file_row` draws the kind letter and then the
@@ -4877,10 +4871,10 @@ fn the_sigil_sits_in_one_column_in_both_regions() {
 /// **What it does not reach, said out loud.** Narrowing a region's *width* moves
 /// the right-anchored glance elements and truncates the path sooner; it does not
 /// move the path's origin, so nothing here fires. That is `MIN_PATH_WIDTH`'s
-/// property and `Columns`' gates hold it. An earlier version of this docblock
-/// claimed the narrowing case, and the claim was false in a way no run could
-/// show: the assertion then read `listed + KIND == streamed + KIND + owed`, which
-/// cancels to the gate above it, so the test could not fail alone whatever it
+/// property and `Columns`' gates hold it. Claiming the narrowing case here would
+/// be false in a way no run could show, because an assertion reading
+/// `listed + KIND == streamed + KIND + owed` cancels to the gate above it, so
+/// the test cannot fail alone whatever it
 /// claimed. Found by review, not by a run, because a gate that restates its
 /// neighbour is green for its neighbour's reasons.
 #[test]
@@ -5321,9 +5315,9 @@ fn the_band_gets_a_left_bar_wherever_the_pane_lends_a_column() {
         // and the comparison is not even valid: at widths too narrow for a gutter
         // the leftmost glyph is the *sigil*, and a context row's sigil is a space
         // where a changed row's is `+`, so the two legitimately differ by one for
-        // a reason that has nothing to do with this element. The first draft
-        // asserted it at every width and reddened at two columns, which is a gate
-        // measuring the thing beside the thing it is about.
+        // a reason that has nothing to do with this element. Asserting it at
+        // every width reddens at two columns, which is a gate measuring the
+        // thing beside the thing it is about.
         if inset_at(width) > 0 {
             let first = |y: u16| (0..width).find(|x| buffer[(*x, y)].symbol() != " ");
             for (label, y) in [("added", added), ("removed", removed)] {
@@ -5349,10 +5343,9 @@ fn the_band_gets_a_left_bar_wherever_the_pane_lends_a_column() {
 fn the_glyph_rung_buys_columns_and_never_costs_them() {
     // **The second axis of the row ladder**, swept rather than sampled, because
     // a ladder is only wrong at the widths where it changes rung and a denser
-    // glyph moves every one of those. The 2026-08-16 header-seam gate is why
-    // this is a sweep and not a screen: it drew one 80-column pane, where the
-    // widest rung fits and the broken narrow one is never reached, and passed
-    // against the code it was written for.
+    // glyph moves every one of those. A single-screen version is why: one
+    // 80-column pane is where the widest rung fits and the broken narrow one is
+    // never reached, so it passes against the code it was written for.
     //
     // Read as *buckets of the window*, which is the thing the ladder rations.
     // Columns are what a glyph changes and buckets are what a reader loses, so a
@@ -5381,9 +5374,9 @@ fn the_glyph_rung_buys_columns_and_never_costs_them() {
                 "at {width} columns {dense:?} shows {dense_buckets} buckets \
                  where blocks show {block_buckets}"
             );
-            // **Conditioned on the window, and the first draft was not.** A
-            // bare `dense_cells <= block_cells` is too strong and this sweep
-            // said so at 40 columns, where blocks draw no sparkline at all and
+            // **Conditioned on the window.** A bare
+            // `dense_cells <= block_cells` is too strong, and this sweep says so
+            // at 40 columns, where blocks draw no sparkline at all and
             // braille draws four buckets in two: spending columns to show
             // something where there was nothing is the feature, not a
             // regression. What may never happen is spending *more* row on the
@@ -5609,9 +5602,9 @@ fn columns_of(
 
 /// A narrower rung shows the whole window at a lower resolution, never its tail.
 ///
-/// **`SPEC.md` §11.1's ruling, reversed on 2026-08-20 and gated here**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)). The sparkline was a
-/// list and dropped whole buckets oldest first; it is a projection now, on the
+/// **`SPEC.md` §11.1's ruling, gated here**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)). A sparkline is a
+/// projection rather than a list that drops whole buckets oldest first, on the
 /// clause the heat strip already had, so a narrow row draws sums of adjacent
 /// source buckets. `the_heat_strip_reprojects_rather_than_dropping_buckets` makes
 /// the identical argument one element over and this is its sibling, down to the
@@ -5748,10 +5741,10 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
         12, 12, 12, 12, 11, 11, 10, 10, 9, 9, 8, 8, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1,
     ]);
 
-    // **Swept, and the first draft was not.** At 120 columns the widest rung is
-    // drawn, where a slot mis-measured in buckets happens to be clamped back to
-    // the right answer by the number of cells that exist. Mutating the clamp
-    // survived a single-width version of this gate and dies here, because it is
+    // **Swept rather than sampled.** At 120 columns the widest rung is drawn,
+    // where a slot mis-measured in buckets happens to be clamped back to the
+    // right answer by the number of cells that exist. Mutating the clamp
+    // survives a single-width version of this gate and dies here, because it is
     // only at the *narrow* sparkline rung that the two units disagree in a
     // direction nothing else bounds: the strip then draws four cells into a slot
     // reserved for two and walks into the heat strip.

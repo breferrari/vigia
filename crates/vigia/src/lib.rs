@@ -163,11 +163,11 @@ enum Wake {
     /// alternate screen with nothing the reader in front of it could do about
     /// it, and leaving is the smaller failure.
     ///
-    /// **What changed with [`Signalled`](Wake::Signalled) is the consequence,
-    /// not the ruling.** This used to say the only remaining exit was a kill,
-    /// which ran neither the guard nor the panic hook and handed back a terminal
-    /// in raw mode. A kill is caught now and restores like any other exit, so the
-    /// cost of staying is no longer a wrecked terminal. It is still a pane that
+    /// **[`Signalled`](Wake::Signalled) changes the consequence, not the
+    /// ruling.** Without it the only remaining exit is a kill, which runs
+    /// neither the guard nor the panic hook and hands back a terminal in raw
+    /// mode. A kill is caught and restores like any other exit, so the cost of
+    /// staying is not a wrecked terminal. It is still a pane that
     /// cannot be closed from the pane, which is reason enough.
     InputLost,
     /// Something outside this process asked it to stop.
@@ -283,10 +283,10 @@ pub enum Request {
     NoSuchOption,
     /// More than one argument, when the surface is exactly one.
     ///
-    /// **Refused rather than ignored**, which is a change from how this behaved
-    /// before the surface was gated: `vigia . --colour=never` used to watch `.`
-    /// and drop the rest on the floor, so a reader who typed a flag alongside a
-    /// path got no signal that the flag does not exist. That is the same defect
+    /// **Refused rather than ignored.** Ungated, `vigia . --colour=never`
+    /// watches `.` and drops the rest on the floor, so a reader who typed a flag
+    /// alongside a path gets no signal that the flag does not exist. That is the
+    /// same defect
     /// [`NoSuchOption`](Request::NoSuchOption) exists to prevent, reached from a
     /// position the old check never looked at, and it is worse there: the tool
     /// appears to accept the flag, because it starts and draws.
@@ -299,10 +299,10 @@ pub enum Request {
 /// rather than a list to interpret.
 ///
 /// Takes the whole list rather than one argument, because **arity is part of the
-/// surface and nothing was checking it**. The classifier used to see only
-/// `args_os().nth(1)`, so `vigia . --colour=never` watched `.` and discarded the
-/// rest silently: the flag that does not exist produced a running program
-/// instead of the one-line refusal that a flag on its own produces. A function
+/// surface**. A classifier seeing only `args_os().nth(1)` lets
+/// `vigia . --colour=never` watch `.` and discard the rest silently: the flag
+/// that does not exist produces a running program instead of the one-line
+/// refusal that a flag on its own produces. A function
 /// handed one argument cannot notice a second, which is why the fix is the
 /// signature rather than an extra check at the call site.
 ///
@@ -440,10 +440,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // were trying to change. Same defect `Action::ToggleStaged` had against the
     // keypress, on the path that has no keypress to trigger it.
     //
-    // **Which is why the first walk moved below the config read.** It used to run
-    // three lines after `Worktree::discover`, before this file had been looked at,
-    // so no amount of telling the frame afterwards could have reached it without
-    // walking twice. The rule that put it early is untouched and is why it is
+    // **Which is why the first walk sits below the config read.** Run three
+    // lines after `Worktree::discover`, before this file has been looked at, no
+    // amount of telling the frame afterwards reaches it without walking twice.
+    // The rule that puts it early is untouched and is why it is
     // still above `Session::enter`: a repository that fails on its first walk
     // reports on a terminal the reader can still see, and so does a config file
     // that does not parse. The two now happen in the order they are needed in.
@@ -489,10 +489,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // which was the core's frame path from an example that builds no
         // highlighter at all; the shipped first paint measured 105.03ms.
         //
-        // Not "before the screen is taken", which an earlier version of this
-        // comment claimed: struct fields evaluate in written order and
-        // `Session::enter` is written above, so the alternate screen is already
-        // ours by the time this runs. The placement is right and the reason was
+        // Not "before the screen is taken": struct fields evaluate in written
+        // order and `Session::enter` is written above, so the alternate screen
+        // is already ours by the time this runs. The placement is right and
+        // that reason is
         // wrong.
         //
         // That same evaluation order is why the signal handler is armed *above*
@@ -684,9 +684,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // to `Action::Bottom` being classified wrongly: a call site that
             // decides a height instead of asking for one.
             //
-            // Found by [#297](https://github.com/breferrari/vigia/issues/297)'s
-            // third audit round, after the second had unified two of the three.
-            // No test drives this loop, so what protects it is that there is now
+            // No test drives this loop, so what protects it is that there is
             // one function every site calls rather than three answers that can
             // drift apart.
             let height = shell.diff_rows_for(step, frame.files())?;
@@ -802,10 +800,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // and that ordering is the fix.** `action_for` asks what is
                     // under the pointer, which is the right question for a press
                     // and the wrong one for a hand already moving: a reader
-                    // dragging a one-column bar leaves that column immediately,
-                    // and the gesture used to end there. Now the grip decides,
-                    // and the row is clamped so pulling past either end holds
-                    // that end.
+                    // dragging a one-column bar leaves that column immediately
+                    // and the gesture ends there. The grip decides instead, and
+                    // the row is clamped so pulling past either end holds that
+                    // end.
                     if let Some(on) = shell.grabbed {
                         if let Some(drag) = drag_action(&event, regions, on) {
                             // **The height, because a drag on the diff's bar is a
@@ -870,11 +868,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     };
                     // Asked for only by the one action that reads it, and that is
                     // the drain's doing rather than tidiness. `Shell::area` is an
-                    // uncached terminal-size syscall and `chrome` allocates, and
-                    // both used to be amortised against the full repaint each
-                    // event caused. With sixty-four notches now arriving between
-                    // two paints, computing a height none of them but `Page` reads
-                    // would be sixty-four syscalls and several hundred discarded
+                    // uncached terminal-size syscall and `chrome` allocates,
+                    // and a full repaint per event amortises both. With
+                    // sixty-four notches arriving between two paints, computing
+                    // a height none of them but `Page` reads would be sixty-four
+                    // syscalls and several hundred discarded
                     // allocations inside one batch.
                     //
                     // The branch it carries is whatever the last draw settled on,
@@ -886,8 +884,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw
-                        // below: the reader asked to leave, and painting one more
-                        // frame on the way out is a frame they did not ask for.
+                        // below: leaving was asked for, and painting one more
+                        // frame on the way out is a frame nobody asked for.
                         Ok(false) => break 'awake,
                         Err(e) => shell.app.warn(e.to_string()),
                     }
@@ -900,11 +898,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // keep its file plain for the rest of the session however
                     // many times it was rewritten.
                     //
-                    // A flag rather than `served.clear()`, which is what this
-                    // was in round one of #129's audit: a tick lands inside a
-                    // running warm often during active editing, and clearing
-                    // there destroyed the record of what that warm had been
-                    // handed, so its result had nothing to be compared against.
+                    // A flag rather than `served.clear()`: a tick lands inside
+                    // a running warm often during active editing, and clearing
+                    // there destroys the record of what that warm was handed, so
+                    // its result has nothing to be compared against.
                     shell.written = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only
@@ -913,10 +910,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // pulse where it was, which is the staging case.
                     // **Sized, and the `stat` is here on purpose**
                     // ([#232](https://github.com/breferrari/vigia/issues/232)).
-                    // A sample used to count files written, so a worktree where
-                    // one file is saved over and over put a one in every sample,
-                    // became its own peak, and drew every active column of the
-                    // band at full height: the element said *when* and never
+                    // Counting files written instead lets a worktree where one
+                    // file is saved over and over put a one in every sample,
+                    // become its own peak, and draw every active column of the
+                    // band at full height: the element says *when* and never
                     // *how much*. Weighing a write by the bytes it moved is what
                     // gives both glance elements the shape `SPEC.md` §5.1 names
                     // them for.
@@ -1011,7 +1008,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 /// metadata is warm and the marginal syscall costs nothing measurable.
 ///
 /// **A component measured alone is not a budget.** `CLAUDE.md` asks for the
-/// headroom to be quoted beside any cost used to refuse something, and this was
+/// headroom to be quoted beside any cost that refuses something, and this was
 /// refused twice on a number taken outside the frame: once on a wall figure
 /// inflated by a loaded machine, and once on a CPU figure that was real and
 /// answered a question nobody was asking. Both times the thing the cap protected
@@ -1083,9 +1080,9 @@ pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(
 /// Wakes taken in one go, so one gesture costs one paint.
 ///
 /// **Sixty-four**, and the number matters in one direction only. A trackpad
-/// reports a flick as a stream of scroll events rather than as one, and every one
-/// of them used to be a full redraw: the pane then renders each notch in turn and
-/// falls behind the thumb, which is what *"if it gets too fast, it struggles"*
+/// reports a flick as a stream of scroll events rather than as one, and a full
+/// redraw per event renders each notch in turn and falls behind the thumb, which
+/// is what *"if it gets too fast, it struggles"*
 /// describes. Draining removes that whole class, because the shell moves the
 /// viewport by the flick and draws where it ended up.
 ///
@@ -1303,10 +1300,8 @@ impl Shell {
     /// resolved a screenful short. The two ends of the track agree under both
     /// arithmetics and only the middle does not, which is why nothing noticed.
     ///
-    /// Found by [#297](https://github.com/breferrari/vigia/issues/297)'s second
-    /// audit round, in the same sweep that found `Action::Bottom` classified
-    /// wrongly. **The classification is gated and this wiring is not**: it lives
-    /// inside the takeover loop, which no test drives, so the answer is to leave
+    /// **The classification is gated and this wiring is not**: it lives inside
+    /// the takeover loop, which no test drives, so the answer is to leave
     /// one place that can be wrong rather than two that can disagree. A mutation
     /// that empties this function survives the suite and is recorded as such.
     ///
@@ -1370,9 +1365,9 @@ impl Shell {
     /// Which region's bar is being dragged, for the frame that draws its thumb
     /// lit.
     ///
-    /// A plain read, since [#254](https://github.com/breferrari/vigia/issues/254):
-    /// this used to convert the [`Grabbed`] it is holding into that region's
-    /// first row, which is an identity only while the regions are stacked.
+    /// A plain read ([#254](https://github.com/breferrari/vigia/issues/254)):
+    /// converting the [`Grabbed`] it holds into that region's first row is an
+    /// identity only while the regions are stacked.
     fn gripped(&self) -> Option<Grabbed> {
         self.grabbed
     }
@@ -1438,9 +1433,9 @@ impl Shell {
 
     /// Clear the direction mark once its burst has stopped.
     ///
-    /// **Returns nothing, and used to return whether anything changed** "so the
-    /// caller repaints only on the frame that actually turns it off". The one
-    /// caller never read it: the timeout arm this sits on draws unconditionally,
+    /// **Returns nothing.** Returning whether anything changed, *"so the caller
+    /// repaints only on the frame that actually turns it off"*, is a value no
+    /// caller reads: the timeout arm this sits on draws unconditionally,
     /// because it is also where a held step and an ageing wake land. So the
     /// sentence described a caller that has never existed, and the value was free
     /// to be wrong.
@@ -1460,10 +1455,10 @@ impl Shell {
     ///
     /// **Taken from the terminal's own resized state rather than from a second
     /// size syscall**, so the area a frame is *planned* for is the area it is
-    /// *painted* into. This used to call `Backend::size` directly, which meant two
-    /// independent reads per frame: this one, deciding how many rows
-    /// [`View::collect`] was asked for, and the one `Terminal::draw` makes inside
-    /// its own `autoresize`. A resize landing between them left the collect sized
+    /// *painted* into. Calling `Backend::size` directly is two independent reads
+    /// per frame: this one, deciding how many rows [`View::collect`] is asked
+    /// for, and the one `Terminal::draw` makes inside its own `autoresize`. A
+    /// resize landing between them leaves the collect sized
     /// for a screen the paint no longer had.
     ///
     /// That is not hypothetical on Windows. Entering the alternate screen under
@@ -1857,10 +1852,10 @@ mod tests {
     //! can reach it. `terminal.rs` already keeps its unit tests beside the code
     //! for the same reason.
     //!
-    //! [`branch_for`] used to be tested here too and deliberately is not any
-    //! more. Its rule is about a **frame**, and driving it from a number typed
-    //! into a unit test proved only that the function reads its own argument:
-    //! the call site producing that argument was untestable, and mutating it
+    //! [`branch_for`] is deliberately not tested here. Its rule is about a
+    //! **frame**, and driving it from a number typed into a unit test proves
+    //! only that the function reads its own argument: the call site producing
+    //! that argument is untestable there, and mutating it
     //! passed the whole suite. It is exported and gated against real frames in
     //! `tests/reads.rs` instead.
 
@@ -1925,8 +1920,8 @@ mod tests {
     #[test]
     fn a_burst_of_wakes_arrives_as_one_batch() {
         // The reported symptom, in the only form a test can hold it: a trackpad
-        // reports one flick as a stream of events, and every one of them used to
-        // be a full redraw. One batch is one paint.
+        // reports one flick as a stream of events, and a redraw per event is
+        // what this rules out. One batch is one paint.
         let (tx, rx) = mpsc::channel();
         for at in 1..=5 {
             tx.send(tick(at)).expect("send");
@@ -2275,9 +2270,9 @@ mod tests {
              advances and the loop spins on a zero timeout",
         );
 
-        // And the frame it draws is one the bar counts. Round 1 added this and
-        // nothing held it: deleting the call left the whole suite green, because
-        // a frame time nobody asserts on is invisible to every test in the repo.
+        // And the frame it draws is one the bar counts. Without this, deleting
+        // the call leaves the whole suite green, because a frame time nobody
+        // asserts on is invisible to every test in the repo.
         let timed = arm.find("record_frame(").expect(
             "a timeout frame is not recorded, so the readout `SPEC.md` §5.1 \
              defines as the whole turn of the loop silently omits what is now the \
