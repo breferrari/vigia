@@ -39,9 +39,9 @@
 //! [`History::record`] ran once per coalesced tick and nothing on screen changed
 //! without an event.
 //!
-//! **[#243](https://github.com/breferrari/vigia/issues/243) reverses that, and
-//! the argument it replaced is worth keeping in view because its conclusion was
-//! the defect.** *A tree that has gone quiet holds its last picture* is not what
+//! **The ageing clock reverses that, and the argument it replaces is worth
+//! keeping in view because its conclusion was the defect.** *A tree that has
+//! gone quiet holds its last picture* is not what
 //! a monitor is supposed to do when the picture's own axis
 //! is time: a frozen window keeps its newest sample at the right edge, so a
 //! burst from ninety seconds ago draws as *just now*. The window ages on a clock
@@ -68,8 +68,8 @@
 //! are read from this store through one lookup, and [`Recency::Cold`] is not a
 //! fourth rule but what I10's own eviction leaves behind.
 //!
-//! **What the `●` marks is a second predicate over that same store, since
-//! [#345](https://github.com/breferrari/vigia/issues/345)**, and it does not
+//! **What the `●` marks is a second predicate over that same store**, and it
+//! does not
 //! create the disagreement §5.1 forbids because it is **not a clock at all**.
 //! [`History::newest`] asks *which file did the newest burst name*, which has no
 //! decay to disagree with anything about; the ink keeps the only decay there is.
@@ -92,10 +92,8 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 
 /// The resolution a sparkline is projected **from**, oldest bucket first.
 ///
-/// **The source rather than the drawn count, since
-/// [#234](https://github.com/breferrari/vigia/issues/234)**, which is what
-/// `HEAT_BUCKETS` has been for the heat strip since
-/// [#161](https://github.com/breferrari/vigia/issues/161). The shell's
+/// **The source rather than the drawn count**, which is what `HEAT_BUCKETS` is
+/// for the heat strip. The shell's
 /// `SPARK_RUNGS` halves this on the way down and sums adjacent buckets onto the
 /// rung a pane affords, so a narrow row draws the whole window at a lower
 /// resolution rather than the newest slice of it. `SPEC.md` §11.1 carries that
@@ -113,14 +111,13 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 /// seeded series in three work patterns, twelve buckets of five seconds draws
 /// *fewer* distinct heights than twelve of ten: 5.25 against 5.75 on a steady
 /// worktree, 6.20 against 6.35 on a bursty one. Twenty-four of five draws 6.72
-/// and 7.40. So [#223](https://github.com/breferrari/vigia/issues/223)'s
-/// "distinct heights peak near four to five seconds" was taken with the column
-/// count moving with the period, and it is the columns the shape follows.
+/// and 7.40. So *"distinct heights peak near four to five seconds"* is a reading
+/// taken with the column count moving with the period, and it is the columns the
+/// shape follows.
 ///
-/// **This is what one element *draws from*, and since
-/// [#198](https://github.com/breferrari/vigia/issues/198) it is no longer what
-/// the store *samples*.** The two were the same number for two phases, and the
-/// reason was a sampling rate chosen from one element's column count.
+/// **This is what one element *draws from* and not what the store *samples*.**
+/// The two are the same number only where the sampling rate is chosen from one
+/// element's column count.
 /// [`HISTORY_SAMPLES`] is the sampling rate, and [`History::churn`] projects one
 /// onto the other.
 ///
@@ -129,9 +126,8 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 /// rate is untouched at 120, and twenty-four divides it exactly.
 pub const HISTORY_BUCKETS: usize = 24;
 
-// Eight, twelve ([#161](https://github.com/breferrari/vigia/issues/161)) and
-// twenty-four ([#234](https://github.com/breferrari/vigia/issues/234)) were each
-// argued from a different thing. Eight was one element's column count.
+// Eight, twelve and twenty-four were each argued from a different thing. Eight
+// was one element's column count.
 // Twelve was a period: a fifteen-second bucket is coarse enough that a steady
 // worktree drew five and a half of the ramp's nine rungs, which is a block rather
 // than a shape, and ten seconds took it to 6.5 without crossing into scatter.
@@ -144,8 +140,8 @@ pub const HISTORY_BUCKETS: usize = 24;
 
 /// Source buckets one **drawn** bucket may cover, finest first.
 ///
-/// **The halving ladder the shell narrows on, seen from the store's side**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)). A row draws
+/// **The halving ladder the shell narrows on, seen from the store's side.** A
+/// row draws
 /// `HISTORY_BUCKETS / group` buckets, each the sum of `group` source ones, so
 /// `render::SPARK_RUNGS` is **computed from this table** rather than written out
 /// beside it, so the two cannot disagree. Its order is asserted in **both**
@@ -204,8 +200,8 @@ const _: () = {
 
 /// How much time one **source** bucket covers, which is the finest a rung draws.
 ///
-/// **A rung's own period is this times the buckets it groups**, since
-/// [#234](https://github.com/breferrari/vigia/issues/234): five seconds at the
+/// **A rung's own period is this times the buckets it groups**: five seconds at
+/// the
 /// widest rung, ten at the settled one, twenty at the narrowest. Every rung
 /// covers the whole window, which is what makes this a resolution rather than a
 /// span.
@@ -214,10 +210,10 @@ pub const HISTORY_BUCKET: Duration =
 
 // **`GRAPH_COLUMNS` and `GRAPH_PERIOD` were here and are retired**
 // ([#232](https://github.com/breferrari/vigia/issues/232)). They fixed the
-// band's period at fifteen columns of eight seconds, which
-// [#223](https://github.com/breferrari/vigia/issues/223) tuned over forty seeded
-// series. That row diagnosed the right defect, a save drawing a one-column
-// hairline between two blanks, and reached for the wrong fix: the answer to the
+// band's period at fifteen columns of eight seconds, tuned over forty seeded
+// series. That diagnosed the right defect, a save drawing a
+// one-column hairline between two blanks, and reached for the wrong fix: the
+// answer to the
 // same defect on the same shape of signal is the **axis**, and with a
 // floor under it a narrow column is a spike rather than a mark in a void. The
 // band draws one value per sub-column now, so its period is a property of the
@@ -227,21 +223,21 @@ pub const HISTORY_BUCKET: Duration =
 // lives in the *distinct heights*, and those collapse when columns coarsen.
 // Coarsening was the thing being tuned, and it is gone.
 //
-// **What that left open is closed by [#234](https://github.com/breferrari/vigia/issues/234),
-// and the replacement is a bound rather than an absence.** `GRAPH_PERIOD` was
-// what stopped a drawn bucket going finer than a band column; with it gone the
+// **What that leaves open is closed by the rung ladder, and the replacement is a
+// bound rather than an absence.** `GRAPH_PERIOD` is what stops a drawn bucket
+// going finer than a band column; with it gone the
 // two elements are still read side by side over one store, so what has to agree
 // is the **window** they cover. The band covers all of it at every width, and
-// since #234 so does the sparkline at every rung. `SPEC.md` §11.1 states it and
+// so does the sparkline at every rung. `SPEC.md` §11.1 states it and
 // `crates/vigia/tests/masthead.rs` gates the comparison the retired constant
 // made.
 
 /// Samples the store keeps per path, oldest first.
 ///
 /// **The resolution the store records at, which is not the resolution any one
-/// element draws at** ([#198](https://github.com/breferrari/vigia/issues/198)).
-/// It was [`HISTORY_BUCKETS`] until then, so one element's column count decided
-/// what the whole store could ever answer, and a worktree-wide graph across a wide
+/// element draws at.** As [`HISTORY_BUCKETS`] one element's column count decides
+/// what the whole store can ever answer, and a worktree-wide graph across a
+/// wide
 /// pane had eight points to draw whatever glyph drew them.
 ///
 /// **Not an I10 change.** That row bounds 256 paths and a 120-second window: the
@@ -260,9 +256,8 @@ pub const HISTORY_BUCKET: Duration =
 /// a [`History::record`] walk fifteen times longer than it was. Both are measured
 /// in the issue rather than asserted to be small.
 ///
-/// **Public since [#158](https://github.com/breferrari/vigia/issues/158)**, which
-/// is the second element and the one this resolution was raised for. It was kept
-/// private while [`History::churn`] was the only reader, on the ground that
+/// **Public**, for the second element this resolution was raised for. It is
+/// private while [`History::churn`] is the only reader, on the ground that
 /// private is the reversible direction under semver and `pub` is not; the graph
 /// draws the whole series across a whole pane, so it needs the length to project
 /// against.
@@ -270,8 +265,8 @@ pub const HISTORY_SAMPLES: usize = 120;
 
 /// How much time one **sample** covers, which is the grid the window rolls on.
 ///
-/// **Public since [#243](https://github.com/breferrari/vigia/issues/243)**,
-/// because it stopped being an internal grid and became a term in I1's budget:
+/// **Public**, because it is a term in I1's budget rather than an internal
+/// grid:
 /// the ageing clock wakes at most once per sample, and it is the *derivation*
 /// that ruling rests on, since a sample is the finest interval at which any drawn
 /// cell can change.
@@ -311,8 +306,8 @@ pub const HISTORY_SAMPLE: Duration =
 /// so the **worst** case is what the unclosed form's best case was.
 ///
 /// **It is still bounded, which is the half that matters to §5.3.** A mark with no
-/// ceiling is the frozen clock [#243](https://github.com/breferrari/vigia/issues/243)
-/// removed and the pulse decay before it; one with no floor is the mark nobody
+/// ceiling is the frozen clock the ageing removed, and the pulse decay before
+/// it; one with no floor is the mark nobody
 /// catches. `crates/vigia-core/tests/history.rs::a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`
 /// gates both ends, across every corner of the grid including the two that
 /// measured 10ms and 5ms.
@@ -385,23 +380,22 @@ pub enum Recency {
     /// Named by the most recent tick **and** holding ink in the newest sample.
     /// Drawn brightest.
     ///
-    /// **It does not carry the `●`**
-    /// ([#345](https://github.com/breferrari/vigia/issues/345)). This rung is
+    /// **It does not carry the `●`.** This rung is
     /// how brightly a row is drawn; [`History::newest`] is which file was
     /// written last, and one value answering both is what quietly retires a mark
     /// the
     /// reader relied on.
     ///
-    /// Both halves, since [#243](https://github.com/breferrari/vigia/issues/243).
-    /// The ordinal alone only advances when a burst names something, so on a
+    /// Both halves. The ordinal alone only advances when a burst names
+    /// something, so on a
     /// quiet worktree it left the mark lit: a file written two minutes ago drew
     /// at full brightness beside a band that had almost drained.
     ///
     /// Still not a duration, and the reason is no longer the one recorded here.
     /// This said a rung measured in seconds "would have to age while the event
     /// loop is blocked, and being able to see that happen needs a redraw I1
-    /// forbids scheduling", which #243 reversed: I1's licence does reach that
-    /// redraw, and the window ages on its own. What is left is the coherence
+    /// forbids scheduling", which is false: I1's licence does reach that redraw,
+    /// and the window ages on its own. What is left is the coherence
     /// argument. This rung means *there is ink in the newest sample*, so it is
     /// bounded by that sample and expires on the grid the elements beside it are
     /// drawn on. A duration of its own would be a second clock disagreeing with
@@ -432,8 +426,7 @@ pub struct HistoryStats {
     pub evicted_by_cap: u64,
     /// Paths dropped because nothing was left inside [`HISTORY_WINDOW`].
     pub evicted_by_window: u64,
-    /// Projections walked, which is the work
-    /// [#243](https://github.com/breferrari/vigia/issues/243)'s clock made worth
+    /// Projections walked, which is the work the ageing clock makes worth
     /// counting.
     ///
     /// **A counter because the saving is otherwise unobservable**, which is the
@@ -468,8 +461,7 @@ pub struct Churn(pub [u32; HISTORY_SAMPLES]);
 /// rules that a published artifact answering an open question is the answer. A
 /// write is a **point event**, so the retained samples are zero almost
 /// everywhere and drawing them raw is a spike train rather than a wave. Reported
-/// from a live pane as *"spikes on a flat line"*
-/// ([#242](https://github.com/breferrari/vigia/issues/242)).
+/// from a live pane as *"spikes on a flat line"*.
 ///
 /// **A causal decay is the obvious first idea and it is the wrong shape.** An
 /// impulse rises instantly and falls slowly, which is a sawtooth: measured, it
@@ -486,9 +478,8 @@ pub struct Churn(pub [u32; HISTORY_SAMPLES]);
 /// `tests/history.rs::two_bursts_thirty_seconds_apart_still_read_as_two` is what
 /// fails if this is raised past it.
 ///
-/// **Re-derived when the source halved**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)) rather than carried
-/// over, because every one of those numbers is read through a bucket. This
+/// **Re-derived when the source halves** rather than carried over, because every
+/// one of those numbers is read through a bucket. This
 /// docblock and the gate's are one measurement on one fixture, not two — taken
 /// from separate fixtures they quote 0.54 against 0.40 for eight seconds. The
 /// constant did not move and its margin
@@ -672,8 +663,7 @@ impl Churn {
     /// What [`Self::levels`] at this width is measured against.
     ///
     /// **The cut is taken before the projection and the mean after it, and
-    /// getting that order wrong is a defect this row made twice**
-    /// ([#256](https://github.com/breferrari/vigia/issues/256)).
+    /// getting that order wrong is a defect made easily and twice.**
     ///
     /// [`Self::projected`] *sums* where a pane holds fewer columns than the
     /// window holds samples. So the two mistakes are:
@@ -738,9 +728,9 @@ impl Churn {
 /// time, so counting the zeroes would make the denominator a measure of how long
 /// the reader has been away rather than of how large a write is.
 ///
-/// **And it is over the non-outlying values only**, which is
-/// [#256](https://github.com/breferrari/vigia/issues/256) and is what
-/// [`SCALE_OUTLIER`] decides. A mean is not robust, so on a heavy-tailed window
+/// **And it is over the non-outlying values only**, which is what
+/// [`SCALE_OUTLIER`] decides. A mean is not robust, so on a heavy-tailed
+/// window
 /// the outlier this rule exists to let saturate was setting the denominator from
 /// inside it.
 ///
@@ -774,9 +764,8 @@ pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
 
 /// How many times the median a value may be before it stops setting the scale.
 ///
-/// **The estimator was not robust, and one loud write was enough**
-/// ([#256](https://github.com/breferrari/vigia/issues/256), reported from a live
-/// pane). A test run rewriting 3,400 bytes sits in the same window as the
+/// **A mean is not robust, and one loud write is enough**, reported from a live
+/// pane. A test run rewriting 3,400 bytes sits in the same window as the
 /// 180-byte edits around it; the mean that sets the denominator is dragged up by
 /// the burst, and every ordinary edit lands on the lowest of the band's sixteen
 /// levels, which at the baseline row is `▁` and is not distinguishable from the
@@ -843,9 +832,7 @@ fn scale_of_busy(busy: &mut [u32]) -> u32 {
 /// `None` when there is nothing to measure.
 ///
 /// **Taken once over the whole population and then applied, rather than
-/// re-derived wherever the values are summed.** That is the difference between
-/// this and the first shape of
-/// [#256](https://github.com/breferrari/vigia/issues/256), and it is what keeps
+/// re-derived wherever the values are summed.** That is what keeps
 /// [`History::repeak`]'s figures in order: see the paragraph there about a
 /// coarser rung. Reorders `busy`.
 ///
@@ -894,9 +881,9 @@ fn scale_from(sum: u64, kept: u64) -> u32 {
 
 /// One path's churn, and when it last moved.
 ///
-/// **`Clone` and not `Copy` since [#198](https://github.com/breferrari/vigia/issues/198)**,
-/// which took this from twenty-four bytes to two hundred and forty-eight.
-/// Nothing copies one today, and that is exactly why the trait comes off now: a
+/// **`Clone` and not `Copy`**, this being two hundred and forty-eight bytes
+/// rather than twenty-four. Nothing copies one, and that is exactly why the
+/// trait comes off: a
 /// `Copy` of this size makes the next accidental by-value use invisible at the
 /// call site and an order of magnitude more expensive than it reads.
 #[derive(Debug, Clone)]
@@ -929,8 +916,7 @@ struct Track {
 impl Track {
     /// Whether this track was named by the burst numbered `tick`.
     ///
-    /// **One spelling, because two callers ask it for different reasons**
-    /// ([#345](https://github.com/breferrari/vigia/issues/345)):
+    /// **One spelling, because two callers ask it for different reasons:**
     /// [`History::newest`] asks it alone and it decides the `●`, and
     /// [`History::recency`] asks it beside the ink and it decides how brightly
     /// the row is drawn. A predicate written at each site is the shape this
@@ -978,8 +964,7 @@ impl Track {
     /// [`SAMPLES_PER_BUCKET`] samples covering exactly the seconds it always
     /// covered, so the same writes land in the same column.
     ///
-    /// **This is one projection of two since
-    /// [#234](https://github.com/breferrari/vigia/issues/234).** The shell groups
+    /// **This is one projection of two.** The shell groups
     /// these again onto the rung a pane affords, by the same rule and for the
     /// same reason, so what a reader sees is the whole window at whatever
     /// resolution the row can hold.
@@ -1115,8 +1100,8 @@ pub struct History {
     /// grouping walks one track's [`HISTORY_BUCKETS`] at a time, which is what
     /// `chunks(HISTORY_BUCKETS)` relies on and all that it relies on.
     ///
-    /// **A denominator stopped being expressible as a running pair**
-    /// ([#256](https://github.com/breferrari/vigia/issues/256)): the rule takes a
+    /// **A denominator is not expressible as a running pair**: the rule takes
+    /// a
     /// median before it takes a mean, and a median needs the values. This is
     /// where they go.
     ///
@@ -1130,8 +1115,7 @@ pub struct History {
     /// [`HISTORY_PATHS`] cap this holds [`HISTORY_BUCKETS`] `u32` per track,
     /// which is twenty-four kilobytes, allocated once and `clear`ed on every
     /// walk. I3 bounds RSS *drift*, and a fixed buffer of that size is the same
-    /// trade [#161](https://github.com/breferrari/vigia/issues/161) made when the
-    /// store went from 4KiB to 60KiB.
+    /// trade the store makes going from 4KiB to 60KiB.
     scratch: Vec<u32>,
     /// The non-empty members of [`Self::scratch`], which is the population the
     /// median is taken over.
@@ -1187,16 +1171,14 @@ impl History {
     /// diff drawn, but nothing on disk moved, so the file the reader is watching
     /// keeps its label.
     ///
-    /// That is also **why there is no separate `expire`**, which the plan for
-    /// [#38](https://github.com/breferrari/vigia/issues/38) named as a second
-    /// public method. A public `expire` would have been exactly `record` with no
+    /// That is also **why there is no separate `expire`**, which is the obvious
+    /// second public method. It would be exactly `record` with no
     /// paths, and two entry points into one rule are two things a caller can get
     /// out of step. Ageing with no paths is therefore spelled `record_sized([])`
     /// and goes through the same door as everything else.
     ///
-    /// **Called on a tick *and* on the ageing wake, which was not true before
-    /// [#243](https://github.com/breferrari/vigia/issues/243).** This said "once
-    /// per tick and never on a timer", and that was the whole of the freeze: with
+    /// **Called on a tick *and* on the ageing wake.** "Once per tick and never
+    /// on a timer" is the whole of the freeze: with
     /// a tick as the only clock, a worktree that went quiet stopped ageing and
     /// the window kept a ninety-second-old burst pinned at the right edge,
     /// drawing it as *just now*. The window is still real time and the store
@@ -1274,10 +1256,9 @@ impl History {
             self.tracks.insert(path.to_owned(), track);
         }
 
-        // **Skipped when nothing moved and nothing was written**, which is new
-        // with [#277](https://github.com/breferrari/vigia/issues/277) and is not
-        // an optimisation looking for a problem: that row put this call on the
-        // shell loop's *timeout* arm, which also fires every `STEP_REPEAT` while
+        // **Skipped when nothing moved and nothing was written**, which is not
+        // an optimisation looking for a problem: this call sits on the shell
+        // loop's *timeout* arm, which also fires every `STEP_REPEAT` while
         // a scrollbar button is held. At 50ms a held button drives twenty
         // timeouts a second and nineteen of them cross no sample boundary, so
         // without this guard each one pays the walk priced at **150.1µs p50** in
@@ -1299,9 +1280,8 @@ impl History {
     /// comparable to the reference on every target, and returning it by value is
     /// what lets a caller hold one while asking about the next path.
     ///
-    /// **Projected rather than stored since
-    /// [#198](https://github.com/breferrari/vigia/issues/198)**, which is what
-    /// keeps the sentence above true: the store holds [`HISTORY_SAMPLES`] of them
+    /// **Projected rather than stored**, which is what keeps the sentence above
+    /// true: the store holds [`HISTORY_SAMPLES`] of them
     /// and this sums each drawn column's worth. Handing back the samples instead
     /// would have made the array larger than a reference on every target and
     /// pushed the projection out to every caller, where each would have had to
@@ -1313,9 +1293,8 @@ impl History {
     /// This path's churn read as a **level** rather than as the writes that made
     /// it, in the same source buckets [`History::churn`] returns.
     ///
-    /// The sparkline's half of [#242](https://github.com/breferrari/vigia/issues/242),
-    /// and it shares one kernel with the worktree band so the two cannot
-    /// disagree, which is [#234](https://github.com/breferrari/vigia/issues/234)'s
+    /// The sparkline's half of the levelling, and it shares one kernel with the
+    /// worktree band so the two cannot disagree, which is the coherence
     /// constraint met by construction rather than by discipline.
     pub fn level(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
         self.tracks.get(path).map(Track::levelled)
@@ -1323,8 +1302,7 @@ impl History {
 
     /// Whether the newest burst named this path, which is what the `●` marks.
     ///
-    /// **The ordinal alone, and that is the whole of the fix**
-    /// ([#345](https://github.com/breferrari/vigia/issues/345)). [`Self::recency`]
+    /// **The ordinal alone, and that is the whole of the fix.** [`Self::recency`]
     /// answers *how brightly to draw this row* and this answers *which file was
     /// written last*, which are two questions.
     ///
@@ -1365,9 +1343,8 @@ impl History {
 
     /// Which rung of the recency ladder this path is on.
     ///
-    /// **The newest burst, and only until the window rolls past it**
-    /// ([#243](https://github.com/breferrari/vigia/issues/243)). Both halves are
-    /// load bearing and the first was here alone.
+    /// **The newest burst, and only until the window rolls past it.** Both
+    /// halves are load bearing and the first is the one easily kept alone.
     ///
     /// `track.tick == self.tick` is the newest *burst*, which is what
     /// distinguishes two saves a second apart: §11.2 B2 has follow move to the
@@ -1417,8 +1394,7 @@ impl History {
 
     /// What a **source** bucket's height is divided by, across every tracked path.
     ///
-    /// **A caller drawing a coarser rung scales this with it**, since
-    /// [#234](https://github.com/breferrari/vigia/issues/234): a drawn column
+    /// **A caller drawing a coarser rung scales this with it**: a drawn column
     /// summing `n` source buckets is measured against `n` times this figure, so a
     /// wider bucket is compared with a proportionally wider yardstick rather than
     /// saturating against a narrow one. That keeps a rung a change of resolution
@@ -1439,10 +1415,8 @@ impl History {
     /// the sparkline divides by the same store and needed it too.
     ///
     /// **Zero when nothing is tracked, which is a scale a caller must not divide
-    /// by — and not an instruction to draw nothing.** Since
-    /// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket
-    /// draws a track, so zero means every bucket is empty and every one of them
-    /// is
+    /// by — and not an instruction to draw nothing.** An empty bucket draws a
+    /// track, so zero means every bucket is empty and every one of them is
     /// still drawn. The constraint this states is arithmetic and belongs here;
     /// what to draw is the shell's and belongs in `SPEC.md` §5.1.
     pub fn scale(&self) -> u32 {
@@ -1451,8 +1425,7 @@ impl History {
 
     /// Every figure [`SPARK_GROUPS`] names, in that order.
     ///
-    /// **What a caller drawing a coarser rung needs**, since
-    /// [#234](https://github.com/breferrari/vigia/issues/234): a drawn bucket is
+    /// **What a caller drawing a coarser rung needs**: a drawn bucket is
     /// the sum of `group` source ones, and the figure it is measured against is
     /// this one rather than [`History::scale`] multiplied, for the reason
     /// [`SPARK_GROUPS`] states with the measurement behind it.
@@ -1480,7 +1453,7 @@ impl History {
     /// Advance the window to `now`, dropping whatever fell out of it.
     /// Returns how many whole samples the window moved, which is what lets
     /// [`Self::record_sized`] skip [`Self::repeak`] over state that did not
-    /// change ([#277](https://github.com/breferrari/vigia/issues/277)).
+    /// change.
     fn roll(&mut self, now: Instant) -> usize {
         let elapsed = now.saturating_duration_since(self.opened);
         // Saturating into `usize` before the comparison below, so an instant far
@@ -1500,10 +1473,9 @@ impl History {
             self.tracks.clear();
             self.opened = now;
             // **`repeak` owns both derived fields, so neither is zeroed here.**
-            // This zeroed `scales` and left `worktree` alone, which was harmless
-            // only because the caller repeaked unconditionally. Since
-            // [#277](https://github.com/breferrari/vigia/issues/277) it does not,
-            // and a branch that clears one of two derived fields is one edit from
+            // Zeroing `scales` and leaving `worktree` alone is harmless only
+            // while the caller repeaks unconditionally. It does not, and a
+            // branch that clears one of two derived fields is one edit from
             // a window that reads as full ink forever while `ages_in` says there
             // is nothing left to age. The caller repeaks whenever this returns
             // non-zero, and this branch always does.
@@ -1526,9 +1498,8 @@ impl History {
         // non-zero step, so a second full projection of every track would be pure
         // duplicate work. That was survivable while a track held eight samples
         // and is a quarter of the tick's cost now that it holds a hundred and
-        // twenty. (It repeaked *unconditionally* until
-        // [#277](https://github.com/breferrari/vigia/issues/277) gave the caller
-        // this function's step count to skip on.)
+        // twenty. (Repeaking *unconditionally* is what this function's step
+        // count lets the caller skip.)
         steps
     }
 
@@ -1558,8 +1529,8 @@ impl History {
     /// How long until the window's next sample boundary, or `None` when it holds
     /// nothing to age.
     ///
-    /// **The whole of [#243](https://github.com/breferrari/vigia/issues/243)'s
-    /// budget, and `None` is the load-bearing half.** The shell's loop waits
+    /// **The whole of the ageing clock's budget, and `None` is the load-bearing
+    /// half.** The shell's loop waits
     /// untimed when every deadline it can see is `None`, so returning a duration
     /// here for an empty window would put an idle monitor on a poll loop while
     /// looking entirely reasonable. That is the same shape `Held::wait` is
@@ -1595,8 +1566,8 @@ impl History {
     /// Every tracked path's churn added together, oldest sample first.
     ///
     /// **The worktree's own series, which is what `SPEC.md` §5.3 calls the
-    /// worktree churn graph** ([#158](https://github.com/breferrari/vigia/issues/158)).
-    /// It invents nothing: it is arithmetic over state I10 already bounds, so it
+    /// worktree churn graph.** It invents nothing: it is arithmetic over state
+    /// I10 already bounds, so it
     /// needs no wake, no write and no clock, and it is drawn on frames that were
     /// going to happen anyway.
     ///
@@ -1625,8 +1596,8 @@ impl History {
     /// most expensive thing a tick does.
     ///
     /// The peak is over the **projection** rather than the raw samples, which is
-    /// the half of [#198](https://github.com/breferrari/vigia/issues/198) that
-    /// would have moved the sparkline if it were got wrong: heights are scaled
+    /// the half of the sampling change that would move the sparkline if it were
+    /// got wrong: heights are scaled
     /// against it, so a denominator measured one sample at a time would be
     /// smaller than the columns it divides and every bar on screen would top
     /// out.
@@ -1646,15 +1617,13 @@ impl History {
                 *total = total.saturating_add(count);
             }
         }
-        // **Collected rather than streamed, since
-        // [#256](https://github.com/breferrari/vigia/issues/256).** This walked
-        // the buckets through an iterator so nothing had to hold them, and the
-        // rule now takes a median, which no running pair can answer.
+        // **Collected rather than streamed.** Walking the buckets through an
+        // iterator means nothing has to hold them, and the rule takes a median,
+        // which no running pair can answer.
         // [`Self::scratch`] is what keeps that from costing an allocation a tick.
         // **Measured rather than assumed, since this is the frame path, and
-        // re-measured when this body changed** rather than left describing the
-        // code it was taken against
-        // ([#256](https://github.com/breferrari/vigia/issues/256)). At the full
+        // re-measured when this body changes** rather than left describing the
+        // code it was taken against. At the full
         // 256-path cap over a populated window this walk costs **150.1µs p50 and
         // 154.2µs p99**, from 147.0 and 150.7 with the cut disabled and the rest
         // of the body unchanged, measured interleaved in one process so a loaded
@@ -1669,14 +1638,14 @@ impl History {
         // 1.82%**, and the band's own half of the change, taking the cut before
         // the projection rather than folding the projection, is 0.91µs of it.
         //
-        // **Levelled, because that is what the sparkline draws**
-        // ([#242](https://github.com/breferrari/vigia/issues/242)). A denominator
+        // **Levelled, because that is what the sparkline draws.** A
+        // denominator
         // taken over the raw buckets while the bars are drawn from the levelled
         // ones is two different quantities in one division, and every bar on
         // screen would be wrong by whatever the kernel moved.
         //
-        // **One figure per [`SPARK_GROUPS`] entry, from the one walk**, since
-        // [#234](https://github.com/breferrari/vigia/issues/234). The shell's
+        // **One figure per [`SPARK_GROUPS`] entry, from the one walk.** The
+        // shell's
         // `spark_of` groups these same buckets the same way to get the numerator
         // this is the denominator for, and the two are deliberately not one
         // function: that one materialises the groups so a drawn row allocates
@@ -1689,10 +1658,9 @@ impl History {
         // the grouping instead was measured and rejected, and that constant's
         // docblock carries the number.
         //
-        // **Gathered rather than accumulated, since
-        // [#256](https://github.com/breferrari/vigia/issues/256).** This kept a
-        // running `(sum, busy)` per grouping while the rule was a plain mean, and
-        // the rule now takes a median first, which no running pair can answer.
+        // **Gathered rather than accumulated.** A running `(sum, busy)` per
+        // grouping serves a plain mean, and the rule takes a median first, which
+        // no running pair can answer.
         // [`Self::scratch`] is what keeps that from being an allocation per tick:
         // it is cleared and refilled, so the cost of the change is the gather
         // rather than the memory. The kernel still runs once per track, which is
@@ -1932,8 +1900,8 @@ mod tests {
         // **The claim, asserted by moving the outlier rather than by comparing
         // against one bucket.** `scale < busiest` is a true consequence of a
         // mean-based scale while the buckets are spiky and stops being one once
-        // [#242](https://github.com/breferrari/vigia/issues/242) makes them a
-        // level: a smooth series has few outliers, so a mean is
+        // levelling makes them smooth: a smooth series has few outliers, so a
+        // mean is
         // representative and thirteen tenths of it sits *above* a typical bucket
         // rather than below the tallest. The property that actually matters never
         // depended on which side it landed: one enormous write must not drag the
@@ -1970,7 +1938,7 @@ mod tests {
     /// A path written more than `u16::MAX` times in one sample is already at the
     /// top of the ramp; wrapping would draw the busiest file as the quietest.
     ///
-    /// **Both halves, since #198 gave the projection its own saturating add.** A
+    /// **Both halves, the projection having its own saturating add.** A
     /// sample that saturates and a drawn column that sums fifteen of them are two
     /// places the same wrap could happen, and the second is the newer one.
     #[test]
