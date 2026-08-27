@@ -1187,36 +1187,32 @@ impl App {
 
     /// The file a pin is on, resolved against the files that actually exist.
     ///
-    /// **`None` is *not pinned*, and it covers two different states on purpose**:
-    /// the reader has not asked for a pin, and there is nothing to pin to. Both
-    /// want the arm's unpinned branch, and both are states the arms below would
-    /// otherwise have had to test for separately.
+    /// **`None` is *not pinned*, and it covers two states on purpose**: the
+    /// reader has not asked for a pin, and there is nothing to pin to. Both
+    /// want the arm's unpinned branch.
     ///
     /// **The clamp is what makes this a function rather than a field read**, and
     /// it is load-bearing rather than defensive. `SPEC.md` §11.2 B16 puts the
     /// pinned file in [`Self::position`], and a position is exactly the index
     /// that outlives the list it was resolved against:
     /// [`vigia_core::Frame::advance`] rebuilds the changed set from scratch, so
-    /// the agent in the other pane committing its work, reverting an edit or
-    /// switching branch leaves this naming a file that is gone.
-    /// [`vigia_core::Frame::rows_of`] **panics** on that index by design, the same
-    /// way [`vigia_core::Frame::diff`] does, and the two callers below reach the
-    /// frame *before* [`View::collect`] has had a chance to clamp. **They are not
-    /// the only ones, and an earlier draft of this sentence said they were**:
-    /// [`Self::up`]'s walk back does too, it had the same latent panic, and the
-    /// claim here is what kept anyone from looking. It carries its own clamp now,
-    /// and this says *two of three* rather than *the only two*. A clean worktree is the whole
-    /// of the second case and it is not an edge: it is the state a monitor sits in
-    /// most of the time, so `s` and then `G` on a pane that has been left open is
+    /// the agent in the other pane committing, reverting or switching branch
+    /// leaves this naming a file that is gone. [`vigia_core::Frame::rows_of`]
+    /// **panics** on that index by design. Two of the three callers that reach
+    /// the frame before [`View::collect`] can clamp are below; [`Self::up`]'s
+    /// walk back is the third and carries its own clamp. **A clean worktree is
+    /// the whole of the second case and is not an edge**: it is the state a
+    /// monitor sits in most of the time, so `s` then `G` on a pane left open is
     /// a panic in a tool whose job is to be left open.
     ///
-    /// Clamped rather than refused, which is [`View::collect`]'s own answer to the
-    /// same staleness: the reader asked for the end of the file they were on, and
-    /// the nearest file that still exists is a better answer than nothing
-    /// happening. `tests/single.rs::a_pinned_gesture_survives_the_diff_it_was_made_against`
+    /// Clamped rather than refused, which is [`View::collect`]'s own answer to
+    /// the same staleness: the reader asked for the end of the file they were
+    /// on, and the nearest file that still exists is a better answer than
+    /// nothing happening.
+    /// `tests/single.rs::a_pinned_gesture_survives_the_diff_it_was_made_against`
     /// holds both shapes.
     ///
-    /// [`Action::Top`] does not come through here, and that is not an omission:
+    /// [`Action::Top`] does not come through here and that is not an omission:
     /// it writes an index and reads nothing, so a stale one is resolved by the
     /// same clamp every other jump gets.
     fn pinned_file(&self, frame: &Frame) -> Option<usize> {
@@ -1226,41 +1222,36 @@ impl App {
 
     /// Put the viewport at the top of `file`, which is what a **jump** means.
     ///
-    /// **The rule was written out at five call sites and this is the fifth's
-    /// doing.** [`App::scroll`] one method down already argues this case for the
-    /// other half of the pair: anchoring lives there rather than in each arm
-    /// that scrolls, because *"a rule spelled out three times is one an arm
-    /// eventually forgets"*. The jump side never got the same treatment, and
-    /// adding a sixth arm that restates it is what made the omission worth
-    /// closing rather than noting.
+    /// Here rather than in each arm that jumps, for the reason [`App::scroll`]
+    /// gives for the other half of the pair: *a rule spelled out three times is
+    /// one an arm eventually forgets*.
     ///
     /// Row zero because a jump lands on the file's **heading**. Finding any
     /// other row means asking how tall the file is, which costs the diff I4
     /// forbids, so this is the resolution every jump on this map shares: `g`,
     /// `G`, a click on a listed file, a digit, and `n`/`p`. **Follow starts
-    /// here too and is then moved off it**, which is [`Self::landing`] and
-    /// #257; every one of the keys named above keeps the heading, because
-    /// `SPEC.md` §11.1 gives them the *file* as their unit.
+    /// here too and is then moved off it**, which is [`Self::landing`]; every
+    /// one of the keys named above keeps the heading, because `SPEC.md` §11.1
+    /// gives them the *file* as their unit.
     ///
     /// `anchored` is cleared because that word means "reached by scrolling", and
     /// a jump is the other thing. See [`App::anchored`] for what it costs to get
     /// wrong: a viewport free to back up and fill a short tail moves the file the
     /// jump was *for* off the top row.
     ///
-    /// **[`App::landing`] is not cleared here, and a draft of this cleared it.**
-    /// The debt has to be settled by every gesture that moves the viewport, or a
-    /// `G` or a digit inherits it and lands mid-file, which `SPEC.md` §11.1 rules
-    /// against by name for exactly those keys. That is one predicate rather than
-    /// a list of sites, and `Action::is_manual_scroll` is it: every caller of
-    /// this but [`App::jump_to_newest`] is one, so a clear here would be a second
-    /// statement of a rule already made and could never fire. Mutation testing is
-    /// what said so, by leaving the whole suite green without it. (A drag on the
-    /// diff's bar is a manual scroll too and settles the debt the same way, but
-    /// it does not come through here: it writes a position of its own.)
+    /// **[`App::landing`] is deliberately not cleared here.** The debt has to be
+    /// settled by every gesture that moves the viewport, or a `G` or a digit
+    /// inherits it and lands mid-file. That is one predicate rather than a list
+    /// of sites, and `Action::is_manual_scroll` is it: every caller of this but
+    /// [`App::jump_to_newest`] is one, so a clear here would restate a rule
+    /// already made and could never fire. Mutation testing is what said so, by
+    /// leaving the whole suite green without it. (A drag on the diff's bar is a
+    /// manual scroll too and settles the debt the same way, but it does not come
+    /// through here: it writes a position of its own.)
     ///
-    /// The caller picks the index, and that is the whole of what the arms differ
-    /// by. Nothing here bounds it: an arm that cannot say which file it means has
-    /// nothing to jump to and does not call this.
+    /// The caller picks the index, and nothing here bounds it: an arm that
+    /// cannot say which file it means has nothing to jump to and does not call
+    /// this.
     fn jump_to(&mut self, file: usize) {
         self.anchored = false;
         self.position = Position { file, row: 0 };

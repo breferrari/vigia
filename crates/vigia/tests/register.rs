@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 const RATIO_CEILING: [(&str, u64); 8] = [
     ("vigia-core/src/change.rs", 192),
     ("vigia/src/input.rs", 240),
-    ("vigia/src/app.rs", 249),
+    ("vigia/src/app.rs", 246),
     ("vigia-core/src/history.rs", 236),
     ("vigia/src/render.rs", 195),
     ("vigia/src/glyphs.rs", 191),
