@@ -1062,13 +1062,12 @@ fn a_single_burst_draws_a_wave_rather_than_a_spike() {
 /// Half is the line, and this gate is what fails if the constant is raised past
 /// it.
 ///
-/// **Re-derived at the finer source resolution**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)), because these
-/// numbers are read through a bucket and the bucket halved. They moved in the
-/// direction that matters and not the one that decides: six seconds went from
-/// 0.36 to 0.23, so the shipped constant has half again the margin it was
-/// credited with, while the *line* is where it was, between eight seconds and
-/// ten. A finer bucket smears less, which is the whole of it.
+/// **Re-derived at the finer source resolution**, because these numbers are
+/// read through a bucket and the bucket halved. They moved in the direction
+/// that matters and not the one that decides: six seconds went from 0.36 to
+/// 0.23, so the shipped constant has half again the margin it was credited
+/// with, while the *line* is where it was, between eight seconds and ten. A
+/// finer bucket smears less, which is the whole of it.
 #[test]
 fn two_bursts_thirty_seconds_apart_still_read_as_two() {
     let now = base();
@@ -1586,11 +1585,11 @@ fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
 
 /// `SPEC.md` §11.1's `●`: the file the newest burst named, until another arrives.
 ///
-/// **Reported from the pane** ([#345](https://github.com/breferrari/vigia/issues/345)):
-/// the mark did not stay long enough, and it never went away. Both halves were
-/// true. It is the ordinal alone; giving `History::recency` a second term while
-/// ageing the churn window takes the mark along with the ink, on a complaint
-/// that is about **brightness** rather than about the mark.
+/// **Reported from the pane**: the mark did not stay long enough, and it never
+/// went away. Both halves were true. It is the ordinal alone; giving
+/// `History::recency` a second term while ageing the churn window takes the
+/// mark along with the ink, on a complaint that is about **brightness** rather
+/// than about the mark.
 ///
 /// The two questions are separate now, and this gate is the one that keeps them
 /// separate: it asserts the mark **survives** exactly where
@@ -1653,11 +1652,11 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
 
 /// Every file one burst names carries the mark, which is what *newest* means.
 ///
-/// **Deliberately not narrowed to one file** ([#345](https://github.com/breferrari/vigia/issues/345)).
-/// A formatter, a branch switch or a multi-file agent edit writes several paths
-/// in one tick, and choosing which of them is "the" last edited one would be a
-/// second ruling with no basis in what happened. Recorded as a gate so the next
-/// reader finds a decision rather than an omission.
+/// **Deliberately not narrowed to one file**. A formatter, a branch switch or a
+/// multi-file agent edit writes several paths in one tick, and choosing which
+/// of them is "the" last edited one would be a second ruling with no basis in
+/// what happened. Recorded as a gate so the next reader finds a decision rather
+/// than an omission.
 #[test]
 fn every_file_a_burst_names_carries_the_newest_mark() {
     let start = base();
@@ -1679,12 +1678,11 @@ fn every_file_a_burst_names_carries_the_newest_mark() {
 
 /// And the mark's real bound is I10's, which is not eternity.
 ///
-/// **The correction to the sentence the row was written from**
-/// ([#345](https://github.com/breferrari/vigia/issues/345)). *"Until another
-/// write arrives"* is what a reader means and not quite the whole rule: the mark
-/// is a property of a tracked path, and I10 retires a track two ways. This gates
-/// the one a quiet worktree reaches, so the sticky mark is bounded rather than
-/// frozen, which is the difference §5.3 turns on.
+/// **The correction to the sentence the row was written from**. *"Until another
+/// write arrives"* is what a reader means and not quite the whole rule: the
+/// mark is a property of a tracked path, and I10 retires a track two ways. This
+/// gates the one a quiet worktree reaches, so the sticky mark is bounded rather
+/// than frozen, which is the difference §5.3 turns on.
 #[test]
 fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
     let start = base();

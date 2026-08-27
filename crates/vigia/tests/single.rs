@@ -1453,11 +1453,11 @@ fn a_straddle_reached_by_a_drag_pins_to_the_bottom_too() {
 
 #[test]
 fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
-    // **The state that made the pin's first two licences leak.** `SPEC.md` §11.1
-    // keeps a deliberate exception for a jump onto a tail shorter than the pane
-    // ([#59](https://github.com/breferrari/vigia/issues/59)): the file the jump
-    // was for keeps the top row and the blanks under it stay, because a jump is a
-    // claim about the top and backing up would move the file off it.
+    // **The state that made the pin's first two licences leak.** `SPEC.md`
+    // §11.1 keeps a deliberate exception for a jump onto a tail shorter than
+    // the pane: the file the jump was for keeps the top row and the blanks
+    // under it stay, because a jump is a claim about the top and backing up
+    // would move the file off it.
     //
     // Two attempts at licensing the pin's own back-up went through `anchored`,
     // and `anchored` outlives the pin. So `n` onto a short tail, then `s` and `s`,

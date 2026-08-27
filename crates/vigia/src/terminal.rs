@@ -45,13 +45,12 @@
 //! delivered signal is otherwise uncovered: raw mode makes Ctrl-C a key event
 //! and never a signal, so there is nothing to catch on the path a reader uses,
 //! and a `kill` from elsewhere runs neither the guard nor the hook.
-//! [`signal`](crate::signal) closes that
-//! ([#24](https://github.com/breferrari/vigia/issues/24)) while adding nothing
-//! to this module: the handler restores nothing, it ends the loop, and the guard
-//! above then does what it already did. The number of ways to leave went up by
-//! one and the number of ways to restore did not, which is the property worth
-//! having: the three test layers below are unchanged, and what they gained is a
-//! section beside them rather than among them.
+//! [`signal`](crate::signal) closes that while adding nothing to this module:
+//! the handler restores nothing, it ends the loop, and the guard above then
+//! does what it already did. The number of ways to leave went up by one and the
+//! number of ways to restore did not, which is the property worth having: the
+//! three test layers below are unchanged, and what they gained is a section
+//! beside them rather than among them.
 //!
 //! What is still out of reach is `SIGKILL` and `TerminateProcess`, on the same
 //! footing on both platforms, because neither runs any code the process owns.

@@ -432,13 +432,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
     // **The view defaults reach the frame before its first walk, not just the
-    // shell** ([#313](https://github.com/breferrari/vigia/issues/313)). Three of
-    // the four keys decide how rows the frame already holds are arranged, so
-    // setting them on `App` is all they need. `staged` decides what the frame
-    // *walks*, so a reader whose file says `staged = on` has to be honoured here
-    // or the key sets a flag nothing acts on and the opening pane is the one they
-    // were trying to change. Same defect `Action::ToggleStaged` had against the
-    // keypress, on the path that has no keypress to trigger it.
+    // shell**. Three of the four keys decide how rows the frame already holds
+    // are arranged, so setting them on `App` is all they need. `staged` decides
+    // what the frame *walks*, so a reader whose file says `staged = on` has to
+    // be honoured here or the key sets a flag nothing acts on and the opening
+    // pane is the one they were trying to change. Same defect
+    // `Action::ToggleStaged` had against the keypress, on the path that has no
+    // keypress to trigger it.
     //
     // **Which is why the first walk sits below the config read.** Run three
     // lines after `Worktree::discover`, before this file has been looked at, no
@@ -1567,15 +1567,15 @@ impl Shell {
         worktree: &Worktree,
         now: Instant,
     ) -> Result<(), Failure> {
-        // **The window is rolled here because this is where every frame passes**
-        // ([#243](https://github.com/breferrari/vigia/issues/243)). It sat on the
-        // loop's timeout arm first, which is where the ageing clock's own wake
-        // lands, and that was wrong in a way only an audit found: `recv_timeout`
-        // returns `Ok` whenever anything is queued, so a stream of wakes that are
-        // not ticks never reaches that arm at all. Pointer motion is exactly such
-        // a stream, and the takeover asks for it, so moving the mouse over a
-        // quiet pane redrew a window that never rolled: the freeze this row
-        // exists to fix, for as long as the motion continued.
+        // **The window is rolled here because this is where every frame
+        // passes**. It sat on the loop's timeout arm first, which is where the
+        // ageing clock's own wake lands, and that was wrong in a way only an
+        // audit found: `recv_timeout` returns `Ok` whenever anything is queued,
+        // so a stream of wakes that are not ticks never reaches that arm at
+        // all. Pointer motion is exactly such a stream, and the takeover asks
+        // for it, so moving the mouse over a quiet pane redrew a window that
+        // never rolled: the freeze this row exists to fix, for as long as the
+        // motion continued.
         //
         // Rolling *here* makes "the drawn window is current" true by
         // construction rather than by remembering it at each of the paths that
@@ -1606,18 +1606,17 @@ impl Shell {
 
     /// One collect and one paint, with no view of what it leaves owed.
     fn paint(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
-        // Before the chrome, because the chrome carries it, and from the frame's
-        // own file count so the read happens on exactly the frames that draw the
-        // answer. That is the whole of I4 for this read.
-        // **Read on every draw, because every frame draws it**
-        // ([#158](https://github.com/breferrari/vigia/issues/158)). This went
-        // through a `branch_for` seam whose whole job was the guard *only the
-        // empty state names a branch, so a populated frame must not read a file
-        // it will not draw*. The **header** draws it always, so that premise is
-        // false and the wrapper became the identity over its closure: a function
-        // taking a `&Frame` it did not read, with a docblock arguing for a
-        // parameter that no longer decided anything, and a gate asserting that
-        // `read()` calls `read`.
+        // Before the chrome, because the chrome carries it, and from the
+        // frame's own file count so the read happens on exactly the frames that
+        // draw the answer. That is the whole of I4 for this read. **Read on
+        // every draw, because every frame draws it**. This went through a
+        // `branch_for` seam whose whole job was the guard *only the empty state
+        // names a branch, so a populated frame must not read a file it will not
+        // draw*. The **header** draws it always, so that premise is false and
+        // the wrapper became the identity over its closure: a function taking a
+        // `&Frame` it did not read, with a docblock arguing for a parameter
+        // that no longer decided anything, and a gate asserting that `read()`
+        // calls `read`.
         //
         // **The header rather than the masthead**, which
         // [#204](https://github.com/breferrari/vigia/issues/204) makes load
@@ -2134,20 +2133,19 @@ mod tests {
         );
 
         // **Every frame rolls the window before it paints, and `Shell::draw` is
-        // where every frame passes** ([#243](https://github.com/breferrari/vigia/issues/243)).
-        // Position is the whole of it: a roll after the paint draws the picture
-        // it was woken to change, and a roll on only one of the loop's paths
-        // leaves the other redrawing a frozen window. This lived on the timeout
-        // arm first and was exactly that second bug, because `recv_timeout`
-        // returns `Ok` whenever anything is queued and a stream of pointer
-        // motion never reaches that arm.
+        // where every frame passes**. Position is the whole of it: a roll after
+        // the paint draws the picture it was woken to change, and a roll on
+        // only one of the loop's paths leaves the other redrawing a frozen
+        // window. This lived on the timeout arm first and was exactly that
+        // second bug, because `recv_timeout` returns `Ok` whenever anything is
+        // queued and a stream of pointer motion never reaches that arm.
         // Anchored on the newline and the indentation rather than on the
         // argument list, because the argument list is the thing this row
         // changed: the previous anchor spelled the whole signature out and went
         // red the moment `now: Instant` pushed it onto five lines, reporting
         // "`Shell::draw` is gone" about a function three lines above it. An
-        // anchor that has to be edited whenever the thing it guards is edited is
-        // an anchor that gets edited to whatever makes the test pass.
+        // anchor that has to be edited whenever the thing it guards is edited
+        // is an anchor that gets edited to whatever makes the test pass.
         //
         // It cannot match this test's own strings, but that is not why it is
         // written this way and the first version of this comment claimed it was:

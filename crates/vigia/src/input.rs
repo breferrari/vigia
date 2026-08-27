@@ -57,12 +57,11 @@ pub struct Region {
     ///
     /// **A region has columns since
     /// [#251](https://github.com/breferrari/vigia/issues/251)**, and until then
-    /// membership was a row test: `over_list` asked `contains(row)` and the wheel
-    /// router and the click arm asked it too. That is sound only while the list
-    /// sits *above* the diff, which is the vertical stack this type exists to
-    /// stop assuming. Beside a rail
-    /// ([#252](https://github.com/breferrari/vigia/issues/252)) both regions hold
-    /// every row of the body and only the column says which one a pointer is in.
+    /// membership was a row test: `over_list` asked `contains(row)` and the
+    /// wheel router and the click arm asked it too. That is sound only while
+    /// the list sits *above* the diff, which is the vertical stack this type
+    /// exists to stop assuming. Beside a rail both regions hold every row of
+    /// the body and only the column says which one a pointer is in.
     ///
     /// Bare `u16`s rather than a `Rect`, matching [`Sheet`] one type down and for
     /// its stated reason: everything in this module is absolute within the pane,
@@ -82,15 +81,15 @@ pub struct Region {
     pub track: (u16, u16),
     /// The column **this region's** bar is drawn in, when it has one.
     ///
-    /// **Per region since [#251](https://github.com/breferrari/vigia/issues/251)**,
-    /// where it was one `Option<u16>` on [`Regions`] documented as *"the column
-    /// both scrollbars are drawn in"*. That was true only because both regions
-    /// span the pane and their bars land on the same right edge, and every reader
+    /// **Per region since
+    /// [#251](https://github.com/breferrari/vigia/issues/251)**, where it was
+    /// one `Option<u16>` on [`Regions`] documented as *"the column both
+    /// scrollbars are drawn in"*. That was true only because both regions span
+    /// the pane and their bars land on the same right edge, and every reader
     /// then told the two apart **by row**, which is the vertical stack written
-    /// into the hit-test model. Beside a rail
-    /// ([#252](https://github.com/breferrari/vigia/issues/252)) the two regions
-    /// share their rows and differ in their columns, so the row can no longer
-    /// answer it and the column already can.
+    /// into the hit-test model. Beside a rail the two regions share their rows
+    /// and differ in their columns, so the row can no longer answer it and the
+    /// column already can.
     ///
     /// Paired with `top`, `rows` and `track` here for the reason `track` gives
     /// one field up: a `Region` holding one region's rows beside another's bar is
@@ -383,11 +382,11 @@ impl Regions {
     /// gesture that *continues*, so the loop knows to keep routing motion to this
     /// region however far the pointer travels afterwards.
     ///
-    /// **The sheet guard is [`Regions::step_at`]'s and arrived with it**
-    /// ([#298](https://github.com/breferrari/vigia/issues/298)). These two are the
-    /// only geometry the loop asks `Regions` for directly, outside [`action_for`],
-    /// and guarding one and not the other is how the class recurs rather than
-    /// closes, leaving the unguarded method holding the identical shape.
+    /// **The sheet guard is [`Regions::step_at`]'s and arrived with it**. These
+    /// two are the only geometry the loop asks `Regions` for directly, outside
+    /// [`action_for`], and guarding one and not the other is how the class
+    /// recurs rather than closes, leaving the unguarded method holding the
+    /// identical shape.
     ///
     /// **It is the worse of the two, which is why it is not merely symmetry.** A
     /// hold repeats a bounded step every [`STEP_REPEAT`]; a grab hands the whole
@@ -497,10 +496,9 @@ pub struct Pointing {
 /// the way `Chrome::pressed` does, so the drawer compares one kind of thing;
 /// what is not here yet is a variant for the thumb and one for a list row, both
 /// of which are surfaces a click acts on and both of which are waiting on the
-/// same ruling ([#189](https://github.com/breferrari/vigia/issues/189)) about
-/// what mark a region with no spare rung gets. A bare `Option<(u16, u16)>` would
-/// say the mark is always a cell, which is the thing that is about to stop being
-/// true.
+/// same ruling about what mark a region with no spare rung gets. A bare
+/// `Option<(u16, u16)>` would say the mark is always a cell, which is the thing
+/// that is about to stop being true.
 ///
 /// **This is view state and never an [`Action`]**, which is §11.1's ruling and
 /// the reason `action_for` never learns about it: the mark says where a pointer
@@ -995,12 +993,12 @@ pub enum Action {
     /// [`Action::Page`] and [`Action::HalfPage`] already are: one arm in
     /// `App::apply`, one rule, and no way for the two directions to drift apart.
     ///
-    /// **`←` and `→` are aliases of `p` and `n` since `SPEC.md` §11.2 B15**
-    /// ([#296](https://github.com/breferrari/vigia/issues/296)): vertical keys move
-    /// inside the diff and horizontal keys move between files, so the four arrows
-    /// are one set rather than half of one. A reader reaching for an arrow was
-    /// getting `Shift+↑`'s list scroll, which is `Action::ScrollList` doing exactly
-    /// what §11.1 says and not what was wanted.
+    /// **`←` and `→` are aliases of `p` and `n` since `SPEC.md` §11.2 B15**:
+    /// vertical keys move inside the diff and horizontal keys move between
+    /// files, so the four arrows are one set rather than half of one. A reader
+    /// reaching for an arrow was getting `Shift+↑`'s list scroll, which is
+    /// `Action::ScrollList` doing exactly what §11.1 says and not what was
+    /// wanted.
     ///
     /// **The one thing the arrow pair conflicts with is declined rather than
     /// deferred.** §11.1 rules a long line clipped rather than wrapped and names a
@@ -1135,14 +1133,13 @@ pub enum Action {
     /// [`Action::ToggleMasthead`] it does not even resize a region, which is the
     /// whole reason the keymap went over the pane rather than into the footer.
     ///
-    /// **Three outcomes since §11.2 B13**
-    /// ([#286](https://github.com/breferrari/vigia/issues/286)), and which one it
-    /// takes is the receiving state's rather than this variant's: closed opens the
-    /// first page, a page with another after it advances, and the last page
-    /// closes. On every pane whose sheet is one page, which is every pane the
-    /// first three rungs of the ladder serve, that is the toggle it has always
-    /// been. The close control still closes from any page, so a reader who wants
-    /// out of a six-page sheet is never made to walk it.
+    /// **Three outcomes since §11.2 B13**, and which one it takes is the
+    /// receiving state's rather than this variant's: closed opens the first
+    /// page, a page with another after it advances, and the last page closes.
+    /// On every pane whose sheet is one page, which is every pane the first
+    /// three rungs of the ladder serve, that is the toggle it has always been.
+    /// The close control still closes from any page, so a reader who wants out
+    /// of a six-page sheet is never made to walk it.
     ///
     /// **The name is kept rather than widened to `AdvanceSheet`.** What a reader
     /// presses `?` for is *the sheet*, and one variant is what says the key has
@@ -1171,15 +1168,14 @@ pub enum Action {
     /// Leave the frontmost thing: the gestures sheet if one is up, and the
     /// program if none is. `Esc`.
     ///
-    /// **One key, one meaning, and the state is resolved where state lives**
-    /// ([#340](https://github.com/breferrari/vigia/issues/340)). `SPEC.md`
-    /// §11.2 B12 rules that no key changes meaning while the sheet is up, and
-    /// [`key_action`] is handed no shell state so that the rule is structural
-    /// rather than remembered. Both survive: this action *is* one meaning, the
-    /// one every terminal program gives `Esc`, and which thing is frontmost is
-    /// a question only [`crate::App`] can answer. `q` is untouched and still
-    /// quits from anywhere, which is what a reader who wants out of the
-    /// program presses.
+    /// **One key, one meaning, and the state is resolved where state lives**.
+    /// `SPEC.md` §11.2 B12 rules that no key changes meaning while the sheet is
+    /// up, and [`key_action`] is handed no shell state so that the rule is
+    /// structural rather than remembered. Both survive: this action *is* one
+    /// meaning, the one every terminal program gives `Esc`, and which thing is
+    /// frontmost is a question only [`crate::App`] can answer. `q` is untouched
+    /// and still quits from anywhere, which is what a reader who wants out of
+    /// the program presses.
     ///
     /// It was `Quit` outright until #340, reported from a real pane: a reader
     /// pressed `Esc` to put the help away and the monitor exited. That is the
@@ -1395,19 +1391,20 @@ impl Action {
             // `view::last_top`; what has not changed is that this arm needs no
             // height passed to it.
             //
-            // **`Bottom` joined them with `SPEC.md` §11.2 B16**
-            // ([#297](https://github.com/breferrari/vigia/issues/297)), and this
-            // arm is the whole of what makes that ruling reach a reader. Unpinned
-            // it is `jump_to(len - 1)`, which lands on a heading and is measured
-            // in files exactly as the comment below says; **pinned it rests the
-            // file's last row on the bottom**, and *the bottom* is a height. Left
-            // in the arm below, `crate::run` hands it a height of zero, the
-            // resting row saturates back to the file's whole span, and every
-            // keystroke batched behind `G` in the same wake is swallowed by the
-            // walk's own clamp. That is the defect B16 records as fixed, still
-            // shipping, with the gate green because a test calls `App::apply`
-            // with the height a shell does not pass. `crates/vigia/tests/scroll.rs::only_the_action_that_reads_the_height_is_given_one`
-            // is where the two are held together, and it now runs pinned as well.
+            // **`Bottom` joined them with `SPEC.md` §11.2 B16**, and this arm
+            // is the whole of what makes that ruling reach a reader. Unpinned
+            // it is `jump_to(len - 1)`, which lands on a heading and is
+            // measured in files exactly as the comment below says; **pinned it
+            // rests the file's last row on the bottom**, and *the bottom* is a
+            // height. Left in the arm below, `crate::run` hands it a height of
+            // zero, the resting row saturates back to the file's whole span,
+            // and every keystroke batched behind `G` in the same wake is
+            // swallowed by the walk's own clamp. That is the defect B16 records
+            // as fixed, still shipping, with the gate green because a test
+            // calls `App::apply` with the height a shell does not pass.
+            // `crates/vigia/tests/scroll.rs::only_the_action_that_reads_the_height_is_given_one`
+            // is where the two are held together, and it now runs pinned as
+            // well.
             Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) | Self::Bottom => true,
             // `File` steps a file index and lands on a heading, so it is
             // measured in files and never in rows: no height can change where it

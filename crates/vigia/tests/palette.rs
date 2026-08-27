@@ -24,10 +24,9 @@ use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// Buckets a sparkline draws on the panes this file renders at.
 ///
-/// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)). That constant is the
-/// resolution the shell projects *from*; what a row draws is the rung its pane
-/// affords, which is twelve at every width here.
+/// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**. That
+/// constant is the resolution the shell projects *from*; what a row draws is
+/// the rung its pane affords, which is twelve at every width here.
 const DRAWN_BUCKETS: usize = 12;
 
 /// The heat strip's slice, restated rather than imported: a test sharing the
@@ -179,11 +178,10 @@ fn backgrounds(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
 /// The same, from a given column, so a gate can ask about the row **without** the
 /// pane's leading cell.
 ///
-/// **That cell stopped being part of the wash's question**
-/// ([#218](https://github.com/breferrari/vigia/issues/218)): it carries §5.1's
-/// left bar, which is a background on a blank column of margin and degrades on its
-/// own terms. A gate asking *does this palette wash* has to skip it or it is
-/// asking two questions and failing the one it did not mean.
+/// **That cell stopped being part of the wash's question**: it carries §5.1's
+/// left bar, which is a background on a blank column of margin and degrades on
+/// its own terms. A gate asking *does this palette wash* has to skip it or it
+/// is asking two questions and failing the one it did not mean.
 fn backgrounds_from(backend: &TestBackend, y: u16, from: u16) -> Vec<Option<Color>> {
     let buffer = backend.buffer();
     (from..buffer.area.width)
@@ -337,8 +335,7 @@ fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
 
 #[test]
 fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
-    // **The opposite of what a gate here would naturally assert**
-    // ([#218](https://github.com/breferrari/vigia/issues/218)). Written as
+    // **The opposite of what a gate here would naturally assert**. Written as
     // `a_palette_that_declines_a_bar_leaves_the_sigil_alone` it pins every
     // built-in's `_bar` keys as unset, which is how §5.1's *tinted row with a
     // coloured left bar* shipped as the tint alone for three phases: the key
@@ -454,15 +451,14 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // carries a modifier as part of its meaning: `path_hover` underlines,
         // which is the whole of what keeps it apart from the recency ladder.
         //
-        // **It is the quietest of the four rather than the brightest**
-        // ([#193](https://github.com/breferrari/vigia/issues/193)).
-        // It holds `bar_hover`'s value, which on this palette is `Gray` and
-        // therefore `path_cold`'s foreground **exactly**, so the modifier is not
-        // merely the last separation left, it is the only one. That is why it is
-        // still checked here: `Gray` is not colour 8 and must not become it, and
-        // `a_palette_never_draws_text_in_colour_8` is about the foreground
-        // alone. The modifier rides along untested here and is gated in
-        // `tests/render.rs`, where the row is actually drawn.
+        // **It is the quietest of the four rather than the brightest**. It
+        // holds `bar_hover`'s value, which on this palette is `Gray` and
+        // therefore `path_cold`'s foreground **exactly**, so the modifier is
+        // not merely the last separation left, it is the only one. That is why
+        // it is still checked here: `Gray` is not colour 8 and must not become
+        // it, and `a_palette_never_draws_text_in_colour_8` is about the
+        // foreground alone. The modifier rides along untested here and is gated
+        // in `tests/render.rs`, where the row is actually drawn.
         path_hover,
         kind,
         hunk,
@@ -535,10 +531,10 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("chrome", chrome),
         ("chrome_dim", chrome_dim),
         // **A run separator's word and a staged row's gutter mark, and both are
-        // read** ([#313](https://github.com/breferrari/vigia/issues/313)). The bar
-        // is a glyph rather than prose, but it is the only thing on a row that
-        // says which comparison the row belongs to, so a palette that put it on
-        // the background would take the distinction off the screen entirely.
+        // read**. The bar is a glyph rather than prose, but it is the only
+        // thing on a row that says which comparison the row belongs to, so a
+        // palette that put it on the background would take the distinction off
+        // the screen entirely.
         ("staged", staged),
         ("path", path),
         ("path_live", path_live),
@@ -585,15 +581,14 @@ fn the_ansi_palette_draws_no_wash_at_any_depth() {
     // has to assume a background; `ansi` resolves to the reader's own scheme and so
     // assumes none, and it refuses at truecolour just as firmly as at sixteen.
     //
-    // **Read past the pane's leading cell, because the bar is not the wash**
-    // ([#218](https://github.com/breferrari/vigia/issues/218)). A wash has to be a
-    // *tint*, and a tint is the thing that cannot be chosen without knowing the
-    // background behind it. The bar is a **saturated block on a blank column**,
-    // which is what the mockup draws and what needs no such knowledge, so this
-    // palette can carry one and the loss §11.1 records at sixteen colours is
-    // smaller than it was. The two are separate keys precisely so they can degrade
-    // apart, and a gate that read them together would report a ruling it was not
-    // asked about.
+    // **Read past the pane's leading cell, because the bar is not the wash**. A
+    // wash has to be a *tint*, and a tint is the thing that cannot be chosen
+    // without knowing the background behind it. The bar is a **saturated block
+    // on a blank column**, which is what the mockup draws and what needs no
+    // such knowledge, so this palette can carry one and the loss §11.1 records
+    // at sixteen colours is smaller than it was. The two are separate keys
+    // precisely so they can degrade apart, and a gate that read them together
+    // would report a ruling it was not asked about.
     for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let backend = draw(60, 8, &three_kinds(), Theme::ansi().resolve(depth));
         for row in [CONTEXT, ADDED, REMOVED] {
@@ -1847,12 +1842,10 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
 /// against the pane, and for two of them that is the whole story: the heat strip
 /// and the sparkline draw on list rows and file headings, which are never washed.
 ///
-/// **The bar is the exception**
-/// ([#239](https://github.com/breferrari/vigia/issues/239)). The row wash runs
-/// under the bar's own column, so on a changed row the track and the thumb sit
-/// on
-/// `added_row` or `removed_row` rather than on the pane. Every ratio in the older
-/// gate is measured against the pane, so it could not see that `#57606a` fell to
+/// **The bar is the exception**. The row wash runs under the bar's own column,
+/// so on a changed row the track and the thumb sit on `added_row` or
+/// `removed_row` rather than on the pane. Every ratio in the older gate is
+/// measured against the pane, so it could not see that `#57606a` fell to
 /// **1.88:1** on an added row: a value this palette calls absent at 1.24:1 and
 /// chose 2.96:1 to escape. The bar would have drawn as a dashed line, solid on
 /// context rows and faint on the rows a reader is looking at.

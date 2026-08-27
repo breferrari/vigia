@@ -39,15 +39,14 @@ use vigia::{FileEntry, ListRow, Theme, View};
 /// colour-only match counts a counter as a slice. The symbol term separates
 /// those: a slice is a block and a counter is digits.
 ///
-/// **Bounded by a column range, which is what the rail made necessary**
-/// ([#252](https://github.com/breferrari/vigia/issues/252)). A row can hold two
-/// regions in that layout, and a strip counted across the whole row adds one
-/// region's rung to the other's. That does not merely inflate the number, it
-/// lands on a *legal* one: twelve slices beside twelve is twenty-four, which is
-/// the widest rung, so a whole-row count passes a whole-rungs assertion on a
-/// renderer that had lost the ladder entirely. Callers that want the whole row
-/// pass its whole width and say so.
-/// The rows a reader would see, as plain strings with trailing blanks trimmed.
+/// **Bounded by a column range, which is what the rail made necessary**. A row
+/// can hold two regions in that layout, and a strip counted across the whole
+/// row adds one region's rung to the other's. That does not merely inflate the
+/// number, it lands on a *legal* one: twelve slices beside twelve is
+/// twenty-four, which is the widest rung, so a whole-row count passes a
+/// whole-rungs assertion on a renderer that had lost the ladder entirely.
+/// Callers that want the whole row pass its whole width and say so. The rows a
+/// reader would see, as plain strings with trailing blanks trimmed.
 ///
 /// **Rebuilt from the cells rather than parsed out of `TestBackend`'s
 /// `Display`.** That `Display` appends `Hidden by multi-width symbols: [...]` to
@@ -56,8 +55,7 @@ use vigia::{FileEntry, ListRow, Theme, View};
 /// terminal does, skipping what the previous symbol already covered, gives back
 /// exactly what a reader would see.
 ///
-/// **Here rather than in each file that reads a screen**
-/// ([#272](https://github.com/breferrari/vigia/issues/272)), which is this
+/// **Here rather than in each file that reads a screen**, which is this
 /// module's own reason one paragraph up. `tests/wrap.rs` arrived with a second
 /// copy that did the naive thing, concatenating every cell's symbol: correct on
 /// an ASCII fixture and one wide glyph away from reintroducing the bug the

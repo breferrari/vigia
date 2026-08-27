@@ -7534,21 +7534,19 @@ impl Painter<'_> {
 
         // **The gutter comes from the same width, and that is
         // [#77](https://github.com/breferrari/vigia/issues/77)'s ruling one
-        // element over.** `area` has already lost the scrollbar's columns when a
-        // bar was drawn, and the stream's bar appears when the diff outgrows the
-        // pane, so measuring the gutter against it made the line numbers a
+        // element over.** `area` has already lost the scrollbar's columns when
+        // a bar was drawn, and the stream's bar appears when the diff outgrows
+        // the pane, so measuring the gutter against it made the line numbers a
         // function of the *diff's height*. At 29 and 30 columns a diff crossing
         // the pane height took the whole gutter off every content row: not a
         // reflow but an all-or-nothing disappearance, on the tick an agent's
-        // edit made the diff long.
-        // **The painter reads the gutter where one was decided, and takes it
-        // where none was**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)). The wrap
-        // decision is taken against this number before these rows exist, so a
-        // second derivation here is a pane whose text bound and whose gutter come
-        // apart by a column. `None` is a view nobody wrapped, which is a
-        // hand-built one and a caller that named no width, and there the answer
-        // is this function's as it always was.
+        // edit made the diff long. **The painter reads the gutter where one was
+        // decided, and takes it where none was**. The wrap decision is taken
+        // against this number before these rows exist, so a second derivation
+        // here is a pane whose text bound and whose gutter come apart by a
+        // column. `None` is a view nobody wrapped, which is a hand-built one
+        // and a caller that named no width, and there the answer is this
+        // function's as it always was.
         self.gutter = view
             .gutter
             .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
@@ -7587,8 +7585,8 @@ impl Painter<'_> {
                     false,
                     // **And the same literal for the hover mark**, which is the
                     // sentence above coming true: beside a rail the two regions
-                    // *do* share a `y`, and the mark that was confined by geometry
-                    // reached this row ([#252](https://github.com/breferrari/vigia/issues/252)).
+                    // *do* share a `y`, and the mark that was confined by
+                    // geometry reached this row.
                     false,
                 ),
                 Row::Hunk {
@@ -7618,13 +7616,12 @@ impl Painter<'_> {
                     );
                 }
                 // **Empty on purpose, and the arm exists to say so.** A gap is
-                // the blank that closes a file's block
-                // ([#165](https://github.com/breferrari/vigia/issues/165)), and
-                // an unwritten row is already blank: it is what every row below
-                // a short diff has always been. Writing spaces would be the same
-                // screen at the cost of a row of cells, and leaving the variant
-                // out of this match is not available, which is the half that
-                // makes the silence safe rather than an omission.
+                // the blank that closes a file's block, and an unwritten row is
+                // already blank: it is what every row below a short diff has
+                // always been. Writing spaces would be the same screen at the
+                // cost of a row of cells, and leaving the variant out of this
+                // match is not available, which is the half that makes the
+                // silence safe rather than an omission.
                 Row::Gap => {}
                 Row::Note(note) => {
                     let drawn = format!("  {note}");
@@ -7678,10 +7675,9 @@ impl Painter<'_> {
                         0,
                     );
                 }
-                // **The same drawer, told it has no number**, which is what keeps
-                // the wash, the left bar, the two-tone gutter, the word patch and
-                // the degradation ladder one rule rather than two
-                // ([#272](https://github.com/breferrari/vigia/issues/272)). A
+                // **The same drawer, told it has no number**, which is what
+                // keeps the wash, the left bar, the two-tone gutter, the word
+                // patch and the degradation ladder one rule rather than two. A
                 // second drawer for a continuation is exactly the shape §11.1
                 // refuses one region over, where the list and the stream draw a
                 // heading through one function so the two cannot disagree.
@@ -7966,17 +7962,17 @@ impl Painter<'_> {
         let mut room = usize::from(right.width);
         let at = area.x;
 
-        // **The kind letter carries the staged mark rather than a column beside it
-        // carrying one** ([#316](https://github.com/breferrari/vigia/issues/316)).
-        // B17 first spent a gutter column on a `\u{2502}`, and the column was the whole
-        // cost: it was taken on *every* row of *both* runs, because a mark that
-        // appears and disappears per row would slide every path beside it one cell
-        // sideways. So *every* row of *both* runs paid for a mark only the staged
-        // rows carry, which is a tax on the pane's most contested element to say
-        // something the letter's own ink says for free. The two runs were never
-        // misaligned with each other; the pane was simply one column narrower
-        // than it needed to be everywhere at once, which is the harder cost to
-        // see and the reason the reader felt it before anyone measured it.
+        // **The kind letter carries the staged mark rather than a column beside
+        // it carrying one**. B17 first spent a gutter column on a `\u{2502}`,
+        // and the column was the whole cost: it was taken on *every* row of
+        // *both* runs, because a mark that appears and disappears per row would
+        // slide every path beside it one cell sideways. So *every* row of
+        // *both* runs paid for a mark only the staged rows carry, which is a
+        // tax on the pane's most contested element to say something the
+        // letter's own ink says for free. The two runs were never misaligned
+        // with each other; the pane was simply one column narrower than it
+        // needed to be everywhere at once, which is the harder cost to see and
+        // the reason the reader felt it before anyone measured it.
         //
         // **An overlay was the reader's first ask and it was checked before this
         // was written.** `U+20D2 COMBINING LONG VERTICAL LINE OVERLAY` composes
@@ -8294,11 +8290,11 @@ impl Painter<'_> {
             LineKind::Removed => (self.theme.removed, '-'),
             LineKind::Context => (self.theme.context, ' '),
         };
-        // **`None` is a continuation, and it changes exactly two cells**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)): the sigil
-        // becomes [`WRAPPED`] and the gutter goes blank. Everything else on this
-        // row is the row it continues, which is the point: a wrapped removal that
-        // stopped being washed halfway down would read as ending early.
+        // **`None` is a continuation, and it changes exactly two cells**: the
+        // sigil becomes [`WRAPPED`] and the gutter goes blank. Everything else
+        // on this row is the row it continues, which is the point: a wrapped
+        // removal that stopped being washed halfway down would read as ending
+        // early.
         let sigil = if number.is_some() { sigil } else { WRAPPED };
 
         let (wash, bar) = match kind {
@@ -8311,13 +8307,12 @@ impl Painter<'_> {
             self.buf.set_style(area, wash);
         }
 
-        // **§5.1's left bar, and it costs no column**
-        // ([#218](https://github.com/breferrari/vigia/issues/218)). The pane's
-        // leading cell is blank margin that the wash above has already bled under,
-        // so setting its background spends nothing that was carrying content. It is
-        // therefore a **width rung**: drawn wherever [`inset_of`] lends a column,
-        // absent below forty-three where it does not and where the wash and the
-        // sigil carry the signal alone.
+        // **§5.1's left bar, and it costs no column**. The pane's leading cell
+        // is blank margin that the wash above has already bled under, so
+        // setting its background spends nothing that was carrying content. It
+        // is therefore a **width rung**: drawn wherever [`inset_of`] lends a
+        // column, absent below forty-three where it does not and where the wash
+        // and the sigil carry the signal alone.
         //
         // **The leading cell of the inset, never all of it.** At eighty columns the
         // margin is two and the bar takes the first, which is the picture's own
@@ -8403,13 +8398,12 @@ impl Painter<'_> {
         runs.push((sigil.to_string(), sigil_style));
 
         // **The gap `assets/preview.svg` has drawn since before any of this
-        // existed** ([#164](https://github.com/breferrari/vigia/issues/164)).
-        // The picture states its own grid in a comment, one cell at 13.5px being
-        // ~8.1px, and it puts the sigil at x=72 and every content origin at
-        // x=88: the sigil is one cell, 72 to 80.1, so a clear column has always
-        // stood between the two. §5.1's departure list is meant to be the
-        // complete set of licensed disagreements with the picture and this was
-        // not on it, so it was an omission rather than a decision.
+        // existed**. The picture states its own grid in a comment, one cell at
+        // 13.5px being ~8.1px, and it puts the sigil at x=72 and every content
+        // origin at x=88: the sigil is one cell, 72 to 80.1, so a clear column
+        // has always stood between the two. §5.1's departure list is meant to
+        // be the complete set of licensed disagreements with the picture and
+        // this was not on it, so it was an omission rather than a decision.
         //
         // **It does not ladder**, where every other spacing decision here does.
         // The sigil column *is* the diff signal at any depth or on any palette
@@ -8478,13 +8472,12 @@ impl Painter<'_> {
             LineKind::Context => None,
         }
         .map(|word| (word, emph));
-        // **Neovim's `'breakindent'`, paid out of the tail's own budget**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)). Pushed as a
-        // run rather than folded into the text so the column counter
-        // [`Painter::content_runs`] keeps stays the tail's own: a tab in the tail
-        // then aligns to where the tail starts, which is the only origin a
-        // continuation has. [`indent_of`] caps it at half the content so a deeply
-        // indented line cannot buy a second row with nothing on it.
+        // **Neovim's `'breakindent'`, paid out of the tail's own budget**.
+        // Pushed as a run rather than folded into the text so the column
+        // counter [`Painter::content_runs`] keeps stays the tail's own: a tab
+        // in the tail then aligns to where the tail starts, which is the only
+        // origin a continuation has. [`indent_of`] caps it at half the content
+        // so a deeply indented line cannot buy a second row with nothing on it.
         let indent = indent.min(content);
         if indent > 0 {
             runs.push((" ".repeat(indent), Style::new()));
@@ -8536,13 +8529,13 @@ pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
         .iter()
         .filter_map(|row| match row {
             Row::Line { number, .. } => Some(*number),
-            // **A continuation carries no number**, named rather than swept up by
-            // the arm below ([#272](https://github.com/breferrari/vigia/issues/272)).
-            // It adds no protection today and is not pretending to: both arms
-            // answer `None` and deleting this one changes nothing. What it does is
-            // put the variant in front of the next reader of this function, whose
-            // question will be whether a continuation's absent line number counts
-            // towards the width reserved for line numbers. It does not.
+            // **A continuation carries no number**, named rather than swept up
+            // by the arm below. It adds no protection today and is not
+            // pretending to: both arms answer `None` and deleting this one
+            // changes nothing. What it does is put the variant in front of the
+            // next reader of this function, whose question will be whether a
+            // continuation's absent line number counts towards the width
+            // reserved for line numbers. It does not.
             Row::Wrap { .. } => None,
             _ => None,
         })
@@ -8640,17 +8633,16 @@ struct Printed {
     /// row count is taken from where the split lands and the pane is drawn from
     /// where the walk stops, and those have to be the same byte.
     ///
-    /// **The last character that *fitted*, not the first that did not**, and the
-    /// difference is a whole glyph ([#272](https://github.com/breferrari/vigia/issues/272)).
-    /// The walk admits a character while `column < room` and only then charges
-    /// its width, so the last one admitted can be **two columns wide against one
-    /// column of room**. Splitting at the character after it put a head on the row
-    /// that was one column too wide: `Painter::put_runs_marked` then cut that
-    /// glyph and stamped `›` on a head whose tail is on the row below, which is
-    /// the one thing [`crate::view::Row::Wrap`]'s own docblock says cannot
-    /// happen, and the glyph was drawn on neither row. Found by an adversarial
-    /// audit on `abcdefgh` followed by two CJK characters at a content width of
-    /// nine.
+    /// **The last character that *fitted*, not the first that did not**, and
+    /// the difference is a whole glyph. The walk admits a character while
+    /// `column < room` and only then charges its width, so the last one
+    /// admitted can be **two columns wide against one column of room**.
+    /// Splitting at the character after it put a head on the row that was one
+    /// column too wide: `Painter::put_runs_marked` then cut that glyph and
+    /// stamped `›` on a head whose tail is on the row below, which is the one
+    /// thing [`crate::view::Row::Wrap`]'s own docblock says cannot happen, and
+    /// the glyph was drawn on neither row. Found by an adversarial audit on
+    /// `abcdefgh` followed by two CJK characters at a content width of nine.
     at: usize,
     /// Columns the walk reached, so a caller can tell *the room ran out* from
     /// *the character bound ran out*.
@@ -8704,14 +8696,12 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
 
 /// Where a line has to break to fit `room` columns, or `None` when it fits.
 ///
-/// **The row model's half of the wrap**
-/// ([#272](https://github.com/breferrari/vigia/issues/272)), and it is
-/// [`printable`]'s own walk with the string thrown away rather than a second
-/// measurement of the same thing. `SPEC.md` §11.2 B19 is the ruling; what makes
-/// this the shape rather than a `width_of` comparison is tabs, control
-/// characters and grapheme clusters, all three of which move a column by
-/// something other than one per `char` and all three of which the painter
-/// already resolves here.
+/// **The row model's half of the wrap**, and it is [`printable`]'s own walk
+/// with the string thrown away rather than a second measurement of the same
+/// thing. `SPEC.md` §11.2 B19 is the ruling; what makes this the shape rather
+/// than a `width_of` comparison is tabs, control characters and grapheme
+/// clusters, all three of which move a column by something other than one per
+/// `char` and all three of which the painter already resolves here.
 ///
 /// **A byte offset rather than a column**, because what the caller does with it
 /// is slice: [`crate::view::View::wrap_rows`] cuts the row's text there and
@@ -8734,12 +8724,12 @@ pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
 
 /// Every byte offset a line breaks at, in order, to fit `room` columns a row.
 ///
-/// **The uncapped form of [`split_at`]**, and the cap it replaces was never asked
-/// for ([#272](https://github.com/breferrari/vigia/issues/272)). A first reading
-/// of the field took `delta --wrap-max-lines`' default of two and wrote it into
-/// the ruling; what a reader asking for `w` means is *show me the line*, and two
-/// rows of an eighty-column pane is a hundred and thirty-two columns of it. So a
-/// line breaks as many times as it needs.
+/// **The uncapped form of [`split_at`]**, and the cap it replaces was never
+/// asked for. A first reading of the field took `delta --wrap-max-lines`'
+/// default of two and wrote it into the ruling; what a reader asking for `w`
+/// means is *show me the line*, and two rows of an eighty-column pane is a
+/// hundred and thirty-two columns of it. So a line breaks as many times as it
+/// needs.
 ///
 /// **Bounded by `limit` rather than by the line**, which is what keeps the frame
 /// bounded by the window: a line taller than the pane cannot be made more useful
@@ -8803,9 +8793,8 @@ pub(crate) fn indent_of(text: &str, content: usize) -> usize {
 
 /// Write `times` copies of `c` into the walk's output, where there is one.
 ///
-/// **Named because the guard is what varies and the payload is not**
-/// ([#272](https://github.com/breferrari/vigia/issues/272)). Every arm of
-/// [`walk_printable`]'s match ends in the same `if let Some(out)`, and four
+/// **Named because the guard is what varies and the payload is not**. Every arm
+/// of [`walk_printable`]'s match ends in the same `if let Some(out)`, and four
 /// copies of a conditional is four chances for one of them to stop being
 /// conditional: an arm that pushed unguarded would allocate on the measuring
 /// path, which is the one thing [`split_at`] exists to avoid, and nothing drawn

@@ -131,12 +131,10 @@ fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
 
 /// Each region reports its **own** bar's column, not the pane's.
 ///
-/// **The claim the removed field could not make**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)). One `Option<u16>`
-/// documented as *"the column both scrollbars are drawn in"* is true only while
-/// both regions span the pane and their bars
-/// land on the same right edge. Beside a rail
-/// ([#252](https://github.com/breferrari/vigia/issues/252)) they do not.
+/// **The claim the removed field could not make**. One `Option<u16>` documented
+/// as *"the column both scrollbars are drawn in"* is true only while both
+/// regions span the pane and their bars land on the same right edge. Beside a
+/// rail they do not.
 ///
 /// **What this proves, and what it does not.** The expected column is restated
 /// from the pane rather than read off the renderer's ladder, so a bar drawn in
@@ -823,12 +821,11 @@ fn the_two_regions_tile_the_body_exactly() {
     let mut saw_rail = false;
 
     for height in 1..=40u16 {
-        // **Two widths past the rail's arrival**
-        // ([#252](https://github.com/breferrari/vigia/issues/252)), so the one
-        // subtraction this gate exists for is exercised in both shapes.
-        // `clamped_to`'s rail arm shortens the list and gives nothing back,
-        // because beside a rail there is no region below it to give to, and that
-        // arm had no direct test until these two widths were added.
+        // **Two widths past the rail's arrival**, so the one subtraction this
+        // gate exists for is exercised in both shapes. `clamped_to`'s rail arm
+        // shortens the list and gives nothing back, because beside a rail there
+        // is no region below it to give to, and that arm had no direct test
+        // until these two widths were added.
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [0usize, 1, 3, LIST_SETTLED, LIST_SETTLED + 1, 200] {
                 let area = Rect::new(0, 0, width, height);

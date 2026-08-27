@@ -1849,10 +1849,10 @@ impl View {
         // ends and so cannot move it either.
         //
         // **[`gap_rows`] reads it too, which is what drops the closing blank.**
-        // That row separates two *drawn* files ([#165](https://github.com/breferrari/vigia/issues/165))
-        // and a pinned frame draws one, so the file's last content row is the
-        // last row a reader can reach: the same rule the last file of an
-        // unpinned diff already gets, applied to the only file there is.
+        // That row separates two *drawn* files and a pinned frame draws one, so
+        // the file's last content row is the last row a reader can reach: the
+        // same rule the last file of an unpinned diff already gets, applied to
+        // the only file there is.
         //
         // **Both ends in one binding, and the pair is why.** The walk's start is
         // also the floor the short back-up below compares against, and the two
@@ -2084,36 +2084,36 @@ impl View {
             // The two are indistinguishable from a `Position` alone, which is why
             // this is a parameter rather than something inferable here.
             //
-            // **A landing is the third case and it goes with the scroll**
-            // ([#257](https://github.com/breferrari/vigia/issues/257)). Its claim
-            // is weaker than a jump's: it is that the change is *visible*, not
-            // that a particular row is at the top, and it is satisfied from any
-            // row the change is drawn from. So the pane is filled and the change
-            // moves down it, where honouring the row exactly would draw a handful
-            // of rows over blanks. That is reachable wherever the rows after the
-            // landing run out, which is the last file and every file followed
-            // only by hunkless ones: a rename, a mode change, a note. A clamp on
-            // the last file alone was the first fix here and covered one of
-            // those.
-            // **And not already at the top**, which is the difference between a
-            // back-up and a treadmill. When the whole diff is shorter than the
-            // pane, `last_screenful` resolves to `Position::default()`, the next
-            // frame is short again from the same place, and it restarts on every
-            // paint forever: measured at three walks and six `frame.diff` calls a
-            // frame against two. `Frame::diff` re-reads any file written in the
-            // last two seconds, so the file being edited was diffed three times
-            // per frame, which is exactly what this function's one-pass design
-            // exists to prevent. It also breached I3's bound on the highlight
-            // cache, which is what turned it red on Windows CI rather than here.
-            // **A landing that resolved to row zero is not the third case**, it
-            // is the ordinary jump: the file follow named belongs on the top row
-            // and backing up would take it off. Caught by
-            // `a_position_survives_the_file_it_points_at_being_committed`, which
-            // follows the last file of a forty-file fixture whose blocks are five
-            // rows: every one of those frames is short, and dropping this term
-            // backed every one of them up off the heading it had just placed.
-            // **And the floor is the walk's, not the diff's**, which is the
-            // one line of this guard a pin moves. `Position::default()` is
+            // **A landing is the third case and it goes with the scroll**. Its
+            // claim is weaker than a jump's: it is that the change is
+            // *visible*, not that a particular row is at the top, and it is
+            // satisfied from any row the change is drawn from. So the pane is
+            // filled and the change moves down it, where honouring the row
+            // exactly would draw a handful of rows over blanks. That is
+            // reachable wherever the rows after the landing run out, which is
+            // the last file and every file followed only by hunkless ones: a
+            // rename, a mode change, a note. A clamp on the last file alone was
+            // the first fix here and covered one of those. **And not already at
+            // the top**, which is the difference between a back-up and a
+            // treadmill. When the whole diff is shorter than the pane,
+            // `last_screenful` resolves to `Position::default()`, the next
+            // frame is short again from the same place, and it restarts on
+            // every paint forever: measured at three walks and six `frame.diff`
+            // calls a frame against two. `Frame::diff` re-reads any file
+            // written in the last two seconds, so the file being edited was
+            // diffed three times per frame, which is exactly what this
+            // function's one-pass design exists to prevent. It also breached
+            // I3's bound on the highlight cache, which is what turned it red on
+            // Windows CI rather than here. **A landing that resolved to row
+            // zero is not the third case**, it is the ordinary jump: the file
+            // follow named belongs on the top row and backing up would take it
+            // off. Caught by
+            // `a_position_survives_the_file_it_points_at_being_committed`,
+            // which follows the last file of a forty-file fixture whose blocks
+            // are five rows: every one of those frames is short, and dropping
+            // this term backed every one of them up off the heading it had just
+            // placed. **And the floor is the walk's, not the diff's**, which is
+            // the one line of this guard a pin moves. `Position::default()` is
             // *file zero, row zero*: the top of the first file the walk can
             // reach, which under a pin is the pinned file rather than the first
             // changed one. Read literally it would compare against a position
@@ -2151,13 +2151,13 @@ impl View {
             // file `n`, `p`, a digit or a click asked for keeps the top row.
             let landed_inside = view.landed && view.top.row > 0;
             // **A screen that is display-full is not short, however few of the
-            // diff's own rows it holds** ([#272](https://github.com/breferrari/vigia/issues/272)).
-            // This compared the rows collected, which are the diff's, against
-            // `height`, which counts the terminal's, and the two are one number
-            // only while nothing wraps. With `w` on a full pane read as short, so
-            // the walk backed up to rest a last screenful that was already
-            // resting, and the change follow had just landed on fell off the
-            // bottom: I5's promise broken on the one frame it exists for.
+            // diff's own rows it holds**. This compared the rows collected,
+            // which are the diff's, against `height`, which counts the
+            // terminal's, and the two are one number only while nothing wraps.
+            // With `w` on a full pane read as short, so the walk backed up to
+            // rest a last screenful that was already resting, and the change
+            // follow had just landed on fell off the bottom: I5's promise
+            // broken on the one frame it exists for.
             //
             // Counted rather than estimated, over rows the walk already holds and
             // with no file read, which is [`Self::wrap_rows`]' own arithmetic
@@ -2426,11 +2426,9 @@ impl View {
 
         // Always pulled back so the last file can rest on the bottom row rather
         // than leaving blanks a reader would read as "no more files". That is
-        // validity, and holds however the window got there.
-        // **The furthest start that still reaches the last file, which is not
-        // `files - rows` once a window can hold rows that are not files**
-        // ([#313](https://github.com/breferrari/vigia/issues/313)). See
-        // [`last_top`].
+        // validity, and holds however the window got there. **The furthest
+        // start that still reaches the last file, which is not `files - rows`
+        // once a window can hold rows that are not files**. See [`last_top`].
         let ceiling = last_top(frame.files(), rows);
         // A screenful in files, taken from the ceiling so the bar's travel is the
         // drag's travel. See [`View::list_span`].
@@ -2525,10 +2523,9 @@ impl View {
     /// How many rows of the terminal the rows this walk has collected would take.
     ///
     /// **The same arithmetic [`Self::wrap_rows`] does, asked before the walk
-    /// decides whether it came up short** ([#272](https://github.com/breferrari/vigia/issues/272)).
-    /// It reads no file and asks the frame for nothing: the rows are in hand and
-    /// the width is the caller's, so this is bounded by the window exactly as the
-    /// expansion is.
+    /// decides whether it came up short**. It reads no file and asks the frame
+    /// for nothing: the rows are in hand and the width is the caller's, so this
+    /// is bounded by the window exactly as the expansion is.
     ///
     /// `self.rows.len()` when nothing wraps, which is every pane with `w` off and
     /// every caller that named no width, so the guard that reads this is the
@@ -2545,15 +2542,15 @@ impl View {
         self.rows
             .iter()
             .map(|row| match row {
-                // **`breaks_of`, not `split_at`**, and it was the second for one
-                // commit ([#272](https://github.com/breferrari/vigia/issues/272)).
-                // Removing the wrap cap moved `wrap_rows` and `landing_of` onto
-                // the uncapped walk and left this one counting at most two rows a
-                // line, so a screen of three-row lines read as short, backed the
-                // walk up every frame, and undid a `j` as fast as a reader could
-                // press it. The docblock above said "the same arithmetic
-                // `wrap_rows` does" throughout, which is the drift this project
-                // treats as worse than no comment at all.
+                // **`breaks_of`, not `split_at`**, and it was the second for
+                // one commit. Removing the wrap cap moved `wrap_rows` and
+                // `landing_of` onto the uncapped walk and left this one
+                // counting at most two rows a line, so a screen of three-row
+                // lines read as short, backed the walk up every frame, and
+                // undid a `j` as fast as a reader could press it. The docblock
+                // above said "the same arithmetic `wrap_rows` does" throughout,
+                // which is the drift this project treats as worse than no
+                // comment at all.
                 Row::Line { text, .. } => 1 + crate::render::breaks_of(text, content, height).len(),
                 _ => 1,
             })
@@ -2563,8 +2560,7 @@ impl View {
     /// Turn logical rows into display rows, and record the gutter they were
     /// measured against.
     ///
-    /// **`SPEC.md` §11.2 B19**, from `w`
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)).
+    /// **`SPEC.md` §11.2 B19**, from `w`.
     ///
     /// **It reads nothing and asks the frame for nothing**, which is what keeps
     /// I4 exactly where it was. Wrapping only ever *grows* the row count, so the
@@ -2715,12 +2711,11 @@ impl View {
             // Rows of this line to pass over, which is the display offset above.
             let skip = if at == from { above } else { 0 };
             // **A line taller than the pane is the one case a mark is still
-            // honest** ([#272](https://github.com/breferrari/vigia/issues/272)).
-            // Scrolling moves by rows of the **diff**, so a line the pane cannot
-            // hold is stepped over whole: no gesture reaches its middle, and the
-            // reader has to be told. A line that merely runs past the fold is a
-            // different thing and carries no mark, because that is what every row
-            // below the last one already is.
+            // honest**. Scrolling moves by rows of the **diff**, so a line the
+            // pane cannot hold is stepped over whole: no gesture reaches its
+            // middle, and the reader has to be told. A line that merely runs
+            // past the fold is a different thing and carries no mark, because
+            // that is what every row below the last one already is.
             //
             // It is said by handing the painter the **rest of the line** on the
             // last row there is room for, rather than by a flag: the painter

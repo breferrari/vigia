@@ -121,9 +121,8 @@ palette! {
     /// background a chrome row is painted with before anything is drawn on it.
     ///
     /// **Not the header's changed-file count**, which took the worktree name's
-    /// [`Theme::chrome`] when it moved beside it
-    /// ([#67](https://github.com/breferrari/vigia/issues/67)), because two
-    /// weights inside one clause would draw the seam that move removed.
+    /// [`Theme::chrome`] when it moved beside it, because two weights inside
+    /// one clause would draw the seam that move removed.
     ///
     /// The list is meant to be exhaustive for a line of chrome, which is what
     /// makes the exclusion worth stating: a class with a named exception has to
@@ -158,15 +157,13 @@ palette! {
     /// reader already reads as *the thing under the cursor* from every hyperlink
     /// they have ever pointed at.
     ///
-    /// **It deliberately does not sit above all three rungs**
-    /// ([#193](https://github.com/breferrari/vigia/issues/193)), and the reason
-    /// is not taste. §5.3's
-    /// own B10 principle rules that a pointer mark *"must be the quietest thing
-    /// still visible in that region"*, on the ground that a mark which can go
-    /// **stale** must never be read before the worktree is; the paragraph beside
-    /// it made this the brightest text on the pane. Both sentences were written
-    /// the same day. The brightness was never doing the anti-collision work, and
-    /// the underline above always was.
+    /// **It deliberately does not sit above all three rungs**, and the reason
+    /// is not taste. §5.3's own B10 principle rules that a pointer mark *"must
+    /// be the quietest thing still visible in that region"*, on the ground that
+    /// a mark which can go **stale** must never be read before the worktree is;
+    /// the paragraph beside it made this the brightest text on the pane. Both
+    /// sentences were written the same day. The brightness was never doing the
+    /// anti-collision work, and the underline above always was.
     ///
     /// **On `ansi` the foreground now equals [`Theme::path_cold`]'s outright**,
     /// which is stated rather than left to be discovered: sixteen names hold
@@ -218,10 +215,9 @@ palette! {
     /// A sparkline bucket nothing was written in.
     ///
     /// A track rather than a gap, which is the rule [`Theme::heat_track`] and
-    /// [`Theme::bar_track`] already follow. A file with no history at all is the
-    /// *all*-empty case, so at launch a worktree that was already dirty draws a
-    /// full track on every row
-    /// ([#78](https://github.com/breferrari/vigia/issues/78)).
+    /// [`Theme::bar_track`] already follow. A file with no history at all is
+    /// the *all*-empty case, so at launch a worktree that was already dirty
+    /// draws a full track on every row.
     ///
     /// **Chosen rather than read off the picture, which is the one value in
     /// [`Theme::dark`] that is.** `assets/preview.svg` drew all eight bucket
@@ -353,11 +349,10 @@ palette! {
     ///
     /// **Green, because that is git's own vocabulary for staged**: `git status`
     /// paints a staged path green and an unstaged one red, so a reader who has
-    /// used git has already learned this. It is `SPEC.md` §5.3's green amendment
-    /// ([#313](https://github.com/breferrari/vigia/issues/313)), and what keeps it
-    /// from colliding with the diff's own green is *where* it is drawn: it inks a
-    /// file row's kind letter and never a content row, so it is never beside a `+`
-    /// sigil or a `+42` counter.
+    /// used git has already learned this. It is `SPEC.md` §5.3's green
+    /// amendment, and what keeps it from colliding with the diff's own green is
+    /// *where* it is drawn: it inks a file row's kind letter and never a
+    /// content row, so it is never beside a `+` sigil or a `+42` counter.
     ///
     /// **It was a bar in a column of its own until
     /// [#316](https://github.com/breferrari/vigia/issues/316)**, and the column is
@@ -413,13 +408,12 @@ palette! {
     removed_gutter,
     /// The pane's leading cell on an added line, which is §5.1's left bar.
     ///
-    /// **Background only, and it costs no column**
-    /// ([#218](https://github.com/breferrari/vigia/issues/218)). It is one cell of
-    /// the blank margin [`crate::render`]'s inset ladder already keeps, and the row
-    /// wash already bleeds under, so setting its background spends nothing that was
-    /// carrying content. Drawn wherever that margin exists, which is forty-three
-    /// columns up, and absent below it, where the wash and the sigil carry the
-    /// signal alone.
+    /// **Background only, and it costs no column**. It is one cell of the blank
+    /// margin [`crate::render`]'s inset ladder already keeps, and the row wash
+    /// already bleeds under, so setting its background spends nothing that was
+    /// carrying content. Drawn wherever that margin exists, which is
+    /// forty-three columns up, and absent below it, where the wash and the
+    /// sigil carry the signal alone.
     ///
     /// **The reason for putting it on the sigil instead is recorded because it
     /// expired rather than because it was wrong**: *"the mockup's bar is three
@@ -908,16 +902,16 @@ impl Theme {
             // and the gap between them is what keeps the ruling one line up true:
             // the track is context and the thumb is the reading.
             //
-            // **`#656c76`, because the column it sits on is not the pane**
-            // ([#239](https://github.com/breferrari/vigia/issues/239)). Every
-            // ratio above is measured against `#0d1117`, which holds for the
-            // bar's cell only while the row wash stops one column short of it.
-            // The band runs under the bar now, so on a changed row this glyph sits
-            // on `added_row` or `removed_row` instead, and `#57606a` there is
-            // **1.88:1** and **2.17:1**. That is nearer the `#21262d` this note
-            // rejects as absent than the value it chose, so the track would have
-            // survived on context rows and faded on the rows a reader is looking
-            // at, drawing the bar as a dashed line down the pane.
+            // **`#656c76`, because the column it sits on is not the pane**.
+            // Every ratio above is measured against `#0d1117`, which holds for
+            // the bar's cell only while the row wash stops one column short of
+            // it. The band runs under the bar now, so on a changed row this
+            // glyph sits on `added_row` or `removed_row` instead, and `#57606a`
+            // there is **1.88:1** and **2.17:1**. That is nearer the `#21262d`
+            // this note rejects as absent than the value it chose, so the track
+            // would have survived on context rows and faded on the rows a
+            // reader is looking at, drawing the bar as a dashed line down the
+            // pane.
             //
             //             context   added  removed
             //   #57606a     2.96     1.88     2.17
@@ -1017,13 +1011,13 @@ impl Theme {
             // The wash carries the band; the sigil carries the sign.
             //
             // **The bar itself was then refused, on a reason that has since
-            // expired** ([#218](https://github.com/breferrari/vigia/issues/218)).
-            // It read: *the bar has no terminal equivalent that does not spend a
-            // column I6 forbids.* True when the pane drew from column zero, false
-            // once [#119](https://github.com/breferrari/vigia/issues/119) gave it a
-            // margin, and nobody re-read the refusal. The margin is blank, the wash
-            // already bleeds under it, so the bar is a background on a cell that
-            // was carrying nothing.
+            // expired**. It read: *the bar has no terminal equivalent that does
+            // not spend a column I6 forbids.* True when the pane drew from
+            // column zero, false once
+            // [#119](https://github.com/breferrari/vigia/issues/119) gave it a
+            // margin, and nobody re-read the refusal. The margin is blank, the
+            // wash already bleeds under it, so the bar is a background on a
+            // cell that was carrying nothing.
             //
             // The picture's own colours, which is the point: the sliver beside the
             // `+` is `#3fb950` and the one beside the `−` is `#f85149`, the same
@@ -1093,9 +1087,8 @@ impl Theme {
             // on `Theme::dark`'s `bar_track`; the two were wrong together and are
             // fixed together, and the gap below `bar`'s 6.11:1 matches.
             //
-            // **`#7d8590`**, the third value these two take together
-            // ([#239](https://github.com/breferrari/vigia/issues/239)).
-            // The band runs under the bar, so this glyph sits on `added_row` or
+            // **`#7d8590`**, the third value these two take together. The band
+            // runs under the bar, so this glyph sits on `added_row` or
             // `removed_row` on a changed row rather than on white:
             //
             //             context   added  removed

@@ -313,14 +313,13 @@ fn band_at(width: u16, series: [u32; HISTORY_SAMPLES], glyphs: Glyphs) -> Vec<St
 
 /// The band's period against a drawn sparkline bucket's, read off one screen.
 ///
-/// **The comparison the retired ceiling made, in the form that survives #232**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)).
-/// `vigia-core` once asserted `GRAPH_PERIOD < HISTORY_BUCKET`: two elements read
-/// one store over one window and a reader has both on screen, so a burst that
-/// splits in a file's sparkline and merges in the worktree band at the same
-/// instant is incoherent. That gate went with the constants it read, because the
-/// band's period stopped being a constant and became a property of the pane, and
-/// nothing has compared the two since.
+/// **The comparison the retired ceiling made, in the form that survives #232**.
+/// `vigia-core` once asserted `GRAPH_PERIOD < HISTORY_BUCKET`: two elements
+/// read one store over one window and a reader has both on screen, so a burst
+/// that splits in a file's sparkline and merges in the worktree band at the
+/// same instant is incoherent. That gate went with the constants it read,
+/// because the band's period stopped being a constant and became a property of
+/// the pane, and nothing has compared the two since.
 ///
 /// So it is compared where both are now decided, on the screen. The band plots
 /// one value per sub-column and the sparkline one per drawn bucket, both across

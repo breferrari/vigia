@@ -862,12 +862,11 @@ impl Pane<'_> {
     /// and would report the cheaper half as the frame.
     fn draw(&mut self, worktree: &Worktree, now: Instant) {
         // **The roll, because `Shell::draw` does it and this file's whole claim
-        // is that it does what the shell does**
-        // ([#277](https://github.com/breferrari/vigia/issues/277)). Without it
-        // this harness models a window that never ages, so `tracked_history`
-        // reports a store that only ever grows and the sampled readout draws a
-        // burst pinned where it was: the freeze that row removed, preserved in
-        // the instrument that is supposed to notice it.
+        // is that it does what the shell does**. Without it this harness models
+        // a window that never ages, so `tracked_history` reports a store that
+        // only ever grows and the sampled readout draws a burst pinned where it
+        // was: the freeze that row removed, preserved in the instrument that is
+        // supposed to notice it.
         //
         // `now` is the turn's instant, shared with the tick's own record, for
         // the reason `Shell::draw` gives: two clocks a status walk apart let a

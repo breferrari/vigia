@@ -10,9 +10,8 @@
 //!
 //! **The count moved twice and this sentence did not**, which is why it is
 //! spelled out rather than left as *three*: B17's `staged` made it four and
-//! B19's `wrap` five ([#272](https://github.com/breferrari/vigia/issues/272)),
-//! and [`KEYS`] is seven with the appearance keys B18 added. `links` is the one
-//! that does **not** start off, and its own field says why.
+//! B19's `wrap` five, and [`KEYS`] is seven with the appearance keys B18 added.
+//! `links` is the one that does **not** start off, and its own field says why.
 //!
 //! ## Why this is a file and not a variable
 //!
@@ -88,11 +87,10 @@ pub struct Config {
     pub single: bool,
     /// Draw the staged run beside the unstaged one. `a`.
     ///
-    /// **§11.2 B17** ([#313](https://github.com/breferrari/vigia/issues/313)), and
-    /// it is here because this file's set is *defined* as the gestures sheet's
-    /// `view` section less `follow`: the section gained a fourth row, so leaving
-    /// this out would have made that rule false rather than merely leaving a key
-    /// unavailable.
+    /// **§11.2 B17**, and it is here because this file's set is *defined* as
+    /// the gestures sheet's `view` section less `follow`: the section gained a
+    /// fourth row, so leaving this out would have made that rule false rather
+    /// than merely leaving a key unavailable.
     ///
     /// **It answers nothing that [#50](https://github.com/breferrari/vigia/issues/50)
     /// asks.** That row is still open and still on a week of real use: it decides
@@ -102,12 +100,11 @@ pub struct Config {
     pub staged: bool,
     /// Wrap a content line too wide for the pane onto the row below. `w`.
     ///
-    /// **§11.2 B19** ([#272](https://github.com/breferrari/vigia/issues/272)), and
-    /// it is here for the reason [`Self::staged`] is: this file's set is
-    /// *defined* as the gestures sheet's `view` section less `follow`, plus the
-    /// appearance keys B18 added, so a section that gains a row and a file that
-    /// does not would make that definition false rather than merely leave a key
-    /// unavailable.
+    /// **§11.2 B19**, and it is here for the reason [`Self::staged`] is: this
+    /// file's set is *defined* as the gestures sheet's `view` section less
+    /// `follow`, plus the appearance keys B18 added, so a section that gains a
+    /// row and a file that does not would make that definition false rather
+    /// than merely leave a key unavailable.
     ///
     /// Off by default, which is both the derived answer and the ruled one.
     pub wrap: bool,
@@ -125,9 +122,8 @@ pub struct Config {
     pub icons: bool,
     /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
     ///
-    /// **The first key whose default is on**, and the reasoning is B18's
-    /// ([#326](https://github.com/breferrari/vigia/issues/326)): the 2026
-    /// support matrix shows OSC 8 degrading silently everywhere it is not
+    /// **The first key whose default is on**, and the reasoning is B18's: the
+    /// 2026 support matrix shows OSC 8 degrading silently everywhere it is not
     /// understood, so there is nothing to protect a reader from and the key
     /// exists to turn a nicety off, not to discover it. That inverts this
     /// struct's `Default`, which is now written by hand and says so.

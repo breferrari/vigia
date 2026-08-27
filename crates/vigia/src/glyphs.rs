@@ -83,14 +83,13 @@ pub(crate) const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '�
 
 /// A bucket nothing happened in.
 ///
-/// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
-/// the heat strip and [`Theme::bar_track`](crate::Theme::bar_track) the scrollbar, reaching it last
-/// though §5 lists it first
-/// ([#78](https://github.com/breferrari/vigia/issues/78)).
-/// A file with no history at all is the *all*-empty case, so a worktree that was
-/// already dirty when `vigia` started draws a full track on every row, which is
-/// the ordinary first frame: history is fed from the watch, so nothing a reader
-/// opens the pane to look at has a tick behind it yet.
+/// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already
+/// gives the heat strip and [`Theme::bar_track`](crate::Theme::bar_track) the
+/// scrollbar, reaching it last though §5 lists it first. A file with no history
+/// at all is the *all*-empty case, so a worktree that was already dirty when
+/// `vigia` started draws a full track on every row, which is the ordinary first
+/// frame: history is fed from the watch, so nothing a reader opens the pane to
+/// look at has a tick behind it yet.
 ///
 /// Not a space, and the sentence that argues for one still holds: `▁` would say
 /// "a little happened", which is a different claim from "nothing

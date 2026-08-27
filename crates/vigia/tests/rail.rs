@@ -139,12 +139,11 @@ const TALL: u16 = 24;
 
 /// A shell that has asked for the rail, which is what every gate below is about.
 ///
-/// **The gesture, not the width, since `SPEC.md` §11.2 B14**
-/// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived on
-/// its own until then, so `App::new()` was enough and the width alone decided the
-/// layout. It is a request now, and this file's subject is the rail that a reader
-/// asked for: the width is a precondition and the gesture is the cause. The one
-/// gate about the *default* builds its own chrome and says so.
+/// **The gesture, not the width, since `SPEC.md` §11.2 B14**. The rail arrived
+/// on its own until then, so `App::new()` was enough and the width alone
+/// decided the layout. It is a request now, and this file's subject is the rail
+/// that a reader asked for: the width is a precondition and the gesture is the
+/// cause. The one gate about the *default* builds its own chrome and says so.
 fn chrome() -> Chrome {
     let mut chrome = stacked_chrome();
     chrome.rail = true;
@@ -252,12 +251,11 @@ fn drawn(width: u16, height: u16, view: &View) -> Buffer {
 /// The same, at a named glyph rung.
 ///
 /// **The rung is an input to the glance ladder, so pinning every gate here to
-/// blocks sweeps one rung of two**
-/// ([#252](https://github.com/breferrari/vigia/issues/252)). `Columns::plan`
-/// takes `glyphs`, a denser cell draws two buckets
-/// per column, so the same layout table is reached at a *different width* on a
-/// terminal that carries braille or octants. A sweep at one rung is a sweep of one
-/// of three ladders, which is the shape `SPEC.md` §7 keeps finding.
+/// blocks sweeps one rung of two**. `Columns::plan` takes `glyphs`, a denser
+/// cell draws two buckets per column, so the same layout table is reached at a
+/// *different width* on a terminal that carries braille or octants. A sweep at
+/// one rung is a sweep of one of three ladders, which is the shape `SPEC.md` §7
+/// keeps finding.
 fn drawn_at(width: u16, height: u16, view: &View, glyphs: Glyphs) -> Buffer {
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);

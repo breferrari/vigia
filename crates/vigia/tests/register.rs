@@ -43,6 +43,12 @@ const RATIO_CEILING: [(&str, u64); 9] = [
 
 /// Comments carrying a date or the narrative of a change.
 ///
+/// **Counted per line, which is a blind spot worth naming**: a marker split
+/// across a line break is invisible to this, and rewrapping a paragraph is what
+/// surfaces one. Closing it means joining a comment block before matching, and
+/// the block-joining that would take is the same operation that flattened
+/// thirty-one files' docblocks when it was tried for a different reason.
+///
 /// One number over the whole tree rather than per file, because the work that
 /// lowers it moves file by file and a per-file table would be edited in every
 /// commit of the pass rather than read.

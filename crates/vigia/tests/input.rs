@@ -59,13 +59,12 @@ fn every_way_out_is_a_way_out() {
         );
     }
 
-    // **`Esc` is the dialog reflex, and a dialog reflex dismisses the dialog**
-    // ([#340](https://github.com/breferrari/vigia/issues/340)). It mapped to
-    // `Quit` here until a reader pressed it to put the gestures sheet away and
-    // the monitor exited. It is still a way out, and `App` decides out of
-    // *what*: the sheet if one is up, the program if none is. This function is
-    // handed no state and still maps one key to one action, which is what
-    // `SPEC.md` §11.2 B12 asks of it.
+    // **`Esc` is the dialog reflex, and a dialog reflex dismisses the dialog**.
+    // It mapped to `Quit` here until a reader pressed it to put the gestures
+    // sheet away and the monitor exited. It is still a way out, and `App`
+    // decides out of *what*: the sheet if one is up, the program if none is.
+    // This function is handed no state and still maps one key to one action,
+    // which is what `SPEC.md` §11.2 B12 asks of it.
     assert_eq!(
         action_for(&press(KeyCode::Esc), Regions::default()),
         Some(Action::Escape),
@@ -212,12 +211,11 @@ fn the_digits_cover_the_settled_cap_and_stop_there() {
     // leaving a row every pane draws with no key that reaches it.
     //
     // **This was `every_row_the_list_can_draw_has_a_digit` and the name stopped
-    // being true** ([#160](https://github.com/breferrari/vigia/issues/160)). The
-    // list is deeper than the settled cap on a pane of 28 rows or more, and those
-    // rows are addressed by `J`/`K`, `n`/`p` and the pointer rather than by a
-    // digit. What the digits cover is the rows **every** pane drawing a list has,
-    // so a digit means the same thing at every height, and that is the claim this
-    // gate holds now.
+    // being true**. The list is deeper than the settled cap on a pane of 28
+    // rows or more, and those rows are addressed by `J`/`K`, `n`/`p` and the
+    // pointer rather than by a digit. What the digits cover is the rows
+    // **every** pane drawing a list has, so a digit means the same thing at
+    // every height, and that is the claim this gate holds now.
     for row in 0..LIST_SETTLED {
         let digit = char::from_digit(row as u32 + 1, 10).expect("a digit for the row");
         assert_eq!(
@@ -616,9 +614,8 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 /// draw, and gates written against it would pass while agreeing with nothing.
 /// The same screen with both bars in `column`.
 ///
-/// **A helper because the column is per region now**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)), where a fixture used
-/// to say `bar: Some(60)` once. Every screen these gates describe is the stacked
+/// **A helper because the column is per region**, rather than a fixture saying
+/// `bar: Some(60)` once. Every screen these gates describe is the stacked
 /// layout, where the two bars share the pane's right edge, so moving them
 /// together is what "the bar moved" means here.
 fn bars_at(regions: Regions, column: u16) -> Regions {
@@ -797,11 +794,11 @@ fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
 
 /// A gesture in one region's columns is not a gesture in the other's.
 ///
-/// **The bar gate's sibling, and the larger half of the same assumption**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)). Region *membership*
-/// was a row test: `over_list` asked `contains(row)`, and the wheel router and
-/// the click arm asked it through that. Sound only while the list sits above the
-/// diff, which is the vertical stack this model stops assuming.
+/// **The bar gate's sibling, and the larger half of the same assumption**.
+/// Region *membership* was a row test: `over_list` asked `contains(row)`, and
+/// the wheel router and the click arm asked it through that. Sound only while
+/// the list sits above the diff, which is the vertical stack this model stops
+/// assuming.
 ///
 /// Written against two regions that **share every row and differ in columns**,
 /// which the shipped layout does not draw today and
@@ -2273,12 +2270,11 @@ fn a_mark_names_its_region_when_both_share_a_first_row() {
 
 #[test]
 fn shift_r_and_ctrl_r_are_unbound() {
-    // **The pattern this file already applies to `F`, `D`, `U`, `N` and `P`**, and
-    // `r` arrived with `SPEC.md` §11.2 B14 without it
-    // ([#295](https://github.com/breferrari/vigia/issues/295)). A key map where `g`
-    // and `G` mean different things has to say which capitals are deliberate, and
-    // a rail toggled by a mis-shifted keystroke is the kind of thing a reader
-    // reports as the pane rearranging itself on its own.
+    // **The pattern this file already applies to `F`, `D`, `U`, `N` and `P`**,
+    // and `r` arrived with `SPEC.md` §11.2 B14 without it. A key map where `g`
+    // and `G` mean different things has to say which capitals are deliberate,
+    // and a rail toggled by a mis-shifted keystroke is the kind of thing a
+    // reader reports as the pane rearranging itself on its own.
     assert_eq!(
         action_for(&press(KeyCode::Char('R')), Regions::default()),
         None,
@@ -2295,10 +2291,10 @@ fn shift_r_and_ctrl_r_are_unbound() {
 }
 
 // **What covers the arrows beyond the keymap, and why nothing else is written
-// here** ([#296](https://github.com/breferrari/vigia/issues/296)). The gate below
-// proves `→` resolves to the same `Action` as `n`, and `App::apply` has **one** arm
-// for `Action::File`, so what the arrows do to the screen is exactly what the file
-// step does and is owned by the gates that already pin it:
+// here**. The gate below proves `→` resolves to the same `Action` as `n`, and
+// `App::apply` has **one** arm for `Action::File`, so what the arrows do to the
+// screen is exactly what the file step does and is owned by the gates that
+// already pin it:
 //
 // - `scroll.rs::n_and_p_step_one_file_and_land_on_its_heading` steps and lands
 // - `scroll.rs::the_file_step_stops_at_both_ends` is the inertness at both ends,

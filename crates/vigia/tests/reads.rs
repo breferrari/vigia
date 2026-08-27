@@ -137,11 +137,10 @@ fn layout_on(width: u16, height: u16) -> Body {
 
 /// A chrome that has asked for the rail.
 ///
-/// **The rail is a gesture since `SPEC.md` §11.2 B14**
-/// ([#295](https://github.com/breferrari/vigia/issues/295)), so the arm of this
-/// file that is about the deeper region beside a rail has to ask for one. The
-/// stacked arm reads the same layout at eighty columns, where the request cannot
-/// be honoured and changes nothing.
+/// **The rail is a gesture since `SPEC.md` §11.2 B14**, so the arm of this file
+/// that is about the deeper region beside a rail has to ask for one. The
+/// stacked arm reads the same layout at eighty columns, where the request
+/// cannot be honoured and changes nothing.
 fn railed(mut chrome: vigia::Chrome) -> vigia::Chrome {
     chrome.rail = true;
     chrome
@@ -1237,14 +1236,13 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     );
 
     // **And again on a pane where the region is deeper than the cap that
-    // shipped** ([#160](https://github.com/breferrari/vigia/issues/160)). Every
-    // gate in this file measures `ORDINARY`, which is the one height where the
-    // list's share *is* `LIST_SETTLED`, so before this the claim above was held
-    // at exactly one rung of a ladder and it was the rung that was already
-    // correct. That is the shape §7 keeps finding, and this region is where the
-    // repo has been bitten by it before: the height walk re-read the whole
-    // undrawn changed set on every tick with eleven read-bounding gates green
-    // over it.
+    // shipped**. Every gate in this file measures `ORDINARY`, which is the one
+    // height where the list's share *is* `LIST_SETTLED`, so before this the
+    // claim above was held at exactly one rung of a ladder and it was the rung
+    // that was already correct. That is the shape §7 keeps finding, and this
+    // region is where the repo has been bitten by it before: the height walk
+    // re-read the whole undrawn changed set on every tick with eleven
+    // read-bounding gates green over it.
     //
     // The claim is the same one, not a new one: the read count is the diff's
     // files plus the region's **own drawn height**, whatever that height is. A
@@ -1266,14 +1264,12 @@ fn the_file_list_reads_only_the_rows_it_draws() {
         deep.read
     );
 
-    // **And once more beside a rail**
-    // ([#252](https://github.com/breferrari/vigia/issues/252)), which is the same
-    // argument on the other axis and the one `SPEC.md` §11.1 names this file for.
-    // From 134 columns the list sits beside the diff and its height cap does not
-    // apply at all, so the region is deeper again: the claim that a visible row
-    // costs one `Frame::diff` and no more is what makes that affordable, and until
-    // this arm every gate here drew at eighty columns and no rail was ever
-    // measured.
+    // **And once more beside a rail**, which is the same argument on the other
+    // axis and the one `SPEC.md` §11.1 names this file for. From 134 columns
+    // the list sits beside the diff and its height cap does not apply at all,
+    // so the region is deeper again: the claim that a visible row costs one
+    // `Frame::diff` and no more is what makes that affordable, and until this
+    // arm every gate here drew at eighty columns and no rail was ever measured.
     let beside = one_screen_on("shell-list-rail", 200, RAIL_WIDTH, DEEP);
     let rail = layout_on(RAIL_WIDTH, DEEP);
     assert!(

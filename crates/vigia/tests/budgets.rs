@@ -230,11 +230,10 @@ fn shell_frame(
 /// pays and a tick pays on top of.
 ///
 /// **Split out of [`shell_frame`] rather than copied into the one gate that
-/// wants it** ([#277](https://github.com/breferrari/vigia/issues/277)). That gate
-/// compares a wake that skips `Frame::advance` against one that does not, and a
-/// hand-rolled second copy of these four lines is exactly the drift `shell_frame`
-/// exists to prevent: the two arms would stop being the same frame the moment
-/// either grew a step.
+/// wants it**. That gate compares a wake that skips `Frame::advance` against
+/// one that does not, and a hand-rolled second copy of these four lines is
+/// exactly the drift `shell_frame` exists to prevent: the two arms would stop
+/// being the same frame the moment either grew a step.
 fn frame_body(
     frame: &mut Frame,
     app: &mut App,
@@ -248,11 +247,11 @@ fn frame_body(
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let view = app.view(frame, highlighter, history, screen).expect("view");
     // **The pane comes from the buffer being painted rather than from
-    // [`area`]** ([#252](https://github.com/breferrari/vigia/issues/252)). The two
-    // were the same rect arriving twice and had to agree; a caller timing a frame
-    // on a *rail* pane would otherwise have had to remember to change both, and
-    // the failure mode is the one this file's own doc warns about, since what gets
-    // rendered against the wrong rect gets cheaper rather than louder.
+    // [`area`]**. The two were the same rect arriving twice and had to agree; a
+    // caller timing a frame on a *rail* pane would otherwise have had to
+    // remember to change both, and the failure mode is the one this file's own
+    // doc warns about, since what gets rendered against the wrong rect gets
+    // cheaper rather than louder.
     let pane = buf.area;
     render(buf, pane, &view, theme, Glyphs::default(), &chrome);
 }
@@ -658,12 +657,12 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 
 /// The same, on a named pane.
 ///
-/// **Parameterised for the rail** ([#252](https://github.com/breferrari/vigia/issues/252)):
-/// beside one the pinned list is not capped by [`vigia::LIST_SETTLED`]'s share of
-/// the pane, because its rows cost the diff nothing, so a tall pane draws every
-/// changed file it has. Each visible list row costs one `Frame::diff`, which
-/// `tests/reads.rs` bounds structurally; what only a clock can answer is whether
-/// four times as many of them still fit inside I9.
+/// **Parameterised for the rail**: beside one the pinned list is not capped by
+/// [`vigia::LIST_SETTLED`]'s share of the pane, because its rows cost the diff
+/// nothing, so a tall pane draws every changed file it has. Each visible list
+/// row costs one `Frame::diff`, which `tests/reads.rs` bounds structurally;
+/// what only a clock can answer is whether four times as many of them still fit
+/// inside I9.
 fn frame_budget_on(
     name: &str,
     depth: usize,
@@ -683,11 +682,10 @@ fn frame_budget_on(
     let mut history = History::new();
 
     // **Asked for before the layout is taken, because it changes the layout.**
-    // The rail is a gesture since `SPEC.md` §11.2 B14
-    // ([#295](https://github.com/breferrari/vigia/issues/295)), and unlike the
-    // sheet's toggle below it moves rows: taking the height first would time a
-    // frame planned for the stacked shape. `ToggleRail` reads no height of its
-    // own (`Action::needs_height` is false for it), so the stacked figure is an
+    // The rail is a gesture since `SPEC.md` §11.2 B14, and unlike the sheet's
+    // toggle below it moves rows: taking the height first would time a frame
+    // planned for the stacked shape. `ToggleRail` reads no height of its own
+    // (`Action::needs_height` is false for it), so the stacked figure is an
     // honest argument here.
     if rail {
         let stacked = layout_of(&app, pane, FILES).diff;
@@ -904,15 +902,14 @@ fn frame_budget_on(
 
 #[test]
 fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
-    // **The gate whose absence was the finding**
-    // ([#101](https://github.com/breferrari/vigia/issues/101)). Every other
-    // wall-clock gate in this file opens with `settle`, and `settle` calls
-    // `materialise`, which diffs *every* file. With a `FileDiff` cached for all
-    // hundred of them, `Frame::height` rebuilds every span from memory and reads
-    // nothing, so the gate's own setup deletes the cost it would otherwise
-    // measure. That is `SPEC.md` §7's recurring shape along a fourth axis:
-    // cheapest position, cheapest state, warmed-past first frame, and now
-    // **cheapest cache population**.
+    // **The gate whose absence was the finding**. Every other wall-clock gate
+    // in this file opens with `settle`, and `settle` calls `materialise`, which
+    // diffs *every* file. With a `FileDiff` cached for all hundred of them,
+    // `Frame::height` rebuilds every span from memory and reads nothing, so the
+    // gate's own setup deletes the cost it would otherwise measure. That is
+    // `SPEC.md` §7's recurring shape along a fourth axis: cheapest position,
+    // cheapest state, warmed-past first frame, and now **cheapest cache
+    // population**.
     //
     // The state here is the one a reader is actually in one second after launch:
     // a hundred changed files, of which the viewport has drawn six, ticking as
@@ -2380,10 +2377,9 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
 /// The pane the sheet's own budget is measured on.
 ///
 /// **Short and wide on purpose**, because that is the pane the two-column rung
-/// arrives on ([#220](https://github.com/breferrari/vigia/issues/220)) and it is
-/// the widest the sheet ever draws: 104 columns by 14 rows against the
-/// one-column rung's 56 by 19. It is no longer the **largest**, which is a
-/// different superlative and belongs to the roomy rung below.
+/// arrives on and it is the widest the sheet ever draws: 104 columns by 14 rows
+/// against the one-column rung's 56 by 19. It is no longer the **largest**,
+/// which is a different superlative and belongs to the roomy rung below.
 const SHEET_PANE: Rect = Rect {
     x: 0,
     y: 0,
@@ -2458,8 +2454,7 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
 
 /// The pane the roomy rung's own budget is measured on.
 ///
-/// **Tall and wide**, because that is what the roomy rung needs
-/// ([#285](https://github.com/breferrari/vigia/issues/285)): a room of
+/// **Tall and wide**, because that is what the roomy rung needs: a room of
 /// sixty-eight columns and a body of thirty-five rows.
 const ROOMY_PANE: Rect = Rect {
     x: 0,
