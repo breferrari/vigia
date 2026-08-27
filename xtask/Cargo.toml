@@ -27,3 +27,6 @@ two-face = { version = "0.5.2", default-features = false, features = [
 # could quietly diverge. The workspace features (parsing, dump-load,
 # regex-fancy) ride along.
 syntect = { workspace = true, features = ["yaml-load", "dump-create"] }
+
+[lints]
+workspace = true

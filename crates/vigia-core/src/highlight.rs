@@ -460,6 +460,12 @@ impl Highlighter {
     }
 
     /// The same highlighter, parsing whatever it resolves, cold or not.
+    ///
+    /// # Panics
+    ///
+    /// The grammar dump compiled into this binary fails to deserialise, which is a corrupt
+    /// build rather than a runtime condition: the bytes are `include_bytes!`d from
+    /// `assets/syntaxes.bin` and cannot vary at run time.
     pub fn eager() -> Self {
         Self {
             syntaxes: Arc::new(

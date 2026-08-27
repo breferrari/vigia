@@ -91,3 +91,13 @@ libc.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
 windows-sys.workspace = true
+
+# Not `workspace = true`: the workspace turns on the C-FAILURE lints, and this
+# crate is the binary. Those guidelines exist for callers you do not control, and
+# nothing outside this crate calls `App::apply`. Applied here they produced five
+# `# Errors` sections in `view.rs` saying the same sentence, which is the register
+# this repository just spent a week removing. `vigia-core` is published with a
+# real public API and keeps them.
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+doc_markdown = "warn"

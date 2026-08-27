@@ -130,6 +130,12 @@ pub fn arm_frame(frame: &mut vigia_core::Frame, config: crate::Config) {
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
+///
+/// # Errors
+///
+/// The path is not a repository, an input the reader controls does not parse, or the
+/// terminal cannot be taken. Every one of them is reported before the takeover, on a
+/// terminal the reader can still read.
 pub fn run(path: &Path) -> Result<(), Failure> {
     let worktree = Worktree::discover(path)?;
     let mut frame = worktree.frame();

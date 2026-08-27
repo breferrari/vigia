@@ -133,6 +133,11 @@ pub struct Session {
 
 impl Session {
     /// Enter the alternate screen, in raw mode, with the mouse reporting.
+    ///
+    /// # Errors
+    ///
+    /// A step of the takeover fails. Any step that already succeeded is undone first, so the
+    /// terminal is never left half taken.
     pub fn enter() -> io::Result<Self> {
         check_drawable(stdout().is_terminal())?;
 

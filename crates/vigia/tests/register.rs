@@ -41,9 +41,9 @@ const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia-core/src/history.rs", 3350),
     ("vigia/src/render.rs", 3314),
     ("vigia/src/glyphs.rs", 3947),
-    ("vigia/src/lib.rs", 3588),
-    ("vigia/src/config.rs", 4114),
-    ("vigia/src/view.rs", 2685),
+    ("vigia/src/lib.rs", 3575),
+    ("vigia/src/config.rs", 4000),
+    ("vigia/src/view.rs", 2610),
 ];
 
 /// Comments carrying a date or the narrative of a change.
@@ -138,6 +138,48 @@ fn is_comment(line: &str) -> bool {
     trimmed.starts_with("//")
 }
 
+/// Comment lines this repository chose to write, which is what the ratio bounds.
+///
+/// `# Errors`, `# Panics` and `# Safety` sections are excluded, capped at
+/// [`COMPELLED_LINES`] each. They are not discretionary: `clippy`'s
+/// `missing_errors_doc`, `missing_panics_doc`, `missing_safety_doc` and
+/// `undocumented_unsafe_blocks` fail the build without them, and CI runs
+/// `-D warnings`. Counting them here put two gates in opposition, and the only
+/// way a session could satisfy both was to delete an ordinary comment that
+/// explained something real in order to pay for a section a lint demanded. That
+/// is the ratchet buying worse code, which is the opposite of its job — it
+/// exists to refuse session narrative and essay, not API documentation.
+///
+/// **The cap is what keeps this from being a hole.** Everything past
+/// [`COMPELLED_LINES`] in such a section counts normally, so an essay cannot be
+/// smuggled in under an `# Errors` heading. Adopted 2026-08-28 with the C-FAILURE
+/// lints; a first spelling with no cap was rejected for exactly that reason.
+fn discretionary(lines: &[String]) -> usize {
+    let mut count = 0;
+    let mut compelled = 0;
+    for line in lines {
+        if !is_comment(line) {
+            continue;
+        }
+        let body = line.trim_start().trim_start_matches('/').trim();
+        if matches!(body, "# Errors" | "# Panics" | "# Safety") {
+            compelled = COMPELLED_LINES;
+            continue;
+        }
+        if compelled > 0 {
+            compelled -= 1;
+            continue;
+        }
+        count += 1;
+    }
+    count
+}
+
+/// Lines a compelled documentation section may spend before it counts like any
+/// other prose. Six is the longest of the thirty-two written when the C-FAILURE
+/// lints were adopted: a heading, a blank, and four lines of text.
+const COMPELLED_LINES: usize = 6;
+
 /// The gate refuses to run against an empty tree, because a ceiling nothing
 /// reached is satisfied the way an empty room satisfies a fire code.
 fn non_vacuous(files: &[(String, Vec<String>)]) {
@@ -161,7 +203,7 @@ fn the_comment_to_code_ratio_only_falls() {
         let Some((_, lines)) = files.iter().find(|(n, _)| n == name) else {
             panic!("{name} is in the ceiling table and not in the tree");
         };
-        let comments = lines.iter().filter(|l| is_comment(l)).count();
+        let comments = discretionary(lines);
         let code = lines
             .iter()
             .filter(|l| !l.trim().is_empty() && !is_comment(l))
