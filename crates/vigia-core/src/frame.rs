@@ -259,6 +259,10 @@ impl<'w> Frame<'w> {
     }
 
     /// Re-read which files changed, keeping every diff still known to be valid.
+    ///
+    /// # Errors
+    ///
+    /// The status walk fails.
     pub fn advance(&mut self) -> Result<()> {
         let mut files = Vec::with_capacity(self.files.len());
         for change in self.worktree.changes()? {
@@ -371,6 +375,10 @@ impl<'w> Frame<'w> {
     }
 
     /// How many rows the whole diff is, counting every changed file.
+    ///
+    /// # Errors
+    ///
+    /// A file's span cannot be measured, which is a read of either side.
     pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
         let mut total = 0usize;
         for index in 0..self.files.len() {
@@ -382,6 +390,10 @@ impl<'w> Frame<'w> {
     }
 
     /// How many rows one file occupies, from its span.
+    ///
+    /// # Errors
+    ///
+    /// The file's span cannot be measured, which is a read of either side.
     pub fn rows_of(
         &mut self,
         index: usize,
@@ -486,6 +498,10 @@ impl<'w> Frame<'w> {
     ///
     /// If `index` is out of range, the same way indexing a slice does. Holding an
     /// index across [`Frame::advance`] is how: the list shrinks under it.
+    ///
+    /// # Errors
+    ///
+    /// The file at `index` cannot be diffed, which is a read of either side.
     pub fn diff(&mut self, index: usize) -> Result<(&FileChange, &FileDiff)> {
         let change = &self.files[index];
         let path = self.worktree.workdir().join(&change.path);

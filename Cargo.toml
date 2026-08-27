@@ -246,3 +246,25 @@ targets = [
     "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc",
 ]
+
+# The documentation lints from the Rust API guidelines, plus the two clippy
+# offers as measurable stand-ins for complexity. They land as `warn` rather than
+# `deny` for one reason: CI runs `RUSTFLAGS: -D warnings` on a floating stable
+# toolchain, so a lint that fires on a future release would redden `main` on a
+# day nobody changed the code. `warn` here and `-D warnings` there means the
+# gate is real in CI and does not block a local build while the count comes
+# down.
+#
+# `too_many_lines` and `excessive_nesting` are measured rather than gated, and
+# `cognitive_complexity` is absent because clippy moved it to `restriction` and
+# warns against using it as a measurement at all. Measured 2026-08-28: 22 sites
+# over 100 lines, 15 of them test functions, where length is the idiom and
+# splitting one costs the reader the case it sets up. Under `-D warnings` a
+# `warn` here is a `deny` in CI, so gating on it would forbid a shape that is
+# not a defect. The count belongs in a commit, not in the build.
+[workspace.lints.clippy]
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+missing_safety_doc = "warn"
+undocumented_unsafe_blocks = "warn"
+doc_markdown = "warn"

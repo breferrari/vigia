@@ -41,9 +41,9 @@ const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia-core/src/history.rs", 3350),
     ("vigia/src/render.rs", 3314),
     ("vigia/src/glyphs.rs", 3947),
-    ("vigia/src/lib.rs", 3588),
-    ("vigia/src/config.rs", 4114),
-    ("vigia/src/view.rs", 2685),
+    ("vigia/src/lib.rs", 3575),
+    ("vigia/src/config.rs", 4000),
+    ("vigia/src/view.rs", 2610),
 ];
 
 /// Comments carrying a date or the narrative of a change.
@@ -138,6 +138,48 @@ fn is_comment(line: &str) -> bool {
     trimmed.starts_with("//")
 }
 
+/// Comment lines this repository chose to write, which is what the ratio bounds.
+///
+/// `# Errors`, `# Panics` and `# Safety` sections are excluded, capped at
+/// [`COMPELLED_LINES`] each. They are not discretionary: `clippy`'s
+/// `missing_errors_doc`, `missing_panics_doc`, `missing_safety_doc` and
+/// `undocumented_unsafe_blocks` fail the build without them, and CI runs
+/// `-D warnings`. Counting them here put two gates in opposition, and the only
+/// way a session could satisfy both was to delete an ordinary comment that
+/// explained something real in order to pay for a section a lint demanded. That
+/// is the ratchet buying worse code, which is the opposite of its job — it
+/// exists to refuse session narrative and essay, not API documentation.
+///
+/// **The cap is what keeps this from being a hole.** Everything past
+/// [`COMPELLED_LINES`] in such a section counts normally, so an essay cannot be
+/// smuggled in under an `# Errors` heading. Adopted 2026-08-28 with the C-FAILURE
+/// lints; a first spelling with no cap was rejected for exactly that reason.
+fn discretionary(lines: &[String]) -> usize {
+    let mut count = 0;
+    let mut compelled = 0;
+    for line in lines {
+        if !is_comment(line) {
+            continue;
+        }
+        let body = line.trim_start().trim_start_matches('/').trim();
+        if matches!(body, "# Errors" | "# Panics" | "# Safety") {
+            compelled = COMPELLED_LINES;
+            continue;
+        }
+        if compelled > 0 {
+            compelled -= 1;
+            continue;
+        }
+        count += 1;
+    }
+    count
+}
+
+/// Lines a compelled documentation section may spend before it counts like any
+/// other prose. Six is the longest of the thirty-two written when the C-FAILURE
+/// lints were adopted: a heading, a blank, and four lines of text.
+const COMPELLED_LINES: usize = 6;
+
 /// The gate refuses to run against an empty tree, because a ceiling nothing
 /// reached is satisfied the way an empty room satisfies a fire code.
 fn non_vacuous(files: &[(String, Vec<String>)]) {
@@ -161,7 +203,7 @@ fn the_comment_to_code_ratio_only_falls() {
         let Some((_, lines)) = files.iter().find(|(n, _)| n == name) else {
             panic!("{name} is in the ceiling table and not in the tree");
         };
-        let comments = lines.iter().filter(|l| is_comment(l)).count();
+        let comments = discretionary(lines);
         let code = lines
             .iter()
             .filter(|l| !l.trim().is_empty() && !is_comment(l))
@@ -410,5 +452,125 @@ fn a_comment_cites_no_more_of_the_tracker_than_it_did() {
          pointer and is fine; one of a closed issue is the commit's history in \
          a file nobody reads it from. Worst files:\n{}",
         top.join("\n")
+    );
+}
+
+/// Every tracked markdown file, so the gate reads what a session reads.
+fn markdown() -> Vec<(String, String)> {
+    let root = crates_root().join("..");
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["ls-files", "*.md"])
+        .output()
+        .expect("git ls-files");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|name| !name.contains("NOTICE"))
+        .filter_map(|name| {
+            let body = std::fs::read_to_string(root.join(name)).ok()?;
+            Some((name.to_owned(), body))
+        })
+        .collect()
+}
+
+/// No prose paragraph in a tracked markdown file spans more than one line.
+///
+/// A wall rather than a ratchet, because the tree is clean and the class is
+/// mechanical: GitHub renders a single newline inside a paragraph as a real
+/// line break, so a body wrapped at eighty arrives at its reader broken
+/// mid-sentence. 811 forced breaks across sixteen of this repository's own pull
+/// requests before anyone measured it.
+///
+/// **Gated rather than written down, because it had been written down twice
+/// and lost twice.** An instruction cannot beat a corpus: these documents held
+/// 7,351 hard-wrapped lines, and a session reads them before it writes
+/// anything. Removing the examples is what makes the rule hold.
+///
+/// Code comments are deliberately out of scope. Nothing renders them, so a
+/// break there corrupts nothing, and they sit beside code held near a hundred
+/// columns where one long line reads worse.
+///
+/// Structure is not prose and is never counted: YAML frontmatter, fenced code,
+/// tables, list items, headings, blockquotes and thematic breaks.
+#[test]
+fn no_prose_paragraph_is_hard_wrapped() {
+    let files = markdown();
+    assert!(
+        files.len() > 5,
+        "only {} markdown file(s) found, so this gate is passing on nothing",
+        files.len()
+    );
+
+    let structural = |line: &str| {
+        let t = line.trim_start();
+        t.is_empty()
+            || t.starts_with('|')
+            || t.starts_with('#')
+            || t.starts_with('>')
+            || t.starts_with("- ")
+            || t.starts_with("* ")
+            || t.starts_with("+ ")
+            || t.starts_with("---")
+            || t.starts_with("===")
+            // A raw HTML block is layout, and joining `<table>` onto `<tr>` is
+            // the same class of damage as joining a form's fields.
+            || t.starts_with('<')
+            || t.chars().next().is_some_and(|c| c.is_ascii_digit())
+                && t.contains(". ")
+                && t.split_once(". ").is_some_and(|(n, _)| {
+                    n.chars().all(|c| c.is_ascii_digit())
+                })
+    };
+
+    let mut breaches = Vec::new();
+    for (name, body) in &files {
+        // Frontmatter is `key: value` structure. Joining it once made a skill's
+        // name and description one field.
+        let body = body.strip_prefix("---\n").map_or(body.as_str(), |rest| {
+            rest.find("\n---\n")
+                .map_or(body.as_str(), |at| &rest[at + 5..])
+        });
+        let mut fence = false;
+        // An HTML comment is not prose either. The issue template's `<!-- -->`
+        // block holds the fields a reporter fills in one per line, and joining
+        // them made `Terminal and version: OS: vigia --version:` one line.
+        let mut html = false;
+        let mut prose = 0usize;
+        for (n, line) in body.lines().enumerate() {
+            if line.trim_start().starts_with("```") {
+                fence = !fence;
+                prose = 0;
+                continue;
+            }
+            if line.contains("<!--") {
+                html = true;
+            }
+            let closing = html && line.contains("-->");
+            if html || closing {
+                if closing {
+                    html = false;
+                }
+                prose = 0;
+                continue;
+            }
+            if fence || structural(line) {
+                prose = 0;
+                continue;
+            }
+            prose += 1;
+            if prose == 2 {
+                breaches.push(format!("  {name}:{}", n + 1));
+            }
+        }
+    }
+
+    assert!(
+        breaches.is_empty(),
+        "{} paragraph(s) are hard wrapped. One paragraph is one line: a newline \
+         inside one renders as a break the author did not write. Join them; do \
+         not reflow to a wider column:\n{}",
+        breaches.len(),
+        breaches.join("\n")
     );
 }

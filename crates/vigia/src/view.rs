@@ -757,6 +757,10 @@ impl View {
     }
 
     /// Collect the rows visible from `position`, and no others.
+    ///
+    /// # Errors
+    ///
+    /// A file the window reaches cannot be read or measured.
     pub fn collect(
         frame: &mut Frame,
         highlighter: &mut Highlighter,

@@ -37,6 +37,11 @@ pub struct Worktree {
 
 impl Worktree {
     /// Find the repository at or above `path` and open its working tree.
+    ///
+    /// # Errors
+    ///
+    /// `path` is not inside a git repository, or the repository it finds is bare and has no
+    /// worktree to compare against.
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let repo = gix::discover(path)?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
@@ -59,16 +64,28 @@ impl Worktree {
     }
 
     /// Stream the working-tree-vs-index changes with default options.
+    ///
+    /// # Errors
+    ///
+    /// `gix` cannot walk the worktree's status.
     pub fn changes(&self) -> Result<Changes> {
         self.changes_with(ChangeOptions::default())
     }
 
     /// Stream the working-tree-vs-index changes.
+    ///
+    /// # Errors
+    ///
+    /// `gix` cannot walk the worktree's status.
     pub fn changes_with(&self, options: ChangeOptions) -> Result<Changes> {
         self.changes_of(Origin::Unstaged, options)
     }
 
     /// Stream one comparison's changes.
+    ///
+    /// # Errors
+    ///
+    /// `gix` cannot walk the worktree's status.
     pub fn changes_of(&self, origin: Origin, options: ChangeOptions) -> Result<Changes> {
         match origin {
             Origin::Unstaged => {
@@ -91,6 +108,10 @@ impl Worktree {
     }
 
     /// How many changes one comparison holds, without keeping any of them.
+    ///
+    /// # Errors
+    ///
+    /// `gix` cannot walk the worktree's status.
     pub fn count_of(&self, origin: Origin) -> Result<usize> {
         // Rename tracking on, and the cheaper spelling is wrong here.
         self.changes_of(origin, ChangeOptions::default())?
@@ -139,6 +160,10 @@ impl Worktree {
     }
 
     /// Start watching this working tree for change.
+    ///
+    /// # Errors
+    ///
+    /// The filesystem watcher cannot be armed on this worktree.
     pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
         Watcher::new(&self.repo, &self.workdir, options)
     }
@@ -149,6 +174,11 @@ impl Worktree {
     }
 
     /// Compute the line-level diff for one change.
+    ///
+    /// # Errors
+    ///
+    /// Either side cannot be read: the working-tree file is unreadable, or the index names an
+    /// object the database does not hold.
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
         self.diff_counted(change, &mut 0)
     }
@@ -175,6 +205,10 @@ impl Worktree {
     }
 
     /// How tall one change's diff is, without building any of it.
+    ///
+    /// # Errors
+    ///
+    /// Either side cannot be read, as [`Worktree::diff`].
     pub fn measure(&self, change: &FileChange) -> Result<hunk::FileSpan> {
         self.measure_counted(change, &mut 0)
     }

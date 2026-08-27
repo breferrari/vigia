@@ -169,6 +169,11 @@ impl std::error::Error for ConfigError {}
 /// A byte order mark is stripped. U+FEFF is `Cf` rather than `White_Space`, so it
 /// survives every trim and lands inside the first key, and a file saved by Notepad
 /// would otherwise stop the shell with an error naming an invisible byte.
+///
+/// # Errors
+///
+/// A line is not `key = on`: an unknown key or value, a missing value or separator, a
+/// repeated key, or a value carrying a trailing token.
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
 
@@ -251,6 +256,10 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 }
 
 /// Read and parse a config file.
+///
+/// # Errors
+///
+/// The file cannot be read, or it does not parse.
 pub fn load(path: &Path) -> Result<Config, ConfigError> {
     let source = std::fs::read_to_string(path).map_err(|why| ConfigError::Unreadable {
         path: path.to_owned(),
@@ -260,6 +269,10 @@ pub fn load(path: &Path) -> Result<Config, ConfigError> {
 }
 
 /// The view defaults this process should start with.
+///
+/// # Errors
+///
+/// The configuration file named by the environment cannot be read, or does not parse.
 pub fn from_env(lookup: impl Fn(&str) -> Option<String>) -> Result<Config, ConfigError> {
     match crate::theme::home_file(CONFIG_FILE, &lookup).filter(|path| path.is_file()) {
         Some(path) => load(&path),

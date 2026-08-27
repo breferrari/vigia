@@ -103,7 +103,7 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 **This is not a correction to the phrase everywhere else it appears.** *"The timer I1 forbids"* is this repo's own shorthand and is used correctly in every other place it occurs: the pulse decay, the header's idle word, the memory readout, the poll loop `lib.rs` rejects and §10's highlight tail are all clocks that would run **while nothing is happening**, which is precisely the state the budget measures and precisely where it bites. A held-button repeat is the one instance where the clock is bounded by an active gesture, so it slips under the measure while still failing the sentence. Worth writing down because the shorthand is otherwise reliable, and a reader who has seen it used well five times will not stop to check the sixth.
 
-§5.3 refuses the same thing one layer up for animation: *"snap, never ease."* A step button that repeats is an eased scroll with a mouse holding it. That half is a design ruling and needs no measure either.
+§5.3 refused the same thing for animation — *"snap, never ease"* — **reversed 2026-08-27 by the reader** on this entry's own ground: a clock that cannot start on its own never touches I1's idle measure.
 
 **The first ruling made one step per click the affordance, on the grounds that there is no trick that is not a clock.** That half was right and is worth keeping: nobody should go looking for a protocol feature that would give repeat for free, because there is none. What the ruling got wrong was treating "it needs a clock" as the end of the argument rather than the beginning, when the question it should have asked next is *which* clock, and whether a clock bounded by a press is the thing I1's budget was written against. It is not. See the callout at the top of this entry.
 
@@ -296,13 +296,9 @@ Two lessons, and the second is the general one:
 
 ## B13 — the sheet's height axis dropped gestures in silence, and the width axis still can
 
-The ruling is in `SPEC.md` §11.2 B13 and what the shell does is §11.1. This is the
-measurement it rests on, kept here because a number in a ruling is a claim and a
-number here is a trail.
+The ruling is in `SPEC.md` §11.2 B13 and what the shell does is §11.1. This is the measurement it rests on, kept here because a number in a ruling is a claim and a number here is a trail.
 
-**Before, on `main` at 0.25.0.** Every width from 20 to 140 swept against every
-height from 3 to 40, counting the gestures actually painted inside the sheet's own
-rect rather than anywhere on the pane:
+**Before, on `main` at 0.25.0.** Every width from 20 to 140 swept against every height from 3 to 40, counting the gestures actually painted inside the sheet's own rect rather than anywhere on the pane:
 
 | pane width | most gestures reachable, at any height |
 |---|---|
@@ -312,258 +308,81 @@ rect rather than anywhere on the pane:
 | 35 to 44 | 11 of 16 |
 | 45 and up | 16 of 16 |
 
-Two things that table says and [#286](https://github.com/breferrari/vigia/issues/286)'s
-own did not. The height floor drew **4** of 16 rather than 3, because `SHEET_KEEP`
-is a keep-count and the floor rung had room for one more than it. And the residual
-was as much **width** as height: at 40 columns, the width I6 is named for, the
-ceiling was 11 at every height, and the five missing were the whole mouse group.
-No pane height reached them, because the tight one-column sheet with the mouse
-group was 43 columns wide and a 40 column pane has 40 to give.
+Two things that table says and [#286](https://github.com/breferrari/vigia/issues/286)'s own did not. The height floor drew **4** of 16 rather than 3, because `SHEET_KEEP` is a keep-count and the floor rung had room for one more than it. And the residual was as much **width** as height: at 40 columns, the width I6 is named for, the ceiling was 11 at every height, and the five missing were the whole mouse group. No pane height reached them, because the tight one-column sheet with the mouse group was 43 columns wide and a 40 column pane has 40 to give.
 
-**The one string that made it 43.** `MOUSE`'s tight verbs topped out at
-`scroll what you point at` (24) and `one row, repeats held` (21); the keyboard
-group's topped out at 18, and keys at `click a track` (13). So the table's verb
-field was the wheel's alone. At 17 and 19 the field is 19, the sheet is
-`13 + 2 + 19 + 4 = 38`, and 40 columns of room takes it with two to spare.
+**The one string that made it 43.** `MOUSE`'s tight verbs topped out at `scroll what you point at` (24) and `one row, repeats held` (21); the keyboard group's topped out at 18, and keys at `click a track` (13). So the table's verb field was the wheel's alone. At 17 and 19 the field is 19, the sheet is `13 + 2 + 19 + 4 = 38`, and 40 columns of room takes it with two to spare.
 
-**After.** Every pane of 38 columns and up reaches all sixteen, at every height
-that draws a sheet at all. 35 to 37 reach eleven, 32 to 34 eight, 30 to 31 four,
-and below 30 nothing is drawn. The narrowest sheet the ladder draws went from 24
-columns to 30, because every rung charges the page counter's widest spelling so the
-ordinals can never run into the close control.
+**After.** Every pane of 38 columns and up reaches all sixteen, at every height that draws a sheet at all. 35 to 37 reach eleven, 32 to 34 eight, 30 to 31 four, and below 30 nothing is drawn. The narrowest sheet the ladder draws went from 24 columns to 30, because every rung charges the page counter's widest spelling so the ordinals can never run into the close control.
 
-**And that reason is the second one this ledger has recorded for the same charge.**
-The first was that it keeps a centred box the same size between pages. A mutation
-removing the charge left `the_box_does_not_resize_between_pages` green and reddened
-two width gates, which is the opposite of what the claim predicted: `sheet_fields`
-measures over the whole row set and every page of a pane shares that set, so the
-width was page-independent already. Both claims are about the same line and only
-one of them is true.
+**And that reason is the second one this ledger has recorded for the same charge.** The first was that it keeps a centred box the same size between pages. A mutation removing the charge left `the_box_does_not_resize_between_pages` green and reddened two width gates, which is the opposite of what the claim predicted: `sheet_fields` measures over the whole row set and every page of a pane shares that set, so the width was page-independent already. Both claims are about the same line and only one of them is true.
 
-**The two-column rung moved with the copy and the plan did not predict it.**
-`sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
-its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew
-eleven gestures and drew sixteen on one page after it. (**B13's counts throughout
-this section are B13's own and are not current**: `r` and then `s` were added
-after it and every one of them moved. The current ones are in `SPEC.md` §11.1.)
-Recorded as a deviation rather
-than folded in, because a number that moves without being predicted is the thing
-this ledger exists to catch.
+**The two-column rung moved with the copy and the plan did not predict it.** `sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew eleven gestures and drew sixteen on one page after it. (**B13's counts throughout this section are B13's own and are not current**: `r` and then `s` were added after it and every one of them moved. The current ones are in `SPEC.md` §11.1.) Recorded as a deviation rather than folded in, because a number that moves without being predicted is the thing this ledger exists to catch.
 
-**What the counter cost, found by a gate rather than by reading.** The first
-`sheet_counter_floor` asked the formatter for `(16, 16)` and got the *short*
-spelling, ten columns rather than thirteen, because that pair is the one case the
-range form never draws. Every rung was then three columns narrower than the counter
-it had to fit and the sheet drew at 27 where the ruling says 30. The fix is a
-maximum over the pairs the planner can actually return, taken once per process.
-Deriving the width arithmetically instead would have been the same defect one layer
-over: two expressions agreeing about a sum by hand.
+**What the counter cost, found by a gate rather than by reading.** The first `sheet_counter_floor` asked the formatter for `(16, 16)` and got the *short* spelling, ten columns rather than thirteen, because that pair is the one case the range form never draws. Every rung was then three columns narrower than the counter it had to fit and the sheet drew at 27 where the ruling says 30. The fix is a maximum over the pairs the planner can actually return, taken once per process. Deriving the width arithmetically instead would have been the same defect one layer over: two expressions agreeing about a sum by hand.
 
 ## B13 — what the audit found that the ruling had shipped
 
-Both defects are B13's own, both were introduced by the change that made the
-sheet page, and neither was visible to the suite that shipped it.
+Both defects are B13's own, both were introduced by the change that made the sheet page, and neither was visible to the suite that shipped it.
 
-**The close control advanced.** A click on `✕` returned `Action::ToggleSheet`,
-which is the action `?` sends, and once `?` meant *advance* the control did too.
-On a six-page pane a reader needed six clicks to leave, and the pointer has no `?`
-to fall back on. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both
-stated the opposite while it did this, which makes it the fourth false claim in
-this element's documentation inside one pass.
+**The close control advanced.** A click on `✕` returned `Action::ToggleSheet`, which is the action `?` sends, and once `?` meant *advance* the control did too. On a six-page pane a reader needed six clicks to leave, and the pointer has no `?` to fall back on. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both stated the opposite while it did this, which makes it the fourth false claim in this element's documentation inside one pass.
 
-The gate that should have caught it is worth recording precisely, because it looks
-adequate. `the_close_control_dismisses_and_the_sheet_swallows_the_rest` asserts
-that `action_for` on the control's cell returns the dismissing action, on an
-eighty by twenty-four pane. Two things make that unable to fail here: the pane is
-**one page**, so there is nothing to advance to and the two actions are
-indistinguishable on it; and the test asserts the action's **identity** and never
-applies it, so what the action does to the state is not in the assertion at all.
-An identity is not an outcome.
+The gate that should have caught it is worth recording precisely, because it looks adequate. `the_close_control_dismisses_and_the_sheet_swallows_the_rest` asserts that `action_for` on the control's cell returns the dismissing action, on an eighty by twenty-four pane. Two things make that unable to fail here: the pane is **one page**, so there is nothing to advance to and the two actions are indistinguishable on it; and the test asserts the action's **identity** and never applies it, so what the action does to the state is not in the assertion at all. An identity is not an outcome.
 
-**The last page's box moved.** `paged_fit` sized the frame from `take`, which is a
-remainder on the last page, and `sheet_plan` centres the box on its height, so the
-final page shrank by the remainder and slid down half of it. The close control went
-with it, and the row it vacated fell through to a scrollbar the reader could not
-see. The box is `capacity + SHEET_FRAME` on every page now, with the tail blank
-inside the frame.
+**The last page's box moved.** `paged_fit` sized the frame from `take`, which is a remainder on the last page, and `sheet_plan` centres the box on its height, so the final page shrank by the remainder and slid down half of it. The close control went with it, and the row it vacated fell through to a scrollbar the reader could not see. The box is `capacity + SHEET_FRAME` on every page now, with the tail blank inside the frame.
 
-`the_box_does_not_resize_between_pages` recorded `(left, width)` and those are
-exactly the two edges that did not move. It now records all four, and a second gate
-covers the tail's own frame: `the_sheet_is_a_closed_box_at_every_rung` sweeps 3,400
-panes and reads **page one** on every one of them, because its scaffold toggles
-once and paints, so the blank tail is outside its reach by construction.
+`the_box_does_not_resize_between_pages` recorded `(left, width)` and those are exactly the two edges that did not move. It now records all four, and a second gate covers the tail's own frame: `the_sheet_is_a_closed_box_at_every_rung` sweeps 3,400 panes and reads **page one** on every one of them, because its scaffold toggles once and paints, so the blank tail is outside its reach by construction.
 
-**Twenty mutations, twenty killed.** Four of them are the four above and the
-fixes' own gates; the rest cover the ladder, the clamp, the counter, the drop
-order and the drain. Two survived their first run and both were instrument
-failures rather than gaps: one ran against a test binary that did not contain the
-test, and one applied to a file a previous iteration's `git checkout` had already
-reverted. A mutation that never applied and a mutation the suite failed to kill
-report identically, and they call for opposite responses.
+**Twenty mutations, twenty killed.** Four of them are the four above and the fixes' own gates; the rest cover the ladder, the clamp, the counter, the drop order and the drain. Two survived their first run and both were instrument failures rather than gaps: one ran against a test binary that did not contain the test, and one applied to a file a previous iteration's `git checkout` had already reverted. A mutation that never applied and a mutation the suite failed to kill report identically, and they call for opposite responses.
 
 ## B14 — the rail arrived on its own, and one number is the whole argument
 
-The ruling is `SPEC.md` §11.2 B14 and what the shell does is §11.1. This is the
-trade it rests on, kept here because the reversal is narrow and the part that is
-*not* reversed is the part most likely to be re-argued.
+The ruling is `SPEC.md` §11.2 B14 and what the shell does is §11.1. This is the trade it rests on, kept here because the reversal is narrow and the part that is *not* reversed is the part most likely to be re-argued.
 
-**What was reversed.** Not the width. [#252](https://github.com/breferrari/vigia/issues/252)
-derived 134 rather than choosing it, and that derivation stands: both regions read
-one glance ladder, so splitting a pane costs each half the width the whole had, and
-a split costs no rung only where both halves and the undivided pane one column
-below sit on the same plateau. There are two plateaus and the other needs a
-328-column pane, so 134 is the only answer. What was reversed is that **crossing it
-was automatic**.
+**What was reversed.** Not the width. [#252](https://github.com/breferrari/vigia/issues/252) derived 134 rather than choosing it, and that derivation stands: both regions read one glance ladder, so splitting a pane costs each half the width the whole had, and a split costs no rung only where both halves and the undivided pane one column below sit on the same plateau. There are two plateaus and the other needs a 328-column pane, so 134 is the only answer. What was reversed is that **crossing it was automatic**.
 
-**The number that decides it, and §11.1 already stated it.** At 133 the diff plans
-against 129 columns; at 134 against 60. Widening a terminal past a threshold nobody
-chose more than halved the region this tool exists to show. §11.1 called that "the
-feature rather than a defect", and it is, *for a reader who asked*. The same
-sentence describing a reader who did not is the reason this reopened.
+**The number that decides it, and §11.1 already stated it.** At 133 the diff plans against 129 columns; at 134 against 60. Widening a terminal past a threshold nobody chose more than halved the region this tool exists to show. §11.1 called that "the feature rather than a defect", and it is, *for a reader who asked*. The same sentence describing a reader who did not is the reason this reopened.
 
-**Why an opt-out was rejected rather than an opt-in.** Both need the same discovery
-path: the gestures sheet names the key either way. Given that, the question is only
-which default a reader who never opens the sheet gets, and the answer is the one
-that changes nothing.
+**Why an opt-out was rejected rather than an opt-in.** Both need the same discovery path: the gestures sheet names the key either way. Given that, the question is only which default a reader who never opens the sheet gets, and the answer is the one that changes nothing.
 
-**And the picture stopped being an exception.** `assets/preview.svg` is a
-109-column render, so §5.1 could only say the picture and the code "describe the
-same pane" by noting the picture sits below the arrival width. With the rail asked
-for, they describe the same pane at every width.
+**And the picture stopped being an exception.** `assets/preview.svg` is a 109-column render, so §5.1 could only say the picture and the code "describe the same pane" by noting the picture sits below the arrival width. With the rail asked for, they describe the same pane at every width.
 
-**What it cost, which is the sheet and not the pane.** A key is a row, so the
-gestures table went from eleven keyboard rows to twelve and every row count in
-§11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x
-15` and `71 x 15`, the roomy rung to `68 x 30`. (**Those numbers are B14's own and
-are not current**: B15 and then B16 moved them again. The current ones are in
-§11.1.) **No width moved**, and that is what
-kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left
-rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28
-wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording
-because the plan made them before the run rather than after.
+**What it cost, which is the sheet and not the pane.** A key is a row, so the gestures table went from eleven keyboard rows to twelve and every row count in §11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x 15` and `71 x 15`, the roomy rung to `68 x 30`. (**Those numbers are B14's own and are not current**: B15 and then B16 moved them again. The current ones are in §11.1.) **No width moved**, and that is what kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28 wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording because the plan made them before the run rather than after.
 
-**The keep-set did not move, and the reason first written for that was false.**
-`r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and
-`SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at
-rank eight of `DROP_ORDER`, two before `f`, with `s` between them since B16.
+**The keep-set did not move, and the reason first written for that was false.** `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and `SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at rank eight of `DROP_ORDER`, two before `f`, with `s` between them since B16.
 
-The reason recorded at the time was that the drop order binds at 30 to 34 columns
-and a rail needs 134, so `r` could not fire on the pane dropping it. **That
-describes a pane that does not exist.** At 30 to 34 columns the rung is `from = 7`
-and `r` is *kept*, which this repository's own `NARROW` table asserts by name. The
-rank that drops it is `from >= 9`, which needs a width below thirty, and below
-thirty no sheet is drawn at all.
+The reason recorded at the time was that the drop order binds at 30 to 34 columns and a rail needs 134, so `r` could not fire on the pane dropping it. **That describes a pane that does not exist.** At 30 to 34 columns the rung is `from = 7` and `r` is *kept*, which this repository's own `NARROW` table asserts by name. The rank that drops it is `from >= 9`, which needs a width below thirty, and below thirty no sheet is drawn at all.
 
-So the reorder is **unreachable on every pane that draws**, and it is a defensive
-ordering of the tables rather than an observable behaviour: `sheet_tables` asserts
-the keep-set is `f`, `m` and `?`, the untouched order would have dropped `f`
-instead, and if a rung ever reaches that depth `r` is the right one to lose because
-it is the only one of the four that needs 134 columns. Found by the audit, which is
-the fifth false claim this element's documentation has produced in two passes and
-the second where the sentence was checkable against a table in the same repository.
+So the reorder is **unreachable on every pane that draws**, and it is a defensive ordering of the tables rather than an observable behaviour: `sheet_tables` asserts the keep-set is `f`, `m` and `?`, the untouched order would have dropped `f` instead, and if a rung ever reaches that depth `r` is the right one to lose because it is the only one of the four that needs 134 columns. Found by the audit, which is the fifth false claim this element's documentation has produced in two passes and the second where the sentence was checkable against a table in the same repository.
 
-**One instrument note, from the pass rather than the ruling.** `cargo test
---workspace` stops at the first failing binary, so a grep for `FAILED` over its
-output reports only that binary's failures and reads as green once it passes. Two
-counts in this pass were taken that way and both were wrong: the first was a
-*compile* failure with no `FAILED` line at all, and the second hid twenty-nine
-failures in later binaries. `--no-fail-fast` is the flag, and a count that cannot
-see a compile error is not a count.
+**One instrument note, from the pass rather than the ruling.** `cargo test --workspace` stops at the first failing binary, so a grep for `FAILED` over its output reports only that binary's failures and reads as green once it passes. Two counts in this pass were taken that way and both were wrong: the first was a *compile* failure with no `FAILED` line at all, and the second hid twenty-nine failures in later binaries. `--no-fail-fast` is the flag, and a count that cannot see a compile error is not a count.
 
 ## B15 — the arrows were free, and the only thing they cost is a spelling on the sheet
 
-The ruling is `SPEC.md` §11.2 B15 and the behaviour is §11.1. This is the trade,
-and the correction that came with it.
+The ruling is `SPEC.md` §11.2 B15 and the behaviour is §11.1. This is the trade, and the correction that came with it.
 
-**A claim in the issue's own body was false, and it was mine.** [#296](https://github.com/breferrari/vigia/issues/296)
-was filed on 2026-08-24 saying [#272](https://github.com/breferrari/vigia/issues/272)
-*"would want those arrows if horizontal reading ever lands"*, and offering that as
-the thing to rule against. #272 asks for **`w`**, a wrap toggle, and needs no arrows
-at all. The real conflict is with a **horizontal pan**, which §11.1 declined in the
-sentence after the one ruling a long line clipped rather than wrapped. (The first
-draft of this section said "the same sentence"; it is the adjacent one, and being
-precise about that is cheaper than being caught being loose about it.) So the arrows
-were contested by a rejected alternative rather than by an open row, and the ruling
-is cheaper than the issue that asked for it. Recorded because the pattern is now
-familiar here: a premise written into an issue reads as settled the next day, and
-the issue's author is the least likely person to re-check it.
+**A claim in the issue's own body was false, and it was mine.** [#296](https://github.com/breferrari/vigia/issues/296) was filed on 2026-08-24 saying [#272](https://github.com/breferrari/vigia/issues/272) *"would want those arrows if horizontal reading ever lands"*, and offering that as the thing to rule against. #272 asks for **`w`**, a wrap toggle, and needs no arrows at all. The real conflict is with a **horizontal pan**, which §11.1 declined in the sentence after the one ruling a long line clipped rather than wrapped. (The first draft of this section said "the same sentence"; it is the adjacent one, and being precise about that is cheaper than being caught being loose about it.) So the arrows were contested by a rejected alternative rather than by an open row, and the ruling is cheaper than the issue that asked for it. Recorded because the pattern is now familiar here: a premise written into an issue reads as settled the next day, and the issue's author is the least likely person to re-check it.
 
-**The one measured cost is the tight spelling of one keys cell.** The gestures
-sheet's tight keyboard keys field is eleven columns, on `Space  PgDn`. The arrowed
-cell `n  →  /  p  ←` is thirteen. Carrying it at the tight spelling would take the
-keyboard-only rung from **35 columns to 37**, so panes of 35 and 36 would fall to
-the next rung down and lose their twelve gestures. The whole-table rung is unmoved
-either way, because the mouse group's `click a track` is already thirteen.
+**The one measured cost is the tight spelling of one keys cell.** The gestures sheet's tight keyboard keys field is eleven columns, on `Space  PgDn`. The arrowed cell `n  →  /  p  ←` is thirteen. Carrying it at the tight spelling would take the keyboard-only rung from **35 columns to 37**, so panes of 35 and 36 would fall to the next rung down and lose their twelve gestures. The whole-table rung is unmoved either way, because the mouse group's `click a track` is already thirteen.
 
-Two columns of pane losing gestures to an **alias** is the wrong trade, so the
-arrows are named at the wide spelling only. That is also the established
-convention: `q  Esc  Ctrl+C  Ctrl+D` becomes `q  Esc` and `g  Home  /  G  End`
-becomes `g  /  G`. `j  k  ↓  ↑` is the exception and it keeps its arrows because
-there they cost nothing, which is the same test applied and answered differently.
+Two columns of pane losing gestures to an **alias** is the wrong trade, so the arrows are named at the wide spelling only. That is also the established convention: `q  Esc  Ctrl+C  Ctrl+D` becomes `q  Esc` and `g  Home  /  G  End` becomes `g  /  G`. `j  k  ↓  ↑` is the exception and it keeps its arrows because there they cost nothing, which is the same test applied and answered differently.
 
-**No row was added, and that is why this diff is small where #295's was large.**
-An alias goes in an existing cell, so `KEYBOARD` was still twelve rows, the counter
-still counted to seventeen, and every rung height and reachability boundary §11.1
-states was untouched. #295 added a row and moved every one of them. (**Those
-numbers are B15's own and are not current**: B16 added `s` the next day and moved
-them again. The current ones are in §11.1.)
+**No row was added, and that is why this diff is small where #295's was large.** An alias goes in an existing cell, so `KEYBOARD` was still twelve rows, the counter still counted to seventeen, and every rung height and reachability boundary §11.1 states was untouched. #295 added a row and moved every one of them. (**Those numbers are B15's own and are not current**: B16 added `s` the next day and moved them again. The current ones are in §11.1.)
 
 ## B16 — the pin makes the frame path cheaper, and the guard that would have made it dearer
 
-The ruling is `SPEC.md` §11.2 B16 and the behaviour is §11.1. This is the
-archaeology: one defect found by reading, one premise checked instead of
-inherited, and what a thirteenth key did to the sheet.
+The ruling is `SPEC.md` §11.2 B16 and the behaviour is §11.1. This is the archaeology: one defect found by reading, one premise checked instead of inherited, and what a thirteenth key did to the sheet.
 
-**The defect is a literal that stopped meaning what it says.** `View::collect`
-backs a short screen up so the diff's last row rests on the bottom, and it skips
-that when the position is already the first one the walk can reach. That test is
-spelled `view.top != Position::default()`, and `Position::default()` is *file
-zero, row zero*. It has been correct for as long as the walk always started at
-the first changed file. Under a pin it does not: the first position a pinned walk
-can reach is the pinned file's own row zero, so on any pinned file but the first
-the guard cannot fire, and a pinned file shorter than the pane is `short` on every
-frame, restarts on every frame, and pays what that guard's own paragraph records
-at **three walks and six `Frame::diff` calls a frame against two** — on the file
-an agent is writing to, which `Frame::diff` re-reads inside the settle margin by
-design.
+**The defect is a literal that stopped meaning what it says.** `View::collect` backs a short screen up so the diff's last row rests on the bottom, and it skips that when the position is already the first one the walk can reach. That test is spelled `view.top != Position::default()`, and `Position::default()` is *file zero, row zero*. It has been correct for as long as the walk always started at the first changed file. Under a pin it does not: the first position a pinned walk can reach is the pinned file's own row zero, so on any pinned file but the first the guard cannot fire, and a pinned file shorter than the pane is `short` on every frame, restarts on every frame, and pays what that guard's own paragraph records at **three walks and six `Frame::diff` calls a frame against two** — on the file an agent is writing to, which `Frame::diff` re-reads inside the settle margin by design.
 
-Both walks resolve to the same position and draw the same rows. Nothing on screen
-can see it, no snapshot moves, and the only instrument is the frame's own read
-count, which is what `tests/single.rs::a_pinned_file_shorter_than_the_pane_walks_once`
-asserts. It was found by reading the guard's docblock while working out what the
-pin had to bound, which is the cheapest way this could have been found and was
-luck rather than method: nothing would have gone red.
+Both walks resolve to the same position and draw the same rows. Nothing on screen can see it, no snapshot moves, and the only instrument is the frame's own read count, which is what `tests/single.rs::a_pinned_file_shorter_than_the_pane_walks_once` asserts. It was found by reading the guard's docblock while working out what the pin had to bound, which is the cheapest way this could have been found and was luck rather than method: nothing would have gone red.
 
-**The generalisable half**: a bound written as a type's `default()` reads as *the
-floor* and means *the floor of the old walk*. When a feature narrows what a walk
-may reach, every such literal is part of the change, and the ones that are
-`Default::default()` are the ones no reviewer looks twice at.
+**The generalisable half**: a bound written as a type's `default()` reads as *the floor* and means *the floor of the old walk*. When a feature narrows what a walk may reach, every such literal is part of the change, and the ones that are `Default::default()` are the ones no reviewer looks twice at.
 
-**The premise checked rather than inherited is B14's.** That ruling ranks `r`
-outside the sheet's keep-set and its **first** stated reason was false: it said
-`r` cannot fire on the pane that drops it, and no drawable pane drops it at all.
-The correction is in B14. Ranking `s` at nine raised exactly the same question, and
-the answer was taken from drawn output rather than from B14's conclusion: swept
-over every width from 20 to 45, the deepest rung a drawable pane reaches is still
-`from = 7`, so the `NARROW` table now shows both `r` and `s` **kept** at thirty
-columns, and both reorders remain defence rather than behaviour.
+**The premise checked rather than inherited is B14's.** That ruling ranks `r` outside the sheet's keep-set and its **first** stated reason was false: it said `r` cannot fire on the pane that drops it, and no drawable pane drops it at all. The correction is in B14. Ranking `s` at nine raised exactly the same question, and the answer was taken from drawn output rather than from B14's conclusion: swept over every width from 20 to 45, the deepest rung a drawable pane reaches is still `from = 7`, so the `NARROW` table now shows both `r` and `s` **kept** at thirty columns, and both reorders remain defence rather than behaviour.
 
-**What a key costs, measured twice now.** `r` and `s` are the same shape of change
-and the same shape of cost: every row count moves and no width does. The four
-reachability boundaries sit at 30, 32, 35 and 38 columns and have not moved
-through either, and the counts behind them went 16, 11, 8, 4 to 17, 12, 9, 5 to
-18, 13, 10, 6. They were re-derived from a swept pane both times rather than
-incremented, which is the only way a boundary that *did* move would be noticed.
+**What a key costs, measured twice now.** `r` and `s` are the same shape of change and the same shape of cost: every row count moves and no width does. The four reachability boundaries sit at 30, 32, 35 and 38 columns and have not moved through either, and the counts behind them went 16, 11, 8, 4 to 17, 12, 9, 5 to 18, 13, 10, 6. They were re-derived from a swept pane both times rather than incremented, which is the only way a boundary that *did* move would be noticed.
 
-**The one number that goes the other way.** Every feature added to this pane so
-far has cost the frame path something. A pin removes I4's single exception from
-the frames it is on: the diff's height is counted for every changed file once per
-tick and is the only thing in the frame path not bounded by the window, and a
-pinned frame reads its total off the pinned file's span instead. The gate asserts
-the **unpinned** frame counted something before it asserts the pinned frame
-counted nothing, because a zero over a fixture that had nothing to count is not
-evidence, and that is the same two-fixture rule §7 states for every other cost
-claim here.
+**The one number that goes the other way.** Every feature added to this pane so far has cost the frame path something. A pin removes I4's single exception from the frames it is on: the diff's height is counted for every changed file once per tick and is the only thing in the frame path not bounded by the window, and a pinned frame reads its total off the pinned file's span instead. The gate asserts the **unpinned** frame counted something before it asserts the pinned frame counted nothing, because a zero over a fixture that had nothing to count is not evidence, and that is the same two-fixture rule §7 states for every other cost claim here.
 
 ## B16 — eight audit rounds, one mechanism
 
@@ -595,23 +414,13 @@ The ruling is `SPEC.md` §11.2 B16. Eight rounds ran over it and **every serious
 
 ## B6 — the amendment the ruling predicted, and the one-line defect that shaped it
 
-`SPEC.md` §11.2 B6 is the ruling and §11.1 is the behaviour. This is why the shape
-is two files rather than three more keys in one.
+`SPEC.md` §11.2 B6 is the ruling and §11.1 is the behaviour. This is why the shape is two files rather than three more keys in one.
 
-**B6 predicted this amendment and named the test it would have to pass.** Its
-closing line reads *"there is nowhere to put a setting that is neither of those…
-the next setting that is neither a preference about you nor a fact about the
-terminal in front of you will find it again."* A view default is not in that gap.
-It is B6's **first** kind without strain, a preference about you, and B6 already
-rules that those live in a file. So the amendment **applies** the taxonomy rather
-than widening it, and B7 remains the only candidate that has ever been in the gap.
+**B6 predicted this amendment and named the test it would have to pass.** Its closing line reads *"there is nowhere to put a setting that is neither of those… the next setting that is neither a preference about you nor a fact about the terminal in front of you will find it again."* A view default is not in that gap. It is B6's **first** kind without strain, a preference about you, and B6 already rules that those live in a file. So the amendment **applies** the taxonomy rather than widening it, and B7 remains the only candidate that has ever been in the gap.
 
-That distinction is what kept this cheap. Widening B6 would have needed the
-argument B7 was refused for; applying it needed only a place to look.
+That distinction is what kept this cheap. Widening B6 would have needed the argument B7 was refused for; applying it needed only a place to look.
 
-**The shape was decided by a defect, not by taste, and the defect is one line of
-`theme::from_env`.** That function resolves `VIGIA_THEME` first, and a built-in
-name wins outright:
+**The shape was decided by a defect, not by taste, and the defect is one line of `theme::from_env`.** That function resolves `VIGIA_THEME` first, and a built-in name wins outright:
 
 ```rust
 match Theme::named(named) {
@@ -620,35 +429,15 @@ match Theme::named(named) {
 }
 ```
 
-So `VIGIA_THEME=dark` **never opens the theme file at all**. Had the view keys
-gone in beside the colours, a reader naming a palette for one session would have
-silently lost their view defaults, on a gesture with nothing to do with the
-settings it discarded. That is the same class of failure the theme parser already
-refuses unknown keys to avoid: a setting that does nothing, with no way to find
-out why.
+So `VIGIA_THEME=dark` **never opens the theme file at all**. Had the view keys gone in beside the colours, a reader naming a palette for one session would have silently lost their view defaults, on a gesture with nothing to do with the settings it discarded. That is the same class of failure the theme parser already refuses unknown keys to avoid: a setting that does nothing, with no way to find out why.
 
-The tidiness argument points the same way and is the weaker half: a file called
-`theme` holding `rail on` reads as a mistake. It is recorded second because it
-would not have been enough on its own.
+The tidiness argument points the same way and is the weaker half: a file called `theme` holding `rail on` reads as a mistake. It is recorded second because it would not have been enough on its own.
 
-**What the two files share is everything that costs something**: one format, one
-discovery rule (`HOME` then `USERPROFILE`, each checked for emptiness before the
-next is tried), one error path, one report-before-the-takeover order. What they do
-not share is a subject. The amendment therefore adds a place to look and three
-keys to look for, which is the same shape the `VIGIA_GLYPHS` amendment took when
-it added a detector rather than a surface.
+**What the two files share is everything that costs something**: one format, one discovery rule (`HOME` then `USERPROFILE`, each checked for emptiness before the next is tried), one error path, one report-before-the-takeover order. What they do not share is a subject. The amendment therefore adds a place to look and three keys to look for, which is the same shape the `VIGIA_GLYPHS` amendment took when it added a detector rather than a surface.
 
-**`follow` is excluded, and that is I5 doing work rather than an omission.**
-*Correct with zero interaction* is a promise about the program; a file able to
-turn following off would quietly make it a promise about one reader's
-configuration. The three keys that are in have in common that every combination of
-them is a legitimate pane, which is not true of a pane that has stopped following.
+**`follow` is excluded, and that is I5 doing work rather than an omission.** *Correct with zero interaction* is a promise about the program; a file able to turn following off would quietly make it a promise about one reader's configuration. The three keys that are in have in common that every combination of them is a legitimate pane, which is not true of a pane that has stopped following.
 
-**And no variable joins them.** A variable exists for *not this time*, which is
-`VIGIA_THEME`'s whole job. Here that sentence is already spoken by `m`, `r` and
-`s`, one press each and named on the gestures sheet, so a variable would be a
-second spelling of something the pane says better. B6's count of one is untouched;
-its count of files is what moved.
+**And no variable joins them.** A variable exists for *not this time*, which is `VIGIA_THEME`'s whole job. Here that sentence is already spoken by `m`, `r` and `s`, one press each and named on the gestures sheet, so a variable would be a second spelling of something the pane says better. B6's count of one is untouched; its count of files is what moved.
 
 ---
 
@@ -656,73 +445,26 @@ its count of files is what moved.
 
 `SPEC.md` §11.2 B19 is the ruling and §11.1 is the behaviour. This is the trail.
 
-**The field, read rather than remembered, on 2026-08-22.** Five tools were checked
-against their own source or their own `--help` on this machine, and one of them
-changed the proposal.
+**The field, read rather than remembered, on 2026-08-22.** Five tools were checked against their own source or their own `--help` on this machine, and one of them changed the proposal.
 
 - **`delta`** wraps, and `--wrap-max-lines` defaults to **2**, which a session
-  here read as a cap to adopt and the reader removed the next day: *"How often a line
-  should be wrapped if it does not fit. Zero means to never wrap. Any content
-  which does not fit after wrapping will be truncated."* That is a direct answer
-  to §11.1's objection rather than a way around it, and it is where the cap came
-  from. `--wrap-left-symbol` is `↵`, `--wrap-right-symbol` `↴` and
-  `--wrap-right-prefix-symbol` `…`, so the wrap is marked at the end of the line
-  it leaves rather than at the start of the one it enters.
+here read as a cap to adopt and the reader removed the next day: *"How often a line should be wrapped if it does not fit. Zero means to never wrap. Any content which does not fit after wrapping will be truncated."* That is a direct answer to §11.1's objection rather than a way around it, and it is where the cap came from. `--wrap-left-symbol` is `↵`, `--wrap-right-symbol` `↴` and `--wrap-right-prefix-symbol` `…`, so the wrap is marked at the end of the line it leaves rather than at the start of the one it enters.
 - **`ov`** binds `[w]`, `[W]` to a character-based wrap toggle and `[Alt+w]` to
-  word wrap, which is what confirmed the key rather than a preference for it.
+word wrap, which is what confirmed the key rather than a preference for it.
 - **`bat`** reserves the gutter and leaves it **blank** on continuation rows, so
-  the absent line number is itself the signal, and spells the opposite state `-S`
-  / `--chop-long-lines`.
+the absent line number is itself the signal, and spells the opposite state `-S` / `--chop-long-lines`.
 - **`less`** wraps unless `-S`, and toggles the state at runtime.
 - **Neovim** keeps both axes and gives each its own motion, `gj` against `j`, and
-  indents continuations with `'breakindent'`: *"Every wrapped line will continue
-  visually indented… thus preserving horizontal blocks of text."*
+indents continuations with `'breakindent'`: *"Every wrapped line will continue visually indented… thus preserving horizontal blocks of text."*
 
-**And the neighbour that had to build it says why it is cheaper here.**
-[dandavison/delta#657](https://github.com/dandavison/delta/issues/657) is the
-request that produced delta's wrapping, and its problem statement is that the
-pager is the wrong layer: *"delta uses one of many various pagers, usually some
-form of less, which supports line-wrapping, but this breaks lots of things (like
-delta's line numbers)"*. This tool owns its painter and its gutter, so the hard
-part delta built around does not exist here. The same thread calls the
-horizontal-scroll alternative *"tedious"* and says it *"disrupts the viewing
-experience"*, which is a second-hand data point for wrapping over the pan §11.1
-named as the rejected alternative.
+**And the neighbour that had to build it says why it is cheaper here.** [dandavison/delta#657](https://github.com/dandavison/delta/issues/657) is the request that produced delta's wrapping, and its problem statement is that the pager is the wrong layer: *"delta uses one of many various pagers, usually some form of less, which supports line-wrapping, but this breaks lots of things (like delta's line numbers)"*. This tool owns its painter and its gutter, so the hard part delta built around does not exist here. The same thread calls the horizontal-scroll alternative *"tedious"* and says it *"disrupts the viewing experience"*, which is a second-hand data point for wrapping over the pan §11.1 named as the rejected alternative.
 
-**The total was tried the way the issue proposed and abandoned on a fact.** The
-issue asks for a wrapped height threaded through `view::rows_of`, with the
-measurement taken on the counting pass and cached per text width. Two things
-kill it, and only the second is decisive.
+**The total was tried the way the issue proposed and abandoned on a fact.** The issue asks for a wrapped height threaded through `view::rows_of`, with the measurement taken on the counting pass and cached per text width. Two things kill it, and only the second is decisive.
 
-The cheap objection is cost: `vigia_core::FileSpan` is four numbers today and a
-wrapped height is a function of the text **and** of the text width, so the span
-would have to carry either a per-width summary or a per-file re-measure. That is
-an argument about size and could have been answered with a measurement.
+The cheap objection is cost: `vigia_core::FileSpan` is four numbers today and a wrapped height is a function of the text **and** of the text width, so the span would have to carry either a per-width summary or a per-file re-measure. That is an argument about size and could have been answered with a measurement.
 
-The objection that ends it is that the dependency is **circular**.
-`render::gutter_width` sizes the gutter from *the largest line number on screen*,
-so the text width is a function of the drawn rows; a wrapped height is a function
-of the text width; the total is a function of the wrapped heights; and which rows
-are drawn is a function of the total. There is no order in which those four
-evaluate. It is not an expensive computation, it is not one.
+The objection that ends it is that the dependency is **circular**. `render::gutter_width` sizes the gutter from *the largest line number on screen*, so the text width is a function of the drawn rows; a wrapped height is a function of the text width; the total is a function of the wrapped heights; and which rows are drawn is a function of the total. There is no order in which those four evaluate. It is not an expensive computation, it is not one.
 
-**So the split is made and one unit is given one owner.** A **logical row** is a
-row of the diff's model; a **display row** is a row of the terminal. The bar,
-every jump, every clamp and every counting twin stay logical. Display rows exist
-inside the viewport only. That is the shape the design record already names: when
-one quantity splits into two, every site that treats them as interchangeable
-becomes a defect at once, so the quantity gets one owner rather than a spelling
-at each site.
+**So the split is made and one unit is given one owner.** A **logical row** is a row of the diff's model; a **display row** is a row of the terminal. The bar, every jump, every clamp and every counting twin stay logical. Display rows exist inside the viewport only. That is the shape the design record already names: when one quantity splits into two, every site that treats them as interchangeable becomes a defect at once, so the quantity gets one owner rather than a spelling at each site.
 
-**What the split made visible immediately** is that `View::last_screenful` and
-the overshoot branch in `View::collect` both compare a **logical** span against
-the **display** height, which is exactly the units bug that shape predicts. With
-wrapping off the two numbers are equal and nothing can see it; with wrapping on
-the top lands too far back and the last rows of the diff fall off the bottom, so
-the end of the diff becomes unreachable by the gesture that exists to reach it.
-`crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap`
-is what fails when it comes back, and
-`the_wrapped_bottom_survives_the_frame_after_the_gesture` beside it is what
-fails when the clamp holds for one frame and not for the next: the first draft
-of the fix fired on the frame the gesture produced and on no frame after it, so
-the end of the diff was visible until anything repainted.
+**What the split made visible immediately** is that `View::last_screenful` and the overshoot branch in `View::collect` both compare a **logical** span against the **display** height, which is exactly the units bug that shape predicts. With wrapping off the two numbers are equal and nothing can see it; with wrapping on the top lands too far back and the last rows of the diff fall off the bottom, so the end of the diff becomes unreachable by the gesture that exists to reach it. `crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap` is what fails when it comes back, and `the_wrapped_bottom_survives_the_frame_after_the_gesture` beside it is what fails when the clamp holds for one frame and not for the next: the first draft of the fix fired on the frame the gesture produced and on no frame after it, so the end of the diff was visible until anything repainted.

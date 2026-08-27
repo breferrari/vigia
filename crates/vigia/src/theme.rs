@@ -707,6 +707,10 @@ impl fmt::Display for ThemeError {
 impl std::error::Error for ThemeError {}
 
 /// The palette this process should draw with.
+///
+/// # Errors
+///
+/// The theme file named by the environment cannot be read, or does not parse.
 pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
@@ -747,6 +751,10 @@ pub(crate) fn home_file(rela: &str, lookup: &impl Fn(&str) -> Option<String>) ->
 }
 
 /// Read and parse a theme file.
+///
+/// # Errors
+///
+/// The file cannot be read, or it does not parse.
 pub fn load(path: &Path) -> Result<Theme, ThemeError> {
     let source = std::fs::read_to_string(path).map_err(|why| ThemeError::Unreadable {
         path: path.to_owned(),
@@ -779,6 +787,11 @@ pub fn load(path: &Path) -> Result<Theme, ThemeError> {
 /// An unknown key is refused rather than ignored. A silently dropped key is a
 /// theme that does nothing, and "it was discarded" is the one explanation a reader
 /// cannot arrive at by looking at their screen.
+///
+/// # Errors
+///
+/// A line names an unknown key, colour, modifier or base, or is missing a value or its
+/// separator.
 pub fn parse(source: &str) -> Result<Theme, ThemeError> {
     // A BOM is stripped, and `trim` will not do it.
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
