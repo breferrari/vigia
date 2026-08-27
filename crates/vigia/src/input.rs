@@ -787,8 +787,7 @@ pub fn settled(linger: Option<Instant>, now: Instant) -> bool {
 /// rather than panicking.
 ///
 /// `ageing` is [`vigia_core::History::ages_in`], which is `None` for a window
-/// holding nothing and so cannot arm this on an idle tree
-/// ([#243](https://github.com/breferrari/vigia/issues/243)). It is passed as a
+/// holding nothing and so cannot arm this on an idle tree. It is passed as a
 /// duration rather than as a `History` so this stays a free function over three
 /// values, which is what lets a test drive every combination of them.
 pub fn patience(
@@ -1042,13 +1041,12 @@ pub enum Action {
     ToggleMasthead,
     /// Put the pinned list beside the diff as a left rail, or back above it.
     ///
-    /// `SPEC.md` §11.2 **B14**, from `r`
-    /// ([#295](https://github.com/breferrari/vigia/issues/295)).
+    /// `SPEC.md` §11.2 **B14**, from `r`.
     /// [#252](https://github.com/breferrari/vigia/issues/252) shipped the rail
-    /// arriving on its own at 134 columns, and what that meant is that a reader who
-    /// had not asked for a narrower diff got one: at 133 the diff plans against 129
-    /// columns and at 134 against 60. The width is still #252's and still derived;
-    /// crossing it is now a gesture.
+    /// arriving on its own at 134 columns, and what that meant is that a reader
+    /// who had not asked for a narrower diff got one: at 133 the diff plans
+    /// against 129 columns and at 134 against 60. The width is still #252's and
+    /// still derived; crossing it is now a gesture.
     ///
     /// **Below 134 it changes nothing and eats nothing**, exactly as
     /// [`Action::ToggleMasthead`] does on a pane that cannot carry the band. The
@@ -1062,11 +1060,10 @@ pub enum Action {
     ToggleRail,
     /// Pin the diff to the file the viewport is inside, or unpin it.
     ///
-    /// `SPEC.md` §11.2 **B16**, from `s`
-    /// ([#297](https://github.com/breferrari/vigia/issues/297)). While it is on,
-    /// the diff is the one file the caret marks: scrolling clamps at that file's
-    /// two ends instead of carrying on into the file below, and the scrollbar
-    /// measures the file rather than the changeset.
+    /// `SPEC.md` §11.2 **B16**, from `s`. While it is on, the diff is the one
+    /// file the caret marks: scrolling clamps at that file's two ends instead
+    /// of carrying on into the file below, and the scrollbar measures the file
+    /// rather than the changeset.
     ///
     /// **It is not a mode**, which is what keeps it out of B4's refusal the way
     /// [`Action::ToggleRail`] and B12's sheet are kept out of it. No key changes
@@ -1092,12 +1089,11 @@ pub enum Action {
     ToggleSingle,
     /// Show the staged run beside the unstaged one, or stop showing it.
     ///
-    /// `SPEC.md` §11.2 **B17**, from `a`
-    /// ([#313](https://github.com/breferrari/vigia/issues/313)). `a` for *all*:
-    /// with it on the pane holds everything uncommitted, and the issue's own key
-    /// note names it for exactly this case — `i` for *index* was the proposal
-    /// while the toggle was expected to swap one comparison for the other, and it
-    /// adds rather than swaps.
+    /// `SPEC.md` §11.2 **B17**, from `a`. `a` for *all*: with it on the pane
+    /// holds everything uncommitted, and the issue's own key note names it for
+    /// exactly this case — `i` for *index* was the proposal while the toggle
+    /// was expected to swap one comparison for the other, and it adds rather
+    /// than swaps.
     ///
     /// **Unlike every other toggle here, this one changes what is *walked* rather
     /// than what is drawn.** `Action::ToggleMasthead`, `Action::ToggleRail` and
@@ -1115,8 +1111,7 @@ pub enum Action {
     ToggleStaged,
     /// Wrap a content line too wide for the pane onto the row below, or clip it.
     ///
-    /// `SPEC.md` §11.2 **B19**, from `w`
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off on launch.
+    /// `SPEC.md` §11.2 **B19**, from `w`. Off on launch.
     ///
     /// **It is not a mode**, for the reason [`Action::ToggleRail`] and
     /// [`Action::ToggleSingle`] are not: no key changes meaning while it is on.

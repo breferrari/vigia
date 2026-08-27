@@ -358,10 +358,9 @@ fn on_panic<T>(restore: impl Fn(), previous: impl Fn(T), info: T) {
 
 /// Which side of the luminance line the terminal's background sits on.
 ///
-/// The answer to the one question the startup query asks, `SPEC.md` §11.2 B18
-/// ([#325](https://github.com/breferrari/vigia/issues/325)): with no
-/// `VIGIA_THEME` and no theme file, this picks `dark` or `light`, and no
-/// answer keeps `ansi`, whose whole contract is assuming nothing.
+/// The answer to the one question the startup query asks, `SPEC.md` §11.2 B18:
+/// with no `VIGIA_THEME` and no theme file, this picks `dark` or `light`, and
+/// no answer keeps `ansi`, whose whole contract is assuming nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Background {
     /// Luminance at or below the line: the showcase dark palette fits.

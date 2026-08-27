@@ -757,7 +757,7 @@ fn a_hunk_scrolled_back_to_is_not_re_parsed() {
     // reader who scrolled back over what they had just read paid that walk
     // again, with the answer having been in memory one frame earlier: measured
     // over 120-row hunks of Japanese, **26.39ms** against a 16ms budget, once
-    // per file ([#45](https://github.com/breferrari/vigia/issues/45)).
+    // per file.
     let scratch = Scratch::sparse_edits("i2b-scrollback", 1, LARGE_FILE, HUNK_SPACING);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

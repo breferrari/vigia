@@ -2377,10 +2377,10 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
 
 /// `a` asks for the staged run, and nothing else does.
 ///
-/// `SPEC.md` §11.2 **B17** ([#313](https://github.com/breferrari/vigia/issues/313)).
-/// The second half is the one worth having: a binding that also fired on some
-/// other key would be a gesture a reader triggers without asking for it, and this
-/// one changes what the pane is *comparing* rather than how it is arranged.
+/// `SPEC.md` §11.2 **B17**. The second half is the one worth having: a binding
+/// that also fired on some other key would be a gesture a reader triggers
+/// without asking for it, and this one changes what the pane is *comparing*
+/// rather than how it is arranged.
 #[test]
 fn a_asks_for_the_staged_run_and_no_other_key_does() {
     assert_eq!(

@@ -444,8 +444,7 @@ fn a_notice_does_not_change_the_list_height() {
     let mut saw_rail = false;
     for height in 3..=40u16 {
         // The rail's widths too: a notice changes the footer's height, which
-        // changes the body, and beside a rail the body divides differently
-        // ([#252](https://github.com/breferrari/vigia/issues/252)).
+        // changes the body, and beside a rail the body divides differently.
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);

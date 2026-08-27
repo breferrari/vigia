@@ -607,12 +607,11 @@ pub struct Frame<'w> {
     attributes: HashMap<String, Option<Fingerprint>>,
     /// Whether the staged run is drawn beside the unstaged one.
     ///
-    /// `SPEC.md` §11.2 **B17**, from `a`
-    /// ([#313](https://github.com/breferrari/vigia/issues/313)). Off by default,
-    /// which is both the derived answer and the ruled one: a reader who has
-    /// pressed nothing gets the comparison this tool has always drawn, and which
-    /// way the toggle *starts* is still
-    /// [#50](https://github.com/breferrari/vigia/issues/50)'s question.
+    /// `SPEC.md` §11.2 **B17**, from `a`. Off by default, which is both the
+    /// derived answer and the ruled one: a reader who has pressed nothing gets
+    /// the comparison this tool has always drawn, and which way the toggle
+    /// *starts* is still [#50](https://github.com/breferrari/vigia/issues/50)'s
+    /// question.
     ///
     /// **Here rather than in the shell**, unlike the four toggles that only decide
     /// what is drawn: this one decides what is *walked*, so it has to be known
@@ -909,16 +908,15 @@ impl<'w> Frame<'w> {
     /// notes: the rewording that admits the walk, and the one that made it
     /// incremental. Both carry the measurements they were decided on.
     ///
-    /// Four things keep it affordable. It counts through
-    /// [`Worktree::measure`], which reads the same bytes a diff would and skips
-    /// the `String` per line that made the obvious version ten times slower than
-    /// `git diff --numstat`. It reuses a [`FileDiff`] the frame already holds
-    /// rather than re-reading, so a file on screen is free. And a span is kept
-    /// once taken: within a tick because it records that it was proved on this
-    /// one, and **across** ticks because [`Frame::advance`] migrates it and the
-    /// reuse rule re-proves it for one `stat`. So scrolling never pays, and a
-    /// tick pays only for the files that moved
-    /// ([#101](https://github.com/breferrari/vigia/issues/101)).
+    /// Four things keep it affordable. It counts through [`Worktree::measure`],
+    /// which reads the same bytes a diff would and skips the `String` per line
+    /// that made the obvious version ten times slower than `git diff
+    /// --numstat`. It reuses a [`FileDiff`] the frame already holds rather than
+    /// re-reading, so a file on screen is free. And a span is kept once taken:
+    /// within a tick because it records that it was proved on this one, and
+    /// **across** ticks because [`Frame::advance`] migrates it and the reuse
+    /// rule re-proves it for one `stat`. So scrolling never pays, and a tick
+    /// pays only for the files that moved.
     ///
     /// `rows_of` maps a file's span to the rows a caller draws for it, because
     /// what a conflict or a binary file occupies is the shell's ruling rather

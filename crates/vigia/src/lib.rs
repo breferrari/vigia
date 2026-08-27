@@ -646,10 +646,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // A press on a bar's end arms the repeat and it dies with the release. A
     // scroll arms the direction mark and it dies `SCROLL_LINGER` later. And a
     // write arms the ageing roll, which dies when the history window empties
-    // `HISTORY_WINDOW` after the last one
-    // ([#243](https://github.com/breferrari/vigia/issues/243)). **This comment
-    // said "the only clock" through two of those three**, which is what a header
-    // describing a mechanism costs when the mechanism grows underneath it.
+    // `HISTORY_WINDOW` after the last one. **This comment said "the only clock"
+    // through two of those three**, which is what a header describing a
+    // mechanism costs when the mechanism grows underneath it.
     'awake: loop {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
@@ -1152,7 +1151,7 @@ struct Shell {
     /// What the header calls the working tree.
     name: String,
     /// The worktree's absolute path, spelled once for the links' `file://`
-    /// targets ([#326](https://github.com/breferrari/vigia/issues/326)).
+    /// targets.
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     ///
@@ -1365,9 +1364,8 @@ impl Shell {
     /// Which region's bar is being dragged, for the frame that draws its thumb
     /// lit.
     ///
-    /// A plain read ([#254](https://github.com/breferrari/vigia/issues/254)):
-    /// converting the [`Grabbed`] it holds into that region's first row is an
-    /// identity only while the regions are stacked.
+    /// A plain read: converting the [`Grabbed`] it holds into that region's
+    /// first row is an identity only while the regions are stacked.
     fn gripped(&self) -> Option<Grabbed> {
         self.grabbed
     }
@@ -1407,8 +1405,7 @@ impl Shell {
     fn patience(&self, now: Instant) -> Option<std::time::Duration> {
         // The history's own deadline joins the two gesture clocks here rather
         // than at the receive, so `patience` stays the one place that decides
-        // whether this program owns a timer at all
-        // ([#243](https://github.com/breferrari/vigia/issues/243)).
+        // whether this program owns a timer at all.
         input::patience(
             self.held,
             self.scrolling_until,

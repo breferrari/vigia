@@ -1283,10 +1283,9 @@ fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
     //
     // Two things have to hold, and they are on opposite sides of the walk.
     // `landing_of` has to place the viewport at the busiest hunk of the pinned
-    // file ([#257](https://github.com/breferrari/vigia/issues/257)), and the
-    // `landed_inside` restart has to back a short screen up against the *pinned*
-    // floor rather than the diff's, which is the bound whose earlier reading was
-    // this ruling's recorded defect.
+    // file, and the `landed_inside` restart has to back a short screen up
+    // against the *pinned* floor rather than the diff's, which is the bound
+    // whose earlier reading was this ruling's recorded defect.
     //
     // **A sparse fixture rather than this file's usual one**, and that is what
     // makes the landing a landing. `landing_of` keeps the heading whenever the

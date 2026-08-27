@@ -7721,17 +7721,16 @@ impl Painter<'_> {
     ///
     /// Everything to the right of the path goes into a slot [`Columns`] already
     /// chose, drawn right to left so each block knows where the one outside it
-    /// ended. **Nothing here is sized from this row**, which is what makes the row a
-    /// column rather than a cluster: the widths are the region's, not this row's,
-    /// so a row with nothing to put in a slot **keeps** it rather than closing
-    /// it. What it puts there differs by element and that difference is a ruling
-    /// rather than an inconsistency: the sparkline fills its slot with track, so
-    /// the two leading `_` above are a window with no writes in its oldest
-    /// quarter ([#78](https://github.com/breferrari/vigia/issues/78)), while a
-    /// file with no line diff leaves the heat strip's slot blank for the reason
-    /// [`heat_at`] gives. The drawn order, left to right, is pulse, heat strip,
-    /// sparkline, counters; the order they *survive* narrowing in is the layout
-    /// table's.
+    /// ended. **Nothing here is sized from this row**, which is what makes the
+    /// row a column rather than a cluster: the widths are the region's, not
+    /// this row's, so a row with nothing to put in a slot **keeps** it rather
+    /// than closing it. What it puts there differs by element and that
+    /// difference is a ruling rather than an inconsistency: the sparkline fills
+    /// its slot with track, so the two leading `_` above are a window with no
+    /// writes in its oldest quarter, while a file with no line diff leaves the
+    /// heat strip's slot blank for the reason [`heat_at`] gives. The drawn
+    /// order, left to right, is pulse, heat strip, sparkline, counters; the
+    /// order they *survive* narrowing in is the layout table's.
     ///
     /// Nothing is allowed to take the path below [`MIN_PATH_WIDTH`]. A glance
     /// element that cost a reader the name of the file would be spending the
@@ -8032,14 +8031,13 @@ impl Painter<'_> {
         // the reader has on screen: whichever lost would take either *where the
         // pointer is* or *which file the diff is in* off the row.
         //
-        // §5.3 rules that intensity carries recency and nothing else, so a hover
-        // that merely brightened would say *recent* about a file nothing had
-        // touched. [`Theme::path_hover`] answers that with the **underline**,
-        // which no recency weight carries at any depth. Answering with
-        // brightness as well is refused
-        // ([#193](https://github.com/breferrari/vigia/issues/193)): a mark that
-        // can go stale outranking every claim about the worktree is the thing
-        // §5.3's own B10 rule forbids.
+        // §5.3 rules that intensity carries recency and nothing else, so a
+        // hover that merely brightened would say *recent* about a file nothing
+        // had touched. [`Theme::path_hover`] answers that with the
+        // **underline**, which no recency weight carries at any depth.
+        // Answering with brightness as well is refused: a mark that can go
+        // stale outranking every claim about the worktree is the thing §5.3's
+        // own B10 rule forbids.
         //
         // Hover answers on the **list's** rows only: the diff is not clickable and
         // a mark there would imply it is.
@@ -8327,14 +8325,13 @@ impl Painter<'_> {
         // clear space between it and the text.
         //
         // Background only, and gated on the background surviving: a bar whose
-        // colour was dropped by the depth ladder would otherwise paint a blank cell
-        // in nothing at all, which is a no-op that still costs a write. `area.x` is
-        // this **region's** leading column: `with_bar` narrows the width without
-        // moving the origin, so it is the origin `render` handed down. It is also
-        // the pane's for the rail and for every stacked region, and is not for the
-        // diff beside a rail
-        // ([#252](https://github.com/breferrari/vigia/issues/252)), which is why
-        // this says region rather than pane.
+        // colour was dropped by the depth ladder would otherwise paint a blank
+        // cell in nothing at all, which is a no-op that still costs a write.
+        // `area.x` is this **region's** leading column: `with_bar` narrows the
+        // width without moving the origin, so it is the origin `render` handed
+        // down. It is also the pane's for the rail and for every stacked
+        // region, and is not for the diff beside a rail, which is why this says
+        // region rather than pane.
         if bar.bg.is_some() && self.inset > 0 {
             if let Some(cell) = self.buf.cell_mut((area.x, area.y)) {
                 cell.set_style(bar);

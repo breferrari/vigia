@@ -112,10 +112,9 @@ fn layout_at(height: u16) -> Body {
 /// The pane every gate in this file is measured on unless it says otherwise.
 ///
 /// Named rather than written as an `80` in [`layout_at`], because it stopped
-/// being an arbitrary fixture width the day the pinned list became a *rail* on a
-/// wide pane: eighty columns is the stacked shape, and a file whose every gate
-/// measured one width was measuring one of two layouts
-/// ([#252](https://github.com/breferrari/vigia/issues/252)). Same argument
+/// being an arbitrary fixture width the day the pinned list became a *rail* on
+/// a wide pane: eighty columns is the stacked shape, and a file whose every
+/// gate measured one width was measuring one of two layouts. Same argument
 /// [`ORDINARY`] carries one axis over.
 const ORDINARY_WIDTH: u16 = 80;
 
@@ -190,9 +189,8 @@ fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
     one_screen_on(name, files, ORDINARY_WIDTH, height)
 }
 
-/// [`one_screen_at`] on a named pane, so the read bound can be held beside a rail
-/// as well as under a stacked list
-/// ([#252](https://github.com/breferrari/vigia/issues/252)).
+/// [`one_screen_at`] on a named pane, so the read bound can be held beside a
+/// rail as well as under a stacked list.
 fn one_screen_on(name: &str, files: usize, width: u16, height: u16) -> Screen {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
@@ -1739,10 +1737,10 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     // gate green while the thumb stopped moving inside a file.
     const FILES: usize = 12;
     /// A file's whole block: heading, hunk header, two content rows, and the
-    /// blank that closes it ([#165](https://github.com/breferrari/vigia/issues/165)).
-    /// `rows_above` is what the scrollbar is positioned from, so it counts the
-    /// blank exactly as the total does, and a `4` here would be asserting the
-    /// desynchronised arithmetic rather than the drawn one.
+    /// blank that closes it. `rows_above` is what the scrollbar is positioned
+    /// from, so it counts the blank exactly as the total does, and a `4` here
+    /// would be asserting the desynchronised arithmetic rather than the drawn
+    /// one.
     const BLOCK: usize = 5;
 
     let scratch = Scratch::large_diff("shell-rows-above", FILES, 1);

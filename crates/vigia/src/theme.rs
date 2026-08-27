@@ -397,12 +397,11 @@ palette! {
     /// The hotter wash behind the bytes of an added line that actually changed,
     /// when the line pairs with a removal ([`vigia_core::Line::emph`]).
     ///
-    /// delta's formula, adopted by `SPEC.md` §11.2 B18
-    /// ([#321](https://github.com/breferrari/vigia/issues/321)): the word patch
-    /// is the same hue as [`Theme::added_row`], stepped brighter, so the edit
-    /// inside the edit reads as *hotter*, never as a new colour role. A
-    /// background like the wash, so it drops out on the same rungs and a
-    /// palette that draws no wash draws no word patch either.
+    /// delta's formula, adopted by `SPEC.md` §11.2 B18: the word patch is the
+    /// same hue as [`Theme::added_row`], stepped brighter, so the edit inside
+    /// the edit reads as *hotter*, never as a new colour role. A background
+    /// like the wash, so it drops out on the same rungs and a palette that
+    /// draws no wash draws no word patch either.
     added_word,
     /// The same, inside a removed line.
     removed_word,
@@ -573,12 +572,11 @@ impl Theme {
     /// The sparkline stops interpolated into an eight-step ramp, or `None`
     /// where interpolation is meaningless.
     ///
-    /// btop's mechanism, adopted by `SPEC.md` §11.2 B18
-    /// ([#322](https://github.com/breferrari/vigia/issues/322)): linear RGB
-    /// between the stops a palette already declares, `spark` to `spark_warm`
-    /// over the lower half, `spark_warm` to `spark_hot` over the upper, so the
-    /// three keys a reader can move are still the whole of the vocabulary and
-    /// the ramp is derived, never authored.
+    /// btop's mechanism, adopted by `SPEC.md` §11.2 B18: linear RGB between the
+    /// stops a palette already declares, `spark` to `spark_warm` over the lower
+    /// half, `spark_warm` to `spark_hot` over the upper, so the three keys a
+    /// reader can move are still the whole of the vocabulary and the ramp is
+    /// derived, never authored.
     ///
     /// **The depth ladder gates this by construction.** A theme resolved at
     /// truecolour holds `Rgb` stops and interpolates; resolved lower it holds

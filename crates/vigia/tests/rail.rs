@@ -1,6 +1,5 @@
 //! The left rail: the layout where the pinned list sits **beside** the diff
-//! rather than above it, `SPEC.md` §11.1's widest arrangement
-//! ([#252](https://github.com/breferrari/vigia/issues/252)).
+//! rather than above it, `SPEC.md` §11.1's widest arrangement.
 //!
 //! On a wide pane a path ends near column 40 and its glance cluster is pinned to
 //! the right edge, up to 150 cells away. The columnar slots

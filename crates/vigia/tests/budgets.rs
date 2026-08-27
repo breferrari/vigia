@@ -175,9 +175,8 @@ fn layout(app: &App, files: usize) -> Body {
 
 /// The same, on a pane that is not the ordinary terminal.
 ///
-/// Split out for the rail's budget gate
-/// ([#252](https://github.com/breferrari/vigia/issues/252)), which is the first
-/// one here measured on a pane [`area`] does not describe.
+/// Split out for the rail's budget gate, which is the first one here measured
+/// on a pane [`area`] does not describe.
 fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
     body_layout(
         pane,
@@ -334,8 +333,7 @@ const RAIL_PANE: Rect = Rect {
 };
 
 /// I9 beside a rail, where the pinned list draws several times the rows it does
-/// on the pane every other gate here measures
-/// ([#252](https://github.com/breferrari/vigia/issues/252)).
+/// on the pane every other gate here measures.
 ///
 /// **The one thing about this layout only a clock can answer.** That a visible
 /// list row costs one `Frame::diff` and no more is structural and
@@ -2535,11 +2533,10 @@ fn a_pinned_frame_holds_the_frame_budget() {
 
 /// **What the staged run costs, in the frame it sits in rather than on its own.**
 ///
-/// `SPEC.md` §11.2 **B17** ([#313](https://github.com/breferrari/vigia/issues/313)).
-/// Reported rather than gated, which is the same tier
-/// [`what_a_bulk_rewrite_of_undrawn_files_costs`] sits in and for the same reason:
-/// the interesting figure is a *ratio between two arms on one machine*, and a
-/// ceiling on either arm alone would be a number about the runner.
+/// `SPEC.md` §11.2 **B17**. Reported rather than gated, which is the same tier
+/// [`what_a_bulk_rewrite_of_undrawn_files_costs`] sits in and for the same
+/// reason: the interesting figure is a *ratio between two arms on one machine*,
+/// and a ceiling on either arm alone would be a number about the runner.
 ///
 /// **Interleaved, because a sequential pair under varying load is not a controlled
 /// experiment** — the same trap `sizing_a_whole_burst_does_not_change_the_frame_it_sits_in`

@@ -98,19 +98,17 @@ pub struct App {
     /// under 134 columns has no room for a rail and this stays true through it, so
     /// narrowing and widening again returns the rail rather than the question.
     ///
-    /// Off by default since `SPEC.md` §11.2 **B14**
-    /// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived
-    /// on its own before that, and the reader whose diff went from 129 planning
+    /// Off by default since `SPEC.md` §11.2 **B14**. The rail arrived on its
+    /// own before that, and the reader whose diff went from 129 planning
     /// columns to 60 had not asked for it.
     rail: bool,
     /// Whether the reader has asked for the diff to show one file at a time.
     ///
-    /// `SPEC.md` §11.2 **B16**, from `s`
-    /// ([#297](https://github.com/breferrari/vigia/issues/297)). Unlike
-    /// [`Self::rail`] there is no pane that cannot honour it, so this is a
-    /// request and an answer at once and nothing downstream has to distinguish
-    /// them: every pane with a body has a file the viewport is inside, and that
-    /// file is the whole of what the pin names.
+    /// `SPEC.md` §11.2 **B16**, from `s`. Unlike [`Self::rail`] there is no
+    /// pane that cannot honour it, so this is a request and an answer at once
+    /// and nothing downstream has to distinguish them: every pane with a body
+    /// has a file the viewport is inside, and that file is the whole of what
+    /// the pin names.
     ///
     /// **Which file is not stored here**, and that is what keeps this a `bool`.
     /// The pinned file is [`Self::position`]'s, so `n`, `p`, a digit, a click and
@@ -122,13 +120,12 @@ pub struct App {
     single: bool,
     /// Whether a content line too wide for the pane continues on the row below.
     ///
-    /// `SPEC.md` §11.2 **B19**, from `w`
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off by default,
-    /// and that is a ruling rather than the derived answer: every neighbour that
-    /// wraps is given the whole terminal and this one is built for half of it, so
-    /// the mode with a price is the one asked for
-    /// ([#204](https://github.com/breferrari/vigia/issues/204)'s reasoning about
-    /// the masthead, applied to the same reader).
+    /// `SPEC.md` §11.2 **B19**, from `w`. Off by default, and that is a ruling
+    /// rather than the derived answer: every neighbour that wraps is given the
+    /// whole terminal and this one is built for half of it, so the mode with a
+    /// price is the one asked for
+    /// ([#204](https://github.com/breferrari/vigia/issues/204)'s reasoning
+    /// about the masthead, applied to the same reader).
     ///
     /// **Like [`Self::single`] and unlike [`Self::rail`] there is no pane that
     /// cannot honour it**, so this is a request and an answer at once: a pane too
@@ -154,10 +151,9 @@ pub struct App {
     shown: usize,
     /// Whether the reader has asked for the staged run beside the unstaged one.
     ///
-    /// `SPEC.md` §11.2 **B17**, from `a`
-    /// ([#313](https://github.com/breferrari/vigia/issues/313)). Off by default:
-    /// a reader who has pressed nothing gets the comparison this tool has always
-    /// drawn, and which way the toggle *starts* is still
+    /// `SPEC.md` §11.2 **B17**, from `a`. Off by default: a reader who has
+    /// pressed nothing gets the comparison this tool has always drawn, and
+    /// which way the toggle *starts* is still
     /// [#50](https://github.com/breferrari/vigia/issues/50)'s open question on
     /// [#306](https://github.com/breferrari/vigia/issues/306)'s file.
     ///
