@@ -332,7 +332,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ⬜ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
-| ⬜ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
+| ✅ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
 | ⬜ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
 | ⬜ | `MIN_TICKS` restates `MIN_FRAMES`, and the queue it looks like it guards is unbounded | [#114](https://github.com/breferrari/vigia/issues/114) |
 | ⬜ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
