@@ -224,9 +224,9 @@ pub struct App {
     /// last row on the *bottom*, which is a claim about the bottom and not about
     /// the top, so it sets this **true** and takes the back-up on purpose. That
     /// is what corrects a height measured before `App::apply` turned follow off;
-    /// [`Action::Bottom`]'s arm carries the whole of why. This sentence used to
-    /// name `G` as the exemplar of a jump that must not anchor, which is exactly
-    /// the shape a later session "restores" and reinstates a fixed defect with,
+    /// [`Action::Bottom`]'s arm carries the whole of why. **`G` is not the
+    /// exemplar of a jump that must not anchor**, and naming it as one is what a
+    /// later session "restores" and reinstates a fixed defect with,
     /// so the qualifier is load-bearing rather than pedantic.
     ///
     /// The two are indistinguishable from a [`Position`], so it is carried here
@@ -1030,8 +1030,7 @@ impl App {
             // the screen is identical. So this is the same shape as `Body`'s own
             // unreachable guards: it is carried because nothing downstream should
             // have to be the only thing standing between a signed step and an
-            // index, not because a test can see it. Measured 2026-08-24 with
-            // [#296](https://github.com/breferrari/vigia/issues/296)'s battery.
+            // index, not because a test can see it. Confirmed by mutation.
             Action::File(step) => {
                 if let Some(file) = self.position.file.checked_add_signed(step)
                     && file < frame.files().len()
@@ -1043,9 +1042,8 @@ impl App {
             // row of the whole diff back into the file it falls inside and the
             // offset within it.
             //
-            // It counted files until 2026-08-02, from when the bar itself did.
-            // The bar became row-exact and this did not, so a drag had one
-            // landing spot per changed file while the thumb it followed had one
+            // Counting files here where the bar is row-exact gives a drag one
+            // landing spot per changed file while the thumb it follows has one
             // per row: on a worktree of three long files the lower bar moved
             // under the pointer and the diff jumped to a heading or did not move
             // at all. Reported from use, which is the fifth time.
@@ -1106,9 +1104,9 @@ impl App {
             // is not free in every case; two earlier spellings of this paragraph
             // said `span_in` was "a `stat` against a span this tick has already
             // proved", which is [`crate::view::block_rows`]' cost quoted under a
-            // different call, and the sentence outlived both corrections because
-            // nothing reads a comment. The resting row itself is the inner
-            // comment below, and an earlier draft of this one contradicted it.
+            // different call, and a sentence like it outlives correction
+            // because nothing reads a comment. The resting row itself is the
+            // inner comment below.
             Action::Bottom => {
                 if let Some(file) = self.pinned_file(frame) {
                     // **`true`, unlike every other jump on this map, and it is
@@ -1206,9 +1204,9 @@ impl App {
     /// a panic in a tool whose job is to be left open.
     ///
     /// Clamped rather than refused, which is [`View::collect`]'s own answer to
-    /// the same staleness: the reader asked for the end of the file they were
-    /// on, and the nearest file that still exists is a better answer than
-    /// nothing happening.
+    /// the same staleness: the gesture asked for the end of a particular file,
+    /// and the nearest file that still exists is a better answer than nothing
+    /// happening.
     /// `tests/single.rs::a_pinned_gesture_survives_the_diff_it_was_made_against`
     /// holds both shapes.
     ///
@@ -1292,7 +1290,7 @@ impl App {
     /// `as isize` would turn an absurd height into a negative step and send a
     /// page-down upwards. A terminal cannot be that tall, which is a reason to
     /// convert rather than to rely on it. That argument covers both callers from
-    /// here; it used to sit on one of them and be copied to the other.
+    /// here rather than being copied onto each.
     fn step_by(&mut self, count: isize, rows: usize, frame: &mut Frame) -> Result<()> {
         let step = isize::try_from(rows.max(1)).unwrap_or(isize::MAX);
         self.scroll(count.saturating_mul(step), frame)
@@ -1381,9 +1379,10 @@ impl App {
             // **Written every iteration rather than only on the hit**, which is
             // what makes a target *past* the last row land past the last row
             // ([#272](https://github.com/breferrari/vigia/issues/272)). The
-            // fall-through used to leave the initial `row: 0`, so a drag to the
-            // very end of the track, which [`Self::dragged_to`] deliberately maps
-            // past the end so the walk can clamp it in display rows, went to the
+            // fall-through otherwise leaves the initial `row: 0`, so a drag to
+            // the very end of the track, which [`Self::dragged_to`] deliberately
+            // maps past the end so the walk can clamp it in display rows, goes
+            // to the
             // **top** of the last file instead of its bottom. On a one-file diff
             // that is the top of the diff, which is as wrong as a drag can be.
             position = Position {
@@ -1405,8 +1404,8 @@ impl App {
         // resolves, so the pin is enforced there by the walk simply not
         // advancing. Scrolling up is resolved here instead, because stepping off
         // the top of a file means knowing how tall the one above it is, and
-        // under a pin there is no file above it to step into: the reader asked
-        // for one file and the top of that file is where up stops.
+        // under a pin there is no file above it to step into: the pin is a
+        // claim about one file, and the top of that file is where up stops.
         //
         // Above the loop rather than inside it, so the pin costs no `Frame::diff`
         // at all rather than one that is then discarded.
@@ -1414,9 +1413,10 @@ impl App {
             self.position.row = self.position.row.saturating_sub(rows);
             return Ok(());
         }
-        // **The walk back reaches the frame before anything has clamped, and it
-        // panicked on a stale index until [#297](https://github.com/breferrari/vigia/issues/297)'s
-        // second audit round.** [`crate::view::rows_in`] is
+        // **The walk back reaches the frame before anything has clamped, so it
+        // panics on a stale index without the clamp below**
+        // ([#297](https://github.com/breferrari/vigia/issues/297)).
+        // [`crate::view::rows_in`] is
         // [`vigia_core::Frame::diff`], which indexes `files` directly and panics
         // past the end; a position is exactly the index that outlives the list it
         // was resolved against, since [`vigia_core::Frame::advance`] rebuilds the
@@ -1605,8 +1605,8 @@ impl App {
         // The header draws it beside `View::files`, and `Shell::screen` keeps the
         // previous view when a collect fails — so taken from the frame it could
         // pair this frame's staged count with last frame's changed count and read
-        // `3 changed · 5 staged`, which cannot happen: staged is a subset. Round 4
-        // fixed exactly this split on `elsewhere` and left its sibling standing.
+        // `3 changed · 5 staged`, which cannot happen: staged is a subset. The
+        // same split on `elsewhere` is its sibling and is easy to fix alone.
         //
         // **From `Frame::staged_at` rather than a filter**, which is the boundary
         // the walk already recorded: `advance` concatenates unstaged then staged,
@@ -1651,9 +1651,9 @@ impl App {
     /// unchanged.
     fn dragged_to(&self, at: u32, total: usize, height: usize) -> usize {
         // **Only the far end is special, and the rest of the track is the
-        // thumb's own arithmetic** ([#272](https://github.com/breferrari/vigia/issues/272),
-        // corrected by the second audit round). The first draft measured the
-        // whole track in drawn rows, which is a *different* travel from the one
+        // thumb's own arithmetic**
+        // ([#272](https://github.com/breferrari/vigia/issues/272)). Measuring
+        // the whole track in drawn rows is a *different* travel from the one
         // the thumb is drawn against: the painter draws it from the region's
         // height over the diff's rows, so a drag measured in drawn rows landed
         // below the thumb everywhere but the ends. A readout and the gesture

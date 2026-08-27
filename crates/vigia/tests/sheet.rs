@@ -575,7 +575,7 @@ fn the_close_control_brightens_under_the_pointer() {
 /// **Both numbers, because a caller that wants a share needs the denominator too.**
 /// `nothing_can_press_the_close_control` spelled its own `444` while this computed
 /// `panes` from the same two arguments, so the two could drift with nothing to say
-/// so. Round 3.
+/// so.
 ///
 /// **A helper for three gates rather than the file's usual bespoke loop**, and the
 /// difference is that these three are one claim at three call sites: #298's rule is
@@ -620,19 +620,19 @@ fn over_sheets(
     // `>` and a `>` is blind upwards: a mutation that counted a pane twice, or
     // counted the ones that drew no sheet, makes every floor pass more easily.
     // Both directions matter here since `drew` is the only thing standing between
-    // a sweep and a grid it has stopped covering. Named by the mutation round that
-    // predicted it survives.
-    // **Strictly fewer, not merely no more.** `<=` is satisfied by a count that
-    // includes the panes which drew nothing, which is exactly the mutation round 2
-    // predicted would survive and did: `drew` moved above the `continue` still
-    // fits `<= panes`, and every caller's floor is a `>` that more only helps.
+    // a sweep and a grid it has stopped covering. Named by a mutation battery as
+    // a predicted survivor.
     //
-    // **What guarantees a non-drawing pane is the short-and-narrow corner, and it
-    // took two wrong answers and a measurement to say so.** The first draft cited
-    // B13's thirty-column floor, which cannot fire here because both callers sweep
-    // from thirty columns up. Round 3 replaced it with `sheet_plan`'s height floor
-    // alone, and that is wrong in the other direction: a pane of eight rows draws a
-    // sheet at almost every width.
+    // **Strictly fewer, not merely no more.** `<=` is satisfied by a count that
+    // includes the panes which drew nothing: `drew` moved above the `continue`
+    // still fits `<= panes`, and every caller's floor is a `>` that more only
+    // helps.
+    //
+    // **What guarantees a non-drawing pane is the short-and-narrow corner**, and
+    // two nearby answers are both wrong. B13's thirty-column floor cannot fire
+    // here, because both callers sweep from thirty columns up. `sheet_plan`'s
+    // height floor alone is wrong in the other direction: a pane of eight rows
+    // draws a sheet at almost every width.
     //
     // Counted rather than reasoned about, on the fixture both callers use: **11
     // panes of 444 draw none, every one of them at height 8 and at one of the
@@ -644,8 +644,8 @@ fn over_sheets(
     // **So this is a precondition on the caller's grid, not a property of the
     // helper**, and it is stated because a future sweep is the thing most likely to
     // trip it: a grid of heights thirteen and up would never reach the corner, every
-    // pane would draw, and this would fire on a `check` that is perfectly correct.
-    // Named by round 4, which found nothing else.
+    // pane would draw, and this would fire on a `check` that is perfectly
+    // correct.
     assert!(
         drew < panes,
         "the sweep counted {drew} sheets over {panes} panes, so it is counting \
@@ -796,15 +796,15 @@ fn nothing_can_press_the_close_control() {
     // sweep's own `guarded` counter exists to refuse. Three quarters is a bound the
     // ladder has room to move under without tripping.
     //
-    // **Counted by `over_sheets` rather than here**, which is round 2's own
-    // correction: a second counter incremented once per `check` call is equal to
-    // `drew` by construction, so the assertion comparing them could not fail, and
+    // **Counted by `over_sheets` rather than here**: a second counter
+    // incremented once per `check` call is equal to `drew` by construction, so
+    // the assertion comparing them cannot fail, and
     // deleting it left `drew` unread and the lint job red where a plain `cargo
     // test` stayed green.
     //
-    // **And the denominator comes from the same call**, which is round 3's: this
-    // spelled `444` while `over_sheets` computed the grid from the arguments it was
-    // handed, so changing the sweep here would have left the constant stale with
+    // **And the denominator comes from the same call**: spelling `444` here
+    // while `over_sheets` computes the grid from the arguments it was handed
+    // leaves the constant stale the moment the sweep changes, with
     // nothing to catch it.
     assert!(
         drew * 4 > panes * 3,
@@ -815,8 +815,8 @@ fn nothing_can_press_the_close_control() {
 
 #[test]
 fn a_press_on_a_track_under_the_sheet_grabs_nothing() {
-    // **The sibling call site, and the one the first draft of #298 missed.** The
-    // loop reaches into `Regions` for geometry in exactly two places, and guarding
+    // **The sibling call site, and the one most easily missed.** The loop
+    // reaches into `Regions` for geometry in exactly two places, and guarding
     // only the first left the second holding the identical shape: `Regions::grab_at`
     // is asked on every left press, outside `action_for`, and had no sheet in it.
     //
@@ -828,8 +828,7 @@ fn a_press_on_a_track_under_the_sheet_grabs_nothing() {
     // the same narrow widths the step buttons were reachable at it covers the track
     // rows between them, which are more cells than the two the buttons occupy.
     //
-    // Found by this pass's own `/simplify` round rather than by the issue, which
-    // reported the drawn weight and not either producer.
+    // The reported symptom is the drawn weight rather than either producer.
     let mut guarded = 0usize;
     let heights: Vec<u16> = (8..=40).collect();
     let (drew, _) = over_sheets(
@@ -1256,9 +1255,9 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
             !wanted.is_empty(),
             "README.md has a gesture cell {cell:?} with nothing in it to look for"
         );
-        // **`names` alone, with no `contains` fallback.** The fallback was round 1's
-        // and round 2 found what it cost: a single-character token like `f`, `m`,
-        // `r` or `s` is a substring of ordinary verb prose, so `f` matched
+        // **`names` alone, with no `contains` fallback.** A single-character
+        // token like `f`, `m`, `r` or `s` is a substring of ordinary verb prose,
+        // so a fallback lets `f` match
         // `half a page`, and deleting the whole `f` row from `KEYBOARD` left this
         // gate green. Those are the very keys `SPEC.md` records as having shipped
         // uncovered. `names` compares whitespace-delimited cells and understands
@@ -1451,8 +1450,7 @@ fn token_of(event: KeyEvent) -> String {
         // `Insert` and `F1` to `F12`. `KeyCode` is an external and effectively open
         // enum, so a total match is the honest shape, and the `Debug` spelling
         // happens to match the arms above for the codes most likely to be bound
-        // next. Confirmed unreachable by this row's `/simplify` round rather than
-        // assumed.
+        // next. Confirmed unreachable rather than assumed.
         other => format!("{other:?}"),
     };
     // `Space` is drawn by name, because a blank cell is not a cell.
@@ -1512,9 +1510,9 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// [`reach_of`]'s and this function's, so a new [`Action`] variant fails to build
 /// until somebody both classifies it and says what teaches it. What [`ALL_ACTIONS`]
 /// adds is only that the two callers walk the same set; it is data and was never
-/// the guarantee. Round 1 of this row's audit found a `_ => panic!()` arm here that
-/// made the second half a runtime failure, and made it one only for a variant
-/// somebody had already added to that array. A key sweep can enumerate the keyboard because `action_for` answers
+/// the guarantee: a `_ => panic!()` arm here makes the second half a runtime
+/// failure, and only for a variant somebody has already added to that array.
+/// A key sweep can enumerate the keyboard because `action_for` answers
 /// per key event. Nothing does that for the mouse: *wheel*, *drag a bar* and *click
 /// a track* are event **shapes**, not enum variants, so there is no set to walk.
 ///
@@ -1525,15 +1523,15 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// forgotten twice, and strictly weaker than derivation. Saying so is the point: a
 /// gate whose coverage is overstated is the shape #288 is about.
 ///
-/// **And *cannot be forgotten* is what this said until round 2, which is one claim
-/// too many.** Compiling is forced; being *exercised* is not. [`ALL_ACTIONS`] is a
+/// **And *cannot be forgotten* would be one claim too many.** Compiling is
+/// forced; being *exercised* is not. [`ALL_ACTIONS`] is a
 /// hand-maintained array, so a variant can be classified in [`reach_of`], given an
 /// arm here, and still reach neither gate if nobody adds it there. That is one
 /// unenforced step, named rather than papered over.
 ///
-/// **Round 2 claimed a length pin made missing it loud and round 3 showed it did
-/// not**: comparing the array's length against a literal compares two things the
-/// same edit would touch. What `the_action_table_covers_every_variant` checks now
+/// **A length pin does not make missing it loud**: comparing the array's length
+/// against a literal compares two things the same edit would touch. What
+/// `the_action_table_covers_every_variant` checks
 /// is the array against the **sweep**, which is derived, so a variant bound to a
 /// key cannot be left out of it. A variant reachable only by pointer still can be,
 /// and that is the residue.
@@ -1619,9 +1617,9 @@ fn the_action_table_covers_every_variant() {
     // itself. `produced` is derived from `action_for`, so a variant bound to a key
     // and left out of the array reddens here.
     //
-    // **Round 2 put a length pin here instead and round 3 showed it proved
-    // nothing**: `ALL_ACTIONS.len() == 18` compares a hand-maintained array against
-    // a hand-maintained literal, both of which the same edit would have to touch,
+    // **A length pin here proves nothing**: `ALL_ACTIONS.len() == 18` compares a
+    // hand-maintained array against a hand-maintained literal, both of which the
+    // same edit would have to touch,
     // so it passes in exactly the scenario its own comment described. Deleted
     // rather than kept as reassurance.
     //
@@ -1877,9 +1875,9 @@ fn no_gesture_token_hides_inside_another() {
     // sheet**, so a token hiding inside any row the renderer writes scores the same
     // way, whether or not that row is itself a token.
     //
-    // It would have fired on this row's own first draft: the close control's verb
-    // was spelled `close this sheet`, and `this sheet` is already the token for
-    // `?`, so every page carrying the close row counted one gesture too many. What
+    // Spelling the close control's verb `close this sheet` fires it: `this
+    // sheet` is already the token for `?`, so every page carrying the close row
+    // counts one gesture too many. What
     // noticed was `the_counter_is_right_where_a_page_spans_the_mouse_heading`,
     // a counter disagreeing with its own page, which is a long way from the cause.
     //
@@ -2907,8 +2905,9 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
     // shortened two tight mouse verbs so the whole table would fit I6's forty
     // columns in one column: the two-column rung measures the same cells, so it
     // narrowed by the same five. That is additive (a narrower rung arrives
-    // earlier and draws every gesture where the pane used to page) and it is a
-    // deviation from #286's plan, which predicted these numbers unmoved. That is the rail's own lesson one
+    // earlier and draws every gesture where the pane would otherwise page) and
+    // it is a deviation from #286's plan, which predicted these numbers unmoved.
+    // That is the rail's own lesson one
     // element over: `RAIL_FLOOR` pins its composition in a const block precisely
     // because a claim no gate can fail is a wish, and #220's ruling shipped two
     // numbers with nothing holding them.
@@ -2950,9 +2949,9 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
 
 #[test]
 fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
-    // **73 since #286, 78 before it, and the first draft of the ruling said 80.**
-    // `margin_of` returns 2 from 44 to 78, so a pane of 73 leaves 71 columns of room
-    // and the tight two-column rung is exactly 71 wide. It was 76 until #286
+    // **73, and neither 78 nor the 80 the ruling first named.** `margin_of`
+    // returns 2 from 44 to 78, so a pane of 73 leaves 71 columns of room and the
+    // tight two-column rung is exactly 71 wide. It was 76 until #286
     // shortened two tight mouse verbs, and this rung measures the same cells. The
     // probe that produced the ruling's original before-and-after sampled 60, 70 and
     // 80 and stepped over its own boundary, which is the same mistake as a
@@ -3076,8 +3075,8 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // case.
             //
             // **This pane changed rung with [#288](https://github.com/breferrari/vigia/issues/288)**,
-            // and the comment here described the old one until round 1 of that
-            // row's audit read the two together. It took the one-column rung at
+            // which is easy to describe wrongly from the rung it left. It took
+            // the one-column rung at
             // `(12, 1, 56, 21)`, and twenty-one gestures no longer fit one column
             // in a twenty-five-row pane, so it takes the two-column rung at
             // `(5, 3, 71, 17)`.
@@ -3097,8 +3096,8 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // three attempts at a per-case story failed to improve on.
             (81, 25, (5, 3, 71, 18)),
             // The whole table in one column reaches this width since #286, so
-            // where this used to be a dropping rung of thirteen rows it is the
-            // twenty-one-row sheet.
+            // this is the twenty-one-row sheet rather than a dropping rung of
+            // thirteen rows.
             //
             // **It stopped carrying the odd vertical slack when #295 added a
             // row and took it back when #297 added another**: the body is
@@ -3132,7 +3131,7 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
     // one summing the sheet's width and one placing the row. Changing only the
     // second moved every verb column in both shapes and left the width, the frame
     // and the gesture count exactly as planned, so nothing in this file could see
-    // it. The same is true of the ` mouse ` label's column, which is round 0's
+    // it. The same is true of the ` mouse ` label's column, which is the same
     // surviving mutant relocated onto the heading row.
     //
     // Columns are stated as literals rather than derived, because a gate that
@@ -3525,10 +3524,10 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
 
 #[test]
 fn the_one_column_rung_places_its_cells_where_the_plan_says() {
-    // **The rung every reader sees, and its columns were never pinned.** The
-    // two-column rung has had absolute columns since #220's round 1; the one that
-    // draws on a default 80 by 24 pane had none, so moving `Group { at: 1 }` to
-    // `at: 0` shifted the whole table against the left pipe and survived every
+    // **The rung every reader sees, and the one whose columns are easiest to
+    // leave unpinned.** The two-column rung has absolute columns; without them
+    // here, moving `Group { at: 1 }` to `at: 0` shifts the whole table against
+    // the left pipe and survives every
     // gate in this file. Width comes from `sheet_fields` rather than from `at`, so
     // the size and origin gates see nothing; the frame gate sees an under-fill
     // rather than an overwrite; and the weights gate reads two cells that are
@@ -3618,9 +3617,9 @@ fn the_one_column_rung_places_its_cells_where_the_plan_says() {
 fn the_two_column_rung_swallows_what_lands_on_it() {
     // **Every behavioural gate on this element runs at 80 by 24, which takes the
     // one-column rung.** The two-column rung was proven only by geometry and by
-    // what the text says. It matters most here: the sheet went from 56 columns to
-    // 104, so a click at column 90 used to reach a diff row and is now the
-    // sheet's, and nothing resolved a gesture at that shape.
+    // what the text says. It matters most here: at 104 columns rather than 56, a
+    // click at column 90 is the sheet's where it would otherwise reach a diff
+    // row, and nothing resolves a gesture at that shape.
     //
     // B12's rule is that the sheet swallows what lands on it rather than letting
     // it fall through, because a click seeking a scrollbar the reader cannot see
@@ -3750,9 +3749,9 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
 
 #[test]
 fn the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_states() {
-    // **This gate used to hold two branches nothing could make fire.**
-    // `sheet_floor` raised any rung to the width its own title bar needed, and no
-    // rung ever reached it: the floor was seventeen and the narrowest rung
+    // **Two branches here are easy to write and impossible to fire.**
+    // `sheet_floor` raising any rung to the width its own title bar needs is
+    // never reached: the floor is seventeen and the narrowest rung
     // twenty-four. It said so, and said that the day #288 added a `MOUSE` row one
     // of them would stop clearing and the behaviour behind the guard would become
     // reachable and untested.
@@ -4577,8 +4576,7 @@ fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
     // back found themselves on page one of a sheet they had left on page four.
     // Nothing was drawn while it was narrow, so nothing asked for the move.
     //
-    // Found by the audit round that read the previous round's own fixes, which is
-    // the class of defect that round exists for.
+    // The class of defect a fix's own neighbourhood produces.
     let scratch = Scratch::large_diff("sheet-below-floor", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -4634,9 +4632,8 @@ fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    // **One page, one paint.** The first draft reached for `walk_the_pages`, which
-    // presses `?` through every page and repaints each, and then took `.first()`.
-    // Both panes here draw the cell on their first page.
+    // **One page, one paint.** `walk_the_pages` presses `?` through every page
+    // and repaints each, and both panes here draw the cell on their first.
     let mut page_one = |frame: &mut Frame<'_>, at: Rect| {
         let mut app = App::new();
         toggle_at(&mut app, frame, at);

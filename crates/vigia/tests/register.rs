@@ -52,7 +52,7 @@ const RATIO_CEILING: [(&str, u64); 9] = [
 /// from such a probe, and it left 161 of slack, so the gate stayed green
 /// against a deliberate mutation. A ceiling above the measurement is a bound
 /// nothing can reach.
-const SESSION_CONTEXT_CEILING: usize = 1_422;
+const SESSION_CONTEXT_CEILING: usize = 1_347;
 
 /// The longest `///` run in the tree, in lines.
 ///

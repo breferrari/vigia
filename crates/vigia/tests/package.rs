@@ -154,16 +154,8 @@ fn escaping_tests() -> Vec<String> {
     // test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml` and
     // `RELEASE-SMOKE.md` all go on saying the old number with nothing red.
     //
-    // It has now fired for real three times, and each time the four documents
-    // moved together because it did: 2026-08-24 when
-    // [#295](https://github.com/breferrari/vigia/issues/295) made `rail.rs` the
-    // sixteenth, [#297](https://github.com/breferrari/vigia/issues/297) making
-    // `single.rs` the seventeenth, and [#309](https://github.com/breferrari/vigia/issues/309)
-    // making `config.rs` the eighteenth, and 2026-08-25 when
-    // [#320](https://github.com/breferrari/vigia/issues/320) made `theme_docs.rs`
-    // the nineteenth, and 2026-08-26 when
-    // [#272](https://github.com/breferrari/vigia/issues/272) made `wrap.rs` the
-    // twentieth. The whole point is that a count in prose
+    // It has fired for real several times, and each time the four documents
+    // moved together because it did. The whole point is that a count in prose
     // cannot notice a new test, and a floor is a count that cannot notice one
     // either.
     //
@@ -335,8 +327,8 @@ fn run_commands(yaml: &str) -> Vec<String> {
 /// The strings here are **captured from real runs** rather than recalled, which
 /// is the whole reason [`the_unreachable_registry_is_told_apart_from_a_broken_manifest`]
 /// exists beside this: a list of magic strings nobody has ever matched against
-/// real output is prose wearing a `const`. Two shapes were observed on
-/// 2026-08-08 with cargo 1.94.0:
+/// real output is prose wearing a `const`. Two shapes, observed with cargo
+/// 1.94.0:
 ///
 /// - Cold `--offline`: `no matching package named 'notify' found`, followed by
 ///   `you're using offline mode (--offline)`. Note that the first line alone is
@@ -852,9 +844,9 @@ fn the_spec_names_every_test_that_escapes_the_package() {
 
 /// The command scan reads commands and nothing else.
 ///
-/// Every case here is one an audit round actually got past a previous version
-/// of this scan, so the list is a record of how it was wrong rather than a
-/// survey of YAML. Two of them are the same defect from opposite sides: a
+/// Every case here is one that has got past a version of this scan, so the list
+/// is a record of how it can be wrong rather than a survey of YAML. Two of them
+/// are the same defect from opposite sides: a
 /// `name:` that quotes a command is not a command, and a command split over two
 /// physical lines is still one.
 #[test]
@@ -949,9 +941,9 @@ fn only_the_commands_a_workflow_runs_are_read_as_commands() {
 /// A gate that skips has to be right about *when*, and both directions cost
 /// something real: skipping on a broken manifest hides a release defect, and
 /// firing on an offline machine breaks development for a reason the developer
-/// cannot act on. The condition was written from memory once and was wrong both
-/// ways, so the fixtures below are pasted from actual `cargo package --list`
-/// runs on 2026-08-08 with cargo 1.94.0 rather than composed.
+/// cannot act on. Written from memory the condition is wrong both ways, so the
+/// fixtures below are pasted from actual `cargo package --list` runs with cargo
+/// 1.94.0 rather than composed.
 #[test]
 fn the_unreachable_registry_is_told_apart_from_a_broken_manifest() {
     // Captured: `CARGO_HOME=<empty> CARGO_NET_OFFLINE=true cargo package --list`
@@ -1318,8 +1310,8 @@ fn the_release_pipeline_publishes_to_the_registry() {
     // generated file is current rather than that the config is right. A stale
     // release.yml is the failure mode of editing the config and not
     // regenerating, and it is a real one **for the publish wiring specifically**:
-    // measured 2026-08-08, dropping `./publish-crates-io` from the config and
-    // not regenerating leaves `dist generate --check` red and both assertions
+    // dropping `./publish-crates-io` from the config and not regenerating leaves
+    // `dist generate --check` red and both assertions
     // below red too, while the *target* list bakes into release.yml not at all
     // (zero triples appear in it; the build matrix is computed at release time
     // from `dist plan`). So this checks the half that can actually go stale, and
@@ -1334,9 +1326,9 @@ fn the_release_pipeline_publishes_to_the_registry() {
         "release.yml must schedule the registry job at all; run `dist generate`"
     );
 
-    // **The ordering claim this used to make was false, so what is asserted is
-    // the mechanism rather than the conclusion.** The old wording said
-    // `announce` waiting on the publish job stopped a release half-shipping. It
+    // **The mechanism is asserted rather than the conclusion**, because the
+    // obvious ordering claim is false: `announce` waiting on the publish job
+    // does not stop a release half-shipping. It
     // does not: `host` runs `gh release create` with no `--draft`, so the
     // binaries are public before the registry job starts.
     //
@@ -1395,9 +1387,9 @@ fn the_release_pipeline_publishes_to_the_registry() {
 /// The no-C-toolchain gate reads its target list from the release config rather
 /// than from a second hand-typed copy.
 ///
-/// **There used to be a test here asserting the two lists agreed, and deleting
-/// it is the fix rather than a retreat from it.** `CLAUDE.md` calls a C build
-/// dependency in the graph a spec change rather than an implementation detail,
+/// **A test asserting the two lists agree is the wrong shape, and having one
+/// place rather than two is the fix.** `CLAUDE.md` calls a C build dependency in
+/// the graph a spec change rather than an implementation detail,
 /// and `ci.yml`'s `pure-rust` job is that rule with teeth; it held a hand-typed
 /// target list while `[workspace.metadata.dist]` held another. Shipping a fourth
 /// target was the moment they came apart, and the gate caught it:
@@ -1819,8 +1811,8 @@ fn the_packaged_artifact_carries_no_tests() {
 /// **What closes it is a copy in each package directory, and the alternative is
 /// worth recording because it is the one everybody reaches for first.** An
 /// inherited `license-file = "LICENSE"` resolves against the workspace root and
-/// works exactly like `readme`: measured 2026-08-18, it puts `LICENSE` in both
-/// tarballs and rewrites the path package-relative. It also makes `cargo
+/// works exactly like `readme`: it puts `LICENSE` in both tarballs and rewrites
+/// the path package-relative. It also makes `cargo
 /// publish` print `warning: only one of license or license-file is necessary`,
 /// from the verify step rather than from `--list`, which is why it looks clean
 /// until the one workflow nobody can rehearse runs it. The root manifest

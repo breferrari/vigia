@@ -337,8 +337,8 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // before deciding this line is stale.** It is delivered because the mouse
     // bundle sets `?1003h`, any-event tracking, which nothing here consumes and
     // which cannot portably be switched off; `RULINGS.md`'s I1 section carries
-    // what it costs. B10 was reversed on 2026-08-16 and a hover mark is adopted,
-    // which does **not** make this line stale in either direction: §11.1 rules
+    // what it costs. B10's reversal adopting a hover mark does **not** make
+    // this line stale in either direction: §11.1 rules
     // the mark to be view state resolved in the loop, so `Moved` means no action
     // here whether or not the mark has been built yet.
     //
@@ -387,7 +387,7 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
 /// `SPEC.md` §11.2 B9, and it needs its own test rather than a line in the inert
 /// list above.
 ///
-/// > B9 — a yank key over OSC 52. Ruled 2026-08-15: no.
+/// > B9 — a yank key over OSC 52. Ruled: no.
 ///
 /// That list holds keys with **no home of their own**, which is why `D`, `U`,
 /// `N` and `P` are not in it. `y` has one: a ruling refused it, on the ground
@@ -429,8 +429,8 @@ fn the_yank_key_is_refused_rather_than_unbound() {
 /// `SPEC.md` §11.2 B10's tripwire, and the reason the inert list above is not
 /// it.
 ///
-/// > B10 — a hover highlight on what the pointer is over. Ruled 2026-08-15: no.
-/// > Reversed 2026-08-16: yes.
+/// > B10 — a hover highlight on what the pointer is over. Ruled no, reversed
+/// > to yes.
 ///
 /// **This gate outlived the reversal unchanged, and that is the thing to
 /// understand before touching it.** It was written to catch a hover being built
@@ -1408,7 +1408,7 @@ fn a_step_button_the_sheet_covers_arms_nothing() {
 
 #[test]
 fn a_track_the_sheet_covers_grabs_nothing() {
-    // **The sibling of the gate above, and the call site #298's first draft missed.**
+    // **The sibling of the gate above, and the call site most easily missed.**
     // `Regions::step_at` and `Regions::grab_at` are the only geometry `run`'s loop
     // asks for directly, outside `action_for`. Guarding one and not the other leaves
     // the class open on the half that costs more: a hold repeats a bounded step,
@@ -1448,8 +1448,8 @@ fn a_track_the_sheet_covers_grabs_nothing() {
     // **The rectangle's own edges, which nothing else probes.** The two guards rest
     // entirely on `Sheet::covers`, and a mutation of either bound from `<` to `<=`
     // over-refuses by a row or a column with every sweep still green: the sweeps
-    // walk `cells_of`, whose range carries the same bound, so they move together and
-    // neither notices. Named by round 2's mutation battery as a predicted survivor.
+    // walk `cells_of`, whose range carries the same bound, so they move together
+    // and neither notices. Named by a mutation battery as a predicted survivor.
     let box_of = covered.sheet.expect("a sheet");
     assert!(box_of.covers(70, 10), "the first cell the sheet occupies");
     assert!(box_of.covers(79, 13), "the last cell the sheet occupies");
@@ -1633,8 +1633,8 @@ fn a_list_drag_leaves_the_diff_alone_and_a_diff_drag_does_not() {
     // And only one of them needs a height. Both map the track onto travel, but
     // the list's travel is its own row count, which the app holds, where the
     // diff's is the total minus a screenful and the screenful is the caller's to
-    // measure. `DiffTo` answered `false` here until 2026-08-02, so `apply`
-    // received a height of zero and the bottom of the track fell off the end.
+    // measure. With `DiffTo` answering `false` here, `apply` receives a height
+    // of zero and the bottom of the track falls off the end.
     assert!(!Action::ListTo(0).needs_height());
     assert!(Action::DiffTo(0).needs_height());
 }
@@ -2000,7 +2000,7 @@ fn a_direction_mark_expires_where_a_held_button_does_not() {
     // about *expiry* rather than about arrows: what decides whether a mark needs
     // a clock is whether the program can observe its subject ending. A hold ends
     // with an `Up`. A burst has no end, only a last member, so it needs this. A
-    // hover (§11.2 B10, reversed 2026-08-16) has no end either, but its subject
+    // hover (§11.2 B10) has no end either, but its subject
     // *moves* rather than stopping, so the next motion clears it and it must not
     // be given a clock: one would put the mark out while a reader rests on it.
     //
@@ -2105,9 +2105,9 @@ fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     // whether this program owns a timer, and that an empty window therefore
     // leaves the loop's receive untimed.
     //
-    // A first draft of this asserted `ages_in` three times and never called
-    // `patience`, so despite its name it gated nothing about the input layer and
-    // duplicated the core's own gates. The composition is the whole point: both
+    // Asserting `ages_in` three times without calling `patience` gates nothing
+    // about the input layer, whatever the test is named, and duplicates the
+    // core's own gates. The composition is the whole point: both
     // halves can be right while nothing joins them.
     let mut history = History::new();
     let now = Instant::now();
@@ -2227,8 +2227,8 @@ fn a_region_with_no_rows_lights_nothing() {
 #[test]
 fn a_mark_names_its_region_when_both_share_a_first_row() {
     // **The [`beside`] shape, now pointed at the paint marks.** Two tests above
-    // already drive it, which is worth stating because an earlier draft of this
-    // comment claimed the file drew no such screen: it draws it twice, for the
+    // already drive it, which is worth stating because the file looks as though
+    // it draws no such screen: it draws it twice, for the
     // *region geometry* [#251](https://github.com/breferrari/vigia/issues/251)
     // fixed. What no test drove it for is the three marks, which is the whole of
     // [#254](https://github.com/breferrari/vigia/issues/254) and the reason the
@@ -2332,9 +2332,9 @@ fn the_arrows_move_between_files() {
         action_for(&press(KeyCode::Char('p')), Regions::default()),
         "`←` does not do what `p` does"
     );
-    // **No literal pair below, and the first draft had one.** Its stated reason was
-    // that two keys both bound to `None` would satisfy the asserts above, which is
-    // false in this suite: `n_and_p_are_the_file_step` pins `n` and `p` against
+    // **No literal pair below.** The reason for one — that two keys both bound
+    // to `None` would satisfy the asserts above — is false in this suite:
+    // `n_and_p_are_the_file_step` pins `n` and `p` against
     // `Action::File` literally, so `n` cannot go unbound without that going red.
     // Adding the literal here would also be the exact thing the comment above
     // refuses, pinning today's meaning under a new key.
@@ -2357,8 +2357,8 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
         (KeyCode::Right, Action::File(1)),
     ] {
         // `Some(plain)` is the whole claim: it is a `File` step, so it is by
-        // construction not a `ScrollList`. The first draft asserted both and the
-        // second could never fire.
+        // construction not a `ScrollList`, so asserting both makes the second
+        // assertion one that can never fire.
         assert_eq!(
             action_for(&with(KeyModifiers::SHIFT, code), Regions::default()),
             Some(plain),

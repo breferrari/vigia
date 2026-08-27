@@ -1443,9 +1443,9 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
 #[test]
 fn a_row_missing_a_glance_element_keeps_its_column() {
     // The launch case, and the reason #77 is universal rather than occasional.
-    // `spark_of` used to yield nothing until a file had been written once, which
-    // is every file on the first frame, and `heat_at` yields nothing for a file
-    // with no line diff. Under right-packing each absence let that row's
+    // `spark_of` yields nothing until a file has been written once, which is
+    // every file on the first frame, and `heat_at` yields nothing for a file
+    // with no line diff. Under right-packing each absence lets that row's
     // remaining elements slide right into the space, so one quiet file pulled
     // its neighbours out of line.
     //
@@ -3665,9 +3665,9 @@ fn a_scale_answers_by_grouping_and_falls_back_to_the_finest() {
 fn a_narrowed_sparkline_covers_the_whole_window_rather_than_its_tail() {
     // **The one property of the narrow rung nothing could see**, and it is the
     // opposite property since [#234](https://github.com/breferrari/vigia/issues/234).
-    // At the widths where the sparkline halves, `Painter::file_row` used to draw
-    // the *tail* of the window, so a narrow pane showed the newest half and said
-    // nothing about the rest; `spark_of` re-projects now, summing adjacent source
+    // At the widths where the sparkline halves, drawing the *tail* of the window
+    // shows a narrow pane the newest half and says nothing about the rest;
+    // `spark_of` re-projects, summing adjacent source
     // buckets so a narrower rung is a lower resolution of the whole window. That
     // change is invisible to every gate that counts a rung, because it is the
     // same number of cells in the same columns.
@@ -3740,9 +3740,9 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     // exactly one row, and the three rungs have to be three *different*
     // intensities or the gradient `SPEC.md` §5.1 asks for is not being drawn.
     //
-    // Read as a glyph rather than as words since 2026-08-03, when the
-    // `just changed` label went and the dot became the whole signal. The mark
-    // is unique on a file row: the caret is `▸`, the heat strip is `█` and the
+    // Read as a glyph rather than as words, there being no `just changed` label
+    // and the dot being the whole signal. The mark is unique on a file row: the
+    // caret is `▸`, the heat strip is `█` and the
     // sparkline is drawn from the eighth-blocks, so a `●` anywhere on the row
     // is the pulse and nothing else.
     let theme = Theme::default();
@@ -4890,9 +4890,9 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     // is a weight the ladder cannot reach, and what makes it unreachable is the
     // **underline**.
     //
-    // **It used to be the brightness as well, and that was the half that was
-    // wrong** (#193). The mark sat above all three rungs, which made a stale
-    // thing about the pointer the loudest text on the pane and contradicted
+    // **Not the brightness as well** (#193). A mark above all three rungs makes
+    // a stale thing about the pointer the loudest text on the pane and
+    // contradicts
     // §5.3's own B10 rule in the paragraph beside it: a pointer mark *"must be
     // the quietest thing still visible in that region"*. It takes
     // `Theme::bar_hover`'s colour now, the one the bar's own marks use, so the
@@ -4947,8 +4947,8 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     // not on.
     let row = laid.list.top + 1;
 
-    // **Two screens, drawn once each.** This used to draw one per row inside the
-    // loop below, which is the same picture five times over.
+    // **Two screens, drawn once each**, rather than one per row inside the loop
+    // below, which is the same picture five times over.
     let want = weight(theme.path_hover);
     let untouched = screen(width, height, &view, &chrome());
     let hovering = screen(
@@ -6039,8 +6039,8 @@ fn a_wash_runs_under_the_scrollbar_column() {
 /// Every row the bar draws on carries that row's own background, buttons included.
 ///
 /// The gate above reads **one** cell, on a mid-track row of a stepped bar, and that
-/// is three coverage holes wide. Round 1 of #239's audit named two and a probe
-/// found the third while proving the second.
+/// is three coverage holes wide, the third of which is only visible while
+/// proving the second.
 ///
 /// The step buttons sit on the region's **first and last** rows (`Bar::Stepped`),
 /// which the track loop never reaches and a separate arm draws. The gate above ran
@@ -6207,8 +6207,8 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
 
 /// A row wash's **modifier** never reaches the scrollbar's cell.
 ///
-/// The regression this pins was introduced by #239 itself and found by round 2 of
-/// its own audit, which is why it is written out rather than summarised.
+/// The regression this pins was introduced by #239 itself, which is why it is
+/// written out rather than summarised.
 ///
 /// Making the band run under the bar means the bar's cell arrives already painted.
 /// The first version let `Cell::set_style` merge over it, on the reading that a wash
@@ -6299,9 +6299,10 @@ fn a_row_washs_modifier_never_reaches_the_scrollbar() {
 
 /// A bar style's own background wins over the band, and no background yields to it.
 ///
-/// `bar_cell` falls both colours back to the cell it is writing, and until round 4
-/// of [#239](https://github.com/breferrari/vigia/issues/239)'s audit the background
-/// half was **discarded** rather than fallen back: a theme file could write
+/// `bar_cell` falls both colours back to the cell it is writing. Discarding the
+/// background half rather than falling back
+/// ([#239](https://github.com/breferrari/vigia/issues/239)) lets a theme file
+/// write
 /// `bar_track = #57606a on #21262d`, parse without complaint, and never draw it.
 /// That is the failure this repository's own parser notes rail against, one that
 /// reports no error and changes nothing, and this branch created it by making the
@@ -6939,9 +6940,9 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
     // margin's leading half and its right blank is exactly the bar's reserve, so
     // the margin has cost the path its own width in columns rather than twice it.
     //
-    // **The name says "once and once" rather than "the same distance", which is
-    // what it said until round 3 of the audit.** The two blanks are equal only
-    // where the leading half reaches the bar's two, and not at every width. The
+    // **The name says "once and once" rather than "the same distance".** The two
+    // blanks are equal only where the leading half reaches the bar's two, and not
+    // at every width. The
     // assertion below always encoded that asymmetry correctly while the name
     // denied it, which is the worse way round: a reader trusts the name and
     // skips the body.
@@ -7472,7 +7473,7 @@ fn a_staged_rows_kind_letter_carries_the_mark_and_an_unstaged_rows_does_not() {
         rows.join("\n")
     );
 
-    // And the glyph the column used to hold is gone from the pane entirely,
+    // And the glyph that column would hold is absent from the pane entirely,
     // rather than merely moved somewhere the assertions above cannot see.
     assert!(
         !rows.iter().any(|row| row.contains('\u{2502}')),
@@ -7563,9 +7564,9 @@ fn the_mark_takes_the_staged_colour_and_never_the_diffs_green() {
 /// Drawing both runs costs the path no column at all.
 ///
 /// **This is #316's whole claim, and it is the gate that would catch its
-/// reversal.** It used to read `with - 1 == without`, which is the same
-/// measurement with the opposite verdict: the mark cost every row of both runs
-/// one column of the pane's most contested element. Now the two screens put the
+/// reversal.** `with - 1 == without` is the same measurement with the opposite
+/// verdict: the mark costing every row of both runs one column of the pane's
+/// most contested element. The two screens put the
 /// path in the same place, so a reader who asks for the staged run pays nothing
 /// for it and a reader who does not is unaffected either way.
 #[test]
@@ -7670,7 +7671,7 @@ fn an_empty_view_with_nothing_anywhere_says_only_that() {
     );
 
     // With the run **on** and nothing anywhere, both comparisons are named,
-    // because the reader asked about both and the line has to say it looked.
+    // because both were asked about and the line has to say it looked.
     let both = Chrome {
         staged: Some(0),
         ..empty_chrome()
@@ -8345,8 +8346,8 @@ fn a_continuation_mark_only_sits_against_content_that_reached_it() {
 
 /// **No emoji presentation selector reaches the buffer.**
 ///
-/// Reported against a real worktree on 2026-08-26: a file drew correctly until
-/// the line holding a warning emoji scrolled into view, and from there every
+/// Reported against a real worktree: a file drew correctly until the line
+/// holding a warning emoji scrolled into view, and from there every
 /// row of that file broke. Spaces went missing (`row yet` drew as `rownyet`)
 /// and the continuation mark doubled.
 ///

@@ -337,9 +337,9 @@ fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
 
 #[test]
 fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
-    // **This gate used to assert the opposite**
-    // ([#218](https://github.com/breferrari/vigia/issues/218)). It read
-    // `a_palette_that_declines_a_bar_leaves_the_sigil_alone` and pinned every
+    // **The opposite of what a gate here would naturally assert**
+    // ([#218](https://github.com/breferrari/vigia/issues/218)). Written as
+    // `a_palette_that_declines_a_bar_leaves_the_sigil_alone` it pins every
     // built-in's `_bar` keys as unset, which is how §5.1's *tinted row with a
     // coloured left bar* shipped as the tint alone for three phases: the key
     // existed, the renderer consumed it, and a gate held it empty.
@@ -419,9 +419,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
     // still colour 8 and is exempt by name: a track is a solid block that should
     // sit just above the background, which is exactly what the colour is for.
     //
-    // **The exemption used to be by omission and this comment used to deny it.**
-    // It claimed "the exemption is listed rather than inferred, so adding a field
-    // cannot join it by accident", and what was listed was the *readable* side, so
+    // **The exemption is by omission, whatever a comment claiming otherwise
+    // says.** "The exemption is listed rather than inferred, so adding a field
+    // cannot join it by accident" lists the *readable* side, so
     // every field not in that array was exempt by default. `spark_track` joined
     // that way in [#78](https://github.com/breferrari/vigia/issues/78): a track
     // drawn as one stroke rather than a solid block, taking the colour this gate
@@ -454,9 +454,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // carries a modifier as part of its meaning: `path_hover` underlines,
         // which is the whole of what keeps it apart from the recency ladder.
         //
-        // **It is the quietest of the four rather than the brightest, corrected
-        // 2026-08-16** ([#193](https://github.com/breferrari/vigia/issues/193)).
-        // It holds `bar_hover`'s value now, which on this palette is `Gray` and
+        // **It is the quietest of the four rather than the brightest**
+        // ([#193](https://github.com/breferrari/vigia/issues/193)).
+        // It holds `bar_hover`'s value, which on this palette is `Gray` and
         // therefore `path_cold`'s foreground **exactly**, so the modifier is not
         // merely the last separation left, it is the only one. That is why it is
         // still checked here: `Gray` is not colour 8 and must not become it, and
@@ -613,7 +613,7 @@ fn sixteen_colours_draw_no_background_and_keep_the_sigil() {
     // the tool. What must not go with the wash is the sigil's own colour: patching
     // an unset bar over the diff style has to leave the diff style alone, and
     // getting that wrong blanks the last thing distinguishing an addition.
-    // **`Ansi256` is in this list and used to be in the washing one.** The cube
+    // **`Ansi256` is in this list rather than the washing one.** The cube
     // cannot hold a subtle colour: `#1b3d29` quantises to `#005f00`, and over a
     // newly added file that is a screen of flat green rather than a tint. The
     // arithmetic is in `tests/colour.rs`; this is the half that draws.
@@ -822,9 +822,9 @@ fn a_ramp_that_survives_sixteen_colours_is_still_a_ramp() {
 #[test]
 fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
     // The picture ramps its additions across three greens and the strip is the one
-    // element whose intensity `assets/preview.svg` actually specifies. It used to
-    // draw two, because sixteen names hold a normal and a bright of each hue and no
-    // third stop.
+    // element whose intensity `assets/preview.svg` actually specifies. Sixteen
+    // names draw two, holding a normal and a bright of each hue and no third
+    // stop.
     let three = heat_stops(Theme::dark().resolve(Depth::Truecolor));
     assert_eq!(three.len(), 3, "expected three stops, got {three:?}");
 
@@ -1413,9 +1413,9 @@ fn a_comment_does_not_eat_a_hex_colour() {
 
 #[test]
 fn a_modifier_only_value_keeps_the_colour_it_did_not_name() {
-    // `added = bold` reads as "make additions bold" and used to mean "make
-    // additions bold and colourless": the style was built from `Style::new()` and
-    // `set` replaces the whole field. That is the same invisible change
+    // `added = bold` reads as "make additions bold". Built from `Style::new()`,
+    // where `set` replaces the whole field, it means "make additions bold and
+    // colourless". That is the same invisible change
     // `MissingValue` exists to prevent, reached from the other direction.
     let theme = theme::parse("base = dark\nadded = bold\n").expect("parses");
     assert_eq!(
@@ -1481,9 +1481,9 @@ fn base_takes_a_trailing_comment_like_every_other_key() {
 
 #[test]
 fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
-    // `.resolve(depth)` used to be written on each of three exits. Only the
-    // built-in arm was ever gated at a lossy depth, so deleting it from either of
-    // the other two left the whole suite green: at truecolour `resolve` is the
+    // `.resolve(depth)` written on each of three exits is gated on the built-in
+    // arm alone at a lossy depth, so deleting it from either of the other two
+    // leaves the whole suite green: at truecolour `resolve` is the
     // identity, and every test reaching those arms ran there. This drives all
     // three at a depth where the difference shows.
     let home = home_with("resolved", Some("base = dark\n"));
@@ -1847,9 +1847,10 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
 /// against the pane, and for two of them that is the whole story: the heat strip
 /// and the sparkline draw on list rows and file headings, which are never washed.
 ///
-/// **The bar is the exception, and it became one on 2026-08-18**
-/// ([#239](https://github.com/breferrari/vigia/issues/239)). The row wash now runs
-/// under the bar's own column, so on a changed row the track and the thumb sit on
+/// **The bar is the exception**
+/// ([#239](https://github.com/breferrari/vigia/issues/239)). The row wash runs
+/// under the bar's own column, so on a changed row the track and the thumb sit
+/// on
 /// `added_row` or `removed_row` rather than on the pane. Every ratio in the older
 /// gate is measured against the pane, so it could not see that `#57606a` fell to
 /// **1.88:1** on an added row: a value this palette calls absent at 1.24:1 and
@@ -1908,10 +1909,9 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
 
 /// Every bar style says everything [`Painter::bar_cell`] reads from it.
 ///
-/// This began as a claim that the bar and the wash touch **disjoint** style fields,
-/// which was true of `fg` and `bg` and was the stated reason the draw order did not
-/// matter. Round 2 of [#239](https://github.com/breferrari/vigia/issues/239)'s audit
-/// falsified it: a **modifier** is a third field, `Cell::set_style` inserts one
+/// The bar and the wash touching **disjoint** style fields is true of `fg` and
+/// `bg` and false overall, so it is not why the draw order does not matter: a
+/// **modifier** is a third field, `Cell::set_style` inserts one
 /// unconditionally, and `VIGIA_THEME` lets a reader put `reverse` on a row wash. The
 /// order was never free, and the reason recorded here was wrong rather than
 /// incomplete.
@@ -1946,7 +1946,7 @@ fn every_bar_style_says_what_bar_cell_reads() {
     // style's *shape* rather than its values, so it can hold the palette the other
     // two structurally cannot, and `ansi` is the one that matters most: it is the
     // default when nothing is detected, so leaving it out meant the shipped
-    // default was compliant by luck. Named by round 3 of #239's audit.
+    // default was compliant by luck.
     //
     // **Unresolved, which is stricter than resolving.** `Depth::resolve` only ever
     // strips a background and always maps a foreground to `Some`, so a resolved

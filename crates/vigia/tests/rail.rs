@@ -233,8 +233,8 @@ fn beside() -> View {
 ///
 /// **`files` stays at three**, which is the difference between a view with an
 /// empty list and an empty worktree: at zero, B3 replaces the whole region with a
-/// sentence and there is no heading to read a rung off at all. The first draft
-/// zeroed it and the gate's own non-vacuity guard caught it.
+/// sentence and there is no heading to read a rung off at all. Zeroing it is
+/// what the gate's own non-vacuity guard exists to catch.
 fn streamed() -> View {
     View {
         list_span: 0,
@@ -252,9 +252,10 @@ fn drawn(width: u16, height: u16, view: &View) -> Buffer {
 
 /// The same, at a named glyph rung.
 ///
-/// **The rung is an input to the glance ladder and every gate here used to pin it
-/// to blocks** ([#252](https://github.com/breferrari/vigia/issues/252)'s fourth
-/// audit round). `Columns::plan` takes `glyphs`, a denser cell draws two buckets
+/// **The rung is an input to the glance ladder, so pinning every gate here to
+/// blocks sweeps one rung of two**
+/// ([#252](https://github.com/breferrari/vigia/issues/252)). `Columns::plan`
+/// takes `glyphs`, a denser cell draws two buckets
 /// per column, so the same layout table is reached at a *different width* on a
 /// terminal that carries braille or octants. A sweep at one rung is a sweep of one
 /// of three ladders, which is the shape `SPEC.md` §7 keeps finding.
@@ -594,10 +595,10 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
 
         // **The path's own columns: from after the kind letter to the pulse that
         // opens the glance cluster.** Bounded on the right by an *element* rather
-        // than by a blank run, which is the correction that made this gate able to
-        // fail at all. The first draft split on a double space, and there is no
-        // double space between a path and the pulse, so it measured the path plus
-        // the whole cluster and stayed green while the floor was two columns short.
+        // than by a blank run, which is what makes this gate able to fail at
+        // all. Splitting on a double space measures the path plus the whole
+        // cluster, there being no double space between a path and the pulse, and
+        // stays green while the floor is two columns short.
         //
         // Read against `LONG`, which no rail width can draw whole, so the count is
         // the budget rather than the string. Where a rail is wide enough to draw it
@@ -760,14 +761,14 @@ fn a_hover_in_the_rail_does_not_light_the_diff() {
 /// **The bigger-container-holds-less failure, at the one boundary this row
 /// introduces.** The margin ladder is written out as a table to refuse it and
 /// `list_cap`'s step is argued for it; both are about *one* layout, and crossing
-/// between two is a third place it can happen. The first draft of this row did
-/// it: a rail charges `LEAD_ROWS` where the stacked layout at the same height
-/// returns the whole-body diff and charges nothing, so at 133 columns and six
+/// between two is a third place it can happen: a rail charges `LEAD_ROWS` where
+/// the stacked layout at the same height returns the whole-body diff and charges
+/// nothing, so at 133 columns and six
 /// rows the diff had three rows and at 134 it had two.
 ///
 /// **The claim is about the crossing and about the rail, and deliberately not
-/// about every width step.** A first draft swept all widths and reddened twice on
-/// the *stacked* layout, at widths no rail can reach: the footer's ladder takes a
+/// about every width step.** Sweeping all widths reddens twice on the *stacked*
+/// layout, at widths no rail can reach: the footer's ladder takes a
 /// second line at eight columns and shortens the whole body, and at forty-five
 /// columns the body gains a row, the pinned list takes its first, and the diff
 /// pays that row plus the rule's. The second is the shipped design of regions
@@ -787,9 +788,10 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     let mut banded = 0usize;
 
     // **Both masthead settings, every file count that changes the answer, and
-    // every height to two hundred rows.** A first draft swept one file count and
-    // one masthead setting and the defect it was written for survived in the cell
-    // it did not look at: beside a rail `after` still holds the row the stacked
+    // every height to two hundred rows.** Sweeping one file count and one
+    // masthead setting leaves the defect this is written for alive in the cell
+    // that is not looked at: beside a rail `after` still holds the row the
+    // stacked
     // list would have taken and the rule's, so the band's fit test sees more rows
     // and the band can arrive *earlier* than on the strip the rail replaces. With
     // one changed file the strip costs two rows and the band costs three, so the
@@ -913,9 +915,9 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
 /// the one height the band arrives at.
 ///
 /// That second half is an exception to `SPEC.md` §11.1's clamp order and it is
-/// recorded there as one. It is not a defect and it is not free either: an
-/// earlier draft of `Body::beside`'s docblock claimed monotonicity outright, and
-/// this gate is what would have caught the claim.
+/// recorded there as one. It is not a defect and it is not free either:
+/// `Body::beside`'s docblock cannot claim monotonicity outright, and this gate
+/// is what catches the claim.
 #[test]
 fn the_rail_is_monotone_in_pane_height() {
     let width = first_rail();
@@ -1592,8 +1594,8 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
 /// so #313's own headline defect stayed live in one of the two shapes this tool
 /// draws: the staged run was announced and its tail was not there.
 ///
-/// Nothing in this file had ever called `show_staged`, which is why a round of
-/// auditing did not reach it.
+/// Nothing else in this file calls `show_staged`, which is why auditing the
+/// neighbourhood does not reach it.
 #[test]
 fn a_rail_draws_the_tail_of_the_staged_run() {
     let scratch = repo::Scratch::large_diff("rail-staged-tail", 6, 8);
