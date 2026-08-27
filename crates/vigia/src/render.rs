@@ -4485,8 +4485,7 @@ pub fn render(
         // background matches the band is still a blank cell.
         //
         // **The wash follows the region and not the screen, and beside a rail
-        // that is finally a distinction rather than a seam**
-        // ([#252](https://github.com/breferrari/vigia/issues/252)). `washed` is
+        // that is finally a distinction rather than a seam.** `washed` is
         // kept separate from the pane's width even where the two are the same
         // number, which is what left this rung somewhere to land instead of a
         // defect to fix. The diff no longer spans the pane, and the ruling is in
@@ -4534,9 +4533,8 @@ struct Gesture {
     verb: [&'static str; 2],
 }
 
-/// The keyboard half, in the order a reader **reads** it, which since
-/// [#285](https://github.com/breferrari/vigia/issues/285) is not the order the
-/// ladder drops it in.
+/// The keyboard half, in the order a reader **reads** it, which is not the order
+/// the ladder drops it in.
 ///
 /// **Aliases are spelled inside the keys cell**, which is the README table's
 /// shape and B12's answer to *gestures or keys*: `j`, `k`, `↓` and `↑` are one
@@ -4544,9 +4542,9 @@ struct Gesture {
 ///
 /// **This order is [`SECTIONS`]'**: moving, files, view, then leaving, with `q`
 /// at the bottom rather than at the top. Which rows the height ladder gives up
-/// is [`DROP_ORDER`]'s, and separating the two is the whole of #285's
-/// prerequisite: this array ran `q` first and `?` last while `sheet_plan` dropped
-/// *from the top down*, so reordering for sections alone would have kept `q` at
+/// is [`DROP_ORDER`]'s, and separating the two is what makes this order possible
+/// at all: with `q` first and `?` last while `sheet_plan` drops *from the top
+/// down*, reordering for sections alone keeps `q` at
 /// the floor and dropped `f` and `m`, inverting §11.1's own rule.
 const KEYBOARD: [Gesture; 15] = [
     Gesture {
@@ -4566,9 +4564,9 @@ const KEYBOARD: [Gesture; 15] = [
         verb: ["first / last changed file", "first / last file"],
     },
     Gesture {
-        // **The arrows at the wide spelling and not at the tight one, and that is
-        // measured rather than preferred** ([#296](https://github.com/breferrari/vigia/issues/296)).
-        // The tight keyboard keys field is eleven, on `Space  PgDn`; this cell is
+        // **The arrows at the wide spelling and not at the tight one, and that
+        // is measured rather than preferred.** The tight keyboard keys field is
+        // eleven, on `Space  PgDn`; this cell is
         // thirteen, so keeping the arrows there takes the keyboard-only rung from
         // thirty-five columns to thirty-seven and costs panes of 35 and 36 their
         // twelve gestures. Two columns of pane losing gestures to an *alias* is
@@ -4624,9 +4622,9 @@ const KEYBOARD: [Gesture; 15] = [
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
     },
-    // **`Esc` moved up a row with [#340](https://github.com/breferrari/vigia/issues/340)**,
-    // where it stopped quitting outright and started leaving the frontmost
-    // thing. **No field maximum moves and so no width rung does**, which is
+    // **`Esc` sits a row up, where it leaves the frontmost thing rather than
+    // quitting outright. No field maximum moves and so no width rung does**,
+    // which is
     // what makes this a wording change rather than a layout one: the wide
     // keys field is still 22, held by `J  K  Shift+↑  Shift+↓` which ties the
     // old `q  Esc  Ctrl+C  Ctrl+D` exactly, and the tight field is still 11,
@@ -4642,10 +4640,9 @@ const KEYBOARD: [Gesture; 15] = [
 /// into [`KEYBOARD`].
 ///
 /// **A second order, because display order and drop order are two different
-/// things and conflating them cost a written rule.** Until
-/// [#285](https://github.com/breferrari/vigia/issues/285) there was one array and
-/// the ladder dropped a prefix of it, so *the rows a reader meets first* and *the
-/// rows the ladder gives up first* were the same sentence by construction. They
+/// things and conflating them cost a written rule.** With one array and a ladder
+/// that drops a prefix of it, *the rows a reader meets first* and *the rows the
+/// ladder gives up first* are the same sentence by construction. They
 /// are not the same claim: a reader meets `j k` first and the ladder gives up `q`
 /// first.
 ///
@@ -4657,15 +4654,14 @@ const KEYBOARD: [Gesture; 15] = [
 /// how everything above it is found at all.
 ///
 /// **`r`, `s` and `a` are unguessable gestures too, and all three are given up
-/// before those three** ([#295](https://github.com/breferrari/vigia/issues/295),
-/// [#297](https://github.com/breferrari/vigia/issues/297),
-/// [#313](https://github.com/breferrari/vigia/issues/313)), which is why they sit
-/// out of the reader's order here at ranks eight, nine and ten.
+/// before those three**, which is why they sit out of the reader's order here at
+/// ranks eight, nine and ten.
 ///
 /// **`a` last of the three, and the reason is what it costs to lose.** `r` needs
 /// 134 columns to do anything at all and `s` rearranges rows already on screen; `a`
-/// changes what the pane is *comparing*, so a reader who cannot find it cannot see
-/// staged work at all, which is the whole defect #313 was opened on. It is
+/// changes what the pane is *comparing*, so a reader who cannot find it cannot
+/// see staged work at all, which is the defect the staged run exists to fix. It
+/// is
 /// therefore the last of the family to go and the first of them a reader meets in
 /// the `view` section's own order.
 ///
@@ -4706,8 +4702,8 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 
 /// The mouse half, which is the first **gesture** the height ladder drops.
 ///
-/// Since [#285](https://github.com/breferrari/vigia/issues/285) the first thing
-/// it drops is the roomy rung's air and headings, which cost no gesture at all.
+/// The first thing it drops is the roomy rung's air and headings, which cost no
+/// gesture at all.
 ///
 /// It goes before any keyboard row for the reason the hint bar drops `JK files`
 /// first: a mouse gesture announces itself by being tried, where a key does not
@@ -4733,9 +4729,9 @@ const MOUSE: [Gesture; 7] = [
         keys: ["click a listed file", "click a file"],
         verb: ["jump the diff to it", "jump the diff to it"],
     },
-    // **The sheet's own close control, which was named nowhere at all until
-    // [#288](https://github.com/breferrari/vigia/issues/288)**: not here, not in
-    // `README.md`'s Mouse table, and so not on the sheet a reader opens to find out
+    // **The sheet's own close control, which is easily named nowhere at all**:
+    // not here, not in `README.md`'s Mouse table, and so not on the sheet a
+    // reader opens to find out
     // what the pane answers. It is the only cell of this element a click acts on,
     // and the only way to learn it was a control rather than decoration was to rest
     // a pointer on it and notice it brighten.
@@ -4747,9 +4743,8 @@ const MOUSE: [Gesture; 7] = [
     // tracks the marks outside CP437 that have no rung, and `✕` is not among them.
     //
     // **The verb says what it does and not how it looks.** It takes two weights
-    // rather than three since [#298](https://github.com/breferrari/vigia/issues/298),
-    // because it dismisses on the press, so wording that implied a held state would
-    // be teaching a rung that cannot draw.
+    // rather than three, because it dismisses on the press, so wording that
+    // implied a held state would teach a rung that cannot draw.
     //
     // **`close the sheet` rather than `close this sheet`, and the difference is a
     // gate rather than taste.** `tests/sheet.rs` counts the gestures on a page by
@@ -4761,11 +4756,10 @@ const MOUSE: [Gesture; 7] = [
         keys: ["click  ✕", "click  ✕"],
         verb: ["close the sheet", "close the sheet"],
     },
-    // **The hover mark, which `README.md` has taught since
-    // [#189](https://github.com/breferrari/vigia/issues/189) and this table never
-    // did.** That is the drift #288 was filed for: two hand-written lists, one of
-    // them a table of six and the other a table of five, with nothing comparing
-    // them.
+    // **The hover mark, which `README.md` teaches and this table is the second
+    // place for.** Two hand-written lists, one a table of six and the other a
+    // table of five with nothing comparing them, is how a gesture ends up taught
+    // in one and not the other.
     //
     // **One row for three marked surfaces**, which is `SPEC.md` §11.1's own reading:
     // a step button, a bar and a listed file all take the pointer's single colour,
@@ -4785,9 +4779,8 @@ const MOUSE: [Gesture; 7] = [
 /// all: `Index` is not a const trait (rust-lang/rust#143874).
 ///
 /// A two-way choice as a type rather than as an `Option<(usize, usize)>` whose
-/// `None` arm meant *the mouse group*, which is
-/// [#220](https://github.com/breferrari/vigia/issues/220)'s ruling on [`Shape`]
-/// applied one table over.
+/// `None` arm means *the mouse group*, which is [`Shape`]'s own ruling applied
+/// one table over.
 #[derive(Debug, Clone, Copy)]
 enum Rows {
     /// `KEYBOARD[from..to]`.
@@ -4826,8 +4819,7 @@ struct Section {
     rows: Rows,
 }
 
-/// The reader's own sections, in the order
-/// [#285](https://github.com/breferrari/vigia/issues/285)'s Mock A draws them.
+/// The reader's own sections, in the order the roomy rung's mock draws them.
 ///
 /// **The mouse group sits between `view` and `leaving` here and stays last on
 /// every stacking rung**, which is a difference between two rungs of one element
@@ -4938,8 +4930,8 @@ const ROOMY_GAP: usize = 8;
 
 /// Keyboard rows the ladder may never drop: `f`, `m` and `?`.
 const SHEET_KEEP: usize = 3;
-// **It names two things since [#286](https://github.com/breferrari/vigia/issues/286),
-// and only one of them is a keep-set.** On the width axis it is still the rows
+// **It names two things and only one of them is a keep-set.** On the width axis
+// it is the rows
 // [`DROP_ORDER`] never gives up, `f`, `m` and `?`, which is what a pane too narrow
 // for the whole table is left with. On the height axis it is the thinnest page
 // worth drawing: [`sheet_plan`] refuses a sheet whose body cannot hold this many
@@ -4957,8 +4949,7 @@ const SHEET_TITLE: &str = "─ gestures ";
 /// What the rounded rungs splice into the top border, `┐` and `┌` either side.
 ///
 /// The same word [`SHEET_TITLE`] carries without its rule, spelled once so the
-/// border string, the styled overwrite and the width arithmetic cannot drift
-/// ([#323](https://github.com/breferrari/vigia/issues/323)).
+/// border string, the styled overwrite and the width arithmetic cannot drift.
 const SHEET_SPLICE: &str = " gestures ";
 
 /// What the mouse group's heading spells, spaces included.
@@ -4968,7 +4959,7 @@ const SHEET_MOUSE_LABEL: &str = " mouse ";
 /// two-column rung.
 ///
 /// In one column the keyboard group is the table and needs no label; beside the
-/// mouse group it is one of two and does. [#220](https://github.com/breferrari/vigia/issues/220).
+/// mouse group it is one of two and does.
 const SHEET_KEYBOARD_LABEL: &str = " keyboard ";
 
 /// The close control, which is the pane's first.
@@ -4980,14 +4971,13 @@ const SHEET_CLOSE: char = '✕';
 
 /// The widest keys cell and the widest verb over a group, at one spelling.
 ///
-/// Split out of [`sheet_fields`] by [#220](https://github.com/breferrari/vigia/issues/220),
-/// because the two-column rung measures each group **separately**: a single
+/// Split out of [`sheet_fields`] because the two-column rung measures each group
+/// **separately**: a single
 /// maximum over both is what made a two-column sheet look like it needed a
 /// hundred and twelve columns when the group split needs a hundred and four.
 ///
-/// **Takes an iterator rather than a slice** since
-/// [#285](https://github.com/breferrari/vigia/issues/285): a dropping rung no
-/// longer draws a suffix of [`KEYBOARD`], so the rows to measure are
+/// **Takes an iterator rather than a slice**: a dropping rung draws no suffix of
+/// [`KEYBOARD`], so the rows to measure are
 /// [`kept_keyboard`]'s filtered sequence and there is no slice to hand over.
 fn fields_of<'a>(rows: impl IntoIterator<Item = &'a Gesture>, level: usize) -> (usize, usize) {
     let (mut keys, mut verb) = (0, 0);
@@ -5056,9 +5046,8 @@ const SHEET_GAP: usize = 2;
 /// The floor every rung's width takes, so a narrow table cannot draw a truncated
 /// heading. Named once because all three rung shapes charge it.
 ///
-/// **It binds now, which it did not before
-/// [#286](https://github.com/breferrari/vigia/issues/286).** The floor was
-/// seventeen and no rung reached it, because the narrowest one-column rung is
+/// **It binds.** A floor of seventeen is reached by no rung at all, because the
+/// narrowest one-column rung is
 /// twenty-four: at the tight spelling its widest cells are `?` and `follow the
 /// newest`, so one column of keys and seventeen of verb. Charging
 /// [`SHEET_COUNTER_FLOOR`] puts the floor at thirty, so the dropping rungs
@@ -5076,12 +5065,11 @@ fn sheet_floor(total: usize) -> usize {
 
 /// The **two-column** rung's groups and the whole sheet's width.
 ///
-/// [#220](https://github.com/breferrari/vigia/issues/220). The columns are the
-/// two groups the sheet already names, so the seam the split falls on is the one
-/// the `mouse` heading was already pointing at.
+/// The columns are the two groups the sheet already names, so the seam the split
+/// falls on is the one the `mouse` heading was already pointing at.
 ///
 /// **Both groups are returned placed, not merely measured.** Their `at` is the
-/// offset from the sheet's own left edge, which is what keeps #158's rule: the
+/// offset from the sheet's own left edge, which keeps the layout's own rule: the
 /// geometry the painter honours belongs to the layout, and a drawer that
 /// recomputed this offset would be free to disagree with the width planned from
 /// it. `Body::areas` hands the painter rects for exactly this reason.
@@ -5118,8 +5106,8 @@ fn sheet_beside(level: usize) -> (Group, Group, usize) {
 
 /// The **roomy** rung's one placed group and the whole sheet's width.
 ///
-/// [#285](https://github.com/breferrari/vigia/issues/285). Every gesture in one
-/// column, with the table's own sections headed and air around them, which is
+/// Every gesture in one column, with the table's own sections headed and air
+/// around them, which is
 /// what a pane with room to spare spends that room on.
 ///
 /// **At the wide spelling always, and that is derivable rather than a
@@ -5202,10 +5190,9 @@ struct Group {
     /// **Carried rather than read from a constant**, because the roomy rung spends
     /// a different number of them than every other rung does and
     /// [`Group::verb_at`] is the one expression that places a verb. Reading
-    /// [`SHEET_GAP`] here directly is the duplication
-    /// [#220](https://github.com/breferrari/vigia/issues/220)'s audit found: the
-    /// sheet's width was summed from one copy of the number and its rows placed
-    /// from another, so changing either alone could not fail.
+    /// [`SHEET_GAP`] here directly is a duplication: the sheet's width would be
+    /// summed from one copy of the number and its rows placed from another, so
+    /// changing either alone could not fail.
     gap: usize,
 }
 
@@ -5223,9 +5210,9 @@ impl Group {
 
 /// Rows a one-column rung draws, frame excluded.
 ///
-/// **Counted off [`kept_keyboard`] rather than as `KEYBOARD.len() - from`**, which
-/// is what it was until [#285](https://github.com/breferrari/vigia/issues/285)
-/// and was correct only while a rung drew a *prefix*. `from` selects a **set**
+/// **Counted off [`kept_keyboard`] rather than as `KEYBOARD.len() - from`**,
+/// which is correct only while a rung draws a *prefix*. `from` selects a
+/// **set**
 /// now, so an arithmetic count is a second derivation of the number the painter
 /// walks: with a [`DROP_ORDER`] that repeated an index the painter would draw one
 /// row more than the frame was planned for, over the bottom border.
@@ -5243,8 +5230,8 @@ fn sheet_rows(from: usize, mouse: bool) -> usize {
 
 /// One drawn line of a one-column rung.
 ///
-/// **A type rather than an index, because the rung is now paged**
-/// ([#286](https://github.com/breferrari/vigia/issues/286)). A page is a slice of
+/// **A type rather than an index, because the rung is paged.** A page is a slice
+/// of
 /// this sequence, and the mouse group's heading is a line the slice can land on
 /// like any other: the painter has to know which kind it drew, and an offset into
 /// two tables plus a rule about where the heading falls is the arithmetic that
@@ -5282,9 +5269,9 @@ fn column_lines(from: usize, mouse: bool) -> impl Iterator<Item = Line> {
 
 /// Gestures the whole sheet holds, which is what the page counter counts against.
 ///
-/// **Derived, never a literal.** [#288](https://github.com/breferrari/vigia/issues/288)
-/// adds a sixth mouse row, and a counter reading *of 18* on a table of nineteen
-/// is a lie no gate over the drawn output would catch: the number is furniture and
+/// **Derived, never a literal.** Adding a mouse row leaves a counter reading
+/// *of 18* on a table of nineteen, which is a lie no gate over the drawn output
+/// would catch: the number is furniture and
 /// every gate here reads the tables.
 const SHEET_TOTAL: usize = KEYBOARD.len() + MOUSE.len();
 
@@ -5343,10 +5330,9 @@ fn sheet_counter(shown: (usize, usize)) -> String {
 /// `SHEET_TOTAL * (SHEET_TOTAL + 1) / 2` ordered pairs, once per process rather
 /// than once per frame, which is what the lock is for.
 ///
-/// **Stated as the expression rather than as a count**, which is
-/// [#288](https://github.com/breferrari/vigia/issues/288)'s doing: it read *"a
-/// hundred and thirty-six formats, `16 * 17 / 2`"*, and the table has grown three
-/// times since that was written, so the number described nothing. The code was
+/// **Stated as the expression rather than as a count.** *"A hundred and
+/// thirty-six formats, `16 * 17 / 2`"* describes nothing the moment the table
+/// grows, which it has done repeatedly. The code was
 /// always derived from `SHEET_TOTAL` and only the prose went stale, which is the
 /// shape this file names elsewhere as a restated number that quietly stops
 /// describing its own line.
@@ -5389,8 +5375,7 @@ fn sheet_beside_rows() -> usize {
 /// group, and after that keyboard rows in [`DROP_ORDER`], which leaves the three
 /// that constant's own docblock says survive.
 ///
-/// **Above every one of those sits the roomy rung**
-/// ([#285](https://github.com/breferrari/vigia/issues/285)): the same one column
+/// **Above every one of those sits the roomy rung**: the same one column
 /// with its sections headed and air around them, at sixty-eight columns by
 /// thirty-one rows. It is **first** and that is what makes it additive, for the
 /// reason the widening rung is additive by being third: it needs strictly more of
@@ -5398,14 +5383,12 @@ fn sheet_beside_rows() -> usize {
 /// otherwise have drawn every gesture anyway and every pane that does not
 /// take it is untouched.
 ///
-/// **Between those two lies the widening rung**
-/// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
+/// **Between those two lies the widening rung**: where the full
 /// one-column sheet is too tall for the pane but the pane is wide enough to put
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
 /// columns for five rows at the wide spelling (104 against 56, twenty-one rows
 /// against sixteen), or thirty-three columns for the same five rows at the tight
-/// one (71 against 38 since [#286](https://github.com/breferrari/vigia/issues/286),
-/// and 76 against 43 before it), and drawing every gesture where twelve drew
+/// one (71 against 38), and drawing every gesture where twelve drew
 /// before. It is tried **after** the full one-column rung and **before** any
 /// dropping rung, which is what makes it additive: a pane on which one column
 /// already fits never sees it, so nothing that draws every row today changes.
@@ -5417,9 +5400,9 @@ fn sheet_beside_rows() -> usize {
 /// reason for a box rather than a full-pane sheet: a reader reading instructions
 /// must still be able to see that the tool is alive behind them.
 ///
-/// Both floors live here rather than in [`Painter::sheet`], which is
-/// [#158](https://github.com/breferrari/vigia/issues/158)'s correction inherited
-/// rather than re-earned: a floor known only to the drawer lets the layout
+/// Both floors live here rather than in [`Painter::sheet`], on the band's own
+/// recorded reason rather than a new one: a floor known only to the drawer lets
+/// the layout
 /// promise a region the painter then declines to draw.
 fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) -> Option<SheetPlan> {
     let body = area.height.saturating_sub(1 + footer_rows);
@@ -5448,8 +5431,8 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     // every row in one column, then the two-column rung that buys height with
     // width, then the paged rungs, widest row set first.
     //
-    // **The paged rungs come last, and that is what keeps them additive**
-    // ([#286](https://github.com/breferrari/vigia/issues/286)): every pane that
+    // **The paged rungs come last, and that is what keeps them additive**:
+    // every pane that
     // draws one of the first three today draws exactly it, with one page, so a
     // reader whose pane already showed every gesture presses `?` twice as before.
     //
@@ -5545,8 +5528,8 @@ fn column_fit(level: usize, from: usize, mouse: bool) -> Fit {
 
 /// One column, `capacity` rows of it at a time, showing page `page`.
 ///
-/// **The one constructor both the whole-table rung and the paged rungs use**
-/// ([#286](https://github.com/breferrari/vigia/issues/286)): a rung whose capacity
+/// **The one constructor both the whole-table rung and the paged rungs use**: a
+/// rung whose capacity
 /// is its own row count is a single page by arithmetic rather than by a second
 /// code path, so there is no version of "draws everything" that can drift from
 /// "draws a page".
@@ -5619,10 +5602,9 @@ fn beside_fit(level: usize) -> Fit {
 
 /// Which of the sheet's three shapes a rung draws.
 ///
-/// **The exclusivity is in the type rather than in prose.** `SheetPlan` carried
-/// `from`, `mouse` and an `Option` before
-/// [#220](https://github.com/breferrari/vigia/issues/220)'s audit, with a
-/// docblock saying which combinations were legal; three fields for a two-way
+/// **The exclusivity is in the type rather than in prose.** `from`, `mouse` and
+/// an `Option` with a docblock saying which combinations are legal is three
+/// fields for a two-way
 /// choice is a state a caller can build wrong, and the file's own precedent
 /// (`Body::areas`) writes such a convention down at the point it is relied on
 /// only because it cannot be typed away. Here most of it can: `Shape::Beside`
@@ -5639,9 +5621,8 @@ enum Shape {
     Column {
         /// How many entries of [`DROP_ORDER`] have been given up.
         ///
-        /// **Not "rows above this one", which is what it meant until
-        /// [#285](https://github.com/breferrari/vigia/issues/285)** and is the
-        /// reading that inverts the keep-set: the rows dropped are the *set*
+        /// **Not "rows above this one"**, which is the reading that inverts the
+        /// keep-set: the rows dropped are the *set*
         /// `DROP_ORDER[..from]`, which starts with `q` at the bottom of the
         /// table, so what a rung draws is no longer a suffix of [`KEYBOARD`].
         from: usize,
@@ -5777,8 +5758,7 @@ struct Painter<'a> {
     /// [`Chrome::icons`]: whether a listed path carries its type's glyph.
     icons: bool,
     /// Where the gestures sheet will be composited, so nothing underneath it
-    /// claims a column it will draw over
-    /// ([#340](https://github.com/breferrari/vigia/issues/340)).
+    /// claims a column it will draw over.
     covered: Option<Rect>,
     /// [`Chrome::links`] with [`Chrome::root`]: the `file://` prefix every
     /// linked path shares, or `None` where links are off or rootless.
@@ -5828,8 +5808,8 @@ impl Painter<'_> {
     ///
     /// **What this deliberately does not do is give these rows the bar's reserve
     /// unconditionally.** That would make them agree with a heading at every
-    /// width, which is tempting and is [#77](https://github.com/breferrari/vigia/issues/77)'s
-    /// ruling one row class further, but it costs every content line two columns
+    /// width, which is tempting and is the fixed-slot ruling one row class
+    /// further, but it costs every content line two columns
     /// at *every* width including the forty I6 is named for. That is a spec
     /// question rather than a margin question, so this keeps the region's own
     /// right edge where it already was and only declines to charge the margin a
@@ -5853,8 +5833,7 @@ impl Painter<'_> {
     /// the *barred* screen against its own heading rather than asserting that
     /// nothing ever moves.
     ///
-    /// **It takes the pane as a `Rect` since
-    /// [#252](https://github.com/breferrari/vigia/issues/252)**, because the two
+    /// **It takes the pane as a `Rect`**, because the two
     /// edges it is choosing between are *columns*. The region's own right edge
     /// is `area.x + area.width`; the pane's is its own right edge less the
     /// trailing margin. While every region starts at the pane's leading column a
@@ -6002,9 +5981,9 @@ impl Painter<'_> {
     /// **The header's mode word rests on this and on nothing else**, which is
     /// worth saying here because the rule is otherwise located only at the
     /// caller. `SPEC.md` §11.1 requires that `watching` is drawn whole or not at
-    /// all, since `wat›` is a state nobody can read; it had a ladder of its own
-    /// until [#67](https://github.com/breferrari/vigia/issues/67) left that
-    /// ladder with one rung, and this line is what replaced it.
+    /// all, since `wat›` is a state nobody can read. A ladder of its own is left
+    /// with one rung once the count moves off this side, and this line is what
+    /// replaces it.
     fn put_right(&mut self, area: Rect, text: &str, style: Style) -> usize {
         let width = width_of(text);
         if width == 0 || width > usize::from(area.width) {
@@ -6087,11 +6066,10 @@ impl Painter<'_> {
     /// the label's, which is `CellDiffOption::ForcedWidth`'s documented job. A
     /// terminal without OSC 8 renders the label and swallows the wrapper,
     /// which the 2026 matrix verified for every terminal it covers, and is why
-    /// the `links` key defaults on (#326).
+    /// the `links` key defaults on.
     ///
-    /// **The covered columns record the label rather than blanks, and that is
-    /// a correctness requirement rather than tidiness**
-    /// ([#340](https://github.com/breferrari/vigia/issues/340)). `ratatui`'s
+    /// **The covered columns record the label rather than blanks, and that is a
+    /// correctness requirement rather than tidiness.** `ratatui`'s
     /// differ walks straight past every column a `ForcedWidth` claims: its
     /// arm advances `pos` and emits the first cell only, with none of the
     /// shrink protection the `None` arm carries for wide graphemes. So the
@@ -6113,7 +6091,7 @@ impl Painter<'_> {
         }
         // **A claim that reaches under the sheet is not made at all**, because
         // the differ would then skip the sheet's own cells across it and the
-        // row would show through the overlay (#340). The row still draws, as
+        // row would show through the overlay. The row still draws, as
         // plain text: what a reader loses is a link on a path the sheet is
         // covering anyway, which is the cheaper half of the trade by a wide
         // margin.
@@ -6197,7 +6175,7 @@ impl Painter<'_> {
         // The **footer's own** alert rather than a colour of its own: the notice
         // carrying which failure already uses it, and the two halves of one
         // event should not arrive in two different reds. A reuse of an existing
-        // style rather than a palette decision, which stays #11's.
+        // style rather than a palette decision, which is the theme's.
         let right_style = match chrome.mode {
             Mode::Watching => self.theme.chrome_dim,
             Mode::Lost => self.theme.alert,
@@ -6324,9 +6302,9 @@ impl Painter<'_> {
     ///
     /// The styles are reused rather than named anew: [`Theme::chrome`] is the
     /// picture's `.cyn` and [`Theme::added`] its `.grn`, both to the byte on the
-    /// dark palette. A colour of their own would be a palette decision, which
-    /// stays [#11](https://github.com/breferrari/vigia/issues/11)'s, and it is
-    /// the same reuse the header's `not watching` makes of the footer's alert.
+    /// dark palette. A colour of their own would be a palette decision, which is
+    /// the theme's, and it is the same reuse the header's `not watching` makes
+    /// of the footer's alert.
     fn tint_readouts(&mut self, row: Rect, at: u16, readouts: usize) {
         // A measurement and its unit: a run opening with a digit or the
         // over-magnitude sigil, carried through the letters that name the unit.
@@ -6390,8 +6368,7 @@ impl Painter<'_> {
     /// Draw the worktree churn band, `SPEC.md` §11.1's masthead.
     ///
     /// **The hero element, and the only drawn thing on this pane that is about
-    /// the worktree rather than about a file in it**
-    /// ([#158](https://github.com/breferrari/vigia/issues/158)). Every other
+    /// the worktree rather than about a file in it.** Every other
     /// glance element answers *which file*; this answers *how hot is this tree
     /// now, and was it hotter a minute ago*.
     ///
@@ -6429,9 +6406,9 @@ impl Painter<'_> {
         // bursty signal that is zero most of the time forces one mark on the
         // bottom row, so an idle stretch draws an axis rather than nothing.
         //
-        // **That supersedes [#223](https://github.com/breferrari/vigia/issues/223)'s
-        // coarsening, and the correction is worth stating rather than
-        // absorbing.** That row diagnosed the right defect, a save drawing a
+        // **That replaces an earlier coarsening, and the correction is worth
+        // stating rather than absorbing.** That diagnosed the right defect, a
+        // save drawing a
         // one-column hairline between blanks, and reached for a wider column to
         // fix it. The floor is what fixes the same defect, and once the floor is
         // drawn a narrow column is a spike on an axis instead of a mark
@@ -6445,9 +6422,8 @@ impl Painter<'_> {
         // I10, so the projection does the same job from
         // the other side: it aggregates when the pane holds fewer sub-columns
         // than the window holds samples, and repeats when it holds more.
-        // **The rung the pane detected**, which is where the band was until
-        // [#244](https://github.com/breferrari/vigia/issues/244) took it off the
-        // ladder and where it is again since that row was reopened. Bound once
+        // **The rung the pane detected**, rather than a constant off the
+        // ladder. Bound once
         // and read three times below, so this function cannot half-follow the
         // rung: a density from one and a level count from another would draw a
         // band nothing could decode.
@@ -6466,12 +6442,12 @@ impl Painter<'_> {
         // short series, which drew a graph that stopped partway across the pane
         // and left bare axis after it.
         let slots = width * density;
-        // **The level, not the events** ([#242](https://github.com/breferrari/vigia/issues/242)).
-        // `assets/preview.svg` draws this as a wave and a write is a point event,
+        // **The level, not the events.** `assets/preview.svg` draws this as a
+        // wave and a write is a point event,
         // so the raw series is zero almost everywhere and an area chart of it is a
         // spike train. `Churn::levels` reads it as a density through the same
-        // kernel the file sparklines use, which is #234's coherence requirement
-        // met by construction: the two elements cannot disagree about what they
+        // kernel the file sparklines use, which is the coherence requirement met
+        // by construction: the two elements cannot disagree about what they
         // are showing because there is one kernel and one constant.
         let series = view.worktree_churn.levels(slots);
 
@@ -6482,9 +6458,9 @@ impl Painter<'_> {
         // worktree-wide and one per file, which is `SPEC.md` §11.1's ruling; what
         // they may not disagree about is the rule.
         //
-        // **The rule excludes outliers as well as empties**, since
-        // [#256](https://github.com/breferrari/vigia/issues/256): a mean is not
-        // robust, and one loud write was pressing every ordinary edit in this
+        // **The rule excludes outliers as well as empties**: a mean is not
+        // robust, and one loud write otherwise presses every ordinary edit in
+        // this
         // window onto the lowest level the band has. `SCALE_OUTLIER`'s docblock
         // carries the measurement and the interval it was chosen from.
         //
@@ -6493,10 +6469,9 @@ impl Painter<'_> {
         // series changes membership every time the pane resizes;
         // `Churn::scale_at` carries both wrong orders and their measurements.
         let scale = view.worktree_churn.scale_at(slots);
-        // **No data, no axis**, which is what keeps
-        // [#158](https://github.com/breferrari/vigia/issues/158)'s reported
-        // defect fixed while the axis exists at all. That ruling came from a
-        // first real run: a window holding nothing drew a hundred columns of `_`,
+        // **No data, no axis**, which is what keeps the reported defect fixed
+        // while the axis exists at all. It came from a first real run: a window
+        // holding nothing drew a hundred columns of `_`,
         // "a dashed rule the pane did not ask for", and every session opens in
         // exactly that state because a worktree already dirty when `vigia`
         // started has no tick behind it yet. A monitor of this class draws its
@@ -6509,8 +6484,9 @@ impl Painter<'_> {
         //
         // **It does not distinguish "not started" from "quiet for two minutes",
         // and that is deliberate rather than an oversight.** Both are an empty
-        // window, and #158's ruling is about what an empty window draws, not about
-        // how it got that way. A reader back from lunch sees the band go bare and
+        // window, and the ruling is about what an empty window draws, not about
+        // how it got that way. A reader back from lunch sees the band go bare
+        // and
         // the axis return with the first write, which is the same thing the row
         // count already does at launch.
         if scale == 0 {
@@ -6555,7 +6531,7 @@ impl Painter<'_> {
                 let glyph = rung.glyph(low, high);
                 let x = left_edge.saturating_add(cell as u16);
                 // Multi-row graphs colour per row against the vertical axis,
-                // btop's own rule (#322): the baseline draws the quiet stop and
+                // btop's own rule: the baseline draws the quiet stop and
                 // the top row the hot one, one style per row, so the graph
                 // reads hotter as it climbs while costing one lookup. Without a
                 // ramp the column's band draws as it always did. Written the
@@ -6580,8 +6556,7 @@ impl Painter<'_> {
     /// by telling `file_row` which region it is in, so that function stays
     /// ignorant of the layout above it.
     ///
-    /// **The inset is [`caret_gutter`] and is usually zero**
-    /// ([#173](https://github.com/breferrari/vigia/issues/173)). The caret is
+    /// **The inset is [`caret_gutter`] and is usually zero.** The caret is
     /// drawn at the pane's own leading column, into the blank [`margin_of`]
     /// already keeps there, so from forty-three columns up this region's origin
     /// and width are the stream's exactly and the two sigils sit in one column.
@@ -6601,8 +6576,8 @@ impl Painter<'_> {
     /// marking from it would name a file the diff is not in on exactly the frames
     /// that moved. `View::collect` resolves `top` before this ever runs.
     ///
-    /// **`available` is this region's own full width and `pane` is the screen**
-    /// ([#252](https://github.com/breferrari/vigia/issues/252)). They are the same
+    /// **`available` is this region's own full width and `pane` is the screen.**
+    /// They are the same
     /// number on every stacked layout and they are not beside a rail, where this
     /// region is seventy columns of a two-hundred column pane. The ladder rung
     /// comes from the pane, as [`margin_of`] rules; what the row has to spend
@@ -6621,8 +6596,7 @@ impl Painter<'_> {
         // after whatever margin is left over.** `assets/preview.svg` puts the
         // window edge at `x=8`, the caret at `x=8` and every content origin at
         // `x=32`: the marker stands *outside* the text rather than pushing it
-        // right, which is the arrangement
-        // [#173](https://github.com/breferrari/vigia/issues/173) restores.
+        // right, which is the arrangement the caret's own gutter restores.
         // Insetting the whole region by the caret and then drawing the caret
         // inside that inset moves the marker and the text right together, so the
         // list's sigil never lines up with a heading's.
