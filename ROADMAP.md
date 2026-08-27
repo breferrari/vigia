@@ -205,7 +205,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The region model assumes a vertical stack, so a rail cannot be expressed in it | [#251](https://github.com/breferrari/vigia/issues/251) |
 | ✅ | An agent's write is how the grammar compile arrives, and the warmer only ever ran at launch | [#129](https://github.com/breferrari/vigia/issues/129) |
 | ✅ | Follow jumps to the changed file's heading, so a change low in a long file lands off screen | [#257](https://github.com/breferrari/vigia/issues/257) |
-| ✅ | decision: may the graph age, or does I1 forbid the clock that would age it. **Ruled: it ages**, on a clock that stops when the window empties | [#243](https://github.com/breferrari/vigia/issues/243) |
+| ✅ | decision: may the graph age. **Ruled: it ages**, on a clock that stops when the window empties | [#243](https://github.com/breferrari/vigia/issues/243) |
 | ✅ | Build: the window ages on a clock that stops when it empties | [#277](https://github.com/breferrari/vigia/issues/277) |
 | ✅ | One loud burst sets the band's yardstick, so a sparse window draws as spikes on a floor | [#256](https://github.com/breferrari/vigia/issues/256) |
 | ✅ | Three paint marks name a region by its first row, which a rail makes ambiguous | [#254](https://github.com/breferrari/vigia/issues/254) |
@@ -234,6 +234,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
 | ⬜ | Turning wrap off leaves the scroll range at the wrapped row count, so scrolling goes erratic. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
+| ⬜ | research: price animation on an arriving change | [#365](https://github.com/breferrari/vigia/issues/365) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
 | ✅ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
@@ -362,7 +363,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The host-versus-work attribution needs a resolution floor, because the CPU clock is coarser than the budget it defends | [#270](https://github.com/breferrari/vigia/issues/270) |
 | ⬜ | A commit can describe a gate it deleted, and the suite stays green because a missing gate is what no gate can see | [#289](https://github.com/breferrari/vigia/issues/289) |
 | ✅ | `take-next` step 8 names a recurrence and prescribes a workaround, with no point at which the recurrence becomes a bug | [#290](https://github.com/breferrari/vigia/issues/290) |
-| ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane. **Pulled forward into Phase 8 and shipped 2026-08-25** | [#313](https://github.com/breferrari/vigia/issues/313) |
+| ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ⬜ | The mutation harness is re-improvised every pass, and the same footgun has fired in four of them | [#299](https://github.com/breferrari/vigia/issues/299) |
 | ⬜ | A PR reached ready, mergeable and never checked, because the push and the ready raced | [#301](https://github.com/breferrari/vigia/issues/301) |
 | A draft PR shows a red `ci complete`, and a draft-era run can cancel the real one | #267, 2026-08-23 | Shelf, taken | Instrument work, and the same `cancel-in-progress` grouping #301 records from the other direction. Closed by [#274](https://github.com/breferrari/vigia/issues/274). |
