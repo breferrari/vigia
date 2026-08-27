@@ -2143,7 +2143,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 /// row shape `preflight.sh` greps; the ruling lead-ins themselves; and §7, which
 /// has no lead-in structure to lean on.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
-    ("SPEC.md", 421_657),
+    ("SPEC.md", 402_599),
     ("ROADMAP.md", 298_185),
     ("RULINGS.md", 106_735),
 ];
