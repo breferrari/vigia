@@ -1460,7 +1460,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
     ("SPEC.md", 315_805),
     ("ROADMAP.md", 94_781),
-    ("RULINGS.md", 94_423),
+    ("RULINGS.md", 77668),
 ];
 
 /// Each document weighs no more than its budget.
