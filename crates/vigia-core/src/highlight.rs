@@ -649,7 +649,7 @@ pub struct Highlighter {
     /// who scrolls back over ground they just read pays that walk again, and
     /// measured over wide-character content that is **26.39ms** against a 16ms
     /// budget, once per file, with the answer sitting in memory a frame earlier
-    /// ([#45](https://github.com/breferrari/vigia/issues/45)).
+    ///.
     ///
     /// This is a queue rather than a second `entries`, and the difference is the
     /// bound. Eviction order *is* the queue's order, so nothing has to be sorted
@@ -1789,7 +1789,7 @@ pub struct WarmReport {
 /// **Those cold figures are Windows numbers taken under `codegen-units = 1`,
 /// and they overstate what ships.** That setting inflates `fancy-regex`
 /// compilation on the MSVC target by roughly 6x
-/// ([#261](https://github.com/breferrari/vigia/issues/261)); the profile now
+///; the profile now
 /// sets 2. It is also a Windows cliff alone: on Linux the cold parse moves less
 /// than 1% between the two settings, and macOS is unmeasured. They are left
 /// with their provenance attached rather than retyped, because a number carried

@@ -55,7 +55,7 @@ fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
 /// Buckets a sparkline draws on the panes this file renders at.
 ///
 /// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)). That constant is the
+///. That constant is the
 /// resolution the shell projects *from*; what a row draws is the rung its pane
 /// affords, which is twelve from fifty-seven columns up and is every screen here.
 /// A gate reading the renderer's own ladder would agree with it by construction,
@@ -3312,7 +3312,7 @@ fn bars_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
 /// **The launch case, which nothing else here covers**: `SPEC.md` §5.1's history
 /// is fed from the watch, so a worktree that was already dirty when `vigia`
 /// started has no tick behind any of its files and every row's buckets are zero
-/// ([#78](https://github.com/breferrari/vigia/issues/78)). Every fixture in this
+///. Every fixture in this
 /// suite drives ticks first, which is exactly why the state a reader sees first
 /// went two phases without a gate.
 ///
@@ -4021,7 +4021,7 @@ fn the_caret_marks_the_file_the_diff_is_inside() {
             // [#174](https://github.com/breferrari/vigia/issues/174) put beneath
             // it, and the caret sits on the pane's **own leading column** rather
             // than at its first content column
-            // ([#173](https://github.com/breferrari/vigia/issues/173)). The
+            //. The
             // marker stands outside the text it points into instead of pushing
             // it right, which is what `assets/preview.svg` draws (window edge
             // `x=8`, caret `x=8`, every content origin `x=32`) and what puts
@@ -5104,7 +5104,7 @@ fn the_weight_arrives_and_leaves_with_the_caret() {
     // Sixteen columns, which is under the seventeen the floor asks for and wide
     // enough that the list still draws. **The floor moved from eighteen to
     // seventeen** when the caret came to bill the row one column rather than two
-    // ([#173](https://github.com/breferrari/vigia/issues/173)), and sixteen is
+    //, and sixteen is
     // still under it, so this fixture kept its width rather than being nudged to
     // stay red. Worth stating, because a width picked as "one under the floor"
     // silently becomes a width picked as "two under" and then stops exercising
@@ -5745,7 +5745,7 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
     // agreed with each other while the row underneath was two columns short.
     //
     // **What the caret costs a row is now a function of the width**
-    // ([#173](https://github.com/breferrari/vigia/issues/173)), where it was a
+    //, where it was a
     // flat two. The marker stands in the pane's own margin wherever there is one,
     // so from forty-three columns up it bills the row nothing and only the inset
     // comes off; below that the ladder lends nothing and it takes one column. A
@@ -6301,7 +6301,7 @@ fn a_row_washs_modifier_never_reaches_the_scrollbar() {
 ///
 /// `bar_cell` falls both colours back to the cell it is writing. Discarding the
 /// background half rather than falling back
-/// ([#239](https://github.com/breferrari/vigia/issues/239)) lets a theme file
+/// lets a theme file
 /// write
 /// `bar_track = #57606a on #21262d`, parse without complaint, and never draw it.
 /// That is the failure this repository's own parser notes rail against, one that
@@ -6896,7 +6896,7 @@ fn the_wash_bleeds_under_the_inset() {
         );
 
         // **Column zero is §5.1's left bar, not the wash**
-        // ([#218](https://github.com/breferrari/vigia/issues/218)). The band still
+        //. The band still
         // reaches the pane's edge, which is this gate's whole claim; what changed
         // is that its leading cell is the brighter of the two colours. Asserted as
         // *different from the wash* rather than skipped, so a bar that quietly
@@ -7427,7 +7427,7 @@ fn both_runs() -> View {
 /// The mark, and it is the whole of what tells one run from the other on a row.
 ///
 /// **Ink rather than a glyph in a column of its own**
-/// ([#316](https://github.com/breferrari/vigia/issues/316)). The gutter this
+///. The gutter this
 /// replaces spent a column on every row of *both* runs to mark the rows of one,
 /// so the fact now rides on the kind letter the row was already drawing.
 ///
@@ -8100,7 +8100,7 @@ fn a_linked_path_is_one_cell_carrying_the_uri() {
 /// Read against the buffer rather than the backend on purpose: the backend is
 /// what the terminal was *told*, and the skipped columns are exactly what it
 /// was never told about. The defect lived in the gap between the two
-/// ([#340](https://github.com/breferrari/vigia/issues/340)): a shorter path
+///: a shorter path
 /// drawn where a longer one had been compared blank-to-blank across the
 /// uncovered tail, so nothing was emitted and the old path's end stayed on
 /// screen as `settings.jsonodebase.md`.

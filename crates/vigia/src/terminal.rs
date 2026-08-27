@@ -46,7 +46,7 @@
 //! and never a signal, so there is nothing to catch on the path a reader uses,
 //! and a `kill` from elsewhere runs neither the guard nor the hook.
 //! [`signal`](crate::signal) closes that
-//! ([#24](https://github.com/breferrari/vigia/issues/24)) while adding nothing
+//! while adding nothing
 //! to this module: the handler restores nothing, it ends the loop, and the guard
 //! above then does what it already did. The number of ways to leave went up by
 //! one and the number of ways to restore did not, which is the property worth
@@ -359,7 +359,7 @@ fn on_panic<T>(restore: impl Fn(), previous: impl Fn(T), info: T) {
 /// Which side of the luminance line the terminal's background sits on.
 ///
 /// The answer to the one question the startup query asks, `SPEC.md` §11.2 B18
-/// ([#325](https://github.com/breferrari/vigia/issues/325)): with no
+///: with no
 /// `VIGIA_THEME` and no theme file, this picks `dark` or `light`, and no
 /// answer keeps `ansi`, whose whole contract is assuming nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

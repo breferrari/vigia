@@ -99,14 +99,14 @@ pub struct App {
     /// narrowing and widening again returns the rail rather than the question.
     ///
     /// Off by default since `SPEC.md` §11.2 **B14**
-    /// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived
+    ///. The rail arrived
     /// on its own before that, and the reader whose diff went from 129 planning
     /// columns to 60 had not asked for it.
     rail: bool,
     /// Whether the reader has asked for the diff to show one file at a time.
     ///
     /// `SPEC.md` §11.2 **B16**, from `s`
-    /// ([#297](https://github.com/breferrari/vigia/issues/297)). Unlike
+    ///. Unlike
     /// [`Self::rail`] there is no pane that cannot honour it, so this is a
     /// request and an answer at once and nothing downstream has to distinguish
     /// them: every pane with a body has a file the viewport is inside, and that
@@ -123,7 +123,7 @@ pub struct App {
     /// Whether a content line too wide for the pane continues on the row below.
     ///
     /// `SPEC.md` §11.2 **B19**, from `w`
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off by default,
+    ///. Off by default,
     /// and that is a ruling rather than the derived answer: every neighbour that
     /// wraps is given the whole terminal and this one is built for half of it, so
     /// the mode with a price is the one asked for
@@ -137,7 +137,7 @@ pub struct App {
     /// Logical rows the last frame actually drew, or zero before the first one.
     ///
     /// **The screenful a page step is measured in**
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)), and it exists
+    ///, and it exists
     /// because wrapping split one number into two. `height` is the region's
     /// **display** rows, and with `w` on a screen of that many display rows holds
     /// fewer rows of the diff, so `Space`, `d` and `u` stepped over content
@@ -155,7 +155,7 @@ pub struct App {
     /// Whether the reader has asked for the staged run beside the unstaged one.
     ///
     /// `SPEC.md` §11.2 **B17**, from `a`
-    /// ([#313](https://github.com/breferrari/vigia/issues/313)). Off by default:
+    ///. Off by default:
     /// a reader who has pressed nothing gets the comparison this tool has always
     /// drawn, and which way the toggle *starts* is still
     /// [#50](https://github.com/breferrari/vigia/issues/50)'s open question on
@@ -186,7 +186,7 @@ pub struct App {
     /// rather than with instructions about it.
     ///
     /// **A page rather than a flag since `SPEC.md` §11.2 B13**
-    /// ([#286](https://github.com/breferrari/vigia/issues/286)). On every pane
+    ///. On every pane
     /// whose sheet is one page the two are the same type wearing different names,
     /// which is the point: `?` opens `Some(0)` and closes from it, exactly as the
     /// flag did.
@@ -764,7 +764,7 @@ impl App {
         match action {
             Action::Quit => return Ok(false),
             // **`Esc` leaves the frontmost thing, and the sheet is a thing**
-            // ([#340](https://github.com/breferrari/vigia/issues/340)).
+            //.
             // Reported from a real pane: a reader pressed `Esc` to put the
             // help away and the monitor exited. `SPEC.md` §11.2 B12's rule
             // that no key changes meaning while the sheet is up is intact,
@@ -985,7 +985,7 @@ impl App {
             Action::ListRow(offset) => {
                 // **Resolved through the list's own plan, not by adding the offset
                 // to the window's first file**
-                // ([#313](https://github.com/breferrari/vigia/issues/313)). Those
+                //. Those
                 // are the same number only while every drawn row is a file, and
                 // since B17 a grouped window opens each run with a separator. Added
                 // blind, a click or a digit past the first separator names the file
@@ -1160,7 +1160,7 @@ impl App {
                     self.position = Position {
                         file,
                         // **Unchanged by B19, and that is a finding rather than
-                        // an oversight** ([#272](https://github.com/breferrari/vigia/issues/272)).
+                        // an oversight**.
                         // `span` is a count of the file's own rows and `height` a
                         // count of the terminal's, which are the same number only
                         // while nothing wraps, so this lands short with `w` on. A
@@ -1264,7 +1264,7 @@ impl App {
     /// has nothing.
     fn browse(&mut self, to: usize, frame: &Frame) {
         // **The list's own ceiling, not `files - rows`**
-        // ([#313](https://github.com/breferrari/vigia/issues/313)). The naive bound
+        //. The naive bound
         // compares a count of files against a count of drawn rows, and a grouped
         // window spends one or two of those on separators — so `J`, the wheel and
         // a drag to the bottom of the track all stopped one or two files short of
@@ -1377,7 +1377,7 @@ impl App {
             let rows = crate::view::block_rows(frame, file)?;
             // **Written every iteration rather than only on the hit**, which is
             // what makes a target *past* the last row land past the last row
-            // ([#272](https://github.com/breferrari/vigia/issues/272)). The
+            //. The
             // fall-through otherwise leaves the initial `row: 0`, so a drag to
             // the very end of the track, which [`Self::dragged_to`] deliberately
             // maps past the end so the walk can clamp it in display rows, goes
@@ -1414,7 +1414,7 @@ impl App {
         }
         // **The walk back reaches the frame before anything has clamped, so it
         // panics on a stale index without the clamp below**
-        // ([#297](https://github.com/breferrari/vigia/issues/297)).
+        //.
         // [`crate::view::rows_in`] is
         // [`vigia_core::Frame::diff`], which indexes `files` directly and panics
         // past the end; a position is exactly the index that outlives the list it
@@ -1616,7 +1616,7 @@ impl App {
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
         // **What a page step is measured in, recorded where the frame is built**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)). `View::rows`
+        //. `View::rows`
         // is display rows since B19 and a step moves the position, which is
         // logical, so the two have to be told apart here rather than at the
         // stepping site: a continuation is a row of the terminal that is not a
@@ -1637,7 +1637,7 @@ impl App {
     /// the last screenful of track dead.
     ///
     /// **And the far end of the track is the end of the diff, which only the walk
-    /// can place** ([#272](https://github.com/breferrari/vigia/issues/272)).
+    /// can place**.
     /// Travel is `total` less what one screen shows, and with `w` on what one
     /// screen shows is a property of *where* in the diff it is: a screenful of
     /// wrapped lines is fewer rows than a screenful that opens on a heading and a
@@ -1651,7 +1651,7 @@ impl App {
     fn dragged_to(&self, at: u32, total: usize, height: usize) -> usize {
         // **Only the far end is special, and the rest of the track is the
         // thumb's own arithmetic**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)). Measuring
+        //. Measuring
         // the whole track in drawn rows is a *different* travel from the one
         // the thumb is drawn against: the painter draws it from the region's
         // height over the diff's rows, so a drag measured in drawn rows landed

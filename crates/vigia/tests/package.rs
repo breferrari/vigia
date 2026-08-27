@@ -2144,7 +2144,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 /// has no lead-in structure to lean on.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
     ("SPEC.md", 390_719),
-    ("ROADMAP.md", 94_603),
+    ("ROADMAP.md", 94_781),
     ("RULINGS.md", 94_423),
 ];
 

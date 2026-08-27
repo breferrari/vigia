@@ -40,7 +40,7 @@ use vigia::{FileEntry, ListRow, Theme, View};
 /// those: a slice is a block and a counter is digits.
 ///
 /// **Bounded by a column range, which is what the rail made necessary**
-/// ([#252](https://github.com/breferrari/vigia/issues/252)). A row can hold two
+///. A row can hold two
 /// regions in that layout, and a strip counted across the whole row adds one
 /// region's rung to the other's. That does not merely inflate the number, it
 /// lands on a *legal* one: twelve slices beside twelve is twenty-four, which is
@@ -57,7 +57,7 @@ use vigia::{FileEntry, ListRow, Theme, View};
 /// exactly what a reader would see.
 ///
 /// **Here rather than in each file that reads a screen**
-/// ([#272](https://github.com/breferrari/vigia/issues/272)), which is this
+///, which is this
 /// module's own reason one paragraph up. `tests/wrap.rs` arrived with a second
 /// copy that did the naive thing, concatenating every cell's symbol: correct on
 /// an ASCII fixture and one wide glyph away from reintroducing the bug the

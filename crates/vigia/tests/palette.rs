@@ -25,7 +25,7 @@ use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 /// Buckets a sparkline draws on the panes this file renders at.
 ///
 /// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)). That constant is the
+///. That constant is the
 /// resolution the shell projects *from*; what a row draws is the rung its pane
 /// affords, which is twelve at every width here.
 const DRAWN_BUCKETS: usize = 12;
@@ -180,7 +180,7 @@ fn backgrounds(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
 /// pane's leading cell.
 ///
 /// **That cell stopped being part of the wash's question**
-/// ([#218](https://github.com/breferrari/vigia/issues/218)): it carries §5.1's
+///: it carries §5.1's
 /// left bar, which is a background on a blank column of margin and degrades on its
 /// own terms. A gate asking *does this palette wash* has to skip it or it is
 /// asking two questions and failing the one it did not mean.
@@ -338,7 +338,7 @@ fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
 #[test]
 fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
     // **The opposite of what a gate here would naturally assert**
-    // ([#218](https://github.com/breferrari/vigia/issues/218)). Written as
+    //. Written as
     // `a_palette_that_declines_a_bar_leaves_the_sigil_alone` it pins every
     // built-in's `_bar` keys as unset, which is how §5.1's *tinted row with a
     // coloured left bar* shipped as the tint alone for three phases: the key
@@ -455,7 +455,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // which is the whole of what keeps it apart from the recency ladder.
         //
         // **It is the quietest of the four rather than the brightest**
-        // ([#193](https://github.com/breferrari/vigia/issues/193)).
+        //.
         // It holds `bar_hover`'s value, which on this palette is `Gray` and
         // therefore `path_cold`'s foreground **exactly**, so the modifier is not
         // merely the last separation left, it is the only one. That is why it is
@@ -535,7 +535,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("chrome", chrome),
         ("chrome_dim", chrome_dim),
         // **A run separator's word and a staged row's gutter mark, and both are
-        // read** ([#313](https://github.com/breferrari/vigia/issues/313)). The bar
+        // read**. The bar
         // is a glyph rather than prose, but it is the only thing on a row that
         // says which comparison the row belongs to, so a palette that put it on
         // the background would take the distinction off the screen entirely.
@@ -586,7 +586,7 @@ fn the_ansi_palette_draws_no_wash_at_any_depth() {
     // assumes none, and it refuses at truecolour just as firmly as at sixteen.
     //
     // **Read past the pane's leading cell, because the bar is not the wash**
-    // ([#218](https://github.com/breferrari/vigia/issues/218)). A wash has to be a
+    //. A wash has to be a
     // *tint*, and a tint is the thing that cannot be chosen without knowing the
     // background behind it. The bar is a **saturated block on a blank column**,
     // which is what the mockup draws and what needs no such knowledge, so this
@@ -1848,7 +1848,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
 /// and the sparkline draw on list rows and file headings, which are never washed.
 ///
 /// **The bar is the exception**
-/// ([#239](https://github.com/breferrari/vigia/issues/239)). The row wash runs
+///. The row wash runs
 /// under the bar's own column, so on a changed row the track and the thumb sit
 /// on
 /// `added_row` or `removed_row` rather than on the pane. Every ratio in the older

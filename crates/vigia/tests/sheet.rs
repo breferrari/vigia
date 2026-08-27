@@ -54,14 +54,14 @@ const WIDE: u16 = 80;
 /// this number stale rather than leaving six other gates to fail obscurely.
 ///
 /// **Was 26 with thirteen keyboard gestures**, and every added gesture moves it by
-/// one row: B17's `a` ([#313](https://github.com/breferrari/vigia/issues/313)) is
+/// one row: B17's `a` is
 /// what took it to 27, and B19's `w`
-/// ([#272](https://github.com/breferrari/vigia/issues/272)) to 28.
+/// to 28.
 const WHOLE_TABLE: u16 = 28;
 
 /// Keyboard gestures the sheet's table holds, as a reader counts them on screen.
 ///
-/// Fifteen since B19's `w` ([#272](https://github.com/breferrari/vigia/issues/272)),
+/// Fifteen since B19's `w`,
 /// fourteen since B17's `a`.
 const KEYBOARD_ROWS: u16 = 15;
 const TALL: u16 = 24;
@@ -211,7 +211,7 @@ fn the_shell_starts_with_no_sheet_and_question_mark_is_what_opens_one() {
         "`?` is not bound to the sheet"
     );
     // **`Esc` asks to leave the frontmost thing, and B12's refusal was
-    // reversed by its own reason** ([#340](https://github.com/breferrari/vigia/issues/340)).
+    // reversed by its own reason**.
     // That refusal said teaching `Esc` to dismiss *"would put it one keystroke
     // from ending the program"*, and keeping it as Quit is what actually did:
     // a reader pressed `Esc` to put this sheet away and the monitor exited,
@@ -488,7 +488,7 @@ fn closing_the_sheet_restores_every_cell() {
 #[test]
 fn the_close_control_brightens_under_the_pointer() {
     // **A control that never brightened is a glyph a reader has to guess at**
-    // ([#211](https://github.com/breferrari/vigia/issues/211)), and B10's ladder had
+    //, and B10's ladder had
     // the rungs for it: chrome at rest and `bar_hover` under the pointer.
     //
     // **Two rungs and not the step buttons' three, ruled by
@@ -1319,9 +1319,9 @@ const ALL_ACTIONS: [Action; 21] = [
 /// [#288](https://github.com/breferrari/vigia/issues/288) is for.** The gate this
 /// replaced held a hand-written list of tokens, so a new binding was covered only
 /// if somebody remembered to add it, and four did not get remembered: `r`
-/// ([#295](https://github.com/breferrari/vigia/issues/295)) shipped a whole
-/// release uncovered, the arrows ([#296](https://github.com/breferrari/vigia/issues/296))
-/// a day, and `s` ([#297](https://github.com/breferrari/vigia/issues/297)) until that
+/// shipped a whole
+/// release uncovered, the arrows
+/// a day, and `s` until that
 /// row's own audit. A fifth and sixth fell through the mouse list beside it.
 ///
 /// Matching exhaustively on [`Action`] means a variant added to the map **cannot
@@ -1663,7 +1663,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     // find. Spelled as the tokens a reader would look for rather than as key
     // codes, because tokens are what the sheet draws.
     // **80 by 26 rather than the default pane, and the two rows are why**
-    // ([#288](https://github.com/breferrari/vigia/issues/288)). This ran at 80 by 24
+    //. This ran at 80 by 24
     // until the mouse group grew to seven: twenty gestures no longer fit one column
     // in that body, so the pane takes the two-column rung, and this gate needs a
     // rung that is one column *and* draws no section headings. 80 by 26 is the
@@ -1821,10 +1821,10 @@ const GESTURES: [&str; 22] = [
     "churn band",
     "left rail",
     "one file",
-    // B17's row ([#313](https://github.com/breferrari/vigia/issues/313)), between
+    // B17's row, between
     // `s` and `?` because that is where the reader's own order puts it.
     "staged changes",
-    // B19's row ([#272](https://github.com/breferrari/vigia/issues/272)), after
+    // B19's row, after
     // `a` because that is where the reader's own order puts it. The token is the
     // one word both spellings share: the wide verb is `wrap a long line, or clip
     // it` and the tight one `wrap long lines`.
@@ -1869,7 +1869,7 @@ fn no_gesture_token_hides_inside_another() {
     }
 
     // **And no token may hide inside a drawn row either, which is the half this
-    // gate was missing** ([#288](https://github.com/breferrari/vigia/issues/288)).
+    // gate was missing**.
     // The loop above compares tokens against tokens, so it sees only a collision
     // between two entries of this list. The count is taken against the **drawn
     // sheet**, so a token hiding inside any row the renderer writes scores the same
@@ -1936,7 +1936,7 @@ const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
 /// thirty-two would have covered the new rung at no height at all and called it
 /// swept.
 ///
-/// **Raised again to 44 by B19's `w`** ([#272](https://github.com/breferrari/vigia/issues/272)),
+/// **Raised again to 44 by B19's `w`**,
 /// and it is the same failure one gesture short of arriving. The rung is
 /// thirty-five rows now and this fixture reaches it at a pane of **thirty-eight**,
 /// which was the old ceiling exactly: the sweep covered the tallest rung at one
@@ -2360,7 +2360,7 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             // a label floating in a gap.
             //
             // **The roomy rung is the exception and it is the opposite claim**
-            // ([#285](https://github.com/breferrari/vigia/issues/285)): there the
+            //: there the
             // separator is a blank row, so its headings are plain text standing
             // back from their own rows. A rule under a blank row reads as a
             // divider rather than as a heading, and ruling one there would be the
@@ -2792,7 +2792,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
     });
 
     // **The ladder's end moved from the height axis to the width one**
-    // ([#286](https://github.com/breferrari/vigia/issues/286)). A paged rung drops
+    //. A paged rung drops
     // nothing, so `DROP_ORDER` no longer decides what a *short* pane sees; it
     // decides what a pane too **narrow** for the whole table sees, which is the
     // one place rows still disappear. Asserted as exact reachable sets rather than
@@ -2917,7 +2917,7 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
     // frame stayed closed because the sheet grew with it, every gesture still
     // drew, and the ladder stayed monotone. The only thing that changed was the
     // gap between the columns, and the only thing that can see it is a number.
-    // **Both fixtures gained a row with the table** ([#297](https://github.com/breferrari/vigia/issues/297)),
+    // **Both fixtures gained a row with the table**,
     // and the tight one gained another with [#272](https://github.com/breferrari/vigia/issues/272).
     // The two-column rung is eighteen rows where it was fifteen, so a pane that
     // fitted it exactly no longer does and falls to the rung below, which is a
@@ -2962,7 +2962,7 @@ fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
     let arrival;
     sweep!("sheet-arrival", |paint| {
         // **Twenty-one rows rather than twenty since B19's `w`**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)): the rung is a
+        //: the rung is a
         // row taller, so a twenty-row pane no longer takes it at any width and the
         // probe returned `None` at every column of the sweep. The *width* this
         // gate is about is untouched, which is the claim the paragraph above
@@ -3139,7 +3139,7 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
     for (w, h, cols, label, spelling) in [
         (120u16, 23u16, [2usize, 26, 56, 77], 56usize, "wide"),
         // **Twenty-one rows rather than twenty since B19's `w`**
-        // ([#272](https://github.com/breferrari/vigia/issues/272)): the rung is a
+        //: the rung is a
         // row taller, so the old pane falls to the one-column rung and the
         // `contains("keyboard")` guard above says which of the two happened.
         (80, 21, [2, 15, 35, 50], 35, "tight"),
@@ -3278,7 +3278,7 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
         (13, 8, 3),
         (14, 9, 3),
         (15, 10, 3),
-        // **Three pages since B19's `w`** ([#272](https://github.com/breferrari/vigia/issues/272)),
+        // **Three pages since B19's `w`**,
         // and it is the table's length rather than the ladder that moved: eleven
         // rows a page over twenty-two table rows is two pages exactly, and the
         // twenty-third row has nowhere to go. The row above and the row below are
@@ -3289,7 +3289,7 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
         (19, 14, 2),
         (20, 15, 2),
         // The flat step, one row later again since B19 gave the keyboard group a
-        // fifteenth row ([#272](https://github.com/breferrari/vigia/issues/272)):
+        // fifteenth row:
         // this is the height at which the row the body buys is the mouse group's
         // **heading**, which costs a row and names no gesture. It was 17 before
         // #295, 18 before #297, 19 before #313 and 20 before this, and it moves
@@ -4424,7 +4424,7 @@ fn the_counter_is_right_where_a_page_spans_the_mouse_heading() {
             "13-15 of 22",
             // The heading costs this page a row and no ordinal, so it names two
             // gestures where every page above it names three. **It moved a page
-            // later with B19's `w`** ([#272](https://github.com/breferrari/vigia/issues/272)),
+            // later with B19's `w`**,
             // which is the point of pinning the whole list rather than one page:
             // the keyboard group is fifteen rows now, so the heading falls on line
             // sixteen and page six is the one that carries it.

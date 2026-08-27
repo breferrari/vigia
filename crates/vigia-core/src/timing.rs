@@ -125,7 +125,7 @@ impl Samples {
     /// sum against a single percentile's overshoot drifts toward acquittal as
     /// the sample count rises, because ordinary per-frame scheduling noise
     /// accumulates while the per-frame overshoot does not
-    /// ([#269](https://github.com/breferrari/vigia/issues/269)).
+    ///.
     ///
     /// Samples at or under `budget` contribute nothing, so a round that is
     /// entirely inside budget returns zero and a single slow frame contributes

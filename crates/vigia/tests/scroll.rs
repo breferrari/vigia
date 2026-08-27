@@ -1244,7 +1244,7 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
     let total = vigia::diff_rows(&mut frame).expect("total");
 
     // **In both modes since `SPEC.md` §11.2 B19**
-    // ([#272](https://github.com/breferrari/vigia/issues/272)), and the claim is
+    //, and the claim is
     // the same claim in the units that survive the split: what the twins count is
     // the diff's **logical** rows, and what the walk produces with wrapping on is
     // display rows, of which the continuations are the difference. The bar is
@@ -1303,7 +1303,7 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
     // this map resolves through `App::jump_to` to `Position { file, row: 0 }`,
     // and row 0 of a file is its heading only while the blank that closes a
     // block **trails** rather than leads
-    // ([#165](https://github.com/breferrari/vigia/issues/165)). A leading blank
+    //. A leading blank
     // would put one above every heading a reader jumped to, and nothing else in
     // this suite reads the row a jump landed on: the position gates all compare
     // `Position`s, which are identical either way.

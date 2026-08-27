@@ -232,6 +232,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | Text cannot be selected or copied, because the shell holds the mouse | [#177](https://github.com/breferrari/vigia/issues/177) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ⬜ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
+| ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
 | ✅ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |

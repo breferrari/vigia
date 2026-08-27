@@ -60,7 +60,7 @@ fn every_way_out_is_a_way_out() {
     }
 
     // **`Esc` is the dialog reflex, and a dialog reflex dismisses the dialog**
-    // ([#340](https://github.com/breferrari/vigia/issues/340)). It mapped to
+    //. It mapped to
     // `Quit` here until a reader pressed it to put the gestures sheet away and
     // the monitor exited. It is still a way out, and `App` decides out of
     // *what*: the sheet if one is up, the program if none is. This function is
@@ -212,7 +212,7 @@ fn the_digits_cover_the_settled_cap_and_stop_there() {
     // leaving a row every pane draws with no key that reaches it.
     //
     // **This was `every_row_the_list_can_draw_has_a_digit` and the name stopped
-    // being true** ([#160](https://github.com/breferrari/vigia/issues/160)). The
+    // being true**. The
     // list is deeper than the settled cap on a pane of 28 rows or more, and those
     // rows are addressed by `J`/`K`, `n`/`p` and the pointer rather than by a
     // digit. What the digits cover is the rows **every** pane drawing a list has,
@@ -617,7 +617,7 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 /// The same screen with both bars in `column`.
 ///
 /// **A helper because the column is per region now**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)), where a fixture used
+///, where a fixture used
 /// to say `bar: Some(60)` once. Every screen these gates describe is the stacked
 /// layout, where the two bars share the pane's right edge, so moving them
 /// together is what "the bar moved" means here.
@@ -798,7 +798,7 @@ fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
 /// A gesture in one region's columns is not a gesture in the other's.
 ///
 /// **The bar gate's sibling, and the larger half of the same assumption**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)). Region *membership*
+///. Region *membership*
 /// was a row test: `over_list` asked `contains(row)`, and the wheel router and
 /// the click arm asked it through that. Sound only while the list sits above the
 /// diff, which is the vertical stack this model stops assuming.
@@ -2275,7 +2275,7 @@ fn a_mark_names_its_region_when_both_share_a_first_row() {
 fn shift_r_and_ctrl_r_are_unbound() {
     // **The pattern this file already applies to `F`, `D`, `U`, `N` and `P`**, and
     // `r` arrived with `SPEC.md` §11.2 B14 without it
-    // ([#295](https://github.com/breferrari/vigia/issues/295)). A key map where `g`
+    //. A key map where `g`
     // and `G` mean different things has to say which capitals are deliberate, and
     // a rail toggled by a mis-shifted keystroke is the kind of thing a reader
     // reports as the pane rearranging itself on its own.
@@ -2295,7 +2295,7 @@ fn shift_r_and_ctrl_r_are_unbound() {
 }
 
 // **What covers the arrows beyond the keymap, and why nothing else is written
-// here** ([#296](https://github.com/breferrari/vigia/issues/296)). The gate below
+// here**. The gate below
 // proves `→` resolves to the same `Action` as `n`, and `App::apply` has **one** arm
 // for `Action::File`, so what the arrows do to the screen is exactly what the file
 // step does and is owned by the gates that already pin it:
@@ -2377,7 +2377,7 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
 
 /// `a` asks for the staged run, and nothing else does.
 ///
-/// `SPEC.md` §11.2 **B17** ([#313](https://github.com/breferrari/vigia/issues/313)).
+/// `SPEC.md` §11.2 **B17**.
 /// The second half is the one worth having: a binding that also fired on some
 /// other key would be a gesture a reader triggers without asking for it, and this
 /// one changes what the pane is *comparing* rather than how it is arranged.

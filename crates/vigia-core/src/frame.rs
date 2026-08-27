@@ -608,7 +608,7 @@ pub struct Frame<'w> {
     /// Whether the staged run is drawn beside the unstaged one.
     ///
     /// `SPEC.md` §11.2 **B17**, from `a`
-    /// ([#313](https://github.com/breferrari/vigia/issues/313)). Off by default,
+    ///. Off by default,
     /// which is both the derived answer and the ruled one: a reader who has
     /// pressed nothing gets the comparison this tool has always drawn, and which
     /// way the toggle *starts* is still
@@ -918,7 +918,7 @@ impl<'w> Frame<'w> {
     /// one, and **across** ticks because [`Frame::advance`] migrates it and the
     /// reuse rule re-proves it for one `stat`. So scrolling never pays, and a
     /// tick pays only for the files that moved
-    /// ([#101](https://github.com/breferrari/vigia/issues/101)).
+    ///.
     ///
     /// `rows_of` maps a file's span to the rows a caller draws for it, because
     /// what a conflict or a binary file occupies is the shell's ruling rather
