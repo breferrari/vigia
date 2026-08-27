@@ -614,8 +614,8 @@ struct Sample {
     /// says nothing at all about the second.
     ///
     /// It exists because [#101](https://github.com/breferrari/vigia/issues/101)
-    /// stopped clearing this map on every tick, which is what previously made it
-    /// unable to grow. What bounds it now is the migration in `Frame::advance`,
+    /// stopped clearing this map on every tick, which is what had made it unable
+    /// to grow. What bounds it is the migration in `Frame::advance`,
     /// and this is where a soak can see that hold over hours of churn rather
     /// than over one fixture.
     tracked_spans: usize,
@@ -915,8 +915,8 @@ fn workload(
         // A file the viewport is not on, so the frame path has something to
         // revalidate rather than recompute.
         //
-        // Every fourth round rather than every round, and the arithmetic is the
-        // whole of it: with one cold edit per round the rotation returns to each
+        // Every fourth pass rather than every pass, and the arithmetic is the
+        // whole of it: with one cold edit per pass the rotation returns to each
         // file inside the two-second settle margin, so **nothing is ever
         // provably unchanged** and the reuse path this soak is supposed to
         // exercise is never taken. Measured before the divisor existed: 380
@@ -1894,10 +1894,9 @@ fn workflow_jobs(source: &str) -> Vec<(String, String)> {
 /// and the runner accepts all of them.** `needs: plan`, `needs: [plan]`,
 /// `needs: [plan, build]`, `needs: ["plan"]` and the block sequence
 /// (`needs:` then `  - plan`) are one declaration written five ways. The first
-/// version of this check listed three of them literally and would have gone red
-/// the first time a second dependency was added, reporting it as a missing one:
-/// the same mistake, one level down, that keying the soak job on `needs: plan`
-/// made in the first place.
+/// listing three of them literally goes red the first time a second dependency
+/// appears, reporting it as a missing one: the same mistake, one level down,
+/// that keying the soak job on `needs: plan` makes in the first place.
 fn declares_need(block: &str, job: &str) -> bool {
     let inline = workflow_settings(block, "needs:").into_iter().any(|on| {
         on.trim_matches(['[', ']'].as_slice())
@@ -1970,9 +1969,9 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
     // present, the file scan green, and the daily soak killed after five
     // minutes. Which job carries which number is the entire claim.
     // **An empty split passes a `for` loop, so the split is asserted first.**
-    // Round one's version scanned the whole file and could not go vacuous,
-    // because an empty list failed its `any`. Per-job resolution traded that
-    // away: a `jobs:` line with a trailing space, or a comment after it, or
+    // Scanning the whole file cannot go vacuous, because an empty list fails its
+    // `any`; per-job resolution trades that away, since a `jobs:` line with a
+    // trailing space, or a comment after it, or
     // CRLF endings, and this finds nothing and asserts nothing. `plan_script`
     // already sets the precedent by checking its own extraction landed.
     let jobs = workflow_jobs(&source);
@@ -2131,9 +2130,9 @@ struct Planned {
 /// The scratch directory is created **after the probe below answers and before
 /// the script runs**, which is the only ordering available: `$GITHUB_OUTPUT`
 /// has to exist before the script writes to it, so it cannot wait for that
-/// spawn. What it must not do is precede the probe, which is what it used to
-/// do: every run on a machine with no usable `bash` then leaked a directory, in
-/// the one file whose headline invariant is that nothing is retained.
+/// spawn. What it must not do is precede the probe: every run on a machine with
+/// no usable `bash` then leaks a directory, in the one file whose headline
+/// invariant is that nothing is retained.
 fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
     run_plan_on(script, seconds, runner, "false")
 }
@@ -2281,8 +2280,8 @@ fn a_runner_label_cannot_corrupt_the_plan_job_output() {
 
 /// Which platforms each trigger soaks on, run rather than read.
 ///
-/// **The producer side of the same hole three audit rounds closed on the
-/// consumer side.** The soak job is now gated into reading
+/// **The producer side of the hole closed on the consumer side.** The soak job
+/// is gated into reading
 /// `needs.plan.outputs.os`, so pinning a literal matrix there fails. Nothing
 /// looked at what the plan job *puts* in that output: narrowing the default
 /// list to one label deletes macOS and Windows from every weekly run and every
@@ -2874,10 +2873,10 @@ mod statistic {
     /// to keep, and both halves are asserted in one place so the asymmetry is a
     /// gate rather than a comment.
     ///
-    /// **The ratio half is here rather than in a test of its own**, which it
-    /// used to have: `a_series_that_gave_memory_back_reports_no_drift_rather_
-    /// than_a_negative_one` opened with this exact assertion over this exact
-    /// fixture, so once this test existed the older one could not fail while
+    /// **The ratio half is here rather than in a test of its own.** A separate
+    /// `a_series_that_gave_memory_back_reports_no_drift_rather_than_a_negative_one`
+    /// opens with this exact assertion over this exact fixture, so it cannot
+    /// fail while
     /// this one passed. A gate that is a strict subset of another is a gate
     /// nobody will maintain and everybody will count.
     #[test]

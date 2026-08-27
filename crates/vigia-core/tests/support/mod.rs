@@ -905,8 +905,8 @@ impl Scratch {
     /// A repository whose working tree differs from its index by every line of
     /// every file: `2 * files * lines` changed lines in total.
     ///
-    /// Used to size fixtures against the budgets, which are written in lines of
-    /// diff rather than in files.
+    /// Sizes fixtures against the budgets, which are written in lines of diff
+    /// rather than in files.
     pub fn large_diff(name: &str, files: usize, lines: usize) -> Self {
         let scratch = Self::new(name);
         scratch.fill_large_diff(files, lines);

@@ -458,8 +458,8 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
 
     // **Every spelling here has to resolve to a file that exists**, or refused
     // and not-found are the same answer and the gate is green either way. That
-    // is not hypothetical: an earlier version pointed the `..` spelling at
-    // nothing, and adding `ParentDir` back to the whitelist left it passing.
+    // is not hypothetical: with the `..` spelling pointing at nothing, adding
+    // `ParentDir` back to the whitelist leaves this passing.
     let sibling = bait
         .root()
         .file_name()
@@ -481,9 +481,9 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
 
     // **The spelling a blacklist misses, and it has to name a file that really
     // exists.** A path pointing at nothing is refused and not-found alike, so a
-    // gate built on one is green either way: reverting this guard to its earlier
-    // `is_absolute() || ParentDir` form left an earlier version of this test
-    // passing. `Path::is_absolute` on Windows wants a prefix *and* a root, so
+    // gate built on one is green either way: an `is_absolute() || ParentDir`
+    // guard passes against a bait that names nothing.
+    // `Path::is_absolute` on Windows wants a prefix *and* a root, so
     // stripping the drive from the bait leaves a path that fails that test and
     // that `join` still resolves to the same real file.
     //

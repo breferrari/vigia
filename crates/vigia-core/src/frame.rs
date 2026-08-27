@@ -476,9 +476,9 @@ struct Measured {
 ///
 /// It is a no-op on anything that is not a link, since `symlink_metadata` and
 /// `metadata` agree on every other file type, and it corrects **both** failure
-/// directions on one that is: a repoint between two equal-sized targets used to
-/// read as unchanged, and editing a link's target used to invalidate a diff git
-/// reports no change to.
+/// directions on one that is: without it a repoint between two equal-sized
+/// targets reads as unchanged, and editing a link's target invalidates a diff
+/// git reports no change to.
 ///
 /// **On Windows the length term is dead for a link**, which is worth stating
 /// because the sentence above is Unix-shaped: a symlink there reports length
@@ -762,17 +762,17 @@ impl<'w> Frame<'w> {
             // check I3's bound on the diff cache, and a whole cache dropped without
             // being counted is that bound going quiet — here for as long as an
             // uncommitted `.gitattributes` sits in the changed set, which is the
-            // ordinary state of a repository being set up. The two clears used to
-            // differ about this and nothing said why.
+            // ordinary state of a repository being set up. The two clears must
+            // not differ about this.
             self.stats.evicted += self.cached.len() as u64;
             self.cached.clear();
             self.spans.clear();
         }
         self.attributes = attributes;
 
-        // **Both caches are migrated, and neither is dropped.** A span used to be
-        // cleared here, on the reasoning that it is derived from content and has
-        // no freshness check of its own. Giving it one ([`Measured`]) is
+        // **Both caches are migrated, and neither is dropped.** Clearing a span
+        // here rests on its being derived from content with no freshness check
+        // of its own. Giving it one ([`Measured`]) is
         // [#101](https://github.com/breferrari/vigia/issues/101): clearing meant
         // every changed file the reader had not scrolled to was read from disk
         // again on **every tick**, forever, which is 94 files and 3.7 MiB a tick
@@ -1252,8 +1252,8 @@ mod tests {
 
     /// The evidence an artefact was taken under.
     ///
-    /// Named for what [`reusable`] now takes rather than for the diff it used to
-    /// be reached through: the rule governs the span cache too, and a helper
+    /// Named for what [`reusable`] takes rather than for the diff it is reached
+    /// through: the rule governs the span cache too, and a helper
     /// called `cached` would read as though it did not.
     fn taken(
         kind: ChangeKind,

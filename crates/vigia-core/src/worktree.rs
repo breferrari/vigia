@@ -633,8 +633,8 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
     // an index entry. `SYMLINK` is obviously true.
     //
     // `DIR` and `COMMIT` say `true` as well, and **that is a cost rather than a
-    // no-op**, which an earlier version of this comment got wrong by claiming
-    // they never reach a read. A modified submodule is neither a conflict nor a
+    // no-op**: they do reach a read. A modified submodule is neither a conflict
+    // nor a
     // type change nor a removal, so it satisfies both `is_diffable` and
     // `reads_worktree` and does arrive here, where it spends one probe and then
     // fails its `fs::read` exactly as it does on `main`. Rare enough to leave
@@ -668,8 +668,8 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
 
 /// The right-hand side an index-worktree change of this kind has.
 ///
-/// **The rule [`FileChange::reads_worktree`] used to *be*, applied once at the
-/// walk instead of on every consultation.** A conflict and a type change are
+/// **[`FileChange::reads_worktree`]'s rule, applied once at the walk instead of
+/// on every consultation.** A conflict and a type change are
 /// states rather than diffs and a removal has nothing on the right, so all three
 /// carry no side at all; everything else reads the file on disk.
 pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
@@ -886,8 +886,8 @@ impl Iterator for Changes {
                 before: index_blob,
                 // The working tree, unless there is nothing there to read. A
                 // removal and the two states `is_diffable` refuses all reach the
-                // same `None`, which is what `reads_worktree` used to derive from
-                // the kind and now reads straight off.
+                // same `None`, which `reads_worktree` reads straight off rather
+                // than deriving from the kind.
                 after,
                 maybe_symlink: maybe_symlink(&item, &summary),
             }));
@@ -943,8 +943,8 @@ pub struct Indexed {
 ///
 /// **A tally rather than a ranking, and that is the seam.** `SPEC.md` §6 puts
 /// `syntect` on the other side of this file, so this cannot know that `.yml` and
-/// `.yaml` are one grammar, or `.h` and `.hpp`. An earlier version ranked and
-/// truncated here anyway, on the argument that an extension is a good enough
+/// `.yaml` are one grammar, or `.h` and `.hpp`. Ranking and truncating here
+/// anyway rests on the argument that an extension is a good enough
 /// proxy for a grammar — which is true of one path and **false of the selection
 /// step**, because a language spelled two ways is counted twice at exactly the
 /// point where the counts decide who wins. Handing back the whole tally lets the

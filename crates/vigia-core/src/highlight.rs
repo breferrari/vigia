@@ -512,8 +512,8 @@ impl Entry {
     /// Keep as much of this parse as `content` still agrees with, and report
     /// whether anything survived.
     ///
-    /// The alternative is what this used to do: throw the whole parse away and
-    /// start at line zero. That made a frame cost the reader's scroll depth
+    /// The alternative is to throw the whole parse away and start at line zero,
+    /// which makes a frame cost the reader's scroll depth
     /// rather than what it drew, on every frame, for as long as the file being
     /// read was the file being written. See [`CHECKPOINT_STRIDE`].
     ///

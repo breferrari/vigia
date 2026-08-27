@@ -1939,7 +1939,7 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
     //
     // **Fifteen lines because the licence is twenty-one**, which is the number
     // the docblock above quotes, so the floor is set just under the real value
-    // rather than at a round one. A loose floor is the point: MIT's text is
+    // rather than at a rounder one. A loose floor is the point: MIT's text is
     // fixed, but a year or a name change moves the byte count and must not turn
     // this into a failure about nothing.
     assert!(

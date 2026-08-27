@@ -90,9 +90,9 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             Depth::None,
         ),
         (
-            // **Folded since 2026-08-18**, when the glyph ladder's own `TERM`
-            // arm was found to fold where this one did not, so one of the two
-            // heard `TERM=DUMB` as a terminal saying it cannot draw and the
+            // **Folded**, matching the glyph ladder's own `TERM` arm: unfolded,
+            // one of the two hears `TERM=DUMB` as a terminal saying it cannot
+            // draw and the
             // other did not. `TERM` is conventionally lower case and the
             // forgiving reading is right when the cost of mishearing is colour
             // a reader switched off.

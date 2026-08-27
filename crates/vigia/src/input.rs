@@ -387,8 +387,7 @@ impl Regions {
     /// ([#298](https://github.com/breferrari/vigia/issues/298)). These two are the
     /// only geometry the loop asks `Regions` for directly, outside [`action_for`],
     /// and guarding one and not the other is how the class recurs rather than
-    /// closes: the first draft of that fix did exactly that, and this method was
-    /// left holding the identical shape.
+    /// closes, leaving the unguarded method holding the identical shape.
     ///
     /// **It is the worse of the two, which is why it is not merely symmetry.** A
     /// hold repeats a bounded step every [`STEP_REPEAT`]; a grab hands the whole
@@ -625,9 +624,9 @@ pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) ->
 /// **It names the region for all three paint marks since
 /// [#254](https://github.com/breferrari/vigia/issues/254), and only one of the
 /// three is a drag.** [`Hovered::Track`] is a pointer resting on a bar and
-/// `Chrome::scrolling` is a key burst with nothing under a finger. Both used to
-/// carry the region's **first row** instead, which tells the two regions apart
-/// only while they are stacked: every shipped layout stacks them and
+/// `Chrome::scrolling` is a key burst with nothing under a finger. Carrying the
+/// region's **first row** instead tells the two regions apart only while they
+/// are stacked: every shipped layout stacks them and
 /// [#252](https://github.com/breferrari/vigia/issues/252) is the one that does
 /// not. So this is wider than its own name now, and says *which bar* whatever
 /// asked.
@@ -1224,8 +1223,8 @@ pub enum Action {
     /// Put the diff at this fraction of its total height.
     ///
     /// From dragging or clicking the diff's scrollbar. **A row, once the caller
-    /// resolves it**, not a file: I4 was narrowed on 2026-08-01 precisely so the
-    /// diff's total row count could be counted rather than approximated, and a
+    /// resolves it**, not a file: I4 is narrowed precisely so the diff's total
+    /// row count can be counted rather than approximated, and a
     /// gesture performed on a row-exact readout has to land as precisely as the
     /// readout claims.
     DiffTo(u32),
@@ -1463,10 +1462,9 @@ pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
 /// meaning depended on one could not be written here without changing the
 /// signature, and that is a compile error rather than a red test.
 ///
-/// A gate was written for B14 anyway and it was **tautological**: it compared this
-/// function's answers either side of a state change it cannot see. Deleted 2026-08-24
-/// with [#295](https://github.com/breferrari/vigia/issues/295)'s own simplify pass,
-/// and the claim recorded here instead, where the next person to reach for the
+/// A gate for B14 here is **tautological**: it compares this function's answers
+/// either side of a state change it cannot see. The claim is recorded here
+/// instead, where the next person to reach for the
 /// state is standing. What a rail genuinely moves is the **pointer**'s regions, and
 /// `tests/rail.rs::a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over`
 /// is the gate for that.
@@ -1691,9 +1689,9 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         // and turning the wheel means the map; `SPEC.md` §2 makes `btop` the
         // reference and that is what `btop` does.
         //
-        // This used to claim it was "the one place this shell reads a pointer's
-        // position rather than only its kind", which was never true: the bar
-        // test above reads `mouse.column`, and the click arm below reads
+        // It is **not** "the one place this shell reads a pointer's position
+        // rather than only its kind": the bar test above reads `mouse.column`,
+        // and the click arm below reads
         // `mouse.row` through the same `over_list`. What is true is that reading
         // the position never *remembers* it, which is what §11.2 B4 turns on.
         MouseEventKind::ScrollDown if regions.over_list(mouse.column, mouse.row) => {

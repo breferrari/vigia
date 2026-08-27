@@ -825,9 +825,8 @@ impl App {
             // pager does and what the reader was already looking at most of.
             //
             // **The back-up is gated on `anchored || landed_inside || single`,
-            // and the third term is the pin's own licence.** Two audit rounds
-            // went into getting that right. It was left to whatever placed the
-            // position first, which made this paragraph true only for a reader
+            // and the third term is the pin's own licence.** Left to whatever
+            // placed the position, this paragraph is true only for a reader
             // who had arrived by scrolling: after a drag on the diff's bar, which
             // sets `anchored` false, the pinned screen came out short. Setting
             // `anchored` from the toggle's arm was the next attempt and it

@@ -151,8 +151,8 @@ const ROSTER: &str = include_str!("../assets/GRAMMARS.txt");
 /// `two-face`, by the name they carry in the dump.
 ///
 /// It exists so the gates below can act on the **absence** of their sources.
-/// Deleting the extras directory without rebuilding used to satisfy every
-/// gate by early return: the walk found nothing to check and the committed
+/// Deleting the extras directory without rebuilding otherwise satisfies every
+/// gate by early return: the walk finds nothing to check and the committed
 /// dump still held them, so a dump shipping four grammars with no sources was
 /// invisible.
 const VENDORED: [&str; 4] = ["Gleam", "PowerShell", "V", "V Module"];

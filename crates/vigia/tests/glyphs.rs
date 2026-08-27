@@ -357,8 +357,8 @@ fn a_level_past_the_ramp_is_clamped_rather_than_wrapping() {
 #[test]
 fn the_octant_column_climbs_one_row_per_level() {
     // **Octants had no geometry gate at all**, and that is the shape this whole
-    // ladder is most exposed to: `the_two_tables_agree_about_geometry` below used to
-    // assert only that the two rungs draw *different* characters, which any
+    // ladder is most exposed to: `the_two_tables_agree_about_geometry` below
+    // asserting only that the two rungs draw *different* characters is what any
     // indexing satisfies. Mirroring the octant cell's halves passed the entire
     // suite, so the strip could read backwards in time at that rung and nothing
     // would say so.

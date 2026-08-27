@@ -8,8 +8,8 @@
 //! rather than the setup, because follow mode is defined as much by what
 //! disengages it as by what it does.
 //!
-//! `SPEC.md` §11.1 is the rule, ruled as B1 and B2 on 2026-07-30. Two of its
-//! clauses are the ones that would go wrong quietly rather than loudly, and
+//! `SPEC.md` §11.1 is the rule, ruled as B1 and B2. Two of its clauses are the
+//! ones that would go wrong quietly rather than loudly, and
 //! each has a test of its own below: a **resize must not disengage**, because a
 //! pane beside an agent is resized constantly and follow mode would evaporate
 //! for free; and **`G` must disengage rather than re-engage**, because
@@ -758,7 +758,7 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
     for (name, action, expected) in [
         // A jump: `g` is one of the keys §11.1 gives the heading.
         ("g", Action::Top, 0),
-        // A scroll: the reader asked for exactly one row.
+        // A scroll: exactly one row was asked for.
         ("a scroll", Action::Scroll(1), 1),
         // A drag of the diff's own bar to the very top, which writes a position
         // of its own rather than going through either of the two above.
@@ -996,9 +996,9 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
     // inherited the number.
     //
     // **The renumbered index has to still name a file**, which is the whole
-    // subject of the guard: a first draft of this committed everything, so the
-    // list was empty, `View::collect` returned at its own `files == 0` branch,
-    // and the gate passed with the guard deleted. Here `src/aaa.rs` is committed
+    // subject of the guard: committing everything leaves the list empty,
+    // `View::collect` returns at its own `files == 0` branch, and the gate
+    // passes with the guard deleted. Here `src/aaa.rs` is committed
     // and the third file slides into its place.
     //
     // Driven the way the loop drives it, with no `follow` call for the second

@@ -385,8 +385,8 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
         // **Scrolled off the new file's end before the pin is read**, which is
         // what makes the second assertion a claim. Every one of these gestures
         // lands on row zero of a file taller than the body, so a screen drawn
-        // from there shows one file whether or not anything is pinned: #297's
-        // first draft asserted that and was green with the feature deleted.
+        // from there shows one file whether or not anything is pinned, so
+        // asserting that alone is green with the feature deleted.
         app.apply(Action::Scroll(SPAN as isize), &mut frame, body())
             .expect("apply");
         let view = draw(&mut app, &mut frame, &mut highlighter, &history, listed());
@@ -463,8 +463,8 @@ fn follow_still_moves_between_files_while_it_is_pinned() {
 
     // **A middle file, not the last**, and that is the whole non-vacuity of the
     // second assertion. Following the last file draws one file whether or not
-    // anything is pinned, because there is nothing after it to spill into, so
-    // #297's first draft of this gate was green with the feature deleted.
+    // anything is pinned, because there is nothing after it to spill into, so a
+    // gate on the last file is green with the feature deleted.
     const FOLLOWED: usize = 1;
     // In a `const` block, which is this repo's idiom for a claim about constants:
     // a bad one is then a build that will not compile rather than a suite that
@@ -679,9 +679,9 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
     );
 
     // **And the same viewport with the flag set differs**, which is what makes
-    // the assertion above a claim rather than a tautology. A first draft
-    // collected `Viewport { single: false, ..asked }` and compared it with
-    // `asked`, which are the same value: it asserted that `collect` is
+    // the assertion above a claim rather than a tautology. Collecting
+    // `Viewport { single: false, ..asked }` and comparing it with `asked`
+    // compares one value with itself: it asserts that `collect` is
     // deterministic and would have stayed green with the flag ignored entirely.
     let pinned = View::collect(
         &mut frame,
@@ -711,9 +711,9 @@ fn a_pinned_gesture_survives_the_diff_it_was_made_against() {
     // `View::collect` has clamped the position against the files that exist, and
     // under a pin both of them do. **The third is `App::up`'s walk back**, which
     // had the same latent panic and is gated by
-    // `tests/scroll.rs::a_walk_back_survives_the_file_it_pointed_into_disappearing`;
-    // an earlier version of this sentence said *the only two*, which is the claim
-    // that kept it unfound. unpinned, `G` is
+    // `tests/scroll.rs::a_walk_back_survives_the_file_it_pointed_into_disappearing`.
+    // Saying *the only two* here is the claim that keeps the third unfound.
+    // Unpinned, `G` is
     // `jump_to(len - 1)`, which saturates on an empty list and touches no frame,
     // and a drag walks the list it is iterating.
     //
@@ -873,8 +873,8 @@ fn s_is_what_asks_for_one_file_and_s_is_what_gives_the_diff_back() {
 fn a_pinned_end_key_and_a_scroll_in_one_wake_both_move() {
     // **The shell drains actions in a batch and paints once at the end of it**,
     // so `G` and a held `k` arrive together with no frame between them. `G` under
-    // a pin used to write the pinned file's whole height and let `View::collect`
-    // clamp it on the way to the screen, which draws the right rows and leaves a
+    // a pin writing the pinned file's whole height and letting `View::collect`
+    // clamp it on the way to the screen draws the right rows and leaves a
     // *position* nothing can move from: every `k` in the same batch walked the
     // row down from `span` and every one of them still clamped to the same
     // screen. Nine keystrokes swallowed on this fixture at this pane.
@@ -1275,8 +1275,8 @@ fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
     // **The pairing B16 calls the gesture's best case, and nothing exercised
     // it.** Follow chooses the file an agent is writing and the pin keeps the diff
     // on it, so a landing owed by `App::follow` resolving *inside* a pinned walk
-    // is the ordinary state of this feature, not an edge. Until #297's fourth
-    // audit round no test anywhere set `single` with a landing owed:
+    // is the ordinary state of this feature, not an edge, and it is easily left
+    // with no test anywhere setting `single` with a landing owed:
     // `follow_still_moves_between_files_while_it_is_pinned` clears it with a
     // scroll before it draws, `tests/follow.rs` never pins, and `tests/list.rs`'s
     // degenerate grid pins `single: false` by name.

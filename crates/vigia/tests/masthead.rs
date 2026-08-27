@@ -313,8 +313,8 @@ fn band_at(width: u16, series: [u32; HISTORY_SAMPLES], glyphs: Glyphs) -> Vec<St
 
 /// The band's period against a drawn sparkline bucket's, read off one screen.
 ///
-/// **The comparison the retired ceiling used to make, reinstated in the form
-/// that survives #232** ([#234](https://github.com/breferrari/vigia/issues/234)).
+/// **The comparison the retired ceiling made, in the form that survives #232**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)).
 /// `vigia-core` once asserted `GRAPH_PERIOD < HISTORY_BUCKET`: two elements read
 /// one store over one window and a reader has both on screen, so a burst that
 /// splits in a file's sparkline and merges in the worktree band at the same
@@ -443,7 +443,7 @@ const BURSTY: [u32; HISTORY_SAMPLES] = {
 
 /// A wider pane buys finer time, which is the opposite of what #223 ruled.
 ///
-/// **[#223](https://github.com/breferrari/vigia/issues/223) is superseded here
+/// **[#223](https://github.com/breferrari/vigia/issues/223) is replaced here
 /// and the correction is stated rather than absorbed.** That row saw a real
 /// defect: at one column a second, a save drew a hairline between two blanks and
 /// the whole band read as scatter. It reached for a wider column. What fixes the

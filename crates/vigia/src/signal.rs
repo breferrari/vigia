@@ -637,9 +637,9 @@ mod tests {
 
         #[test]
         fn the_handler_maps_hand_on_to_false() {
-            // **The real handler, which round 2 left with no caller at all.** Moving
-            // its decisions into `reply` made five exits testable and left the
-            // mapping from a `Reply` back to a `BOOL` with nothing calling it. An
+            // **The real handler, which is easily left with no caller at all.**
+            // Moving its decisions into `reply` makes five exits testable and
+            // leaves the mapping from a `Reply` back to a `BOOL` uncalled. An
             // unclaimed `CTRL_SHUTDOWN_EVENT` answered TRUE tells Windows a
             // shutdown was handled by a process that got no wake.
             //

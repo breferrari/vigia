@@ -162,9 +162,9 @@ fn tree() -> PathBuf {
 /// so this cannot call it and has to agree with it by construction instead: the
 /// last component first, the canonicalised last component second, and the path
 /// itself rather than a placeholder when a worktree sits at a filesystem root
-/// and has no last component by either route. An earlier version canonicalised
-/// first and fell back to the literal `"worktree"`, which would have made the
-/// report name a tree the header would have named something else, on exactly
+/// and has no last component by either route. Canonicalising first and falling
+/// back to the literal `"worktree"` makes the report name a tree the header
+/// names something else, on exactly
 /// the paths where the two routes disagree.
 fn tree_name(tree: &Path) -> String {
     if let Some(name) = tree.file_name() {
@@ -881,17 +881,17 @@ impl Pane<'_> {
 
     /// One collect and one paint, in the order `Shell::paint` performs them.
     ///
-    /// Three stages here are ones an earlier version of this file left out, and
-    /// each of them is a cost the report would otherwise have under-stated.
+    /// Three stages here are easily left out, and each is a cost the report
+    /// then under-states.
     /// §7's own rule is that a gate is written against the caller's **whole**
     /// frame and any stage left outside it is a stage nothing can regress you
     /// on; the same arithmetic applies to an instrument, one step further along,
     /// because a number is only comparable to the product's if it was taken over
     /// the product's frame.
     ///
-    /// - The **branch read**, one `.git/HEAD` at 56 to 69us. It used to happen
-    ///   on exactly the frames that drew the empty state, which over the
-    ///   recorded sessions was about half of them; since
+    /// - The **branch read**, one `.git/HEAD` at 56 to 69us. Reading it on
+    ///   exactly the frames that draw the empty state covers about half of the
+    ///   recorded sessions; since
     ///   [#158](https://github.com/breferrari/vigia/issues/158) the header draws
     ///   the branch always, so it happens on all of them and this instrument
     ///   would under-state the frame by that much if it were left out.
@@ -1388,9 +1388,10 @@ mod wiring {
     /// The other half, and it exists because a mutation survived the one above.
     ///
     /// **The reason changed with [#158](https://github.com/breferrari/vigia/issues/158)
-    /// and the gate is worth more, not less.** The read used to happen on exactly
-    /// the frames that drew the empty state, so a dirty fixture could not reach
-    /// it and deleting the read outright left the gate above green: it took a
+    /// and the gate is worth more, not less.** With the read happening on
+    /// exactly the frames that draw the empty state, a dirty fixture cannot
+    /// reach it and deleting the read outright leaves the gate above green: it
+    /// takes a
     /// clean fixture to hold a cost the harness would otherwise under-measure on
     /// about half the recorded sessions.
     ///

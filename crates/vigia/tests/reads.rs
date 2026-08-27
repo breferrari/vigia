@@ -424,8 +424,8 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
     );
     // **And one fewer diff than asks, because the two regions overlap by a
     // file.** This is the gate for a defect that shipped and was caught by
-    // measurement: `take_list` used to call `Frame::diff` for every row,
-    // including rows the walk had already built. `Frame::diff` re-reads any file
+    // measurement: `take_list` calling `Frame::diff` for every row includes
+    // rows the walk has already built, and `Frame::diff` re-reads any file
     // written in the last two seconds, and the file an agent just wrote is
     // always the current file and always in the window, so the hottest file in
     // the worktree was read and diffed **twice on every frame a monitor exists

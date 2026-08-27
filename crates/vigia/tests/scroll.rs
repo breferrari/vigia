@@ -279,7 +279,7 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     // last row. Past it draws an empty pane, which in a monitor is
     // indistinguishable from a broken one.
     //
-    // > [!warning] This gate used to assert the defect it was named against
+    // > [!warning] This gate once asserted the defect it is named against
     // >
     // > Until [#57](https://github.com/breferrari/vigia/issues/57) the body of
     // > this test read `assert_eq!(view.rows.len(), 1)`, under this name and
@@ -737,9 +737,9 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 /// How many variants [`Action`] has.
 ///
 /// **Hand maintained, and saying so is the point.** The compile error in [`tag`]
-/// is what *prompts* a bump; nothing forces one. An earlier version of this gate
-/// asserted `named.len() == VARIANTS` and claimed that "an added arm fails loudly
-/// until the variant is actually driven", which was false: give a new arm the tag
+/// is what *prompts* a bump; nothing forces one. Asserting
+/// `named.len() == VARIANTS` and claiming that "an added arm fails loudly until
+/// the variant is actually driven" is false: give a new arm the tag
 /// `18`, leave it undriven, and the count is still eighteen against an unbumped
 /// eighteen. That is the fourth overstated guarantee this branch has produced and
 /// the second inside a gate whose whole subject is overstated guarantees.
@@ -1350,8 +1350,8 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
 #[test]
 fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
     // **`a_position_survives_the_file_it_pointed_at_disappearing` above covers the
-    // *draw*; this covers the *gesture*, and until #297's second audit round
-    // nothing did.** That one lets `View::collect` clamp a stale position on the
+    // *draw*; this covers the *gesture*, which is otherwise uncovered.** That
+    // one lets `View::collect` clamp a stale position on the
     // way to the screen, which is the path a redraw takes. `App::up` reaches the
     // frame ahead of any collect: it walks back a file at a time asking each how
     // tall it is, through `rows_in` into `Frame::diff`, which indexes the file

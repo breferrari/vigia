@@ -4445,8 +4445,8 @@ pub fn render(
         let region = areas.diff;
         // **Counted in rows**, which is what the call below passes: `rows_above`
         // over `total_rows`, with the thumb spanning the screen's own height.
-        // Two superseded rulings are recorded under this one, both reported
-        // from use.
+        // Two earlier rulings are recorded under this one, both reported from
+        // use.
         //
         // **The earlier ruling made the *whole* depend on the current file**, as
         // `files * current_span`, and it was wrong in three visible ways at once:

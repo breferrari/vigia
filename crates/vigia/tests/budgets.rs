@@ -134,9 +134,9 @@ fn sample(history: &mut History, root: &Path, path: &str) {
 /// file. Sampling `EDITED_PATH` alone there would have left the widest tick this
 /// tool has unmeasured while reporting a number that looked like it covered it.
 fn sample_all(history: &mut History, root: &Path, paths: &[String]) {
-    // **`vigia::weigh`, which is the one `run` calls.** These three lines used to
-    // be copied here, and the copy is the drift surface: what a gate leaves out
-    // gets cheaper, so it would go on passing while pricing a tick the product no
+    // **`vigia::weigh`, which is the one `run` calls.** A copy of these three
+    // lines here is the drift surface: what a gate leaves out gets cheaper, so
+    // it goes on passing while pricing a tick the product no
     // longer has, which is the failure the comment beside every call site in this
     // file already names.
     history.record_sized(vigia::sized(root, paths), Instant::now());
@@ -450,9 +450,9 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
 /// this gate exists to keep.** Weighing a write by its size costs one
 /// `symlink_metadata` per changed path per wake, and a burst carries up to
 /// `HISTORY_PATHS` of them. Timed on its own that is 2.60ms of thread CPU against
-/// I9's 16ms, and twice in one session that number was used to cap the feature:
-/// once off a wall figure inflated by a loaded machine, once off a `0ns` CPU
-/// figure that was the clock's 15.625ms quantum rather than a measurement.
+/// I9's 16ms, and that number has twice capped the feature: once off a wall
+/// figure inflated by a loaded machine, once off a `0ns` CPU figure that
+/// was the clock's 15.625ms quantum rather than a measurement.
 ///
 /// **Neither reading measured the frame.** `Frame::advance` walks status on the
 /// same wake and stats every one of these paths to decide they changed at all, so
@@ -1423,11 +1423,11 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     );
 
     // **The re-measure continues the sequence rather than restarting it**, which
-    // matters more here than on the steady-state gates: what this one measures is a
-    // frame *inside the settle margin* after a bulk rewrite, so a second round that
-    // only edited one line would be measuring a cheaper condition and could mask a
-    // real breach. Carrying `at` forward keeps the periodic rewrite on the same
-    // cadence, so round two is the same experiment as round one.
+    // matters more here than on the steady-state gates: what this one measures
+    // is a frame *inside the settle margin* after a bulk rewrite, so a second
+    // pass that only edited one line would measure a cheaper condition and could
+    // mask a real breach. Carrying `at` forward keeps the periodic rewrite on
+    // the same cadence, so both passes are the same experiment.
     let mut at = SAMPLED_FRAMES;
     holds_p99(
         &format!(
@@ -1874,8 +1874,9 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             .expect("scroll");
 
         let before = highlighter.stats();
-        // Wall and CPU for both stages, because #178's attribution is per sample:
-        // the question is whether the work in *this* round was inside budget, and a
+        // Wall and CPU for both stages, because #178's attribution is per
+        // sample: the question is whether the work in *this* pass was inside
+        // budget, and a
         // total taken around the loop would fold in the untimed scrolling between
         // frames.
         let (screen, collect, collect_cpu) = timed_cpu(|| {
@@ -2127,7 +2128,7 @@ fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
         // Wired through `holds_p99` this gate re-measured by running that whole
         // sequence 250 times, which is 250 fixtures and over 20 minutes to
         // produce 250 frames that were each the *first* sampled frame of a cold
-        // run. Observed, not reasoned about: a breaching round hung for 23
+        // run. Observed, not reasoned about: a breaching pass hung for 23
         // minutes before it was killed. `hold_the_scroll_budget` uses this
         // variant for the identical reason.
         || {
@@ -2277,9 +2278,9 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let mut buf = Buffer::empty(area());
 
     // **A window at the path cap, driven on a clock that actually crosses a
-    // sample boundary**, and both halves of that were wrong in the first draft.
-    // It held twenty paths where `repeak` is priced at the 256-path cap, and it
-    // stamped every record with `Instant::now()`, so a hundred rounds of a
+    // sample boundary**, and both halves are easy to get wrong. Twenty paths is
+    // not where `repeak` is priced, which is the 256-path cap; and stamping
+    // every record with `Instant::now()` means a hundred passes of a
     // sub-millisecond frame all landed inside one second: `rolled` was zero every
     // time and the #277 guard skipped the walk in *both* arms. The gate behind
     // the measurement that licensed I1's amendment was timing `Frame::advance`
@@ -2334,8 +2335,8 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let aged = ageing.percentile(0.5).expect("a sampled round");
     let ticked = ticking.percentile(0.5).expect("a sampled round");
 
-    // **Non-vacuity on the thing the first draft got wrong**: every round has to
-    // have crossed a boundary and walked the projection, or neither arm timed an
+    // **Non-vacuity on exactly that**: every pass has to have crossed a boundary
+    // and walked the projection, or neither arm timed an
     // ageing wake and the comparison is about `Frame::advance` alone.
     let walked = history.stats().repeaks;
     assert!(
@@ -2512,9 +2513,9 @@ fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
 /// bounded to one file and `View::measure` skips `diff_rows`, which is I4's only
 /// exception and the only thing in the frame path not bounded by the window. So
 /// the expectation is that a pinned frame is cheaper than the gate above it, and
-/// an expectation is exactly what §7 says a budget must not be. Until #297's
-/// second audit round no budget, no soak and no snapshot ever set `single`, on
-/// the one state that changes the walk's range.
+/// an expectation is exactly what §7 says a budget must not be. Without this,
+/// no budget, no soak and no snapshot sets `single` at all, on the one state
+/// that changes the walk's range.
 ///
 /// **It is not measured against the unpinned frame**, and that is deliberate: a
 /// part compared against the whole it belongs to is the shape §7 records as

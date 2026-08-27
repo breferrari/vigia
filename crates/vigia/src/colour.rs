@@ -220,8 +220,8 @@ impl Depth {
             return Ok(depth);
         }
         if windows {
-            // **Truecolour, and this used to be 256.** The conservative answer was
-            // wrong in a way only a screen could show: the xterm cube's darkest
+            // **Truecolour, not 256.** The conservative answer is wrong in a
+            // way only a screen shows: the xterm cube's darkest
             // axis levels are 0 and 95 with nothing between, so a *subtle* colour
             // has nowhere to land. A row wash of `#1b3d29` quantises to `#005f00`,
             // which is a saturated primary rather than a tint, and a reader looking
@@ -259,8 +259,9 @@ impl Depth {
             // "the terminal's default", which is not the same thing inside a pane
             // that has been given one.
             //
-            // **`Ansi256` is on this side of the line and used to be on the other.**
-            // See the module docs: the cube cannot express a subtle wash, the grey
+            // **`Ansi256` is on this side of the line rather than the other.**
+            // See the module docs: the cube cannot express a subtle wash, the
+            // grey
             // ramp cannot tell an addition from a removal, and a slab is worse than
             // no tint. Nothing else changes at this rung, so the foreground is
             // quantised exactly as it was.
@@ -301,9 +302,10 @@ impl Depth {
 /// `COLORTERM` is the only convention for claiming 24-bit and nothing propagates
 /// it: `ssh` forwards `TERM` and not `COLORTERM`, and a multiplexer replaces `TERM`
 /// with its own entry. `tmux` at its default `default-terminal screen` is the
-/// ordinary case, and `screen` contains neither `256color` nor anything else the
-/// chain used to read, so a reader in the two-pane arrangement this whole tool is
-/// designed for landed on sixteen. Sixteen **drops backgrounds**, so `dark` drew
+/// ordinary case, and `screen` contains neither `256color` nor anything else a
+/// `TERM`-only chain reads, so a reader in the two-pane arrangement this whole
+/// tool is designed for lands on sixteen. Sixteen **drops backgrounds**, so
+/// `dark` draws
 /// every diff row unwashed and the tool looked like it was ignoring the palette.
 /// Reported from a real macOS pane, where the giveaway was the `@@` header: at
 /// sixteen the mockup's `#58a6ff` blue resolves to `LightCyan`, and it was cyan.

@@ -677,8 +677,8 @@ fn stamp_write(path: &std::path::Path, contents: &str, at: std::time::SystemTime
 
 #[test]
 fn a_span_for_a_path_that_stops_changing_is_dropped() {
-    // I3's half of #101. Spans used to be cleared whole on every `advance`, so
-    // they could not accumulate; carrying them across ticks makes the map a
+    // I3's half of #101. Spans cleared whole on every `advance` cannot
+    // accumulate; carrying them across ticks makes the map a
     // **fourth** retained cache, and every retained cache in this repo has to be
     // bounded by something and asserted rather than trusted.
     //

@@ -1,8 +1,8 @@
 //! The pinned file list, which `SPEC.md` §11.1 makes the middle of three
 //! regions.
 //!
-//! > The body is three regions since 2026-08-17: a masthead, a pinned file list,
-//! > a rule, and the scrolling diff.
+//! > The body is three regions: a masthead, a pinned file list, a rule, and the
+//! > scrolling diff.
 //!
 //! Five claims live here, and they fail in different ways, which is why they are
 //! five tests rather than one screen inspected from five angles.
@@ -116,12 +116,10 @@ fn split(width: u16, height: u16, files: usize) -> Body {
 
 /// [`split`], sized the way the shell sizes a region for **this** changed set.
 ///
-/// **`split` passes the file count for both of `body_layout`'s inputs**, which is
-/// the pre-#313 shape and is right only while every drawn row is a file. Every
-/// grouped test in this file sized its region that way, which is why two layout
-/// defects survived a round of auditing: the region was two rows short of what the
-/// shell would have given it, so the tests agreed with a bug rather than with the
-/// product.
+/// **`split` passes the file count for both of `body_layout`'s inputs**, which
+/// is right only while every drawn row is a file. Sizing a grouped region that
+/// way leaves it two rows short of what the shell gives it, so the tests agree
+/// with a bug rather than with the product.
 fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
@@ -134,9 +132,9 @@ fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
 /// Each region reports its **own** bar's column, not the pane's.
 ///
 /// **The claim the removed field could not make**
-/// ([#251](https://github.com/breferrari/vigia/issues/251)). `Regions` used to
-/// carry one `Option<u16>` documented as *"the column both scrollbars are drawn
-/// in"*, which was true only because both regions span the pane and their bars
+/// ([#251](https://github.com/breferrari/vigia/issues/251)). One `Option<u16>`
+/// documented as *"the column both scrollbars are drawn in"* is true only while
+/// both regions span the pane and their bars
 /// land on the same right edge. Beside a rail
 /// ([#252](https://github.com/breferrari/vigia/issues/252)) they do not.
 ///
@@ -152,8 +150,8 @@ fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
 /// `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`
 /// compares each region's reported rect against the one the painter draws into,
 /// and a mutation swapping the two reddens it along with eleven render gates.
-/// `tests/rail.rs::the_two_regions_are_two_regions` is the one this docblock
-/// used to say could not exist: since
+/// `tests/rail.rs::the_two_regions_are_two_regions` is the one that looks
+/// impossible and is not: since
 /// [#252](https://github.com/breferrari/vigia/issues/252) a wide pane puts the
 /// two regions in different columns, so the two bars land in different columns
 /// and the distinction is finally drawn rather than argued.
@@ -2013,10 +2011,10 @@ fn browsing_reaches_the_bottom_of_a_grouped_list() {
 
 /// **A one-row grouped window draws the run's label, not an unlabelled file.**
 ///
-/// This test used to assert the opposite, on the rule that furniture gives way
-/// before content does. The reader overruled that on 2026-08-26 after a real
-/// worktree drew a *staged* file on the last row beneath a heading that said
-/// `unstaged`: the saved row is not worth the list stating the wrong run for a
+/// The opposite rule, that furniture gives way before content, was overruled
+/// after a real worktree drew a *staged* file on the last row beneath a heading
+/// that said `unstaged`: the saved row is not worth the list stating the wrong
+/// run for a
 /// change. See `no_file_is_ever_planned_without_its_own_runs_label`, which is
 /// the general form; this one pins the narrowest case, where the whole window
 /// is the label.
@@ -2425,8 +2423,8 @@ fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
 
 /// **A file is never drawn without the label of the run it belongs to.**
 ///
-/// Reported from a real worktree on 2026-08-26: the window's last row held a
-/// *staged* file while the only label above it said `unstaged`, so the list
+/// Reported from a real worktree: the window's last row held a *staged* file
+/// while the only label above it said `unstaged`, so the list
 /// stated something false about where that change lived. The cause was the
 /// old rule that furniture gives way before content does, which dropped the
 /// run label whenever the window had room for one more thing and spent it on
@@ -2478,8 +2476,8 @@ fn no_file_is_ever_planned_without_its_own_runs_label() {
 /// **A list that is entirely staged still says so, and its rows still read as
 /// staged.**
 ///
-/// Reported from a real worktree on 2026-08-26: with both changed files staged
-/// and nothing unstaged, the list drew no `staged` heading at all and the kind
+/// Reported from a real worktree: with both changed files staged and nothing
+/// unstaged, the list drew no `staged` heading at all and the kind
 /// letters took the ordinary ink rather than the staged one. Unstaging one file
 /// made both headings and both inks appear. So the view that most needs to
 /// announce itself, the one where *everything* is staged, was the one that said

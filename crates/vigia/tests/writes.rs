@@ -323,8 +323,8 @@ fn drive(root: &Path) -> Driven {
     );
     // **The watch is read here and torn down by going out of scope**, which is what
     // puts its teardown inside the window: `drive` returns before the caller takes
-    // the second reading. An earlier version called `watcher.stopper().stop()`
-    // first and said in a comment that this ordered the teardown. It did not.
+    // the second reading. Calling `watcher.stopper().stop()` first does **not**
+    // order the teardown, whatever a comment beside it says.
     // `Stop::stop` is `let _ = tx.send(Message::Stop)`, nothing here ever calls
     // `next_tick`, so the message was never read and the call had no observable
     // effect at all; what actually stops the OS watch is dropping `_backend`, which

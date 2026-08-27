@@ -404,8 +404,8 @@ fn a_line_count_is_not_a_byte_count() {
 /// A recomputed diff does not leave last tick's height behind.
 ///
 /// `Frame::height` fills a span for every changed file, and `Frame::diff` then
-/// recomputes whichever file the viewport reaches. Until 2026-08-02 the
-/// recompute replaced the cached diff and left the span alone, so a frame that
+/// recomputes whichever file the viewport reaches. A recompute that replaces
+/// the cached diff and leaves the span alone lets a frame that
 /// counted before it drew reported the file's **old** height beside its new
 /// rows: the scrollbar's total and the content disagreed inside one frame, and
 /// a drag resolved through that total landed on the wrong row.

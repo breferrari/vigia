@@ -777,8 +777,8 @@ fn every_jump_still_lands_on_a_heading_when_lines_wrap() {
 fn scrolling_up_from_the_wrapped_bottom_moves() {
     // **The end of the diff must be a place a reader can leave.**
     //
-    // The first draft of the front trim advanced `View::top` by the rows it
-    // dropped, and `App` stores that back as the scroll position. From the
+    // A front trim that advances `View::top` by the rows it drops has that
+    // stored back by `App` as the scroll position. From the
     // advanced row fewer than a screenful of logical rows remain, so the next
     // frame is short, restarts through `last_screenful`, lands on the same row
     // and trims to the same place: every `k` after that resolves to the position
@@ -1246,8 +1246,8 @@ fn the_bar_is_drawn_from_the_travel_a_drag_is_resolved_against() {
     // and dragged against another agrees at the two ends and comes apart in the
     // middle, so a gate that checks only the ends passes against the defect.
     //
-    // The first draft of `App::dragged_to` measured the track in the rows a frame
-    // *drew*, while the painter goes on drawing the thumb from the region's
+    // Measuring the track in the rows a frame *drew* leaves the painter drawing
+    // the thumb from the region's
     // height. Pressing inside the thumb's own body then sent it to the bottom of
     // the track from under the pointer.
     //
@@ -1513,7 +1513,7 @@ fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
         served += 1;
         // **I5's promise is that the change is drawn, not that a particular row
         // is on top**, which is #257's own ruling and the reason a landing that
-        // runs short is allowed to be superseded by the back-up that fills the
+        // runs short is allowed to be overridden by the back-up that fills the
         // pane. So the assertion is the promise: a frame that served a landing
         // draws the change it landed for.
         // **A changed line, either side of it.** The oracle was the added

@@ -32,8 +32,8 @@ fn request_all(args: &[&str]) -> Request {
 /// and needs no building here.
 ///
 /// Takes a slice rather than one argument, because the arity refusal is one of
-/// the three arms and a one-argument helper cannot reach it. That is how it
-/// stayed unexercised when the classifier for it was added and gated.
+/// the three arms and a one-argument helper cannot reach it, which is how the
+/// arm stays unexercised while its classifier is gated.
 fn run_binary(args: &[&str]) -> (Option<i32>, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vigia"))
         .args(args)
@@ -166,9 +166,9 @@ fn only_one_argument_is_a_surface_and_a_second_is_refused() {
 
 /// A path that is not valid Unicode is watched, not refused.
 ///
-/// **This docblock used to name `to_string_lossy` as the defect it guards, and
-/// that was wrong.** Mutating `request_for` back to the lossy form the refusal
-/// used before [#12](https://github.com/breferrari/vigia/issues/12) leaves this
+/// **`to_string_lossy` is not the defect this guards.** Mutating `request_for`
+/// back to the lossy form the refusal took before
+/// [#12](https://github.com/breferrari/vigia/issues/12) leaves this
 /// test, and the whole file, green: lossy decoding substitutes `U+FFFD`, which
 /// is neither `-` nor `--version`, so both spellings classify every input
 /// identically. The mutation survived, and a test whose stated purpose a
@@ -208,7 +208,7 @@ fn a_path_that_is_not_valid_unicode_is_still_a_path() {
 /// **This is the gate with teeth in this file.** `SPEC.md` §9 makes the git tag
 /// the one irreversible event in the release: it publishes to crates.io, where a
 /// version cannot be withdrawn. A binary that went out reporting `0.0.0` could
-/// not be corrected, only superseded, and nothing else in the repository would
+/// not be corrected, only replaced, and nothing else in the repository would
 /// have noticed, because `0.0.0` builds, tests and installs exactly like any
 /// other version.
 ///
@@ -302,9 +302,9 @@ fn the_binary_refuses_an_unknown_option_and_exits_non_zero() {
          query answers"
     );
     // The property, not the sentence: it must name the option that does exist
-    // and say that a path is what it takes. Pinning the exact wording made this
-    // go red when `-V` was added to the usage line, which is a documentation
-    // improvement rather than a regression, and a gate that fires on those
+    // and say that a path is what it takes. Pinning the exact wording reddens
+    // on an addition to the usage line, which is a documentation improvement
+    // rather than a regression, and a gate that fires on those
     // teaches people to edit the gate instead of reading it.
     assert!(
         stderr.contains("--version") && stderr.contains("path"),
@@ -314,9 +314,10 @@ fn the_binary_refuses_an_unknown_option_and_exits_non_zero() {
 
 /// The binary refuses a second argument, on stderr, non-zero, without drawing.
 ///
-/// **The third arm, and it was the one with no end-to-end gate.** Round 1 added
-/// `Request::TooManyArguments` and tested the classifier; nothing ran the actual
-/// binary with two arguments, because the helper above took one. So the arm that
+/// **The third arm, and the one most easily left with no end-to-end gate.**
+/// Testing `Request::TooManyArguments`' classifier without running the actual
+/// binary with two arguments — which a one-argument helper cannot — leaves the
+/// arm that
 /// decides the exit code and the stream for this case was the only one of three
 /// that no test reached, in a file written to cover the whole surface.
 ///

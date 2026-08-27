@@ -77,9 +77,9 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 /// purpose: what the ruling promises is a *pane*, and a gate reading the struct
 /// would pass against a shell that stored the settings and drew none of them.
 ///
-/// **`following` is in the tuple and the first draft left it out**, which made
-/// `App::configured`'s `..Self::new()` ungated: mutating it to `..Self::default()`
-/// flips `following` to false and reddened nothing, so a config file would have
+/// **`following` is in the tuple**, without which `App::configured`'s
+/// `..Self::new()` is ungated: mutating it to `..Self::default()` flips
+/// `following` to false and reddens nothing, so a config file would
 /// silently killed I5 for everyone who wrote one.
 ///
 /// **`single` is deliberately absent, because `Chrome` has no such field.** It
@@ -87,8 +87,8 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 /// it and a gate claiming otherwise would be describing itself wrongly. The gate
 /// that covers it drives a gesture and reads the resolved position.
 ///
-/// It takes no area because `App::chrome` is width-independent; the first draft
-/// took one and ignored it, which read as a sweep and was not.
+/// It takes no area because `App::chrome` is width-independent; taking one and
+/// ignoring it reads as a sweep and is not.
 fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
@@ -409,9 +409,9 @@ fn absent_is_not_an_error_and_unreadable_is() {
         Config::default()
     );
 
-    // **And `load` is where unreadable lives, which is worth stating because the
-    // first draft of this gate asserted it through `from_env` and was wrong.**
-    // `from_env` filters on `is_file`, exactly as `theme::from_env` does, so a
+    // **And `load` is where unreadable lives**, which asserting through
+    // `from_env` gets wrong: it filters on `is_file`, exactly as
+    // `theme::from_env` does, so a
     // path that exists and is not a file is *absent* rather than unreadable: a
     // directory called `config` is not a config file anybody wrote. What reports
     // `Unreadable` is a path that is a file and will not read, and `load` is the
@@ -584,10 +584,11 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
         "setting every key in KEYS did not set every field, so the two have drifted"
     );
 
-    // **And each one alone has to *change* something, which `is_ok` did not
-    // say.** A name in `KEYS` with no arm in `Config::set` used to parse to
-    // `Ok(Config::default())`: the key existed, the file was accepted, and the
-    // setting did nothing. The comparison above cannot see it either, because an
+    // **And each one alone has to *change* something, which `is_ok` does not
+    // say.** A name in `KEYS` with no arm in `Config::set` parses to
+    // `Ok(Config::default())`: the key exists, the file is accepted, and the
+    // setting does nothing. The comparison above cannot see it either, because
+    // an
     // extra dead key leaves the all-true result unchanged. **Compared as
     // on-against-off rather than against the default since #326**, because
     // `links` defaults on and `links = on` is legitimately the default spelled

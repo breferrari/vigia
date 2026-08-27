@@ -42,9 +42,9 @@
 //! numbers rather than against crossterm restating itself.
 //!
 //! **A third way in, and deliberately not a third mechanism.** An externally
-//! delivered signal used to be uncovered here: raw mode makes Ctrl-C a key event
+//! delivered signal is otherwise uncovered: raw mode makes Ctrl-C a key event
 //! and never a signal, so there is nothing to catch on the path a reader uses,
-//! and a `kill` from elsewhere ran neither the guard nor the hook.
+//! and a `kill` from elsewhere runs neither the guard nor the hook.
 //! [`signal`](crate::signal) closes that
 //! ([#24](https://github.com/breferrari/vigia/issues/24)) while adding nothing
 //! to this module: the handler restores nothing, it ends the loop, and the guard
@@ -87,9 +87,9 @@ enum Step {
     /// Focus reporting, so a mark drawn from pointer state can be cleared when
     /// the reader looks away.
     ///
-    /// **Added 2026-08-16 for `SPEC.md` §11.2 B10**, which was declined one day
-    /// earlier on the claim that *"the takeover does not enable focus
-    /// reporting"* — a description of this array, written as though it were a
+    /// **Here for `SPEC.md` §11.2 B10**, which was declined on the claim that
+    /// *"the takeover does not enable focus reporting"* — a description of this
+    /// array, written as though it were a
     /// fact about terminals. The decline was a day old; the absence it rested on
     /// had not been real for years, which is the part worth keeping. It is the middle rung of §11.1's clearing ladder: motion
     /// inside the pane retires a hover mark on its own, and this is what retires

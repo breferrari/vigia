@@ -275,9 +275,9 @@ fn total(drawn: &[u32; HISTORY_BUCKETS]) -> u32 {
 ///
 /// **The gate [#198](https://github.com/breferrari/vigia/issues/198) exists
 /// for.** The store samples fifteen times finer than the sparkline draws, and
-/// the projection is what hides that. Two writes a second apart used to land in
-/// one bucket and add up because the bucket *was* the sample; now they land in
-/// two samples of one column, and only summing keeps the answer the same.
+/// the projection is what hides that. Two writes a second apart land in two
+/// samples of one column rather than in one bucket that *is* the sample, and
+/// only summing keeps the answer the same.
 ///
 /// Every other spelling of the projection fails here and passes everything else:
 /// taking the newest sample draws one, taking the max draws one, taking the
@@ -402,9 +402,9 @@ fn newest(history: &History, path: &str) -> u32 {
 /// A write weighs the bytes it moved, not the fact that it happened.
 ///
 /// **[#232](https://github.com/breferrari/vigia/issues/232), reported from a live
-/// pane.** A sample used to be a count of files written, so a worktree where one
-/// file is saved repeatedly put exactly one in every sample and made itself the
-/// peak, and both the band and the sparkline drew every active column at full
+/// pane.** A sample counting files written lets a worktree where one file is
+/// saved repeatedly put exactly one in every sample and make itself the peak, so
+/// both the band and the sparkline draw every active column at full
 /// height. The element could say *when* and never *how much*, which is the
 /// opposite of the "change density over time" `SPEC.md` §5.1 names it for.
 ///
@@ -877,8 +877,8 @@ fn a_coarser_rung_is_never_measured_against_less() {
 ///
 /// **The contract this gained in #232**, and the reason: the band asks for one
 /// value per sub-column, which past a wide pane is more than the window holds
-/// samples. It used to clamp and hand back a short `Vec`, and the band drew a
-/// graph that stopped partway across the pane with bare axis after it.
+/// samples. Clamping and handing back a short `Vec` draws a graph that stops
+/// partway across the pane with bare axis after it.
 #[test]
 fn a_projection_returns_the_width_it_was_asked_for() {
     let mut samples = [0u32; HISTORY_SAMPLES];
@@ -1439,9 +1439,9 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
     // than by anything retiring it**: `Track::shift` walks the write out of the
     // newest end of the track and the mark goes with it.
     //
-    // **The number was one until 2026-08-25 and is two now**, which is the floor
+    // **The number is two rather than one**, which is the floor
     // [`a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`]
-    // exists for: at one sample the lifetime was whatever was left of the second
+    // exists for: at one sample the lifetime is whatever is left of the second
     // the write landed in, measured as low as 5ms, and the reader stopped seeing
     // the dot. What this gate holds is unchanged and is the half #243 was about —
     // the mark **expires** rather than freezing — and the assertion below is what
@@ -1480,8 +1480,8 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
 /// tick*: the label went in [#99](https://github.com/breferrari/vigia/issues/99)
 /// and the dot is all that is left, so a dot nobody catches is the element gone.
 ///
-/// **Reported from a live pane on 2026-08-25** as *"the dot showing a file was
-/// changed recently isn't showing up anymore"*, and it is a regression from
+/// **Reported from a live pane** as *"the dot showing a file was changed
+/// recently isn't showing up anymore"*, and it is a regression from
 /// [#279](https://github.com/breferrari/vigia/issues/279), which gave the window
 /// a clock of its own. Before it the window rolled only on a tick, so the mark
 /// survived until the next write; after it the mark dies at the next boundary of
@@ -1586,11 +1586,11 @@ fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
 
 /// `SPEC.md` §11.1's `●`: the file the newest burst named, until another arrives.
 ///
-/// **Reported from the pane 2026-08-26** ([#345](https://github.com/breferrari/vigia/issues/345)):
-/// the mark did not stay long enough, and it used to never go away. Both halves
-/// of that were true. It was the ordinal alone until 2026-08-22, when ageing the
-/// churn window gave `History::recency` a second term and the mark went with the
-/// ink, on a complaint that was about **brightness** rather than about the mark.
+/// **Reported from the pane** ([#345](https://github.com/breferrari/vigia/issues/345)):
+/// the mark did not stay long enough, and it never went away. Both halves were
+/// true. It is the ordinal alone; giving `History::recency` a second term while
+/// ageing the churn window takes the mark along with the ink, on a complaint
+/// that is about **brightness** rather than about the mark.
 ///
 /// The two questions are separate now, and this gate is the one that keeps them
 /// separate: it asserts the mark **survives** exactly where

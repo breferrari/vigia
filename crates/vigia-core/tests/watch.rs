@@ -127,9 +127,8 @@ fn an_idle_worktree_produces_no_tick_and_accepts_nothing() {
 
     // Deliberately not asserting that the OS delivered nothing. inotify and
     // FSEvents both report reads and attribute touches, so a tree nobody wrote
-    // to is not a tree the kernel is silent about, and an earlier version of
-    // this test failed on Linux and macOS for exactly that reason while the
-    // engine was behaving correctly.
+    // to is not a tree the kernel is silent about, so a test asserting silence
+    // fails on Linux and macOS while the engine is behaving correctly.
     //
     // I1 is a claim about work done, so the portable form is that nothing which
     // arrived was ever accepted as a change.
@@ -417,8 +416,8 @@ fn a_stopper_unblocks_a_waiting_watcher() {
 
 /// A stop unblocks with `None` even when a burst is already open.
 ///
-/// The burst loop used to break out and fall through to its `Some(Tick)`, so a
-/// stop meant "one more tick, then stop" whenever anything was mid-arrival.
+/// A burst loop that breaks out falls through to its `Some(Tick)`, so a stop
+/// means "one more tick, then stop" whenever anything is mid-arrival.
 /// `tick_within` builds its timeout on a stop, so a timeout could report a tick
 /// that had not arrived in time.
 ///

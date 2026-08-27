@@ -1084,8 +1084,9 @@ fn a_long_round_slightly_over_budget_on_work_is_not_excused_by_accumulated_noise
     // **The gate this instrument was missing, and the defect it now catches was
     // live.** The acquittal compares the round's off-CPU deficit against what the
     // round spent over budget. Both are sums, so both grow with the sample count
-    // and the comparison is stable. It used to compare that sum against a *single*
-    // frame's overshoot, which does not grow, so ordinary per-frame scheduling
+    // and the comparison is stable. Comparing that sum against a *single*
+    // frame's overshoot, which does not grow, lets ordinary per-frame
+    // scheduling
     // noise out-accumulated the thing it had to explain and every long round
     // drifted toward acquittal regardless of what the code did.
     //

@@ -1,6 +1,6 @@
 //! What the pane starts as, before anybody presses anything.
 //!
-//! `SPEC.md` §11.2 **B6**, amended 2026-08-25 by
+//! `SPEC.md` §11.2 **B6**, amended by
 //! [#306](https://github.com/breferrari/vigia/issues/306). Five keys, in a file
 //! beside the theme: `masthead`, `rail`, `single`, `staged` and `wrap`, the
 //! toggles that decide what the body is made of, and two more that decide how it
@@ -115,9 +115,9 @@ pub struct Config {
     ///
     /// **The first key here with no key on the keyboard, and that is a
     /// deliberate amendment to this set's definition** (`SPEC.md` §11.2 B18,
-    /// [#323](https://github.com/breferrari/vigia/issues/323)). The set used to
-    /// be *the gestures sheet's view section less `follow`*; it is now that,
-    /// plus the appearance keys B18 added, because an appearance preference is
+    /// [#323](https://github.com/breferrari/vigia/issues/323)). The set is *the
+    /// gestures sheet's view section less `follow`* plus the appearance keys
+    /// B18 added, because an appearance preference is
     /// exactly what a config file is for and exactly what a session gesture is
     /// not: nobody re-decides their icons per pane. Off by default, and off is
     /// byte-identical to every version before it, which `tests/render.rs`
@@ -157,14 +157,14 @@ impl Default for Config {
 /// Every key this file accepts, in the order the gestures sheet lists them.
 ///
 /// **This is what [`parse`] admits a key by**, not merely what the error message
-/// prints, and the two were separate in the first draft: the list was decoration
-/// beside a `match` that did the real work, so they could drift and the message
-/// would have advertised a set the parser did not accept.
+/// prints. Separated, the list is decoration beside a `match` that does the real
+/// work, so the two drift and the message advertises a set the parser does not
+/// accept.
 ///
-/// **It is not a compile-time guarantee and an earlier docblock claimed it was.**
-/// [`Config::set`] matches on a `&str` with a fallback arm, so a fourth field on
-/// [`Config`] compiles perfectly well with no key and no entry here. Two things
-/// tie them instead, and the first draft had only the weaker one:
+/// **It is not a compile-time guarantee.** [`Config::set`] matches on a `&str`
+/// with a fallback arm, so a fourth field on [`Config`] compiles perfectly well
+/// with no key and no entry here. Two things tie them instead, and only the
+/// second is strong:
 ///
 /// - **A key here that [`Config::set`] does not take is an error at parse time**,
 ///   because [`parse`] reads that function's return rather than discarding it.
@@ -428,9 +428,9 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             }
         };
 
-        // **The return is read, and discarding it was the hole round one left.**
-        // The check above admits a key by [`KEYS`]; this applies it by
-        // [`Config::set`]; and until the `bool` was read, a name in the first and
+        // **The return is read, and discarding it is the hole.** The check
+        // above admits a key by [`KEYS`]; this applies it by [`Config::set`];
+        // and with the `bool` unread, a name in the first and
         // not the second parsed to `Ok` and set nothing. A key that did nothing,
         // silently, is exactly what refusing unknown keys exists to prevent, so
         // the drift produced the failure the whole grammar is designed against.

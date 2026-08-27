@@ -92,8 +92,8 @@ pub(crate) const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '�
 /// the ordinary first frame: history is fed from the watch, so nothing a reader
 /// opens the pane to look at has a tick behind it yet.
 ///
-/// This used to be a space, and the sentence that argued for one still holds:
-/// `▁` would say "a little happened", which is a different claim from "nothing
+/// Not a space, and the sentence that argues for one still holds: `▁` would say
+/// "a little happened", which is a different claim from "nothing
 /// did", and over eight buckets that difference is what tells a settling file
 /// from a busy one. **So the track is not `▁` either.** The heat strip may reuse
 /// `█` between a live slice and its track because colour is its only channel; a
