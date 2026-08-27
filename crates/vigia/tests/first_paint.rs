@@ -1,28 +1,4 @@
 //! I7, held against the shell rather than against the core.
-//!
-//! > Startup to first paint is imperceptible. **< 50ms**
-//!
-//! `crates/vigia-core/tests/budgets.rs` already gates this, and that gate is
-//! structurally blind to most of what a first paint costs: it opens the
-//! repository, takes the first change and diffs it, and builds no
-//! [`Highlighter`] at all. The shipped first paint does build one, and `syntect`
-//! compiles a grammar's `fancy_regex` patterns lazily on first use.
-//!
-//! Measured on the reference machine, release, before this gate existed: a first
-//! `App::view` over **two files of two hundred lines** cost **92.62ms** while
-//! parsing seventeen lines, and frames two through four cost ~270µs. The same
-//! fixtures under an extension `syntect` has no grammar for parsed nothing and
-//! showed no step at all. So the cost follows neither the diff nor the lines
-//! drawn; it is one compile, and `SPEC.md` §10's 20.37ms never contained it.
-//!
-//! It is the same shape as `budgets.rs` and `reads.rs`: an invariant the engine
-//! can only make *possible* gets a second gate over the caller (`SPEC.md` §7).
-//! The axis is new, though, and it is the one this repo keeps rediscovering.
-//! §7 already records that a budget measured at one *position* is measured at its
-//! cheapest, and that a gate which *settles* first has measured the cheapest
-//! state. This is the third: **every steady-state wall-clock gate here discards
-//! fifty warmup frames, which is correct for such a budget and is exactly where a
-//! first-paint cost hides.**
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -59,12 +35,6 @@ struct FirstPaint {
     /// what this gate must not accept.
     height: usize,
     /// The two frames' rows with every span stripped.
-    ///
-    /// The gate's real subject. Deferring colour must change **colour**, and a
-    /// row count alone cannot say that: mutating the plain frame to stop drawing
-    /// content lines left `rows == height` satisfied, because the walk simply
-    /// reached further down the file list and drew more headings instead. Found
-    /// by mutation, which is why this field exists.
     plain: Vec<Row>,
     coloured: Vec<Row>,
     /// Lines the first frame parsed, and the second.
@@ -73,45 +43,6 @@ struct FirstPaint {
 }
 
 /// One cold start, staged as `vigia::run` stages it.
-///
-/// **Not identically.** `run` also resolves the colour depth and the theme and
-/// shortens the worktree name before its first paint, none of which this
-/// includes; and `run`'s single `Shell::draw` paints *twice*, where this times
-/// the two separately so the second can be reported rather than gated. What is
-/// measured is time to the screen the reader first sees, which is what I7 is
-/// about.
-///
-/// **One omission is in the expensive direction and is deliberate: the warmer.**
-/// `run` spawns `Highlighter::warm_ahead` just before its draw, so on the real
-/// path a thread is compiling grammars while this window is open. Including it
-/// here would be worse rather than better, because the best-of-three below
-/// would put *three* detached warmers into one measurement where the product
-/// has one, and a gate whose noise floor is its own harness cannot see the
-/// code. Measured at nil on the reference machine (14.85ms against 14.78ms
-/// median over six alternating pairs), and the residual risk is a two-core
-/// runner, where `VIGIA_BUDGET_SLACK` is the lever `SPEC.md` §7 already
-/// provides.
-///
-/// **A fresh [`Highlighter`] every time, which is what makes this repeatable.**
-/// The compile is cached on the `SyntaxSet` a highlighter owns, so a run reusing
-/// one would measure the first start and then nothing at all.
-///
-/// `Session::enter` and the terminal size query are left out, which is the same
-/// carve-out `budgets.rs` and `soak.rs` already name: they need a tty. Note that
-/// the real `run` takes the alternate screen *before* this work, so what a reader
-/// looks at while it happens is a blank screen.
-///
-/// **`signal::forward` is left out too, and it is the one carve-out here that
-/// does not need a tty.** `run` arms it *before* `Session::enter`, so the safety
-/// net covers the takeover itself rather than starting after its fourth step, and
-/// a source-scanning gate in `lib.rs` is what holds that order. Either side of the
-/// takeover it is on the startup path and not measured here.
-///
-/// Measured separately rather than assumed: **84.7µs** on the reference machine
-/// for the whole arming, dominated by a `thread::spawn` Windows does not perform,
-/// against a 50ms budget. Named because this slot is where the next thing armed
-/// before first paint would land unmeasured, and a carve-out nobody wrote down is
-/// the one that grows.
 fn cold_start(root: &std::path::Path) -> FirstPaint {
     let began = Instant::now();
     let worktree = Worktree::discover(root).expect("discover");
@@ -141,15 +72,6 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     // nowhere to send a demand, which is what this gate wants: it holds
     // `parsed_second > 0` below, and that non-vacuity check is the whole reason
     // the first frame's zero means anything.
-    //
-    // The shipped shell builds `Highlighter::new`, which defers instead, so the
-    // number reported here is **not** what a reader's second frame costs since
-    // [#129](https://github.com/breferrari/vigia/issues/129).
-    // `the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached`
-    // is the gate over that, and it is the one to read for the product. This
-    // stays reported rather than gated for the reason it always was: `SPEC.md`
-    // §7 puts a first parse on the cold path I9 excludes by definition, and
-    // reporting it is what stops it going unmeasured again.
     let before = highlighter.stats();
     let began = Instant::now();
     let view = app
@@ -215,18 +137,6 @@ fn the_shells_first_paint_holds_the_startup_budget() {
     // **The assertion the row count cannot make.** Deferring colour has to
     // change colour and nothing else, so the two frames must draw the same rows
     // once spans are taken out of the comparison.
-    //
-    // **This holds at the `Row` level, which is what it compares, and it is one
-    // level short of what a reader sees.** The paint walks a budget per *span*
-    // rather than per row, so on decomposed Unicode the plain row and the
-    // coloured row can fill a cell differently from identical `Row`s. That is
-    // [#106](https://github.com/breferrari/vigia/issues/106), it is pre-existing
-    // and independent of highlighting, and comparing rendered cells here is its
-    // acceptance rather than this gate's. Named so the gap is a decision rather
-    // than an oversight. A row count alone is satisfied
-    // by a plain frame that drew different content: mutating `View::collect` to
-    // stop pushing content lines left `rows == height` green, because the walk
-    // reached further down the file list and drew more headings instead.
     assert_eq!(
         run.plain, run.coloured,
         "the plain first frame and the coloured second one drew different rows, \
@@ -291,20 +201,6 @@ fn the_shells_first_paint_holds_the_startup_budget() {
 }
 
 /// The opening two frames, as the state machine they are.
-///
-/// **What this can and cannot reach.** [`App`]'s half is here: which frame
-/// parses, and that the plain one leaves a debt exactly once. The other half
-/// is `Shell::draw`'s `while self.app.owes_repaint()` loop, and that is not
-/// reachable from any test — `Shell` owns a `Session`, which takes the
-/// alternate screen and needs a tty, the same carve-out `budgets.rs` and
-/// `soak.rs` already name.
-///
-/// So the loop is held by construction rather than by a gate: it is one
-/// expression over a public predicate, where before it was two `draw`
-/// statements in a row whose pairing nothing recorded. Deleting the second
-/// of those left the entire suite green while the product sat on a
-/// permanently uncoloured screen, which is what this state machine exists to
-/// make un-deletable. Naming the gap rather than implying coverage.
 #[test]
 fn the_first_frame_is_plain_and_owes_exactly_one_repaint() {
     let scratch = Scratch::large_diff("app-paint", 2, 8);
@@ -387,25 +283,6 @@ fn a_shell_past_its_first_paint_owes_nothing_and_colours_at_once() {
 
 /// **The opening the shipped shell actually has**, which the gate above
 /// deliberately does not measure.
-///
-/// I7 has two halves since [#129](https://github.com/breferrari/vigia/issues/129).
-/// The first is that the frame a reader waits for at startup draws without
-/// colour, and `the_shells_first_paint_holds_the_startup_budget` covers it. The
-/// second is that **no** frame parses under a grammar nothing has compiled, and
-/// until this gate existed the shell had no test for it: `warm.rs` covers the
-/// core, and every gate in this file builds `Highlighter::eager`, which is
-/// precisely the highlighter that does not defer.
-///
-/// So the opening two frames both draw plain, both parse nothing, and the
-/// second one costs a frame rather than a compile. The reader gets colour when
-/// the warm they asked for lands, which the third act here stands in for.
-///
-/// **Three assertions and each rules out a different way of passing wrongly.**
-/// A shell that never highlighted at all would satisfy the first two and fail
-/// the third. A shell that drew plain without asking would satisfy the first
-/// two and fail the demand check, and would leave a reader on a permanently
-/// uncoloured screen, which is the I5 failure `App::paint` records being caught
-/// by mutation once already.
 #[test]
 fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
     let scratch = Scratch::large_diff("first-paint-deferred", 4, 40);

@@ -1,35 +1,9 @@
 //! The glyph ladder: which drawing characters this terminal's font can be asked
 //! for, and how a sparkline cell is packed once it can be asked for more.
-//!
-//! **Detection is a precedence table**, and a table goes wrong by a rule being
-//! right in isolation and in the wrong place. So it is driven one row per rung,
-//! each with the rungs *above* it deliberately set to something else, rather
-//! than by asserting each variable alone against an empty environment. That is
-//! `tests/colour.rs`'s shape and its reasoning is unchanged.
-//!
-//! **What this ladder has that the colour one does not** is a rung that is
-//! never a font bet. No font measured carries the Unicode 16 octants, and the
-//! engines that draw them rasterise the range themselves (#324), so
-//! [`Glyphs::Octant`] is reachable only through [`GLYPHS_VAR`] or an engine
-//! naming itself *with a qualifying version*, and a sweep of the whole table
-//! asserting that is worth more than any single row: an accidental promotion
-//! would paint tofu on every terminal it reached.
-//!
-//! **The packing half is arithmetic**, and the property that matters most is not
-//! "a glyph came back". A packer that returned the full cell for everything
-//! would pass that and destroy the element. What has to survive is the
-//! *distinction* the sparkline exists to make: one write and no writes are
-//! different **heights**, at every rung, which is
-//! [#78](https://github.com/breferrari/vigia/issues/78) and `SPARK_TRACK`'s own
-//! rule reaching a second geometry.
 
 use vigia::{GLYPHS_VAR, Glyphs};
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
-///
-/// Takes a slice rather than touching the process, because `cargo test` runs
-/// these on threads of one process and `set_var` is both racy and, since Rust
-/// 2024, `unsafe`. `Glyphs::from_env` exists in this shape for that reason.
 fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let owned: Vec<(String, String)> = pairs
         .iter()
@@ -52,10 +26,6 @@ struct Row {
 }
 
 /// The precedence table, richest signal first.
-///
-/// Every row below the first sets the signals **above** it to something that
-/// would answer differently, so a rung that stopped being consulted in the right
-/// order fails here rather than in a screenshot.
 const TABLE: [Row; 19] = [
     Row {
         why: "the override outranks every signal under it",
@@ -613,17 +583,6 @@ fn the_band_follows_the_rung_the_pane_detects() {
     // words describe waves becoming spikes, which is the signal's shape and
     // points at the denominator. That denominator is
     // [#256](https://github.com/breferrari/vigia/issues/256).
-    //
-    // **The band draws at whatever the pane detects, and that is a product
-    // ruling rather than a measured one.** Blocks are more faithful, measured:
-    // mean absolute error between the drawn column and the true level, over five
-    // series at ten widths from 36 to 124, is 1.2% to 4.0% for blocks against
-    // 4.3% to 8.8% for a dense cell. The cost is real, it is known, and the
-    // element is a reader-facing option that was removed without being asked
-    // for. The ladder is one ladder again.
-    //
-    // Pinned as a property rather than by naming a rung: nothing in the band may
-    // read a glyph set the pane did not detect.
     for pane in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
         assert_eq!(
             pane.density() * pane.levels(),

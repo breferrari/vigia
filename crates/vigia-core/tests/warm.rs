@@ -1,46 +1,4 @@
 //! Compiling grammars ahead of the reader, and what that is and is not worth.
-//!
-//! `syntect` defers a grammar's patterns to `fancy_regex` on first use, so the
-//! first parse under one costs 74-362ms where loading the whole dump costs
-//! 318µs. `Highlighter::warm_ahead` pays that where nothing is waiting on it.
-//!
-//! **The claim about warmth is deliberately weak, and the weakness is a
-//! finding.** There is no such thing as a warm grammar: compilation is per
-//! *pattern*, so warming on a small sample leaves a different file of the same
-//! language still paying. Measured in release over a 2.5KB synthetic sibling:
-//! `.js` 80.49ms above floor, `.html` 40.10ms, `.cpp` 37.55ms. So what these
-//! gates assert about warmth is that it helps **the content it warmed on**,
-//! which is the only part that is true.
-//!
-//! **The claim about coldness is exact, and it is the one
-//! [#129](https://github.com/breferrari/vigia/issues/129) is built on.** A
-//! grammar nothing has parsed under has every pattern uncompiled, so the frame
-//! that first meets it pays the whole cliff: measured at frame scale, one
-//! twenty-four line screenful, **123.98ms cold against a 2.40ms floor** under
-//! Rust and 694.75ms against 90.65ms under Markdown. The cliff is flat in
-//! content size, which is what says it is a compile rather than a parse: a
-//! 594-byte screenful costs 631.46ms cold and 0.97ms warm.
-//!
-//! **Every cold figure above was measured on Windows under
-//! `codegen-units = 1`, and it overstates what ships.**
-//! [#261](https://github.com/breferrari/vigia/issues/261) found that setting
-//! inflates `fancy-regex` compilation on the MSVC target by roughly 6x; the
-//! profile now sets 2, where this file's own cold parse (the `warm-cost`
-//! fixture in the gate below, which is a different measurement from the
-//! screenful figures above and the one taken at both settings) is 17.59ms
-//! rather than 107.88ms. The figures are left with their provenance rather than retyped,
-//! because re-measuring them honestly needs the platform they came from.
-//!
-//! **And the cliff is a Windows one.** On Linux (rustc 1.98.0) the cold parse
-//! is 11.999ms at `codegen-units = 1` and 12.113ms at 2, within 1%, so nothing
-//! here is a property of the engine or the profile. macOS is unmeasured. The
-//! ratio gate below encoded the Windows number as a requirement and failed the
-//! first time this suite ran on Linux; see it for what replaced it.
-//!
-//! So the frame path declines to parse under a grammar the warmer has not run
-//! over, draws it plain, and says what it wants. The gates below cover both
-//! halves, the way out when the file it asked for has gone, and the population
-//! sweep that keeps the case a reader is actually watching from flickering.
 
 mod support;
 
@@ -113,16 +71,6 @@ fn many_files_of_one_language_warm_only_a_few() {
 }
 
 /// And the reads, which is the half of the cap nothing asserted.
-///
-/// The parse count above is identical whether the cap is consulted before the
-/// read or after it, so a run that opened eighty-four files to warm three
-/// looked exactly like one that opened three. It happened: the cap moved after
-/// the read while the grammar being charged was corrected, every test stayed
-/// green, and the I/O amplification the cap exists to prevent was back.
-///
-/// The bound is `WARM_PER_GRAMMAR` exactly for a single-language set, because
-/// nothing here is content-sensitive: `SPEC.md` §6's `.ts` rule is the one case
-/// that has to pay a read to learn its grammar, and a `.rs` file never does.
 #[test]
 fn many_files_of_one_language_are_not_even_read() {
     let files = WARM_FILES + 20;
@@ -216,10 +164,6 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
     // The only claim `warm` makes, and the one that has to be measured rather
     // than asserted structurally: there is no observable state to check, because
     // the compiled patterns live in `syntect`'s own `OnceCell`s.
-    //
-    // One highlighter, deliberately: the second timing has to meet the patterns
-    // the first compiled, and a fresh `SyntaxSet` would be cold again and measure
-    // nothing.
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
@@ -228,10 +172,6 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
     // eighty-four file fixture, and a polyglot gate that writes twenty-five files
     // and compiles up to twelve grammars on a thread. A wall clock measured
     // beside either is measuring the neighbour.
-    //
-    // **It works only because they take it too.** A mutual-exclusion protocol one
-    // participant observes is not one, and the two heavy gates hold it across
-    // their fixture building for exactly that reason.
     let _timed = exclusively_timed();
 
     let scratch = Scratch::large_diff("warm-cost", 1, 40);
@@ -257,29 +197,6 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
 
     // **An absolute saving, not a ratio, and the ratio it replaces is a
     // cautionary tale rather than a tightening.**
-    //
-    // This asserted `after * 10 < cold_parse` against a measured "~93ms against
-    // ~0.5ms". Both of those numbers came from Windows under
-    // `codegen-units = 1`, a setting [#261](https://github.com/breferrari/vigia/issues/261)
-    // later found inflates `fancy-regex` compilation on that target by roughly
-    // 6x. So the ratio was calibrated against a cold side that was mostly a
-    // codegen artefact, and it encoded that artefact as a requirement.
-    //
-    // The first time this suite was run on Linux (2026-08-22) the gate failed,
-    // at **11.999ms cold against 2.105ms warmed, a 5.70x**, and it failed
-    // identically at `codegen-units` 1 and 2 (12.113ms at 2, within 1%). It was
-    // never this platform's number: nothing had run it here. A gate that passes
-    // on one target because that target is slow in a way nobody intended is
-    // `SPEC.md` §7's shape again, and lowering the constant to 3 would keep the
-    // shape and only move the edge.
-    //
-    // What `warm` actually claims is that the compile moves **off** the parse
-    // that follows it, so the claim is stated as work removed and work left:
-    // the warmed parse fits comfortably inside a frame, and warming took a
-    // frame's worth of work out of the one behind it. Both hold on every
-    // target measured (Linux 12.11 to 2.13, Windows 17.59 to 2.79), and
-    // neither can be re-invalidated by a codegen setting, because neither is a
-    // proportion of a number that setting moves.
     const WARMED_CEILING: Duration = Duration::from_millis(8);
     const LEAST_SAVING: Duration = Duration::from_millis(5);
     assert!(
@@ -413,18 +330,6 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
 }
 
 /// The escape spelling this platform has that the others do not.
-///
-/// **A function per platform rather than a `cfg` block inside the test**, so the
-/// test body is the same on all three tier-1 targets. Written inline, the Unix
-/// build compiled the `push` away, left `let mut spellings` never mutated, and
-/// `-D warnings` turned that into a build failure on two of the three targets
-/// while passing locally on the third.
-///
-/// Windows is the platform with an extra spelling because `Path::is_absolute`
-/// there wants a prefix *and* a root, so stripping the drive leaves a path that
-/// fails that test and that `join` still resolves to the same real file. On Unix
-/// an absolute path has no prefix, so that case is the plain absolute one the
-/// caller already has and there is nothing to add.
 #[cfg(windows)]
 fn rooted_spelling(outside: &std::path::Path, root: &std::path::Path) -> Option<String> {
     // Asserted to round-trip rather than assumed: `get(2..)` strips two bytes,
@@ -486,9 +391,6 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     // `Path::is_absolute` on Windows wants a prefix *and* a root, so
     // stripping the drive from the bait leaves a path that fails that test and
     // that `join` still resolves to the same real file.
-    //
-    // On Unix an absolute path has no prefix, so the case is already the one a
-    // line above and there is nothing extra to spell.
     spellings.extend(rooted_spelling(&outside, scratch.root()));
 
     let warmed = Highlighter::new()
@@ -508,11 +410,6 @@ fn a_file_cut_mid_character_still_parses() {
     // The cut `WARM_BYTES` makes lands mid-character on anything that is not
     // ASCII, which the `valid_up_to` trim absorbs. Dropping that trim is one
     // edit and nothing else here would notice.
-    //
-    // **Only the trim, not the bound.** This file is valid UTF-8 throughout, so
-    // it warms either way and an unbounded read passes it; the bound is gated by
-    // `the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file`, which is
-    // the one that can see it.
     let scratch = Scratch::large_diff("warm-bounded-read", 1, 4);
     let mut text = String::from("// ");
     while text.len() < WARM_BYTES.saturating_sub(2) {
@@ -550,10 +447,6 @@ fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
     // satisfied whether or not the read is capped — a warm counts the same either
     // way — and mutating the `take` away survived all of them. What separates the
     // two is wall clock against file size, so it takes the absolute tier.
-    //
-    // `SPEC.md` §7's rule about not comparing a part against the whole it belongs
-    // to applies directly: the shared term is the first `WARM_BYTES`, and it
-    // cancels, so what is left is exactly the tail an unbounded read would take.
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
@@ -631,10 +524,6 @@ fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
 
 /// Make `link` inside the worktree point at `target`, or report that this
 /// platform would not.
-///
-/// Windows needs `SeCreateSymbolicLinkPrivilege` or developer mode, so a
-/// hosted runner may refuse. Refusing is reported rather than silently turning
-/// the gate below into a pass, which is the shape `SPEC.md` §7 keeps naming.
 fn link_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
@@ -707,23 +596,6 @@ const FRAME_BUDGET: Duration = Duration::from_millis(16);
 const SCREENFUL: usize = 24;
 
 /// **The frame a reader actually meets, and the one nothing gated.**
-///
-/// `SPEC.md` §7 rules a grammar's first parse onto the cold path that I9
-/// excludes by definition, and that ruling was made when the only way to reach
-/// one was a keypress: §10 lists `G`, a follow jump and a scroll, all of which a
-/// reader asked for. [#129](https://github.com/breferrari/vigia/issues/129)
-/// reports it arriving on **no** keypress, from three directions and on two
-/// platforms, because the agent in the other pane writes a file in a language
-/// this process has not met and the frame that draws it pays the compile.
-///
-/// Measured on the reference machine, release, twenty-four lines: **123.98ms
-/// cold against 2.40ms warm** under Rust, and 694.75ms against 90.65ms under
-/// Markdown. The cliff is flat in content size, which is what says it is a
-/// compile rather than a parse: a 594-byte screenful of Markdown costs 631.46ms
-/// cold and 0.97ms warm, a 650x penalty on half a kilobyte.
-///
-/// So this is I9 over the frame that meets a grammar, and it is the gate the
-/// deferral has to earn. Watched failing before the fix at 93.73ms.
 #[test]
 fn a_frame_that_meets_a_new_grammar_holds_the_frame_budget() {
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
@@ -760,12 +632,6 @@ fn a_frame_that_meets_a_new_grammar_holds_the_frame_budget() {
 
 /// The structural half of the gate above, and the one that survives a fast
 /// machine.
-///
-/// A wall clock says the frame was quick; this says **why**, and it is the claim
-/// a mutation has to break rather than merely slow down. `lines` counts what the
-/// parser actually ran, so zero of them across a full screenful is the deferral
-/// working, and the classes being all `Plain` is what the reader sees while it
-/// does.
 #[test]
 fn a_grammar_nothing_has_compiled_draws_plain_and_parses_nothing() {
     let scratch = Scratch::large_diff("warm-defer-plain", 1, SCREENFUL / 2);
@@ -797,10 +663,6 @@ fn a_grammar_nothing_has_compiled_draws_plain_and_parses_nothing() {
 
 /// And the other direction, which is what makes the gate above a deferral rather
 /// than a regression.
-///
-/// **Both halves or neither.** A change that simply stopped highlighting would
-/// pass the test above and fail this one, which is the pairing `SPEC.md` §7 asks
-/// for wherever a gate asserts an absence.
 #[test]
 fn a_warm_turns_the_plain_hunk_into_colour() {
     let scratch = Scratch::large_diff("warm-defer-thaw", 1, SCREENFUL / 2);
@@ -837,16 +699,6 @@ fn a_warm_turns_the_plain_hunk_into_colour() {
 }
 
 /// **A demand that can never be served must still stop.**
-///
-/// The frame path draws a hunk out of the *diff*, which survives the file the
-/// diff was taken from. So a path that vanishes between the frame asking and the
-/// warmer opening it would be asked for again on the next frame, and every ask
-/// spawns a thread and every thread sends a wake: a livelock, at full CPU, on a
-/// monitor whose whole claim is that it costs nothing while idle.
-///
-/// The warmer therefore marks a grammar it merely *had a run at*, not only one
-/// it compiled. What that costs is that such a grammar is parsed cold once,
-/// which is exactly what shipped before any of this existed.
 #[test]
 fn a_path_that_vanished_does_not_leave_the_frame_asking() {
     let scratch = Scratch::large_diff("warm-defer-vanished", 1, SCREENFUL / 2);
@@ -886,10 +738,6 @@ fn a_path_that_vanished_does_not_leave_the_frame_asking() {
 }
 
 /// The demand describes **this** frame, not every frame there has ever been.
-///
-/// A list that accumulated would hand the warmer paths the reader scrolled off
-/// minutes ago, and would never be empty, so the shell would spawn a warm after
-/// every paint for the life of the process.
 #[test]
 fn a_settled_frame_asks_for_nothing() {
     let scratch = Scratch::large_diff("warm-defer-settled", 1, SCREENFUL / 2);
@@ -918,10 +766,6 @@ fn a_settled_frame_asks_for_nothing() {
 }
 
 /// An eager highlighter has no demand to raise, because it never defers.
-///
-/// The affordance the render gates use, asserted rather than assumed: they build
-/// one and then assert colour, so a version of it that deferred would make every
-/// one of them vacuous at once.
 #[test]
 fn an_eager_highlighter_parses_a_grammar_nothing_has_compiled() {
     let scratch = Scratch::large_diff("warm-eager", 1, SCREENFUL / 2);
@@ -945,10 +789,6 @@ fn an_eager_highlighter_parses_a_grammar_nothing_has_compiled() {
 
 /// A repository of `counts` files per extension, committed, so the index holds
 /// them.
-///
-/// `leading_paths` reads the **index** rather than walking the worktree, which
-/// is what makes it free beside a frame path that already opens one. So a
-/// fixture whose files are merely written proves nothing here, and this commits.
 fn indexed(name: &str, counts: &[(&str, usize)]) -> Scratch {
     let scratch = Scratch::new(name);
     for (extension, count) in counts {
@@ -964,13 +804,6 @@ fn indexed(name: &str, counts: &[(&str, usize)]) -> Scratch {
 }
 
 /// Extensions come back commonest first, which is the whole of the ranking.
-///
-/// **What a repository leads with is the only thing that makes a speculative
-/// warm affordable.** Warming the tail costs +58.00 MiB over ten grammars,
-/// measured on the reference machine; warming the language a repository is
-/// mostly made of moves memory the session was near-certain to spend anyway. A
-/// tally that came back in index order instead would spend the whole budget on
-/// whatever sorts first.
 #[test]
 fn the_indexed_extensions_come_back_commonest_first() {
     let scratch = indexed("warm-leading-rank", &[("rs", 9), ("py", 5), ("go", 2)]);
@@ -990,12 +823,6 @@ fn the_indexed_extensions_come_back_commonest_first() {
 }
 
 /// And it is the same answer every time, which a gate needs and a reader wants.
-///
-/// Two extensions with the same count have no order of their own, and a
-/// `HashMap`'s iteration order is deliberately not one. The merge in
-/// `highlight.rs` sorts this tally **stably**, so a total order here is what
-/// makes the three grammars it picks the same three every run; without it a
-/// session's memory and its first coloured frame would both be luck.
 #[test]
 fn extensions_with_the_same_count_break_their_tie_the_same_way_every_time() {
     let scratch = indexed("warm-leading-tie", &[("rs", 4), ("py", 4), ("go", 4)]);
@@ -1021,16 +848,6 @@ fn extensions_with_the_same_count_break_their_tie_the_same_way_every_time() {
 }
 
 /// The paths are bounded, and so is what it costs to produce them.
-///
-/// **A bound on the walk, not only on the answer**, which is the same
-/// distinction `WARM_BYTES` records one function over: retaining every path and
-/// truncating afterwards is a copy of the index, and an index is the one
-/// structure in this process that scales with the repository rather than with
-/// the window. I3 is a claim about a process left open for days.
-///
-/// The **counts** are deliberately not bounded, and that is what lets the merge
-/// be exact: a count is a `usize` beside an extension that already exists, where
-/// a path is a fresh `String` per file.
 #[test]
 fn no_more_than_the_asked_for_paths_per_extension_come_back() {
     let scratch = indexed("warm-leading-bound", &[("rs", 40), ("py", 40)]);
@@ -1057,10 +874,6 @@ fn no_more_than_the_asked_for_paths_per_extension_come_back() {
 }
 
 /// Somewhere that is not a repository is nothing to warm, not a failure.
-///
-/// This runs on a detached thread that upholds nothing, so every way it can fail
-/// has to end in an empty answer rather than in a panic: the workspace builds
-/// with `panic = "abort"`, so a panic here takes the monitor with it.
 #[test]
 fn a_directory_that_is_not_a_repository_leads_with_nothing() {
     let scratch = Scratch::new("warm-leading-bare");
@@ -1072,18 +885,6 @@ fn a_directory_that_is_not_a_repository_leads_with_nothing() {
 
 /// **A language spelled two ways is one grammar, and the budget must see it
 /// that way.**
-///
-/// Found by the altitude review rather than by a failing test, which is the
-/// finding: ranking on the extension counts `.yml` and `.yaml` separately at
-/// exactly the point where the counts decide which three grammars get compiled,
-/// so a repository whose YAML outweighs everything loses to smaller
-/// single-extension languages. `.h`/`.hpp` and `.md`/`.markdown` are the same
-/// shape.
-///
-/// The fixture is built so the two rankings disagree: by extension the top three
-/// are `.rs` 9, `.go` 8 and `.py` 7 with YAML nowhere, and by **grammar** YAML
-/// leads outright at 12. So Python colouring is the old answer and YAML
-/// colouring is the new one, and the gate fails in both directions.
 #[test]
 fn a_language_spelled_two_ways_is_counted_once() {
     let scratch = indexed(
@@ -1124,15 +925,6 @@ fn a_language_spelled_two_ways_is_counted_once() {
 
 /// **The product claim: a language the repository leads with is compiled before
 /// anybody writes to it, and the tail is not.**
-///
-/// This is the half of [#129](https://github.com/breferrari/vigia/issues/129)
-/// that keeps the pane from flickering at all in the case being watched. A
-/// monitor opened beside an agent that has not started yet has an empty changed
-/// set, so the warm over *that* has nothing to do; the index still knows the
-/// repository is mostly Rust.
-///
-/// Both directions, because a warm with no cap would pass the first assertion
-/// and spend the +58.00 MiB the cap exists to refuse.
 #[test]
 fn the_repositorys_leading_grammars_are_compiled_and_its_tail_is_not() {
     let scratch = indexed(
@@ -1172,26 +964,6 @@ fn the_repositorys_leading_grammars_are_compiled_and_its_tail_is_not() {
 
 /// A shebang script's grammar is knowable only from its first line, and the
 /// warmer gave up before it could be marked.
-///
-/// **The one I1 breach this change was able to produce**, found by the
-/// concurrency review rather than by a gate. `Entry::new` resolves with the
-/// file's first line, so `bin/setup` opening `#!/usr/bin/env python` defers and
-/// asks for a warm. `warm_run` resolved from the **path alone** to decide
-/// whether there was anything to compile, got nothing, and `continue`d before
-/// [`Attempt`] was armed. So the grammar was never marked, the next frame asked
-/// again, and every ask spawned a thread and sent a wake: a monitor at full tilt
-/// on a tree nobody was touching, which is precisely what I1's *0 wakeups while
-/// idle* forbids.
-///
-/// The fix is to pay the bounded read the extension could not spare us, which is
-/// the same read `CONTENT_SENSITIVE` already pays for a Qt `.ts` file. It closes
-/// a second gap in passing: a shebang script was never warmable at all, and
-/// `warm`'s docblock said so.
-///
-/// **Both halves, because either alone passes on a broken build.** A warmer that
-/// marked without compiling would satisfy the second assertion and leave the
-/// reader with a permanently plain file; one that compiled without marking is
-/// today's breach.
 #[test]
 fn a_grammar_only_the_first_line_knows_does_not_spin_the_warmer() {
     let scratch = Scratch::new("warm-shebang");
@@ -1249,11 +1021,6 @@ fn a_grammar_only_the_first_line_knows_does_not_spin_the_warmer() {
 
 /// Drive one screenful of the shebang fixture, passing the first line the frame
 /// path passes.
-///
-/// Written out rather than routed through `highlight_window`, because the shared
-/// helper passes `None` and `None` is exactly what this gate must not do: with
-/// no first line the grammar resolves to nothing on **both** sides, the entry is
-/// `Parse::Unsupported`, no demand is raised, and the breach is unreachable.
 fn shebang_classes(frame: &mut Frame, highlighter: &mut Highlighter) -> Vec<Class> {
     let index = frame
         .files()
@@ -1277,17 +1044,6 @@ fn shebang_classes(frame: &mut Frame, highlighter: &mut Highlighter) -> Vec<Clas
 
 /// A hostile index cannot turn one background scan into an unbounded
 /// allocation.
-///
-/// **Filed by the adversarial review, and the shape is worth keeping.** `.git/index`
-/// in a cloned repository is somebody else's bytes, and `indexed_extensions`
-/// retains a `Vec` per distinct extension. Two hundred thousand entries each
-/// carrying a unique extension is an allocation measured in gigabytes on a
-/// thread that runs at every launch, and under `panic = "abort"` an allocation
-/// failure takes the monitor rather than the thread.
-///
-/// The fixture is deliberately just over the cap rather than enormous: what is
-/// being asserted is that a cap exists and holds, and a gate that needed two
-/// hundred thousand files to say so would never be run.
 #[test]
 fn an_index_of_many_distinct_extensions_is_bounded() {
     let scratch = Scratch::new("warm-index-flood");
@@ -1309,9 +1065,6 @@ fn an_index_of_many_distinct_extensions_is_bounded() {
 }
 
 /// An extension no grammar could register is not worth a `HashMap` entry.
-///
-/// The cheaper of the two rejections and the one that bounds a single entry: the
-/// longest extension the dump registers is `sublime-syntax` at fourteen bytes.
 #[test]
 fn an_extension_longer_than_any_grammar_registers_is_skipped() {
     let scratch = Scratch::new("warm-index-long");
@@ -1336,11 +1089,6 @@ fn an_extension_longer_than_any_grammar_registers_is_skipped() {
 
 /// **The count stays exact past the cap, which is the half that decides the
 /// merge.**
-///
-/// Bounding how many distinct extensions are *tracked* is fine; dropping later
-/// entries of one already being tracked would make its count wrong, and the
-/// merge in `highlight.rs` ranks on exactly those counts. So an extension that
-/// made it into the tally keeps counting however full the tally is.
 #[test]
 fn an_extension_already_tracked_keeps_counting_past_the_cap() {
     let scratch = Scratch::new("warm-index-exact");
@@ -1371,16 +1119,6 @@ fn an_extension_already_tracked_keeps_counting_past_the_cap() {
 }
 
 /// **The grammar charged is the one compiled, not the one the extension named.**
-///
-/// `SPEC.md` §6's Qt rule: a `.ts` file whose first line is an XML declaration is
-/// a translation file, so it resolves to TypeScript by extension and compiles
-/// **XML**. `Attempt::retarget` is what moves the mark onto the grammar that was
-/// really compiled, and until this gate existed nothing exercised it: dropping
-/// the call would have left the warmer marking TypeScript for work XML did, so
-/// the reader's next real TypeScript file would draw coloured off a grammar
-/// nothing had compiled and pay the whole cliff on that frame.
-///
-/// Both directions, because marking everything would pass the first assertion.
 #[test]
 fn a_qt_translation_file_charges_xml_and_not_typescript() {
     // Committed thin and then written full, so every one of the three differs
@@ -1471,25 +1209,6 @@ const XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 "#;
 
 /// A hunk that scrolled away while it was plain comes back in colour.
-///
-/// **The interaction the round-four sweep traced and nothing gated.** Both
-/// halves of this were already covered on their own: a deferred hunk redrawn in
-/// place thaws (`a_warm_turns_the_plain_hunk_into_colour`), and a hunk that
-/// leaves the screen is kept in [`RETAINED_HUNKS`] so a reader who scrolls back
-/// does not pay the walk again (`crates/vigia-core/tests/budgets.rs`). What
-/// nothing reached is the two together, and it is the one place a deferred entry
-/// can be handed back **by a different route**: `recover` lifts it out of the
-/// retired queue rather than finding it in `entries`.
-///
-/// The reason that route is dangerous is that its digest still matches. The
-/// hunk did not change; the world outside it did, one warm ago. An entry
-/// recovered on the digest alone would be called a reuse and hand back the plain
-/// spans it was retired with, for the rest of the session, and a reader who
-/// scrolled away and back would be the only one who ever saw it.
-///
-/// Three passes, because the middle one is what does the retiring: a pass that
-/// draws a different file leaves the first hunk unclaimed, and `Pass`'s `Drop`
-/// sweeps it out.
 #[test]
 fn a_hunk_recovered_after_its_warm_comes_back_coloured() {
     let scratch = Scratch::large_diff("warm-recovered", 2, SCREENFUL / 2);

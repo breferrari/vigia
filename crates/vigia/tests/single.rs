@@ -1,23 +1,4 @@
 //! `SPEC.md` §11.2 **B16**: the diff pinned to one file, on `s`.
-//!
-//! Every gate here is one line of [#297](https://github.com/breferrari/vigia/issues/297)'s
-//! own gate list, and the list is worth restating because it is what the ruling
-//! promised rather than what the code happens to do: off by default; the diff's
-//! total is this file's and scrolling clamps at both ends of it; no row of
-//! another file is ever drawn; `n`, `p`, a digit and a click still change which
-//! file is shown; and toggling it returns the pane to the screen it started
-//! from.
-//!
-//! **The fixture is files taller than the pane**, which is the whole of what
-//! separates this from `scroll.rs`. There a file is four rows and the interesting
-//! event is crossing a boundary; here a file is twenty-two rows against a body of
-//! thirteen, so *scrolling inside one file* and *running out of file* are two
-//! distinguishable things and a clamp that fired at the wrong one would be
-//! visible.
-//!
-//! **What is asserted is the drawn rows and the resolved position**, not the
-//! request. A pin is enforced in `View::collect`, so a gate reading `App`'s own
-//! position would be reading the thing that is allowed to be out of range.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -63,10 +44,6 @@ fn body() -> usize {
 }
 
 /// The diff region alone, for the gates about the walk.
-///
-/// List-free for `scroll.rs`'s reason: these are about how the walk crosses
-/// files, or refuses to, and a pinned list would couple their row arithmetic to
-/// a cap they are not about.
 fn split() -> Body {
     Body::diff_only(body())
 }
@@ -106,18 +83,6 @@ fn draw(
 }
 
 /// Every file index a screen draws rows of.
-///
-/// The oracle for *no row of another file is ever drawn*. Counting headings
-/// alone would miss a screen resting deep inside the wrong file, which draws no
-/// heading at all, so the file the top is in is counted whether or not its
-/// heading is on screen.
-///
-/// **[`View::shown_files`] is that rule and this reads it** rather than counting
-/// headings again here. It is `pub`, exported, and documented for exactly this
-/// question, and until now it had no caller outside `view.rs` and no gate at
-/// all: a second copy of the rule here would have been the one under test while
-/// the shipped one stayed unexercised. The files a screen draws are contiguous
-/// from its top, which is what makes the count an index range.
 fn files_on(view: &View) -> Vec<usize> {
     (view.top.file..view.top.file + view.shown_files()).collect()
 }
@@ -159,10 +124,6 @@ fn a_shell_starts_unpinned() {
     // through a getter, because the field is private and because the ruling is
     // about the pane: a reader who has pressed nothing scrolls the whole changed
     // set exactly as every version before this one did.
-    //
-    // It is also the non-vacuity every gate below rests on. If a fresh shell were
-    // pinned, "the pin draws one file" would be true of the tool with the feature
-    // deleted.
     let scratch = fixture("shell-single-default");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -499,16 +460,6 @@ fn follow_still_moves_between_files_while_it_is_pinned() {
 #[test]
 fn toggling_the_pin_returns_the_screen_it_started_from() {
     // **Two claims, and the second is what the first costs.**
-    //
-    // From a screen already inside one file, one on-and-off pair is exactly
-    // identity: nothing needed clamping, so nothing was rewritten.
-    //
-    // From a screen straddling two files it cannot be, and the ruling says so out
-    // loud rather than leaving it to be discovered. The pin has to rest the
-    // file's last row on the bottom, which rewrites the position, so the straddle
-    // is gone. What is promised there is that it settles: **every pair after the
-    // first is identity**, so the toggle is not a ratchet that walks the reader
-    // up the file one press at a time.
     let scratch = fixture("shell-single-toggle");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -606,9 +557,6 @@ fn a_pinned_file_shorter_than_the_pane_walks_once() {
     // and reading it literally makes every frame on a short pinned file restart
     // the walk: three walks and six `Frame::diff` calls against two, forever, on
     // the file an agent is writing to.
-    //
-    // Nothing on screen can see it. Both walks resolve to the same position and
-    // draw the same rows, so the only instrument is the frame's own read count.
     let scratch = Scratch::large_diff("shell-single-treadmill", FILES, 1);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -643,11 +591,6 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
     // asserts the unpinned pane's behaviour; this asserts that the *route* is the
     // same one, by collecting the same viewport twice and differing only in the
     // flag that is supposed to change nothing when it is false.
-    //
-    // It is deliberately not a comparison against a recorded screen: those exist
-    // in `tests/render.rs` and they are what would catch a drawn difference. What
-    // this catches is a `Viewport::default()` that stopped meaning *the ordinary
-    // frame*.
     let scratch = fixture("shell-single-identity");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -716,13 +659,6 @@ fn a_pinned_gesture_survives_the_diff_it_was_made_against() {
     // Unpinned, `G` is
     // `jump_to(len - 1)`, which saturates on an empty list and touches no frame,
     // and a drag walks the list it is iterating.
-    //
-    // Two shapes, and the second is the one that matters most because it is not
-    // an edge at all. A **clean worktree** is the state a monitor sits in most of
-    // the time, so `s` and then `G` on a pane somebody left open is the ordinary
-    // use of this tool, and `Frame::diff` panics on an index into an empty list by
-    // design. The first shape is the agent in the other pane committing its work,
-    // which renumbers the changed set under a position nobody touched.
     let scratch = fixture("shell-single-shrink");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -807,9 +743,6 @@ fn s_is_what_asks_for_one_file_and_s_is_what_gives_the_diff_back() {
     // shipped with a gesture nothing could reach from a keyboard. #295 closed
     // exactly this hole for `r` and it reopened here, which is why the check is
     // the action's *resolution* rather than its existence.
-    //
-    // `Regions::default()` deliberately: a key is a key, so the hit-test that
-    // resolves a pointer has nothing to say about it.
     use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
     let press = |key: char| Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
@@ -878,10 +811,6 @@ fn a_pinned_end_key_and_a_scroll_in_one_wake_both_move() {
     // *position* nothing can move from: every `k` in the same batch walked the
     // row down from `span` and every one of them still clamped to the same
     // screen. Nine keystrokes swallowed on this fixture at this pane.
-    //
-    // Unpinned the case cannot arise, because `G` there is `jump_to`, which
-    // resolves to row zero. So this is the pin's own defect and it needs the
-    // pin's own gate.
     let scratch = fixture("shell-single-batch");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1182,18 +1111,6 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
     // decide between a one-line and a two-line footer, the region drawn is taller
     // than the region `span - height` was taken against, so the file's last row
     // rests above the bottom with a blank under it.
-    //
-    // **And it persists**, which is what makes it worth a sweep rather than a
-    // note: `App::view` writes the resolved position back every frame, so the
-    // screen stays wrong until the reader scrolls. That is
-    // [#57](https://github.com/breferrari/vigia/issues/57)'s symptom on the arm
-    // written to avoid it.
-    //
-    // Swept rather than pinned at the one width that flips, because which width
-    // that is falls out of the footer's own ladder and would be a number this
-    // gate had to keep in step with `Footer::plan`. What is asserted is the
-    // property at every width the sweep covers: after `G`, a pinned file taller
-    // than the body fills it.
     let scratch = fixture("shell-single-rest");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1280,19 +1197,6 @@ fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
     // `follow_still_moves_between_files_while_it_is_pinned` clears it with a
     // scroll before it draws, `tests/follow.rs` never pins, and `tests/list.rs`'s
     // degenerate grid pins `single: false` by name.
-    //
-    // Two things have to hold, and they are on opposite sides of the walk.
-    // `landing_of` has to place the viewport at the busiest hunk of the pinned
-    // file, and the `landed_inside` restart has to back a short screen up
-    // against the *pinned* floor rather than the diff's, which is the bound
-    // whose earlier reading was this ruling's recorded defect.
-    //
-    // **A sparse fixture rather than this file's usual one**, and that is what
-    // makes the landing a landing. `landing_of` keeps the heading whenever the
-    // busiest hunk is already drawn from it, which is the right answer and is
-    // what the ordinary fixture gets: one hunk starting two rows down, visible
-    // from row zero. A file edited every fortieth line has hunks all the way
-    // down, so the busiest is below the fold and the landing has somewhere to go.
     let scratch = Scratch::sparse_edits("shell-single-landing", FILES, 200, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1342,13 +1246,6 @@ fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
     // clear: one hunk starting two rows down is visible from row zero, and hunks
     // of equal size tie to the earliest, which is also visible. Both keep the
     // heading, correctly.
-    //
-    // What this gate owns is the half `follow.rs` cannot see: that the request
-    // was **resolved by a pinned walk at all**, that the walk did not leave the
-    // file to do it, and that the restart it can trigger backs up against the
-    // pinned floor rather than the diff's. `View::landed` above is the first,
-    // `files_on` the second, and the full screen and the stable next frame are
-    // the third.
     assert_eq!(
         view.rows.len(),
         body(),
@@ -1383,13 +1280,6 @@ fn a_straddle_reached_by_a_drag_pins_to_the_bottom_too() {
     // and stays quiet for one a jump placed. `Action::ToggleSingle` is not a
     // manual scroll, so it inherits whatever set the position, and `App::diff_to`
     // sets `anchored` **false**.
-    //
-    // So a reader who dragged the diff's bar into the middle of a tall file and
-    // then pressed `s` got a short screen with trailing blanks, which jumped
-    // upward on the next `j`. `SPEC.md` §11.2 B16 said the opposite in as many
-    // words, and no gate could see it because every gate arrived by scrolling.
-    //
-    // The gate is the drag, not the scroll, and that is the whole of it.
     let scratch = fixture("shell-single-drag-pin");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1458,21 +1348,6 @@ fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
     // the pane: the file the jump was for keeps the top row and the blanks
     // under it stay, because a jump is a claim about the top and backing up
     // would move the file off it.
-    //
-    // Two attempts at licensing the pin's own back-up went through `anchored`,
-    // and `anchored` outlives the pin. So `n` onto a short tail, then `s` and `s`,
-    // left an **unpinned** frame anchored, `View::collect` found it short, and the
-    // reader was pulled out of the file they had asked for with no input at all.
-    // Licensing from `single` has no state to leak, and this is the gate that
-    // says so.
-    //
-    // Every straddle elsewhere in this file is reached with `Scroll` or `DiffTo`,
-    // both of which already anchor, which is exactly why nothing saw it.
-    // **A fixture of one-line files, not this file's usual tall one.** A short
-    // tail means a *file shorter than the pane*, and every file in `fixture` is
-    // twenty-two rows against a thirteen-row body, so a jump to the last one
-    // fills the screen and there is no tail to protect. The first version of this
-    // gate used it and was vacuous: the mutation that re-adds the leak survived.
     let scratch = Scratch::large_diff("shell-single-short-tail", FILES, 1);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

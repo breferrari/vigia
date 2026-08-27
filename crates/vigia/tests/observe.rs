@@ -1,66 +1,6 @@
 //! [#72](https://github.com/breferrari/vigia/issues/72): the workload, measured.
-//!
-//! Every other number in this repository comes from a fixture.
-//! `crates/vigia-core/tests/budgets.rs` builds 100 files of 500 lines and
-//! rewrites them line for line, the soak drives the same shape, and
-//! `crates/vigia-core/examples/timings.rs` drives the core. Each is a good
-//! instrument and none of them is a repository with an agent writing to it,
-//! which is the one condition `SPEC.md` §2 buys the product class on.
-//!
-//! ## What this is not
-//!
-//! **It is not a gate.** Nothing here asserts anything about the product: the
-//! window is whatever a working session happened to be and the workload is
-//! whatever an agent happened to do, so a threshold over either would be a
-//! budget `SPEC.md` does not name. It reports, and the reports go into §10
-//! beside the fixture numbers they exist to be compared against. A resource
-//! claim is *gated* by the soak, over the soak's window, and that stays true.
-//!
-//! **It is not a product surface.** §11.2 B7 declined `VIGIA_OBSERVE` on
-//! 2026-08-05, and point 5 of that decline is why this file exists rather than a
-//! flag: *"an instrument for measuring this product already has a home, and it
-//! is not the product."* Nothing here is reachable from the binary, and the
-//! monitor still writes nothing.
-//!
-//! ## The three instruments, and why they are three processes
-//!
-//! 1. **The dirty-file sampler is not in this file at all.** How many files are
-//!    dirty at once is a property of the **worktree**, so anything that can read
-//!    the worktree measures it: `git status --porcelain`, counted, on a timer,
-//!    in a pane. That is B7 point 2 verbatim, and building it into a Rust
-//!    harness would be the product-code answer that decline already rejected.
-//!
-//! 2. [`observe_a_working_session`] is the measured loop: `vigia::run` with the
-//!    terminal taken out, pointed at an existing worktree instead of a fixture,
-//!    with **no writer of its own**. The agent in the other pane is the
-//!    workload, and injecting synthetic edits or scripted keys would make this a
-//!    second soak rather than a measurement of use.
-//!
-//! 3. [`observe_the_diff_against_git`] is the oracle, and it runs in a **process
-//!    of its own** rather than on a timer inside 2. That is not tidiness.
-//!    Answering *"does this diff agree with git"* means diffing every changed
-//!    file, and §7 already records what happens when a measurement's own setup
-//!    materialises every unit: `settle()` populated the cache the gate was
-//!    about, eleven read-bounding gates stayed green, and the height walk was
-//!    re-reading the whole undrawn changed set at 18.36ms p99 against a 16ms
-//!    budget. An oracle sharing a [`vigia_core::Frame`] with the measured loop
-//!    would warm exactly the caches whose cost is the measurement.
-//!
-//! ## Reading it
-//!
-//! Both entry points are `#[ignore]`, like `soak_child`: they are run
-//! deliberately, against a tree the environment names, and they print rather
-//! than assert. What `cargo test` does carry is [`statistic`], which holds every
-//! pure function either one draws a conclusion from, because a number nobody can
-//! check is worse than no number at all.
 
 /// The fixture builder, reached the way `soak.rs` reaches it.
-///
-/// `SPEC.md` §9 names this escape: a published `.crate` does not carry the
-/// sibling crate's test tree, so `cargo test` inside an unpacked copy fails
-/// where it passes in a checkout, and the fix at publish time is to exclude the
-/// tests from the package rather than to weaken a gate. This is the second file
-/// to make it and §9 counts them.
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
@@ -83,11 +23,6 @@ const TREE: &str = "VIGIA_OBSERVE_TREE";
 /// How long to watch for, in seconds.
 const SECS: &str = "VIGIA_OBSERVE_SECS";
 /// A path whose existence ends the run early, **with its report**.
-///
-/// A session cannot know its own length in advance, and the alternative is
-/// killing the process, which loses everything it measured. Checked once per
-/// sample rather than once per frame: a `stat` per frame would put a syscall on
-/// the loop being measured, which is the shape §7 spends four bullets on.
 const STOP: &str = "VIGIA_OBSERVE_STOP";
 
 /// Window used when nothing asks for another, short enough that a mistaken
@@ -95,26 +30,10 @@ const STOP: &str = "VIGIA_OBSERVE_STOP";
 const DEFAULT_SECS: u64 = 120;
 
 /// Samples across the window, whatever its length.
-///
-/// The soak's two numbers, deliberately: holding the *count* rather than the
-/// interval is what lets a two-minute window and a four-hour one produce
-/// comparable series, and this report exists to be read beside that one.
 const MAX_SAMPLES: usize = 288;
 const MIN_SAMPLES: usize = 12;
 
 /// Upper bounds of the frame-time histogram, in microseconds.
-///
-/// **16000 is an exact edge, and that is the whole reason this is a histogram
-/// with hand-written edges rather than a log scale.** #72 item 2 asks whether a
-/// frame is *"ever observed above 16ms"*, which is I9's budget, so the answer
-/// has to be a **count** and never an interpolation between two buckets that
-/// straddle it. [`Histogram::at_or_over`] refuses any threshold that is not one
-/// of these, so that property cannot quietly stop holding.
-///
-/// The rest sit where this repository's own measurements already are: about 3ms
-/// for a settled reuse, 7 to 11ms for a real frame under continuous edits, 25 to
-/// 61ms for a first entry into a large hunk. A boundary between two of those is
-/// what makes the printed shape readable rather than merely present.
 const EDGES: [u64; 17] = [
     250, 500, 750, 1_000, 1_500, 2_000, 3_000, 4_000, 6_000, 8_000, 12_000, 16_000, 24_000, 32_000,
     48_000, 64_000, 100_000,
@@ -124,18 +43,9 @@ const EDGES: [u64; 17] = [
 const BUDGET_US: u64 = 16_000;
 
 /// Worst frames kept, with the context that says what they were.
-///
-/// Bounded, and the bound is the point rather than an economy. A `Vec` of every
-/// frame would be harness memory growing with the run **inside the process whose
-/// memory is one of the measurements**, so the instrument would report its own
-/// growth as the product's. The soak states the same rule for its path set.
 const WORST: usize = 8;
 
 /// Pane the session is measured at.
-///
-/// One geometry rather than the soak's rotation: a resize is something a reader
-/// does, and this file measures a pane that is left alone. 80x24 is the size
-/// `SPEC.md` §11.1 sizes the pinned file list against.
 const AREA: (u16, u16) = (80, 24);
 
 fn env_var<T: std::str::FromStr>(name: &str, fallback: T) -> T {
@@ -156,16 +66,6 @@ fn tree() -> PathBuf {
 }
 
 /// What the header would draw on the left, which is the worktree's own name.
-///
-/// **`vigia::run`'s `short_name` in the same order, and the order is the whole
-/// of it.** That function is private to the `vigia` crate and not re-exported,
-/// so this cannot call it and has to agree with it by construction instead: the
-/// last component first, the canonicalised last component second, and the path
-/// itself rather than a placeholder when a worktree sits at a filesystem root
-/// and has no last component by either route. Canonicalising first and falling
-/// back to the literal `"worktree"` makes the report name a tree the header
-/// names something else, on exactly
-/// the paths where the two routes disagree.
 fn tree_name(tree: &Path) -> String {
     if let Some(name) = tree.file_name() {
         return name.to_string_lossy().into_owned();
@@ -183,9 +83,6 @@ fn tree_name(tree: &Path) -> String {
 // ---------------------------------------------------------------------------
 
 /// Frame costs, bucketed rather than retained.
-///
-/// Bucket `i` holds `EDGES[i - 1] <= v < EDGES[i]`, bucket `0` holds
-/// `v < EDGES[0]`, and the last holds everything at or above the final edge.
 #[derive(Debug, Default, Clone)]
 struct Histogram {
     counts: [u64; EDGES.len() + 1],
@@ -197,10 +94,6 @@ struct Histogram {
 }
 
 /// Where a percentile fell, as the bucket that contains it.
-///
-/// An interval rather than a value, because that is what a histogram actually
-/// knows. A single number here would be an interpolation wearing a
-/// measurement's clothes, and this file exists to stop exactly that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Interval {
     low: u64,
@@ -223,20 +116,12 @@ impl Histogram {
     }
 
     /// Frames at or over `edge`, which **must** be one of [`EDGES`].
-    ///
-    /// `None` for anything else, deliberately and loudly. A count over a
-    /// threshold that is not a boundary is an estimate, and the one question
-    /// this histogram exists to answer exactly is how many frames reached I9's
-    /// budget.
     fn at_or_over(&self, edge: u64) -> Option<u64> {
         let first = EDGES.iter().position(|&e| e == edge)?;
         Some(self.counts[first + 1..].iter().sum())
     }
 
     /// The bucket holding the nearest-rank percentile.
-    ///
-    /// Nearest rank, matching `vigia_core::Samples` in the shell and the soak's
-    /// own statistic: rank `ceil(fraction * n)`, one-based, no interpolation.
     fn rank(&self, fraction: f64) -> Option<Interval> {
         if self.total == 0 {
             return None;
@@ -257,21 +142,6 @@ impl Histogram {
 
     /// Whether a percentile at this count is just the maximum wearing a
     /// percentile's name.
-    ///
-    /// **Found by running the instrument rather than by writing it**, which is
-    /// the reason this is a derived check and not a constant. The first real
-    /// window drew 55 frames, cleared a 40-frame floor that looked generous, and
-    /// printed a p99 of `>=100ms` that was the single 591.74ms frame in the run
-    /// and nothing else. §7 already names the shape — *"at 30 samples a
-    /// nearest-rank p99 is just the maximum"* — and it names it as one of the
-    /// two flaws that were invisible to reading.
-    ///
-    /// The arithmetic decides it rather than taste: a nearest-rank p99 is
-    /// `ceil(0.99n)`, so it stops being the top sample at **n = 100**, where it
-    /// is rank 99 and one outlier is excluded. That is the same reasoning §5.1
-    /// gives for the shell's own 128-frame ring. Below it the report prints the
-    /// budget count and the maximum, which are exact at any count, and says
-    /// there is no percentile rather than quoting one.
     fn rank_is_max(&self, fraction: f64) -> bool {
         self.total > 0 && ((fraction * self.total as f64).ceil() as u64).max(1) >= self.total
     }
@@ -296,10 +166,6 @@ impl Histogram {
 }
 
 /// One frame worth keeping, and what it was.
-///
-/// #72 item 2 asks not only whether a frame went over budget but *"during
-/// what"*, and none of that is recoverable afterwards: the changed set moves,
-/// the screen moves, and the tick that caused it is gone.
 #[derive(Debug, Clone, Copy)]
 struct Worst {
     cost: Duration,
@@ -343,16 +209,6 @@ fn median(values: &[u64]) -> Option<u64> {
 }
 
 /// Quarter medians over a series, in order.
-///
-/// **Deliberately not the soak's `quarter_medians`, and deliberately not shared
-/// with it.** That one is half of a gate: its slicing, its warmup prefix and its
-/// refusal floor are all part of what §7 and
-/// [#126](https://github.com/breferrari/vigia/issues/126) ruled, so a second
-/// copy reachable from another file would be a second definition of a gated
-/// statistic. This one gates nothing and the line it prints says so. What it is
-/// for is the **level**, which is what #72 item 3 asks for: where a real
-/// session's RSS sits against the soak's plateau on a synthetic one. Drift stays
-/// the soak's question, over the soak's window.
 fn quarters(values: &[u64]) -> Option<[u64; 4]> {
     if values.len() < 4 {
         return None;
@@ -372,11 +228,6 @@ fn quarters(values: &[u64]) -> Option<[u64; 4]> {
 // ---------------------------------------------------------------------------
 
 /// One changed path, as either side counts it.
-///
-/// `added`/`removed` are `None` where the side declines to count, which is a
-/// third state and not a zero: that is the distinction a `-` row in
-/// `--numstat` exists to draw, and the one an eager parse loses. A binary file
-/// counted as `+0 -0` would agree with a diff nobody took.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Row {
     path: String,
@@ -385,13 +236,6 @@ struct Row {
 }
 
 /// `git diff --numstat -z`, parsed.
-///
-/// The `-z` form is three tab-separated fields per NUL-terminated record, except
-/// for a rename or a copy, where the path field is **empty** and the preimage
-/// and postimage follow as their own NUL-terminated records. Parsing the
-/// non-`-z` form instead would need a rule for a path containing a tab, a quote
-/// or a newline, and §7's fixture-axis rule is exactly about not taking a
-/// position on something like that by accident.
 fn parse_numstat(raw: &str) -> Vec<Row> {
     let mut fields = raw.split('\0');
     let mut rows = Vec::new();
@@ -427,13 +271,6 @@ fn parse_numstat(raw: &str) -> Vec<Row> {
 }
 
 /// `git status --porcelain -z`, parsed to `(status, path)`.
-///
-/// The two status letters are kept rather than discarded, because the untracked
-/// marker is the only trustworthy way to know that a path git's `diff` will
-/// never mention is *expected* to be missing from it rather than a disagreement.
-/// A rename record carries its preimage as an extra NUL-terminated field, and
-/// that field is dropped: this is the set of paths a monitor draws a row for,
-/// and a rename draws one row.
 fn parse_porcelain(raw: &str) -> Vec<(String, String)> {
     let mut fields = raw.split('\0');
     let mut entries = Vec::new();
@@ -453,12 +290,6 @@ fn parse_porcelain(raw: &str) -> Vec<(String, String)> {
 }
 
 /// Where two descriptions of the same worktree disagree.
-///
-/// **Both directions, always.** A check between two collections has the
-/// direction of whichever one it iterates, and a one-directional sweep reads
-/// exactly like a two-directional one when it comes back clean. Ours missing a
-/// path git has and ours holding a path git does not are different defects, and
-/// the second is the one a monitor gets punished for.
 fn disagreements(ours: &[Row], theirs: &[Row]) -> Vec<String> {
     let mine: BTreeMap<&str, &Row> = ours.iter().map(|row| (row.path.as_str(), row)).collect();
     let yours: BTreeMap<&str, &Row> = theirs.iter().map(|row| (row.path.as_str(), row)).collect();
@@ -501,11 +332,6 @@ fn missing(ours: &BTreeSet<String>, theirs: &BTreeSet<String>, what: &str) -> Ve
 }
 
 /// Rows with the excluded paths dropped.
-///
-/// One function rather than the same predicate written twice, because it is
-/// applied to **both** sides of the comparison and the two have to stay
-/// identical: an exclusion that reached one side alone would turn a legitimate
-/// asymmetry into a disagreement, or hide a real one.
 fn excluding(rows: &[Row], excluded: &BTreeSet<String>) -> Vec<Row> {
     rows.iter()
         .filter(|row| !excluded.contains(&row.path))
@@ -564,12 +390,6 @@ struct Report {
     tree: String,
     window: Duration,
     /// The interval the run *planned* to sample at.
-    ///
-    /// Carried rather than recomputed from the window and the samples taken.
-    /// A run stopped early has fewer samples than it planned, so dividing the
-    /// window by what arrived reported a 847-second nominal cadence beside a
-    /// 50-second actual gap on the first real window, which reads as a stall and
-    /// was the report dividing by the wrong denominator.
     step: Duration,
     elapsed: Duration,
     stopped_early: bool,
@@ -577,10 +397,6 @@ struct Report {
     frames: u64,
     ticks: u64,
     /// Sample intervals that passed with nothing written.
-    ///
-    /// On a fixture this would mean the writer stopped. Here it means the agent
-    /// was thinking, which is I1 working rather than a failure, and how much of
-    /// a session is idle is itself a number nobody has.
     idle_waits: u64,
     failed: u64,
     last_error: Option<String>,
@@ -619,13 +435,6 @@ impl Report {
     }
 
     /// Every line of the report, built rather than printed.
-    ///
-    /// Built, because the report is the entire output of an instrument that
-    /// asserts nothing else, which makes it the one thing about a run that *can*
-    /// be gated. That is what the plan asked for and what the quiet-session gate
-    /// below spends: a run that measured almost nothing has to reach a reader as
-    /// "no percentile here" rather than as a percentile over six frames, and
-    /// that is a property of the text rather than of the histogram.
     fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
         out.push(format!(
@@ -828,11 +637,6 @@ impl Report {
 }
 
 /// Everything the shell holds between frames, which `vigia::run` calls `Shell`.
-///
-/// A struct rather than a dozen locals threaded through a paint function, for
-/// the reason the product has one: a paint reads and writes most of it, and the
-/// alternative is a thirteen-parameter call that nothing can keep in agreement
-/// with the loop around it.
 struct Pane<'w> {
     app: App,
     frame: vigia_core::Frame<'w>,
@@ -853,13 +657,6 @@ struct Pane<'w> {
 
 impl Pane<'_> {
     /// `Shell::draw`: one paint, and a second when the first left a debt.
-    ///
-    /// **The debt is I7's whole mechanism.** The first frame draws plain and
-    /// owes its colour to the frame after it, because a grammar's patterns
-    /// compile on first use at 74-362ms and that is not a cost to put on the
-    /// frame a reader is waiting for (§6, §3's I7 row). A harness that painted
-    /// once would time the plain half of a frame the reader sees painted twice,
-    /// and would report the cheaper half as the frame.
     fn draw(&mut self, worktree: &Worktree, now: Instant) {
         // **The roll, because `Shell::draw` does it and this file's whole claim
         // is that it does what the shell does**. Without it this harness models
@@ -867,10 +664,6 @@ impl Pane<'_> {
         // only ever grows and the sampled readout draws a burst pinned where it
         // was: the freeze that row removed, preserved in the instrument that is
         // supposed to notice it.
-        //
-        // `now` is the turn's instant, shared with the tick's own record, for
-        // the reason `Shell::draw` gives: two clocks a status walk apart let a
-        // sample boundary fall between a write and the paint that draws it.
         self.history.record_sized([], now);
         self.paint(worktree);
         if self.app.owes_repaint() {
@@ -879,32 +672,6 @@ impl Pane<'_> {
     }
 
     /// One collect and one paint, in the order `Shell::paint` performs them.
-    ///
-    /// Three stages here are easily left out, and each is a cost the report
-    /// then under-states.
-    /// §7's own rule is that a gate is written against the caller's **whole**
-    /// frame and any stage left outside it is a stage nothing can regress you
-    /// on; the same arithmetic applies to an instrument, one step further along,
-    /// because a number is only comparable to the product's if it was taken over
-    /// the product's frame.
-    ///
-    /// - The **branch read**, one `.git/HEAD` at 56 to 69us. Reading it on
-    ///   exactly the frames that draw the empty state covers about half of the
-    ///   recorded sessions; since
-    ///   [#158](https://github.com/breferrari/vigia/issues/158) the header draws
-    ///   the branch always, so it happens on all of them and this instrument
-    ///   would under-state the frame by that much if it were left out.
-    /// - The **second** `chrome`, rebuilt after the collect so a notice raised
-    ///   during it reaches this frame rather than the next one.
-    /// - [`regions`], which resolves the clickable areas from the drawn frame.
-    ///   It is inside the product's own draw closure and so inside its timed
-    ///   region.
-    ///
-    /// What stays out, named rather than discovered later: the terminal
-    /// takeover and the real `ratatui` terminal, which need a tty and are I8's;
-    /// the input thread, because there is no reader; and the signal handler,
-    /// which is process-global and would arm this harness rather than a shell.
-    /// The buffer is a real one and `render` writes into it.
     fn paint(&mut self, worktree: &Worktree) {
         // Every frame, matching `Shell::paint` since #158. This went through a
         // `branch_for` seam whose guard was *only the empty state names a
@@ -974,10 +741,6 @@ impl Pane<'_> {
 
 impl<'w> Pane<'w> {
     /// Everything `vigia::run` builds before its first wake.
-    ///
-    /// An associated function rather than the body of [`drive`], so that
-    /// [`wiring`] can construct exactly what a session runs and drive one frame
-    /// through it without a watch, a window or a writer.
     fn open(worktree: &'w Worktree, name: String) -> Self {
         let mut frame = worktree.frame();
         frame.advance().expect("the first walk");
@@ -1021,11 +784,6 @@ impl<'w> Pane<'w> {
 }
 
 /// The loop, which is `vigia::run` with the terminal and the reader taken out.
-///
-/// Everything the shell does between waking and drawing, in the order it does
-/// it, and nothing else. There is no writer, no scripted input and no resize:
-/// each of those is something an agent or a reader does, and this measures a
-/// pane sitting beside one.
 fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Report {
     let name = tree_name(tree);
     let worktree = Worktree::discover(tree).expect("discover the worktree under observation");
@@ -1071,14 +829,6 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
         // where `vigia::run` begins before the drain, so the two are not the
         // same boundary and merging them would move every number this reports.
         // That divergence is older than this row and is left alone here.
-        //
-        // **After the receive, not before it.** The first version of this hoist
-        // read the clock above `recv_timeout`, which blocks for up to a sampling
-        // step: on a quiet tree that is two `HISTORY_SAMPLE`s, so every burst
-        // was stamped into a sample that had already closed and the store
-        // trailed the wall clock by however long the wait had been. `vigia::run`
-        // reads `began` after the wake on both of its arms, which is the whole
-        // point of copying it.
         let received = rx.recv_timeout(deadline - now);
         let turn = Instant::now();
         let tick_paths = match received {
@@ -1194,12 +944,6 @@ fn observe_a_working_session() {
 }
 
 /// The watch, the loop, and the counters that only the watcher has.
-///
-/// Separate from the test above so that what a run *is* has one name, and
-/// separate from [`drive`] because the watcher is the one part that has to live
-/// on its own thread: `gix::Repository` is `Send` and not `Sync`, so a borrow of
-/// one cannot cross a thread boundary. `vigia::run` and the soak both take the
-/// same shape for the same reason.
 fn observe(tree: &Path, window: Duration) -> Report {
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let (armed, arming) = mpsc::channel();
@@ -1232,12 +976,6 @@ fn observe(tree: &Path, window: Duration) -> Report {
 }
 
 /// #72 item 4: any disagreement with `git diff`.
-///
-/// One sweep, in its own process, against its own [`Worktree`], for the reason
-/// the module header gives. Run it on a timer from the shell rather than from
-/// inside the loop above: a timer is the shell's to own here exactly as it is
-/// B7 point 2's, and putting one inside the measured process would be inventing
-/// the wake I1 forbids in the one place nobody would look for it.
 #[test]
 #[ignore = "an instrument: it sweeps a real worktree against git"]
 fn observe_the_diff_against_git() {
@@ -1327,22 +1065,6 @@ fn observe_the_diff_against_git() {
 
 /// The one gate that is not over a pure function, because the one mechanism in
 /// this file that is not a pure function had nothing holding it.
-///
-/// [`Pane::draw`] settles the repaint debt I7 leaves after a plain first frame,
-/// and `SPEC.md` §7 records what that mechanism is worth: in the product,
-/// *"deleting the second statement left the whole suite green"*. This file
-/// copied the sequence a second time and got it **wrong** on the first attempt,
-/// which is the strongest possible argument for the gate: without the repaint,
-/// the harness timed the plain half of a frame the reader sees painted twice,
-/// and displaced its colour onto the next tick. Measured on the probe fixture
-/// before and after: a first frame of 5.52ms became **558.83ms**, which is the
-/// grammar compile arriving where the reader actually pays it.
-///
-/// Deliberately not over the watch, the window or a writer. A gate that waited
-/// for a filesystem event inside a one-second window would be timing-dependent
-/// on a loaded machine, and [#36](https://github.com/breferrari/vigia/issues/36)
-/// is this repository's open record of what that costs. One `draw` over a real
-/// worktree needs none of it.
 mod wiring {
     use super::*;
     use support::Scratch;
@@ -1385,20 +1107,6 @@ mod wiring {
     }
 
     /// The other half, and it exists because a mutation survived the one above.
-    ///
-    /// **The reason changed with [#158](https://github.com/breferrari/vigia/issues/158)
-    /// and the gate is worth more, not less.** With the read happening on
-    /// exactly the frames that draw the empty state, a dirty fixture cannot
-    /// reach it and deleting the read outright leaves the gate above green: it
-    /// takes a
-    /// clean fixture to hold a cost the harness would otherwise under-measure on
-    /// about half the recorded sessions.
-    ///
-    /// The header draws the branch on every frame now, so **both** fixtures pay
-    /// it, and this asserts the pair rather than the clean case alone. That is
-    /// the same "span the axis rather than move along it" answer §7 reaches
-    /// twice, and spanning it is what would catch a future guard being
-    /// reintroduced on one side.
     #[test]
     fn every_tree_draws_its_branch_because_the_header_names_it() {
         for (name, dirty) in [
@@ -1445,12 +1153,6 @@ mod wiring {
 
 /// Gates over the pure functions the two instruments draw their conclusions
 /// from.
-///
-/// `SPEC.md` §7: *"Gates are mutation tested before they are trusted."* Every
-/// one of these was broken deliberately and confirmed red before it was kept,
-/// and the last pair is why: a check that can only ever report a disagreement is
-/// as useless as one that can never report one, and only the second failure mode
-/// is loud.
 mod statistic {
     use super::*;
 
@@ -1711,10 +1413,6 @@ mod statistic {
     }
 
     /// A report over a run that measured almost nothing.
-    ///
-    /// Six frames and four samples, which is the shape the second real window
-    /// actually had: a quiet session is the ordinary case here, not an edge, so
-    /// it is the case the report has to survive.
     fn thin_report() -> Report {
         Report {
             tree: "vigia.a".to_owned(),

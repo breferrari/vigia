@@ -1,59 +1,4 @@
 //! Taking the terminal, and giving it back.
-//!
-//! Two mechanisms, because one is not enough.
-//!
-//! A [`Session`] restores on drop, which covers every ordinary return and every
-//! `?` on the way out. It does **not** cover a panic: `Cargo.toml` sets
-//! `panic = "abort"` for the release profile, and an aborting panic runs no
-//! destructors at all. So the restore also runs from a panic hook, installed
-//! before the screen is ever taken. Without it a panic leaves the reader in the
-//! alternate screen with no prompt, no echo, and a mouse that reports every
-//! movement as garbage.
-//!
-//! ## Why this module is shaped as policy over a trait
-//!
-//! I8 is proven here rather than in `crates/vigia/tests/`, and the shape is
-//! forced by two things that are not visible from reading the crossterm API.
-//! Both were measured before this was written, not assumed.
-//!
-//! **Raw mode is not observable.** Under `cargo test` on Windows,
-//! `is_raw_mode_enabled()` returns `Ok(true)` before anything has enabled it, and
-//! `enable_raw_mode()` succeeds against a stdout that is not a terminal. A test
-//! that asserted on real raw-mode state would pass against broken code, which is
-//! worse than no test.
-//!
-//! **Mouse capture is not ANSI everywhere.** On Windows
-//! `EnableMouseCapture::is_ansi_code_supported()` is `false`, so `execute!` routes
-//! it through the console API and writes **zero bytes** into the sink. A
-//! byte-exact assertion over the whole takeover would quietly mean one thing on
-//! Unix and another on Windows.
-//!
-//! So the terminal itself cannot be the oracle. What can be asserted exactly is
-//! the *policy*: which steps are taken, in what order, and that giving back is
-//! their exact inverse. [`Step`] and [`TAKEOVER`] make that policy data, [`Console`]
-//! makes the mechanism swappable, and [`Takeover`] is the guard that runs one over
-//! the other. `SPEC.md` §7 licenses this directly: where a correctness rule has no
-//! reachable integration path, the pure-function test *is* the gate.
-//!
-//! What that leaves untested is the mapping from a [`Step`] to the escape
-//! sequence it really emits, since a recorder cannot see it. The last layer of
-//! the test module closes that by driving the real [`Crossterm`] into a byte
-//! sink, and the ANSI table beside it checks the commands against DEC's own mode
-//! numbers rather than against crossterm restating itself.
-//!
-//! **A third way in, and deliberately not a third mechanism.** An externally
-//! delivered signal is otherwise uncovered: raw mode makes Ctrl-C a key event
-//! and never a signal, so there is nothing to catch on the path a reader uses,
-//! and a `kill` from elsewhere runs neither the guard nor the hook.
-//! [`signal`](crate::signal) closes that while adding nothing to this module:
-//! the handler restores nothing, it ends the loop, and the guard above then
-//! does what it already did. The number of ways to leave went up by one and the
-//! number of ways to restore did not, which is the property worth having: the
-//! three test layers below are unchanged, and what they gained is a section
-//! beside them rather than among them.
-//!
-//! What is still out of reach is `SIGKILL` and `TerminateProcess`, on the same
-//! footing on both platforms, because neither runs any code the process owns.
 
 use std::io::{self, IsTerminal, Stdout, Write, stdout};
 use std::sync::Once;
@@ -85,34 +30,12 @@ enum Step {
     MouseCapture,
     /// Focus reporting, so a mark drawn from pointer state can be cleared when
     /// the reader looks away.
-    ///
-    /// **Here for `SPEC.md` §11.2 B10**, which was declined on the claim that
-    /// *"the takeover does not enable focus reporting"* — a description of this
-    /// array, written as though it were a
-    /// fact about terminals. The decline was a day old; the absence it rested on
-    /// had not been real for years, which is the part worth keeping. It is the middle rung of §11.1's clearing ladder: motion
-    /// inside the pane retires a hover mark on its own, and this is what retires
-    /// one when the window loses focus instead.
-    ///
-    /// **Its platform story is the opposite of [`Step::MouseCapture`]'s, which
-    /// is the trap this module's header would otherwise set.** `EnableMouseCapture`
-    /// overrides `is_ansi_code_supported` to `false` on Windows and writes zero
-    /// bytes; `EnableFocusChange` carries no such override, so with ANSI it
-    /// really does emit `?1004h`, and without it `execute_winapi` is a
-    /// deliberate no-op because the console API delivers `FOCUS_EVENT` records
-    /// unasked. Two mouse-adjacent commands, two answers: do not generalise from
-    /// whichever one you read first.
     FocusChange,
     /// The cursor, which a monitor never places anywhere meaningful.
     Cursor,
 }
 
 /// The order the terminal is taken in. Giving it back walks this **backwards**.
-///
-/// Raw mode is first, so it is the last thing given back. It has more side
-/// effects than anything else here, and ratatui's own restore path orders it the
-/// same way for that reason: the escape sequences that leave the alternate screen
-/// should be written while the terminal is still in the mode they were written in.
 const TAKEOVER: [Step; 5] = [
     Step::RawMode,
     Step::AlternateScreen,
@@ -122,29 +45,15 @@ const TAKEOVER: [Step; 5] = [
 ];
 
 /// The terminal underneath a [`Session`], as something that can be swapped.
-///
-/// Exists so the order in [`TAKEOVER`] and the unwinding in [`Takeover::take`] can
-/// be asserted against a recorder. See this module's header for why the real
-/// terminal cannot be the oracle.
 trait Console {
     /// Take one step, or report why it could not be taken.
     fn take(&mut self, step: Step) -> io::Result<()>;
 
     /// Give one step back.
-    ///
-    /// Infallible on purpose. Nothing useful can be done about an error here: it
-    /// runs while a process is already leaving, sometimes while it is panicking,
-    /// and reporting it would mean writing to a terminal whose state is exactly
-    /// what is in doubt.
     fn give_back(&mut self, step: Step);
 }
 
 /// The real console, over `crossterm`.
-///
-/// Generic over the sink only so a test can read back what it wrote. Production
-/// is always [`stdout`], and [`Step::RawMode`] ignores the sink entirely because
-/// both platforms change the mode through a syscall rather than an escape
-/// sequence.
 struct Crossterm<W: Write> {
     out: W,
 }
@@ -179,11 +88,6 @@ impl<W: Write> Console for Crossterm<W> {
 }
 
 /// The terminal, taken. Gives itself back on drop.
-///
-/// `taken` is how far into [`TAKEOVER`] the takeover got, and it is the whole
-/// reason a half-finished [`Session::enter`] can be undone exactly. A bare "did we
-/// start?" flag would either give back a step that was never taken or leak one
-/// that was.
 struct Takeover<C: Console> {
     console: C,
     taken: usize,
@@ -191,11 +95,6 @@ struct Takeover<C: Console> {
 
 impl<C: Console> Takeover<C> {
     /// Take every step of [`TAKEOVER`], giving back what succeeded if one fails.
-    ///
-    /// The unwinding cannot lean on `Drop`, because on the failing path there is
-    /// no `Takeover` yet. A bare `?` here would hand an error to a caller that
-    /// prints it into a terminal still in raw mode, with no echo and no line
-    /// editing, which is a worse outcome than the failure it is reporting.
     fn take(console: C) -> io::Result<Self> {
         let mut takeover = Self { console, taken: 0 };
         for step in TAKEOVER {
@@ -216,11 +115,6 @@ impl<C: Console> Drop for Takeover<C> {
 }
 
 /// Give the first `taken` steps of [`TAKEOVER`] back, in reverse.
-///
-/// One function rather than a loop at each call site, because the reverse walk
-/// *is* the invariant: the guard and the panic hook are two different ways of
-/// leaving, and while each wrote its own loop only one of them was covered by the
-/// test that pins the order.
 fn give_back_all<C: Console>(console: &mut C, taken: usize) {
     for step in TAKEOVER[..taken].iter().rev() {
         console.give_back(*step);
@@ -228,20 +122,9 @@ fn give_back_all<C: Console>(console: &mut C, taken: usize) {
 }
 
 /// A taken terminal that gives itself back.
-///
-/// Holding one is what makes the screen the shell's; dropping it is what makes it
-/// the reader's again. There is deliberately no way to restore early and keep
-/// drawing: [`Takeover`] is private, and a shell that could put the terminal back
-/// and keep drawing would be drawing onto the reader's shell prompt.
 pub struct Session {
     /// Declared **first**, so it drops first and no live `Terminal` outlives the
     /// screen it draws on, even for the length of a drop.
-    ///
-    /// Checked rather than assumed, because the intuitive reason is the wrong
-    /// one: neither `ratatui::Terminal` nor `CrosstermBackend` implements `Drop`,
-    /// so there is no buffered frame here that could flush itself into the
-    /// reader's shell after the alternate screen is gone. The ordering is
-    /// tidiness, not a fix for that.
     screen: Screen,
     /// Second, so the terminal goes back after the screen is gone. Never read;
     /// its whole job is its `Drop`.
@@ -250,11 +133,6 @@ pub struct Session {
 
 impl Session {
     /// Enter the alternate screen, in raw mode, with the mouse reporting.
-    ///
-    /// Fails rather than draws when standard output is not a terminal. A monitor
-    /// whose output is being redirected has nothing useful to write there, and
-    /// half a megabyte of escape sequences in a pipe is a worse answer than a
-    /// sentence explaining it.
     pub fn enter() -> io::Result<Self> {
         check_drawable(stdout().is_terminal())?;
 
@@ -281,17 +159,6 @@ impl Session {
 }
 
 /// Refuse a standard output that is not a terminal.
-///
-/// Split out from [`Session::enter`] so the refusal is testable. `cargo test`
-/// captures stdout and `--nocapture` does not, so a test driving `Session::enter`
-/// directly would assert opposite things depending on how it was run, and would
-/// take over the terminal of anyone who ran it the second way.
-///
-/// Takes the answer rather than something to ask, because `std::io::IsTerminal`
-/// is a **sealed trait**: it cannot be implemented outside `std`, so there is no
-/// fake terminal to hand this. What that leaves uncovered is the single
-/// `stdout().is_terminal()` at the call site, which is one std call rather than a
-/// derivation that could be subtly wrong.
 fn check_drawable(is_terminal: bool) -> io::Result<()> {
     if is_terminal {
         Ok(())
@@ -303,40 +170,16 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
 }
 
 /// Chain a restore onto the panic hook, once per process.
-///
-/// Builds its own console rather than borrowing a [`Session`]'s, because it has
-/// to run when there is no session to borrow: it is installed before the first
-/// step is taken, and a panic in that window is exactly the case `Drop` cannot
-/// reach.
 fn install_hook() {
     install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
 }
 
 /// Give back the whole of [`TAKEOVER`], whatever was actually taken.
-///
-/// Named rather than inlined into the hook so the *decision* is assertable: the
-/// hook itself can only be observed by panicking a real process against a real
-/// terminal, so inlined, neither the count nor the direction would be reached by
-/// any test, and the panic path is the one that matters most when it is wrong.
-///
-/// Deliberately not symmetrical with [`Takeover`], which gives back only the
-/// prefix it took. At panic time there is no prefix to read, and the two
-/// directions are not equally bad: giving back a step never taken is a no-op or
-/// an escape sequence the terminal ignores, while failing to give back one that
-/// was leaves the reader with no echo.
 fn restore_everything<C: Console>(console: &mut C) {
     give_back_all(console, TAKEOVER.len());
 }
 
 /// Chain `restore` onto the panic hook, at most once per `once`.
-///
-/// Chained rather than replaced, so the panic message still reaches the reader
-/// through whatever hook was already there. `Once` because a second install would
-/// nest the restore inside itself, and every future panic would pay for every
-/// session ever opened.
-///
-/// Takes the `Once` rather than reaching for the static, so a test can install
-/// into one of its own instead of racing the process-global gate.
 fn install_hook_in(once: &Once, restore: impl Fn() + Send + Sync + 'static) {
     once.call_once(|| {
         let previous = std::panic::take_hook();
@@ -345,21 +188,12 @@ fn install_hook_in(once: &Once, restore: impl Fn() + Send + Sync + 'static) {
 }
 
 /// The order the panic path runs in: restore, then whatever hook was there.
-///
-/// A free function because `PanicHookInfo` cannot be constructed outside `std`,
-/// so a test cannot call a real hook, but it can call this. The order is the
-/// point: the previous hook prints the panic message, and it has to land on a
-/// terminal that has already been given back or the reader cannot read it.
 fn on_panic<T>(restore: impl Fn(), previous: impl Fn(T), info: T) {
     restore();
     previous(info);
 }
 
 /// Which side of the luminance line the terminal's background sits on.
-///
-/// The answer to the one question the startup query asks, `SPEC.md` §11.2 B18:
-/// with no `VIGIA_THEME` and no theme file, this picks `dark` or `light`, and
-/// no answer keeps `ansi`, whose whole contract is assuming nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Background {
     /// Luminance at or below the line: the showcase dark palette fits.
@@ -369,13 +203,6 @@ pub enum Background {
 }
 
 /// Classify an OSC 11 reply, or say it is not one.
-///
-/// The reply is `ESC ] 11 ; rgb : RRRR / GGGG / BBBB ST` with one to four hex
-/// digits per channel and either `ESC \` or `BEL` closing it; every terminal
-/// in the 2026 matrix that answers at all answers in that shape, and the
-/// digit width varies, so each channel is scaled by its own width. The
-/// luminance rule is the field's (OpenCode's classifier, delta's and yazi's in
-/// mechanism): Rec. 601 weights against one half.
 pub fn background_of(reply: &[u8]) -> Option<Background> {
     let text = std::str::from_utf8(reply).ok()?;
     let at = text.find("]11;")?;
@@ -405,17 +232,6 @@ pub fn background_of(reply: &[u8]) -> Option<Background> {
 }
 
 /// Ask the terminal its background colour, waiting at most `timeout`.
-///
-/// **Before the event reader exists, and never after**: crossterm's parser
-/// destroys any sequence it does not know (`event/sys/unix/parse.rs` clears
-/// the buffer on an unknown), so the only moment this reply can be read is
-/// before the takeover starts reading. That is also why the *live* flip is a
-/// separate, blocked issue rather than a missing loop here.
-///
-/// The tty is opened directly rather than through stdin, raw mode is borrowed
-/// for the exchange so the reply neither echoes nor waits for a newline, and
-/// every failure is `None`: a monitor that cannot ask still starts, on the
-/// palette that assumes nothing.
 #[cfg(unix)]
 pub fn background(timeout: std::time::Duration) -> Option<Background> {
     use std::io::{Read, Write};
@@ -533,27 +349,6 @@ mod background_tests {
 #[cfg(test)]
 mod tests {
     //! I8, as the policy it is.
-    //!
-    //! The module header says why none of this can be asserted against a real
-    //! terminal. What follows is in three layers, and the layers are not
-    //! interchangeable:
-    //!
-    //! 1. The **policy**, against a recorder: order, the exact inverse, and what
-    //!    a half-finished takeover gives back. This is most of I8.
-    //! 2. The **panic path**, which is a separate mechanism because
-    //!    `panic = "abort"` runs no destructors.
-    //! 3. The **adapter**, because a recorder cannot see that
-    //!    `Step::AlternateScreen` is wired to `LeaveAlternateScreen` rather than
-    //!    to `EnterAlternateScreen`. Layers 1 and 2 would both pass with that
-    //!    wire crossed.
-    //!
-    //! A fourth section follows them and is deliberately **not** a fourth layer.
-    //! The three above prove the restore *policy*, each from an angle the others
-    //! cannot see. What section 4 proves is that an externally delivered signal
-    //! reaches that policy at all: it needs a second process, and it asserts over
-    //! the real bytes a real guard wrote on its way out. Adding a way to *leave*
-    //! did not add a way to *restore*, which is why the three layers are
-    //! unchanged and why the new section sits beside them rather than among them.
 
     use std::sync::{Arc, Mutex};
 
@@ -569,21 +364,12 @@ mod tests {
     }
 
     /// A console that records instead of acting, and can be told to fail.
-    ///
-    /// The log is shared rather than owned because every one of these is handed
-    /// to a [`Takeover`] that then owns it, and the assertions run after that
-    /// takeover has been dropped. A clone the test keeps is the only way back to
-    /// what the moved-away copy saw.
     #[derive(Clone)]
     struct Recorder {
         log: Arc<Mutex<Vec<Event>>>,
         /// The index into [`TAKEOVER`] whose `take` fails, if any.
         fail_at: Option<usize>,
         /// Calls to [`Console::take`] so far, **including** the one that fails.
-        ///
-        /// Not the same quantity as [`Takeover`]'s `taken`, which counts only
-        /// steps that succeeded. Kept distinct on purpose: conflating the two is
-        /// how a test stops being able to tell the off-by-one it exists to catch.
         attempts: usize,
     }
 
@@ -867,15 +653,6 @@ mod tests {
         // 1000/1002/1003/1015/1006 are the mouse reporting modes, and 1004 is
         // focus reporting. `h` sets a mode and `l` resets it, so a swapped pair
         // is visible here as a letter.
-        //
-        // **This list is written out rather than derived from `TAKEOVER`, so a
-        // step added there does not arrive here on its own.** That is the one
-        // gate in this module which does not adapt, and it is deliberate: the
-        // point of asserting bytes is that a human wrote down what the bytes
-        // should be. The two gates that *do* derive are the order walk and the
-        // real-console inverse below, and between them they catch a step that is
-        // taken out of order or not given back. Neither can catch a step wired
-        // to the wrong command, which is what this one is for.
         assert_eq!(ansi(&EnterAlternateScreen), "\x1b[?1049h");
         assert_eq!(ansi(&LeaveAlternateScreen), "\x1b[?1049l");
         assert_eq!(ansi(&Hide), "\x1b[?25l");
@@ -896,18 +673,6 @@ mod tests {
         // panic restore invert whatever it holds, and the byte gate is per
         // command. So all of them stay green if a step is simply deleted, and
         // nothing said the takeover has to contain anything at all.
-        //
-        // **Written as a rule rather than for the step that forced it.**
-        // `SPEC.md` §11.2 B10 needed `FocusChange` asserted, and the narrow
-        // version of this test asserted exactly that one — which is the shape
-        // `RULINGS.md`'s I1 entry records going wrong when an amendment is
-        // written as narrowly as the case in front of it. Deleting
-        // `Step::MouseCapture` would have left that version green while the
-        // mouse §4 requires vanished.
-        //
-        // The `match` is the witness that keeps this honest: a new variant fails
-        // to **compile** here, so the list below cannot silently fall behind the
-        // enum it is checking.
         const EVERY: [Step; 5] = [
             Step::RawMode,
             Step::AlternateScreen,
@@ -943,12 +708,6 @@ mod tests {
         // Focus reporting sits with the mouse rather than after the cursor, so
         // the two modes that change how *input* is reported are taken together
         // and given back together.
-        //
-        // **Indexed rather than compared as `Option`s**, which the first version
-        // got wrong in the silent direction: `position` returns `Option<usize>`,
-        // and `Some(2) > None` is `true`, so deleting `MouseCapture` made the
-        // ordering assert pass rather than fail. The loop above now guarantees
-        // both steps are present, so unwrapping here is honest.
         let at = |step| {
             TAKEOVER
                 .iter()
@@ -984,10 +743,6 @@ mod tests {
     }
 
     /// Every `ESC [ ? <number> (h|l)` in `stream`, as `(number, is_set)`.
-    ///
-    /// Deliberately ignores anything else: crossterm writes mode changes in this
-    /// one shape, and a parser that tried to cover the whole grammar would be a
-    /// second implementation to get wrong.
     fn modes(stream: &str) -> Vec<(u32, bool)> {
         stream
             .split('\x1b')
@@ -1007,10 +762,6 @@ mod tests {
         // What layers 1 and 2 cannot see. A recorder is blind to which crossterm
         // command a step is wired to, so `Step::AlternateScreen` giving back
         // `EnterAlternateScreen` would pass every test above.
-        //
-        // `Step::RawMode` is skipped because it is a syscall against the real
-        // console on both platforms rather than an escape sequence, and a unit
-        // test has no business changing the mode of the terminal running it.
         let emitting = || TAKEOVER.iter().filter(|step| **step != Step::RawMode);
 
         let mut console = Crossterm { out: Vec::new() };
@@ -1042,12 +793,6 @@ mod tests {
         // So `Step::FocusChange => execute!(out, EnableMouseCapture)` would leave
         // both green, and the inverse check below would too, because it only
         // demands that giving back undoes whatever taking did.
-        //
-        // Asserted on `?1004` specifically because that is the step this layer
-        // gained with #186, and because it is the one whose absence B10 was
-        // declined for. `?1049` and `?25` are covered by the same walk; the
-        // mouse bundle is deliberately not asserted here, since on Windows it
-        // writes zero bytes and this test runs on both.
         assert!(
             took.contains(&(1004, true)),
             "the takeover wrote no `?1004h`, so `Step::FocusChange` is wired to \
@@ -1056,11 +801,6 @@ mod tests {
 
         // The inverse, derived from what was actually written rather than listed
         // again. Polarity flipped and order reversed, per mode.
-        //
-        // Flipped, not "all resets": hiding the cursor is `?25l`, which *resets*
-        // mode 25, and showing it again sets the same mode. A rule saying taking
-        // sets and giving back resets would be wrong for the cursor in one
-        // direction and wrong for everything else in the other.
         let expected: Vec<(u32, bool)> = took
             .iter()
             .rev()
@@ -1094,8 +834,6 @@ mod tests {
         // `Session`. Nothing in this crate may reach for a call that skips
         // destructors, because one of those anywhere in the shell would put the
         // reader back in raw mode with no message and nothing to report.
-        //
-        // `main` returns an `ExitCode` for exactly this reason.
         const SOURCES: [(&str, &str); 14] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
@@ -1168,12 +906,6 @@ mod tests {
     }
 
     // ---- Beside the layers: the signal, end to end ------------------------
-    //
-    // The one thing here that needs two processes. A signal cannot be delivered
-    // to the process that would have to observe it arriving, a console control
-    // handler cannot be uninstalled once a test is over, and the wake has to
-    // cross a real blocked `recv` rather than a fake one. So the shape is the
-    // `soak.rs` shape: this binary re-invokes itself by name.
 
     /// Where the parent tells the child to leave its evidence.
     const CHILD: &str = "VIGIA_SIGNAL_DIR";
@@ -1182,30 +914,15 @@ mod tests {
     const CHILD_TEST: &str = "terminal::tests::signal_child";
 
     /// Tells the child to take the wake and then do nothing with it.
-    ///
-    /// A shell wedged for any reason, which is the case the second ask exists for
-    /// and the only way to observe it: a shell that behaves swallows one signal and
-    /// leaves, so nothing else can produce a second delivery that matters.
     const WEDGE: &str = "VIGIA_SIGNAL_WEDGE";
 
     /// The child gets a process group of its own, so a control event addressed
     /// to its process id reaches it and nothing else, above all not the runner.
-    ///
-    /// It is also what decides which event the parent sends: a process created
-    /// this way starts with Ctrl-C disabled, and `CTRL_BREAK` is the one a fresh
-    /// group can always be given.
     #[cfg(windows)]
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
     /// A process that arms the real handler, blocks the way the shell blocks, and
     /// leaves the real guard to restore.
-    ///
-    /// Ignored because it is meaningless on its own, and it **fails** rather than
-    /// returning green when run directly. That is `soak_child`'s rule and the
-    /// right one: a test reporting `ok` having armed nothing is the green tick
-    /// over a check that did not run, which is what the parent below refuses two
-    /// screens further down. The assert fires before anything blocks, so running
-    /// this directly reports rather than hangs.
     #[test]
     #[ignore = "the parent process delivers the signal this waits for"]
     fn signal_child() {
@@ -1270,13 +987,6 @@ mod tests {
             // about frames, and `run` owns a terminal so no test can drive the
             // real one. Said out loud because a copy nobody names is a copy that
             // drifts.
-            //
-            // One `recv` rather than a loop, because `signal::forward` owns the
-            // only sender on this channel and sends one kind of wake. The other
-            // two arms are the ways this test could otherwise pass for the wrong
-            // reason: a `recv` that ended because the forwarder died would drop
-            // the guard exactly as a signal does, so what ended the wait is
-            // checked rather than assumed.
             match rx.recv() {
                 Ok(crate::Wake::Signalled) => {}
                 Ok(_) => panic!("the forwarder sent a wake that was not the signal"),
@@ -1309,29 +1019,6 @@ mod tests {
         // Before the child is spawned, because a child inherits whatever console
         // its parent had at the moment it started. A process with none can be
         // sent no control event, and neither can anything it spawns.
-        //
-        // **Never freed, and the reason took three goes to state correctly.** A
-        // guard that freed it on every way out was the obvious fix to a cleanup
-        // line three exits skipped. Then the revert claimed freeing would break
-        // `the_real_console_gives_back_every_mode_it_set` on a console-less
-        // runner, which was an unmeasured guess and self-refuting: that test is on
-        // `main`, where nothing allocates a console, so if a runner had none it
-        // would already be failing there.
-        //
-        // What is actually true, read out of `crossterm`'s `ansi_support.rs`:
-        // `supports_ansi()` is `enable_vt_processing().is_ok() || TERM is set and
-        // not "dumb"`, memoised **once per process** through `CONOUT$`. Two things
-        // follow. Windows CI must already have a console or a `TERM`, or that test
-        // would be red on `main`, so `AllocConsole` almost certainly never acts
-        // anywhere and this call is a fallback for the genuinely console-less case
-        // a probe had to simulate. And the asymmetry is real: allocating can only
-        // turn a not-yet-memoised `false` into `true`, which no test minds, while
-        // **freeing** can turn it into `false` for all forty-eight tests in this binary,
-        // depending on which ran first.
-        //
-        // So the leak is not a concession. A console this process allocated dies
-        // with the process milliseconds later and nothing outside can see it,
-        // where freeing one is order-dependent damage to everything else here.
         #[cfg(windows)]
         ensure_console();
 
@@ -1507,10 +1194,6 @@ mod tests {
     }
 
     /// Whether the child is gone, within the same bound [`wait_for`] uses.
-    ///
-    /// `Child::wait` has no timeout, and the failure this guards against is a
-    /// process that will not die: waiting for it would hang the run rather than
-    /// report the defect.
     fn wait_for_exit(child: &mut std::process::Child) -> bool {
         for _ in 0..600 {
             match child.try_wait() {
@@ -1523,10 +1206,6 @@ mod tests {
     }
 
     /// Wait for a marker the child writes.
-    ///
-    /// Polling because the two processes share nothing else, and generous because
-    /// a cold `cargo test` on a shared runner can take seconds to reach the
-    /// child's first line. Slowness is not the failure this is guarding against.
     fn wait_for(marker: &std::path::Path) -> bool {
         for _ in 0..600 {
             if marker.exists() {
@@ -1582,19 +1261,6 @@ mod tests {
     }
 
     /// Make sure this process has a console.
-    ///
-    /// Reports nothing, because neither caller has anything to do with the answer:
-    /// the console is deliberately never freed, for the reasons written where it is
-    /// called.
-    ///
-    /// Unconditional rather than detected, which is measured rather than lazy:
-    /// `GetConsoleWindow` returns null in an ordinary redirected `cargo test` that
-    /// delivers control events perfectly well, so there is no cheap question to
-    /// ask first. `AllocConsole` answers it by doing. With a console already
-    /// attached it fails with `ERROR_ACCESS_DENIED` and changes nothing; with none
-    /// it makes one, which is what a runner started by a service needs. The three
-    /// standard handles were measured unchanged across it, so cargo keeps
-    /// capturing this test's output either way.
     #[cfg(windows)]
     fn ensure_console() {
         // SAFETY: an FFI call taking nothing. Failure is the ordinary case and

@@ -1,27 +1,10 @@
 //! The colour-depth ladder: what this terminal can show, and what a palette
 //! becomes when it can show less than the palette was written in.
-//!
-//! Two halves, and only the first is arithmetic.
-//!
-//! **Detection** is a precedence table, and a table is exactly the shape that goes
-//! wrong by a rule being right in isolation and in the wrong place. So it is driven
-//! one row per rung, each with the rungs above it deliberately set to something
-//! else, rather than by asserting each variable alone against an empty environment.
-//!
-//! **Degradation** has one property that matters more than the rest and it is not
-//! "the output is expressible". A depth that mapped every colour to black would pass
-//! that and destroy the product. What has to survive every rung is the *distinction*:
-//! `SPEC.md` §5 spends the diff signal on colour, so added and removed may never
-//! land on the same cell colour however few colours are left.
 
 use ratatui::style::{Color, Modifier, Style};
 use vigia::{DEPTH_VAR, Depth, Theme};
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
-///
-/// Takes a slice rather than touching the process, because `cargo test` runs these
-/// on threads of one process and `set_var` is both racy and, since Rust 2024,
-/// `unsafe`. `Depth::from_env` exists in this shape for exactly that reason.
 fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     let owned: Vec<(String, String)> = pairs
         .iter()
@@ -36,10 +19,6 @@ fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
 }
 
 /// One row of the precedence table: why, the platform, the environment, the rung.
-///
-/// Named because `clippy::type_complexity` is denied and a four-part tuple in a
-/// slice reaches it. The alias is also the better documentation: the table is read
-/// row-wise and the names say what each column is for.
 type Precedence<'a> = (&'a str, bool, &'a [(&'a str, &'a str)], Depth);
 
 /// One row of the hue table: what it is, the colour, and the names it may take.
@@ -407,15 +386,6 @@ fn a_terminal_that_can_draw_the_wash_is_detected_as_one_that_can() {
     // the test above pins, and `dark` therefore drew every changed row unwashed
     // while colouring everything else. From the outside that reads as a palette
     // being ignored, which is what it was reported as.
-    //
-    // Driven from the environment to the drawn style rather than from either end,
-    // because neither end is where it broke.
-    //
-    // `COLORTERM` is absent in every row on purpose. It is the only convention for
-    // claiming 24-bit and nothing propagates it: `ssh` forwards `TERM` alone, and a
-    // multiplexer replaces `TERM` with an entry of its own. Its presence is what
-    // made this invisible for a phase, so a row that sets it is a row that cannot
-    // fail.
     let cases: &[(&str, &[(&str, &str)])] = &[
         // The reported screen: a macOS terminal, `tmux` at its default
         // `default-terminal screen`. `screen` claims nothing at all, so before
@@ -559,8 +529,6 @@ fn degrading_never_collapses_a_hue_onto_its_opposite() {
     // all. `SPEC.md` §5.1 already records that the diff signal narrows to the sigil
     // column at sixteen colours; what it must not do is narrow to nothing, which is
     // what an addition and a removal drawn the same colour would mean.
-    //
-    // Driven from the mockup's own hues, which is what `dark` is authored in.
     let added = Color::Rgb(0x3f, 0xb9, 0x50);
     let removed = Color::Rgb(0xf8, 0x51, 0x49);
     let mixed = Color::Rgb(0xe3, 0xb3, 0x41);
@@ -617,13 +585,6 @@ fn a_tint_keeps_its_hue_at_256_rather_than_landing_on_the_grey_ramp() {
     // between two cube levels measures closer to a grey than to either. The wash
     // then draws as a neutral band, which is a tint that has lost the only thing it
     // was for, and a reader reports that the background colour "does not happen".
-    //
-    // **Driven as foregrounds, and the fixture is still the washes.** 256 no longer
-    // draws a background at all, so this is now a property of the quantiser rather
-    // than of anything on screen. The wash colours stay the fixture because they are
-    // the most desaturated things any palette here holds, which makes them the case
-    // the grey ramp is most likely to steal; a test that swapped them for ordinary
-    // syntax hues would keep passing and stop being about anything.
     for (name, style) in [
         ("dark added", Theme::dark().added_row),
         ("dark removed", Theme::dark().removed_row),
@@ -650,9 +611,6 @@ fn a_channel_between_two_levels_takes_the_nearer_one() {
     // itself, because at a corner the distance is zero either way. It is only wrong
     // in between, where `saturating_sub` reads every level above the value as an
     // equally good zero and picks the last one instead of the nearest.
-    //
-    // The levels are 0, 95, 135, 175, 215, 255, so the first gap is the wide one and
-    // the place to sit in.
     let index = |r: u8, g: u8, b: u8| match Depth::Ansi256
         .resolve(Style::new().fg(Color::Rgb(r, g, b)))
         .fg
@@ -665,9 +623,6 @@ fn a_channel_between_two_levels_takes_the_nearer_one() {
     // nearer a dark grey than it is to black, so the grey ramp wins it and the cube
     // arithmetic never runs. Pinning one channel at full keeps every case in the
     // cube, where the axis picker is the only thing deciding.
-    //
-    // The cube is `16 + 36*r + 6*g + b` over level indices, so one channel moves
-    // the answer by a known stride and the arithmetic stays legible in the result.
     assert_eq!(index(40, 255, 0), 16 + 30, "40 is nearer 0 than 95");
     assert_eq!(index(60, 255, 0), 16 + 36 + 30, "60 is nearer 95 than 0");
     assert_eq!(index(255, 40, 0), 16 + 180, "the same, one axis over");
@@ -771,11 +726,6 @@ fn every_self_naming_term_answers() {
     // can rot without a gate noticing; this ladder swept neither. Five of the
     // seven were gated incidentally by other rows and two, `contour` and `rio`,
     // by nothing at all: deleting either survived the whole suite.
-    //
-    // Driven with nothing else in the environment, so the `TERM` entry is the
-    // only thing that can supply the answer and the floor under it is sixteen.
-    // Restated rather than imported, which is this file's standing rule: a gate
-    // reading the renderer's own table would agree with it by construction.
     const SELF_NAMING: [&str; 7] = [
         "alacritty",
         "contour",
@@ -806,10 +756,6 @@ fn every_named_program_answers() {
     // The other half of the same gap: `program_depth`'s arms were reachable only
     // through rows that used them as a *higher* signal something else had to
     // lose to, so deleting `tabby` and five others survived.
-    //
-    // `Apple_Terminal` is the one entry that is not truecolour and it is the
-    // reason this table returns a rung rather than a bool, so it is named
-    // separately rather than swept with the rest.
     for program in [
         "ghostty",
         "Hyper",
@@ -869,9 +815,6 @@ fn wt_session_is_read_only_on_windows() {
     // which is why it is a behaviour question rather than a dead guard, and it
     // is filed rather than changed here: this row is a glyph ladder, not a
     // colour ruling.
-    //
-    // Its glyph twin genuinely is equivalent, because every non-Windows path
-    // below it already answers braille.
     assert_eq!(
         Depth::from_env(false, env(&[("WT_SESSION", "abc")])).expect("a rung"),
         Depth::Ansi16,

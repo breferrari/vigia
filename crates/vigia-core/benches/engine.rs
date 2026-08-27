@@ -1,12 +1,4 @@
 //! `criterion` benchmarks for the engine, named by `SPEC.md` §7.
-//!
-//! These track and report; they do not gate. The gates live in
-//! `tests/budgets.rs`, because criterion measures change against a baseline
-//! while the budgets in `SPEC.md` are absolute. Both are wanted: criterion says
-//! "this got 20% slower", the budget test says "this is now over the line".
-//!
-//! The fixture is shared with the test suite rather than duplicated, so a
-//! benchmark and a gate can never drift into measuring different things.
 
 #[path = "../tests/support/mod.rs"]
 mod support;

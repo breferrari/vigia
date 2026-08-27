@@ -1,20 +1,4 @@
 //! I4, held against the shell rather than against the core.
-//!
-//! > Streams, never buffers. First paint is independent of total diff size.
-//!
-//! `crates/vigia-core/tests/budgets.rs` gates the engine's half: content is
-//! fetched per file, so a caller *can* paint the top of a large diff without
-//! reading the bottom. Nothing there stops a caller from asking for every file
-//! anyway, and asking is the natural way to write a renderer. So the number that
-//! matters here is what one screenful costs, and the claim is that it follows the
-//! screen instead of the worktree.
-//!
-//! Structural, not wall-clock: exact byte counts compared across two fixtures
-//! that differ only in how many files changed. That is hardware-independent and
-//! takes no slack. The two-fixture shape is not decoration either. Comparing one
-//! screen against the whole diff would pass against exactly the regression this
-//! file exists to catch, because a screen that read every file would inflate both
-//! sides and leave the ratio alone.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -32,97 +16,40 @@ use support::{Scratch, delta, materialise, settle, settle_spans};
 /// The wide fixture: enough files that reading all of them is unmistakable.
 const FILES: usize = 100;
 /// The narrow one. Same content per file, so the per-file cost is comparable.
-///
-/// **At least `LIST_SETTLED`, and derived rather than written.** `SPEC.md` §11.1's
-/// pinned list is one row per changed file up to a cap, so a fixture below the
-/// cap draws a *shorter* list than the wide one and the two stop being
-/// comparable: the equality gates here would then be reading a difference in
-/// region height and calling it a difference in worktree size. Two above the cap
-/// keeps it unmistakably "few" against a hundred while both screens draw the
-/// same six rows.
-///
-/// **The cap is a share of the pane since
-/// [#160](https://github.com/breferrari/vigia/issues/160), and this is still the
-/// right number because of the pane [`layout`] asks for.** Every screen in this
-/// file is 80x24, which is where the share *is* `LIST_SETTLED`, so both fixtures
-/// draw six rows exactly as before and no read count here moves. Deriving it from
-/// the settled cap rather than from `list_cap(24)` is deliberate: the ladder is
-/// not exported, and a test that recomputed a quarter of a height would be
-/// restating the renderer's arithmetic to check the renderer.
 const FEW_FILES: usize = LIST_SETTLED + 2;
 /// Lines per file, chosen so one file is far taller than any screen.
 const LINES: usize = 500;
 
 /// An ordinary terminal, which is where the row count comes from.
-///
-/// Eighty columns, so the footer is one line whatever the state and the two
-/// fixtures below are compared over the same number of rows. At forty this would
-/// still be honest but the row count would be one lower, which is I6's business
-/// rather than I4's.
 fn body() -> usize {
     layout().diff
 }
 
 /// Rows the pinned list takes on this screen.
-///
-/// Every read count in this file is the diff's plus this, because §11.1 makes a
-/// screen two regions and each list row is one `Frame::diff`. Bounded by the
-/// region and never by the changed set, which is the claim rather than an
-/// accounting detail.
 fn listed() -> usize {
     layout().list
 }
 
 /// The shipped split, list included.
-///
-/// **Every gate in this file is about what a screen costs**, and `SPEC.md` §11.1
-/// makes a screen two regions. Asking for a list-free layout here would leave the
-/// pinned list outside every read bound in the repo, which is §7's rule about a
-/// stage a gate never calls, one region over.
 fn layout() -> Body {
     layout_at(ORDINARY)
 }
 
 /// An ordinary terminal, and the pane every gate in this file but one measures.
-///
-/// **Named since [#160](https://github.com/breferrari/vigia/issues/160)**, because
-/// it stopped being an arbitrary fixture size the day the pinned list's cap became
-/// a share of the pane: 24 is the height at which that share is the settled six,
-/// so every number below is the one it was before the ladder existed.
 const ORDINARY: u16 = 24;
 
 /// A pane tall enough that the list is deeper than the cap that shipped.
-///
-/// The height [#125](https://github.com/breferrari/vigia/issues/125) named when it
-/// asked for the deepening, taken from the issue rather than derived from the
-/// share, for the reason `tests/list.rs` gives: a gate that recomputed the quarter
-/// would agree with the renderer by construction.
 const DEEP: u16 = 50;
 
 /// [`layout`] at a named pane height.
-///
-/// **The list's height is a function of the pane now**, so a file whose every gate
-/// measured one height was measuring one rung of a ladder. That is the shape §7
-/// keeps finding: an instrument that looks settled and only ever exercises the
-/// case that was already correct.
 fn layout_at(height: u16) -> Body {
     layout_on(ORDINARY_WIDTH, height)
 }
 
 /// The pane every gate in this file is measured on unless it says otherwise.
-///
-/// Named rather than written as an `80` in [`layout_at`], because it stopped
-/// being an arbitrary fixture width the day the pinned list became a *rail* on
-/// a wide pane: eighty columns is the stacked shape, and a file whose every
-/// gate measured one width was measuring one of two layouts. Same argument
-/// [`ORDINARY`] carries one axis over.
 const ORDINARY_WIDTH: u16 = 80;
 
 /// A pane wide enough that the list is a rail beside the diff.
-///
-/// Above the arrival width `SPEC.md` §11.1 derives, and taken from the spec rather
-/// than recomputed here for the reason [`DEEP`] gives: a gate that re-derived the
-/// number would agree with the renderer by construction.
 const RAIL_WIDTH: u16 = 160;
 
 /// [`layout_at`] on a named pane.
@@ -136,11 +63,6 @@ fn layout_on(width: u16, height: u16) -> Body {
 }
 
 /// A chrome that has asked for the rail.
-///
-/// **The rail is a gesture since `SPEC.md` §11.2 B14**, so the arm of this file
-/// that is about the deeper region beside a rail has to ask for one. The
-/// stacked arm reads the same layout at eighty columns, where the request
-/// cannot be honoured and changes nothing.
 fn railed(mut chrome: vigia::Chrome) -> vigia::Chrome {
     chrome.rail = true;
     chrome
@@ -150,11 +72,6 @@ fn railed(mut chrome: vigia::Chrome) -> vigia::Chrome {
 struct Screen {
     cost: FrameStats,
     /// What highlighting that same screenful cost.
-    ///
-    /// I2b's caller-side half. The core will parse exactly the lines it is asked
-    /// for and nothing in it stops a renderer from asking for every hunk of
-    /// every file, which is the shape `SPEC.md` §7 says needs a second gate over
-    /// the caller.
     highlight: HighlightStats,
     /// Files the view asked the frame for.
     read: usize,
@@ -163,27 +80,11 @@ struct Screen {
 }
 
 /// Draw one screen over a fresh fixture and report what it cost.
-///
-/// The frame is cold, so every file it touches is computed rather than reused.
-/// That is the measurement wanted here: a warm frame reads nothing at all, which
-/// would make the byte comparison pass without saying anything.
-///
-/// **The shell is not cold, and the two are independent.** `App::past_first_paint`
-/// stands in for a monitor past its first frame, because `App::new`'s first
-/// [`App::view`] draws plain (`Viewport::highlight`, I7) and the highlighting
-/// half of this helper would then measure the one frame that deliberately parses
-/// nothing. Priming with an extra view instead would warm the *frame* too and
-/// take the reads with it, which is the comparison the other half is about.
 fn one_screen(name: &str, files: usize) -> Screen {
     one_screen_at(name, files, ORDINARY)
 }
 
 /// [`one_screen`], drawn against a named pane height.
-///
-/// Split out by [#160](https://github.com/breferrari/vigia/issues/160) so the read
-/// bound can be held at a height where the pinned list is deeper than the cap that
-/// shipped. A second fixture rather than a second draw over the first, because the
-/// measurement wants a **cold** frame and the first draw warms it.
 fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
     one_screen_on(name, files, ORDINARY_WIDTH, height)
 }
@@ -427,9 +328,6 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
     // always the current file and always in the window, so the hottest file in
     // the worktree was read and diffed **twice on every frame a monitor exists
     // for**. The walk now hands its entries to the list.
-    //
-    // Written as a relation rather than a constant: it says "the overlap costs
-    // nothing", which stays true if the region's height changes.
     assert_eq!(
         many.cost.computed,
         many.read as u64 - 1,
@@ -484,16 +382,6 @@ fn a_tick_re_measures_only_what_changed() {
     // every tick did. `Frame::advance` dropped the span cache whole, so each of
     // the ninety-four files this screen never draws was read from disk again,
     // forever, at 12.90ms a tick on the reference machine.
-    //
-    // **Why eleven read-bounding gates were green over it.** Every one of them
-    // opens with `settle`, and `settle` materialises: with a `FileDiff` cached
-    // for every file the walk rebuilds every span from memory and reads nothing.
-    // The setup deleted the cost. `settle_spans` is the same wait without the
-    // materialisation, and it exists for this gate.
-    //
-    // Structural on purpose: a count, so it takes no slack and fails on any
-    // machine. The wall clock is
-    // `budgets.rs::ticking_over_an_undrawn_worktree_holds_the_frame_budget`.
     let scratch = Scratch::large_diff("shell-reads-tick", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -544,17 +432,6 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
     // them: a bulk rewrite of files nothing has drawn leaves every carried span
     // unsettled at once, so every one of them would pay a pre-check stat that the
     // rule then ignores, on top of the post-read stat it already pays.
-    //
-    // **Written because a mutation survived.** Reordering the two terms of that
-    // `&&` is invisible to every wall-clock gate here: it costs about 1.3ms over
-    // a hundred files and
-    // `budgets.rs::what_a_bulk_rewrite_of_undrawn_files_costs` has
-    // more headroom than that. A count does not care about headroom.
-    //
-    // The **second** tick after the rewrite is the one to measure. On the first,
-    // the carried evidence is still settled and its print really has moved, so a
-    // stat is genuinely needed to discover that; from the second onward the
-    // evidence is unsettled and the stat is pure waste.
     let scratch = Scratch::large_diff("shell-reads-margin", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -604,18 +481,6 @@ fn an_uncommitted_gitattributes_does_not_re_read_the_worktree_every_tick() {
     // for as long as the file sits uncommitted in the changed set, which is the
     // ordinary state of a repository being set up or of an agent that wrote one
     // and kept working.
-    //
-    // Measured with the presence test in place, over this fixture: **95 files
-    // re-measured and 3.7 MiB read on every tick, 19.91ms p50 against 9.16ms**.
-    // That is the pre-#101 shape exactly, reintroduced by #101's own fix for a
-    // different defect and invisible to every gate here, because no fixture in
-    // the suite had ever ticked with an uncommitted `.gitattributes` in it:
-    // `Scratch::crlf_worktree` is the only family that writes one and it commits
-    // it in the same breath.
-    //
-    // **The third tick is the one that matters.** Two ticks cannot tell "cleared
-    // on arrival" from "cleared every time", which is one tick too few and is
-    // why the gate that shipped with the guard did not catch this.
     let scratch = Scratch::large_diff("shell-reads-attrs", FILES, LINES);
     scratch.write(".gitattributes", "*.rs text\n");
 
@@ -686,14 +551,6 @@ fn a_deleted_gitattributes_does_not_re_read_the_worktree_every_tick() {
     // as the removal sits there, and every tick clears both caches: the presence
     // test the guard was rewritten to remove, back again for the commonest way an
     // attributes file changes.
-    //
-    // An absent file is not a racily-clean hazard, because there is no content to
-    // be stale about. Its absence *is* a change, and the map comparison sees that
-    // on the tick it happens and on no tick after.
-    //
-    // Found by review rather than by any gate here, which is worth recording: the
-    // sibling test one above covers a `.gitattributes` that is written and stays,
-    // and nothing covered one that goes.
     let scratch = Scratch::large_diff("shell-reads-attrs-gone", FILES, LINES);
     scratch.write(
         ".gitattributes",
@@ -787,22 +644,9 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
 }
 
 /// Consecutive frames driven inside the settle margin.
-///
-/// Enough that a shell recomputing the whole worktree would be unmistakable
-/// rather than arguable.
 const MARGIN_FRAMES: usize = 20;
 
 /// Frames between rewrites, so the window cannot outrun the margin.
-///
-/// "Drive frames for two seconds and they will all be inside the margin" is a
-/// race against the machine, not an invariant: the margin is a fixed wall-clock
-/// duration and the frame rate is whatever the hardware gives. A runner slow
-/// enough would settle part-way through, those frames would reuse instead of
-/// recompute, and the comparison below would hold for the one reason that proves
-/// nothing. Rewriting on a fixed frame count instead means every frame sampled
-/// is within this many frames of a write, whatever the machine, and it keeps the
-/// two fixtures doing identical work in identical order rather than however much
-/// each got through in a fixed time.
 const REWRITE_EVERY: usize = 5;
 
 /// What a bulk rewrite cost one fixture over [`MARGIN_FRAMES`] frames.
@@ -814,27 +658,10 @@ struct Margin {
     rows: usize,
     /// Changed files in the whole worktree, which is the term the two fixtures
     /// are supposed to differ in.
-    ///
-    /// Reported rather than trusted from the argument. The guard inside
-    /// [`bulk_rewrite_window`] only proves a fixture matches *its own* argument,
-    /// so it is blind to the one mistake that empties this gate: both call sites
-    /// asking for the same size. That was confirmed by mutation, not by reading.
     files: usize,
 }
 
 /// Draw [`MARGIN_FRAMES`] screens without ever letting the fixture settle.
-///
-/// Deliberately **not** settled during the window, which is the whole point.
-/// Every other structural gate in this file calls [`settle`] first, so the
-/// window in which the frame path can prove nothing and recomputes by design is
-/// the window none of them measure (`SPEC.md` §7). The fixture is settled
-/// *before* the first rewrite so the margin under test is the one those rewrites
-/// open and not the one building the fixture left behind.
-///
-/// Each rewrite carries a new round, because a rewrite with identical bytes
-/// moves the modification time but leaves the diff alone: the frame path would
-/// still recompute, and the highlighter would sit idle reusing a hunk that never
-/// changed. `Scratch::rewrite_all` has the measurement.
 fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
@@ -884,11 +711,6 @@ fn a_bulk_rewrite_recomputes_only_what_is_drawn() {
     // formatter or a branch switch invalidates every diff at once, and for the
     // whole margin nothing can be proved unchanged, so a shell that fetched
     // ahead would recompute a hundred files a frame for two seconds.
-    //
-    // Structural rather than wall-clock, for the reason the file header gives,
-    // and two fixtures rather than one for the reason `one_screenful_costs_the_
-    // same_however_much_else_changed` gives: a shell reading everything inflates
-    // both sides of a single-fixture ratio and leaves it alone.
     let few = bulk_rewrite_window("shell-bulk-few", FEW_FILES);
     let many = bulk_rewrite_window("shell-bulk-many", FILES);
 
@@ -1048,16 +870,6 @@ fn a_full_history_costs_the_frame_no_read_and_no_probe() {
     // I10 sits on the frame path now: every drawn heading asks the store what
     // that file's churn and recency are. This is the assertion that the answer
     // is free.
-    //
-    // It has to be free rather than cheap. I2a's whole claim is that a
-    // revalidated frame reads **zero** bytes, and I4's is that the shell touches
-    // only the files it draws. A store that answered by `stat`-ing, or by
-    // reading, would break both while looking like a rendering detail, and the
-    // failure would be invisible to every gate above: they all run with an empty
-    // history, where a lookup that costs something is never made.
-    //
-    // Compared against the same frame drawn with an empty store rather than
-    // against a literal, so the two runs differ in exactly one thing.
     let scratch = Scratch::large_diff("shell-reads-history", FEW_FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1133,13 +945,6 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
     // needs that file's total line count, and `SPEC.md` §5.2 records that as a
     // whole-file read: measured per frame it puts back exactly what I2a took
     // out.
-    //
-    // It is free instead, because `hunk::compute` interns both sides to diff
-    // them at all and the count falls out of that. So it rides the cached
-    // `FileDiff` and a revalidated frame still reads zero bytes.
-    //
-    // The byte assertion alone is satisfied by drawing no strip at all, so the
-    // non-vacuity half below is what makes this a gate rather than a hope.
     let scratch = Scratch::large_diff("shell-reads-heat", FEW_FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1195,10 +1000,6 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     // whole screen's byte count. `SPEC.md` §11.1 bounds the pinned list by its
     // height and never by the changed set, so doubling the worktree must not
     // move this number by one.
-    //
-    // Two fixtures both far past the cap, which is what makes the comparison an
-    // equality rather than a ratio: below the cap the region is genuinely
-    // shorter and a difference would mean nothing.
     let small = one_screen("shell-list-small", 200);
     let large = one_screen("shell-list-large", 400);
 
@@ -1243,12 +1044,6 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     // region is where the repo has been bitten by it before: the height walk
     // re-read the whole undrawn changed set on every tick with eleven
     // read-bounding gates green over it.
-    //
-    // The claim is the same one, not a new one: the read count is the diff's
-    // files plus the region's **own drawn height**, whatever that height is. A
-    // list that started following the changed set would pass at 24 and fail
-    // here, because the fixture is two hundred files and the region is twelve
-    // rows rather than six.
     let deep = one_screen_at("shell-list-deep", 200, DEEP);
     let deep_rows = layout_at(DEEP).list;
     assert!(
@@ -1299,11 +1094,6 @@ fn a_list_row_for_an_unchanged_file_reads_no_bytes() {
     // already holds costs a `stat` and a cache hit, never a read. Under I2a that
     // is what makes the region affordable at all, because a monitor sits on a
     // settled tree for most of its life and the list is on screen the whole time.
-    //
-    // Settled first, deliberately. A file written moments ago cannot be proved
-    // unchanged and is re-read by design, so measuring inside the margin would
-    // report the engine being correct as the region being wasteful. The margin
-    // gets its own gate below.
     let scratch = Scratch::large_diff("shell-list-idle", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1366,8 +1156,6 @@ fn the_list_reads_no_more_when_its_window_has_moved() {
     // case, and this region has an origin worth leaving: at `list_top` zero the
     // walk starts on file zero, which is also where the diff starts, so the two
     // regions overlap and the list's own reads are hidden behind the body's.
-    //
-    // Driven to a deep window by scrolling the diff, since the window tracks it.
     let scratch = Scratch::large_diff("shell-list-window", FILES, 1);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1439,11 +1227,6 @@ fn a_list_inside_the_settle_margin_reads_only_what_it_draws() {
     // one window where the engine deliberately does the most work per frame is
     // the one window none of them enters. That was worth a rule in `SPEC.md` §7
     // for the diff; the region is new and owes the same proof.
-    //
-    // Inside the margin a file written moments ago is re-read every frame by
-    // design, so the claim is not "reads nothing". It is that what it re-reads
-    // is bounded by the two regions rather than by the worktree, which is the
-    // same two-fixture shape the rest of this file uses.
     let few = margin_screen("shell-list-margin-few", FEW_FILES);
     let many = margin_screen("shell-list-margin-many", FILES);
 
@@ -1459,10 +1242,6 @@ fn a_list_inside_the_settle_margin_reads_only_what_it_draws() {
 }
 
 /// Diffs recomputed by one screen on a fixture that has just been written.
-///
-/// No `settle()`, which is the whole point: the frame cannot prove anything
-/// unchanged, so every file it is asked about is recomputed and the count is
-/// exactly "how many files did this screen ask for".
 fn margin_screen(name: &str, files: usize) -> u64 {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
@@ -1574,15 +1353,6 @@ fn a_tick_recounts_the_height_and_a_redraw_does_not() {
     // else touched that file. And recounting on every *paint* would put the one
     // unbounded walk in the frame path, which is exactly what I4's narrowing says
     // it does not do.
-    //
-    // Found by mutation: deleting the cache's clear in `Frame::advance` left the
-    // whole suite green, which is the tell that nothing was asserting either way.
-    // **Deliberately not `settle`d**, and that is what makes this gate mean
-    // anything: `settle` materialises every file, so a frame that recounted on
-    // every paint would take every span from a cached diff and the counters would
-    // not move. The fixture is wide enough that the screen draws a handful and
-    // leaves the rest un-diffed, which is the only state where "counted once per
-    // tick" and "counted once per frame" produce different numbers.
     let scratch = Scratch::large_diff("shell-height-tick", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1635,22 +1405,6 @@ fn a_pinned_frame_counts_no_height_at_all() {
     // **The one place `SPEC.md` §11.2 B16 makes the frame path cheaper**, and it
     // is worth a gate rather than a sentence because it is the opposite direction
     // to every other feature that has been added to this pane.
-    //
-    // I4's one exception is the diff's **height**, counted for every changed file
-    // once per tick, and it is the only thing in the frame path not bounded by the
-    // window. A pinned diff does not need it: what the reader can reach is the
-    // pinned file, whose span the walk has already recorded, so the total is read
-    // off the screen and the walk is skipped outright rather than made smaller.
-    //
-    // **The unpinned half is the whole gate.** `measured == 0` on a pinned frame
-    // proves nothing on its own, since a fixture whose files are all diffed
-    // already counts nothing either way. So the same fixture is measured unpinned
-    // first, and that number has to be non-zero before the pinned one means
-    // anything. **The same *shape* rather than the same repository**: the
-    // pinned half builds a fixture of its own thirty lines down, because a
-    // second view over a tick whose spans the first proved reports zero either
-    // way. Deliberately un-`settle`d for the reason
-    // `a_tick_recounts_the_height_and_a_redraw_does_not` gives one gate up.
     let scratch = Scratch::large_diff("shell-reads-pinned", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1682,10 +1436,6 @@ fn a_pinned_frame_counts_no_height_at_all() {
     // one above this asserts exactly that of an idle redraw. The control up there
     // measures the first frame, not the counterfactual, so the headline assertion
     // was true of the unpinned path too and proved nothing.
-    //
-    // A second fixture rather than a second `advance` on the first, because an
-    // advance would also renumber the changed set the position was resolved
-    // against, and that is a different subject.
     let pinned_scratch = Scratch::large_diff("shell-reads-pinned-own", FILES, LINES);
     let pinned_worktree = pinned_scratch.worktree();
     let mut pinned_frame = pinned_worktree.frame();
@@ -1775,25 +1525,6 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
 }
 
 /// A path's weight comes from the filesystem, and the cases that are not a size.
-///
-/// **`vigia::weigh` had no test at all, which is how the bug it was written to
-/// fix could be reintroduced silently** ([#232](https://github.com/breferrari/vigia/issues/232)).
-/// `crates/vigia-core/tests/history.rs::deleting_a_file_weighs_what_it_removed`
-/// drives `record_sized` with a literal size and never reaches this function, so
-/// reverting the `NotFound` arm below left the whole suite green: verified by
-/// mutation, 717 passing either way.
-///
-/// The three cases are three different answers, and conflating any two of them is
-/// a defect somebody has already shipped here:
-///
-/// - **A file that is gone weighs zero bytes.** Reading it as "no size" keeps the
-///   store's baseline at whatever the file last held, so the deletion weighs the
-///   floor and the file that replaces it weighs the dead one's whole size.
-/// - **A directory weighs nothing**, because it is not a write with a size:
-///   `symlink_metadata` reports 0 for one on Windows and 4096 and rising on Linux
-///   and macOS, so weighing it charges `mkdir` churn as kilobytes against a path
-///   that is in no diff.
-/// - **A file that is there weighs its bytes.**
 #[test]
 fn a_path_weighs_its_bytes_and_a_missing_one_weighs_zero() {
     let scratch = Scratch::new("weigh-cases");

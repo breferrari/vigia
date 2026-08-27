@@ -1,14 +1,4 @@
 //! The key and mouse map, as a table.
-//!
-//! `SPEC.md` §4 puts "scroll (keyboard + mouse wheel)" in scope and nothing else
-//! about input, so what this file gates is narrow and worth stating: every event
-//! the terminal can deliver resolves to exactly one intention or to none, and the
-//! events that mean nothing to a monitor stay meaning nothing. A shell that
-//! redrew on key releases and mouse movement would have an idle cost, which is
-//! I1's whole subject.
-//!
-//! It is a separate binary from `render.rs` because the question is different:
-//! this one has no buffer, no area and no view.
 
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -209,13 +199,6 @@ fn the_digits_cover_the_settled_cap_and_stop_there() {
     // layout constant would end that. The cost of restating is drift, and this is
     // what pays it: move the settled cap and the loop goes red here instead of
     // leaving a row every pane draws with no key that reaches it.
-    //
-    // **This was `every_row_the_list_can_draw_has_a_digit` and the name stopped
-    // being true**. The list is deeper than the settled cap on a pane of 28
-    // rows or more, and those rows are addressed by `J`/`K`, `n`/`p` and the
-    // pointer rather than by a digit. What the digits cover is the rows
-    // **every** pane drawing a list has, so a digit means the same thing at
-    // every height, and that is the claim this gate holds now.
     for row in 0..LIST_SETTLED {
         let digit = char::from_digit(row as u32 + 1, 10).expect("a digit for the row");
         assert_eq!(
@@ -232,13 +215,6 @@ fn the_digits_cover_the_settled_cap_and_stop_there() {
     // where a bound one is a jump that lands nowhere and spends the reader's
     // follow mode doing it, and a key live only above some pane height would be
     // the intermittent affordance §11.1 refuses one region over.
-    //
-    // **This is the only place either is asserted, deliberately.** The inert list
-    // in `nothing_a_reader_did_not_ask_for_becomes_an_action` holds keys with no
-    // home of their own, which is why `D`, `U`, `N` and `P` are not in it either.
-    // Restating `'7'` there would hardcode what this loop derives, so moving the
-    // settled cap would redden a test named for idle cost and send the next reader
-    // to the wrong file to find out why.
     let past = char::from_digit(LIST_SETTLED as u32 + 1, 10).expect("a digit past the cap");
     for digit in ['0', past] {
         assert_eq!(
@@ -330,34 +306,6 @@ fn a_key_release_is_not_a_keypress() {
 fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // Each of these is delivered by a real terminal in ordinary use, and every
     // one of them turning into a frame is how a monitor acquires an idle cost.
-    //
-    // **`Moved` is the one with a ruling behind it, so read `SPEC.md` §11.2 B10
-    // before deciding this line is stale.** It is delivered because the mouse
-    // bundle sets `?1003h`, any-event tracking, which nothing here consumes and
-    // which cannot portably be switched off; `RULINGS.md`'s I1 section carries
-    // what it costs. B10's reversal adopting a hover mark does **not** make
-    // this line stale in either direction: §11.1 rules
-    // the mark to be view state resolved in the loop, so `Moved` means no action
-    // here whether or not the mark has been built yet.
-    //
-    // `FocusGained` and `FocusLost` sit below for the same reason and will keep
-    // a second one once #186 lands. How often they arrive today is per platform
-    // rather than rare: `TAKEOVER` does not request `?1004h`, so on Unix they
-    // never arrive at all, while on Windows the console API delivers a
-    // `FOCUS_EVENT` on every focus change whether or not anyone asked. Once
-    // #186 asks, `FocusLost` is what clears a hover mark, and clearing it is the
-    // *loop's* job. An arm for either one here would be that job in the wrong
-    // module.
-    //
-    // **This fixture cannot be the whole tripwire, and the sibling below is
-    // why.** `Regions::default()` is a screen with no region and no bars, so a
-    // hover arm written the way the click arm above it is written — gated on
-    // `over_list` — returns `None` here and leaves this green. The proof that
-    // the fixture is doing the work is one line down: `Down(Left)` is asserted
-    // inert here and is emphatically not inert in production. So this list
-    // catches only a region-blind hover, and
-    // [`pointer_motion_over_a_laid_out_screen_is_still_no_action`] catches the
-    // one anybody would actually build.
     let inert = [
         wheel(MouseEventKind::Moved),
         wheel(MouseEventKind::Down(MouseButton::Left)),
@@ -384,30 +332,6 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
 
 /// `SPEC.md` §11.2 B9, and it needs its own test rather than a line in the inert
 /// list above.
-///
-/// > B9 — a yank key over OSC 52. Ruled: no.
-///
-/// That list holds keys with **no home of their own**, which is why `D`, `U`,
-/// `N` and `P` are not in it. `y` has one: a ruling refused it, on the ground
-/// that it would be the first key on this map to destroy something the reader
-/// owns, with no way for the program to confirm it happened. A key that is
-/// refused for a reason is not the same thing as a key nobody thought of, and
-/// the difference is exactly what a later reader needs.
-///
-/// **This is the gate B9 was missing.** Its sibling,
-/// `legibility.rs::a_drawn_path_carries_no_escape_sequence_of_its_own`, holds
-/// B8 by forbidding an escape inside a cell, and cannot hold this one: an OSC 52
-/// write draws nothing, touches no cell, and leaves the buffer identical, so the
-/// whole rendering suite stays green while the ruling is violated. The keymap is
-/// where B9 is decidable, because a clipboard write needs a key to arrive on.
-///
-/// **What it reaches and what it does not.** It reaches the shape anyone would
-/// actually build, which is a plain `y`, and the two neighbouring spellings the
-/// map's own conventions would suggest next. It does not reach a clipboard write
-/// hung on a key that already has a meaning, and nothing here can: that would be
-/// a change to an existing binding's behaviour rather than a new binding, and
-/// `only_the_actions_that_move_the_viewport_disengage_follow` is the closest
-/// thing to a guard over it.
 #[test]
 fn the_yank_key_is_refused_rather_than_unbound() {
     for event in [
@@ -426,40 +350,6 @@ fn the_yank_key_is_refused_rather_than_unbound() {
 
 /// `SPEC.md` §11.2 B10's tripwire, and the reason the inert list above is not
 /// it.
-///
-/// > B10 — a hover highlight on what the pointer is over. Ruled no, reversed
-/// > to yes.
-///
-/// **This gate outlived the reversal unchanged, and that is the thing to
-/// understand before touching it.** It was written to catch a hover being built
-/// while B10 said no. B10 now says yes, and the assertion is still exactly
-/// right, because §11.1 rules that **hover is view state and never an action**:
-/// the mark is resolved from `Regions` in the loop and drawn, the way a pressed
-/// step button is, and `action_for` never learns about it. So what this forbids
-/// is not the feature, it is the feature arriving in the wrong place. A gate
-/// that forbids a *mechanism* survives its ruling changing sign; one that
-/// forbids an *outcome* would have had to be deleted here.
-///
-/// **The fixture is the other half.** [`nothing_a_reader_did_not_ask_for_becomes_an_action`]
-/// hands `action_for` a `Regions::default()`, which is a screen with no list, no
-/// diff and no bar, so every region-gated arm in the map returns `None` against
-/// it whatever it does in production — `Down(Left)` sits in that same list and
-/// puts the diff at a file on a real screen. A hover written the way the click
-/// arm is written, `Moved if regions.over_list(row)`, is therefore invisible
-/// there. Here the screen is laid out, and the pointer is placed over the list,
-/// over the diff and on the scrollbar column in turn: the three places a hover
-/// would have something to say.
-///
-/// **What this does and does not hold.** It holds that pointer motion produces
-/// no *action*. It does **not** hold that motion produces no *paint*, and
-/// nothing in this suite does: `vigia::run` draws once per drained batch whether
-/// or not any wake in it produced an action, so the honest count today is one
-/// paint per motion batch rather than zero. `RULINGS.md`'s I1 section carries
-/// that finding and [#154](https://github.com/breferrari/vigia/issues/154)
-/// tracks it; #123's exit criterion asked for a zero-paints gate and this is
-/// deliberately not one, because writing it today would assert something untrue.
-/// The reversal does not change that either: hover adds no paint, so the count
-/// it would have to assert is the same one.
 #[test]
 fn pointer_motion_over_a_laid_out_screen_is_still_no_action() {
     for (place, row) in [("the list", 2), ("the diff", 9), ("the scrollbar", 6)] {
@@ -518,10 +408,6 @@ fn shift_scrolls_the_list_by_letter_and_by_arrow() {
     // reports a modified arrow would leave `Shift-↓` indistinguishable from `↓`,
     // so the letters are the path that always works; a reader whose hands are on
     // the arrows should not have to learn a letter to use the region.
-    //
-    // `SPEC.md` §11.1 rules Shift as the modifier: `Ctrl-J` is LF, `Ctrl-C` and
-    // `Ctrl-D` already quit, and Alt is intercepted by terminal emulators and by
-    // macOS Option.
     for event in [
         press(KeyCode::Char('J')),
         with(KeyModifiers::SHIFT, KeyCode::Down),
@@ -582,10 +468,6 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
     // `SPEC.md` §11.1's ruling, held where the code reads it. Follow is a claim
     // about the diff viewport; moving a window over the map of it expresses no
     // intent about what the diff should show, exactly as a resize does not.
-    //
-    // Asserted beside the actions that *do* disengage, because the value of this
-    // is the contrast: a gate saying only "list scrolling returns false" would
-    // pass against a predicate that returned false for everything.
     assert!(!Action::ScrollList(1).is_manual_scroll());
     assert!(!Action::ScrollList(-1).is_manual_scroll());
     assert!(Action::Scroll(1).is_manual_scroll());
@@ -602,22 +484,6 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 }
 
 /// A screen with a pinned list on rows 1..4, a diff on 5..20, and bars at 79.
-///
-/// **One bare bar and one stepped one, which is the geometry `render::regions`
-/// actually produces for these heights.** The list's three rows are below the
-/// step floor, so its track is its region and every gate written before there
-/// were buttons still reads the rows it always read. The diff's fifteen are
-/// above it, so rows 5 and 19 are its buttons and its track is 6..19.
-///
-/// Stating both here rather than in each test is deliberate: a fixture that gave
-/// every region a track equal to itself would be a screen the renderer cannot
-/// draw, and gates written against it would pass while agreeing with nothing.
-/// The same screen with both bars in `column`.
-///
-/// **A helper because the column is per region**, rather than a fixture saying
-/// `bar: Some(60)` once. Every screen these gates describe is the stacked
-/// layout, where the two bars share the pane's right edge, so moving them
-/// together is what "the bar moved" means here.
 fn bars_at(regions: Regions, column: u16) -> Regions {
     Regions {
         list: Region {
@@ -664,16 +530,6 @@ fn two_regions() -> Regions {
 
 /// Two regions **beside** each other: one first row, one row count, told apart
 /// by their columns alone.
-///
-/// The layout [#252](https://github.com/breferrari/vigia/issues/252) draws, and
-/// the shape every model in this module has to be able to express before that
-/// row can be built. The shipped ladder never produces it, which is exactly why
-/// it is worth a name: a fixture that only ever appears inline reads as a local
-/// quirk of whichever test spelled it, and this is the case three of them share.
-///
-/// The list takes the left thirty columns with its bar at 29, the diff takes the
-/// remaining seventy with its bar at 99. Both start on row 1 and hold 18 rows, so
-/// **no row distinguishes them and no assertion here may rest on one**.
 fn beside() -> Regions {
     Regions {
         list: Region::bare(1, 18, 0, 30, Some(29)),
@@ -729,23 +585,6 @@ fn the_wheel_scrolls_whichever_region_it_is_over() {
 }
 
 /// One region's bar does not swallow the other region's rows.
-///
-/// **The most ordinary screen there is, and it had no gate.** A handful of
-/// changed files fit the pinned list, so the list has nothing to scroll and draws
-/// no bar; the diff is taller than the pane, so it draws one. Both bars sit on
-/// the pane's right edge when both exist, so "am I on a bar" was asked as *is
-/// this the bar's column*, and once **either** region drew one the whole right
-/// column counted as bar from the top of the body to the bottom.
-///
-/// What that cost is a list row whose rightmost cell stopped answering. Before
-/// the per-region columns landed it seeked a bar that is not drawn, because a
-/// bar-less region's track is the whole of it and `along` answered for any row in
-/// it; after they landed it did nothing at all, because the gate was still the
-/// column alone and no region's `along` matched. A click on a file is neither of
-/// those.
-///
-/// `Region::on_bar` is the column **and** the rows, which is what the comment
-/// above the gate had always claimed.
 #[test]
 fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
     let scrolling_diff = Regions {
@@ -793,18 +632,6 @@ fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
 }
 
 /// A gesture in one region's columns is not a gesture in the other's.
-///
-/// **The bar gate's sibling, and the larger half of the same assumption**.
-/// Region *membership* was a row test: `over_list` asked `contains(row)`, and
-/// the wheel router and the click arm asked it through that. Sound only while
-/// the list sits above the diff, which is the vertical stack this model stops
-/// assuming.
-///
-/// Written against two regions that **share every row and differ in columns**,
-/// which the shipped layout does not draw today and
-/// [#252](https://github.com/breferrari/vigia/issues/252) will. Under the old
-/// model every assertion below would answer for the list, because the list's rows
-/// are the diff's rows and the row was all anything asked.
 #[test]
 fn a_gesture_in_one_regions_columns_is_not_the_others() {
     let rail = beside();
@@ -850,17 +677,6 @@ fn a_gesture_in_one_regions_columns_is_not_the_others() {
 }
 
 /// A press on one region's bar column is not a press on the other's.
-///
-/// **The distinction the pane-wide field could not express.** With one column for
-/// both regions, which bar a press belonged to was decided by **row**, through
-/// `list.along(row)` and `diff.along(row)`. That is the vertical stack written
-/// into the hit-test model, and it is what
-/// [#252](https://github.com/breferrari/vigia/issues/252) breaks: beside a rail
-/// the two regions share their rows, and only the column tells them apart.
-///
-/// Written against a fixture whose bars are in **different columns**, which the
-/// shipped layout does not draw today and the rail will. That is the point: the
-/// model has to be able to say it before the layout can.
 #[test]
 fn a_press_on_one_regions_bar_is_not_the_others() {
     let side_by_side = beside();
@@ -889,11 +705,6 @@ fn a_press_on_one_regions_bar_is_not_the_others() {
     // so: dropping the column check on the list's seek arm passed the whole suite,
     // because on the stacked layout the two regions never share a row and on the
     // rail nothing was asking.
-    //
-    // **The variant rather than the position**, because which region a seek
-    // belongs to is this gate's claim and where along the track it lands is
-    // `dragging_a_bar_reports_where_along_its_own_track`'s. Asserting the scaled
-    // figure here would restate that gate and couple this one to `TRACK_SCALE`.
     let drag = MouseEventKind::Drag(MouseButton::Left);
     assert!(
         matches!(
@@ -1199,13 +1010,6 @@ fn the_clock_advances_by_whole_intervals_so_the_rate_cannot_drift() {
     // to *now plus one interval* instead would let every late tick push the next
     // one later, so a pane under load scrolls slower and slower with the button
     // still down and nothing says why.
-    //
-    // **Asserted through the following deadline, not through the action**, and
-    // that distinction is the gate. A first version of this test checked only
-    // that a late tick produced `Scroll(1)`, which is true of both versions:
-    // rescheduling from the wake is invisible in the step it returns and shows up
-    // only in when the *next* one is allowed. It passed against exactly the
-    // mutation it was written to catch.
     let now = Instant::now();
     let slip = Duration::from_millis(3);
     let hold = Held::new(Action::Scroll(1), (79, 5), now);
@@ -1282,10 +1086,6 @@ fn a_hold_ends_on_release_on_a_key_and_on_a_pointer_that_moved() {
         // holding this button in any sense the repeat should honour. Without it
         // the loop keeps stepping and repainting a pane nobody is looking at, on
         // a timer, which is the state I1's measure exists to protect.
-        //
-        // It became reachable on Unix with #186, which put `Step::FocusChange`
-        // in the takeover so `FocusLost` arrives at all; on Windows the console
-        // has always delivered it, so this hole was open there the whole time.
         ("the window losing focus", Event::FocusLost),
     ] {
         assert!(
@@ -1335,13 +1135,6 @@ fn a_step_button_the_sheet_covers_arms_nothing() {
     // since B12. `Regions::step_at` did not: the loop arms a hold from it directly,
     // outside `action_for`, so a press on a covered button armed a repeat that
     // scrolled a region under the sheet.
-    //
-    // Measured before the guard landed, over widths 30 to 140 against heights 8 to
-    // 40: **85 cells** the sheet covered answered a step, at widths 30, 32, 35 and
-    // 38, every one of them a pane at or below I6's own forty columns.
-    // `tests/sheet.rs::a_press_under_the_sheet_arms_no_step` is that sweep; this is
-    // the same claim where the geometry is spelled rather than laid out, so a
-    // failure here names the rule and a failure there names the pane.
     let bare = two_regions();
     // The same cells the gate above proves are buttons, so the contrast below is
     // between two answers for one cell rather than between two cells.
@@ -1412,10 +1205,6 @@ fn a_track_the_sheet_covers_grabs_nothing() {
     // where a grab hands the gesture to `drag_action`, which ignores the column by
     // design, so the next motion relocates a region the sheet is covering to
     // wherever the pointer went.
-    //
-    // The track is also the bigger target. The sheet is centred on both axes, so
-    // wherever it reaches a bar's column it covers the rows *between* the buttons as
-    // well, which outnumber the two the buttons occupy.
     let bare = two_regions();
     // The track between the two step buttons, which `only_a_step_button_arms_a_hold`
     // proves is a seek rather than a step.
@@ -1483,14 +1272,6 @@ fn a_track_the_sheet_covers_grabs_nothing() {
     // **The close control is not an exception here either**, and it is spelled out
     // because it is the one cell of the sheet a click acts on, so a reader of the
     // guard will ask.
-    //
-    // **What it proves is weaker than its first comment claimed, and saying so is
-    // the point.** `Sheet::covers` is a rectangle test that never reads `close`, and
-    // the guard calls only `covers`, so this refuses because the cell is *covered*
-    // and not because it is the control. No fixture can separate the two: `close` is
-    // inside its own sheet's rect by construction. It is kept as the case a reader
-    // will look for rather than as a discriminating test, and the sibling gate above
-    // has the same shape for the same reason.
     let over_close = Regions {
         sheet: Some(Sheet {
             left: 70,
@@ -1547,11 +1328,6 @@ fn a_drag_onto_a_step_button_is_inert() {
     // pulled past the end of the track is over a button, and the honest reading of
     // that is *nothing further*: the last track row already reaches the last
     // window, so the view is where they asked for it to be.
-    //
-    // Stepping on a drag instead would make a press-and-jiggle on a button walk
-    // the view a row per twitch, and clamping to the end would teleport it there.
-    // Both need to know a drag *began* on a button, which is state, and this
-    // module has none by design.
     let regions = two_regions();
     let drag = MouseEventKind::Drag(MouseButton::Left);
 
@@ -1575,14 +1351,6 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
     // A button is the region's drag by another gesture, so it has to answer follow
     // mode the same way: moving the map expresses no intent about the diff, and
     // moving the diff is a manual scroll.
-    //
-    // **Driven through `action_for` rather than asserted about the `Action`
-    // variants directly**, and that is the whole gate. A version of this test
-    // that read `Action::Scroll(-1).is_manual_scroll()` off the enum would be
-    // three existing tests restated, and would stay green with the step buttons
-    // deleted outright: what has to be checked is that pressing a button *yields*
-    // an action carrying the region's own follow rule, not that the enum still
-    // has the rule.
     let regions = Regions {
         list: Region {
             top: 1,
@@ -1716,11 +1484,6 @@ fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
     // never be reached by a test: mutating the body back to a plain field read
     // passed the entire workspace. It is `hover_repainted` now, and this is what
     // that bought.
-    //
-    // The mark is a claim about the screen it was resolved against. When a tick
-    // moves the bars, every cell it named may belong to something else, and
-    // §11.1's clearing ladder has an accepted residual where the pointer is no
-    // longer there to say otherwise.
     let before = two_regions();
     let mark = Some(Hovered::Button(79, 5));
 
@@ -1763,10 +1526,6 @@ fn a_grip_ends_on_anything_that_is_not_more_of_the_same_drag() {
     // **The one retirement rule no test could drive until #186 moved it.** It
     // sat inline in `run` from #183, and the pass that argued a rule written
     // inline is a rule with no gate had that counterexample one screen above it.
-    //
-    // Coarser than `Held::ends` on purpose: a grip is already the answer to
-    // *what is this gesture about*, so anything that is not more of the same
-    // gesture finishes it, and there are no five cases to tell apart.
     assert!(
         !Grabbed::ends(&at(MouseEventKind::Drag(MouseButton::Left), 79, 12)),
         "a left drag ended the grip it is continuing"
@@ -1927,11 +1686,6 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     // grabbed thumb travels over the step button at that end of the track;
     // lighting it would promise a step that releasing there does not perform,
     // because `Grabbed` owns the gesture until the button comes up.
-    //
-    // **Any button, not just the left one**, which is the mutation that survived
-    // the first version of this: `Drag(_)` narrowed to `Drag(MouseButton::Left)`
-    // passed the whole suite. A drag is a gesture whichever button is down, and
-    // `Held::ends` two functions over already takes that view of a release.
     for held in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
         assert_eq!(
             hover_after(&at(MouseEventKind::Drag(held), 79, 19), regions, button),
@@ -1992,17 +1746,6 @@ fn a_direction_mark_expires_where_a_held_button_does_not() {
     // simply stops sending. So this is the one mark on the bar that needs an
     // expiry, and `SCROLL_LINGER` is it. Without one the last arrow of a burst
     // would stay lit on an idle tree as a claim about the past.
-    //
-    // §11.1 states the three marks as one rule and it is the reason this test is
-    // about *expiry* rather than about arrows: what decides whether a mark needs
-    // a clock is whether the program can observe its subject ending. A hold ends
-    // with an `Up`. A burst has no end, only a last member, so it needs this. A
-    // hover (§11.2 B10) has no end either, but its subject
-    // *moves* rather than stopping, so the next motion clears it and it must not
-    // be given a clock: one would put the mark out while a reader rests on it.
-    //
-    // The clock is still bounded by the gesture that armed it: nothing schedules
-    // it but a scroll, it fires once, and it clears itself.
     assert!(
         SCROLL_LINGER > STEP_REPEAT,
         "the direction mark expires faster than the repeat that drives it, so a \
@@ -2065,15 +1808,6 @@ fn nothing_armed_means_no_deadline_at_all() {
     // directions, because it is the slowest of the three by orders of magnitude
     // and a `min` written the wrong way round would be invisible against the
     // other two: they would simply always win.
-    //
-    // **Here rather than in a gate of its own**, which is what
-    // [#277](https://github.com/breferrari/vigia/issues/277)'s plan named. The
-    // property is *the nearest deadline wins*, this test is where that property
-    // already lives for the other two clocks, and a second gate would have
-    // rebuilt the same fixture to assert the same rule about a third. Recorded
-    // rather than done silently, because a promise kept somewhere other than
-    // where it was promised is indistinguishable from one dropped unless
-    // somebody says so.
     assert_eq!(
         patience(None, Some(now + SCROLL_LINGER), Some(HISTORY_SAMPLE), now),
         Some(SCROLL_LINGER),
@@ -2101,11 +1835,6 @@ fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     // what matters here is that its answer reaches the one function deciding
     // whether this program owns a timer, and that an empty window therefore
     // leaves the loop's receive untimed.
-    //
-    // Asserting `ages_in` three times without calling `patience` gates nothing
-    // about the input layer, whatever the test is named, and duplicates the
-    // core's own gates. The composition is the whole point: both
-    // halves can be right while nothing joins them.
     let mut history = History::new();
     let now = Instant::now();
 
@@ -2145,9 +1874,6 @@ fn each_bar_answers_only_the_keys_that_move_it() {
     // A test that hands the painter a mark checks the drawing; this checks that
     // the right mark is produced, which is where the 0.5.0 defect actually lived
     // once the drawing was fixed.
-    //
-    // The two regions move different things: `j`/`k`/`d`/`u`/`Space`/`g`/`G` and
-    // the file steps move the diff's viewport, `J`/`K` move the list's window.
     let regions = two_regions();
     let (list, diff) = (Grabbed::List, Grabbed::Diff);
 
@@ -2186,19 +1912,6 @@ fn each_bar_answers_only_the_keys_that_move_it() {
 fn a_region_with_no_rows_lights_nothing() {
     // **A mark nobody can see still costs a wake**, which is what this guard is
     // for now and is not what it was for.
-    //
-    // Until [#254](https://github.com/breferrari/vigia/issues/254) the mark was
-    // the region's first row and the danger was a *collision*: with no list on
-    // screen the diff starts where the list would have, both reported top 1, and
-    // an unguarded `ScrollList` lit the **diff's** arrows for a movement of a map
-    // nobody can see. The mark names its region now, so that confusion cannot be
-    // spelled at all, and deleting this guard would draw nothing wrong.
-    //
-    // It stays because the drawing is not the only consumer. `Shell` arms
-    // `scrolling_until` on every mark it is handed, so a mark naming a bar that
-    // is not drawn buys a `SCROLL_LINGER` timer, a wake, and a repaint that
-    // changes no cell. I1 is what that spends, and the `None` below is what does
-    // not spend it.
     let regions = Regions {
         list: Region::bare(1, 0, 0, 80, Some(79)),
         diff: Region::bare(1, 20, 0, 80, Some(79)),
@@ -2230,10 +1943,6 @@ fn a_mark_names_its_region_when_both_share_a_first_row() {
     // fixed. What no test drove it for is the three marks, which is the whole of
     // [#254](https://github.com/breferrari/vigia/issues/254) and the reason the
     // assumption survived that pass.
-    //
-    // Every mark that named a region by its top collapses here, and on every
-    // layout that ships `list.top < diff.top`, so a top and a region are the same
-    // answer and the wrong one cannot be told from the right one.
     let regions = beside();
     assert_eq!(
         (regions.list.top, regions.list.rows),
@@ -2295,29 +2004,12 @@ fn shift_r_and_ctrl_r_are_unbound() {
 // `App::apply` has **one** arm for `Action::File`, so what the arrows do to the
 // screen is exactly what the file step does and is owned by the gates that
 // already pin it:
-//
-// - `scroll.rs::n_and_p_step_one_file_and_land_on_its_heading` steps and lands
-// - `scroll.rs::the_file_step_stops_at_both_ends` is the inertness at both ends,
-//   and it covers a case a from-scratch gate omitted
-// - `list.rs::the_window_is_overtaken_when_the_diff_leaves_it` is the map being
-//   handed back to the caret from a window a reader had taken over
-//
-// A 106-line gate driving `Action::File` from a fixture was written first and
-// deleted: it never pressed an arrow, so it could not tell one from `n`, and each
-// of its five claims already had an owner. **Measured rather than argued**: the
-// mutation that stops `App::apply` handing the map back is killed by the `list.rs`
-// gate above with the new one removed.
 
 #[test]
 fn the_arrows_move_between_files() {
     // **`SPEC.md` §11.2 B15**: vertical keys move inside the diff, horizontal keys
     // move between files, so `↑` `↓` `←` `→` are one complete pair rather than half
     // of one. `←` is `p` and `→` is `n`.
-    //
-    // Asserted **against the keys they alias** rather than against a literal
-    // `Action`, which is what stops the alias drifting from its original: change
-    // what `n` means and this goes red rather than pinning the old meaning under a
-    // new key.
     assert_eq!(
         action_for(&press(KeyCode::Right), Regions::default()),
         action_for(&press(KeyCode::Char('n')), Regions::default()),
@@ -2343,11 +2035,6 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
     // steps a file, where `Shift+↓` is intercepted and scrolls the pinned list.
     // That asymmetry is real, it is a consequence of the block's own `_ => {}`,
     // and nothing stated it until #296 put keys on the other axis.
-    //
-    // Pinned in the direction that matters: a shifted horizontal arrow must not
-    // become a *list* gesture, because that is the confusion this row exists to
-    // end. Whether it steps a file or does nothing is a smaller question; today it
-    // steps, and this says so rather than leaving it to be discovered.
     for (code, plain) in [
         (KeyCode::Left, Action::File(-1)),
         (KeyCode::Right, Action::File(1)),
@@ -2372,11 +2059,6 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
 }
 
 /// `a` asks for the staged run, and nothing else does.
-///
-/// `SPEC.md` §11.2 **B17**. The second half is the one worth having: a binding
-/// that also fired on some other key would be a gesture a reader triggers
-/// without asking for it, and this one changes what the pane is *comparing*
-/// rather than how it is arranged.
 #[test]
 fn a_asks_for_the_staged_run_and_no_other_key_does() {
     assert_eq!(

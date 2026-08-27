@@ -1,34 +1,5 @@
 //! The pinned file list, which `SPEC.md` §11.1 makes the middle of three
 //! regions.
-//!
-//! > The body is three regions: a masthead, a pinned file list, a rule, and the
-//! > scrolling diff.
-//!
-//! Five claims live here, and they fail in different ways, which is why they are
-//! five tests rather than one screen inspected from five angles.
-//!
-//! **Its height is a function of pane height and changed-file count, and of
-//! nothing else.** That is the same pair `Footer::plan` takes, and for the same
-//! reason: both change only when the diff does, so neither can move content
-//! under a reader who did nothing. A notice is the thing most likely to break it
-//! and gets its own gate.
-//!
-//! **It grows with the pane, and no pane that shipped draws differently.** The
-//! cap is a share of the pane rather than a flat six since
-//! [#160](https://github.com/breferrari/vigia/issues/160). The two halves are one
-//! gate because they are one ladder, and because the second is what says every
-//! other fixture in this repo is untouched.
-//!
-//! **It gives way before the diff does.** A monitor whose diff has been squeezed
-//! out by the map of the diff has stopped being one.
-//!
-//! **It tracks the diff.** The caret marks the file the diff is inside, and the
-//! window slides to keep that file on screen, so the region is correct with no
-//! interaction the way I5 requires of everything else.
-//!
-//! What is deliberately *not* here is what the region costs: that is an I4 claim
-//! and `tests/reads.rs` is where every I4 claim in this crate lives, beside the
-//! ones bounding the diff walk rather than in a file of its own.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -45,11 +16,6 @@ use support::{Scratch, materialise};
 
 /// The smallest diff the layout will leave behind, restated rather than
 /// imported.
-///
-/// `render.rs` keeps this as a private constant. A test that shared it would
-/// agree with the renderer by construction, which is the same reason the
-/// sparkline's ramp and the heat strip's block are restated in
-/// `tests/legibility.rs`.
 const MIN_BODY: usize = 2;
 
 /// Eighty columns, where the footer is one line whatever the state, so nothing
@@ -57,27 +23,12 @@ const MIN_BODY: usize = 2;
 const WIDE: u16 = 80;
 
 /// The top of every height sweep here.
-///
-/// **Well past any pane anyone runs, deliberately.** The cap is a share of the
-/// pane since [#160](https://github.com/breferrari/vigia/issues/160), so a sweep
-/// that stopped at a realistic height would be asserting the ladder's monotonicity
-/// over the rungs that happen to be reachable today rather than over the rule.
 const TALLEST: u16 = 120;
 
 /// The pane `SPEC.md` §11.1 sized the list against, and the anchor of the ladder.
-///
-/// Every claim below about *what did not move* is measured from here, and none of
-/// them restates the share. The ladder's own arithmetic is deliberately not
-/// available to this file: a gate that recomputed the quarter would agree with the
-/// renderer by construction and go on agreeing with it while both were wrong.
 const REFERENCE: u16 = 24;
 
 /// More changed files than any cap the sweeps below can reach.
-///
-/// So the changed-file clamp is never the one doing the work, and what a sweep
-/// measures is the pane's own answer. Shared rather than declared per test,
-/// because it is one fact: two copies would let one sweep's margin be widened
-/// while the other's silently stayed where it was.
 const MANY: usize = 500;
 
 /// The tall pane [#125](https://github.com/breferrari/vigia/issues/125) named
@@ -90,14 +41,6 @@ fn chrome(app: &App) -> vigia::Chrome {
 }
 
 /// The same, with the rail asked for.
-///
-/// **Two gates here sweep past 134 columns to reach the rail's own arm, and
-/// [#295](https://github.com/breferrari/vigia/issues/295) made that a gesture.**
-/// The default chrome stopped drawing a rail at any width, so both sweeps went on
-/// covering the stacked shape twice under comments claiming otherwise, and one of
-/// them is what `Body::split`'s docblock names as holding the notice invariant it
-/// gave up when it took a `&Chrome`. Found by that change's own audit; the
-/// `saw_rail` guards below are what makes it loud rather than silent next time.
 fn railed(app: &App) -> vigia::Chrome {
     vigia::Chrome {
         rail: true,
@@ -115,11 +58,6 @@ fn split(width: u16, height: u16, files: usize) -> Body {
 }
 
 /// [`split`], sized the way the shell sizes a region for **this** changed set.
-///
-/// **`split` passes the file count for both of `body_layout`'s inputs**, which
-/// is right only while every drawn row is a file. Sizing a grouped region that
-/// way leaves it two rows short of what the shell gives it, so the tests agree
-/// with a bug rather than with the product.
 fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
@@ -130,33 +68,6 @@ fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
 }
 
 /// Each region reports its **own** bar's column, not the pane's.
-///
-/// **The claim the removed field could not make**. One `Option<u16>` documented
-/// as *"the column both scrollbars are drawn in"* is true only while both
-/// regions span the pane and their bars land on the same right edge. Beside a
-/// rail they do not.
-///
-/// **What this proves, and what it does not.** The expected column is restated
-/// from the pane rather than read off the renderer's ladder, so a bar drawn in
-/// the wrong column reddens it. It cannot tell the two regions apart **on this
-/// screen**: the pane here is eighty columns, which is a stacked layout, and
-/// there `Body::areas` spreads `..area` to both regions, so their rects share an
-/// `x` and a `width` and therefore a bar column. A `regions` that handed
-/// `Bar::region` the wrong rect would still produce these two numbers.
-///
-/// **Two gates catch that and neither is this one.**
-/// `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`
-/// compares each region's reported rect against the one the painter draws into,
-/// and a mutation swapping the two reddens it along with eleven render gates.
-/// `tests/rail.rs::the_two_regions_are_two_regions` is the one that looks
-/// impossible and is not: since
-/// [#252](https://github.com/breferrari/vigia/issues/252) a wide pane puts the
-/// two regions in different columns, so the two bars land in different columns
-/// and the distinction is finally drawn rather than argued.
-///
-/// This one owns the narrower claim, and it owns it on the screen a reader is
-/// most often on: the column is a region's own right edge, and it is `None` where
-/// no bar is drawn.
 #[test]
 fn each_region_reports_its_own_bar_column() {
     // Enough files to overflow the list and enough rows to overflow the diff, so
@@ -211,10 +122,6 @@ fn the_list_grows_to_the_file_count_and_stops_at_the_cap() {
     // The difference between this region and a fixed one, and the whole reason
     // `assets/preview.svg` can be honest: three changed files draw three rows,
     // exactly the picture, and a formatter touching two hundred draws the cap.
-    //
-    // A gate over only the capped end would pass against a region that was
-    // always `LIST_SETTLED` tall and padded with blanks, which is the design this
-    // one was chosen over.
     for files in 1..=LIST_SETTLED {
         assert_eq!(
             split(WIDE, 24, files).list,
@@ -238,30 +145,6 @@ fn the_list_grows_to_the_file_count_and_stops_at_the_cap() {
 }
 
 /// The list deepens on a tall pane, and no pane that shipped draws differently.
-///
-/// `SPEC.md` §11.1's cap is a share of the pane since
-/// [#160](https://github.com/breferrari/vigia/issues/160), floored at
-/// `LIST_SETTLED`. Four claims, and they fail in different ways.
-///
-/// **Monotone, and stepping by at most one row per row of pane.** The first is
-/// the obvious half; the second is the one the *band* rests on, one region up.
-/// `Body::split` pays the band out of what the list leaves, so a cap that gained
-/// two rows for one row of pane would take a band off a pane that had just grown,
-/// which is the "a bigger container holds less" failure the margin ladder is
-/// written as a table to avoid. It is asserted here rather than beside the band
-/// because it is a property of the cap.
-///
-/// **Nothing at or below the reference pane moved.** Measured by reading, not by
-/// restating the share: the ladder adds rungs strictly above the settled cap, and
-/// a rung added to the top of a monotone ladder cannot move a boundary beneath
-/// it. So every pane the rest of this suite draws is at the settled cap, and no
-/// snapshot in the repo can move. A share that deepened *early* is exactly what
-/// the `<= LIST_SETTLED` half catches.
-///
-/// **The ladder is walked rather than sampled.** A gate that exercised one height
-/// would exercise one rung, and it would be the healthiest one. The witness at
-/// the end fails if the sweep ever stops reaching several, so a ladder that
-/// silently stopped laddering cannot pass this by going quiet.
 #[test]
 fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
     let mut depths = std::collections::BTreeSet::new();
@@ -315,27 +198,6 @@ fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
 }
 
 /// A taller pane never costs the masthead its band.
-///
-/// The band is last in `Body::split`'s clamp order and is paid out of what the
-/// list leaves, so the two are coupled in exactly one direction: deepening the
-/// list on a taller pane spends rows the band was going to be offered. The
-/// arithmetic says it cannot bite — `after` is the body less the list less two,
-/// and one more row of pane adds one to the body and at most one to the list — but
-/// that argument rests on a step bound, and an argument is not a gate.
-///
-/// **The failure this refuses is silent and shaped like a feature**: a reader
-/// enlarges their terminal, the map gets deeper, and the graph they were watching
-/// disappears. Nothing errors, no snapshot moves, and the band is a masthead-on
-/// screen so the default pane never sees it.
-///
-/// **Its reach is narrower than it looks, and stating that is cheaper than
-/// re-deriving it.** It sees a band *removed* from a pane that had one, never one
-/// *delayed*. Proved by mutation rather than by reading: a cap made to jump two
-/// rows at height 24 left this green, because 24 is exactly where the band arrives
-/// at this width and the jump pushed the arrival later instead of undoing it. The
-/// same jump one row higher fails it at `80x25`. Delay is the ordinary shape of a
-/// clamp order and needs no gate; removal is the one that reads as a bug to the
-/// person watching.
 #[test]
 fn a_taller_pane_never_costs_the_band_its_rows() {
     // The masthead is off by default since #204, and the band only exists with it
@@ -374,19 +236,6 @@ fn the_list_region_gives_way_before_the_diff_falls_below_min_body() {
     // The ordering rule. The list is what shrinks, and it shrinks to nothing
     // rather than taking the diff below two rows, because a pane showing a map
     // of a diff it can no longer show has stopped being a monitor.
-    //
-    // Swept over every height a pane can plausibly be rather than checked at the
-    // boundary, because the boundary moves with the footer's own height and a
-    // gate that hardcoded it would be restating the arithmetic it is checking.
-    //
-    // **The sweep reaches `TALLEST` rather than forty since
-    // [#160](https://github.com/breferrari/vigia/issues/160)**, and the widening
-    // is the point rather than thoroughness: the cap is a share of the pane now,
-    // so every height above forty asks the list for rows the old flat cap never
-    // let it take, and this is the gate that says the diff keeps `MIN_BODY`
-    // through all of them. Widened rather than duplicated, because a second sweep
-    // asserting the same thing over a taller range would be this one with a
-    // different bound.
     let mut saw_a_region = false;
     let mut saw_it_give_way = false;
 
@@ -425,14 +274,6 @@ fn a_notice_does_not_change_the_list_height() {
     // read, a repository mid-`git gc`. If one could resize the region, the
     // reader's diff would jump a row and back every time one flickered, which is
     // the same thing a resize is forbidden from doing.
-    //
-    // Follow state is swept too. It changes the *footer's* height, so it changes
-    // the body, and this is what says the list still divides that body the same
-    // way rather than absorbing the difference itself.
-    // **Railed, because two of the widths below exist to reach the rail's arm**
-    // and since #295 the default chrome never does. Both chromes ask, so the
-    // notice is the only thing that differs between them, which is what this gate
-    // is about.
     let mut app = App::new();
     let quiet = railed(&app);
     app.warn("a file vanished between being named and being read");
@@ -471,11 +312,6 @@ fn the_list_window_slides_to_keep_the_current_file_visible() {
     // The tracking half, and what makes the caret worth drawing. Scroll the diff
     // a file at a time and the window has to follow, or the map stops being a
     // map of where the reader is.
-    //
-    // Asserted at **every** step rather than at the end, because the failure is
-    // not at the far end of the walk: a window that never moved would satisfy a
-    // final check on a fixture short enough for one screenful and fail silently
-    // on a longer one.
     const FILES: usize = 40;
     const SPAN: usize = 4;
 
@@ -765,10 +601,6 @@ fn the_window_survives_a_pane_too_short_to_show_it() {
     // opposite in exactly that situation: `take_list` zeroed `list_top`, `App`
     // stored it back, and because nothing but a diff-moving action hands the map
     // back, the window never recovered.
-    //
-    // Reachable by dragging a pane edge, which is a thing a reader does to a
-    // monitor beside an agent, and `SPEC.md` §11.1 rules a resize "no state
-    // change".
     const FILES: usize = 40;
 
     let scratch = Scratch::large_diff("list-short-pane", FILES, 1);
@@ -897,9 +729,6 @@ fn collect_resolves_every_degenerate_viewport() {
     // by design on an index past the end of the file list. That it cannot be
     // reached is currently proved only by a comment. This drives the public
     // signature with the positions that comment is about.
-    //
-    // It also covers the pair `body_layout` never produces and `View::collect`'s
-    // own doc argues at length: no diff rows and a region anyway.
     const FILES: usize = 12;
 
     let scratch = Scratch::large_diff("list-degenerate", FILES, 1);
@@ -1031,18 +860,6 @@ fn browsing_back_up_returns_the_window_to_the_top() {
 }
 
 /// Dragging the list's scrollbar to the bottom of its track shows the last file.
-///
-/// The sibling of `scroll.rs`'s diff-drag gate, and the reason both exist: a
-/// track that maps onto the whole changed set instead of onto its travel leaves
-/// its final `LIST_SETTLED` worth of track dead, because every fraction past the
-/// bound clamps to the same window.
-///
-/// **The middle of the track is the assertion that can tell those apart**, and
-/// the ends are not. Mapping onto the whole still reaches the last file, since
-/// the clamp catches it; what it does is compress the live part of the track
-/// into the first 85% and pin the rest. So the ends are checked because a
-/// resolution ignoring the fraction entirely would pass a midpoint check alone,
-/// and the midpoint is checked because the ends cannot see the defect.
 #[test]
 fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
     use vigia::TRACK_SCALE;
@@ -1102,17 +919,6 @@ fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
 }
 
 /// The caret walks down the window before the window moves under it.
-///
-/// **Reported from use, and it is the second fixed-position rule this region
-/// has had.** Ending the window on the current file showed the six files before
-/// the six the diff was drawing; starting the window on it fixed that and
-/// pinned the caret to the first row, so scrolling a seventeen-file tree moved
-/// the list on every step while the marker never went anywhere. Both are the
-/// same defect: a constant row is not following a file.
-///
-/// So this asserts **travel**, which neither fixed rule can satisfy and which
-/// `the_list_window_slides_to_keep_the_current_file_visible` cannot see, since
-/// containment holds for a pinned caret too.
 #[test]
 fn the_caret_travels_the_window_before_the_window_moves() {
     const FILES: usize = 40;
@@ -1187,21 +993,6 @@ fn the_caret_travels_the_window_before_the_window_moves() {
 }
 
 /// Clicking a listed file sends the diff to it.
-///
-/// The gesture a reader tries without being told, and the one the region most
-/// obviously invites by drawing a list of names next to the thing they name.
-///
-/// It is **not** selection, which is what `SPEC.md` §11.2 B4 refuses: nothing is
-/// remembered, no row becomes special, and the event after it means exactly what
-/// it would have meant. The same argument already licensed dragging a scrollbar.
-///
-/// **Run at the reference pane and at a deep one, which is what makes it the
-/// gate for #160's ruling on the digits as well as for the gesture.** The digit
-/// range stays `1`-`LIST_SETTLED`, so on a pane whose list is deeper than that
-/// the rows past it can be named by nothing on the keyboard. What keeps them
-/// reachable is this: the hit-test bounds a click by the *region*, so it reaches
-/// every drawn row at every height. The deepest offset in the loop is
-/// `list_rows - 1`, so the tall pass clicks a row no digit can address.
 #[test]
 fn clicking_a_listed_file_sends_the_diff_to_it() {
     use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -1282,17 +1073,6 @@ fn digit(key: char) -> ratatui::crossterm::event::Event {
 }
 
 /// A digit names the row it is drawn beside, not the file that many from the top.
-///
-/// **The distinction the window makes, and the one an absolute index would lose.**
-/// `SPEC.md` §11.1 gives the digits the *visible window* of the list: what you can
-/// see is what you can name. With the list at the top the two readings agree, so
-/// a gate that only ever pressed a digit from a fresh shell would pass against an
-/// implementation that resolved the digit against the changed set instead. The
-/// second half browses first, which is where they come apart.
-///
-/// It is still not selection: nothing is remembered, no row becomes special, and
-/// the event after it means what it would have meant. `SPEC.md` §11.2 B4 stands
-/// for the same reason it stands for a click.
 #[test]
 fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
     use vigia::{Regions, action_for};
@@ -1363,25 +1143,6 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
 }
 
 /// A digit pressed after the diff shrank names no file at all.
-///
-/// **The case the window bound cannot catch, and the reason both bounds exist.**
-/// `App::list_rows` is what the *last frame* drew, so between a paint and the
-/// keystroke that follows it the changed set can get shorter: `git reset --hard`,
-/// a branch switch, an agent reverting its own work. `SPEC.md` §11.1 names that
-/// as an ordinary event on the pane this tool exists for rather than an edge
-/// case, and it is exactly when someone looks over.
-///
-/// Six rows were on screen, two files are left, and `6` still passes the window
-/// bound because the window is remembered from the frame that drew six. Only the
-/// file-count bound refuses it. Found by mutation: deleting that bound left every
-/// other gate in this suite green, because both halves of
-/// `a_digit_past_the_drawn_window_is_a_no_op` are caught by the window bound
-/// first and neither one isolates this.
-///
-/// Asserted on `App::position` rather than on the view, deliberately. A view
-/// resolves a degenerate position by clamping it, so driving one would hide the
-/// defect behind the very clamp that `collect_resolves_every_degenerate_viewport`
-/// is about. What is wrong here is the position the keystroke *stored*.
 #[test]
 fn a_digit_after_the_diff_shrank_names_no_file() {
     use vigia::{Regions, action_for};
@@ -1428,21 +1189,6 @@ fn a_digit_after_the_diff_shrank_names_no_file() {
 }
 
 /// A digit naming a row the list is not drawing moves nothing.
-///
-/// **Two shapes, because they are two different defects and only one of them is
-/// interesting.** A list can fall short of the digits from either side, and the
-/// arm in `App::apply` needs a bound for each.
-///
-/// *Fewer files than rows* is the control: the file it would name is past the end
-/// of the changed set, so the file-count bound that has been there since the
-/// click landed catches it. This half passes with no window bound at all.
-///
-/// *Fewer rows than digits* is the one that needs the window bound. A nine-row
-/// pane beside an agent is ordinary, and the region gives way to the diff before
-/// it reaches its cap, so `5` and `6` are on the reader's keyboard while the list
-/// is drawing four rows. Without the bound the digit resolves against the file
-/// list and the diff jumps to a file that is not on screen — a jump the reader
-/// asked for by name, landing somewhere they cannot see they named.
 #[test]
 fn a_digit_past_the_drawn_window_is_a_no_op() {
     use vigia::{Regions, action_for};
@@ -1537,11 +1283,6 @@ fn two_runs(name: &str) -> support::Scratch {
 
 /// **A separator opens each run, and a window scrolled into the middle of one
 /// still opens with that run's own label.**
-///
-/// Without the second half the rows at the top of a scrolled window are
-/// unattributed: a reader who scrolled would be looking at files with nothing on
-/// screen saying which comparison they belong to, which is worse than the label
-/// costing a row.
 #[test]
 fn each_run_opens_with_its_own_separator_wherever_the_window_starts() {
     let scratch = two_runs("list-runs");
@@ -1603,9 +1344,6 @@ fn a_single_run_spends_no_row_on_a_label_that_says_nothing() {
 }
 
 /// **A separator with no room for a file under it is not drawn.**
-///
-/// It would be a label naming a run the window cannot show: a row of the map spent
-/// saying nothing about the map.
 #[test]
 fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
     let scratch = two_runs("list-tight");
@@ -1625,11 +1363,6 @@ fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
 }
 
 /// **A digit and a click address a *file*, and never the separator above it.**
-///
-/// The defect this closes is silent: added blind to the window's first file, an
-/// offset past a separator names the file *before* the one under the pointer, the
-/// jump lands, and nothing on screen says the reader went somewhere they did not
-/// point at.
 #[test]
 fn a_drawn_row_addresses_the_file_under_it_and_a_separator_addresses_nothing() {
     let scratch = two_runs("list-address");
@@ -1664,11 +1397,6 @@ fn a_drawn_row_addresses_the_file_under_it_and_a_separator_addresses_nothing() {
 }
 
 /// The region asks for the rows it will draw, separators included.
-///
-/// Measured on the first grouped snapshot taken: a view sized from its files alone
-/// spent two of its rows on separators and drew the staged run's heading with
-/// **none of its files** under it — the run the reader pressed `a` for, announced
-/// and then empty.
 #[test]
 fn the_list_asks_for_the_rows_its_separators_will_take() {
     let scratch = two_runs("list-rows-wanted");
@@ -1693,18 +1421,6 @@ fn the_list_asks_for_the_rows_its_separators_will_take() {
 }
 
 /// **Pressing `a` shows the staged run on that frame, not on the next write.**
-///
-/// The defect this closes reached a live pane: `Action::ToggleStaged` told the
-/// frame what to walk and nothing re-walked, because `Frame::advance` runs on a
-/// **tick** and a keypress is not one. So the reader pressed the key, the header
-/// said `0 staged` over a worktree with two staged files, and the pane went on
-/// showing exactly what it showed before — until something happened to be written,
-/// which on a tree an agent has finished with may be never.
-///
-/// That is the failure `SPEC.md` §11.2 B17 is named for, one layer down: a key
-/// that does nothing a reader can see. The three toggles beside it need no advance
-/// because they rearrange rows the frame already holds; this one changes what the
-/// frame *contains*.
 #[test]
 fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
     let scratch = two_runs("list-toggle-advances");
@@ -1747,12 +1463,6 @@ fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
 }
 
 /// **Every file in the list is reachable when both runs are drawn.**
-///
-/// The window's top was clamped to `files - rows`, which compares a count of
-/// *files* against a count of *drawn rows*. A grouped window spends one or two of
-/// those rows on separators, so the clamp stops the window one or two files short
-/// and the tail of the staged run cannot be scrolled to at all — silently, since
-/// nothing on screen says the map has an end it will not show.
 #[test]
 fn the_last_file_is_reachable_when_the_list_is_grouped() {
     let scratch = two_runs("list-tail-reachable");
@@ -1812,12 +1522,6 @@ fn the_last_file_is_reachable_when_the_list_is_grouped() {
 }
 
 /// **The height a scroll step is measured in is the height the paint lays out.**
-///
-/// `diff_height` and the paint path both split the body, and they have to agree or
-/// a page-down steps by more rows than the diff has. They took the same inputs
-/// until the list's row budget stopped being its file count: `diff_height` went on
-/// passing `files` for both, so with the staged run drawn it computed a diff up to
-/// two rows taller than the one the reader is looking at.
 #[test]
 fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
     let scratch = two_runs("list-diff-height");
@@ -1866,16 +1570,6 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
 }
 
 /// **`last_top` is the *tightest* ceiling, not merely a top that works.**
-///
-/// The first version returned the **largest** top from which the last file is
-/// drawn, which for any window is the last file's own index: trivially true, and a
-/// ceiling that never binds. The window could then scroll past the end and leave
-/// blank rows under the last file, which is the thing the clamp exists to prevent
-/// and which its own docblock claims it does.
-///
-/// **The gate that missed it asserted only that the ceiling shows the last file**,
-/// satisfied vacuously by the wrong answer. Naming the row *below* is what makes
-/// it a bound rather than an example.
 #[test]
 fn the_lists_ceiling_is_the_tightest_top_that_still_shows_the_last_file() {
     let scratch = two_runs("list-tight-ceiling");
@@ -1909,12 +1603,6 @@ fn the_lists_ceiling_is_the_tightest_top_that_still_shows_the_last_file() {
 }
 
 /// **Follow keeps the caret's own file inside the window it computes.**
-///
-/// The window's forward push was `current + 1 - rows`, which subtracts a count of
-/// **drawn rows** from a **file index**. Once a window can hold rows that are not
-/// files the two are different units, and the arithmetic lands short: the list
-/// scrolls, the file the diff is inside is not among the rows it drew, and the
-/// caret marking that file simply is not there.
 #[test]
 fn follow_marks_the_current_file_at_every_window_it_chooses() {
     let scratch = two_runs("list-follow-caret");
@@ -1961,11 +1649,6 @@ fn follow_marks_the_current_file_at_every_window_it_chooses() {
 }
 
 /// **`J` reaches the end of a grouped list.**
-///
-/// `browse` clamps with `files - list_rows`, which is the naive bound the ceiling
-/// replaced — and `take_list` only takes the smaller of the two, so it cannot
-/// raise one that is already too low. A reader scrolling the map with `J` stopped
-/// one or two files short of the end with nothing saying so.
 #[test]
 fn browsing_reaches_the_bottom_of_a_grouped_list() {
     let scratch = two_runs("list-browse-tail");
@@ -2006,19 +1689,6 @@ fn browsing_reaches_the_bottom_of_a_grouped_list() {
 }
 
 /// **A one-row grouped window draws the run's label, not an unlabelled file.**
-///
-/// The opposite rule, that furniture gives way before content, was overruled
-/// after a real worktree drew a *staged* file on the last row beneath a heading
-/// that said `unstaged`: the saved row is not worth the list stating the wrong
-/// run for a
-/// change. See `no_file_is_ever_planned_without_its_own_runs_label`, which is
-/// the general form; this one pins the narrowest case, where the whole window
-/// is the label.
-///
-/// The original defect this test was written for is still closed, and that is
-/// the part to preserve: a one-row grouped list must not come out **empty**.
-/// The label is pushed and kept, never emitted and retracted, so the region
-/// always draws the row `Body::split` gave it.
 #[test]
 fn a_one_row_list_draws_its_runs_label() {
     let scratch = two_runs("list-one-row");
@@ -2055,16 +1725,6 @@ fn a_one_row_list_draws_its_runs_label() {
 
 /// **The plan's files run contiguously from `top`, which is what lets the painter
 /// count rather than ask.**
-///
-/// `Painter::list` walks `view.list` and increments a file index per drawn file,
-/// starting at `view.list_top`. That is only correct while the plan's files are
-/// `top`, `top + 1`, … with nothing skipped — and it is a coupling that prose
-/// alone holds, between a function in `view.rs` and a loop in `render.rs` that
-/// never calls it. If the plan ever grew a gap, every row below it would draw the
-/// caret and the hover mark against the wrong file, silently.
-///
-/// Swept over every `(top, rows)` the fixture can produce, on a grouped list,
-/// because separators are the only thing that has ever made the two counts differ.
 #[test]
 fn the_plans_files_run_contiguously_from_the_top_it_was_given() {
     let scratch = two_runs("list-contiguous");
@@ -2110,12 +1770,6 @@ fn the_plans_files_run_contiguously_from_the_top_it_was_given() {
 }
 
 /// **The list's scrollbar and its drag agree about how far the window can go.**
-///
-/// All three terms of that bar are files: the position is a file index, the total
-/// is the changed set, and the span has to be one too. Handed the *row* count it
-/// over-reported how much of the list was on screen, so the thumb drew longer than
-/// the travel `Action::ListTo` maps the track onto — the pointer reached the
-/// bottom of a thumb that said it was already there.
 #[test]
 fn the_lists_bar_is_measured_in_files_at_both_ends() {
     let scratch = two_runs("list-bar-units");
@@ -2168,19 +1822,6 @@ fn the_lists_bar_is_measured_in_files_at_both_ends() {
 }
 
 /// **The thumb keeps its length as the window scrolls.**
-///
-/// That is the reader-visible half of the units fix, and it is the only form of it
-/// a gate can hold without restating the renderer's arithmetic. A span taken from
-/// *what this window shows* varies with where the window starts — a window opening
-/// on a run boundary spends one separator and one inside a run spends two — so the
-/// thumb grew and shrank under the pointer as the list moved. A screenful is a
-/// property of the list, not of the position.
-///
-/// **Read off the painted buffer at every reachable top**, because computing the
-/// length from the same numbers `render` uses would be the renderer agreeing with
-/// itself. The non-vacuity check is what makes it bite: at least one top must be a
-/// top where the two candidate spans genuinely differ, or the sweep compares a
-/// number with itself.
 #[test]
 fn the_lists_thumb_keeps_its_length_as_the_window_moves() {
     let scratch = support::Scratch::large_diff("list-thumb-constant", 24, 6);
@@ -2268,11 +1909,6 @@ fn the_lists_thumb_keeps_its_length_as_the_window_moves() {
 
 /// **A screenful is the complement of the ceiling**, which is the definition the
 /// bar, the drag and the clamp all read.
-///
-/// Pinned because three call sites depend on it and none of them can see the
-/// others: a mutation putting the *row* count back was invisible to every
-/// behavioural gate in the suite, because the two differ by the separator count
-/// and a short track rounds that away.
 #[test]
 fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
     let scratch = two_runs("list-span-definition");
@@ -2315,14 +1951,6 @@ fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
 
 /// **Every frame leaves a screenful a scrollbar can be asked about**, including
 /// the two that return before one is computed.
-///
-/// `take_list` returns early on a pane with no list region and `View::collect`
-/// returns early on an empty worktree, so a span left at its initial value is what
-/// those frames hand the bar. Zero reads as *this window shows none of the list*,
-/// which is `scrollable` answering yes; nothing draws a bar on either frame today,
-/// and only because `bar_for`'s own track-height guard catches it first. A field
-/// that is safe because of a guard somewhere else is the shape this module keeps
-/// finding, so the value is right at the source instead.
 #[test]
 fn a_frame_with_no_list_still_reports_a_screenful_that_scrolls_nothing() {
     let scratch = two_runs("list-span-early-returns");
@@ -2372,12 +2000,6 @@ fn a_frame_with_no_list_still_reports_a_screenful_that_scrolls_nothing() {
 }
 
 /// **A drag on the list's track reaches the last file when both runs are drawn.**
-///
-/// `Action::ListTo` clamps through the same ceiling `browse` does, and until this
-/// existed nothing said so on a grouped list: the drag gate in this file uses an
-/// ungrouped fixture, so reverting the travel to `files - list_rows` stayed green.
-/// `browse` cannot rescue it either, because it only ever takes the *smaller* of
-/// the two bounds.
 #[test]
 fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
     let scratch = two_runs("list-drag-grouped");
@@ -2418,22 +2040,6 @@ fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
 }
 
 /// **A file is never drawn without the label of the run it belongs to.**
-///
-/// Reported from a real worktree: the window's last row held a *staged* file
-/// while the only label above it said `unstaged`, so the list
-/// stated something false about where that change lived. The cause was the
-/// old rule that furniture gives way before content does, which dropped the
-/// run label whenever the window had room for one more thing and spent it on
-/// the file instead.
-///
-/// The reader overruled it, and the reason is that the two outcomes are not
-/// comparable. A list one row shorter is merely smaller, and the rail already
-/// says there is more; a file sitting under the wrong run's heading is the
-/// list asserting the wrong thing about the reader's index. So the label now
-/// comes first and the file follows only if a row is left.
-///
-/// Swept over every `(top, rows)` the fixture reaches, because the defect only
-/// appears where a run boundary meets the bottom edge of the window.
 #[test]
 fn no_file_is_ever_planned_without_its_own_runs_label() {
     let scratch = two_runs("list-labelled");
@@ -2471,24 +2077,6 @@ fn no_file_is_ever_planned_without_its_own_runs_label() {
 
 /// **A list that is entirely staged still says so, and its rows still read as
 /// staged.**
-///
-/// Reported from a real worktree: with both changed files staged and nothing
-/// unstaged, the list drew no `staged` heading at all and the kind
-/// letters took the ordinary ink rather than the staged one. Unstaging one file
-/// made both headings and both inks appear. So the view that most needs to
-/// announce itself, the one where *everything* is staged, was the one that said
-/// nothing, and it was indistinguishable from the default unstaged view.
-///
-/// One decision caused both halves. `Runs::grouped` asked whether **both** runs
-/// held files, and `Heading::origin` is `grouped.then_some(entry.origin)`, so a
-/// single-run view dropped its run's identity entirely: no label to draw, and
-/// `None` for the ink to match on, which falls to the unstaged case.
-///
-/// Dropping it is right for a list that is entirely unstaged, because unstaged
-/// is what a reader is looking at unless told otherwise. It is wrong for a list
-/// that is entirely staged, which is the one case where the absence of a label
-/// states the opposite of the truth. So the question is now whether a staged run
-/// exists at all.
 #[test]
 fn an_entirely_staged_list_announces_itself() {
     let scratch = support::Scratch::new("list-all-staged");
@@ -2528,18 +2116,6 @@ fn an_entirely_staged_list_announces_itself() {
 }
 
 /// The `●` survives the ink that drew it, all the way to the screen.
-///
-/// **The wiring gate for [#345](https://github.com/breferrari/vigia/issues/345)**,
-/// and the third one that row needed. `vigia-core` proves `History::newest`
-/// outlives `History::recency`, and `tests/render.rs` proves the painter reads
-/// the right field, and **neither of them proves the two are joined**: a build
-/// that filled `FileEntry::newest` from the recency again would satisfy both and
-/// fail a reader. Mutation found exactly that, which is the shape this project's
-/// record calls a gate modelling the function rather than the program.
-///
-/// So this one drives the real path: a real worktree, a real `History` rolled
-/// forward the way the shell rolls it, `App::view` building the entry, and the
-/// drawn pane read back.
 #[test]
 fn the_mark_reaches_the_drawn_pane_after_the_ink_has_drained() {
     let scratch = Scratch::large_diff("list-newest-mark", 3, 6);

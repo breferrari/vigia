@@ -1,50 +1,4 @@
 //! Which colour every drawn thing gets.
-//!
-//! `SPEC.md` §11.1 rules that the engine emits **meanings** and the shell colours
-//! them, so this is the only place in the project that knows what green is. §5
-//! makes shape and colour the whole differentiator, which is what makes a palette
-//! load-bearing rather than decoration.
-//!
-//! ## Two axes, and both have to allow a thing before it is drawn
-//!
-//! A **palette** decides what may be drawn. A [`Depth`] decides how finely it can
-//! be expressed. They are separate because they answer different questions and get
-//! different answers: [`Theme::ansi`] refuses a row tint at *every* depth, because
-//! a tint has to assume a background and that palette's whole contract is that it
-//! assumes none, while [`Theme::dark`] draws one wherever the depth can express it.
-//!
-//! ## Why `ansi` is now the fallback rather than the default
-//!
-//! **Since [#325](https://github.com/breferrari/vigia/issues/325)** the shell
-//! asks the terminal its background at startup (OSC 11, one poll, at most a
-//! breath), and with no `VIGIA_THEME` and no theme file a terminal that
-//! answers gets the showcase: `dark` or `light`, chosen by its own answer.
-//! That is B18's *nice theme as the default* qualifier landing where #320's
-//! PR said it would, and it removes the clause the old rule rested on: the
-//! background is no longer a thing "nothing has detected".
-//!
-//! `ansi` keeps exactly the role its reasoning always earned: the only
-//! palette that is correct when the terminal does not answer, over ssh, under
-//! a multiplexer that swallows the query, on Windows where none is sent. The
-//! sixteen names resolve to the reader's own scheme, so the fallback matches
-//! the pane beside it instead of fighting it, and a reader who knows better
-//! still says so by name.
-//!
-//! ## Configuring it
-//!
-//! `SPEC.md` §11.2 B6 is ruled here: **no flags**. `VIGIA_THEME` names a built-in
-//! or points at a file, `VIGIA_COLOR` overrides the depth, and `~/.config/vigia/theme`
-//! is where a palette set once lives.
-//!
-//! **There is a config file.** B6's *first* ruling was two variables and no
-//! file, on the argument that a config file with one thing in it invites a
-//! second thing; it was amended within the day. The amendment's own reasoning
-//! is the opposite: a variable has to be re-declared per shell, so a preference
-//! set once belongs in a file. And the second thing did arrive, in
-//! [#306](https://github.com/breferrari/vigia/issues/306), which put the view
-//! defaults in `crate::config` rather than here: `VIGIA_THEME` naming a built-in
-//! never opens this file, so keys that are not colours would be lost by a reader
-//! choosing a palette for one session.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -60,22 +14,9 @@ pub const THEME_VAR: &str = "VIGIA_THEME";
 
 /// Where a theme is read from when nothing overrides it, under the home
 /// directory.
-///
-/// **One rule rather than one per platform.** Resolved from `HOME` or
-/// `USERPROFILE`, which between them cover every target: no XDG matrix, no
-/// `%APPDATA%` special case, no discovery crate. `SPEC.md` §11.1 argues the trade;
-/// the short version is that a palette is a preference and should follow a reader
-/// into every shell, where a colour depth is a fact about one terminal and stays a
-/// variable.
 pub const THEME_FILE: &str = ".config/vigia/theme";
 
 /// Declare the palette once, and derive everything that has to agree with it.
-///
-/// The struct, the key list a theme file is parsed against, the setter that list
-/// dispatches through, and the walk [`Theme::resolve`] uses all come from this one
-/// place. **"Every field has a key" is then true by construction** rather than by a
-/// test that rots the first time someone adds a field and forgets the table, which
-/// is the failure this shape exists to make impossible.
 macro_rules! palette {
     ($($(#[$doc:meta])* $field:ident),* $(,)?) => {
         /// Every colour the shell draws with.
@@ -119,210 +60,37 @@ palette! {
     /// `N/M` position, the readouts, and the header's mode word **while the watch
     /// is live**, since a lost one takes [`Theme::alert`] instead. It is also the
     /// background a chrome row is painted with before anything is drawn on it.
-    ///
-    /// **Not the header's changed-file count**, which took the worktree name's
-    /// [`Theme::chrome`] when it moved beside it, because two weights inside
-    /// one clause would draw the seam that move removed.
-    ///
-    /// The list is meant to be exhaustive for a line of chrome, which is what
-    /// makes the exclusion worth stating: a class with a named exception has to
-    /// name its members too, or the exception is the only thing anyone can
-    /// check. It was not exhaustive when it first named one, and the follow
-    /// marker is what it missed.
     chrome_dim,
 
     /// A changed file's path, at the recency the reader should read it as.
-    ///
-    /// Three styles rather than one, because `SPEC.md` §5 makes intensity carry
-    /// recency: the mockup's dimmed `Cargo.toml` is how the eye finds what moved
-    /// without reading anything. Resolved through [`Theme::recency`].
     path,
     /// A path that changed inside the glance window but not in the last tick.
     path_live,
     /// A path nothing has written since `vigia` started watching.
     path_cold,
     /// A listed path the pointer is resting on.
-    ///
-    /// **The pointer's own colour, which is [`Theme::bar_hover`]'s**, so that
-    /// one reading means *the pointer is here* wherever it lands: a step button,
-    /// a thumb, a listed path. It holds that value in every built-in and keeps a
-    /// key of its own for [`Theme::spark_track`]'s reason, which is that a
-    /// distinct element has to be movable without moving the others.
-    ///
-    /// **It is underlined, and that is the whole of what keeps it off the
-    /// recency ladder.** §5.3 rules that intensity carries recency *and nothing
-    /// else*, so a mark that merely brightened a row would say **recent** about
-    /// a file nothing had touched. Nothing else in these palettes underlines
-    /// anything, so the separation survives every depth. It is also what a
-    /// reader already reads as *the thing under the cursor* from every hyperlink
-    /// they have ever pointed at.
-    ///
-    /// **It deliberately does not sit above all three rungs**, and the reason
-    /// is not taste. §5.3's own B10 principle rules that a pointer mark *"must
-    /// be the quietest thing still visible in that region"*, on the ground that
-    /// a mark which can go **stale** must never be read before the worktree is;
-    /// the paragraph beside it made this the brightest text on the pane. Both
-    /// sentences were written the same day. The brightness was never doing the
-    /// anti-collision work, and the underline above always was.
-    ///
-    /// **On `ansi` the foreground now equals [`Theme::path_cold`]'s outright**,
-    /// which is stated rather than left to be discovered: sixteen names hold
-    /// nothing between colour 8 and `Gray`, so a quiet mark on that palette *is*
-    /// the cold rung's colour and the modifier is the only channel left. That is
-    /// exactly the case §5.3 nominates the underline for.
-    ///
-    /// **It carries no `BOLD`.** That weight belongs to the row the caret marks,
-    /// which is `render.rs`'s `CURRENT_WEIGHT`, and the two are orthogonal on
-    /// purpose: colour and underline are the pointer, weight is the file the
-    /// diff is inside, so a hovered current row reads as both rather than as
-    /// whichever mark won.
     path_hover,
     /// The `●` marking a file that moved in the last tick.
     pulse,
     /// A churn sparkline's blocks, at the quietest of its three stops.
-    ///
-    /// **Ramped by height since [#196](https://github.com/breferrari/vigia/issues/196),
-    /// which closes a departure rather than adding a flourish.**
-    /// `assets/preview.svg` has ramped its sparkline across five greens from the
-    /// start, tallest brightest, and a single flat colour is what that closes.
-    /// *"The picture draws a ramp there and we draw one colour, so it does not
-    /// answer this"* reads the picture as silent where it is not.
-    ///
-    /// **The hue is not what changed and is still cyan.** Green already means
-    /// addition two rows down, and a churn sparkline is about *when* rather than
-    /// *what*, which is the ruling that survives. What the picture was right
-    /// about is the ramp.
-    ///
-    /// Three stops rather than the picture's five, resolved through the same
-    /// [`Band`] and [`Theme::band`] the heat strip uses, so the two glance
-    /// elements on one row ramp through one mechanism and a reader learns the
-    /// gradient once. `Band` has three variants because a third is what the
-    /// depth ladder can draw, which is [`Theme::heat_added`]'s own reasoning.
     spark,
     /// A sparkline bucket at a third or more of the screen's busiest.
     spark_warm,
     /// A sparkline bucket at two thirds or more of it.
-    ///
-    /// **Measured against `vigia_core::scale_of`'s figure over every bucket on
-    /// screen**, which was the busiest of them until
-    /// [#232](https://github.com/breferrari/vigia/issues/232) made a sample weigh
-    /// bytes. Not against
-    /// this file's own, which is the asymmetry `heat_at`'s docblock already
-    /// draws: a sparkline is compared *down* a file list so it shares one scale,
-    /// and a heat strip is read *across* one row so it scales to its own file.
-    /// The ramp inherits that rather than introducing a second rule.
     spark_hot,
     /// A sparkline bucket nothing was written in.
-    ///
-    /// A track rather than a gap, which is the rule [`Theme::heat_track`] and
-    /// [`Theme::bar_track`] already follow. A file with no history at all is
-    /// the *all*-empty case, so at launch a worktree that was already dirty
-    /// draws a full track on every row.
-    ///
-    /// **Chosen rather than read off the picture, which is the one value in
-    /// [`Theme::dark`] that is.** `assets/preview.svg` drew all eight bucket
-    /// positions on all three rows, so nothing in it was ever absent — but its
-    /// quiet buckets were `#1f6f3f`, the ramp's own floor colour, which makes
-    /// them *written* buckets rather than track. There was no sparkline track in
-    /// the file to read. (`#30363d` *is* in that file, as the window border's
-    /// stroke, which is worth knowing because grepping the SVG for it finds a
-    /// hit that has nothing to do with this element.) So this was picked for the
-    /// reason below and the picture was then corrected to draw it, which is why
-    /// the artifact and the shell still agree: the cold row's eight bars are
-    /// `#30363d` today, deliberately **not** the `#21262d` the heat strip on that
-    /// same row uses.
-    ///
-    /// **One step brighter than the other two tracks, because ink is not
-    /// value.** [`Theme::heat_track`] argues `DarkGray` is right on the ground
-    /// that "a track is not text: it is a solid block that should sit just above
-    /// the background". A sparkline track is `_`, one stroke in a cell, so that
-    /// premise does not reach it: the same colour behind a twelfth of the ink
-    /// reads as absence, which is the state this element exists to stop looking
-    /// like. What should match across the three tracks is perceived **weight**,
-    /// and matching the value is what would break it.
-    ///
-    /// **[`Theme::ansi`] is the exception and it is a forced one.** Sixteen
-    /// names hold nothing between colour 8 and `Gray`, and `Gray` is what that
-    /// palette draws content in, so the track keeps `DarkGray` and inherits the
-    /// risk [#60](https://github.com/breferrari/vigia/issues/60) is open on. That
-    /// palette assumes no background, so it cannot be gated the way
-    /// `tests/palette.rs` gates `dark` and `light` against the pane behind them;
-    /// what it gets instead is a named place in the destructure at the top of
-    /// `nothing_a_reader_has_to_read_is_drawn_in_colour_eight`, so the exemption
-    /// is a decision the compiler makes someone take rather than a field nobody
-    /// added to a list. What is not available is walking the styles **by key
-    /// string**: `Theme::KEYS` is public and the values behind those names are
-    /// not, which is why that gate is a destructure rather than a loop.
-    ///
-    /// **Its own key rather than [`Theme::heat_track`]'s**, which is what it
-    /// started as and would still be sharing a value with in all three built-ins
-    /// had the paragraph above not moved two of them. The precedent for the
-    /// separate key is [`Theme::bar_track`], which *does* still hold
-    /// [`Theme::heat_track`]'s value everywhere and is separate anyway: a
-    /// distinct element gets a distinct key, so a theme author can move one
-    /// without moving the others. That the sparkline's then had to move is this
-    /// field's own vindication rather than a coincidence.
-    ///
-    /// **Not** "so a test can tell two tracks apart by style", which is untrue
-    /// while the values are identical and only accidentally true otherwise: what
-    /// separates a spark track from a heat track on one row is
-    /// the **glyph**, `_` against `█`, and `tests/render.rs` matches on the pair.
     spark_track,
 
     /// The filled part of a scrollbar: where in the whole a region is looking.
-    ///
-    /// **Deliberately not `chrome`**, which every other structural mark uses.
-    /// The thumb is drawn as `█`, and `chrome` shares its foreground with
-    /// [`Theme::spark`] on every palette here, so a bar drawn in it would be
-    /// indistinguishable from a sparkline at full height to anything reading
-    /// cells. That is not a hypothetical: `tests/legibility.rs` counts a
-    /// sparkline's buckets by colour *and* glyph precisely because the heat
-    /// strip has collided with it, and this bar is a third candidate for the
-    /// same collision.
     bar,
     /// The same mark while the reader is holding it.
-    ///
-    /// **Feedback for a gesture in progress, and it reuses a reading the eye has
-    /// already learned on this column.** A step button held down and a thumb
-    /// being dragged both take this, so *lit* means the same thing in both
-    /// places: you are doing this right now. Brighter than [`Theme::bar`] rather
-    /// than a different hue, because the element has not changed meaning, only
-    /// state.
-    ///
-    /// It is also what the arrows take while the keys scroll, which is the one
-    /// case where nothing is being held at all: `j` moving the viewport down
-    /// lights the down arrow for as long as the burst lasts, so the bar answers
-    /// the keyboard the way it answers the mouse.
     bar_active,
     /// The same mark while the pointer is merely resting on it.
-    ///
-    /// **The middle rung of the column's three, and it exists because a click
-    /// has to be brighter than a hover.** A step button had somewhere to put a
-    /// hover already, since it rests at [`Theme::bar_track`] and only reaches
-    /// [`Theme::bar_active`] under a gesture. The **thumb** did not: it rests at
-    /// [`Theme::bar`] and is dragged at `bar_active`, with nothing in between,
-    /// so a hover drawn in `bar_active` would make a pointer resting on the
-    /// thumb indistinguishable from a hand dragging it.
-    ///
-    /// [#186](https://github.com/breferrari/vigia/issues/186) read that as *no
-    /// rung, therefore no mark* and shipped the thumb unmarked. That inverted
-    /// the question: if the mark is wanted, the rung is the thing to build.
-    /// Between `bar` and `bar_active` on every palette, so the ordering holds on
-    /// the button and on the thumb with one entry.
     bar_hover,
     /// The unfilled part, which is drawn rather than left blank.
-    ///
-    /// A bar with no track is a mark floating in space: a reader cannot tell a
-    /// short thumb near the top from a long one without seeing the extent it sits
-    /// in. Dimmer than the thumb, for the same reason [`Theme::heat_track`] is
-    /// dimmer than a slice.
     bar_track,
 
     /// A heat-strip slice nothing changed in.
-    ///
-    /// A track rather than a gap, which is what `assets/preview.svg` draws: an
-    /// empty slice is dark, not absent, so the strip's own length stays legible
-    /// and a reader can see *how much* of the file is untouched.
     heat_track,
     /// A heat-strip slice holding additions.
     heat_added,
@@ -346,26 +114,6 @@ palette! {
     /// The letter naming what happened to a file.
     kind,
     /// The kind letter and the run label that mark a **staged** change.
-    ///
-    /// **Green, because that is git's own vocabulary for staged**: `git status`
-    /// paints a staged path green and an unstaged one red, so a reader who has
-    /// used git has already learned this. It is `SPEC.md` §5.3's green
-    /// amendment, and what keeps it from colliding with the diff's own green is
-    /// *where* it is drawn: it inks a file row's kind letter and never a
-    /// content row, so it is never beside a `+` sigil or a `+42` counter.
-    ///
-    /// **It was a bar in a column of its own until
-    /// [#316](https://github.com/breferrari/vigia/issues/316)**, and the column is
-    /// what it cost: taken on every row of *both* runs, so that a run boundary did
-    /// not slide the paths beside it, to mark the rows of one. Colour says the same
-    /// thing for nothing, needs no glyph the reader's font may not have, and is the
-    /// channel `git status` was already using. What it gives up is `NO_COLOR`,
-    /// where the run separators carry the fact alone, which is what they already
-    /// did below the old gutter's own floor.
-    ///
-    /// One key for both marks on purpose. The letter's ink and the word in the
-    /// run's separator are the same statement said twice, so a theme that moved
-    /// one and not the other would be saying it two ways.
     staged,
     /// A hunk's `@@` header.
     hunk,
@@ -380,23 +128,11 @@ palette! {
     context,
 
     /// The wash behind a whole added line.
-    ///
-    /// `SPEC.md` §5.1's tinted row, and it is a **background**: a palette that
-    /// leaves it unset draws no tint, which is what [`Theme::ansi`] does
-    /// deliberately. Drawn only at [`Depth::Truecolor`], because every rung below it
-    /// turns a wash into a slab: see [`crate::colour`] for the arithmetic and for
-    /// why the grey ramp is not the way out.
     added_row,
     /// The same, behind a removed line.
     removed_row,
     /// The hotter wash behind the bytes of an added line that actually changed,
     /// when the line pairs with a removal ([`vigia_core::Line::emph`]).
-    ///
-    /// delta's formula, adopted by `SPEC.md` §11.2 B18: the word patch is the
-    /// same hue as [`Theme::added_row`], stepped brighter, so the edit inside
-    /// the edit reads as *hotter*, never as a new colour role. A background
-    /// like the wash, so it drops out on the same rungs and a palette that
-    /// draws no wash draws no word patch either.
     added_word,
     /// The same, inside a removed line.
     removed_word,
@@ -407,33 +143,6 @@ palette! {
     /// The same, on a removed line.
     removed_gutter,
     /// The pane's leading cell on an added line, which is §5.1's left bar.
-    ///
-    /// **Background only, and it costs no column**. It is one cell of the blank
-    /// margin [`crate::render`]'s inset ladder already keeps, and the row wash
-    /// already bleeds under, so setting its background spends nothing that was
-    /// carrying content. Drawn wherever that margin exists, which is
-    /// forty-three columns up, and absent below it, where the wash and the
-    /// sigil carry the signal alone.
-    ///
-    /// **The reason for putting it on the sigil instead is recorded because it
-    /// expired rather than because it was wrong**: *"the mockup's bar is three
-    /// pixels of a nine-pixel cell, so it has no terminal equivalent that does
-    /// not spend a column, and I6 forbids spending one on decoration"*. The
-    /// sigil
-    /// cell carried it by inverting. That was the best answer available when the
-    /// pane drew from column zero. [#119](https://github.com/breferrari/vigia/issues/119)
-    /// gave the pane a margin, the premise stopped being true, and nobody re-read
-    /// the refusal. It also never drew: every built-in left this key empty, so the
-    /// element §5.1 lists as *a tinted row with a coloured left bar* shipped as the
-    /// tint alone for three phases.
-    ///
-    /// **It reaches `ansi` and every depth, where the wash reaches neither**, and
-    /// the distinction is the whole reason this is a separate key. What rules the
-    /// wash out below 24-bit is stated about text: *a quantised background is a
-    /// solid block, and a block behind highlighted code destroys the colours on
-    /// it.* This cell has no code on it. It is one blank column, so there is
-    /// nothing for a background to destroy, and the default palette gets a
-    /// row-level diff signal §11.1 records it as having lost.
     added_bar,
     /// The same, on a removed line.
     removed_bar,
@@ -486,30 +195,11 @@ impl Theme {
     pub const NAMES: [&'static str; 3] = ["ansi", "dark", "light"];
 
     /// This palette, in colours `depth` can actually show.
-    ///
-    /// Walked **once**, at startup, and the result stored. Nothing here runs on the
-    /// frame path, so I9 never sees it and the renderer keeps drawing with plain
-    /// [`Style`] values that already mean what this terminal can show.
     pub fn resolve(self, depth: Depth) -> Self {
         self.map(|style| depth.resolve(style))
     }
 
     /// The style a file heading is drawn in at `recency`.
-    ///
-    /// **Three steps, not a fade, and the palette is not what decides that.** A
-    /// real gradient does **not** wait on the truecolour ramp
-    /// [#11](https://github.com/breferrari/vigia/issues/11) brings: the number
-    /// of rungs belongs
-    /// to [`Recency`], which has three variants because the store can answer
-    /// exactly three questions about a path, and whose `Cold` means *untracked*
-    /// rather than *old*. A wider palette draws the same three rungs in better
-    /// colours. A fourth would have to mean *how far through the window*, which
-    /// nothing computes and which cannot be drawn honestly on a shell that only
-    /// wakes when a file changes.
-    ///
-    /// What #11 did buy is real: these were three intensities borrowed from the
-    /// modifier set, and they are now three chosen luminances wherever the depth
-    /// can express them.
     pub fn recency(&self, recency: Recency) -> Style {
         match recency {
             Recency::Pulse => self.path,
@@ -519,13 +209,6 @@ impl Theme {
     }
 
     /// The style one slice of a heat strip is drawn in.
-    ///
-    /// **Mixed is yellow, and that is a ruling rather than a leftover colour.**
-    /// `SPEC.md` §5.1 left the mixed case open because the mockup happens not to
-    /// contain one. Every alternative lies: drawing the slice as whichever kind
-    /// dominates, or as the rarer one, paints a mixed slice as pure, and telling
-    /// addition from removal by position is the strip's entire job. Yellow is also
-    /// what a reader already reads as "both" from every diff tool they have used.
     pub fn heat(&self, heat: Heat) -> Style {
         match heat {
             Heat::Cool => self.heat_track,
@@ -551,32 +234,12 @@ impl Theme {
     }
 
     /// Which cyan a written sparkline bucket takes, by how busy it is.
-    ///
-    /// **The sibling of [`Theme::heat`], one element over**, and it goes through
-    /// the same [`Theme::band`] so a ramp that ever draws its middle stop where
-    /// its top belongs is one line to find rather than two elements to compare.
-    /// It takes no `Cool` arm because a sparkline's empty bucket is
-    /// [`Theme::spark_track`] and is resolved by the glyph rather than by the
-    /// band: `_` against `▁`, which `SPARK_TRACK`'s own docblock rules is what
-    /// keeps that distinction a matter of shape.
     pub fn spark_at(&self, band: Band) -> Style {
         self.band(band, self.spark, self.spark_warm, self.spark_hot)
     }
 
     /// The sparkline stops interpolated into an eight-step ramp, or `None`
     /// where interpolation is meaningless.
-    ///
-    /// btop's mechanism, adopted by `SPEC.md` §11.2 B18: linear RGB between the
-    /// stops a palette already declares, `spark` to `spark_warm` over the lower
-    /// half, `spark_warm` to `spark_hot` over the upper, so the three keys a
-    /// reader can move are still the whole of the vocabulary and the ramp is
-    /// derived, never authored.
-    ///
-    /// **The depth ladder gates this by construction.** A theme resolved at
-    /// truecolour holds `Rgb` stops and interpolates; resolved lower it holds
-    /// indexed or named colours, which have no line between them to walk, so
-    /// this returns `None` and the caller draws the three stops it always
-    /// drew. No second ladder, no flag.
     pub fn spark_ramp(&self) -> Option<[Color; 8]> {
         let rgb = |style: Style| match style.fg {
             Some(Color::Rgb(r, g, b)) => Some((r, g, b)),
@@ -621,12 +284,6 @@ impl Theme {
     }
 
     /// One rung of a three-stop ramp.
-    ///
-    /// Written once and called four times rather than twelve match arms, so a
-    /// ramp that ever draws its middle stop where its top belongs is one line to
-    /// find instead of four places to compare. Three of the callers are
-    /// [`Theme::heat`]'s arms and the fourth is [`Theme::spark_at`], which is what
-    /// made the count in this sentence worth keeping current.
     fn band(&self, band: Band, low: Style, warm: Style, hot: Style) -> Style {
         match band {
             Band::Low => low,
@@ -636,13 +293,6 @@ impl Theme {
     }
 
     /// The style a run of `class` is drawn in.
-    ///
-    /// [`Class::Plain`] takes [`Theme::context`] whatever line it lands on, and
-    /// that is `SPEC.md` §11.1's ruling rather than an oversight: the mockup
-    /// colours added, removed and context lines identically and leaves the diff
-    /// signal to the sigil, so unclassified text on an added line is *not* green.
-    /// What the picture uses instead is the row tint, which this palette may or may
-    /// not carry and which the depth may or may not be able to express.
     pub fn class(&self, class: Class) -> Style {
         match class {
             Class::Plain => self.context,
@@ -659,12 +309,6 @@ impl Theme {
 
     /// The wash and the bar for a changed line, or nothing where the palette
     /// declines to draw one.
-    ///
-    /// Two styles rather than one lookup because they land on different cells: the
-    /// wash covers the row and the bar covers the pane's own leading cell. They
-    /// also degrade separately, which is why neither can be derived from the other:
-    /// a wash is dropped below 24-bit because it sits behind highlighted code, and
-    /// a bar is not, because it sits behind nothing.
     pub fn row(&self, added: bool) -> (Style, Style) {
         if added {
             (self.added_row, self.added_bar)
@@ -674,45 +318,11 @@ impl Theme {
     }
 
     /// The sixteen named colours, which is what shipped before there was a choice.
-    ///
-    /// Every colour here is a **name**, never an index or an RGB triple, and that
-    /// is the whole point: a name resolves to whatever the reader's terminal scheme
-    /// says it is, so this palette inherits their scheme instead of arguing with
-    /// it. It is the only one that is correct on a background nothing detected.
-    ///
-    /// It draws **no row tint at any depth**. A tint has to assume a background,
-    /// this palette assumes none, and a solid ANSI block behind syntax-highlighted
-    /// text destroys the colours on it. That is `SPEC.md` §11.1's recorded loss,
-    /// and on this palette it stands.
     pub fn ansi() -> Self {
         Self {
             chrome: fg(Color::Cyan).add_modifier(Modifier::BOLD),
             // **Readable, at the cost of not being dim, and that trade is the
             // ruling.**
-            //
-            // The sixteen-colour world offers exactly two ways to say "dim", and
-            // both were tried here and both were invisible on the same real
-            // terminal ([#60](https://github.com/breferrari/vigia/issues/60)).
-            //
-            // `DarkGray` is ANSI colour 8, which most schemes define *relative to
-            // the background* rather than as a colour: "bright black" is commonly a
-            // shade just above the pane. `Reset` plus `DIM` is SGR 2, which asks
-            // for the reader's own foreground at reduced intensity, and terminals
-            // are free to reduce it as far as they like. One of them put the hints,
-            // the counts, the readouts, the empty state and every line number a few
-            // points off the background; the other did it again.
-            //
-            // So this palette stops trying. Colour 7 is the reader's ordinary
-            // foreground and is readable by construction, which is the property
-            // that actually matters: `SPEC.md` §5 makes colour half the
-            // differentiator, and §11.1 already argues that a monitor whose state
-            // cannot be read has failed twice. The hints are how a reader finds out
-            // the tool has an `f` key.
-            //
-            // What is given up is the visual hierarchy between chrome and content,
-            // and `dark` and `light` keep it, because a palette that knows its own
-            // background can pick a grey that is genuinely between the two. That is
-            // the cost of inheriting a scheme you cannot see.
             chrome_dim: fg(Color::Gray),
             // Three rungs of one ramp: bright and bold, bright, then plain.
             // `Gray` rather than `DarkGray` for the coldest, deliberately. Every
@@ -821,27 +431,6 @@ impl Theme {
     }
 
     /// `assets/preview.svg`, as a palette.
-    ///
-    /// Every value here is **read out of the picture** rather than chosen, per
-    /// `SPEC.md` §5.1's rule that a published artifact answering an open question
-    /// is the answer. **[`Theme::spark_track`] is the one exception and says so
-    /// itself**: the picture had no sparkline track in it to read, so that value
-    /// was picked and the picture was corrected to draw it, which is the same
-    /// rule applied in the only direction available when the artifact is silent.
-    /// The picture's own class names map onto these directly:
-    /// `.fg` `#e6edf3`, `.dim` `#7d8590`, `.faint` `#6e7681`, `.grn` `#3fb950`,
-    /// `.red` `#f85149`, `.cyn` `#39c5cf`, `.kw` `#ff7b72`, `.fnn` `#d2a8ff`,
-    /// `.typ` `#ffa657`, `.var` `#79c0ff`, `.con` `#e3b341`, with the row washes
-    /// `#0f2c1c` and `#2d1416` and the heat and scrollbar tracks' `#21262d` taken
-    /// from the rects.
-    ///
-    /// Where the picture ramps and we need a third stop it is interpolated in the
-    /// picture's own direction: brighter is busier, which is what its sparkline
-    /// does.
-    ///
-    /// **This is the palette that assumes a dark terminal**, and that is why it is
-    /// not the default. On a light background its foregrounds are unreadable, and
-    /// nothing here can detect which one a reader has.
     pub fn dark() -> Self {
         Self {
             chrome: rgb(0x39, 0xc5, 0xcf).add_modifier(Modifier::BOLD),
@@ -870,12 +459,6 @@ impl Theme {
             // read as the same weight: `_` is one line in a cell where `▄` is
             // half of one. With `heat_track` at 2.96:1 this is 4.12:1, where
             // `#30363d` is **1.55:1**, below even the block it must outrank.
-            //
-            // Found by the gate rather than by eye, which is the point of having
-            // one: nobody reported the sparkline, and an empty bucket is exactly
-            // the case `SPEC.md` §5.1 rules has to draw a track, so a launched
-            // worktree with no history behind it was drawing the blank column
-            // [#78](https://github.com/breferrari/vigia/issues/78) exists to remove.
             spark_track: rgb(0x6e, 0x76, 0x81),
             bar: rgb(0x8b, 0x94, 0x9e),
             bar_active: rgb(0xc9, 0xd1, 0xd9),
@@ -885,65 +468,6 @@ impl Theme {
             // all, and a button appeared only while it was pressed, because a
             // press draws in `bar` above and everything
             // else on that column drew in this.
-            //
-            // Measured rather than adjusted by eye: `#21262d` on `#0d1117` is
-            // **1.24:1**, where 1.0 is the background exactly. It was never a
-            // subtle colour, it was an absent one, and the same value made the
-            // empty heat bucket `SPEC.md` §5.1 promises a track for draw nothing.
-            //
-            // The earlier reading was that the value was right and the defect
-            // belonged to the sixteen-colour rung, because these were taken off
-            // `assets/preview.svg` where they do read. That is the picture-versus-
-            // cell-grid distinction §5.1 already draws: a 1.24:1 edge over many
-            // pixels of SVG is perceptible and the same ratio in one terminal cell
-            // is not. The mockup is not wrong; reading a cell colour off it is.
-            //
-            // `#57606a` is **2.96:1**, against the thumb's 6.15:1. Both visible,
-            // and the gap between them is what keeps the ruling one line up true:
-            // the track is context and the thumb is the reading.
-            //
-            // **`#656c76`, because the column it sits on is not the pane**.
-            // Every ratio above is measured against `#0d1117`, which holds for
-            // the bar's cell only while the row wash stops one column short of
-            // it. The band runs under the bar now, so on a changed row this
-            // glyph sits on `added_row` or `removed_row` instead, and `#57606a`
-            // there is **1.88:1** and **2.17:1**. That is nearer the `#21262d`
-            // this note rejects as absent than the value it chose, so the track
-            // would have survived on context rows and faded on the rows a
-            // reader is looking at, drawing the bar as a dashed line down the
-            // pane.
-            //
-            //             context   added  removed
-            //   #57606a     2.96     1.88     2.17
-            //   #656c76     3.57     2.27     2.61
-            //   thumb       6.15     3.91     4.51
-            //
-            // The gap the paragraph above depends on survives and stops varying:
-            // **1.72x on every row kind**, where it was 2.08x on a context row and
-            // undefined on a washed one, the track having been the pane there.
-            //
-            // **`#656c76` is a value this palette holds nowhere else, and #239
-            // is where a new colour turned out to be needed.** The intended
-            // value was `spark_track`'s own `#6e7681`, on §5.3's rule that an
-            // element earns a colour by
-            // taking a role rather than by being distinct. It fails `palette.rs`'s
-            // pre-existing separation gate, which requires the thumb to outrank the
-            // track by half again: it lands at **1.49x** where 1.50 is the floor.
-            //
-            // The window is genuinely narrow. Once the track has to clear 2.0:1 on
-            // the *added* row and stay under the thumb by half again on that same
-            // row, it is bounded to roughly 2.0 and 2.61 there, and **no grey this
-            // palette already holds sits inside it**: `#57606a` is below the floor
-            // at 1.88, and `#6e7681` and everything above it breaks the separation.
-            // So the value is chosen by those two constraints rather than by eye,
-            // and it is stated as new rather than dressed up as borrowed.
-            //
-            // (`#6e7781` is not a value here and is easy to write by mistake:
-            // `spark_track` is `#6e7681`, and the other is that value with a
-            // single digit slipped, `7` for `6` in the fourth
-            // place, which is why it read as a neighbour rather than as a typo. The
-            // 1.49x was measured against the real one, so the conclusion held while
-            // the attribution did not.)
             bar_track: rgb(0x65, 0x6c, 0x76),
             // **Left at `#57606a` deliberately, and not an oversight.** The move
             // above is paid for by the wash, and the heat strip does not sit on
@@ -979,13 +503,6 @@ impl Theme {
             // dark scheme is *lighter* than the mockup's. A wash darker than the
             // background reads as nothing at all, which is what it did on the first
             // terminal it met.
-            //
-            // So these are lifted until they are green and red rather than
-            // marginally-darker, while staying dark enough to keep `#e6edf3` text
-            // and the syntax colours legible on top. What the picture specifies is
-            // *that the row is washed in the colour of the change*, and that is
-            // what survives; the exact triple was a value chosen against a
-            // background this palette does not control.
             added_row: Style::new().bg(Color::Rgb(0x1b, 0x3d, 0x29)),
             removed_row: Style::new().bg(Color::Rgb(0x45, 0x22, 0x2a)),
             // The washes stepped hotter, same hue, roughly delta's line-to-emph
@@ -999,29 +516,6 @@ impl Theme {
             // the argument that the sigil is the one cell that already
             // means "this line changed" and so could carry §5.1's left bar without
             // spending a column.
-            //
-            // It reads as a solid block. Inverting the sigil takes the one glyph
-            // that carries the diff signal and turns it into a background, and at
-            // terminal sizes the `+` stops being a character. Reported from a real
-            // screen, which is the only place this was ever going to show.
-            //
-            // So the sigil keeps its own colour on the wash, which is what every
-            // diff tool does and what the mockup itself draws: its bar is a
-            // separate 3px sliver *beside* a green `+`, not a recolouring of it.
-            // The wash carries the band; the sigil carries the sign.
-            //
-            // **The bar itself was then refused, on a reason that has since
-            // expired**. It read: *the bar has no terminal equivalent that does
-            // not spend a column I6 forbids.* True when the pane drew from
-            // column zero, false once
-            // [#119](https://github.com/breferrari/vigia/issues/119) gave it a
-            // margin, and nobody re-read the refusal. The margin is blank, the
-            // wash already bleeds under it, so the bar is a background on a
-            // cell that was carrying nothing.
-            //
-            // The picture's own colours, which is the point: the sliver beside the
-            // `+` is `#3fb950` and the one beside the `−` is `#f85149`, the same
-            // hues `added` and `removed` draw the sigils in.
             added_bar: Style::new().bg(Color::Rgb(0x3f, 0xb9, 0x50)),
             removed_bar: Style::new().bg(Color::Rgb(0xf8, 0x51, 0x49)),
             note: rgb(0xd2, 0xa8, 0xff),
@@ -1038,13 +532,6 @@ impl Theme {
     }
 
     /// The same design against a light terminal.
-    ///
-    /// Not an inversion of [`Theme::dark`], which does not work: flipping a
-    /// luminance ramp leaves saturated hues that were chosen to glow on black
-    /// sitting at the same lightness as white paper. The hues are re-picked at
-    /// light-background luminance instead, and the **direction of every ramp
-    /// flips**: on black, busier is brighter; on white, busier is darker, because
-    /// that is which end has contrast to spend.
     pub fn light() -> Self {
         Self {
             chrome: rgb(0x0a, 0x62, 0x6b).add_modifier(Modifier::BOLD),
@@ -1060,15 +547,6 @@ impl Theme {
             // **Darker as it climbs**, which is the same rule as `dark`'s and
             // not a second one: both move towards the foreground, and on a light
             // background that direction is down.
-            //
-            // **Today's flat value becomes the middle stop here**, where on
-            // `dark` it stays the quietest, and that asymmetry is forced rather
-            // than chosen. The 256-colour cube's axes are `0, 95, 135, 175, 215,
-            // 255`, so everything below 95 collapses into one cell: a ramp
-            // running *down* from `#0a626b` has nowhere to put two more stops and
-            // `the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them`
-            // is what said so. Spread around it instead, and the quiet end
-            // lightens.
             spark: rgb(0x5a, 0xa6, 0xae),
             spark_warm: rgb(0x0a, 0x62, 0x6b),
             spark_hot: rgb(0x03, 0x28, 0x2e),
@@ -1086,19 +564,6 @@ impl Theme {
             // invisible for the same reason the dark palette's was. See the note
             // on `Theme::dark`'s `bar_track`; the two were wrong together and are
             // fixed together, and the gap below `bar`'s 6.11:1 matches.
-            //
-            // **`#7d8590`**, the third value these two take together. The band
-            // runs under the bar, so this glyph sits on `added_row` or
-            // `removed_row` on a changed row rather than on white:
-            //
-            //             context   added  removed
-            //   #8c959f     3.04     2.40     2.25
-            //   #7d8590     3.73     2.95     2.77
-            //   thumb       6.11     4.83     4.54
-            //
-            // A uniform **1.64x** below the thumb on every row kind. `#7d8590` is
-            // `spark_track`'s value here, so no colour is invented on this palette
-            // either.
             bar_track: rgb(0x7d, 0x85, 0x90),
             // Light enough to read as a track on white, dark enough to be visible.
             // Unmoved for the reason `Theme::dark`'s twin gives: the heat strip
@@ -1152,10 +617,6 @@ impl Theme {
 }
 
 /// sRGB bytes to Oklab, through linear light.
-///
-/// Bjorn Ottosson's constants, verbatim; the fit is public domain and tiny,
-/// which is why this is written here rather than bought as a dependency
-/// `SPEC.md` does not name.
 fn oklab_of((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
     let linear = |c: u8| {
         let c = c as f32 / 255.0;
@@ -1205,10 +666,6 @@ impl Default for Theme {
 }
 
 /// Anything that stops a theme from being understood.
-///
-/// Every variant carries the 1-based line it was found on, because a theme file is
-/// the one input here a reader wrote by hand and "something is wrong somewhere" is
-/// not an answer they can act on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThemeError {
     /// A key that is not one of [`Theme::KEYS`].
@@ -1322,12 +779,6 @@ impl fmt::Display for ThemeError {
 impl std::error::Error for ThemeError {}
 
 /// The palette this process should draw with.
-///
-/// Resolved **before the screen is taken**, so a theme that does not parse reports
-/// on a terminal the reader can still read. That is the same rule `SPEC.md` §11.1
-/// already states for a path that is not a repository, and it exists for the same
-/// reason: an error painted inside a TUI that then hands the terminal back is an
-/// error nobody sees.
 pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
@@ -1370,16 +821,6 @@ pub fn from_env(
 }
 
 /// `rela` under the reader's home directory, if there is one.
-///
-/// `HOME` first, because it is set on every Unix and by Git Bash on Windows too,
-/// then `USERPROFILE`. Read through the same lookup its callers use, so a test can
-/// place a home directory without touching the process environment.
-///
-/// **Takes the relative path since [#306](https://github.com/breferrari/vigia/issues/306)**,
-/// because there are two files under that directory now and the empty-versus-unset
-/// rule below is the kind that is got wrong once per copy. It was got wrong once
-/// already, in this function, before there was a second caller to get it wrong
-/// again. `crate::config::CONFIG_FILE` is the other one.
 pub(crate) fn home_file(rela: &str, lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     // **Each candidate is emptied-checked before the next is tried**, which is the
     // whole of this function and was wrong on the first write. Filtering after the
@@ -1387,10 +828,6 @@ pub(crate) fn home_file(rela: &str, lookup: &impl Fn(&str) -> Option<String>) ->
     // `or_else` never fires, and the filter then discards it having already skipped
     // `USERPROFILE`. A reader with an empty `HOME` would get no theme file and no
     // way to know why.
-    //
-    // The same empty-versus-unset trap `VIGIA_COLOR` had. Twice in one file is
-    // enough to say it out loud: an environment variable has three states, not
-    // two, and the third is the one that only shows up on somebody else's machine.
     ["HOME", "USERPROFILE"]
         .into_iter()
         .filter_map(lookup)
@@ -1509,26 +946,6 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
 }
 
 /// The words of a value, stopping where a trailing comment starts.
-///
-/// Every configuration format that writes colours in hex has this collision: `#`
-/// starts a comment and also starts a value. **Two rules were tried before this
-/// one and both were wrong in a way that reading did not show.**
-///
-/// *"A `#` preceded by whitespace is a comment"* eats `added_row = on #0f2c1c`,
-/// where a background with no foreground puts a space before the only colour on
-/// the line.
-///
-/// *"A `#` followed by six hex digits is a colour, otherwise a comment"* fixes that
-/// and then does something worse: `added = #gg0000` is a **typo**, and this rule
-/// reads it as a comment, leaves the value empty, and parses successfully with the
-/// key silently set to nothing. A theme file that reports no error and changes
-/// nothing is the exact failure the refuse-unknown-keys rule exists to prevent,
-/// arrived at from the other direction.
-///
-/// The rule that holds is positional: a `#` token begins a comment only once
-/// **something real already precedes it** in the value. The first token of a value
-/// is therefore always an attempted colour and reaches [`colour_of`], which
-/// rejects it by name.
 fn words_of(value: &str) -> Vec<&str> {
     let mut out = Vec::new();
     for word in value.split_whitespace() {
@@ -1548,11 +965,6 @@ fn is_hex(word: &str) -> bool {
 }
 
 /// `[<colour>] [on <colour>] [<modifier>...]`.
-///
-/// **A value with nothing in it is an error, not an empty style.** `added =` is
-/// something a reader meant to finish, and accepting it would set the key to no
-/// colour at all, which is a theme file that changes something invisibly rather
-/// than not changing it.
 fn style_of(value: &str, line: usize, current: Style) -> Result<Style, ThemeError> {
     // **Seeded from the key's current value, not from nothing.** `added = bold`
     // reads as "make additions bold"; built from `Style::new()`, where `set`
@@ -1560,9 +972,6 @@ fn style_of(value: &str, line: usize, current: Style) -> Result<Style, ThemeErro
     // That is the same invisible change
     // [`ThemeError::MissingValue`] exists to prevent, reached from the other
     // direction: a line that says one thing and silently does two.
-    //
-    // Only the fields the value names are overwritten, so a value that names a
-    // colour still replaces the colour.
     let mut style = current;
     let tokens = words_of(value);
     if tokens.is_empty() {

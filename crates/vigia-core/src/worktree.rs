@@ -15,11 +15,6 @@ use crate::watch::{WatchOptions, Watcher};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangeOptions {
     /// Pair deletions with additions so a moved file reads as one change.
-    ///
-    /// Costs streaming. Rename detection cannot emit its first result until
-    /// the walk has finished, because any later addition might still pair with
-    /// an earlier deletion. With this on, time-to-first-change equals
-    /// time-to-last-change, which is the shape I4 exists to forbid.
     pub track_renames: bool,
 }
 
@@ -32,30 +27,11 @@ impl Default for ChangeOptions {
 }
 
 /// A working tree under observation.
-///
-/// Holds an open `gix::Repository` for the process lifetime. Reopening per
-/// frame would re-read config and re-mmap the object database, which is
-/// exactly the per-tick cost the engine exists to avoid.
 pub struct Worktree {
     repo: gix::Repository,
     workdir: PathBuf,
     /// The clean filter: built on the first working-tree read after each
     /// [`Frame::advance`], and not before.
-    ///
-    /// Lazy because a monitor pointed at a clean tree draws the empty state and
-    /// diffs nothing, and assembling this costs an index load and an
-    /// attribute-globals read. Paying for those at [`Worktree::discover`] would
-    /// put them on the path I7 measures, to build something that session might
-    /// never consult.
-    ///
-    /// Dropped once per frame rather than held for the process, because the
-    /// rules it caches live in files the agent in the other pane can rewrite.
-    /// See [`Worktree::invalidate_filter`] for why that is a correctness rule
-    /// and not a refresh policy.
-    ///
-    /// `RefCell` costs nothing that was not already given up: `gix::Repository`
-    /// is `Send` and not `Sync`, so each thread already opens its own
-    /// `Worktree` rather than sharing one.
     filter: RefCell<Option<Filter>>,
 }
 
@@ -77,80 +53,22 @@ impl Worktree {
     }
 
     /// The branch HEAD names, shortened, or `None` when HEAD is detached.
-    ///
-    /// This is orientation for the empty state and nothing else: `SPEC.md` §11.1
-    /// rules B3, and it is explicit that the branch does **not** describe the
-    /// comparison. The diff here is the working tree against the index, so HEAD
-    /// does not enter into it, and a reader who took the branch for the left-hand
-    /// side of the diff would be reading it wrong.
-    ///
-    /// Shortened, because `refs/heads/` is a prefix every branch carries and
-    /// therefore says nothing. A slash inside the name survives.
-    ///
-    /// `None` is ordinary rather than a failure. A detached HEAD is where a
-    /// rebase or a bisect leaves a tree, and the empty state drops the branch
-    /// instead of inventing one. An unreadable HEAD reaches the same answer for
-    /// the same reason a frame failure reaches the footer rather than the exit
-    /// code: a monitor that refuses to draw because it could not name a branch
-    /// has stopped doing its job over a decoration.
-    ///
-    /// An unborn branch still names itself, which is not a quirk to work around:
-    /// a repository with no commits is what an agent's first minute looks like,
-    /// and `main` is the honest answer there rather than nothing.
-    ///
-    /// Costs one `.git/HEAD` read, so the caller decides when to pay it. The
-    /// shell asks only on a frame that draws the empty state, which is a frame
-    /// with no diff to compute and nothing else to read, and that is what keeps
-    /// I4 true: the thing read is the thing drawn.
     pub fn branch(&self) -> Option<String> {
         let name = self.repo.head_name().ok()??;
         Some(name.shorten().to_string())
     }
 
     /// Stream the working-tree-vs-index changes with default options.
-    ///
-    /// An iterator rather than a `Vec` on purpose: I4 makes first paint a
-    /// budget, so the caller must be able to render file one before file one
-    /// thousand has been looked at. Returning a collection here would make
-    /// that impossible to honour further up.
     pub fn changes(&self) -> Result<Changes> {
         self.changes_with(ChangeOptions::default())
     }
 
     /// Stream the working-tree-vs-index changes.
-    ///
-    /// Kept as the unstaged spelling of [`Worktree::changes_of`] rather than
-    /// removed: it is the comparison this tool is named for, every caller that
-    /// does not know about runs wants it, and a default argument is not a thing
-    /// Rust has.
     pub fn changes_with(&self, options: ChangeOptions) -> Result<Changes> {
         self.changes_of(Origin::Unstaged, options)
     }
 
     /// Stream one comparison's changes.
-    ///
-    /// **Two comparisons since [#313](https://github.com/breferrari/vigia/issues/313),
-    /// and they are not the same shape.** [`Origin::Unstaged`] streams: `gix`
-    /// hands back an iterator over the index-worktree walk and this wraps it.
-    /// [`Origin::Staged`] does **not** stream and cannot, because
-    /// `Repository::tree_index_status` is callback-driven — it takes an `FnMut`
-    /// and drives the whole diff itself, so the only iterator available is over
-    /// what it has already produced.
-    ///
-    /// **That is stated rather than hidden behind the shared return type**, for
-    /// the reason this repository already learned once about the walk beside it:
-    /// an `impl Iterator` is not evidence that work is incremental, and only a
-    /// time-to-first-item measurement tells a lazy iterator from a lazy-looking
-    /// one over an eager batch. The unstaged walk is itself barely incremental
-    /// while rename tracking is on (first item at 97% of the walk), which is
-    /// `SPEC.md` §10's own open bullet, so the staged arm is a difference of
-    /// degree rather than of kind here.
-    ///
-    /// **What makes buffering affordable is that it reads no content.** A staged
-    /// change is two object ids compared, so this walk touches no file, allocates
-    /// one `FileChange` per changed path and nothing per line. Measured on a
-    /// 200-file fixture: **430µs against 2.15ms** for the index-worktree walk
-    /// beside it. I4 governs building what is drawn, and nothing here is built.
     pub fn changes_of(&self, origin: Origin, options: ChangeOptions) -> Result<Changes> {
         match origin {
             Origin::Unstaged => {
@@ -173,16 +91,6 @@ impl Worktree {
     }
 
     /// How many changes one comparison holds, without keeping any of them.
-    ///
-    /// **For the empty state and nothing else.** B3's line says which comparison
-    /// it is empty *for*, and since #313 it also says where the work went when the
-    /// other run has some: `no unstaged changes · 3 staged` turns a blank pane
-    /// into a signpost instead of a dead end.
-    ///
-    /// Asked only on a frame that draws that line, which is a frame with no diff
-    /// to compute and nothing else to read. That is the same rule
-    /// [`Worktree::branch`] follows and it is what keeps I4 true: the thing read
-    /// is the thing drawn.
     pub fn count_of(&self, origin: Origin) -> Result<usize> {
         // **Rename tracking on, and the cheaper spelling is wrong here.** A count
         // does not care about pairing *in the abstract* — but this number is drawn
@@ -196,12 +104,6 @@ impl Worktree {
     }
 
     /// The index against `HEAD^{tree}`, collected.
-    ///
-    /// **An unborn `HEAD` is an ordinary answer rather than a failure**, and it is
-    /// the case an agent's first minute is actually in: a repository with no
-    /// commits has no tree to compare against, so the comparison is against the
-    /// empty one and every indexed path reads as a staged addition. That is what
-    /// `git diff --cached` reports there too.
     fn staged(&self, options: ChangeOptions) -> Result<Vec<FileChange>> {
         let tree = match self.repo.head_tree_id() {
             Ok(id) => id.detach(),
@@ -241,10 +143,6 @@ impl Worktree {
         // the right rule and is exactly what made this bad: the pane kept its
         // pre-`a` contents and stopped updating, quietly, on a tree the reader was
         // watching precisely because it was changing.
-        //
-        // Empty is the honest answer rather than a fallback: this walk cannot see
-        // that index, so it has nothing to report. The unstaged run is unaffected
-        // and goes on drawing.
         if let Err(e) = walked {
             if matches!(
                 e,
@@ -258,41 +156,21 @@ impl Worktree {
     }
 
     /// Start watching this working tree for change.
-    ///
-    /// The watcher borrows the repository, because the gitignore rules it
-    /// filters against are resolved through it.
     pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
         Watcher::new(&self.repo, &self.workdir, options)
     }
 
     /// Start a frame over this working tree.
-    ///
-    /// The frame is what holds diffs between redraws, so it is what I2a is
-    /// about. It starts empty; [`Frame::advance`] gives it its first contents.
     pub fn frame(&self) -> Frame<'_> {
         Frame::new(self)
     }
 
     /// Compute the line-level diff for one change.
-    ///
-    /// Reads both sides every time. A monitor calls this through a
-    /// [`Frame`], which is what stops a redraw paying for files that did not
-    /// change (I2a).
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
         self.diff_counted(change, &mut 0)
     }
 
     /// [`Worktree::diff`], reporting the type probes it spent.
-    ///
-    /// The counted spelling exists so [`Frame`] can fold this read's syscalls
-    /// into [`FrameStats::probes`](crate::FrameStats) **by construction rather
-    /// than by protocol**. The first version of this counting used a `Cell` on
-    /// `Worktree` that the caller drained, which meant the rule "drain the
-    /// counter around your own call, and discard whatever a direct caller left"
-    /// was enforced by a doc comment and nothing else: deleting either drain
-    /// left the suite green and misattributed a probe to the wrong frame.
-    /// Threading it out cannot be got wrong, and `Worktree` keeps no counter
-    /// state at all.
     pub(crate) fn diff_counted(&self, change: &FileChange, probes: &mut u64) -> Result<FileDiff> {
         if !change.is_diffable() {
             return Ok(FileDiff {
@@ -317,18 +195,11 @@ impl Worktree {
     }
 
     /// How tall one change's diff is, without building any of it.
-    ///
-    /// Reads both sides exactly as [`Worktree::diff`] does, and then counts
-    /// instead of materialising. That is the whole saving: the reads are the same
-    /// bytes, and what it skips is a `String` per drawn line.
     pub fn measure(&self, change: &FileChange) -> Result<hunk::FileSpan> {
         self.measure_counted(change, &mut 0)
     }
 
     /// [`Worktree::measure`], reporting the type probes it spent.
-    ///
-    /// See [`Worktree::diff_counted`] for why the count is threaded rather than
-    /// accumulated.
     pub(crate) fn measure_counted(
         &self,
         change: &FileChange,
@@ -343,17 +214,6 @@ impl Worktree {
     }
 
     /// Both sides of one change's diff, in the bytes git would compare.
-    ///
-    /// **One function since [#313](https://github.com/breferrari/vigia/issues/313)**,
-    /// where [`Worktree::diff_counted`] and [`Worktree::measure_counted`] each had
-    /// their own copy of it. The two must read the *same* bytes or a measured
-    /// height describes a diff nobody will draw, and two copies of a rule that now
-    /// has three cases — a blob, a working-tree read, or nothing at all — is the
-    /// same drift argument [`FileChange::reads_worktree`] was extracted on.
-    ///
-    /// A staged change reaches [`Side::Blob`] on both sides and spends no
-    /// syscall, which is what makes the second walk affordable: the run a reader
-    /// has just asked for costs object-database reads rather than filesystem ones.
     fn sides(&self, change: &FileChange, probes: &mut u64) -> Result<(Vec<u8>, Vec<u8>)> {
         let before = match change.before {
             Some(id) => self.blob(id, &change.path)?,
@@ -376,16 +236,6 @@ impl Worktree {
     /// *commit*. On a repository whose object database can resolve it (a clone
     /// made with `--reference`, or any alternates setup) `find_object` succeeds
     /// and the conversion aborts the process.
-    ///
-    /// A monitor that panics is the worst failure this product has, and it would
-    /// land on the reader's whole terminal rather than on one row. So an object of
-    /// the wrong kind reaches the same `MissingBlob` a missing one does: the file
-    /// draws its state and nothing else stops.
-    ///
-    /// Reachable on both sides since
-    /// [#313](https://github.com/breferrari/vigia/issues/313) — the staged run's
-    /// right-hand side is an index id too — which is what turned a latent
-    /// unstaged-only hazard into one worth closing rather than recording.
     fn blob(&self, id: gix::ObjectId, path: &str) -> Result<Vec<u8>> {
         let missing = || Error::MissingBlob {
             path: path.to_owned(),
@@ -395,65 +245,11 @@ impl Worktree {
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
-    ///
-    /// Called once per [`Frame::advance`], which is what bounds how stale the
-    /// filter can be to a single frame. It has to be bounded by something: the
-    /// rules live in `.gitattributes` and `core.autocrlf`, and **the agent in
-    /// the other pane can write a `.gitattributes` at any moment.** Built once
-    /// per process, the pane then goes on drawing the old answer indefinitely
-    /// while a restart would draw a different one, which is I5 (correct with
-    /// zero interaction) failing silently in a process I3 expects to run for
-    /// days.
-    ///
-    /// Dropping rather than rebuilding keeps the laziness that made this cheap.
-    /// A frame whose diffs are all reused reads no file, so it rebuilds nothing;
-    /// only a frame that actually recomputes a diff pays, and that frame was
-    /// already reading from disk. `gix` rebuilds its own attributes stack on
-    /// every status walk for the same reason, so this matches the freshness of
-    /// the walk it is paired with rather than inventing a policy.
     pub(crate) fn invalidate_filter(&self) {
         *self.filter.borrow_mut() = None;
     }
 
     /// Read a working-tree file as git would store it.
-    ///
-    /// The normalisation is not a nicety. Git diffs the working-tree side
-    /// *through* its clean filter, so on a checkout with `core.autocrlf=true`
-    /// the bytes on disk are CRLF while the blob they are compared against is
-    /// LF. Skipping the filter makes every line of every such file differ from
-    /// its stored form: see `filter.rs` and
-    /// [#65](https://github.com/breferrari/vigia/issues/65).
-    ///
-    /// **A symlink is stored by content too, and its content is the target
-    /// path.** Git keeps one as a mode `120000` blob holding the target verbatim,
-    /// so `fs::read` is the wrong primitive for it twice over: it follows the
-    /// link, and it therefore compares the *target file's* bytes against a blob
-    /// holding a path. Reading the link itself is the same rule this function
-    /// already applies to a text file, not an exception to it: compare the bytes
-    /// git would store. See [`Worktree::link_target`] and
-    /// [#15](https://github.com/breferrari/vigia/issues/15).
-    ///
-    /// **Deciding between the two costs no syscall on the ordinary path**, which
-    /// is the whole reason [`FileChange::maybe_symlink`] exists: the status walk
-    /// has already seen the entry's mode, and asking the filesystem again put a
-    /// second `stat` per file on the path
-    /// `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
-    /// holds at one, for a measured **+1.18ms p50** over a hundred undrawn files
-    /// inside the settle margin. Only a change the walk could not resolve as a
-    /// plain file reaches the `lstat` below.
-    ///
-    /// **`gix`'s own blob pipeline is the obvious alternative and it is refused,
-    /// which is recorded here because it is the first thing a reader will
-    /// propose.** `gix_diff::blob::pipeline::Pipeline::convert_to_diffable` does
-    /// handle `EntryKind::Link`, and three things make it the wrong call: it
-    /// performs **no separator conversion**, so it reproduces on Windows exactly
-    /// the defect [#15](https://github.com/breferrari/vigia/issues/15) fixed; it
-    /// can spawn a `binary_to_text_command` external driver, which `filter.rs`
-    /// rejects outright as a process per file per frame; and its own
-    /// documentation warns that it leaks temporary files without a
-    /// `gix_tempfile` signal handler, against I3's zero-retained-temp-files gate.
-    /// It also takes the entry mode as a **trusted** input, which is the same
-    /// ruling [`FileChange::maybe_symlink`] makes and a less conservative one.
     fn read_worktree(&self, change: &FileChange, probes: &mut u64) -> Result<Vec<u8>> {
         let rela_path = change.path.as_str();
         let full = self.workdir.join(rela_path);
@@ -464,11 +260,6 @@ impl Worktree {
         // and `FrameStats::probes` is one layer up, so the gate that holds this
         // corner at one stat per file could see neither the cost nor the saving.
         // See [`Worktree::diff_counted`].
-        //
-        // Anything the probe cannot positively call a link falls through to the
-        // plain read, which reaches the same answers one line later: a file that
-        // vanished reads empty there, and an unreadable one produces the same
-        // `Error::Read`. Only the link arm is load-bearing.
         if change.maybe_symlink {
             *probes += 1;
             if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
@@ -481,10 +272,6 @@ impl Worktree {
             // The agent in the other pane can delete a file between the moment
             // status named it and the moment we read it. That is ordinary, not
             // a failure: report it as empty and let the next frame correct us.
-            //
-            // Returned before the filter rather than through it, because there
-            // is nothing to normalise and priming the attributes stack for a
-            // file that no longer exists would be a read for no reader.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(source) => return Err(Error::read(rela_path, source)),
         };
@@ -498,29 +285,6 @@ impl Worktree {
     }
 
     /// The bytes git stores for a symlink: its target path, and nothing else.
-    ///
-    /// **No terminator and no clean filter**, which is what the blob on the
-    /// other side of the diff holds. Git appends no newline to a link target and
-    /// runs no conversion over one, so a `\ No newline at end of file` on both
-    /// sides is the correct answer rather than a defect: `git diff` prints
-    /// exactly that for a repointed link. Running the filter here would be the
-    /// mistake [#65](https://github.com/breferrari/vigia/issues/65) made in
-    /// reverse, normalising something git never normalised.
-    ///
-    /// **The filter half of that is correct by construction and no gate can hold
-    /// it, which is said here so nobody concludes it is merely untested.**
-    /// Mutation-tested: wrapping this in `convert_to_git` leaves every test in
-    /// `fidelity.rs` and `frame.rs` green, and it has to. That filter is a
-    /// line-ending conversion, and a link target contains no line ending, so both
-    /// paths emit identical bytes and no fixture can separate them. What the
-    /// bypass actually buys is the *cost*: priming the attributes stack for a
-    /// path whose answer could not depend on it.
-    ///
-    /// Reads through `OsString::into_encoded_bytes` rather than through `str`,
-    /// because a target is a path and a path is not required to be UTF-8. That
-    /// is the one half of [#17](https://github.com/breferrari/vigia/issues/17)
-    /// this touches: the *target* is byte-exact here, while `FileChange::path`
-    /// remains lossy and remains #17's.
     fn link_target(full: &Path, rela_path: &str) -> Result<Vec<u8>> {
         let target = match std::fs::read_link(full) {
             Ok(target) => target,
@@ -535,33 +299,6 @@ impl Worktree {
 
 /// A link target spelled the way git stores it, whatever this platform hands
 /// back.
-///
-/// A Windows reparse point stores `dir\target.txt` where git stores
-/// `dir/target.txt`, so without this a nested link reads as changed on Windows
-/// and unchanged everywhere else, which is
-/// [#65](https://github.com/breferrari/vigia/issues/65)'s class of defect one
-/// file type over. Git's own `readlink` does the same substitution on this
-/// platform and only on this platform.
-///
-/// **`cfg!` rather than `#[cfg]`, so the body type-checks and lints on all three
-/// targets.** The lint leg of `ci.yml` runs on Linux alone, so a `#[cfg(windows)]`
-/// body is compiled by nothing that gates a pull request. `cfg!` is a
-/// compile-time constant, so Unix still emits no loop.
-///
-/// **Separate and unit-tested because the integration gate over it is vacuous on
-/// two of three tier-1 targets.** `fidelity.rs::a_symlink_to_a_nested_path_reports_forward_slashes`
-/// asserts the right thing, and on Linux and macOS `read_link` already returns
-/// `dir/other.txt`, so it passes whether this function exists or not. That is
-/// exactly the shape `SPEC.md` §7 names about fixtures on a tooling default, so
-/// the rule gets a test that runs everywhere instead.
-///
-/// Byte-level, and safe: `\` is `0x5C`, which never appears inside a multi-byte
-/// UTF-8 or WTF-8 sequence, so this cannot corrupt a non-UTF-8 target. Windows
-/// only, because a backslash is a legal character in a **Unix** filename and
-/// converting there would corrupt a target that is perfectly valid. `watch.rs`'s
-/// `followable` states that same hazard and answers it by joining components,
-/// which is the right answer for a path and the wrong one here: this value is
-/// opaque bytes git compares verbatim, not a path this process resolves.
 fn git_separators(mut bytes: Vec<u8>) -> Vec<u8> {
     if cfg!(windows) {
         for byte in &mut bytes {
@@ -574,17 +311,6 @@ fn git_separators(mut bytes: Vec<u8>) -> Vec<u8> {
 }
 
 /// Iterator over one comparison's changes.
-///
-/// Yields one `Result` per path, so a single unreadable file does not end the
-/// stream. A monitor keeps going.
-///
-/// **Two arms, and only one of them streams.** See [`Worktree::changes_of`] for
-/// why: `gix` gives the index-worktree walk an iterator and gives the tree-index
-/// walk a callback, so the staged arm is over a `Vec` that has already been
-/// filled. The type is shared because every caller wants the same thing from
-/// either, and the difference is documented rather than implied — a lazy-looking
-/// iterator over an eager batch is exactly the shape that has misled this
-/// repository once before.
 #[allow(
     clippy::large_enum_variant,
     reason = "the streaming arm is `gix`'s own iterator and is 1.5KB; boxing it \
@@ -603,15 +329,6 @@ fn path_of(raw: &gix::bstr::BStr) -> String {
 }
 
 /// Whether this item's working-tree side may be a symlink.
-///
-/// See [`FileChange::maybe_symlink`] for why this is read off the walk rather
-/// than asked of the filesystem, and for the two directions its soundness rests
-/// on.
-///
-/// **Every arm defaults to `true`**, so a `gix` version that grows an item shape
-/// or a disk kind this does not know about pays a syscall rather than reading a
-/// link as a file. The cost of being wrong is not symmetric, and this is where
-/// that asymmetry is spent.
 fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
     // **An intent-to-add entry's mode describes nothing**, and trusting it was a
     // live instance of exactly the defect this whole field guards against.
@@ -622,36 +339,12 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
     // followed the link. Measured: git says `+target.txt`, `vigia` said the
     // target's contents, and on Windows a link whose target holds a `/` failed
     // `fs::read` outright and re-failed on every tick.
-    //
-    // So this arm is the conservative default the rest of the function already
-    // takes, applied to the one summary whose mode is not evidence.
     if matches!(summary, Summary::IntentToAdd) {
         return true;
     }
 
     // A regular file, executable or not, is the only positive answer taken from
     // an index entry. `SYMLINK` is obviously true.
-    //
-    // `DIR` and `COMMIT` say `true` as well, and **that is a cost rather than a
-    // no-op**: they do reach a read. A modified submodule is neither a conflict
-    // nor a
-    // type change nor a removal, so it satisfies both `is_diffable` and
-    // `reads_worktree` and does arrive here, where it spends one probe and then
-    // fails its `fs::read` exactly as it does on `main`. Rare enough to leave
-    // alone; counted, so it is not invisible if it stops being rare.
-    // **`FILE` and not `FILE_EXECUTABLE`, and the asymmetry is `gix`'s rather
-    // than a nicety here.** `change_to_match_fs_with_values` carries an arm
-    // `Mode::FILE if !is_file => Change::Type` and **no** `FILE_EXECUTABLE`
-    // equivalent, so a `100755` entry whose worktree side became a link falls
-    // through to `ExecutableBit` or to no change at all and arrives as
-    // `Modified` with the index still reading `100755`. Trusting that mode sent
-    // it to an ordinary read, through the link: #15's own defect, on every
-    // committed executable. `100644` is the one mode whose type change `gix`
-    // reliably reports, so it is the only one taken as evidence.
-    //
-    // Gated by
-    // `fidelity.rs::an_executable_replaced_by_a_symlink_diffs_as_its_target_path`.
-    // Costs one `lstat` per executable actually read.
     let not_a_plain_file =
         |mode: gix::index::entry::Mode| !matches!(mode, gix::index::entry::Mode::FILE);
     let disk_is_not_a_file =
@@ -667,11 +360,6 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
 }
 
 /// The right-hand side an index-worktree change of this kind has.
-///
-/// **[`FileChange::reads_worktree`]'s rule, applied once at the walk instead of
-/// on every consultation.** A conflict and a type change are
-/// states rather than diffs and a removal has nothing on the right, so all three
-/// carry no side at all; everything else reads the file on disk.
 pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     match kind {
         ChangeKind::Conflict | ChangeKind::TypeChange | ChangeKind::Removed => None,
@@ -680,20 +368,6 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
 }
 
 /// Whether either side of a tree-index change is a **gitlink**.
-///
-/// **Both sides, and the first version of this asked only the destination.** A
-/// submodule's recorded commit is an index entry whose id names a *commit*, so a
-/// change with a gitlink on either end has an id `blob` cannot read — and a
-/// submodule *replaced by a real file* is a `Modification` whose destination is an
-/// ordinary blob and whose **source** is the commit. Asked one-sidedly it passed
-/// the guard, reached the read, returned `MissingBlob`, and `View::collect`
-/// propagates: the collect fails, the shell keeps the previous screen, and the
-/// pane freezes. That is the same symptom the sparse-index arm exists to stop,
-/// arriving by the door the first fix left open.
-///
-/// A function rather than a match at the call site because the variants spell
-/// their modes under five different field names, and the arms are what a reader
-/// has to check.
 fn touches_gitlink(change: &gix::diff::index::ChangeRef<'_, '_>) -> bool {
     use gix::diff::index::ChangeRef;
     let commit = |mode: &gix::index::entry::Mode| *mode == gix::index::entry::Mode::COMMIT;
@@ -715,24 +389,6 @@ fn touches_gitlink(change: &gix::diff::index::ChangeRef<'_, '_>) -> bool {
 }
 
 /// One tree-index change, as this crate spells changes.
-///
-/// **Both sides are object ids and neither is a file**, which is the whole reason
-/// the staged run is cheaper than the run beside it: `gix_diff::index` compares
-/// what the tree holds against what the index holds, and it has both blobs in hand
-/// by the time it calls back.
-///
-/// **`None` is a gitlink**, and it is the only thing dropped here. A submodule's
-/// recorded commit is an ordinary index entry whose id names a *commit* rather
-/// than a blob, so diffing it as content is a category error; `SPEC.md` §11.2 B5
-/// keeps submodules out of v1, and the unstaged walk reaches the same answer by a
-/// different road (`gix` reports a modified submodule and the read then fails).
-/// Dropping it costs a reader one row about a thing this tool does not draw.
-///
-/// **The match is otherwise exhaustive with no fallback**, deliberately: a `gix`
-/// version that grows a `ChangeRef` variant is a compile error here rather than a
-/// silently missing row, which is the stronger of the two answers and the one the
-/// index-worktree mapper cannot have (its summaries and item shapes are paired at
-/// run time, so it needs `_ => continue`).
 fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileChange> {
     use gix::diff::index::ChangeRef;
 
@@ -896,27 +552,12 @@ impl Iterator for Changes {
 }
 
 /// Distinct extensions [`indexed_extensions`] will track, at most.
-///
-/// Generous by two orders of magnitude against any real tree, because it is not
-/// there to shape the answer: it is there so that an index somebody else wrote
-/// cannot turn one background scan into an unbounded allocation.
 pub const INDEXED_EXTENSIONS: usize = 1024;
 
 /// Bytes of a path [`indexed_extensions`] will retain, at most.
-///
-/// The third side of the same bound, and it was missing: capping how many
-/// extensions are tracked and how long each may be still leaves
-/// [`INDEXED_EXTENSIONS`] times `per_extension` **path** strings of any length
-/// at all, which against the hostile index the caps exist for is the two-thirds
-/// defence that reads as a whole one. Four kilobytes is past what any tier-1
-/// platform will open, so nothing real is refused by it.
 pub const INDEXED_PATH: usize = 4096;
 
 /// Bytes of an extension [`indexed_extensions`] will consider, at most.
-///
-/// The longest any grammar in the dump registers is `sublime-syntax` at
-/// fourteen, so this is twice the longest real answer and a hundredth of what a
-/// hostile index can spell.
 pub const INDEXED_EXTENSION: usize = 32;
 
 /// One extension the index carries, with how many entries have it and a bounded
@@ -933,49 +574,6 @@ pub struct Indexed {
 }
 
 /// Every extension the index carries, commonest first.
-///
-/// **What a repository is made of, before anybody writes to it.** The warmer's
-/// other entry point walks the *changed* set, and a monitor is very often opened
-/// on a clean tree beside an agent that has not started yet: there is then
-/// nothing to warm, and the first write arrives under a grammar nothing has
-/// compiled. The index knows the answer already and costs no walk of the
-/// worktree to ask.
-///
-/// **A tally rather than a ranking, and that is the seam.** `SPEC.md` §6 puts
-/// `syntect` on the other side of this file, so this cannot know that `.yml` and
-/// `.yaml` are one grammar, or `.h` and `.hpp`. Ranking and truncating here
-/// anyway rests on the argument that an extension is a good enough
-/// proxy for a grammar — which is true of one path and **false of the selection
-/// step**, because a language spelled two ways is counted twice at exactly the
-/// point where the counts decide who wins. Handing back the whole tally lets the
-/// caller merge on the grammar it can see, and leaves nothing here to be wrong
-/// about.
-///
-/// **Complete for any tree that is one**, which is the bound rather than an
-/// absence of one. Every extension in the index is counted, so the merge has
-/// nothing to miss, and the two things that scale are both capped: the *paths*
-/// at `per_extension` each, and the tally itself at [`INDEXED_EXTENSIONS`]
-/// distinct extensions of at most [`INDEXED_EXTENSION`] bytes.
-///
-/// **Both caps are for a hostile index rather than for a large one.** A tree's
-/// distinct-extension count is a fact about its shape and not its size, so a
-/// hundred-thousand-file checkout still has a few dozen and neither cap is in
-/// play. `.git/index` in a cloned repository is somebody else's bytes, though,
-/// and two hundred thousand entries each carrying a unique two-hundred-byte
-/// extension is an allocation measured in gigabytes on a background thread at
-/// every launch — which under `panic = "abort"` takes the monitor with it rather
-/// than the thread. What is dropped past the caps is said here rather than left
-/// silent: it is whatever the index named last, and a tree with more distinct
-/// extensions than that has no leading language for this to find.
-///
-/// Ties break on the extension itself, so the order is total and a caller
-/// merging with a **stable** sort inherits a deterministic answer.
-///
-/// Opens its own repository, because `gix::Repository` is `Send` and not `Sync`
-/// so the frame path's cannot be borrowed across a thread boundary; the shell's
-/// watch thread already pays the same second open for the same reason. A
-/// repository that cannot be opened, or has no index at all, is **nothing to
-/// warm** rather than an error: this only ever makes a later frame cheaper.
 pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
     if per_extension == 0 {
         return Vec::new();
@@ -1046,15 +644,6 @@ mod tests {
     use super::git_separators;
 
     /// The separator rule, on every platform rather than on one.
-    ///
-    /// **This exists because the integration gate over it is vacuous on two of
-    /// three tier-1 targets.** `fidelity.rs::a_symlink_to_a_nested_path_reports_forward_slashes`
-    /// asserts the right thing, and on Linux and macOS `read_link` already hands
-    /// back `dir/other.txt`, so it passes whether the conversion exists or not.
-    /// Only Windows can fail it. That is `SPEC.md` §7's "a fixture on its
-    /// tooling's default cannot observe the code that exists for the
-    /// non-default", one axis over, so the rule is asserted here as a pure
-    /// function where both branches are reachable from any host.
     #[test]
     fn a_link_target_is_spelled_the_way_git_stores_it() {
         let converted = git_separators(br"dir\other.txt".to_vec());
@@ -1081,17 +670,6 @@ mod tests {
     }
 
     /// A target that is not UTF-8 loses its separator and nothing else.
-    ///
-    /// `read_link` hands back an `OsString`, which is not required to be UTF-8 on
-    /// Unix, and `0x5C` never appears inside a multi-byte UTF-8 or WTF-8
-    /// sequence, so the conversion cannot corrupt one.
-    ///
-    /// **The fixture has to contain a `0x5C` for that to be the claim under
-    /// test.** Without one the loop rewrites nothing, the assertion reduces to
-    /// `raw == raw`, and it passes with the whole conversion deleted on every
-    /// platform, leaving the continuation-byte argument as a comment rather than
-    /// a gate. The bytes on either side of the separator here are an invalid
-    /// leading byte and an orphaned continuation byte.
     #[test]
     fn a_target_that_is_not_utf8_keeps_every_byte_but_the_separator() {
         let raw = vec![0xff, b'd', 0x5C, 0x80, b'x'];

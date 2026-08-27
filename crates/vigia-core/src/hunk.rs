@@ -1,14 +1,9 @@
 use gix::diff::blob::{Algorithm, InternedInput, diff_with_slider_heuristics};
 
 /// Lines of unchanged context kept on each side of a change.
-///
-/// Three is git's default and what every reader's eye is calibrated to.
 pub const CONTEXT: u32 = 3;
 
 /// How many leading bytes are inspected when deciding if content is binary.
-///
-/// Git uses the same 8000-byte window, so vigia agrees with `git diff` about
-/// what counts as binary.
 const BINARY_SNIFF_LEN: usize = 8000;
 
 /// The role a line plays in a hunk.
@@ -28,18 +23,11 @@ pub struct Line {
     /// Whether the line was added, removed, or is context.
     pub kind: LineKind,
     /// Line content with any trailing `\n` or `\r\n` stripped.
-    ///
-    /// Invalid UTF-8 is replaced rather than rejected: a monitor that blanks
-    /// out because one file is latin-1 has failed at its job.
     pub text: String,
     /// Byte ranges of `text` that are not shared with this line's partner on
     /// the other side of the change, per [`crate::emphasis`]. Empty for
     /// context, for an unpaired changed line, and for a pair too far apart to
     /// be one; the shell then draws the whole-line wash it always drew.
-    ///
-    /// Meaning rather than styling, which is why it lives here: `SPEC.md`
-    /// §11.1 has the engine emit meanings and the shell colour them, and
-    /// *these bytes are the change inside the change* is a meaning.
     pub emph: crate::emphasis::Emphasis,
 }
 
@@ -73,45 +61,12 @@ pub struct FileDiff {
     pub removed: u32,
     /// Lines on the **working-tree** side, which is the whole file rather than
     /// the diff.
-    ///
-    /// Locating a change *within* a file needs the file's length, and
-    /// `SPEC.md` §5.2 records that as the heat strip's cost: measured on its own
-    /// it is a whole-file read, which is exactly what I2a removed from the frame
-    /// path.
-    ///
-    /// **It costs nothing here.** [`compute`] interns both sides to diff them at
-    /// all, so the line count is a by-product of a read already being made, and
-    /// it is cached and invalidated with the rest of this struct. §5.2 predicted
-    /// a separate cache keyed on `(path, blob id)`; none is needed, and the
-    /// diff's own validity rule is the stricter key anyway, because a blob id
-    /// alone cannot notice a working-tree edit.
-    ///
-    /// The working-tree side rather than the index side, because it is the file
-    /// the reader is looking at and it is what [`Hunk::new_start`] is measured
-    /// against. Zero when there is no working-tree side to measure: a removal, a
-    /// binary file, a conflict, a type change.
     pub lines: u32,
     /// The file's own first line, worktree side, falling back to the index
     /// side for a deletion. `None` for a binary file and for the states this
     /// crate deliberately reads nothing for.
-    ///
-    /// Exists for syntax resolution and nothing else: a shebang or an XML
-    /// declaration is how an extensionless script or an ambiguous `.ts` gets a
-    /// language at all (`SPEC.md` §6), and the hunks of a mid-file edit never
-    /// contain line one. **It costs no read**: [`compute`] holds both sides
-    /// whole to diff them, so this is a by-product exactly like
-    /// [`FileDiff::lines`]. Capped at 256 bytes **read** because every
-    /// first-line pattern in the dump matches inside that, and a minified
-    /// bundle's "first line" is the whole file. The returned string can run to
-    /// 258: a cut through a four-byte character becomes a three-byte
-    /// replacement, which [`first_line_of`] documents and a test pins.
     pub first_line: Option<String>,
     /// Bytes compared: index-side content plus worktree-side content.
-    ///
-    /// Recorded because I2a is a claim about work being proportional to what
-    /// changed rather than to worktree size, and that is only checkable against
-    /// a byte count. It is what the frame path sums to prove a reuse read
-    /// nothing.
     pub bytes: u64,
 }
 
@@ -135,17 +90,6 @@ fn text_of(token: &[u8]) -> String {
 }
 
 /// Compute the hunks between two blobs.
-///
-/// Buffers one file, not the whole diff: I4 requires first paint to be
-/// independent of *total* diff size, and callers reach this one file at a time.
-/// What one file contributes to the diff's height, with none of its text.
-///
-/// **The whole point is what it does not carry.** A [`FileDiff`] owns a `String`
-/// per line, so totalling a worktree's rows through one materialises an
-/// allocation per changed line and per line of context: measured over a hundred
-/// files of five hundred rewritten lines, that is **460ms** where `git diff
-/// --numstat` does the same work in **46ms**. The ten times is the text, and a
-/// height needs none of it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FileSpan {
     /// Hunks the file diffs into.
@@ -155,26 +99,11 @@ pub struct FileSpan {
     /// True when either side sniffed as binary, so there are no hunks to draw.
     pub binary: bool,
     /// Bytes compared to reach this answer.
-    ///
-    /// Counted for the same reason [`FileDiff::bytes`] is, and it is not
-    /// bookkeeping: every read bound in this repo is written in bytes, so a
-    /// counting path that reported none would be a stage no gate could regress
-    /// you on. It reads exactly what a diff reads; only the building is skipped.
     pub bytes: u64,
 }
 
 impl From<&FileDiff> for FileSpan {
     /// The span a diff already in hand describes, without reading anything.
-    ///
-    /// **One mapping rather than one per caller.** [`groups`] and [`bounds`]
-    /// exist so two heights cannot disagree, and hand-rolling this conversion at
-    /// each call site reintroduces exactly that hazard one layer up: a new field
-    /// would be silently defaulted by whichever copy was not updated, and
-    /// nothing would fail.
-    ///
-    /// `bytes` is zero because nothing was read. The caller paid for those bytes
-    /// when it computed the diff, and counting them again would double them in
-    /// any budget denominated in reads.
     fn from(diff: &FileDiff) -> Self {
         Self {
             hunks: diff.hunks.len() as u32,
@@ -186,13 +115,6 @@ impl From<&FileDiff> for FileSpan {
 }
 
 /// Merge raw changes into the hunks a reader sees.
-///
-/// Shared by [`compute`] and [`measure`] rather than written twice, because the
-/// two must agree exactly: a height that disagreed with the rows underneath it
-/// would put a scrollbar's thumb somewhere the content is not. Two raw changes
-/// share an output hunk when their context windows would touch or overlap, which
-/// is what stops a run of small edits rendering as a wall of near-duplicate
-/// headers.
 fn groups(raw: impl Iterator<Item = gix::diff::blob::Hunk>) -> Vec<Vec<gix::diff::blob::Hunk>> {
     let mut out: Vec<Vec<gix::diff::blob::Hunk>> = Vec::new();
     for raw in raw {
@@ -229,12 +151,6 @@ fn bounds(
 }
 
 /// How tall this file's diff is, without building any of it.
-///
-/// Every old line in a hunk's window is drawn exactly once, as context or as a
-/// removal, and every added line is drawn on top of those — so a hunk's height is
-/// its old-side window plus the additions inside it. That identity is what lets
-/// this count without materialising, and `tests/fidelity.rs` is what holds it to
-/// [`compute`]'s own answer.
 pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
     let bytes = (before.len() + after.len()) as u64;
     if is_binary(before) || is_binary(after) {
@@ -389,15 +305,6 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
 
 /// The first line of `bytes`, capped at 256 bytes read, or `None` for an
 /// empty side.
-///
-/// The cap is what keeps a minified bundle's single line from travelling on
-/// every [`FileDiff`] of it; every first-line pattern in the dump matches
-/// inside 256 bytes. `from_utf8_lossy` because the cap can land mid-codepoint
-/// and a replacement character at the tail of a shebang match is harmless
-/// where refusing the line would lose it. **The cap counts bytes read, not
-/// bytes returned**: a split codepoint becomes a three-byte `U+FFFD`, so a
-/// cut through a four-byte character returns 258. Bounded either way, which
-/// is the whole point of the cap.
 fn first_line_of(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() {
         return None;
@@ -415,18 +322,10 @@ mod tests {
     //! it without the text.
 
     //! What [`FileDiff::lines`] counts, tested where the count is made.
-    //!
-    //! `tests/fidelity.rs` checks it against a real worktree and git as the
-    //! oracle. These check the two cases a repository fixture reaches awkwardly
-    //! or not at all: which *side* is counted, and what a binary file reports.
 
     use super::*;
 
     /// The working-tree side, not the index side, and not their sum.
-    ///
-    /// A file that shrank is the case that separates all three: an index side of
-    /// five lines against a worktree side of two gives 5, 2 and 7, and only one
-    /// of them describes the file a reader is looking at.
     #[test]
     fn the_line_count_is_the_working_tree_side_not_the_index_side() {
         let before = b"a\nb\nc\nd\ne\n";
@@ -516,11 +415,6 @@ mod tests {
     }
 
     /// A file with no trailing newline still counts its last line.
-    ///
-    /// The interner tokenises on line boundaries, so `"a\nb"` is two lines and
-    /// not one-and-a-bit. Worth pinning: an implementation that counted `\n`
-    /// bytes would report one here and be wrong about every file an editor
-    /// saved without a final newline.
     #[test]
     fn a_file_with_no_trailing_newline_counts_its_last_line() {
         let diff = compute("src/lib.rs".to_owned(), b"", b"a\nb");
@@ -541,11 +435,6 @@ mod tests {
 mod spans {
     //! [`measure`] against [`compute`], which is the only thing that makes the
     //! cheap path trustworthy.
-    //!
-    //! A height counted one way and drawn another puts a scrollbar's thumb
-    //! somewhere the content is not, and nothing on screen would say so. So the
-    //! two run over the same inputs and their answers are compared, rather than
-    //! `measure` being reasoned about.
 
     use super::*;
 

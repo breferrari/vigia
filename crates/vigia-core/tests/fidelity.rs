@@ -1,8 +1,4 @@
 //! Does `gix` read a working tree the way git wrote it?
-//!
-//! This is the open question `SPEC.md` §10 puts on Phase 1, and it gates the
-//! whole stack. Every test here builds its fixture with real `git` and then
-//! reads it back through `vigia-core`.
 
 mod support;
 
@@ -214,10 +210,6 @@ fn hunk_headers_match_what_git_reports() {
 }
 
 /// Where exactly two edits stop sharing a hunk.
-///
-/// Sweeping the gap rather than picking one value is deliberate: a single
-/// fixture with a comfortable gap passes no matter what the merge threshold
-/// is, so it tests nothing. Git is the oracle at every step.
 #[test]
 fn hunk_grouping_boundary_matches_git_at_every_gap() {
     const TOTAL_LINES: usize = 60;
@@ -324,17 +316,6 @@ fn one_unreadable_path_does_not_end_the_stream() {
 
 /// The line count, against the file on disk rather than against the arithmetic
 /// restated.
-///
-/// `FileDiff::lines` is what the heat strip projects hunk positions across, so
-/// getting it wrong misplaces every mark on the strip rather than failing
-/// loudly. The oracle is the bytes the fixture wrote: a file's line count is
-/// something a test can know independently, which is the whole reason to check
-/// it here rather than only beside `compute`.
-///
-/// Three kinds in one test on purpose. A modification, an addition and a
-/// deletion are the three shapes of working-tree side there are, and the wrong
-/// implementations (count the index side, count both, count the hunks) each
-/// pass for at least one of them alone.
 #[test]
 fn the_line_count_matches_the_file_on_disk() {
     let scratch = Scratch::new("line-count");
@@ -372,10 +353,6 @@ fn the_line_count_matches_the_file_on_disk() {
 
 /// A file whose length in *bytes* did not change but whose length in *lines*
 /// did.
-///
-/// The pair that separates a line count from a byte count, and the fixture the
-/// frame path's cache-key gate uses for the same reason. Nine bytes either way;
-/// three lines against one.
 #[test]
 fn a_line_count_is_not_a_byte_count() {
     let scratch = Scratch::new("line-count-bytes");
@@ -402,18 +379,6 @@ fn a_line_count_is_not_a_byte_count() {
 }
 
 /// A recomputed diff does not leave last tick's height behind.
-///
-/// `Frame::height` fills a span for every changed file, and `Frame::diff` then
-/// recomputes whichever file the viewport reaches. A recompute that replaces
-/// the cached diff and leaves the span alone lets a frame that
-/// counted before it drew reported the file's **old** height beside its new
-/// rows: the scrollbar's total and the content disagreed inside one frame, and
-/// a drag resolved through that total landed on the wrong row.
-///
-/// Free to fix, which is what separates it from [#84]: the fresh diff is
-/// already in hand, so the span rebuilds from it without reading a byte. #84 is
-/// the other half, a file that changed and has *not* been re-diffed, and that
-/// one needs a read to notice.
 #[test]
 fn a_recomputed_diff_invalidates_its_span() {
     let scratch = Scratch::new("span-invalidation");
@@ -454,18 +419,9 @@ fn a_recomputed_diff_invalidates_its_span() {
 // Symlinks. Git stores one as a mode `120000` blob whose *content is the target
 // path*, so every gate below is about reading the link rather than through it:
 // [#15](https://github.com/breferrari/vigia/issues/15).
-//
-// `SPEC.md` §7 names `core.symlinks` as one of the axes every fixture in this
-// repository had silently taken a position on. These span it.
-// ---------------------------------------------------------------------------
 
 /// A target large enough and binary enough that reading *through* a link to it
 /// is unmistakable rather than a subtle count difference.
-///
-/// Under the defect this file's 4 KiB of NUL bytes sniffs binary, so a diff that
-/// read through the link reports `binary: true` and no hunks at all. Under the
-/// fix the compared bytes are a twelve-character path. One fixture, three
-/// independent assertions: the binary flag, the byte count, and the text.
 fn binary_target() -> Vec<u8> {
     vec![0u8; 4096]
 }
@@ -571,19 +527,6 @@ fn a_symlink_git_checked_out_reads_as_unchanged() {
     // Windows stores `dir\other.txt` where the blob holds `dir/other.txt`
     // (measured). Every other symlink gate here sits on the harness side of that
     // axis.
-    //
-    // **What it does not do is gate `git_separators`, and saying so is the
-    // point.** Deleting the conversion leaves this green, because an unchanged
-    // link never enters the changed set and `read_worktree` is never reached:
-    // `gix`'s own walk settles this comparison before `vigia` sees it. Claiming
-    // otherwise would be `SPEC.md` §7's "a gate can assert the defect it was
-    // named against" exactly. The conversion itself is gated where it is
-    // reachable from every platform, by the unit tests over `git_separators` in
-    // `worktree.rs`, and those do go red when it is deleted.
-    //
-    // What this holds is the fidelity claim beside it: `vigia` agrees with git
-    // that a link git checked out is **unchanged**, so a reader does not get a
-    // permanently modified file they cannot act on.
     let scratch = Scratch::new("symlink-checked-out");
     scratch.write("dir/other.txt", "X\n");
     if !checkout_link(&scratch, "dir/other.txt", "nested.txt") {
@@ -649,9 +592,6 @@ fn an_untracked_symlink_is_added_as_its_target_path() {
     // entry's mode. An untracked link has no index entry at all and is
     // classified off the dirwalk entry's `disk_kind` instead, which is a
     // different `gix` field on a different code path.
-    //
-    // Not a hypothetical population: a link an agent has just created is exactly
-    // what a monitor is pointed at.
     let scratch = Scratch::new("symlink-untracked");
     scratch.write("keep.txt", "tracked\n");
     scratch.write("target_b.txt", binary_target());
@@ -698,11 +638,6 @@ fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
     // `Mode::FILE_EXECUTABLE` equivalent, so an executable replaced by a link
     // falls through to `ExecutableBit` or to no change at all, and arrives as
     // `Modified` with the index still saying `100755`.
-    //
-    // Treating `FILE_EXECUTABLE` as a positive "plain file" answer therefore sent
-    // it to an ordinary read, through the link. Not an exotic population: a
-    // committed `bin/` wrapper or a hook replaced by a link is ordinary, and
-    // `100755` entries are everywhere on Linux and macOS.
     let scratch = Scratch::new("symlink-executable");
     scratch.write("target_b.txt", binary_target());
     scratch.write("exe.sh", "#!/bin/sh\necho hi\n");
@@ -727,19 +662,6 @@ fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
         .unwrap_or_else(|| panic!("exe.sh is not in {changes:#?}"));
 
     // **Whatever kind `gix` assigns, the read must not follow the link.**
-    //
-    // The type-change branch is defensive and **unreachable on all three tier-1
-    // targets today**, which is worth stating precisely because an earlier
-    // version of this comment claimed the opposite. `change_to_match_fs_with_values`
-    // reaches `ExecutableBit` on Linux and macOS (their `is_executable` requires
-    // `S_IFREG`, and an `lstat` of a link gives `S_IFLNK`) and falls to no change
-    // at all on Windows, where the executable bit is not tracked. Both routes end
-    // at `Modified`, so the diffable branch below is the one that runs everywhere.
-    //
-    // It still asserts rather than returning bare: if a future `gix` grows the
-    // `FILE_EXECUTABLE` arm it is missing, this becomes live, and a bare `return`
-    // would turn the gate silent on the platform where `100755` is the common
-    // case instead of telling anyone.
     if !change.is_diffable() {
         let diff = worktree.diff(change).expect("diff the type change");
         assert!(
@@ -811,10 +733,6 @@ fn an_intent_to_add_path_that_became_a_symlink_diffs_as_its_target_path() {
     // `false` and the read followed the link: #15's headline defect, intact, in
     // the one corner the two-directions argument on `FileChange::maybe_symlink`
     // did not cover, because that argument is about *tracked* entries.
-    //
-    // On Windows it was worse than a wrong diff. A link whose target holds a `/`
-    // cannot be resolved there, so `fs::read` failed outright with
-    // `ERROR_INVALID_NAME` and `fill_span` re-failed it on every tick.
     let scratch = Scratch::new("symlink-intent-to-add");
     scratch.write("target_b.txt", binary_target());
     scratch.write("ita.txt", "plain\n");
@@ -867,9 +785,6 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
     // mode, so it is only sound while a working tree that disagrees with the
     // index about a file's **type** is something git reports as a type change
     // rather than as a modification.
-    //
-    // Measured here rather than assumed, because the two directions are not
-    // symmetric and only one of them was obvious.
     let scratch = Scratch::new("symlink-typechange");
     scratch.write("target.txt", "AAAA\n");
     scratch.write("swap.txt", "plain content\n");
@@ -904,9 +819,6 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
     // machine returned `Modified`. Pinning one of them was the same fixture-axis
     // mistake #15 is about, one axis further out again: a fixture on *this*
     // installation's answer, asserted as though it were the rule.
-    //
-    // What matters is not which label arrives but that neither label lets the
-    // read follow a link that is no longer there, so both branches assert.
     let became_file = of("link.txt");
     let diff = worktree.diff(became_file).expect("diff the replaced link");
     if became_file.is_diffable() {
@@ -959,10 +871,6 @@ fn editing_a_symlinks_target_leaves_the_link_out_of_the_changed_set() {
     // and the read is never reached: an unchanged path has no diff to be wrong
     // about. So this gates `gix`'s walk, which is what `fidelity.rs` is for, and
     // it is worth keeping for that.
-    //
-    // The half it looked like it covered is real and lives in `frame.rs`:
-    // `editing_a_symlinks_target_does_not_invalidate_the_links_diff` is the
-    // fingerprint side, and it is only observable through `FrameStats`.
     let scratch = Scratch::new("symlink-target-edit");
     scratch.write("target_a.txt", "AAAAAAAA\n");
     if !committed_link(&scratch, "target_a.txt", "link.txt") {

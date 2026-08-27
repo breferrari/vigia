@@ -1,78 +1,22 @@
 //! What the published `.crate` carries, and what the release pipeline does.
-//!
-//! `SPEC.md` §9 is a contract with no code under it: it describes a tarball
-//! nobody builds during `cargo test`, a workflow that only runs on a tag, and a
-//! set of targets named in three separate files. Every one of those is a claim
-//! this repository could break without a single gate going red, and one of them
-//! already had. §9 said "three escapes" across two files for two phases while the
-//! real number grew to thirteen, because the count lived in prose and ten tests
-//! were added by people with no reason to edit a sentence in another file.
-//!
-//! So this file is §9's teeth. It reads the manifests and the workflows the way
-//! `soak.rs` reads `.github/workflows/soak.yml`: through `CARGO_MANIFEST_DIR`,
-//! hand-parsed, because a TOML or YAML parser is a dependency `SPEC.md` does not
-//! name and the properties here are line-shaped rather than tree-shaped.
-//!
-//! **This file escapes the package it is about**, which is not irony but the
-//! only way the check can exist: everything it compares lives above
-//! `crates/vigia/`. `exclude = ["tests/**"]` covers it along with every other
-//! test, which is what the first gate below asserts.
-//!
-//! What none of this proves: nothing here builds a tarball or runs a workflow.
-//! [`the_packaged_artifact_carries_no_tests`] and
-//! [`every_published_crate_ships_the_licence`] are the gates that ask cargo
-//! rather than asking a file, and both go through [`package_list`], so both
-//! skip together when the registry is away. A syntactically broken workflow
-//! still reaches CI. `RELEASE-SMOKE.md` is where the artifact itself gets
-//! checked, by a human, before the tag that makes any of it permanent.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The two shapes a test uses to read outside this package.
-///
-/// **Assembled with `concat!` rather than written whole, so that this file does
-/// not match itself.** The needles are the only strings in the repository whose
-/// presence *means* "something escapes here", so a scanner that spells them
-/// literally is guaranteed to find one in its own source. That is not a
-/// harmless false positive: `package.rs` genuinely does escape, through
-/// [`repo_root`], so the scanner reported the right answer by the wrong
-/// mechanism, and the wrong mechanism is the one that survives. Rewriting
-/// [`repo_root`] to climb some other way would have silently stopped this file
-/// being detected while it went on escaping, and every gate below would have
-/// stayed green.
-///
-/// Verified rather than reasoned: before this split, `escapes(package.rs)` was
-/// true with zero `#[path]` attributes in the file.
 const PATH_ATTRIBUTE: &str = concat!("#[path = \"..", "/../");
 const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// One level up reaches a sibling crate, which is outside this package just as
 /// surely as the repository root is.
-///
-/// Matching [`CLIMBING_LITERAL`] alone leaves a test that reads
-/// `crates/vigia-core/**` invisible to the scanner, because it climbs one
-/// level where every other escape climbs two.
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-///
-/// Stated once here and asserted against the *documents* that repeat it, rather
-/// than written into an assertion and left to agree with them by hand. Three
-/// files spell this number in prose, and the whole reason this test file exists
-/// is that a number living only in prose drifted by a factor of four. Fixing
-/// that with a number living only in a test would have been the same mistake
-/// with a smaller radius.
 const ESCAPING_FILES: usize = 21;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
 const ESCAPING_FILES_SPELLED: &str = "twenty-one";
 
 /// The repository root, two levels above this package.
-///
-/// Spelled `join("../..")` rather than `join("..").join("..")` so the climb
-/// appears in this file's source as [`CLIMBING_LITERAL`]. That makes
-/// `package.rs` detectable by the same rule as every other escaping test,
-/// rather than exempt from its own gate by an accident of spelling.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -115,17 +59,6 @@ fn test_files() -> Vec<(String, String)> {
 }
 
 /// Does this test's source read anything outside the package?
-///
-/// Two shapes, and both are needed. A `#[path]` attribute climbing out is how
-/// twelve files reach `vigia-core/tests/support/mod.rs`. A `CARGO_MANIFEST_DIR`
-/// join climbing out is how `soak.rs` reads the soak workflow and how this file
-/// reads `SPEC.md`.
-///
-/// The `CARGO_MANIFEST_DIR` half is matched on the *climbing literal* rather
-/// than on the `env!` alone, because `soak.rs` uses `CARGO_MANIFEST_DIR` twice
-/// and only one of the two leaves: `join("tests/soak.rs")` stays inside, and the
-/// workflow path does not. A check that counted every mention would call the
-/// first one an escape and be wrong in the direction that looks thorough.
 fn escapes(source: &str) -> bool {
     source.contains(PATH_ATTRIBUTE)
         || (source.contains("CARGO_MANIFEST_DIR")
@@ -133,15 +66,6 @@ fn escapes(source: &str) -> bool {
 }
 
 /// Every test file that reads outside the package, by name, sorted.
-///
-/// One function rather than two predicates and a filter written at each call
-/// site: two tests need exactly this list, and a fourth escape shape should
-/// be teachable in one place.
-///
-/// **The vacuity guards live here rather than in one caller**, because every
-/// caller is a `for` loop over this list and every one of them passes trivially
-/// if it comes back empty. Putting them in the producer means a scanner that
-/// stops scanning fails both at once instead of quietly satisfying one.
 fn escaping_tests() -> Vec<String> {
     let escaping: Vec<String> = test_files()
         .into_iter()
@@ -153,15 +77,6 @@ fn escaping_tests() -> Vec<String> {
     // reopens the very defect this file exists to close: adding one more escaping
     // test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml` and
     // `RELEASE-SMOKE.md` all go on saying the old number with nothing red.
-    //
-    // It has fired for real several times, and each time the four documents
-    // moved together because it did. The whole point is that a count in prose
-    // cannot notice a new test, and a floor is a count that cannot notice one
-    // either.
-    //
-    // The cost is that adding a test which escapes now requires editing this
-    // number, which is the intended cost: it is one line, and it is attached to
-    // the three documents that have to change with it.
     assert_eq!(
         escaping.len(),
         ESCAPING_FILES,
@@ -183,12 +98,6 @@ fn escaping_tests() -> Vec<String> {
 }
 
 /// The entries of a TOML array declared as `key = [ … ]`.
-///
-/// Handles the one-line and the multi-line spellings identically, because it
-/// splits on commas rather than on lines. That matters: `exclude` is written on
-/// one line today and `publish-jobs` could be rewrapped by anyone, and a parser
-/// that read one entry per line would return nothing for the other shape and be
-/// wrong silently.
 fn toml_array(source: &str, key: &str) -> Vec<String> {
     // Comments first, on the same rule as `without_comments` for YAML: a `#`
     // anywhere inside a multi-line array would otherwise be split on commas
@@ -212,30 +121,6 @@ fn toml_array(source: &str, key: &str) -> Vec<String> {
 }
 
 /// The shell commands a workflow actually runs, one string per step.
-///
-/// **Written as a small parser with its own test because two attempts at doing
-/// it with a line filter were both wrong, in opposite directions.** The first
-/// read only `run: <command>`, so rewriting a step as a `run: |` block, which
-/// is what anyone does the moment it needs two lines, reported that the file
-/// contained no publish command at all. The second dropped the `run:`
-/// requirement to fix that, and thereby matched *any* line, so a step called
-/// `- name: publish (was cargo publish, split for retries)` satisfied the gate
-/// while the command beneath it did something else. That second failure is the
-/// one the gate was written to catch in the first place.
-///
-/// The shapes it reads:
-///
-/// - `run: cargo publish …` on one line, with or without the list dash.
-/// - A block scalar with an indented body, joined into one string. `|` and `>`,
-///   and either carrying a chomping indicator or an indentation digit, since
-///   `|-` is ordinary YAML and reading only the bare form turned a legitimate
-///   rewrite into a red claiming the file had no publish command at all.
-/// - Either of those with `\` continuations, joined, because a flag on a
-///   continued line is invisible to anything working line by line and
-///   `--dry-run` is exactly the flag someone would put there.
-///
-/// Nothing else on a step is a command, which is the property both earlier
-/// versions lost: a `name:`, an `if:` or a comment may say anything at all.
 fn run_commands(yaml: &str) -> Vec<String> {
     let lines: Vec<&str> = yaml.lines().collect();
     let mut commands = Vec::new();
@@ -279,10 +164,6 @@ fn run_commands(yaml: &str) -> Vec<String> {
         // `\` and `--dry-run` on the next line gave GitHub one command carrying
         // `--dry-run` and gave this scan one command without it. Every
         // assertion passed while the release published nothing.
-        //
-        // A more-indented line after a key belongs to that key's value in YAML
-        // whichever form it took, so the collection rule is the same for both
-        // and only the first line differs.
         let mut collected: Vec<String> = if is_block {
             Vec::new()
         } else {
@@ -317,28 +198,6 @@ fn run_commands(yaml: &str) -> Vec<String> {
 
 /// Did `cargo package` fail because this machine cannot reach the registry,
 /// rather than because the manifest is broken?
-///
-/// **The distinction decides whether the gate below skips or fires**, and the
-/// first attempt at it was wrong in the dangerous direction *and* the annoying
-/// one at once. It listed five substrings written from memory, none of which
-/// cargo 1.94 actually emits for the common offline shape, so an offline
-/// developer got a hard red from a gate that had nothing to say.
-///
-/// The strings here are **captured from real runs** rather than recalled, which
-/// is the whole reason [`the_unreachable_registry_is_told_apart_from_a_broken_manifest`]
-/// exists beside this: a list of magic strings nobody has ever matched against
-/// real output is prose wearing a `const`. Two shapes, observed with cargo
-/// 1.94.0:
-///
-/// - Cold `--offline`: `no matching package named 'notify' found`, followed by
-///   `you're using offline mode (--offline)`. Note that the first line alone is
-///   indistinguishable from a genuinely missing dependency, which is why the
-///   marker is the *offline* sentence rather than the failure.
-/// - A broken manifest: `readme 'READMEE.md' does not appear to exist`, which
-///   matches nothing here and so correctly fires the gate.
-///
-/// Case-insensitive because cargo capitalises some of these mid-sentence
-/// (`Could not connect to server`) and not others.
 fn registry_unreachable(stderr: &str) -> bool {
     const MARKERS: [&str; 7] = [
         "offline mode",
@@ -363,19 +222,6 @@ fn registry_unreachable(stderr: &str) -> bool {
 
 /// Assert that `preflight` carries a create-then-delete write probe against
 /// `repo`, anchored on the shell variable naming the ref it creates.
-///
-/// **Bounded to one probe, because there are two now and unbounded assertions
-/// stopped telling them apart.** The tap's gate asserted `-X POST`, `/git/refs`,
-/// `-X DELETE` and `201` over the whole step. When a second probe landed in that
-/// same step, every one of those strings had two suppliers: deleting the tap
-/// probe entirely left the gate green, and the gate exists because v0.1.0
-/// actually failed there. That is the fourth time in this file a mention has
-/// stood in for the thing, and the first time the mention was a *different real
-/// mechanism* rather than a comment.
-///
-/// So each assertion is confined to its own probe's span: from the line naming
-/// the ref, through the create, to the request that undoes it. A probe deleted
-/// now takes its span with it and its own gate fails.
 fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
     // `refs/` rather than `refs/heads/`: the two probes deliberately sit in
     // different namespaces, since only one of them needs to avoid raising a
@@ -420,12 +266,6 @@ fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
     );
     // And the create is checked, or a 403 passes silently: `curl` exits 0 on
     // one, and the delete that follows would be undoing a ref never made.
-    //
-    // **The comparison *and* the stop.** Asserting only `!= "201"` leaves the
-    // probe decorative: replace the failure body with an `echo` and the string
-    // survives, the job carries on, and the irreversible half proceeds against
-    // a token that has just been shown not to work. Demonstrated by running it,
-    // not reasoned about.
     let checked = &preflight[created..undone];
     assert!(
         checked.contains(r#"!= "201""#),
@@ -439,13 +279,6 @@ fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
 }
 
 /// The step named `name`, from its `- name:` to the next step's.
-///
-/// **A step is more than the commands it runs, and [`run_commands`] only ever
-/// sees the commands.** An `if:` or a `continue-on-error:` beside them decides
-/// whether any of it executes, and both are invisible to every gate in this file
-/// that reads a `run:` body. Adding `if: ${{ inputs.rehearse }}` to the token
-/// pre-flight leaves the entire suite green while switching off the guard that
-/// exists because a release actually failed.
 fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
     let header = format!("- name: {name}");
     let at = bump
@@ -456,16 +289,6 @@ fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
 }
 
 /// The mapping keys sitting at exactly `indent` columns, unquoted.
-///
-/// **Not a substring search for `if:`, because four spellings evade one.** A
-/// quoted `"if":`, an `if :` with a space before the colon, the key at a
-/// different indent, and the same key one level up on the *job* are all valid
-/// YAML and all mean the step does not run. Each of those passed a `contains`
-/// check that had been mutation-tested against the obvious spelling only, which
-/// is what a single mutation buys: confidence in the one case you thought of.
-///
-/// Lines inside a `run: |` body are indented deeper than any key this asks
-/// about, so shell `if [ ... ]` is never mistaken for the YAML key.
 fn keys_at_indent(text: &str, indent: usize) -> Vec<String> {
     text.lines()
         .filter(|line| {
@@ -495,11 +318,6 @@ fn assert_step_always_runs(bump: &str, name: &str) {
 }
 
 /// The step named `name` runs only when this is not a rehearsal.
-///
-/// **The rehearsal's whole promise is that `main` is left alone**, and until
-/// this existed that promise had no gate: deleting the condition from `commit
-/// the bump` left the suite green while every rehearsal pushed a version to the
-/// default branch, with the step above it still printing "main untouched".
 fn assert_step_skips_a_rehearsal(bump: &str, name: &str) {
     let block = step_block(bump, name);
     let at = block
@@ -524,12 +342,6 @@ fn assert_step_skips_a_rehearsal(bump: &str, name: &str) {
 }
 
 /// One job, carrying nothing that can skip it.
-///
-/// **A step-level check cannot see the level above it.** Moving the pre-flight
-/// into a second job that nothing `needs:` leaves every step-level assertion
-/// true while the commit runs whether or not the tokens were ever checked, and
-/// an `if:` on the job skips every step in it at once. Both parsed as valid
-/// YAML and both passed before this existed.
 fn assert_one_job_that_always_runs(bump: &str) {
     let jobs = &bump[bump.find("\njobs:").expect("bump.yml defines jobs")..];
     let names = keys_at_indent(jobs, 2);
@@ -553,9 +365,6 @@ fn assert_one_job_that_always_runs(bump: &str) {
 }
 
 /// `first` appears before `second` in the workflow's text.
-///
-/// Both token gates need this and both spelled it out: a check that reports a
-/// problem after the version has already moved reports it too late.
 fn assert_precedes(bump: &str, first: &str, second: &str, why: &str) {
     let at = bump
         .find(first)
@@ -568,18 +377,6 @@ fn assert_precedes(bump: &str, first: &str, second: &str, why: &str) {
 
 /// Text with its `#` comments removed, so a `contains` check cannot be
 /// satisfied by prose *about* the thing instead of the thing.
-///
-/// This repository comments heavily by house style, and several of those
-/// comments quote the very command or triple a gate below looks for. Without
-/// this, commenting out a `run:` line and leaving its explanation above it keeps
-/// the gate green, which is the failure a comment-blind `contains` is guaranteed
-/// to have eventually.
-///
-/// Used for both YAML and TOML, which share `#` and, in every file read here,
-/// share the property that no value legitimately contains one. That is worth
-/// stating because it is the limit: this would truncate a genuine `#` inside a
-/// quoted string, so it is a helper for these files rather than a comment
-/// stripper in general.
 fn without_comments(text: &str) -> String {
     text.lines()
         .map(|line| line.split_once('#').map_or(line, |(code, _)| code))
@@ -596,11 +393,6 @@ fn exclude_patterns() -> Vec<String> {
 }
 
 /// Does `pattern` cover `tests/<name>`?
-///
-/// Only the shapes this repository actually uses are understood: a literal path
-/// and a trailing `**`. Anything else is rejected loudly rather than silently
-/// treated as no-match, because a pattern this function does not understand is
-/// exactly the case where a silent "no" reads as a finding and is a bug here.
 fn covers(pattern: &str, name: &str) -> bool {
     let target = format!("tests/{name}");
     match pattern.strip_suffix("**") {
@@ -622,19 +414,6 @@ fn repo_file(relative: &str) -> String {
 }
 
 /// Every workspace member, as (repository-relative directory, package name).
-///
-/// **Derived rather than written out, on the same rule as everything else in
-/// this file.** A list restated here is a second place to edit, and forgetting
-/// is silent in the direction that matters: `cargo publish --workspace` ships a
-/// third crate whether or not any gate below has heard of it.
-/// [`the_internal_dependency_tracks_the_workspace_version`] is what makes
-/// adding one a decision rather than a discovery; this is what makes the gates
-/// follow it.
-///
-/// The name is read from the member's own `[package]` block rather than taken
-/// from the last path segment. They agree today, and a directory name is not a
-/// crates.io name: `cargo package -p <name>` takes the latter, so reading the
-/// manifest is the mechanism and the path is a guess that happens to be right.
 fn workspace_members() -> Vec<(String, String)> {
     toml_array(&repo_file("Cargo.toml"), "members")
         .into_iter()
@@ -662,14 +441,6 @@ fn workspace_members() -> Vec<(String, String)> {
 
 /// The members `cargo publish --workspace` actually ships: every workspace
 /// member whose manifest does not declare `publish = false`.
-///
-/// The licence gates walk this list rather than [`workspace_members`], because
-/// what they guarantee is a property of the **published** artifact: `xtask`
-/// (`publish = false`, the grammar-dump builder `SPEC.md` §6 names) never
-/// becomes a `.crate`, so there is no tarball for a LICENSE to be missing
-/// from. The member-list pin in
-/// [`the_release_pipeline_publishes_to_the_registry`] is what stops an
-/// unpublished member from being added silently.
 fn published_members() -> Vec<(String, String)> {
     workspace_members()
         .into_iter()
@@ -686,32 +457,11 @@ fn published_members() -> Vec<(String, String)> {
 }
 
 /// Whether a `cargo package --list` names `file` at the package root.
-///
-/// **Trimmed equality rather than `contains`**, which is this file's standing
-/// rule and the one it has been caught by four times: a substring test for
-/// `LICENSE` would also be satisfied by a path ending in it, so the mention
-/// would stand in for the thing. The list prints package-relative paths one per
-/// line, so an exact line is the mechanism and nothing else is.
 fn listed_has(listed: &str, file: &str) -> bool {
     listed.lines().any(|line| line.trim() == file)
 }
 
 /// `cargo package --list` for one member, or `None` if the registry is away.
-///
-/// **The skip is a documented outcome rather than a failure**, and the
-/// distinction is [`registry_unreachable`]'s: an index that cannot be reached
-/// means this gate proved nothing on this run, while anything else cargo
-/// refuses is the gate firing. `gate` names the caller in the annotation, so a
-/// CI log says which claim went unchecked rather than that one did.
-///
-/// **`gate` is a literal that has to track the caller's own name, and nothing
-/// enforces that**, so a renamed test leaves a CI annotation pointing at a test
-/// that no longer exists. Recorded rather than fixed: Rust has no stable way to
-/// read the enclosing function's name, and the alternatives are a
-/// `stringify!`-based macro or a `type_name` trick that are both more machinery
-/// than two call sites are worth. The failure is a misleading log line on a run
-/// that already proved nothing, which is the cheapest place in this file for a
-/// drift to land.
 fn package_list(package: &str, gate: &str) -> Option<String> {
     let output = Command::new(env!("CARGO"))
         .args(["package", "--list", "--allow-dirty", "-p", package])
@@ -749,17 +499,6 @@ fn package_list(package: &str, gate: &str) -> Option<String> {
 }
 
 /// Every test that reads outside this package is excluded from the package.
-///
-/// The invariant `SPEC.md` §9 states and could not enforce. A test that escapes
-/// cannot compile in an unpacked or vendored copy, because the thing it reaches
-/// for is not in the tarball, so shipping one means `cargo test` fails for a
-/// reader who did nothing wrong.
-///
-/// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: twenty-one of the test files escape
-/// already, a per-file list would need editing every time a test is added, and
-/// the failure mode of forgetting is silent. This gate holds either shape,
-/// because it asks whether each escaping file is *covered*, not how.
 #[test]
 fn every_test_that_reads_outside_the_package_is_excluded_from_it() {
     let patterns = exclude_patterns();
@@ -777,16 +516,6 @@ fn every_test_that_reads_outside_the_package_is_excluded_from_it() {
 
 /// `SPEC.md` §9 names every test file that escapes, and the naming is checked
 /// rather than trusted.
-///
-/// **This is the gate against the exact defect that produced it.** §9's own
-/// closing sentence says the escapes are "counted rather than described because
-/// a count is what a later reader can check", and then nothing checked it: the
-/// bullet said three across two files while the truth grew to thirteen across
-/// twelve. Prose cannot notice a new test.
-///
-/// One direction only. Every escaping file must be named in the bullet; the
-/// bullet is free to mention others, because it also discusses `vigia-core`'s
-/// files in order to explain why that package is *not* excluded.
 #[test]
 fn the_spec_names_every_test_that_escapes_the_package() {
     let spec = repo_file("SPEC.md");
@@ -843,12 +572,6 @@ fn the_spec_names_every_test_that_escapes_the_package() {
 }
 
 /// The command scan reads commands and nothing else.
-///
-/// Every case here is one that has got past a version of this scan, so the list
-/// is a record of how it can be wrong rather than a survey of YAML. Two of them
-/// are the same defect from opposite sides: a
-/// `name:` that quotes a command is not a command, and a command split over two
-/// physical lines is still one.
 #[test]
 fn only_the_commands_a_workflow_runs_are_read_as_commands() {
     let inline = run_commands("    steps:\n      - run: cargo publish --workspace\n");
@@ -937,13 +660,6 @@ fn only_the_commands_a_workflow_runs_are_read_as_commands() {
 }
 
 /// The skip condition is checked against stderr cargo really produced.
-///
-/// A gate that skips has to be right about *when*, and both directions cost
-/// something real: skipping on a broken manifest hides a release defect, and
-/// firing on an offline machine breaks development for a reason the developer
-/// cannot act on. Written from memory the condition is wrong both ways, so the
-/// fixtures below are pasted from actual `cargo package --list` runs with cargo
-/// 1.94.0 rather than composed.
 #[test]
 fn the_unreachable_registry_is_told_apart_from_a_broken_manifest() {
     // Captured: `CARGO_HOME=<empty> CARGO_NET_OFFLINE=true cargo package --list`
@@ -1015,20 +731,6 @@ fn the_unreachable_registry_is_told_apart_from_a_broken_manifest() {
 }
 
 /// The internal dependency's pinned version is the workspace version.
-///
-/// **The one duplication in this manifest that cargo cannot remove.** A path
-/// dependency that will be published needs both halves: `path` is what a
-/// checkout builds against, and `version` is what `cargo publish` rewrites the
-/// dependency to, because crates.io has no paths. Cargo has no
-/// `version.workspace = true` inside a dependency spec, so the number is written
-/// twice and only a gate can hold the two together.
-///
-/// The failure it prevents is silent, permanent, and passes every other check
-/// here: bump the workspace to 0.2.0 while the pin still reads 0.1.0, and
-/// `cargo publish --workspace` ships `vigia` 0.2.0 depending on `vigia-core`
-/// **0.1.0** — a real published crate that resolves, builds and installs. The
-/// binary a user gets is the new shell over the old engine, and nothing in the
-/// repository is red.
 #[test]
 fn the_internal_dependency_tracks_the_workspace_version() {
     let root = repo_file("Cargo.toml");
@@ -1096,11 +798,6 @@ fn the_internal_dependency_tracks_the_workspace_version() {
 }
 
 /// Nothing in `exclude` has quietly stopped matching anything.
-///
-/// A stale pattern is worse than a missing one: it reads as protection, it
-/// survives review because deleting an `exclude` entry always looks risky, and
-/// it excludes nothing at all. The failure it hides is the same one the gate
-/// above exists for, arrived at from the other side.
 #[test]
 fn nothing_excluded_has_since_stopped_existing() {
     let names: Vec<String> = test_files().into_iter().map(|(name, _)| name).collect();
@@ -1151,17 +848,6 @@ fn nothing_excluded_has_since_stopped_existing() {
 
 /// The profile the release is built with is the profile the budgets are measured
 /// against.
-///
-/// Every absolute budget in this repository (I7, I9, I3) is taken in `release`.
-/// `dist` builds with `[profile.dist]`, so the moment those two diverge, every
-/// one of those numbers becomes a claim about a binary no user receives, and
-/// nothing anywhere would say so: a tuned `dist` profile builds, ships and
-/// installs exactly like an untuned one.
-///
-/// The assertion is that the block inherits `release` **and adds nothing**,
-/// rather than that it adds nothing *harmful*. Deciding which keys are harmless
-/// needs a model of the optimiser this gate has no business holding, and "adds
-/// nothing" is a property a reader can confirm in one glance.
 #[test]
 fn the_profile_that_ships_is_the_profile_the_budgets_measure() {
     let root = repo_file("Cargo.toml");
@@ -1203,18 +889,6 @@ fn the_profile_that_ships_is_the_profile_the_budgets_measure() {
 }
 
 /// The release pipeline actually sends both crates to the registry.
-///
-/// `dist` has no built-in crates.io publisher, so this is a custom reusable
-/// workflow, which means it is wired by a string in one file and implemented in
-/// another. A typo in either produces a release that builds binaries, publishes
-/// a Homebrew formula, announces itself, and never claims the crate name, and
-/// the first symptom is a user's `cargo install vigia` failing weeks later.
-///
-/// `--workspace` is asserted by name rather than left to whatever `cargo publish`
-/// invocation happens to be there. Two `-p` calls in sequence are the obvious
-/// alternative and they are wrong: `vigia` declares `vigia-core` by path *and*
-/// version, so the registry refuses the second until the first is indexed, and
-/// the sleep that papers over it has no correct length.
 #[test]
 fn the_release_pipeline_publishes_to_the_registry() {
     const JOB: &str = "./publish-crates-io";
@@ -1331,14 +1005,6 @@ fn the_release_pipeline_publishes_to_the_registry() {
     // does not stop a release half-shipping. It
     // does not: `host` runs `gh release create` with no `--draft`, so the
     // binaries are public before the registry job starts.
-    //
-    // Asserted as two facts a reader can check, not as a byte-offset
-    // comparison. Textual order in a YAML mapping is not semantic, so an
-    // offset comparison both false-reds (dist reorders its emitted jobs and
-    // nothing has changed) and false-greens on the edit that actually matters:
-    // adding `--draft` to that line moves no offsets at all, and dist's own
-    // stated direction is draft-then-undraft, so a future upgrade lands
-    // exactly that.
     let gh_release_line = release
         .lines()
         .find(|line| line.contains("gh release create"))
@@ -1386,20 +1052,6 @@ fn the_release_pipeline_publishes_to_the_registry() {
 
 /// The no-C-toolchain gate reads its target list from the release config rather
 /// than from a second hand-typed copy.
-///
-/// **A test asserting the two lists agree is the wrong shape, and having one
-/// place rather than two is the fix.** `CLAUDE.md` calls a C build dependency in
-/// the graph a spec change rather than an implementation detail,
-/// and `ci.yml`'s `pure-rust` job is that rule with teeth; it held a hand-typed
-/// target list while `[workspace.metadata.dist]` held another. Shipping a fourth
-/// target was the moment they came apart, and the gate caught it:
-/// `x86_64-apple-darwin` was in the release and the purity job had never heard
-/// of it.
-///
-/// A gate over a duplication fires *after* somebody types the fifth target
-/// wrong. Deriving the list makes the drift impossible instead, so what this
-/// asserts now is only that the derivation is still there: `cargo metadata`
-/// exposes `[workspace.metadata.dist]` verbatim, and the job reads it.
 #[test]
 fn the_purity_gate_derives_its_targets_from_the_release_config() {
     // Comment-stripped before slicing, because the region is heavily commented
@@ -1439,21 +1091,6 @@ fn the_purity_gate_derives_its_targets_from_the_release_config() {
 }
 
 /// The button that cuts a release reaches the workflow that performs one.
-///
-/// **Three files have to agree and only one of them fails loudly on its own.**
-/// `bump.yml` dispatches `release.yml`; `release.yml` accepts a dispatch only
-/// because `[workspace.metadata.dist] dispatch-releases = true` generated it
-/// that way; and that same setting is what removed the tag-push trigger. Turn
-/// the setting off and regenerate, and `bump.yml` still exists, still has its
-/// dropdown, still bumps the version and still pushes the commit, and then
-/// dispatches a workflow that has no `workflow_dispatch` to receive it. The
-/// release never runs. Nothing is red, the version has already moved, and the
-/// tell is a release that simply did not happen.
-///
-/// That is worth a gate rather than a comment because the failure is silent in
-/// the direction that matters and because the whole mechanism exists to avoid a
-/// second long-lived token: a tag pushed from a workflow holding `GITHUB_TOKEN`
-/// triggers nothing, and `workflow_dispatch` is the exception being relied on.
 #[test]
 fn the_release_button_reaches_the_release() {
     let root = repo_file("Cargo.toml");
@@ -1523,11 +1160,6 @@ fn the_release_button_reaches_the_release() {
     // formula job checked the tap out successfully and then failed `git push`
     // with a 403, by which point the GitHub release and the crates.io publish
     // had both already happened.
-    //
-    // Asserting `permissions.push` rather than merely that a check exists is
-    // the point. A check that only proves the token *works* passes against a
-    // read-only one, because reading a public repository needs no grant at all,
-    // so a token scoped to entirely the wrong repository reads this one fine.
     let preflight = commands
         .iter()
         .find(|command| command.contains(r#"-z "${CARGO_REGISTRY_TOKEN"#))
@@ -1551,11 +1183,6 @@ fn the_release_button_reaches_the_release() {
     // the user's role on the repository rather than the token's grants. So the
     // check creates a ref in the tap and deletes it, and this asserts that
     // shape rather than any wording.
-    //
-    // **Bounded to the tap's own probe, and it was not always.** These three
-    // assertions ran over the whole step until a second probe landed in it, at
-    // which point every string they look for had two suppliers and deleting the
-    // tap probe outright left them green. See [`assert_write_probe`].
     assert_write_probe(preflight, "probe", "${tap}");
 
     // And it has to run before the commit, or it reports a problem the version
@@ -1570,24 +1197,6 @@ fn the_release_button_reaches_the_release() {
 }
 
 /// The push that moves `main` carries a token that can, and it is checked first.
-///
-/// **Run 31435812487 written down as a gate.** The button's first real run built
-/// everything, moved both version strings, and was rejected at the push with
-/// *"7 of 7 required status checks are expected"*. `main` is protected; a commit
-/// pushed with `GITHUB_TOKEN` triggers no workflow, so those checks can never
-/// arrive on it; and the bot holds write rather than admin, so it cannot bypass
-/// them. Retrying reaches the same answer forever.
-///
-/// **This is the one step in that workflow no rehearsal has ever reached**,
-/// because a rehearsal's whole promise is to leave `main` alone. Three green
-/// rehearsals and a token guard rewritten twice all ran over a step none of them
-/// performed, which is why the gate is here rather than left to the next
-/// release to discover.
-///
-/// Each assertion names a form only the *mechanism* has. `RELEASE_TOKEN` appears
-/// in the step's `env:` block, in two error messages and in a comment, so
-/// finding the name proves nothing; this file has recorded four separate
-/// occasions where a mention stood in for the thing.
 #[test]
 fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
@@ -1611,11 +1220,6 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     // it.** A token with `Contents: Read and write` still cannot move a
     // protected branch unless the account behind it is an admin. The probe
     // above covers the grant; this covers the standing.
-    //
-    // Span-bound with its comparison and its stop, for the reason
-    // [`assert_write_probe`] is: `contains(".permissions.admin")` alone was
-    // satisfied by deleting the whole check and leaving an `echo` that named
-    // it, which was demonstrated by running it rather than argued.
     let admin = preflight
         .find(".permissions.admin")
         .expect("nothing reads the standing of the account behind RELEASE_TOKEN");
@@ -1743,27 +1347,6 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
 }
 
 /// The tarball cargo would actually upload carries no tests.
-///
-/// Every gate above reads a file and reasons about what cargo *will* do. This one
-/// asks cargo, which is the only way to catch an `exclude` that is spelled
-/// correctly and means something other than what it looks like.
-///
-/// It shells out, so it can be genuinely unavailable: `cargo package` touches
-/// the registry index, and a machine with no network answers a question nobody
-/// asked.
-///
-/// **The skip is narrow, and the first version of it was not.** That one
-/// returned on *any* non-zero exit, which meant the single most valuable failure
-/// it could see was the one it swallowed: a typo in `readme` makes
-/// `cargo package --list` fail, so a broken manifest turned this gate green.
-/// Verified, one character (`readme = "READMEE.md"`) was enough. Now only an
-/// index or network failure skips, and everything else is the finding.
-///
-/// **And the skip is written to stderr with a CI annotation, not `println!`.**
-/// libtest captures stdout for a *passing* test and discards it without
-/// `--nocapture`, so the old "skipping is printed" was false exactly where it
-/// mattered: in CI, a skip and a pass looked identical, which is the shape
-/// `soak.rs`'s own rule exists to prevent.
 #[test]
 fn the_packaged_artifact_carries_no_tests() {
     let Some(listed) = package_list("vigia", "the_packaged_artifact_carries_no_tests") else {
@@ -1799,59 +1382,6 @@ fn the_packaged_artifact_carries_no_tests() {
 }
 
 /// Every published crate carries the licence text, not only its SPDX name.
-///
-/// `license = "MIT"` is metadata: crates.io renders a badge from it and a
-/// scanner reads it, and neither puts the twenty-one lines of the licence in
-/// front of a reader who has the tarball. Cargo picks a licence up from the
-/// **package** directory only, and this repository's is one level above both
-/// packages, so for the whole of 0.1.0 through 0.17.0 the `.crate` shipped
-/// none. `dist` puts `LICENSE` in all four binary archives, so the tarball was
-/// the one channel that did not carry it.
-///
-/// **What closes it is a copy in each package directory, and the alternative is
-/// worth recording because it is the one everybody reaches for first.** An
-/// inherited `license-file = "LICENSE"` resolves against the workspace root and
-/// works exactly like `readme`: it puts `LICENSE` in both tarballs and rewrites
-/// the path package-relative. It also makes `cargo
-/// publish` print `warning: only one of license or license-file is necessary`,
-/// from the verify step rather than from `--list`, which is why it looks clean
-/// until the one workflow nobody can rehearse runs it. The root manifest
-/// already ruled that trade in the other direction for `homepage`, and
-/// dropping `license` to silence it would give up the SPDX expression that is
-/// the field's whole point. Eight of eight dependencies here, `gix` and
-/// `notify` among them and both workspaces with this same layout, ship the file
-/// from inside the crate directory.
-///
-/// **A symlink is the third idea and the worst of the three, which is worth
-/// writing down because it is the one a Unix reader reaches for first.** It
-/// fails twice over, independently. Git on Windows needs
-/// `SeCreateSymbolicLinkPrivilege` to materialise one at all, and without it a
-/// checkout writes an ordinary file whose *contents* are the string
-/// `../../LICENSE`; `.gitattributes` does not save that, since `eol=lf` governs
-/// line endings rather than symlink materialisation. And even where the link is
-/// real, cargo does not dereference one pointing outside the package directory:
-/// [cargo#5664](https://github.com/rust-lang/cargo/issues/5664) is open on
-/// exactly this case, filed against `serde`, whose packaged `LICENSE-APACHE`
-/// carried the literal target path instead of the licence text. Both failures
-/// are silent, and both land on the tier-1 platform this project is developed
-/// on. A `build.rs` cannot help either, since `cargo package` fixes the
-/// tarball's file list before any build script runs.
-///
-/// **And this gate lives in `vigia`'s tests rather than each crate's own**,
-/// which is not tidiness. `crates/vigia/Cargo.toml` excludes `tests/**`, so a
-/// test here that reads outside the package ships to nobody;
-/// `crates/vigia-core`'s manifest says its tests are *"deliberately not
-/// excluded"* because none of them escape. A licence-drift check placed there
-/// would read `../../LICENSE` and become the first escape in the one package
-/// that publishes its own test suite, which is the exact defect `SPEC.md` §9
-/// and this file exist to prevent. Reaching `vigia-core` from here costs
-/// nothing: this gate shells `cargo package -p vigia-core` and reads its files
-/// by path, and touches nothing under its `tests/`.
-///
-/// This gate asks cargo. [`the_licence_each_crate_ships_is_the_repository_licence`]
-/// asks whether what it ships is the right text, and neither subsumes the
-/// other: a copy that drifts passes here, and a mechanism that stops working
-/// passes there.
 #[test]
 fn every_published_crate_ships_the_licence() {
     for (dir, package) in published_members() {
@@ -1920,15 +1450,6 @@ fn every_published_crate_ships_the_licence() {
 }
 
 /// The licence each crate ships is this repository's, byte for byte.
-///
-/// The cost of the copy that [`every_published_crate_ships_the_licence`]
-/// records: two files that can drift from the one at the root, and from each
-/// other. Drift here is worse than the absence it replaced, because a crate
-/// that ships *a* licence looks settled while carrying terms nobody chose.
-///
-/// Offline and unconditional, unlike its pair, which is deliberate: the gate
-/// that can be skipped is the one about a mechanism cargo owns, and the gate
-/// about what this repository is licensed under always runs.
 #[test]
 fn the_licence_each_crate_ships_is_the_repository_licence() {
     let root = repo_file("LICENSE");
@@ -1936,12 +1457,6 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
     // Non-vacuity, on the same rule as the package lists above: an empty or
     // truncated root file would make every comparison below pass by matching
     // nothing against nothing, and three empty files are byte-identical.
-    //
-    // **Fifteen lines because the licence is twenty-one**, which is the number
-    // the docblock above quotes, so the floor is set just under the real value
-    // rather than at a rounder one. A loose floor is the point: MIT's text is
-    // fixed, but a year or a name change moves the byte count and must not turn
-    // this into a failure about nothing.
     assert!(
         root.contains("MIT License") && root.lines().count() > 15,
         "the repository LICENSE is not the text this gate thinks it is \
@@ -1961,19 +1476,6 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
 }
 
 /// The grammar count the README states is the one the dump holds.
-///
-/// `README.md` names a number, and a number in prose is the thing this
-/// repository has been caught by most often: nothing reads it, so it is true on
-/// the day it is written and silently false after the next `two-face` upgrade.
-/// The roster pin in `crates/vigia-core/tests/coverage.rs` forces the *dump* to
-/// be re-pinned deliberately; this is what points that same edit at the
-/// sentence a reader sees.
-///
-/// **It lives here rather than in a file of its own** because this one already
-/// reads the repository root and is already excluded from the package, so it
-/// adds no escaping test and no count for `SPEC.md` §9 to restate. Phase 4's
-/// rule is that the artifacts agree with each other, and this is one pair of
-/// them.
 #[test]
 fn the_readme_states_the_grammar_count_the_dump_holds() {
     let roster = repo_file("crates/vigia-core/assets/GRAMMARS.txt");
@@ -1992,12 +1494,6 @@ fn the_readme_states_the_grammar_count_the_dump_holds() {
 }
 
 /// Drives the judgement `ci complete` runs, with fabricated leg results.
-///
-/// Unix only, and the test below is scoped to match. The script is POSIX shell
-/// run by a job whose `runs-on` is `ubuntu-latest`, so Windows never executes
-/// it; driving it there through Git Bash failed on the extended-length path
-/// `canonicalize` returns. `the_ci_workflow_runs_the_script_the_gate_proves`
-/// pins that `runs-on` on every platform, so this scoping cannot go stale.
 #[cfg(unix)]
 fn ci_complete(draft: &str, legs: &[&str]) -> bool {
     let script = repo_root().join(".github/scripts/ci-complete.sh");
@@ -2012,13 +1508,6 @@ fn ci_complete(draft: &str, legs: &[&str]) -> bool {
 }
 
 /// A draft's skipped legs are not a failure, and everything else still is.
-///
-/// See [`ci_complete`] for why this is Unix only.
-///
-/// The judgement was inline in the workflow and judged a draft's skips as
-/// failure, so the required check went red on every push to a draft. The cases
-/// below are the ones that distinguish "nothing ran because it is a draft" from
-/// "something did not run", which is the whole of what this gate has to know.
 #[cfg(unix)]
 #[test]
 fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
@@ -2084,9 +1573,6 @@ fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
 }
 
 /// The workflow calls the script the gate above proves.
-///
-/// Without this the script could be correct and unreached, which is the same
-/// shape as the defect it replaced.
 #[test]
 fn the_ci_workflow_runs_the_script_the_gate_proves() {
     let ci = read(&repo_root().join(".github/workflows/ci.yml"));
@@ -2129,19 +1615,6 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 }
 
 /// What each document is allowed to weigh, in bytes.
-///
-/// These are ratchets. Lower one when a pass removes prose; never raise one.
-/// Raising it is the move that has no natural stopping point, which is how the
-/// contract reached half a megabyte with the rule that was supposed to prevent
-/// it already written down.
-///
-/// The targets these are walking toward: 90_000 for the spec, 40_000 each for
-/// the roadmap and the ledger. The spec's is set by it staying read-before-code
-/// for everyone, which makes it the contributor on-ramp and not a barrier routed
-/// around. 90_000 rather than something rounder because a floor of roughly
-/// 72_000 is forced by structures that cannot move: §3's invariant table, whose
-/// row shape `preflight.sh` greps; the ruling lead-ins themselves; and §7, which
-/// has no lead-in structure to lean on.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
     ("SPEC.md", 390_719),
     ("ROADMAP.md", 94_781),
@@ -2149,10 +1622,6 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
 ];
 
 /// Each document weighs no more than its budget.
-///
-/// A structural gate rather than a timed one: an exact count, no slack, running
-/// in debug so it holds on every `cargo test --workspace` rather than only on
-/// the release legs.
 #[test]
 fn the_written_layer_stays_under_its_budget() {
     let root = repo_root();

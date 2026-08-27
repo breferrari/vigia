@@ -1,26 +1,4 @@
 //! I5: correct with zero interaction.
-//!
-//! > Auto-follows the newest change and scrolls to it, untouched.
-//!
-//! The invariant that separates a monitor from a viewer, so the load-bearing
-//! word in nearly every test here is **untouched**: the view moves with no
-//! `Action` applied at all. Where an action does appear it is the subject
-//! rather than the setup, because follow mode is defined as much by what
-//! disengages it as by what it does.
-//!
-//! `SPEC.md` §11.1 is the rule, ruled as B1 and B2. Two of its clauses are the
-//! ones that would go wrong quietly rather than loudly, and
-//! each has a test of its own below: a **resize must not disengage**, because a
-//! pane beside an agent is resized constantly and follow mode would evaporate
-//! for free; and **`G` must disengage rather than re-engage**, because
-//! otherwise a reader cannot look at the newest file without re-arming the
-//! view.
-//!
-//! What is asserted is the **path drawn at the top of the screen**, not the
-//! index the position holds. Status order is not the order the fixture writes
-//! its files in, so an index assertion would be restating the implementation's
-//! own lookup; a path is an oracle the shell cannot satisfy by being
-//! consistently wrong.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -63,20 +41,11 @@ fn fixture(name: &str) -> Scratch {
 }
 
 /// The path status reports at `index`.
-///
-/// Read out of the frame rather than constructed, because the fixture writes
-/// `src/mod_0.rs` through `src/mod_39.rs` and status reports them
-/// lexicographically, so `mod_10` precedes `mod_2`. A test that assumed
-/// otherwise would be asserting against the wrong file and still passing.
 fn path_at(frame: &Frame, index: usize) -> String {
     frame.files()[index].path.clone()
 }
 
 /// The file whose heading is drawn at the top of the screen.
-///
-/// The oracle for every assertion in this file. Following is a claim about
-/// what the reader sees, so it is checked against what would be drawn rather
-/// than against the position that produced it.
 fn top_file(
     app: &mut App,
     frame: &mut Frame,
@@ -154,9 +123,6 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
     // frame that resolved to row zero and reported nothing leaves a request
     // armed to fire on the next resize. Every other gate here lands on a row
     // above zero, so this is the only place the distinction is visible.
-    //
-    // Re-armed, because the assertion above went through `top_file`, which draws
-    // a frame and so has already served the first request.
     app.follow(&target, &frame);
     let view = app
         .view(&mut frame, &mut highlighter, &history, layout())
@@ -285,10 +251,6 @@ fn f_re_engages_follow_and_jumps_to_the_newest_change() {
 
     // Arrives while disengaged, so it is recorded and not acted on. That is
     // what gives `f` somewhere to jump to a moment later.
-    //
-    // Checked against the position rather than [`top_file`], because after a
-    // one-row scroll the top of the screen is a hunk header rather than a
-    // heading. That is the correct picture and the wrong oracle.
     let other = path_at(&frame, OTHER);
     let parked = app.position();
     app.follow(&other, &frame);
@@ -497,17 +459,6 @@ fn a_position_survives_the_file_it_points_at_being_committed() {
 }
 
 /// A file whose diff is several screens tall, with its largest change low down.
-///
-/// The shape [#257](https://github.com/breferrari/vigia/issues/257) was reported
-/// against: a Swift test file carrying a 76-line deletion that the reader could
-/// not see, because follow put the heading on the top row and the deletion was
-/// below the bottom one. Three small edits above it are what push it there; a
-/// two-hunk file puts its second header ten rows down, which fits on any pane
-/// and would make this gate pass against the old behaviour.
-///
-/// Written out rather than built from [`Scratch::sparse_edits`] because the
-/// hunks here are deliberately **unequal**: that fixture edits every `every`th
-/// line, so every hunk holds exactly one change and no hunk is the busiest.
 fn tall(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write(TALL, support::numbered_lines(TALL_LINES));
@@ -546,10 +497,6 @@ const CUT_AT: usize = 200;
 const CUT_LINES: usize = 76;
 
 /// Where the deletion's hunk header sits on the index side.
-///
-/// One-based, and three lines of context above the first line removed:
-/// `CUT_AT` is zero-based, so the first line gone is 201 and the hunk opens at
-/// 198.
 const CUT_HUNK_START: u32 = CUT_AT as u32 + 1 - vigia_core::CONTEXT;
 
 /// How many index-side lines that hunk covers: what was removed, plus three
@@ -744,9 +691,6 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
     // and a debt left armed makes them land mid-file instead. `n` at an end
     // writes no position at all and still settles it, which is why the predicate
     // is the rule rather than the write.
-    //
-    // Driven with no view between the follow and the gesture, which is the state
-    // the drain produces and the only one where the debt is still outstanding.
     let scratch = tall("shell-follow-settled");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -898,14 +842,6 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
 }
 
 /// A file whose busiest hunk is **near its end and shorter than the pane**.
-///
-/// Deliberately not [`tall`], which cannot show this: there the busiest hunk is
-/// a 76-line deletion, so landing on it fills any pane from its own rows and no
-/// tail is left over. This one is four one-line tweaks and then a four-line
-/// rewrite low down, so the busiest hunk is fifteen rows against an eighteen-row
-/// region and the rows under it run out. A block ends at its last hunk, so what
-/// is left below a landing is that hunk and nothing else, however long the file
-/// is.
 fn tail(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write(TAIL, support::numbered_lines(TALL_LINES));
@@ -994,15 +930,6 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
     // every index, and a landing armed by the tick before it holds nothing but
     // an index, so resolving it puts the viewport deep inside whichever file
     // inherited the number.
-    //
-    // **The renumbered index has to still name a file**, which is the whole
-    // subject of the guard: committing everything leaves the list empty,
-    // `View::collect` returns at its own `files == 0` branch, and the gate
-    // passes with the guard deleted. Here `src/aaa.rs` is committed
-    // and the third file slides into its place.
-    //
-    // Driven the way the loop drives it, with no `follow` call for the second
-    // tick, because that is the state the defect needs.
     let scratch = Scratch::new("shell-follow-renumbered");
     scratch.write("src/aaa.rs", "fn a() {}\n");
     scratch.write("src/mmm.rs", support::numbered_lines(TALL_LINES));
@@ -1076,18 +1003,6 @@ fn a_refused_landing_is_settled_rather_than_deferred() {
     // **The guard is re-read every frame**, so refusing a landing and keeping it
     // is not the same as dropping it: the debt fires the moment an index names
     // the followed path again, on a frame no tick armed.
-    //
-    // The fixture is what makes that reachable, and the renumbering gate above
-    // cannot do it: there the followed file keeps an index no later frame points
-    // at, so the guard refuses forever and a kept debt is indistinguishable from
-    // a dropped one. Here the two files *around* the followed one are committed,
-    // so the position is out of range on the frame that refuses, and
-    // `View::collect` then clamps it back onto the followed file. The next frame
-    // is the one that would fire.
-    //
-    // Opening the gestures sheet is where a reader would meet it: `ToggleSheet`
-    // moves no viewport at all, and its own ruling is that a reader who opens it
-    // and closes it is looking at the screen they left.
     let scratch = Scratch::new("shell-follow-deferred");
     scratch.write("src/aaa.rs", "fn a() {}\n");
     scratch.write("src/zzz.rs", "fn z() {}\n");
@@ -1175,10 +1090,6 @@ fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
     // cheapest hunkless block the default view can hold: a heading and one line
     // saying why. (A rename is cheaper still and unreachable here, because
     // `git mv` stages it and the default view is the unstaged one.)
-    //
-    // Built here rather than on top of [`tail`], which has already committed its
-    // baseline: a second `commit_all` would take the tall file's own diff with
-    // it and leave the fixture with nothing to follow.
     let scratch = Scratch::new("shell-follow-hunkless");
     scratch.write(TAIL, support::numbered_lines(TALL_LINES));
     scratch.write("src/zzz.bin", b"\0\0committed\0\0".as_slice());
@@ -1241,9 +1152,6 @@ fn a_landing_survives_a_pane_with_no_diff_region() {
     // that frame resolves nothing, and forgetting the request there would leave
     // the reader on the heading for good: the tick that armed it has been spent
     // and no other will re-arm it until the agent writes again.
-    //
-    // A resize is `SPEC.md` §11.1's "no state change", so this is the same
-    // ruling the follow mode paragraph already makes about disengaging.
     let scratch = tall("shell-follow-kept");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1285,11 +1193,6 @@ fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
     // the frame for it a second time, and on a pane too short for a list there
     // is no list to serve: the record is dropped unread, and building it is the
     // heat projection over that file's whole diff, every frame.
-    //
-    // No counter in `FrameStats` moves for it, because building an entry reads
-    // nothing: it walks lines the frame already holds. So `View::recorded` is
-    // what this asserts on, and it exists for this. Mutating the guard to `true`
-    // survived every other gate in the suite, which is what asked for it.
     let scratch = tall("shell-follow-listless");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1328,11 +1231,6 @@ fn the_landing_turns_on_the_diff_regions_own_height() {
     // passes. Every other gate here sits far from both edges, so the call site
     // could add or subtract a row and the whole suite would stay green while a
     // reader on a pane one row either side of an edge got the wrong screen.
-    //
-    // The `tall` fixture puts the busiest hunk's header at row 28 and its first
-    // removal at row 32, so the two edges are four rows apart at the bottom and
-    // at 32 at the top, and driving the region to each side of both is what pins
-    // the argument.
     let scratch = tall("shell-follow-heights");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

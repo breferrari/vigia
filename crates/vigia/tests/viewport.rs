@@ -45,11 +45,6 @@ fn body() -> usize {
 }
 
 /// Twelve files of four rows each, so the diff is 48 rows against a 22-row body.
-///
-/// **Deliberately more than one screenful and less than two.** The defect needs a
-/// diff long enough to scroll into and short enough that the tail runs out, and a
-/// fixture that is many screenfuls deep would take a hundred keystrokes to reach
-/// the shape being tested.
 fn fixture(name: &str) -> Scratch {
     Scratch::large_diff(name, FILES, 1)
 }
@@ -58,12 +53,6 @@ fn fixture(name: &str) -> Scratch {
 fn scrolling_to_the_bottom_never_leaves_the_pane_half_empty() {
     // The gate #59 was filed for. Scroll a row at a time, all the way past the
     // end, and assert after **every** step that the body is full.
-    //
-    // Every step rather than only the last, because the defect is not at the very
-    // bottom: it starts the moment fewer than a screenful of rows remain below the
-    // top, and it grows by one blank row per keystroke after that. A gate that
-    // only checked the final position would find the pane at its emptiest and
-    // report the same failure, but it would not say when it began.
     let scratch = fixture("viewport-scroll");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -228,11 +217,6 @@ fn a_backed_up_body_holds_the_rows_its_own_position_names() {
     // gate above stays green while the pane shows a stale prefix followed by rows
     // from somewhere else entirely. A mutation proved that, by deleting the clear
     // and surviving.
-    //
-    // The oracle is the position the view reports. Collecting from it again, with
-    // no back-up allowed, has to produce the same rows: the resolved position is
-    // what the next frame starts from, so if it does not describe what is on
-    // screen then the screen and the scroll state have already disagreed.
     let scratch = fixture("viewport-content");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

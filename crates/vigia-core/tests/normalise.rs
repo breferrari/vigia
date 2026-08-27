@@ -1,18 +1,4 @@
 //! Does the diff normalise the working-tree side the way git does?
-//!
-//! Git compares the working tree against the index *through* its clean filter,
-//! so on a checkout with `core.autocrlf=true` the CRLF on disk is turned back
-//! into the LF the blob holds before anything is compared. Reading the raw bytes
-//! instead makes every line of every such file differ from its stored form.
-//!
-//! That was [#65](https://github.com/breferrari/vigia/issues/65), and it was
-//! reported from a real screen: a 21-line edit drawn as **+905 −885**, on a file
-//! `git diff` called unchanged, on the installed default of a tier-1 target.
-//!
-//! **`git` is the oracle in every test here**, as it is in `fidelity.rs`, and for
-//! a sharper reason: the expected numbers below are exactly the ones a
-//! hand-written expectation would have got wrong, since the whole defect is a
-//! disagreement with git about what "changed" means.
 
 mod support;
 
@@ -20,15 +6,6 @@ use support::{Numstat, Scratch, changes_sorted, delta, numbered_lines};
 use vigia_core::{Error, Frame, Worktree};
 
 /// The reported case: a CRLF worktree file over an LF blob, and no real edit.
-///
-/// `git diff` reports nothing at all here, so anything this draws as changed is
-/// a line the reader has to scroll past to reach a change that exists.
-///
-/// The file is still **listed**, and that is the ruling rather than a leftover:
-/// dropping it from the list would need its content during `Frame::advance`,
-/// which I4 forbids, and a header count disagreeing with the body is exactly the
-/// contradiction B3's empty state exists to remove. `git status` lists it too.
-/// See `SPEC.md` §11.1.
 #[test]
 fn a_crlf_worktree_file_whose_blob_is_lf_diffs_as_no_change() {
     let scratch = Scratch::crlf_worktree("normalise-clean", Some("* text=auto eol=lf\n"));
@@ -66,10 +43,6 @@ fn a_crlf_worktree_file_whose_blob_is_lf_diffs_as_no_change() {
 
 /// The commoner and worse case: the plain installed default, no `.gitattributes`
 /// anywhere, where a checkout puts CRLF on disk against an LF blob.
-///
-/// Every text file in every repository is in this state on a default Windows
-/// install, so without normalisation **every** edit to **any** of them reads as
-/// a full rewrite. This was not in the issue report and is the larger half of it.
 #[test]
 fn a_one_line_edit_inside_a_crlf_file_diffs_as_one_line() {
     let scratch = Scratch::crlf_worktree("normalise-edit", None);
@@ -111,11 +84,6 @@ fn a_one_line_edit_inside_a_crlf_file_diffs_as_one_line() {
 }
 
 /// The oracle at full strength: hunk boundaries, not just totals.
-///
-/// The same sweep `fidelity.rs::hunk_grouping_boundary_matches_git_at_every_gap`
-/// runs, one configuration axis over. A totals-only check passes for a diff that
-/// agrees on how much changed and disagrees on where, and where is what the pane
-/// draws.
 #[test]
 fn a_normalised_diff_matches_git_hunk_for_hunk() {
     const TOTAL_LINES: usize = 60;
@@ -153,17 +121,6 @@ fn a_normalised_diff_matches_git_hunk_for_hunk() {
 }
 
 /// Normalisation follows the attributes rather than the platform.
-///
-/// Two fixtures differing in one term, which is the shape `SPEC.md` §7 asks for:
-/// the same bytes, the same configuration, and one `.gitattributes` line
-/// between them. `binary` implies `-text`, so git converts nothing and the CRLF
-/// difference is real; without it the same file normalises to nothing at all.
-/// Asserting only the first would pass against a filter that never ran.
-///
-/// What this does **not** claim is that a `binary`-marked file is drawn the way
-/// git draws it. `git diff` reports `Binary files differ` and this still diffs it
-/// as text, because `binary` also implies `-diff` and nothing here honours that:
-/// [#68](https://github.com/breferrari/vigia/issues/68).
 #[test]
 fn the_binary_attribute_turns_normalisation_off() {
     let changed = |attributes: Option<&str>, name: &str| -> (u32, u32) {
@@ -197,23 +154,6 @@ fn the_binary_attribute_turns_normalisation_off() {
 }
 
 /// A `.gitattributes` written mid-session reaches the very next frame.
-///
-/// **Driven through `Frame::advance`, because that is how the shell runs.** The
-/// same sequence against `Worktree::diff` called twice by hand passes whatever
-/// the filter's lifetime is, since nothing in it marks a frame boundary. A gate
-/// that does not model the caller cannot see this defect, and did not: the
-/// filter was originally built once per process and this test is what found it.
-///
-/// The failure it forbids is specific and silent. `.gitattributes` decides what
-/// a diff normalises, the agent in the other pane writes one, and a monitor
-/// holding its filter for the life of the process goes on drawing the old answer
-/// indefinitely while a restart draws a different one. That is I5 (correct with
-/// zero interaction) failing in a process I3 expects to run for days, and
-/// nothing on screen would say so.
-///
-/// The control is a **restarted** worktree, not a hand-written expectation: what
-/// the running session draws has to equal what a fresh one draws, which is the
-/// property that actually matters and the one a literal number would not pin.
 #[test]
 fn attributes_written_mid_session_reach_the_next_frame() {
     let scratch = Scratch::crlf_worktree("normalise-restat", None);
@@ -276,19 +216,6 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     // the next *read* correct and says nothing about an answer already in hand.
     // The shell holds one `Frame` for the life of the session, which is the only
     // state in which the defect exists.
-    //
-    // **An attributes change is a fourth way a cached artefact goes stale, and
-    // `reusable` cannot see it.** Writing `.gitattributes` moves neither the
-    // file, nor its length, nor its modification time, nor its index blob, so
-    // every term in the rule reports "unchanged" while the bytes a diff would
-    // compare have changed underneath it. Measured before `Frame::advance`
-    // dropped its caches: a carried span reported **80 rows where a cold frame
-    // computes 8**, and never recovered, because nothing was going to touch that
-    // file again.
-    //
-    // Both caches, because both are wrong in the same way. The span half
-    // arrived with [#101](https://github.com/breferrari/vigia/issues/101); the
-    // diff half predates it and this is the first gate over either.
     let scratch = Scratch::crlf_worktree("normalise-carried", None);
     scratch.write("a.txt", numbered_lines(20));
     scratch.commit_all("initial");
@@ -368,11 +295,6 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     // And the diff cache with it, which is the same hole one artefact over. The
     // diff asked for here was computed and cached before the attributes moved,
     // so a frame that kept it answers with the stale pair.
-    //
-    // **Re-resolved, because the index moved.** Writing `.gitattributes` adds a
-    // changed file that sorts before `a.txt`, so the position taken above now
-    // names the attributes file: asking for it compared `.gitattributes` against
-    // itself, and the control below passed on a pair that was never the subject.
     let at = frame
         .files()
         .iter()
@@ -400,22 +322,6 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
 }
 
 /// A configured external clean driver is **not** executed.
-///
-/// `SPEC.md` §6 takes an in-process diff over a subprocess per tick, and §11.1
-/// records dropping the drivers as the ruling that follows. An invariant without
-/// a failing test is a wish, so this is the test: the driver here rewrites every
-/// line, and running it would be unmistakable.
-///
-/// Both halves matter. `git` is asked the same question and reports **20 added,
-/// 20 removed**, because git does run the driver; this reports one line, the
-/// eol-normalised answer. So the assertion pins a deliberate **divergence from
-/// the oracle**, which is the only place in this suite that does, and the
-/// divergence is the ruling rather than a defect.
-///
-/// `filter.shout.required = true` is set on purpose: git treats a missing
-/// required driver as an error, and this asserts the diff still succeeds rather
-/// than failing the frame over a program a monitor declines to run. The cost of
-/// the ruling is [#69](https://github.com/breferrari/vigia/issues/69).
 #[test]
 fn an_external_clean_driver_is_never_run() {
     let scratch = Scratch::crlf_worktree("normalise-driver", None);
@@ -459,20 +365,6 @@ fn an_external_clean_driver_is_never_run() {
 }
 
 /// `core.safecrlf` does not reach the diff, because it guards writing.
-///
-/// The setting makes `git add` refuse a file whose conversion would not
-/// round-trip, so history cannot be corrupted by it. `git diff` ignores it, and
-/// this fixture proves that rather than assuming it: the same file git **refuses
-/// to add** is one git reports as `Unchanged`.
-///
-/// `vigia` never writes, so inheriting the check meant failing a frame over a
-/// guard on an operation it does not perform. Every later frame failed too,
-/// because the file stays mixed, so one such file anywhere in the tree stopped
-/// the pane working. Found by the audit, after the branch was otherwise green.
-///
-/// The mixed terminator is the point: a lone LF inside an otherwise CRLF file is
-/// exactly what does not round-trip, and a uniformly-CRLF fixture cannot reach
-/// this at all.
 #[test]
 fn safecrlf_does_not_fail_a_frame() {
     let scratch = Scratch::crlf_worktree("normalise-safecrlf", None);
@@ -515,20 +407,6 @@ fn safecrlf_does_not_fail_a_frame() {
 }
 
 /// A path whose attributes name something unhonourable reports that path.
-///
-/// The other half of the error surface: [`Error::FilterSetup`] is one failure
-/// for the whole repository, and this is one file's. `working-tree-encoding`
-/// naming an encoding that does not exist is the reachable way in, and it is a
-/// misconfigured repository rather than a hostile one.
-///
-/// Failing here is right and is not the same call as [`safecrlf_does_not_fail_a_frame`]
-/// above. That guard governs writing, which this never does; this one says the
-/// bytes git would compare cannot be produced at all, and inventing an answer
-/// would be drawing a diff nobody could vouch for.
-///
-/// What it costs is bounded, and that is why it is an error rather than a
-/// refusal to start: `App::draw` turns a failed collect into a footer notice and
-/// keeps the previous screen, so the pane names the file and goes on working.
 #[test]
 fn an_unhonourable_attribute_names_the_file_it_came_from() {
     let scratch = Scratch::crlf_worktree("normalise-bad-encoding", None);
@@ -561,20 +439,6 @@ fn an_unhonourable_attribute_names_the_file_it_came_from() {
 }
 
 /// A filter that cannot be assembled fails the diff rather than falling back.
-///
-/// The one claim in `filter.rs` that nothing else here reaches, and the reason
-/// it is a claim at all: falling back to the raw bytes on failure would put the
-/// pane straight back to drawing whole-file rewrites for every CRLF file, with
-/// nothing anywhere saying why. The defect this branch fixes would return, and
-/// return **invisibly**, which is strictly worse than the version that was
-/// reported, because that one at least looked wrong.
-///
-/// The index is corrupted *after* the walk, so the filter is still unbuilt and
-/// assembling it is the thing that fails. `frame.rs` already gates the other
-/// order, where the walk itself fails first and reports `Error::Status`.
-///
-/// Asserted on the variant rather than on the message, since the message is
-/// `gix`'s and may be reworded by a bump.
 #[test]
 fn a_filter_that_cannot_be_built_fails_the_diff() {
     let scratch = Scratch::crlf_worktree("normalise-broken-index", None);
@@ -605,16 +469,6 @@ fn a_filter_that_cannot_be_built_fails_the_diff() {
 }
 
 /// Normalising costs no extra read and no extra `stat`.
-///
-/// The structural half, and exact rather than a threshold. A CRLF worktree and
-/// its LF twin hold **identical normalised content**, so a frame over one must
-/// compare the same number of bytes and take the same number of probes as a
-/// frame over the other. Two fixtures differing in one term, per `SPEC.md` §7.
-///
-/// Byte equality is the stronger of the two claims and the one that would catch
-/// a regression: it holds only if the filter converted, since the raw CRLF file
-/// is a carriage return per line larger. A filter that read the file a second
-/// time to convert it would move `probes` instead.
 #[test]
 fn normalising_costs_no_extra_read_or_probe() {
     const FILES: usize = 8;

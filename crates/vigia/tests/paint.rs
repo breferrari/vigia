@@ -1,30 +1,4 @@
 //! I4's shape, held over the **paint** rather than over the collect.
-//!
-//! > Streams, never buffers. First paint is independent of total diff size.
-//!
-//! `reads.rs` holds the half about *files*: a screenful reads the files it draws
-//! and not the rest of the worktree. This file holds the half about *lines*: a
-//! drawn row costs the pane it is drawn into, not the length of the line behind
-//! it. They are the same invariant one term apart, and the second half went
-//! unmeasured for two phases for a reason worth stating at the top:
-//!
-//! **no budget gate in this repo had ever painted.** `budgets.rs` timed
-//! `Frame::advance` plus `App::view` and stopped there, so `render` — and with
-//! it every character walked to fill a row — sat outside both tiers. A row
-//! carrying 7x more line than pane therefore passed a 16ms gate that could not
-//! see it, and what found it was a reader scrolling a Japanese README.
-//!
-//! Structural, not wall-clock: [`PaintStats`] is an exact counter, so this is
-//! hardware-independent, takes no slack, and runs in every `cargo test`. The
-//! bound is derived from the run — rows drawn times the pane's width — rather
-//! than written as a constant, because a constant is a bound no input can
-//! approach and an assertion against one is documentation.
-//!
-//! **Why the fixture has to be Japanese.** Over ASCII a character is a column, so
-//! "bounded by the pane" and "unbounded" produce the *same* count and no fixture
-//! made of `generated()` can tell them apart. The gap only opens where a
-//! character is two columns wide or where a line is longer than a screen, and the
-//! wide fixture is both.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -49,18 +23,9 @@ const FILES: usize = 3;
 const LINES: usize = 60;
 
 /// The mark the renderer writes where a row runs past its edge.
-///
-/// Restated rather than imported, for the reason `tests/render.rs` gives: it is
-/// one character of published behaviour, and a test sharing the constant would
-/// agree with the renderer by construction.
 const CONTINUES: char = '›';
 
 /// One screenful, and everything a gate here asks about it.
-///
-/// A struct rather than a tuple because the fourth member is what lets the
-/// grammarless baseline use this helper at all: it needs the highlighter's
-/// counters, and restating the setup to reach them cost that test `painted`'s
-/// own two non-vacuity assertions.
 struct Painted {
     stats: PaintStats,
     highlight: vigia_core::HighlightStats,
@@ -124,12 +89,6 @@ fn longest_line(view: &View) -> usize {
 }
 
 /// The fixture's own arithmetic, checked rather than trusted.
-///
-/// Every number the gates below report is relative to the shape `wide_line`
-/// documents, and that shape is three string literals in a support module: an
-/// editor that reflows one of them, or a `git` config that rewrites the line
-/// endings, would leave every assertion here passing against a fixture that no
-/// longer has the property they are about.
 #[test]
 fn the_wide_fixture_is_the_shape_it_says_it_is() {
     let text = wide_generated(1, "after");
@@ -170,13 +129,6 @@ fn the_wide_fixture_is_the_shape_it_says_it_is() {
 
 /// The prose fixture's own shape, checked rather than trusted, for the reason
 /// the wide one is: every number the #261 gates report is relative to it.
-///
-/// **This one guards a steeper cliff than the wide fixture's.** A wide line that
-/// lost a unit would weaken its gate proportionally. A prose line that loses two
-/// code spans weakens its gate by roughly fifty times, because the cost is
-/// exponential in the span count, and nothing else in the suite would notice: the
-/// content still reads as prose, the file still resolves as Markdown, and every
-/// downstream assertion still passes.
 #[test]
 fn the_prose_fixture_is_the_shape_it_says_it_is() {
     let text = prose_generated(1, "after");
@@ -259,10 +211,6 @@ fn the_paint_narrows_with_the_pane() {
     // hardcoded to any single number satisfies a one-width gate exactly as well
     // as the real thing. What distinguishes them is that the count *moves* with
     // the pane.
-    //
-    // Forty is I6's floor and two hundred is a wide terminal, so the two are far
-    // enough apart that the gutter and sigil, which differ between them by a
-    // column or two, cannot account for the gap.
     let narrow = painted("paint-narrow", WIDE_EXT, 40, 24).stats;
     let wide = painted("paint-wide", WIDE_EXT, 200, 24).stats;
 
@@ -299,10 +247,6 @@ fn a_clipped_wide_row_still_says_it_continues() {
     // the pane's edge and the renderer no longer knows there was more, so a
     // clipped row draws as one that simply ended. That is worse than the cost it
     // was fixing, because a reader cannot see it.
-    //
-    // Swept across widths rather than checked at one, because the case that
-    // breaks is a two-column glyph landing on the last cell, and which width
-    // does that depends on the gutter.
     let buf = painted("paint-mark", WIDE_EXT, 80, 24).buf;
     let area = *buf.area();
 
@@ -311,11 +255,6 @@ fn a_clipped_wide_row_still_says_it_continues() {
     // whenever there is anywhere to scroll. Reading the pane's edge unconditionally
     // would then be reading the bar and reporting every row as unmarked, which is
     // this gate failing for a reason that has nothing to do with what it asserts.
-    //
-    // The last three columns rather than a computed one: which of them holds the
-    // mark depends on whether the bar is drawn, and the bar reserves a gap before
-    // itself so the mark can be two columns in. Recomputing that here would be
-    // restating the renderer's own rule instead of checking its output.
     let mut marked = 0usize;
     for y in 1..area.height.saturating_sub(1) {
         let tail: Vec<String> = (1..=3)
@@ -338,18 +277,6 @@ fn a_clipped_wide_row_still_says_it_continues() {
 fn a_row_of_zero_width_characters_still_costs_the_pane() {
     // The hole a column bound leaves on its own, and the reason `printable`
     // carries a second one in characters.
-    //
-    // `unicode-width` measures a combining mark, a zero-width joiner, a
-    // variation selector and `U+200B` as **zero columns**. A run of them never
-    // advances `column`, so a bound written only in columns is satisfied
-    // forever and the walk runs to the end of the line: the exact unbounded
-    // shape the bound removes, still present for content that is ordinary
-    // rather than hostile. Decomposed Unicode, emoji built from joiners, and
-    // anything pasted out of a web page all reach it.
-    //
-    // Built by hand rather than from a fixture, for the reason the tab row
-    // below gives: `wide_line` has none of these, and a fixture that had them
-    // would be testing the fixture.
     let area = Rect::new(0, 0, 80, 6);
     let zero_width = "\u{200b}\u{200d}\u{fe0f}\u{0301}".repeat(500);
     let chars = zero_width.chars().count();
@@ -415,9 +342,6 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
     // so the counter the bound is written in terms of is the same counter tab
     // expansion reads. Getting that wrong misaligns indentation on every row of
     // a tab-indented file, and it is invisible until one is drawn.
-    //
-    // Built by hand rather than from a fixture: `wide_line` has no tabs, and a
-    // fixture that had them would be testing the fixture.
     let area = Rect::new(0, 0, 40, 6);
     let view = View {
         rows: vec![Row::Line {
@@ -463,21 +387,6 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
 #[test]
 fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
     // The premise behind coalescing input, held where the cost actually is.
-    //
-    // A trackpad reports one flick as a stream of scroll events. The shell drains
-    // them and paints once (`drain` in `lib.rs`), and this is why that is worth
-    // doing: moving the viewport is free, and *drawing* is what costs, so one
-    // gesture is one screenful of work however many events carried it. Painting
-    // per event walks every position in between, and over a large diff most of
-    // those positions enter a hunk nothing has parsed.
-    //
-    // Structural rather than timed: the comparison is lines highlighted and
-    // characters painted, so it holds on any machine.
-    // Many short files rather than the wide fixture's usual few tall ones, and
-    // that is the term that decides the whole comparison. A forward-only parse
-    // is *cumulative within a hunk*: drawing row 90 of one hunk needs the ninety
-    // above it whether that took one frame or thirty. The saving is entirely in
-    // the hunks a batched gesture never enters, so the travel has to cross them.
     const BURST_FILES: usize = 24;
     const BURST_LINES: usize = 6;
     let scratch = Scratch::wide_lines_as("paint-burst", BURST_FILES, BURST_LINES, WIDE_EXT);

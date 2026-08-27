@@ -1,74 +1,4 @@
 //! The `ratatui` + `crossterm` shell over [`vigia_core`].
-//!
-//! `SPEC.md` §6 asks this half of the workspace to be thin: the core produces
-//! frames, the shell renders them, and the TUI stays swappable because nothing
-//! it knows is load bearing. So there is no diff logic here, no caching and no
-//! filtering. What is here is a terminal, a key map, a scroll position, and one
-//! pure function from a screenful of rows to cells.
-//!
-//! **Coalescing is the one word in that list that needs two entries**, because
-//! there are two of them with different subjects and they belong in different
-//! crates. `vigia_core` coalesces **events**: which filesystem writes count as
-//! one change, which is I1's, and the policy stays there because that is where
-//! it is testable. `run` below coalesces **paints**: how many frames one burst
-//! of wakes is worth, which is I9's, and it can only live here because a paint
-//! is the shell's and because one of the four wake sources is the terminal. It
-//! decides nothing about which events are real, which is what the sentence
-//! above is protecting.
-//!
-//! It is a library with a five-line binary on top rather than a binary alone.
-//! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
-//! proof for I5 and I6, and a test cannot import a `main.rs`.
-//!
-//! ## Why four threads and two repositories
-//!
-//! I1 says an idle monitor does no work, and the core delivers that by blocking:
-//! [`vigia_core::Watcher::next_tick`] waits on an untimed `recv`. `crossterm`
-//! reads input the same way. **The first two** blocking sources need two threads
-//! and one channel, or a poll loop, and a poll loop is the timer I1 forbids.
-//!
-//! The third is [`vigia_core::Highlighter::warm_ahead`], and **it is a sender on
-//! that channel too** since [#129](https://github.com/breferrari/vigia/issues/129).
-//! It compiles grammars ahead of the reader and ends by itself, and it now says
-//! so when it does, because the frame path draws a hunk plain while its grammar
-//! is uncompiled and a loop blocked on `recv` has no other reason to look again.
-//!
-//! **That does not make it a timer and I1 does not reach it.** I1's words are
-//! *no filesystem event and no git index change means no work*, and its budget
-//! is *0 wakeups while idle*: a warm exists only because something was written
-//! or because a diff was already on screen, it is bounded by the number of
-//! grammars a session meets rather than by time, and on a tree nobody touches
-//! nothing is spawned and nothing is ever sent. The licence sentence about
-//! clocks is not being stretched to cover it, because it is not one.
-//!
-//! What `warm_ahead` still does **not** report is which grammars it managed,
-//! and that has not changed: there is no such thing as a warm grammar for the
-//! frame path to believe in. What the frame path acts on is the opposite claim,
-//! that a grammar has never been parsed under at all, which is exact.
-//! `Highlighter::attempted` carries the distinction in full.
-//!
-//! The fourth is [`signal`]'s, and it is a **third wake source on the same
-//! channel** rather than a new mechanism: an externally delivered signal ends
-//! the loop, and the ordinary `Drop` restores the terminal (I8). It blocks the
-//! way the first two do, on a self-pipe `signal-hook` drains, so it costs an idle
-//! monitor nothing either. **On Windows it does not exist**: console control
-//! events arrive on a thread the OS makes for the handler, and only while the
-//! process is leaving, so there is nothing of ours to spawn.
-//!
-//! The watch thread opens its own [`vigia_core::Worktree`]. That is not
-//! duplication for its own sake: a [`vigia_core::Watcher`] borrows the
-//! `gix::Repository` it filters gitignore rules through, and `gix::Repository` is
-//! `Send` but not `Sync`, so a borrow of one cannot cross a thread boundary. The
-//! second open costs one repository discovery, paid after first paint, off the
-//! path I7 measures.
-//!
-//! All of them are detached rather than scoped. Quitting means main returning,
-//! and none of them can be woken to be joined: the warmer ends by itself, and
-//! for the rest, `crossterm` has no portable
-//! interruptible read, the one handle that unblocks the watcher makes its
-//! `next_tick` return `None` permanently, which is a shutdown and not a nudge,
-//! and there is no portable way to interrupt a blocked read of a self-pipe
-//! either.
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -76,11 +6,6 @@
 mod app;
 mod colour;
 /// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
-///
-/// `pub` for the reason [`theme`] gives in its own declaration below: the
-/// functions that resolve a file take a lookup so a gate can place a home
-/// directory without touching the process environment, and a gate can only call
-/// them if it can name them.
 pub mod config;
 mod glyphs;
 /// Public where its seven siblings are private, and for one reason: `soak.rs` is
@@ -133,10 +58,6 @@ use ratatui::layout::Rect;
 use vigia_core::{Highlighter, History, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
-///
-/// Deliberately not the type a *frame* failure uses. A repository that cannot be
-/// opened is a reason to exit with a message; a file that cannot be read during
-/// one frame is not, and goes to the footer instead. See [`App::warn`].
 pub type Failure = Box<dyn std::error::Error>;
 
 /// Why the shell woke up.
@@ -144,97 +65,24 @@ enum Wake {
     /// The terminal reported something.
     Input(ratatui::crossterm::event::Event),
     /// The working tree changed, coalesced into one signal by the core.
-    ///
-    /// Carries every file the burst wrote, with the one that landed last at the
-    /// end. The tail is what follow mode moves to (I5) and the whole list is
-    /// what the glance history samples (I10). Empty is ordinary: a staging write
-    /// changes every diff's left-hand side and is nowhere to scroll to.
     Tick(Vec<String>),
     /// The watch stopped, so the shell is a still picture.
-    ///
-    /// Reported rather than fatal. A diff nobody is watching for changes is
-    /// still a diff, and the reader should be told which of the two they have.
     WatchLost(String),
     /// Terminal input stopped, so nothing can reach the shell any more.
-    ///
-    /// Fatal, and it is the one wake-up that is. In raw mode every way out from
-    /// this keyboard is a key event, because the terminal does not turn Ctrl-C
-    /// into a signal. So a shell that kept drawing after this would hold the
-    /// alternate screen with nothing the reader in front of it could do about
-    /// it, and leaving is the smaller failure.
-    ///
-    /// **[`Signalled`](Wake::Signalled) changes the consequence, not the
-    /// ruling.** Without it the only remaining exit is a kill, which runs
-    /// neither the guard nor the panic hook and hands back a terminal in raw
-    /// mode. A kill is caught and restores like any other exit, so the cost of
-    /// staying is not a wrecked terminal. It is still a pane that
-    /// cannot be closed from the pane, which is reason enough.
     InputLost,
     /// Something outside this process asked it to stop.
-    ///
-    /// The quit key's arm, reached without a key. It carries nothing because
-    /// there is nothing left to decide: whichever signal it was, the answer is
-    /// to leave, and the terminal goes back the way it does on every other exit,
-    /// through the `Drop` on the way out. [`signal`] is where the reasoning
-    /// lives, above all why the handler must restore nothing itself.
     Signalled,
     /// A warm finished, so a hunk that drew plain can draw in colour.
-    ///
-    /// **It carries nothing, and the arm below does nothing**, because the paint
-    /// after the batch *is* the whole of the response: the highlighter already
-    /// holds the compiled patterns, and what was missing was a reason for a loop
-    /// blocked on `recv` to look again.
-    ///
-    /// **A fourth sender on the channel the other three share**, which is the
-    /// shape [`signal`] already established as a third rather than a new
-    /// mechanism. I1 does not reach it, and the row's own words are why: *no
-    /// filesystem event and no git index change means no work*, budget **0
-    /// wakeups while idle**. A warm happens only because something was written
-    /// or because the reader is looking at a diff that already existed, it is
-    /// bounded by the number of grammars a session meets rather than by time,
-    /// and with nothing to warm nothing is ever spawned and nothing is ever
-    /// sent. It is not a clock and the licence sentence about clocks does not
-    /// have to be stretched to cover it.
     Warmed,
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
 /// handed and whether the tree has changed since.
-///
-/// **The rule lives here rather than inside `Shell::request_warm` for the reason
-/// `Held::ends` is a free function: that loop cannot be driven by a test, and a
-/// rule written inline is a rule with no gate.**
-///
-/// Three answers. An empty demand is nothing to do. A demand **identical** to
-/// the one the last warm was handed is nothing to do either, because that warm
-/// has already had its turn at exactly these paths and finished: asking again
-/// spawns a thread that will do the same nothing and send a wake for it, which
-/// on a tree nobody is touching is I1's *0 wakeups while idle* breached. And
-/// `written` overrides both, because a warm that could not be served a moment
-/// ago may be servable now.
-///
-/// **It cannot stall a demand that is making progress**, and that is why the
-/// comparison is on the whole list rather than on a flag. A warm that compiles
-/// two of three grammars leaves a *shorter* demand, which is a different list,
-/// which is offered immediately. Only a demand that moved not at all is held
-/// back.
-///
-/// **`written` is a flag rather than a clearing of `served`, and that is a round
-/// two correction.** Clearing on the tick itself wiped the record of a warm that
-/// was still in flight, so when that warm finished there was nothing left to
-/// compare its result against and the same unservable demand was spawned for
-/// again. During active editing a tick lands inside a warm often, which is the
-/// case this exists for. A flag cannot lose that record: it is set by the tick,
-/// read here, and cleared by the spawn.
 pub fn worth_warming(wanted: &[String], served: &[String], written: bool) -> bool {
     !wanted.is_empty() && (written || wanted != served)
 }
 
 /// The callback a warm ends with, wired to this shell's wake channel.
-///
-/// One line, and it is here rather than written out at its three call sites so
-/// that what a warm does when it finishes is one decision. Failure is dropped:
-/// a closed channel is the shell on its way out, and there is nothing to tell.
 fn warmed(tx: &Sender<Wake>) -> vigia_core::Warmed {
     let tx = tx.clone();
     Box::new(move || {
@@ -243,32 +91,9 @@ fn warmed(tx: &Sender<Wake>) -> vigia_core::Warmed {
 }
 
 /// The version this binary reports, which is the package's.
-///
-/// Read from the manifest rather than written down, so the string a user quotes
-/// in a report cannot drift from the tag the release was cut at. `SPEC.md` §9
-/// makes the tag the one irreversible event in the release, and a version
-/// constant maintained by hand is the obvious way for the binary to disagree
-/// with it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// What `vigia`'s argument list is asking for.
-///
-/// The CLI is one optional positional path and one flag (`SPEC.md` §11.1), so
-/// this is the whole surface. It lives here rather than in `main.rs` because §7
-/// makes the test suite the proof and a test cannot import a `main.rs`, which is
-/// the split that file's own module docblock describes. What stays over there is
-/// the dispatch: which stream each answer is written to, and the exit code, both
-/// of which `tests/cli.rs` reaches by running the built binary.
-///
-/// **Deliberately not `#[non_exhaustive]`, and it was tried.** The argument for
-/// it is that this crate is about to be published permanently and §11.1 leaves
-/// `--help` open, so answering it adds a variant and breaks every downstream
-/// `match`. Two things make it the wrong trade here. `main.rs` is a separate
-/// crate from this library, so the attribute reaches it too and forces a `_`
-/// arm on the one match that must never silently ignore a new variant, which is
-/// exactly the exhaustiveness this enum exists to get. And at `0.x` the
-/// protection is worth nothing anyway: cargo already treats every `0.x` minor
-/// bump as breaking, so adding a variant costs `0.2.0` either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Request {
     /// Watch the argument as a path.
@@ -276,39 +101,12 @@ pub enum Request {
     /// Print the version and exit successfully.
     Version,
     /// An argument beginning with `-` that is not a version query.
-    ///
-    /// Refused with one line naming the surface rather than being taken as a
-    /// path, so `vigia --colour=never` is told what the options are instead of
-    /// being told `--colour=never` is not a repository.
     NoSuchOption,
     /// More than one argument, when the surface is exactly one.
-    ///
-    /// **Refused rather than ignored.** Ungated, `vigia . --colour=never`
-    /// watches `.` and drops the rest on the floor, so a reader who typed a flag
-    /// alongside a path gets no signal that the flag does not exist. That is the
-    /// same defect
-    /// [`NoSuchOption`](Request::NoSuchOption) exists to prevent, reached from a
-    /// position the old check never looked at, and it is worse there: the tool
-    /// appears to accept the flag, because it starts and draws.
     TooManyArguments,
 }
 
 /// Classify the arguments `vigia` was given.
-///
-/// A surface of at most one, so anything longer is [`TooManyArguments`](Request::TooManyArguments)
-/// rather than a list to interpret.
-///
-/// Takes the whole list rather than one argument, because **arity is part of the
-/// surface**. A classifier seeing only `args_os().nth(1)` lets
-/// `vigia . --colour=never` watch `.` and discard the rest silently: the flag
-/// that does not exist produces a running program instead of the one-line
-/// refusal that a flag on its own produces. A function
-/// handed one argument cannot notice a second, which is why the fix is the
-/// signature rather than an extra check at the call site.
-///
-/// An empty list is [`Watch`](Request::Watch), and `main` supplies the default
-/// path. That keeps the "optional positional" of §11.1 in one place instead of
-/// splitting the default across both files.
 pub fn request_for(args: &[OsString]) -> Request {
     match args {
         [] => Request::Watch,
@@ -318,33 +116,6 @@ pub fn request_for(args: &[OsString]) -> Request {
 }
 
 /// Classify the one argument `vigia` takes.
-///
-/// **B6 forbids flags that *configure*, and a version query is not one**, which
-/// is the amendment `SPEC.md` §11 records: this prints a line and exits before a
-/// terminal is taken, so there is no frame it can change and no state it can
-/// leave. Both conventional spellings are accepted, because a user who tries one
-/// tries the other, and refusing exactly one of them is a worse surface than
-/// refusing both.
-///
-/// Everything else beginning with `-` is still
-/// [`NoSuchOption`](Request::NoSuchOption). That includes `--help`, which §11.1
-/// leaves open on purpose: help text describes a surface and has to be kept true
-/// as the surface grows, where a version string comes from the manifest and
-/// cannot drift.
-///
-/// **Compared against the raw [`OsStr`], and the reason is cost rather than
-/// correctness.** The obvious claim to make here is that `to_string_lossy` (what
-/// the old refusal used) would misclassify a path that is not valid Unicode, and
-/// **that claim is false**: lossy decoding replaces what it cannot read with
-/// `U+FFFD`, which is not `-` and is not `--version`, so it reaches the same
-/// answer this does on every input. Mutation-tested rather than reasoned, and
-/// the mutation *survived* the whole suite, which is how the overclaim was
-/// caught.
-///
-/// What the raw comparison buys is that classifying an argument stops being
-/// proportional to its length. `to_string_lossy` validates the entire string to
-/// decide whether it can borrow, where `as_encoded_bytes().first()` reads one
-/// byte, and this runs before anything else in the process on the I7 path.
 fn request_for_one(arg: &OsStr) -> Request {
     if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
         return Request::Version;
@@ -360,26 +131,6 @@ fn request_for_one(arg: &OsStr) -> Request {
 }
 
 /// Tell a frame what the shell's view defaults ask it to walk.
-///
-/// **One line, and it is a seam rather than a convenience.** `App` holds what was
-/// *asked for* and `Frame` holds what is *walked*, which is the same split
-/// `Chrome::rail` and `Body::rail` draw one region over, and everything that sets
-/// the first has to set the second. Written twice they drifted immediately: the
-/// keypress was wired and the file was not, so `staged = on` set a flag nothing
-/// acted on.
-///
-/// **This is the startup half.** `Action::ToggleStaged` sets both in one arm of
-/// `App::apply`, where the frame is already in hand and the pairing is one
-/// statement; naming it there too would mean handing `apply` a borrow of the `App`
-/// it is already mutating. Two call sites, one rule, and the rule is stated here
-/// because this is the one a reader will not think to look for.
-///
-/// **Takes the [`Config`] rather than an [`App`]**, which is the whole of what it
-/// needs: building an `App` to read one bool and then building the real one three
-/// lines later said the seam was about the shell when it is about the file.
-///
-/// `pub` and `doc(hidden)` for `tests/config.rs`, which drives the startup path
-/// without a terminal.
 #[doc(hidden)]
 pub fn arm_frame(frame: &mut vigia_core::Frame, config: crate::Config) {
     frame.show_staged(config.staged);
@@ -395,17 +146,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // still read. `SPEC.md` §11.1 states it for a path that is not a repository,
     // and an error painted inside a TUI that then hands the terminal back is an
     // error nobody sees.
-    //
-    // Resolved to the depth here as well, so the palette the renderer holds is
-    // already in colours this terminal can show and the frame path never
-    // quantises. I9 therefore sees none of it.
-    // **The one question the shell asks its terminal** (`SPEC.md` §11.2 B18,
-    // [#325](https://github.com/breferrari/vigia/issues/325)): the background,
-    // OSC 11, before the event reader exists, because crossterm's parser
-    // destroys any reply it does not recognise once the takeover is reading.
-    // At most 150ms, and only where nothing has already chosen: the variable
-    // and the theme file still win inside `from_env`, and a terminal that
-    // stays silent costs the wait once and keeps the fallback.
     let detected = terminal::background(std::time::Duration::from_millis(150));
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok(), detected)?;
 
@@ -426,9 +166,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // inside a TUI that then hands the terminal back is an error nobody sees.
     // `SPEC.md` §11.2 B6 as amended by
     // [#306](https://github.com/breferrari/vigia/issues/306).
-    //
-    // Read once, before the screen is taken, so the frame path never asks the
-    // filesystem what the reader prefers. Absent is not an error; unreadable is.
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
     // **The view defaults reach the frame before its first walk, not just the
@@ -439,14 +176,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // pane is the one they were trying to change. Same defect
     // `Action::ToggleStaged` had against the keypress, on the path that has no
     // keypress to trigger it.
-    //
-    // **Which is why the first walk sits below the config read.** Run three
-    // lines after `Worktree::discover`, before this file has been looked at, no
-    // amount of telling the frame afterwards reaches it without walking twice.
-    // The rule that puts it early is untouched and is why it is
-    // still above `Session::enter`: a repository that fails on its first walk
-    // reports on a terminal the reader can still see, and so does a config file
-    // that does not parse. The two now happen in the order they are needed in.
     arm_frame(&mut frame, config);
     frame.advance()?;
 
@@ -464,14 +193,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // versions of this line got that wrong in two different ways: inside the
     // struct literal it also sat after `Highlighter::new`'s 318µs grammar load,
     // because fields evaluate in written order.
-    //
-    // A signal that arrives before the loop exists is not lost. It waits in the
-    // channel, and the first `recv` below acts on it, by which point there is a
-    // `Session` to drop and a terminal to give back.
-    //
-    // Reported rather than fatal. A monitor that refused to open because it could
-    // not arm a safety net would be a worse answer than one that opens and says
-    // so, so the outcome is carried to where there is an `App` to warn through.
     let armed = signal::forward(tx.clone());
 
     let mut shell = Shell {
@@ -481,24 +202,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
         // that draws something.
-        //
-        // **Loading is not compiling, and only the small half is this line.**
-        // `syntect` hands each pattern to `fancy_regex` on first use, which is
-        // 74-362ms per grammar, and that is why the first frame below draws
-        // plain. The earlier version of this comment cited I7 "measuring 20ms",
-        // which was the core's frame path from an example that builds no
-        // highlighter at all; the shipped first paint measured 105.03ms.
-        //
-        // Not "before the screen is taken": struct fields evaluate in written
-        // order and `Session::enter` is written above, so the alternate screen
-        // is already ours by the time this runs. The placement is right and
-        // that reason is
-        // wrong.
-        //
-        // That same evaluation order is why the signal handler is armed *above*
-        // this literal rather than as a field beside `session`: a field here
-        // would run after this load, and the window it exists to cover opens
-        // before the takeover's first step.
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws
         // cold until something writes to it. That is the honest first frame: a
@@ -526,17 +229,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // The arming from above, reported now that there is somewhere to report it. A
     // signal that arrived before this point is not lost: it waits in the channel
     // and the first `recv` below handles it.
-    //
-    // **A notice rather than the durable header mode `WatchLost` also sets**, and
-    // the two are not the same shape. A lost watch changes what every later frame
-    // *is*, so a reader looking at a stale diff has to keep being told. An
-    // unarmed handler changes nothing on screen and matters only at the moment
-    // somebody kills the process, so being told once, on the first frame, is
-    // being told. Stated here because the transience is a choice.
-    //
-    // The wording says *stop* rather than *signal*, because I8 is one guarantee
-    // over two mechanisms and half the readers of this line are on a platform
-    // with no signals at all.
     if let Err(e) = armed {
         shell.app.warn(format!(
             "not catching an external stop, so a kill may not restore the terminal: {e}"
@@ -546,32 +238,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // **For a screen with rows on it, so a clean worktree spawns nothing.**
     // Starting a monitor on a tree nobody has touched is an ordinary way to
     // start one, and there is no grammar to compile for an empty state.
-    //
-    // `take` before `map`, not after: `warm_ahead` considers at most
-    // `WARM_FILES` paths, so cloning the rest would be ten thousand `String`
-    // allocations at the scale
-    // [#48](https://github.com/breferrari/vigia/issues/48) contemplates, every
-    // one of them dropped unread.
-    //
-    // **The handle is kept now rather than dropped**, and it is `Shell::warming`
-    // for the reason that field exists: a warm in flight is what stops the next
-    // one being spawned. Dropped, the `request_warm` below saw no warm running
-    // and started a second thread over the same paths the moment the opening
-    // frames raised their demand. Nothing broke, because the compiled patterns
-    // land in one shared `SyntaxSet` either way, but it is two threads and two
-    // wakes for one grammar and the bound that field documents was not being
-    // held. Detached still: it is never joined, only asked whether it is done.
-    //
-    // **Above the draw, so it overlaps the frame that compiles.** Below it,
-    // the warm starts only once paint two has finished paying the 74-362ms
-    // for what is on screen, which turns `max(paint, warm)` into their sum
-    // and widens the window in which a first scroll below the fold meets a
-    // cold grammar. That window is the whole reason this thread exists.
-    //
-    // **It sends a wake now, where before it reported to nobody.** A hunk whose
-    // grammar nothing has compiled draws plain (`Highlighter::wanted`), so the
-    // frame that finishes this warm is the frame that has colour to add, and a
-    // loop blocked on `recv` has no other reason to look.
     if !frame.files().is_empty() {
         shell.warming = Some(
             shell.highlighter.warm_ahead(
@@ -592,11 +258,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // future edit can separate. `App::paint` records why that matters: deleting
     // the second statement left the whole suite green while the product sat on a
     // permanently uncoloured screen.
-    //
-    // The alternate screen is already taken by the line above, so before this
-    // the reader watched the whole 74-362ms grammar compile happen on a blank
-    // one. Measured over the hundred-file fixture: 105.03ms to first paint
-    // before, 13.26ms now.
     shell.draw(&mut frame, &worktree, Instant::now())?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore
@@ -611,11 +272,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // nobody has written to yet.** A pane is opened beside an agent *before* the
     // agent writes, so the warm above very often has nothing to warm, and then
     // the agent's first write arrives under a grammar nothing has compiled.
-    //
-    // Below the draw rather than above it, unlike the warm over the changed set:
-    // that one is racing the frame that draws those very files and has to
-    // overlap it, while this one reads `.git/index` and would put that read on
-    // the path I7 measures. Nothing on screen is waiting for it.
     shell
         .highlighter
         .warm_repository(worktree.workdir().to_path_buf(), Some(warmed(&tx)));
@@ -642,13 +298,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // is I1's *0 wakeups while idle* unchanged and unmeasurable-away; the
     // invariant is that nothing can arm a clock without going through that
     // function. `SPEC.md` §11.1 carries all three rulings.
-    //
-    // A press on a bar's end arms the repeat and it dies with the release. A
-    // scroll arms the direction mark and it dies `SCROLL_LINGER` later. And a
-    // write arms the ageing roll, which dies when the history window empties
-    // `HISTORY_WINDOW` after the last one. **This comment said "the only clock"
-    // through two of those three**, which is what a header describing a
-    // mechanism costs when the mechanism grows underneath it.
     'awake: loop {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
@@ -682,10 +331,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // [`Shell::diff_rows_for`] was extracted for, and the identical shape
             // to `Action::Bottom` being classified wrongly: a call site that
             // decides a height instead of asking for one.
-            //
-            // No test drives this loop, so what protects it is that there is
-            // one function every site calls rather than three answers that can
-            // drift apart.
             let height = shell.diff_rows_for(step, frame.files())?;
             match shell.app.apply(step, &mut frame, height) {
                 Ok(true) => {}
@@ -716,18 +361,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // this the most common frame on a quiet tree: a p99 that could not
             // see it would be reporting on the frames a reader is *not* looking
             // at.
-            //
-            // **And recording them cannot flatter the number I9 rests on**,
-            // which is the obvious objection and it does not hold. A burst is
-            // followed by up to `HISTORY_SAMPLES` cheap ageing wakes, and
-            // `FRAME_SAMPLES` is 128, so on a quiet tree they do come to own most
-            // of the ring. But I9 claims a *p99*, and p99 of 128 samples is the
-            // worst or second worst of them: one expensive frame among a hundred
-            // and twenty cheap ones still sets it. What moves is the p50, and it
-            // moves to the truth, because on a tree that nothing is writing to
-            // these genuinely are the frames. Dropping them to keep the median
-            // describing something else would be curating the sample to protect
-            // the claim, which is the failure `SPEC.md` §7 is about.
             shell.app.record_frame(began.elapsed());
             continue;
         };
@@ -780,20 +413,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // request nothing, and a motion is exactly such an event, so
                     // resolving after it would leave the mark answering the
                     // pointer's last *click* rather than its position.
-                    //
-                    // **The position is load-bearing against the drag block too,
-                    // and that is the less obvious half.** A `Drag` that
-                    // `drag_action` accepts `continue`s from inside that block,
-                    // so moving this below it would skip resolution on every
-                    // applied drag and leave the mark lit for the whole gesture,
-                    // which is exactly what `hover_after`'s drag arm exists to
-                    // prevent. Order against `Held::ends` above is free; order
-                    // against the block below is not.
-                    //
-                    // The whole rule is in `hover_after` rather than here, for
-                    // the reason `Held::ends` is a free function: this loop
-                    // cannot be driven by a test, and a rule written inline is a
-                    // rule with no gate.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
                     // **A drag under way answers before the column is consulted,
                     // and that ordering is the fix.** `action_for` asks what is
@@ -819,11 +438,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // `tests/scroll.rs::dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end`
                             // pins for the press, one gesture over from where the
                             // reader spends the rest of the drag.
-                            //
-                            // Found on this branch and not caused by it
-                            // ([#297](https://github.com/breferrari/vigia/issues/297)'s
-                            // audit): the pinned arm inherits the same parameter,
-                            // so fixing it here fixes both.
                             let height = shell.diff_rows_for(drag, frame.files())?;
                             match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
@@ -873,11 +487,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // a height none of them but `Page` reads would be sixty-four
                     // syscalls and several hundred discarded
                     // allocations inside one batch.
-                    //
-                    // The branch it carries is whatever the last draw settled on,
-                    // which is right rather than merely cheap: it feeds
-                    // `diff_height` alone, and neither the branch nor the mode can
-                    // change how many rows the footer takes. See `Footer::plan`.
                     let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
@@ -896,11 +505,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `Shell::served`: without this, one unservable demand would
                     // keep its file plain for the rest of the session however
                     // many times it was rewritten.
-                    //
-                    // A flag rather than `served.clear()`: a tick lands inside
-                    // a running warm often during active editing, and clearing
-                    // there destroys the record of what that warm was handed, so
-                    // its result has nothing to be compared against.
                     shell.written = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only
@@ -916,12 +520,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // *how much*. Weighing a write by the bytes it moved is what
                     // gives both glance elements the shape `SPEC.md` §5.1 names
                     // them for.
-                    //
-                    // One `symlink_metadata` per changed path per tick, taken
-                    // where the budget gates can see it rather than inside the
-                    // store. It does not follow links, for `fingerprint`'s
-                    // reason one crate over: the thing weighed has to be the
-                    // thing that was written.
                     shell
                         .history
                         .record_sized(sized(worktree.workdir(), &paths), began);
@@ -983,10 +581,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // costs. The consequence is that the p99 drawn above is always the
         // *previous* frames' and never this one's, which is the only thing a
         // frame can honestly say about itself.
-        //
-        // Not reached on the quit path, which breaks out above without drawing:
-        // a frame nobody saw is not a frame, and recording it would put a
-        // half-frame into the window a later session never uses anyway.
         shell.app.record_frame(began.elapsed());
     }
 
@@ -994,29 +588,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 }
 
 /// What each path in one wake's burst now holds, for [`vigia_core::History::record_sized`].
-///
-/// **Every path, and the cap that was here twice is the finding.** A burst
-/// reports up to `HISTORY_PATHS` paths on one coalesced wake, and sizing all of
-/// them measures **2.60ms of thread CPU** in isolation against I9's 16ms. That
-/// number is real and it is not the cost, which is the whole lesson: measured in
-/// the frame it actually sits in, interleaved over thirty rounds of a hundred-file
-/// bulk rewrite, the frame costs **18.43ms sizing nothing, 17.39ms sizing
-/// sixty-four paths and 17.93ms sizing all 256**. The unsized run is the slowest
-/// of the three. `Frame::advance` walks status on the same wake and stats every
-/// one of these paths to decide they changed at all, so by the time this runs the
-/// metadata is warm and the marginal syscall costs nothing measurable.
-///
-/// **A component measured alone is not a budget.** `CLAUDE.md` asks for the
-/// headroom to be quoted beside any cost that refuses something, and this was
-/// refused twice on a number taken outside the frame: once on a wall figure
-/// inflated by a loaded machine, and once on a CPU figure that was real and
-/// answered a question nobody was asking. Both times the thing the cap protected
-/// went unmeasured.
-///
-/// The duplicated work is still real and still worth removing: the walk already
-/// has the size and `gix` does not surface it, which is
-/// [#233](https://github.com/breferrari/vigia/issues/233). That is an efficiency
-/// row, not a reason to draw a worse graph.
 pub fn sized<'p>(
     workdir: &'p Path,
     paths: &'p [String],
@@ -1027,19 +598,6 @@ pub fn sized<'p>(
 }
 
 /// What a written path now holds on disk, for [`vigia_core::History::record_sized`].
-///
-/// **Private, because [`sized`] is what a caller wants.** The budget gates price
-/// this syscall inside the frame they measure, and they reach it through `sized`
-/// so a gate cannot end up sampling a shape the product does not have: what a
-/// gate leaves out gets *cheaper*, so that drift would never fail.
-///
-/// **Does not follow links**, for `Frame`'s fingerprint rule one crate over: the
-/// thing weighed has to be the thing that was written, and a link's own bytes are
-/// what a write to it changes.
-///
-/// `None` for a path that cannot be read, which is a file that vanished between
-/// the watch naming it and this call. The store weighs that at its floor rather
-/// than at nothing, because it was still written.
 fn weigh(workdir: &Path, path: &str) -> Option<u64> {
     match std::fs::symlink_metadata(workdir.join(path)) {
         // **A directory is not a write with a size**, and on the platforms where
@@ -1067,47 +625,12 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 }
 
 /// How long the direction arrows stay lit after the last scroll.
-///
-/// **Long enough to survive the gap between two key repeats, short enough that a
-/// reader who stopped does not see a claim about the past.** A terminal's own key
-/// repeat runs near 30ms once it gets going and its first gap is far longer, so
-/// this covers the steady stream and expires on the pause. It is the only number
-/// here that is a feel judgement rather than a measurement, and it is stated as
-/// one.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
 /// Wakes taken in one go, so one gesture costs one paint.
-///
-/// **Sixty-four**, and the number matters in one direction only. A trackpad
-/// reports a flick as a stream of scroll events rather than as one, and a full
-/// redraw per event renders each notch in turn and falls behind the thumb, which
-/// is what *"if it gets too fast, it struggles"*
-/// describes. Draining removes that whole class, because the shell moves the
-/// viewport by the flick and draws where it ended up.
-///
-/// The cap is not tuning. It is the guard against an event source faster than the
-/// shell: without one, a stuck key or a build touching thousands of files could
-/// keep the queue non-empty forever and the screen would never be painted again.
-/// Sixty-four notches is far more than any one gesture and still a bounded amount
-/// of work between two frames.
 const DRAIN_CAP: usize = 64;
 
 /// Take the wake that woke the loop, plus everything already queued behind it.
-///
-/// A pure function over the channel rather than a loop inline in [`run`], for the
-/// reason [`drain`] is one: `run` owns a terminal and cannot be driven from a
-/// test, so a rule left inside it is a rule nothing can gate.
-///
-/// **Nothing is dropped.** Coalescing here is about the *paint*, not about the
-/// events: every wake is handed back and handled in arrival order, so a tick still
-/// records its paths for I10, a scroll still moves the viewport by its own rows,
-/// and `Quit` still arrives. A version that kept only the last wake would be
-/// shorter and would lose the history the glance strip is drawn from.
-///
-/// `batch` is passed in rather than returned so the caller can keep one buffer for
-/// the life of the process. `try_recv` fails on empty and on a hung-up sender
-/// alike, and both mean the same thing here: there is nothing more to take right
-/// now. A disconnect is then reported by the `recv` that follows.
 fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
     batch.clear();
     batch.push(first);
@@ -1124,29 +647,12 @@ struct Shell {
     session: Session,
     app: App,
     /// The syntax classes of whatever is on screen, kept between frames.
-    ///
-    /// Held here rather than in [`App`] so that type stays cheap to clone; see
-    /// [`App::view`]. Bounded by the viewport rather than by the diff, so a day
-    /// of scrolling leaves it the size of one screen.
     highlighter: Highlighter,
     /// What changed recently: the source for the sparkline, the recency gradient
     /// and the pulse.
-    ///
-    /// The one thing the shell keeps that deliberately outlives the diff. A file
-    /// that settles leaves [`vigia_core::Frame`]'s cache and must not leave this,
-    /// or the strip would empty exactly when a reader glances over to ask what
-    /// was busy. I10 bounds it instead, by a window and a path cap rather than by
-    /// the session.
     history: History,
     theme: Theme,
     /// Which glyphs the sparkline may draw from, resolved once at startup.
-    ///
-    /// Held beside [`Shell::theme`] because it is the same kind of value: a
-    /// property of the terminal, decided before the screen was taken and
-    /// unchanged for the session. It reaches the renderer the way `theme` does,
-    /// as its own [`render`] parameter, rather than riding [`Chrome`]: nothing
-    /// in the layout reads it, so a per-frame field meant two of its three
-    /// callers stamping something the function they fed never looked at.
     glyphs: Glyphs,
     /// What the header calls the working tree.
     name: String,
@@ -1154,170 +660,34 @@ struct Shell {
     /// targets.
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
-    ///
-    /// Refreshed per draw rather than held for the session, because an agent in
-    /// the other pane can check out a branch and a name cached at startup would
-    /// then be a confident lie.
-    ///
-    /// **Every frame since [#158](https://github.com/breferrari/vigia/issues/158)**,
-    /// where it was the empty state's alone. `None` now means a detached HEAD
-    /// rather than a populated frame, which is the only case that draws no
-    /// branch anywhere.
     branch: Option<String>,
     /// How many changes the run this pane is **not** drawing holds.
-    ///
-    /// Zero on every frame but the one that draws the empty state, which is what
-    /// keeps I4 true for the walk behind it: a count costs a status walk, and it
-    /// is spent only where it is drawn. Same rule [`Shell::branch`] follows one
-    /// field up.
-    ///
-    /// **What it buys is the difference between a clean tree and a fully staged
-    /// one**, which `no unstaged changes` says nothing about and which is the
-    /// whole of [#313](https://github.com/breferrari/vigia/issues/313)'s report.
     elsewhere: usize,
     /// The last view collected successfully.
-    ///
-    /// Painted again when collecting a new one fails, which is why it is kept at
-    /// all. A monitor showing a stale diff with the reason on its footer is more
-    /// use than one showing an empty pane, and it is the same promise the core
-    /// makes about a failed [`vigia_core::Frame::advance`]. Bounded by the screen,
-    /// not by the diff, so keeping it costs nothing I3 would notice.
     screen: View,
     /// Where the last painted screen's regions and scrollbars were.
-    ///
-    /// Held so a mouse gesture can be told what it is over without a terminal
-    /// syscall per event, and so the answer describes the screen a reader is
-    /// actually pointing at rather than the one the next paint will make.
     regions: Regions,
     /// What a mouse button is currently being held down on, if anything.
-    ///
-    /// **Here rather than in [`App`] because it is a fact about the terminal, not
-    /// about the viewport.** A hold begins and ends on input events, and `App`
-    /// owns where the reader is looking; giving it a field it never reads would
-    /// put a gesture's lifetime inside the thing the gesture moves. The paint
-    /// reads it to light the pressed button and nothing else does.
     held: Option<Held>,
     /// The bar a drag is currently moving, if one is.
-    ///
-    /// **Separate from [`Shell::held`] because they are different gestures on the
-    /// same column.** A press on a step button repeats on a clock; a press on the
-    /// track seeks, and keeps seeking wherever the pointer goes until it is let
-    /// go. Only one can be armed at a time, because only one press starts them.
     grabbed: Option<Grabbed>,
     /// What the pointer is resting on, when it is on something a click acts on.
-    ///
-    /// **The mark `SPEC.md` §11.2 B10 adopts, and it is here for
-    /// [`Shell::held`]'s reason**: where a pointer is, is a fact about the
-    /// terminal rather than about the viewport, and `App` owns the viewport.
-    ///
-    /// It needs no clock, which is §11.1's three-mark rule arriving at its third
-    /// case: a hold ends with an `Up`, a key burst has no end and takes a clock,
-    /// and this is retired by its **replacement**, because the next mouse event
-    /// says where the pointer is now.
-    ///
-    /// **The rule is in two functions, and both are free functions so that both
-    /// have gates.** [`hover_after`] answers *what does this event do to the
-    /// mark*, and [`hover_repainted`] answers *what does a repaint do to it*,
-    /// which is a different question with a different subject: the first is
-    /// about the pointer moving, the second about the screen moving underneath a
-    /// pointer that did not.
-    ///
-    /// `None` is both *not over anything* and *the window is not focused*, which
-    /// are the same drawn result and are deliberately not distinguished: the
-    /// mark says the pointer is here, and it has nothing to say about why it is
-    /// not.
     hovered: Option<Hovered>,
     /// Which way the viewport is currently being moved, and until when.
-    ///
-    /// **The one lit thing on this screen that nobody is touching.** A reader
-    /// scrolling with `j` or `d` gets the matching arrow lit, because the arrows
-    /// are the element whose whole job is *which way* and there is no reason the
-    /// keyboard should not reach them.
-    ///
-    /// It needs an expiry where the other two gestures do not, and that is the
-    /// honest cost: a release ends a hold and a key burst simply stops, sending
-    /// nothing. Without `scrolling_until` the last arrow of a burst would stay
-    /// lit forever on an idle tree, as a claim about the past. The clock that
-    /// clears it is bounded by the burst that armed it, fires once, and is the
-    /// same one `Held` uses.
-    ///
-    /// **Why this field and not the other marks**: §11.1 states the rule, which
-    /// is that a mark is retired by whatever the program can still observe about
-    /// its subject — its end, its replacement, or, failing both, a clock. A hold
-    /// has an end. A burst has neither, which is why the expiry lives here and
-    /// nowhere else. The rule is at one address on purpose, because the same
-    /// reasoning restated per field is what left `Regions::step`'s doc claiming
-    /// a held button cannot repeat for a day after it could.
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
-    ///
-    /// **The backstop for a demand the core cannot mark**, which is a narrower
-    /// set than it sounds and is not empty. `warm_run` marks the grammar it had
-    /// a run at, so an ordinary vanished file stops being asked for; what it
-    /// cannot do is mark the *right* grammar for a file it never opened whose
-    /// extension lies about its language. A Qt `.ts` translation file draws as
-    /// XML because the frame has its first line, and if it is deleted before the
-    /// warmer opens it the warmer can only mark TypeScript, which the frame was
-    /// never waiting on. Without this that hunk is demanded on every frame, and
-    /// every demand spawns a thread and sends a wake.
-    ///
-    /// Overridden by [`Self::written`] rather than cleared, because a tick can
-    /// land while the warm this describes is still running. See
-    /// [`worth_warming`], which is where the rule lives so that it can be gated.
     served: Vec<String>,
     /// Whether the tree has changed since the last warm was spawned.
-    ///
-    /// A tick is the world changing, so a demand that could not be served a
-    /// moment ago is worth offering once more. Set by the tick and spent by the
-    /// spawn, so one tick buys exactly one re-offer.
     written: bool,
     /// The warm this shell last asked for, if any.
-    ///
-    /// **Held to be asked whether it has finished, never to be joined.** See
-    /// [`Shell::request_warm`]: it is the one bound keeping the thread count to
-    /// the grammars a session meets, and joining it would be a frame waiting on
-    /// the compile the whole deferral exists to get off the frame.
-    ///
-    /// Detached on the way out like every other thread here, which
-    /// [`vigia_core::Highlighter::warm_ahead`] is written for: it ends on its
-    /// own and holds nothing but an `Arc` to the grammars.
     warming: Option<std::thread::JoinHandle<vigia_core::WarmReport>>,
 }
 
 impl Shell {
     /// The diff region's height for `action`, or zero where it reads none.
-    ///
-    /// **One expression, because there were two and they disagreed.** The
-    /// ordinary path has asked [`Action::needs_height`] since the predicate
-    /// existed; the drag-under-way path passed a literal `0` from the day it was
-    /// written. A drag on the diff's bar is a [`Action::DiffTo`], which reads the
-    /// height to map the track onto **travel** rather than onto the whole, so the
-    /// first event of a gesture resolved correctly and every motion after it
-    /// resolved a screenful short. The two ends of the track agree under both
-    /// arithmetics and only the middle does not, which is why nothing noticed.
-    ///
-    /// **The classification is gated and this wiring is not**: it lives inside
-    /// the takeover loop, which no test drives, so the answer is to leave
-    /// one place that can be wrong rather than two that can disagree. A mutation
-    /// that empties this function survives the suite and is recorded as such.
-    ///
-    /// Cheap by construction: a drained trackpad flick is up to sixty-four
-    /// actions between two paints, and only the four that read a height pay for
-    /// the terminal-size syscall and the `Chrome` this builds. **Four rather than
-    /// three since `Action::Bottom` joined them**, which is B16's doing: pinned,
-    /// `G` rests a file's last row on the bottom, and *the bottom* is a height.
-    ///
-    /// **Takes the changed set rather than its length**, since
-    /// [#313](https://github.com/breferrari/vigia/issues/313). The body's split
-    /// needs two numbers now — how many files the footer counts, and how many
-    /// *rows* the list wants once its run separators are in — and they are equal
-    /// only while one comparison is drawn. Passed as a pair at this seam they were
-    /// got wrong immediately: `files` went to both, and a scroll step was measured
-    /// in a diff up to two rows taller than the paint laid out. Handed the slice,
-    /// neither can be supplied without the other.
     fn diff_rows_for(
         &mut self,
         action: Action,
@@ -1344,10 +714,6 @@ impl Shell {
 
     /// The cell a step button is being held on, for the frame that draws it lit.
     /// What the pointer is doing this frame, as the one value the chrome takes.
-    ///
-    /// Gathered here rather than at each call site because the chrome is built
-    /// twice per paint and a second spelling of this list is a second chance to
-    /// transpose two `Option`s that compile either way.
     fn pointing(&self) -> Pointing {
         Pointing {
             pressed: self.pressed(),
@@ -1363,45 +729,16 @@ impl Shell {
 
     /// Which region's bar is being dragged, for the frame that draws its thumb
     /// lit.
-    ///
-    /// A plain read: converting the [`Grabbed`] it holds into that region's
-    /// first row is an identity only while the regions are stacked.
     fn gripped(&self) -> Option<Grabbed> {
         self.grabbed
     }
 
     /// What the pointer is over, for the frame that marks it.
-    ///
-    /// A plain read. The staleness this would otherwise have to carry is handled
-    /// where the layout actually moves: [`hover_repainted`] retires the mark
-    /// inside the paint that changes the geometry, so anything reaching this
-    /// accessor was resolved against the screen that is on show.
-    ///
-    /// **Two narrower rules were tried in this function first and both were
-    /// wrong.** The reasoning is recorded on `hover_repainted` rather than here,
-    /// because the second of them was a tautology that read as a fix, and a
-    /// reader who finds this accessor plain deserves to know it was not always.
     fn hovered(&self) -> Option<Hovered> {
         self.hovered
     }
 
     /// How long the loop may block before something here has to act.
-    ///
-    /// **`None` is the whole invariant, and it is why every clock is asked
-    /// through one function.** With nothing held, nothing lingering and nothing
-    /// left in the history window this returns `None`, the receive below is
-    /// untimed, and I1's *0 wakeups while idle* is a fact about the structure
-    /// rather than about care taken elsewhere. Clocks asked separately is that
-    /// many chances to leave a deadline armed on an idle monitor; asked together
-    /// there is one place to be wrong and one place to gate.
-    ///
-    /// Where several are armed it is the nearest, because the loop has to wake
-    /// for whichever comes first.
-    ///
-    /// **There were two of these until
-    /// [#243](https://github.com/breferrari/vigia/issues/243) and this docblock
-    /// said so through the commit that added the third**, which is what a comment
-    /// counting the things below it costs. It is written without a number now.
     fn patience(&self, now: Instant) -> Option<std::time::Duration> {
         // The history's own deadline joins the two gesture clocks here rather
         // than at the receive, so `patience` stays the one place that decides
@@ -1415,9 +752,6 @@ impl Shell {
     }
 
     /// Note which way an action is moving the viewport, so the bar can say so.
-    ///
-    /// Only the actions that move it, and only their direction: a jump to a file
-    /// or a drag of the thumb is not a direction the arrows can honestly draw.
     fn note_scroll(&mut self, action: Action, now: Instant) {
         // The routing lives in `input::scroll_mark`, beside the key map it is a
         // fact about, and is driven directly by a test there. What is left here
@@ -1429,18 +763,6 @@ impl Shell {
     }
 
     /// Clear the direction mark once its burst has stopped.
-    ///
-    /// **Returns nothing.** Returning whether anything changed, *"so the caller
-    /// repaints only on the frame that actually turns it off"*, is a value no
-    /// caller reads: the timeout arm this sits on draws unconditionally,
-    /// because it is also where a held step and an ageing wake land. So the
-    /// sentence described a caller that has never existed, and the value was free
-    /// to be wrong.
-    ///
-    /// The comparison lives in [`input::settled`] for the reason that module's
-    /// `patience` gives: what stays here owns a terminal and three threads and
-    /// cannot be driven by a test. It was here, and inverting it passed the whole
-    /// suite while the arrows never claimed a direction.
     fn settle_scroll(&mut self, now: Instant) {
         if input::settled(self.scrolling_until, now) {
             self.scrolling = None;
@@ -1449,25 +771,6 @@ impl Shell {
     }
 
     /// The drawable area of the terminal right now.
-    ///
-    /// **Taken from the terminal's own resized state rather than from a second
-    /// size syscall**, so the area a frame is *planned* for is the area it is
-    /// *painted* into. Calling `Backend::size` directly is two independent reads
-    /// per frame: this one, deciding how many rows [`View::collect`] is asked
-    /// for, and the one `Terminal::draw` makes inside its own `autoresize`. A
-    /// resize landing between them leaves the collect sized
-    /// for a screen the paint no longer had.
-    ///
-    /// That is not hypothetical on Windows. Entering the alternate screen under
-    /// Warp changes the reported size (measured: 195x77 before, 199x75 after), so
-    /// the two reads genuinely disagree, and they disagree on the very first frame
-    /// where a monitor may then sit idle for minutes before anything wakes it.
-    ///
-    /// `autoresize` is the same call `draw` makes, so doing it here does not add a
-    /// read: it moves the one that decides the layout to before the decision
-    /// instead of after it, and `draw`'s own call then finds nothing to change.
-    /// A resize that lands in the remaining window is repainted by the `Resize`
-    /// event, which `input.rs` maps to [`Action::Redraw`].
     fn area(&mut self) -> Result<Rect, Failure> {
         let screen = self.session.screen();
         screen.autoresize()?;
@@ -1475,35 +778,11 @@ impl Shell {
     }
 
     /// Where the regions of the **last painted** screen were.
-    ///
-    /// Stored rather than recomputed, because recomputing needs the terminal's
-    /// size, and that is an uncached syscall the drain deliberately does not make
-    /// per event. It is also the honest answer: a pointer is over the screen a
-    /// reader can see, which is the one that was last drawn, not the one the next
-    /// paint will produce.
     fn regions(&self) -> Regions {
         self.regions
     }
 
     /// Hand the warmer whatever the last paint drew plain, and let it wake us.
-    ///
-    /// **The other half of the deferral.** `Highlighter::wanted` lists the paths
-    /// whose grammar nothing has compiled, one per grammar, as of the frame that
-    /// just drew; those hunks are on screen in plain text right now, and this is
-    /// what turns them into colour.
-    ///
-    /// **One warm in flight at a time**, which is what keeps the thread count
-    /// bounded by grammars rather than by frames. A demand that arrives while
-    /// one is running is not lost and is not queued either: the running warm
-    /// ends with a wake, that wake paints, that paint raises the demand again if
-    /// it is still true, and this spawns the next. The loop is self-driving and
-    /// it terminates, because the warmer marks every grammar it had a run at
-    /// even when the file it meant to read has gone.
-    ///
-    /// **A finished handle is not the same as no handle.** Checking only for
-    /// `Some` would spawn once and never again, since the shell detaches rather
-    /// than joining; `is_finished` is what says the previous run is over without
-    /// blocking a frame on it.
     fn request_warm(&mut self, worktree: &Worktree, tx: &Sender<Wake>) {
         if self
             .warming
@@ -1532,35 +811,6 @@ impl Shell {
     }
 
     /// Collect a screenful and paint it, settling any repaint it leaves owed.
-    ///
-    /// **The opening two frames are one call, and that is the point.** The first
-    /// frame of a process draws plain, because a grammar's patterns compile on
-    /// first use at 74-362ms and I7 gives the whole of startup 50ms; the frame
-    /// after it colours. Written as two `draw` statements in [`run`] that held
-    /// only by statement order, deleting the second left the entire suite green
-    /// while the product sat on a permanently uncoloured screen for any tree
-    /// nobody was writing to — an I5 failure, since a monitor is meant to be
-    /// correct untouched. Found by mutation.
-    ///
-    /// So [`App::owes_repaint`] carries the debt and this collects it, which
-    /// makes the pair impossible to separate by editing one line. It costs one
-    /// extra frame once per process: measured at ~1.8ms on the hundred-file
-    /// fixture, against the 91.51ms compile it exists to hide.
-    ///
-    /// **At most one repaint, and the bound is structural rather than argued.**
-    /// Written as a `while` this spun forever: [`Self::paint`] swallows a failed
-    /// collect into [`App::warn`] and returns `Ok`, while [`App::view`] advances
-    /// its state only past the `?`, so a collect that keeps failing leaves the
-    /// debt standing and the condition can never clear — 100% CPU with the
-    /// alternate screen held and the quit key unreachable, which is the terminal
-    /// this shell refuses to leave a reader in. It is reachable rather than
-    /// exotic: `Frame::diff` re-reads any file written in the last two seconds,
-    /// so a `git checkout` landing between the two paints does it.
-    ///
-    /// An `if` cannot spin, and a debt that survives it is simply carried to the
-    /// next wake, where the reader is looking at the plain frame rather than at
-    /// nothing. That is the same "report and keep the previous screen" rule the
-    /// rest of the frame path already follows.
     fn draw(
         &mut self,
         frame: &mut vigia_core::Frame,
@@ -1576,26 +826,6 @@ impl Shell {
         // for it, so moving the mouse over a quiet pane redrew a window that
         // never rolled: the freeze this row exists to fix, for as long as the
         // motion continued.
-        //
-        // Rolling *here* makes "the drawn window is current" true by
-        // construction rather than by remembering it at each of the paths that
-        // draw. It costs nothing on the frames that do not need it:
-        // `History::record_sized` skips its projection when no sample boundary
-        // was crossed and nothing was named, which is 20ns at the path cap.
-        //
-        // Before the paint, not after, or the frame draws the picture it was
-        // woken to change and the next one corrects it a beat late.
-        //
-        // **`now` is the caller's, not this function's, and the two are not
-        // interchangeable.** A tick records its burst at the top of the turn and
-        // reaches here only after `Frame::advance` has walked status, so with a
-        // fresh `Instant::now()` a sample boundary landing inside that gap rolled
-        // away the very sample the burst had just written. `Track::shift` zeroes
-        // the newest sample, so `recency` fell to `Live` and the batch drew with
-        // no pulse on the one frame it caused, which is `SPEC.md` §11.2's B2 mark
-        // failing exactly when it has something to say. One instant per turn of
-        // the loop makes the roll and the tick agree about when *now* is, and the
-        // gap closes by construction rather than by being small.
         self.history.record_sized([], now);
         self.paint(frame, worktree)?;
         if self.app.owes_repaint() {
@@ -1617,20 +847,6 @@ impl Shell {
         // `&Frame` it did not read, with a docblock arguing for a parameter
         // that no longer decided anything, and a gate asserting that `read()`
         // calls `read`.
-        //
-        // **The header rather than the masthead**, which
-        // [#204](https://github.com/breferrari/vigia/issues/204) makes load
-        // bearing rather than a nicety of wording: the band is hidden until a
-        // reader presses `m`, so a branch that lived up there would put this back
-        // to reading a file most frames do not draw. The header's ladder draws it
-        // on every frame whatever the masthead is doing.
-        //
-        // The **rule** survives untouched and is now satisfied rather than
-        // guarded: this is a read the frame is going to draw. Reading `.git/HEAD`
-        // measures 56 to 69us against I9's 16ms, and it is not cached across
-        // frames on purpose, because an agent in the other pane can check out a
-        // branch and a name held from startup would be a confident lie on
-        // exactly the screen that exists to orient a reader.
         self.branch = worktree.branch();
 
         // The chrome is built before the layout, not after, because the footer
@@ -1666,28 +882,6 @@ impl Shell {
         // is true of a clean tree and of a fully staged one alike, and the reader
         // had no way to tell them apart. Counting the other run turns that line
         // into `no unstaged changes · 3 staged`.
-        //
-        // **Decided from the screen that will be drawn, not from the frame**, and
-        // the difference is a failed collect. `Shell::screen` keeps the previous
-        // view when a collect fails, so a frame whose walk succeeded and whose
-        // collect did not draws *last* frame's rows — and asked of `frame` this
-        // would say "there are files, so no signpost" over an empty state that is
-        // still on screen, taking the `· 3 staged` off the one line that explains
-        // it. That is exactly the split [#158](https://github.com/breferrari/vigia/issues/158)
-        // removed for the branch name, restated for this field, and it is why the
-        // read sits below the collect rather than above it.
-        //
-        // **The rule that put it here is unchanged and is now satisfied rather
-        // than guarded**: a count costs a status walk, and this is a walk the
-        // frame is going to draw. A screen with a diff on it never asks. One
-        // without has no diff to compute and reads nothing else, and the walk it
-        // pays for is the cheaper of the two — the staged comparison touches no
-        // file at all, measured at 430us against 2.15ms on a 200-file fixture.
-        //
-        // Asked only while the staged run is **off**, because with it on the pane
-        // already holds both comparisons and an empty screen means both are empty.
-        // A failed walk is not worth a notice: it costs the reader a hint on one
-        // frame, and saying so on the footer would push a real notice off it.
         self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
             worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
         } else {
@@ -1698,23 +892,6 @@ impl Shell {
         // rather than the next one. Safe to differ from the chrome the height
         // came from: a notice cannot change how many rows the footer takes, by
         // construction. See `Footer::plan`.
-        //
-        // The *file count* can, and on a failed collect the screen drawn below
-        // is the previous one, whose count may differ from the frame's. That
-        // costs nothing worse than a row budget that was one out for a collect
-        // which failed anyway: the renderer plans and draws from the same
-        // `view.files`, so what reaches the screen is self-consistent either way.
-        //
-        // The **branch** has that shape too, and one direction of it is visible
-        // rather than merely inconsistent. **That discrepancy is gone with
-        // [#158](https://github.com/breferrari/vigia/issues/158)**: it existed
-        // because the branch was decided from the *frame's* count while the
-        // empty state was drawn from `view.files`, so a collect failing on the
-        // way from a clean tree to a dirty one drew last frame's empty state
-        // with no branch on it. The branch is not decided from a count any more.
-        // What stands is the reason it is re-read rather than held: a name kept
-        // across frames is a confident lie the moment the other pane checks
-        // something out.
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
@@ -1742,12 +919,6 @@ impl Shell {
             // correcting the field only reaches the *next* paint. On an idle
             // tree there is no next paint (I1), so a mark "wrong for one frame"
             // is wrong until somebody writes to the worktree.
-            //
-            // The ordering here is not circular even though it looks it:
-            // `render::regions` reads the chrome's *heights* (the notice, the
-            // mode, the branch) and never its marks, so the layout is settled
-            // before the mark is judged against it, and the paint below sees the
-            // judged one.
             chrome.hovered = hover_repainted(chrome.hovered, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
@@ -1809,25 +980,6 @@ fn spawn_input(tx: Sender<Wake>) {
 }
 
 /// The last component of the worktree path, which is what a reader recognises.
-///
-/// Three steps, and the order is the whole of it.
-///
-/// **The path as given comes first**, so the name a reader typed is the name they
-/// see. A worktree reached through a symlink keeps the link's name rather than
-/// its target's, and the common case costs no syscall at all.
-///
-/// **Then the resolved path**, because `.` and `..` have no final component and
-/// `vigia .` is the invocation this tool is named after. `gix` hands back the
-/// workdir exactly as it was given, so that spelling headered the screen `.` for
-/// a whole phase: the one thing the header exists to say was the one thing it
-/// could not. Resolving is for **display only** and the result is thrown away
-/// after its last component is taken. It must not reach anything that compares
-/// paths, because it is `\\?\C:\…` on Windows and `/private/var/…` on macOS, and
-/// [#30](https://github.com/breferrari/vigia/issues/30) is the record of what a
-/// root matching no event path costs.
-///
-/// **Then the path itself.** A worktree at a filesystem root has no last
-/// component by any route, and showing the root beats showing nothing.
 fn short_name(workdir: &Path) -> String {
     if let Some(name) = workdir.file_name() {
         return name.to_string_lossy().into_owned();
@@ -1843,17 +995,6 @@ fn short_name(workdir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     //! The one rule in this file that is arithmetic rather than plumbing.
-    //!
-    //! [`short_name`] is private and `run` owns a terminal, so nothing outside
-    //! can reach it. `terminal.rs` already keeps its unit tests beside the code
-    //! for the same reason.
-    //!
-    //! [`branch_for`] is deliberately not tested here. Its rule is about a
-    //! **frame**, and driving it from a number typed into a unit test proves
-    //! only that the function reads its own argument: the call site producing
-    //! that argument is untestable there, and mutating it
-    //! passed the whole suite. It is exported and gated against real frames in
-    //! `tests/reads.rs` instead.
 
     use super::*;
 
@@ -1864,9 +1005,6 @@ mod tests {
         // was given, `Path::new(".")` has no final component, and the fallback
         // then printed the path itself. The header's whole job is saying which
         // tree this is, and this was the one input where it could not.
-        //
-        // Both sides come from the process's own directory, so the assertion
-        // holds wherever the suite is run from.
         let here = std::env::current_dir().expect("a current directory");
         let expected = here
             .file_name()
@@ -2013,12 +1151,6 @@ mod tests {
 
     /// Two properties of `run` that no test can execute, because `run` owns a
     /// terminal, and that are load bearing enough to gate by reading the source.
-    ///
-    /// This is the shape `no_exit_path_in_the_shell_skips_the_destructors` already
-    /// uses in `terminal`, and it is a weak instrument used deliberately: both
-    /// properties are single lines whose *position* and *form* are the whole of
-    /// their correctness, and a mutation of either passes the entire suite. A gate
-    /// that reads the file is worth more than a paragraph nobody re-checks.
     #[test]
     fn the_signal_arming_covers_the_takeover_and_the_wake_ends_the_loop() {
         // Only what ships, so the strings below cannot match this test itself.
@@ -2063,23 +1195,6 @@ mod tests {
         // this does not recognise and a file that does not parse are all reported
         // on a terminal the reader can still see, because an error painted inside
         // a TUI that then hands the terminal back is an error nobody reads.
-        //
-        // **The config file joined them with [#309](https://github.com/breferrari/vigia/issues/309)
-        // and nothing enforced the position**: the ordering was verified by
-        // running the binary, which is evidence that dies with the shell it ran
-        // in. Adding it here costs one line and covers the whole family, so the
-        // next input added is a failing assertion rather than a hand check
-        // somebody remembers to repeat.
-        // **`frame.advance()` is in the list too**, and leaving it out was the
-        // block's own claim about itself being wider than the block: its comment
-        // in `run` makes exactly this promise, that a repository failing on its
-        // first walk reports on a terminal the reader can still see.
-        //
-        // **Two of these appear twice in the shipped source**, `Worktree::discover(`
-        // and `frame.advance()`, and in both the second occurrence is after the
-        // takeover. `find` returns the first, which is what this wants: a moved
-        // call cannot hide behind a *later* occurrence, only behind an earlier
-        // one, and neither has one.
         for reader in [
             "Worktree::discover(",
             "frame.advance()",
@@ -2146,11 +1261,6 @@ mod tests {
         // "`Shell::draw` is gone" about a function three lines above it. An
         // anchor that has to be edited whenever the thing it guards is edited
         // is an anchor that gets edited to whatever makes the test pass.
-        //
-        // It cannot match this test's own strings, but that is not why it is
-        // written this way and the first version of this comment claimed it was:
-        // `code` is `shipped` above, which is everything before `#[cfg(test)]`,
-        // so no literal in this module was ever reachable from here.
         let drawer = &code[code.find("\n    fn draw(").expect("`Shell::draw` is gone")..];
         let signature = &drawer[..drawer
             .find("-> Result<(), Failure>")
@@ -2168,18 +1278,6 @@ mod tests {
         // token wide, compiling clean and green across the whole suite. That
         // mutation was found by review rather than by this file, which is the
         // reason it is written down here.
-        //
-        // The binding matters as much as the value. `began` is taken once at the
-        // top of the turn, before the drain, so a tick's record and the paint
-        // that draws it agree about when *now* is even though `Frame::advance`
-        // runs between them. Two fresh clocks a status walk apart is exactly the
-        // gap a sample boundary falls into.
-        //
-        // Matched on the *argument* rather than on the whole call, because a
-        // literal spelling out the argument list is a gate that reddens against
-        // correct code the next time a parameter is added: `rustfmt` explodes the
-        // call across five lines and the string stops matching, reporting a lost
-        // instant about a reflow. That is how the anchor above broke, one row ago.
         let turns = &code[code.find("'awake: loop {").expect("the loop is gone")..];
         let calls: Vec<&str> = turns
             .match_indices("shell.draw(")
@@ -2290,10 +1388,6 @@ mod tests {
         // branches on it: a `recv_timeout` reached unconditionally would put an
         // idle monitor on a poll loop while every gate over `Held` stayed green,
         // because none of them can see which receive the loop calls.
-        //
-        // Read from the source for the reason the two assertions above are: the
-        // loop owns a terminal and three threads, so there is nothing to drive it
-        // with in a unit test, and the alternative is no gate at all.
         let untimed = code
             .find("None => match rx.recv()")
             .expect("the loop no longer has an untimed receive for the idle case");

@@ -1,33 +1,4 @@
 //! The watch and coalesce engine: I1.
-//!
-//! > Redraw is event-driven, never a fixed timer. No filesystem event and no
-//! > git index change means no work.
-//!
-//! The whole invariant reduces to one line of code, [`Watcher::next_tick`]'s
-//! unbounded `recv()`. An idle monitor is a blocked thread, not a sleeping one,
-//! so "zero wakeups" is a property of the design rather than a number to tune
-//! towards. Every timeout in this module is inside a burst, never outside one.
-//!
-//! Two things stop that from being enough on its own. A recursive watch over a
-//! Rust worktree sees every write `cargo build` makes to `target/`, so events
-//! are filtered against the same gitignore rules the diff uses. And an agent
-//! saving twelve files produces twelve events for one logical change, so
-//! accepted events are coalesced into a single tick.
-//!
-//! A tick also **names the files written in it**, which is what follow mode and
-//! the glance history both read (`SPEC.md` §11.1, I5 and I10). That is not extra
-//! work: the gitignore filter already resolves every event against the worktree
-//! root, so the paths are a by-product of a decision this module was making
-//! anyway. The alternative was deriving recency by `stat`-ing every changed
-//! file, which is the cost [#19](https://github.com/breferrari/vigia/issues/19)
-//! records as breaching I9 at scale, for an answer the event was carrying all
-//! along.
-//!
-//! The set a burst reports is **capped**, at the same [`HISTORY_PATHS`] that
-//! bounds the store it feeds. A bulk operation can put ten thousand writes
-//! inside one hundred-millisecond burst, and a tick that carried all of them
-//! would hand I10 a bound to enforce after the allocation had already happened.
-//! What the cap refuses is counted rather than dropped silently.
 
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -46,14 +17,8 @@ use crate::history::HISTORY_PATHS;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WatchOptions {
     /// How long the tree must be quiet before a burst counts as finished.
-    ///
-    /// Charged only once per burst, so it is latency on the first frame after
-    /// an edit and nothing at all while idle.
     pub quiet: Duration,
     /// The longest a tick may be held back while events keep arriving.
-    ///
-    /// Without this, a process writing continuously would starve the display
-    /// forever, since the tree would never fall quiet.
     pub max_delay: Duration,
 }
 
@@ -69,10 +34,6 @@ impl Default for WatchOptions {
 }
 
 /// A coalesced signal that the working tree changed.
-///
-/// Not `Copy`, because it owns the paths. One `Vec` per burst, holding paths
-/// that only exist while something is being edited, and never more than
-/// [`HISTORY_PATHS`] of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tick {
     /// Accepted events folded into this tick.
@@ -81,47 +42,19 @@ pub struct Tick {
     pub coalesced_for: Duration,
     /// The distinct files written in this tick, spelled the way
     /// [`crate::FileChange::path`] spells them.
-    ///
-    /// **The write that landed last is the last element**, which is what
-    /// [`Tick::newest`] reads and what I5 follows. The order of everything
-    /// before it is unspecified: I10 bumps a bucket per path and does not care
-    /// which order they arrive in, so imposing one would be a promise with no
-    /// reader and a sort with no purpose.
-    ///
-    /// Empty when the burst wrote no file the view could move to, which is an
-    /// ordinary outcome rather than a failure: a write to `.git/index` is a real
-    /// change and produces a real tick, because the index is the left-hand side
-    /// of every diff drawn, but it is not somewhere to scroll.
     pub paths: Vec<String>,
     /// How many further paths this burst touched past [`HISTORY_PATHS`].
-    ///
-    /// Reported rather than dropped quietly. A bulk operation is exactly when a
-    /// reader most wants to know the picture is partial, and a cap that lied by
-    /// omission would make the sparkline understate the busiest moment a session
-    /// ever has.
     pub dropped: u32,
 }
 
 impl Tick {
     /// The write that landed **last** in this tick.
-    ///
-    /// This is what I5 follows, and `SPEC.md` §11.1 is the rule it obeys. It is
-    /// the last element of [`Tick::paths`] rather than a field of its own,
-    /// because two fields holding one fact are two things that can disagree, and
-    /// the one that would be wrong is the one the viewport jumps to.
-    ///
-    /// `None` for a tick that named no followable file. See [`Tick::paths`].
     pub fn newest(&self) -> Option<&str> {
         self.paths.last().map(String::as_str)
     }
 }
 
 /// The paths accumulated while a burst is still being coalesced.
-///
-/// A set rather than a list, because the same file saved four times inside one
-/// burst is one change to the reader and I10 samples per tick. The write that
-/// landed last is tracked alongside it, and is the one path the cap may never
-/// refuse: it is where the viewport is about to move.
 #[derive(Debug, Default)]
 struct Burst {
     seen: HashSet<String>,
@@ -164,9 +97,6 @@ impl Burst {
 }
 
 /// What one accepted message meant.
-///
-/// Two answers rather than one, because they are independent: an index write
-/// is relevant and unfollowable, and both facts have to survive the call.
 #[derive(Debug, Default)]
 struct Accepted {
     /// The event named something the display depends on.
@@ -194,9 +124,6 @@ enum Message {
 }
 
 /// Unblocks a [`Watcher`] that is waiting.
-///
-/// A monitor blocks indefinitely by design, so quitting needs a way in from
-/// another thread. Cloneable and cheap; sending on a dead channel is a no-op.
 #[derive(Clone)]
 pub struct Stop {
     tx: Sender<Message>,
@@ -234,9 +161,6 @@ impl<'repo> Watcher<'repo> {
         // `.git/index` and the gitignore files is enough to register on
         // backends that report reads or attribute touches, and Linux and macOS
         // both do.
-        //
-        // An empty index is the correct fallback: a repository with no commits
-        // still has gitignore files, and they are what the filter needs.
         let index = repo
             .index_or_empty()
             .map_err(|e| Error::Watch(Box::new(e)))?;
@@ -296,27 +220,11 @@ impl<'repo> Watcher<'repo> {
 
     /// Raw events the OS has delivered since the watcher started, accepted and
     /// filtered alike.
-    ///
-    /// This is a non-vacuity guard, not a measure of idle cost. A test that
-    /// asserts some class of write produces no tick needs to know the OS
-    /// reported the write at all, or it would pass just as happily against a
-    /// watcher that was silently broken.
-    ///
-    /// It is deliberately not asserted to be zero on an idle tree: inotify and
-    /// FSEvents both report reads and attribute touches, so a quiet tree is not
-    /// a silent one, and I1 is a claim about work done rather than about
-    /// packets received.
     pub fn delivered(&self) -> u64 {
         self.delivered.load(Ordering::Relaxed)
     }
 
     /// Block until the working tree changes, then return one coalesced tick.
-    ///
-    /// Returns `None` once a [`Stop`] handle fires or the backend goes away.
-    ///
-    /// The first `recv()` has no timeout, and that is the whole of I1. Giving
-    /// it one, however generous, would turn this into a polling loop and make
-    /// the idle cost non-zero.
     pub fn next_tick(&mut self) -> Option<Tick> {
         loop {
             let message = self.rx.recv().ok()?;
@@ -408,11 +316,6 @@ impl<'repo> Watcher<'repo> {
 
     /// This event's path relative to the worktree, or `None` when nothing the
     /// display depends on is behind it.
-    ///
-    /// Returns the path rather than a bool so the caller can both decide
-    /// relevance and learn *what* changed. Those were one question until
-    /// follow mode needed the second half, and computing the answer twice
-    /// would mean a second `symlink_metadata` per event.
     fn relative<'p>(&mut self, path: &'p Path) -> Option<&'p Path> {
         let rela = self
             .roots
@@ -450,34 +353,6 @@ impl<'repo> Watcher<'repo> {
 }
 
 /// Every spelling of the worktree root that an event path might carry.
-///
-/// Three, because the root is spelled by three parties that do not agree and
-/// none of them is wrong.
-///
-/// * **As given.** `gix` hands back the path it was discovered with, so
-///   `vigia .` leaves this as `"."`. Kept first because a backend that does not
-///   resolve the watched path at all reports events under exactly this.
-/// * **Absolute.** `notify` resolves the watch before asking the OS for it, and
-///   builds every event path by joining the change onto that. This is the one
-///   that was missing, and without it a relative root matched **nothing**: the
-///   monitor drew its first frame and then silently ignored every event for the
-///   rest of the session. `Components` normalises an interior `.` away, so an
-///   event at `C:\w\.\SPEC.md` strips against `C:\w` even though the strings do
-///   not share a prefix.
-/// * **Canonical.** macOS reports FSEvents paths through `/private` for a
-///   worktree opened as `/var`, which neither of the two above covers. On
-///   Windows this is the `\\?\` verbatim form, which events never use, so it
-///   earns its place on one platform and is inert on another.
-///
-/// Deduplicated, because in the ordinary case of an absolute argument the first
-/// two are the same path and a repeated root would make every event cost an
-/// extra comparison.
-///
-/// Pure, and separated from the watcher for the reason `SPEC.md` §7 gives: the
-/// case it exists for cannot be reached from the rest of the suite without
-/// changing the process working directory, which is global and races every other
-/// test in the binary. `tests/relative.rs` is the one end-to-end gate, alone in
-/// its own target so it can own that directory; this is the rule.
 fn roots_of(workdir: &Path) -> Vec<PathBuf> {
     let mut roots = vec![workdir.to_path_buf()];
     for spelling in [std::path::absolute(workdir), workdir.canonicalize()]
@@ -492,21 +367,6 @@ fn roots_of(workdir: &Path) -> Vec<PathBuf> {
 }
 
 /// Fold the paths one event named into what that event meant.
-///
-/// `resolve` decides whether a path matters and where it sits in the worktree.
-/// It needs the gitignore stack, so it cannot be pure; the **order** rule can
-/// be, and separating them is not tidiness. Nearly every event names exactly
-/// one path, where first and last are the same path, so no filesystem this
-/// suite can drive distinguishes the two: a version reading the paths forwards
-/// passed the entire integration suite, and only the unit tests below caught
-/// it. `SPEC.md` §7 names this shape.
-///
-/// **Walked backwards**, because the last path an event names is the one that
-/// landed last: a rename reports `[from, to]`, and the destination is where
-/// the content is now. The first followable hit wins and settles relevance at
-/// the same time, so the paths before it have nothing left to say. An
-/// unfollowable one does not stop the walk, which is what lets an event ending
-/// on `.git/index` still name the file beside it.
 fn accept_paths<'p>(
     paths: &'p [PathBuf],
     mut resolve: impl FnMut(&'p Path) -> Option<&'p Path>,
@@ -527,46 +387,6 @@ fn accept_paths<'p>(
 
 /// Where the view should move for a worktree-relative path an event named, or
 /// `None` when there is nowhere to move.
-///
-/// Whether a path inside `.git` is one the pane's contents depend on.
-///
-/// **The index was the whole answer until
-/// [#313](https://github.com/breferrari/vigia/issues/313), and it was the whole
-/// answer because there was one comparison.** The working tree against the index
-/// depends on `.git/index` and on nothing else in there; the index against
-/// `HEAD^{tree}` depends on where `HEAD` resolves to as well, and `HEAD` can move
-/// without the index being written at all.
-///
-/// **Measured rather than reasoned**, on a fixture repository: `git add`,
-/// `git commit` and `git reset --mixed` all rewrite `.git/index`, so staging was
-/// always seen. `git reset --soft` writes `.git/refs/heads/<branch>`,
-/// `.git/logs/HEAD` and `.git/ORIG_HEAD` and **not** `.git/index` — so the staged
-/// run would have gone on drawing a comparison against a commit that is no longer
-/// `HEAD`, indefinitely, with nothing on screen saying so. That is I5 failing
-/// silently, which is the failure this whole module is priced against.
-///
-/// **It also repays a defect that predates the staged run.** The empty state names
-/// the branch, read from `HEAD` on the frame that draws it, and `git switch -c`
-/// does not write the index either: the pane named the old branch until something
-/// else happened to wake it.
-///
-/// Four names, and the ones left out are left out deliberately:
-///
-/// * **`index`**, matched by file name rather than by full path, which is what
-///   catches the *destination* of `index.lock`'s rename into place — how git
-///   actually publishes a new index. The lock file itself is not watched: waking
-///   on it would draw the outgoing index one frame before the incoming one.
-/// * **`HEAD`**, which is rewritten by a checkout and by detaching, and which
-///   carries the object id itself while detached.
-/// * **`refs/heads/**`**, because `HEAD` is a symref into it almost always, so a
-///   branch tip moving is `HEAD` moving.
-/// * **`packed-refs`**, because `git pack-refs` and `git gc` move a loose ref into
-///   it and the loose file then stops existing.
-///
-/// **`refs/remotes` and `refs/tags` stay excluded**, and that is what keeps a
-/// `git fetch` from waking a monitor that would draw exactly what it drew before:
-/// `HEAD` cannot resolve to either. So can `logs/`, `ORIG_HEAD` and the object
-/// database, which are records of what happened rather than statements of what is.
 fn watched_in_git_dir(rela: &Path) -> bool {
     if rela.file_name() == Some(OsStr::new("index")) {
         return true;
@@ -600,21 +420,6 @@ fn watched_in_git_dir(rela: &Path) -> bool {
 /// Unix and load bearing on Windows, and the `.git` rule needs a burst that
 /// ends on an index write. A test that can only run on one platform, or only
 /// under a race, is not the gate this needs.
-///
-/// **`.git` is excluded rather than filtered earlier.** An index write is a
-/// real change, produces a real tick, and must keep doing so: the index is the
-/// left-hand side of every diff drawn, so staging changes what is on screen.
-/// It is simply not a file the viewport can sit on.
-///
-/// **Separators are normalised**, because this is compared against
-/// [`crate::FileChange::path`], which is git's spelling and always `/`. A
-/// Windows event arrives with `\`, so comparing unnormalised would match
-/// nothing and leave follow mode silently inert on one tier-1 platform while
-/// every test passed on the other two.
-///
-/// Joining components rather than replacing `\` with `/` is the reason this is
-/// not a one-liner: on Unix a backslash is an ordinary filename character, and
-/// replacing it would corrupt paths that are perfectly legal there.
 fn followable(rela: &Path) -> Option<String> {
     let mut components = rela.components().peekable();
     if components.peek().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
@@ -643,10 +448,6 @@ fn followable(rela: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     //! The follow-target rule, tested as the pure function it is.
-    //!
-    //! Both of its decisions are invisible from an integration test on at
-    //! least one tier-1 platform, which is exactly the case `SPEC.md` §7 says
-    //! to extract and test directly.
 
     use super::*;
 
@@ -658,18 +459,6 @@ mod tests {
 
     /// `vigia .`, which is the default invocation and the one the name is built
     /// on, and which redrew exactly once before this test existed.
-    ///
-    /// `gix` hands back the path it was given, so a relative argument leaves
-    /// `workdir()` as `"."`. `notify` resolves the watch to an absolute path and
-    /// joins each change onto it, so an event never begins with `"."`, and the
-    /// canonicalised root carries a `\\?\` prefix on Windows that events never
-    /// use. With neither matching, every event is discarded as outside the
-    /// worktree and `next_tick` blocks forever on a live channel: no tick, no
-    /// error, and nothing on the footer to say so.
-    ///
-    /// Reproducing it needs the root to be `"."` exactly. Rust's `Components`
-    /// normalises a `.` away everywhere except the start of a path, so even
-    /// `<absolute>/.` strips correctly and looks fine.
     #[test]
     fn a_relative_worktree_root_matches_the_paths_events_carry() {
         let roots = roots_of(Path::new("."));
@@ -736,16 +525,6 @@ mod tests {
 
     /// **A branch tip moving is a change the monitor must see**, and until
     /// [#313](https://github.com/breferrari/vigia/issues/313) it did not.
-    ///
-    /// The staged run compares the index against `HEAD^{tree}`, so where `HEAD`
-    /// resolves to is an input to it. Measured on a fixture: `git reset --soft`
-    /// writes `refs/heads/<branch>`, `logs/HEAD` and `ORIG_HEAD`, and **not**
-    /// `index` — so under the old rule the run went on drawing a comparison
-    /// against a commit that was no longer `HEAD`, indefinitely. I5 failing with
-    /// nothing on screen to say so.
-    ///
-    /// It repays an older defect too: the empty state names the branch, and
-    /// `git switch -c` does not write the index either.
     #[test]
     fn a_branch_tip_moving_is_a_change_the_monitor_must_see() {
         let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
@@ -768,15 +547,6 @@ mod tests {
 
     /// **What stays excluded, and why each one would be a wake that draws exactly
     /// what was already on screen.**
-    ///
-    /// This is the half that keeps the widening honest. `HEAD` cannot resolve to a
-    /// remote branch or to a tag, so neither can change either comparison; the
-    /// reflogs and `ORIG_HEAD` are records of what happened rather than statements
-    /// of what is; and the object database is where content lands *before* any ref
-    /// names it.
-    ///
-    /// Without this test the rule above is satisfied by returning `true`, which is
-    /// a monitor woken by every `git fetch` and every `git gc`.
     #[test]
     fn the_rest_of_the_git_directory_still_wakes_nothing() {
         let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
@@ -809,9 +579,6 @@ mod tests {
     }
 
     /// Neither of the refs the staged run watches is somewhere to scroll to.
-    ///
-    /// Same ruling as the index one above, applied to the three names that joined
-    /// it: they produce a real tick and they are not files the viewport can rest on.
     #[test]
     fn a_ref_write_names_no_file_to_follow() {
         assert_eq!(followable(&native(&[".git", "HEAD"])), None);

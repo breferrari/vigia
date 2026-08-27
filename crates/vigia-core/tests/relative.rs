@@ -1,25 +1,4 @@
 //! I1, for the invocation the tool is named after.
-//!
-//! > `vigia` is Portuguese: a watchman, and a porthole. Also the verb: `vigia .`
-//! > reads as "watch this."
-//!
-//! `vigia .` drew its first frame and then ignored every filesystem event for
-//! the rest of the session, silently, because the worktree root spelled `"."`
-//! matched none of the paths events carry. Every one of the ten tests in
-//! `watch.rs` passed throughout, because [`Scratch::worktree`] discovers by an
-//! absolute `PathBuf` and so the relative case had never once been run.
-//!
-//! **This file holds exactly one test, and that is the point.** Reproducing the
-//! defect needs the worktree root to be `"."` exactly: Rust's `Components`
-//! normalises a `.` away everywhere except the start of a path, so even
-//! `<absolute>/.` strips correctly and looks healthy. Getting a root of `"."`
-//! means changing the process working directory, which is global and would race
-//! every other test sharing the binary. A test target is a process, so this one
-//! owns its directory by being alone in it.
-//!
-//! The rule itself is unit tested beside the code, in `watch.rs`'s `roots_of`.
-//! This is the end-to-end half: the rule can be right while the wiring is
-//! wrong, and only a real watch over a real repository says otherwise.
 
 mod support;
 
@@ -30,10 +9,6 @@ use support::Scratch;
 use vigia_core::{Tick, WatchOptions, Watcher, Worktree};
 
 /// How long a real change is allowed to take to travel through the OS.
-///
-/// The same generous bound `watch.rs` uses, and generous for the same reason:
-/// this is a concession to CI, and tightening it would buy flakiness rather
-/// than rigour.
 const SETTLE: Duration = Duration::from_secs(10);
 
 /// How long the writer waits, so the write lands after the watch is armed.
@@ -41,10 +16,6 @@ const DELAY: Duration = Duration::from_millis(400);
 
 /// Block on `next_tick`, with another thread stopping the watcher after
 /// `timeout`, so `None` means "still waiting" rather than "hung".
-///
-/// A local copy rather than a shared helper, which is how the rest of these
-/// suites handle a mechanism: `support` is shared only for [`support::slack`],
-/// because that is one policy rather than one convenience.
 fn tick_within(watcher: &mut Watcher<'_>, timeout: Duration) -> Option<Tick> {
     let stop = watcher.stopper();
     let (done, finished) = mpsc::channel::<()>();

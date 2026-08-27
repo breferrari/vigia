@@ -1,17 +1,4 @@
 //! The scroll position, against a real frame.
-//!
-//! Kept apart from `reads.rs`, which asks what a screen *costs*. This file asks
-//! whether it lands in the right place, and the two need different fixtures: a
-//! cost measurement wants one file taller than the screen, and scrolling wants
-//! many files short enough to move between.
-//!
-//! The case worth knowing about before reading any of it:
-//! [`vigia_core::Frame::diff`] **panics** on an index past the end of the file
-//! list, deliberately, and the file list is rebuilt from scratch on every
-//! [`vigia_core::Frame::advance`]. A scroll position is exactly the index that
-//! outlives that rebuild. So the agent in the other pane committing its work is
-//! enough to crash a shell that trusts its own position, with no input on this
-//! side at all, and clamping is not defensive programming here but the contract.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
@@ -30,19 +17,9 @@ const FILES: usize = 40;
 const SPAN: usize = 4;
 
 /// Rows one file's whole block occupies: [`SPAN`] plus the blank that closes it.
-///
-/// **The unit a row index maps onto a position through**, since
-/// [#165](https://github.com/breferrari/vigia/issues/165) gave every file but
-/// the last a trailing [`Row::Gap`]. Before it, block and span were the same
-/// number and the arithmetic below could use either; they are not, and the one
-/// that is wrong now is the one that reads `SPAN`.
 const BLOCK: usize = SPAN + 1;
 
 /// Rows the fixture's whole diff occupies.
-///
-/// Not `FILES * BLOCK`: the last file closes the stream, so it has no blank
-/// after it, which is the exception `view::gap_rows` carries and `SPEC.md`
-/// §11.1's "the bottom of the diff is content" is the reason for.
 const TOTAL: usize = FILES * BLOCK - 1;
 
 fn body() -> usize {
@@ -57,22 +34,11 @@ fn body() -> usize {
 }
 
 /// The layout these gates ask for: the diff region alone.
-///
-/// List-free deliberately. Every gate here is about how `View::collect` crosses
-/// files, and a pinned region would couple their row arithmetic to a cap they
-/// are not about. `Body::diff_only` documents that this is a real short-pane
-/// state rather than a test convenience.
 fn split() -> Body {
     Body::diff_only(body())
 }
 
 /// The shipped split, list included.
-///
-/// **Only `only_the_action_that_reads_the_height_is_given_one` wants it**, and it
-/// wants it because three of the eighteen `Action` variants move the list's
-/// window and nothing else: a list-free body makes those three unobservable, and
-/// leaves `App::list_rows` at zero so `ListRow` is a hard no-op as well.
-/// Everything else in this file is deliberately list-free; see [`split`].
 fn listed() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
@@ -218,12 +184,6 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     // The mirror of the test above, and not a duplicate of it. Down hands the
     // overrun to `View::collect` to carry; up walks back and asks each file how
     // tall it is, so the two boundary crossings are different code.
-    //
-    // A round trip cannot tell them apart, which is the point of doing this
-    // separately. Every round trip in this file ends at file zero, and file zero
-    // clamps to row zero, so a step that lands one row short at every boundary
-    // still arrives at exactly (0, 0). Found by mutation: subtracting one from
-    // the previous file's height left the whole suite green.
     let scratch = fixture("shell-scroll-back");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -278,21 +238,6 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     // Scrolling past the end must rest on the last **screenful**, not on the
     // last row. Past it draws an empty pane, which in a monitor is
     // indistinguishable from a broken one.
-    //
-    // > [!warning] This gate once asserted the defect it is named against
-    // >
-    // > Until [#57](https://github.com/breferrari/vigia/issues/57) the body of
-    // > this test read `assert_eq!(view.rows.len(), 1)`, under this name and
-    // > under the comment above it. Both describe the right rule; the assertion
-    // > pinned the wrong behaviour in place, and it is the strongest kind of
-    // > wrong a test can be, because a defect with a green gate over it is one
-    // > nobody goes looking for. It survived being read every time this file was
-    // > touched.
-    // >
-    // > The tell, and it generalises: **an exact small count where the rule is
-    // > about a bound.** "Rests on content rather than blank" is a claim about
-    // > the screen being full; `== 1` is a claim about it being nearly empty.
-    // > `SPEC.md` §7 carries it now.
     let scratch = fixture("shell-scroll-bottom");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -735,33 +680,9 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-///
-/// **Hand maintained, and saying so is the point.** The compile error in [`tag`]
-/// is what *prompts* a bump; nothing forces one. Asserting
-/// `named.len() == VARIANTS` and claiming that "an added arm fails loudly until
-/// the variant is actually driven" is false: give a new arm the tag
-/// `18`, leave it undriven, and the count is still eighteen against an unbumped
-/// eighteen. That is the fourth overstated guarantee this branch has produced and
-/// the second inside a gate whose whole subject is overstated guarantees.
-///
-/// What holds now is weaker and true: the set is compared against `0..VARIANTS`,
-/// so an added arm with the next tag is **not** in the driven set and the gate is
-/// red until it is driven; and forgetting to bump this number is caught by that
-/// same comparison the moment two variants share a tag or one is skipped.
 const VARIANTS: usize = 19;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
-///
-/// **The `match` is the instrument.** A new variant does not compile here, which
-/// is the same guarantee `Action::needs_height` and `Action::is_manual_scroll`
-/// get from being exhaustive, and which the gate that drives them did not have.
-/// Adding an arm with the next tag then leaves that tag out of the driven set,
-/// and the assertion under the list compares the two sets rather than their
-/// sizes, so it is red until the variant is really driven.
-///
-/// Numbers rather than the variants themselves because `Action` is not `Ord` and
-/// the payloads are irrelevant here: two `Scroll`s with different rows are one
-/// variant for this purpose, and the list above deliberately drives both.
 fn tag(action: Action) -> usize {
     match action {
         Action::Quit => 0,
@@ -794,34 +715,6 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // terminal-size syscall and a `Chrome` allocation on every action that does
     // not read the answer, which matters because a drained trackpad flick is up
     // to sixty-four actions between two paints.
-    //
-    // The exhaustive match in `needs_height` catches an action nobody
-    // classified. It cannot catch one classified **wrongly**, and that failure
-    // is silent: the action is handed a zero height and quietly moves the
-    // viewport by the wrong amount. So the claim is checked against `App::apply`
-    // itself, by driving each action twice with heights that could not both be
-    // right and asserting the answer did not depend on which.
-    //
-    // **Two things were blind here until [#297](https://github.com/breferrari/vigia/issues/297),
-    // and between them they let a wrong classification ship.**
-    //
-    // The first is that every `App` was unpinned. `Action::Bottom` reads the
-    // height only under `SPEC.md` §11.2 B16's pin, where it rests the file's last
-    // row on the bottom; unpinned it is a jump to a heading and no height can
-    // move it. So the classification was checked in the one state that cannot see
-    // it, `Bottom` stayed in the `false` arm, `crate::run` handed it a zero, and
-    // the resting row saturated back to the whole span. Every action is driven
-    // pinned **and** unpinned now, and `needs_height` is a claim about whether
-    // *any* reachable state reads it.
-    //
-    // The second is that it compared `View::top`, which is the position after
-    // `View::collect` has resolved it. That walk clamps, so two different
-    // requests land on the same drawn row and the difference the gate exists to
-    // see is exactly what the clamp hides: `G` writing the whole span and `G`
-    // writing the resting row draw the identical screen. What separates them is
-    // the position the shell **keeps**, which is what the next action in the same
-    // drained batch moves from. `App::position` is read before any view, and the
-    // drawn top is kept as a second signal rather than the only one.
     let scratch = fixture("shell-scroll-height");
     let worktree = scratch.worktree();
 
@@ -834,11 +727,6 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // coverage that nothing enforces is the shape `RULINGS.md` calls worse than
     // no claim at all, and it is how `Bottom` shipped misclassified in the first
     // place.
-    //
-    // [`tag`] below is what enforces it: an exhaustive `match`, so a new variant
-    // is a **compile error** there, and then the assertion under it is a loud
-    // failure until the new variant is named here too. Two steps, and the first
-    // one cannot be skipped.
     let actions = [
         Action::Quit,
         Action::Escape,
@@ -904,10 +792,6 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // move `list_top` and nothing else, so a gate reading only the diff's
     // position could never have failed on them. Real coverage was fifteen
     // asserted as eighteen, which is the same overstatement one layer down.
-    //
-    // `ListRow` needs one more thing: `App::list_rows` is zero until a view has
-    // been drawn, so `offset < self.list_rows` is `1 < 0` and the action is a
-    // hard no-op. Each run below draws before it acts.
     for action in actions {
         // Whether the answer moved with the height, in each configuration.
         let mut moved_anywhere = false;
@@ -924,16 +808,6 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                     // so seeding with a scroll alone made the pinned run byte
                     // identical to the unpinned one for the *other* action B16
                     // changed.
-                    //
-                    // **Defence rather than behaviour, and recorded as such**,
-                    // which is B14's own precedent for a reorder no pane reaches:
-                    // removing this seed leaves the suite green, because this gate
-                    // compares two *heights* within one configuration and `Top`
-                    // reads no height in either. What it buys is that the pinned
-                    // half exercises a state that differs at all, so an action
-                    // that starts reading a height only under a pin is seen here
-                    // rather than in production. That is exactly how `Bottom` got
-                    // out.
                     app.apply(Action::File(2), &mut frame, full)
                         .expect("seed a file");
                     app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
@@ -983,16 +857,6 @@ fn only_the_action_that_reads_the_height_is_given_one() {
 }
 
 /// Drive the view once and hand back the whole screenful.
-///
-/// The four gates below are all assertions that a **full** screen came back, so
-/// what they compare against is [`body`] itself. `view.rows.len() == body()`
-/// reads as arithmetic where what it means is "no blank rows under content that
-/// exists".
-///
-/// Returns the [`View`] rather than the two numbers most callers want, because
-/// one of them wants a third thing and a second helper to fetch it would drive
-/// the view twice: `App::view` writes its resolved position back, so a second
-/// call is a second resolution of a position the first one already moved.
 fn drawn(app: &mut App, frame: &mut Frame) -> View {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
@@ -1005,31 +869,6 @@ fn a_diff_that_shrank_under_the_viewport_still_fills_the_screen() {
     // **The half that was reported**, and the one no fixture in this suite could
     // have produced: every other gate here holds the file list still and moves
     // the window. This moves the file list.
-    //
-    // The sequence is the one that found it, run literally. A worktree of forty
-    // changed files, scrolled deep into, then `git reset --hard` with two
-    // untracked files left behind — an agent in the other pane reverting its own
-    // work, which is an ordinary event on the pane this tool exists for and
-    // exactly when someone looks over. The retained position was reasonable when
-    // it was taken and names a row the new diff does not have.
-    //
-    // What made it monitor-class rather than cosmetic: the header went on
-    // truthfully saying two files had changed over a blank body, so one thing on
-    // screen contradicted the other two. `SPEC.md` §11.1 ruled the empty state
-    // into existence to stop "nothing changed" and "this has stopped working"
-    // looking alike, and this reintroduced that ambiguity by another route.
-    // **Tall files, not the shared forty-by-four fixture, and this is the part
-    // that took a mutation run to get right.** What survives the shrink is the
-    // row *offset within a file*, because the file index is clamped to the new
-    // list and the offset is not. Over four-row files the deepest offset
-    // reachable is three, which is smaller than anything the surviving file
-    // holds, so the walk never reaches the overshoot branch at all and the gate
-    // passes against the unfixed code. Sixty-two row files give the offset
-    // somewhere to be large.
-    //
-    // Recorded rather than quietly corrected: this gate asserted the right
-    // outcome and reproduced the wrong situation, which is the same shape as the
-    // gate #57 was found under and would have been just as green.
     let scratch = Scratch::large_diff("shell-scroll-shrunk", FILES, 30);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1079,9 +918,6 @@ fn a_last_file_shorter_than_the_screen_is_filled_from_the_ones_above_it() {
     // in an earlier file, which is a question the forward walk has no way to
     // ask, because its borrow of the current file is live until that file is
     // drawn.
-    //
-    // Five-row blocks against a twenty-two row body means five of them fill it, so
-    // this exercises a real walk rather than the degenerate one.
     let scratch = fixture("shell-scroll-short-tail");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1107,12 +943,6 @@ fn a_diff_shorter_than_the_screen_starts_at_the_top() {
     // The other end of the same rule, and the one that must **not** be "fill the
     // screen": a diff with fewer rows than the body has nothing to fill it with,
     // so the honest picture is every row it has, from the first.
-    //
-    // Without a floor, `last_screenful` walking back until it has a screenful is
-    // a loop that runs off the front of the file list, and the obvious
-    // off-by-one puts the top in a file that does not exist —
-    // `vigia_core::Frame::diff` **panics** on an index past the end, which this
-    // file's own header warns about.
     let scratch = Scratch::large_diff("shell-scroll-short-diff", 2, 1);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1140,23 +970,6 @@ fn a_diff_shorter_than_the_screen_starts_at_the_top() {
 }
 
 /// Dragging the diff's scrollbar lands where the thumb says it will.
-///
-/// **The gesture and the readout have to be the same arithmetic**, and for one
-/// day they were not. The bar was made row-exact when I4 was narrowed on
-/// 2026-08-01, and `Action::DiffTo` went on resolving its fraction against the
-/// *file count*, which is what it had counted before. The two agree only when
-/// every file is one row tall.
-///
-/// The fixture is deliberately few-files-many-rows, which is the shape that
-/// exposes it and the shape a reader actually has: three long files gave the
-/// old code three landing spots for a track dozens of rows tall, so the pointer
-/// moved and the diff either jumped to a heading or did not move at all.
-///
-/// Two claims, because they fail separately. Dragging *within* one file has to
-/// move the diff, which file granularity cannot do at all. And the bottom of
-/// the track has to reach the last screenful, which is the half that stays
-/// broken if the fraction is mapped onto the whole diff instead of onto its
-/// travel.
 #[test]
 fn dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end() {
     use vigia::TRACK_SCALE;
@@ -1220,10 +1033,6 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
     // every other gate here reads a *position*, and a total that drifted from
     // the walk moves no position at all. It moves the thumb, silently, on a bar
     // this project already had to make row-exact once.
-    //
-    // A threshold-shaped claim, so no snapshot can see it: the two numbers are
-    // computed on different code paths from the same frame and never appear on
-    // screen together.
     let scratch = fixture("shell-scroll-twins");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1248,10 +1057,6 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
     // diff's **logical** rows, and what the walk produces with wrapping on is
     // display rows, of which the continuations are the difference. The bar is
     // scaled against the first, so this compares the first with the first.
-    //
-    // Read against `Row::Wrap` rather than against a second total, because a gate
-    // that recomputed the logical count from the width would be recomputing the
-    // thing under test.
     for wrap in [false, true] {
         let view = View::collect(
             &mut frame,
@@ -1305,9 +1110,6 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
     // every heading a reader jumped to, and nothing else in this suite reads
     // the row a jump landed on: the position gates all compare `Position`s,
     // which are identical either way.
-    //
-    // So this asserts the drawn row rather than the position, which is the only
-    // form of the claim that can tell the two designs apart.
     let scratch = fixture("shell-scroll-jumps");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1354,13 +1156,6 @@ fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
     // frame ahead of any collect: it walks back a file at a time asking each how
     // tall it is, through `rows_in` into `Frame::diff`, which indexes the file
     // list directly and panics past its end.
-    //
-    // **The batch is what makes it reachable.** The shell drains every pending
-    // action before it paints, so a `Wake::Tick` carrying an agent's commit and a
-    // wheel-up arriving together are applied with no frame between them, and the
-    // position resolved against the old list is handed straight to the new one.
-    // No test drove a scroll across an advance without a paint, so the crash sat
-    // behind a suite that exercised both halves separately.
     let scratch = fixture("shell-scroll-back-shrink");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

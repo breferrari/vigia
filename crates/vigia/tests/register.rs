@@ -30,15 +30,15 @@ use std::path::{Path, PathBuf};
 /// naming every file would need editing whenever one is added, and the ones
 /// worth bounding are the ones that were furthest out when the ratchet landed.
 const RATIO_CEILING: [(&str, u64); 9] = [
-    ("vigia-core/src/change.rs", 192),
-    ("vigia/src/input.rs", 240),
-    ("vigia/src/app.rs", 246),
-    ("vigia-core/src/history.rs", 233),
-    ("vigia/src/render.rs", 194),
-    ("vigia/src/glyphs.rs", 191),
-    ("vigia/src/lib.rs", 185),
-    ("vigia/src/config.rs", 163),
-    ("vigia/src/view.rs", 159),
+    ("vigia-core/src/change.rs", 47),
+    ("vigia/src/input.rs", 65),
+    ("vigia/src/app.rs", 80),
+    ("vigia-core/src/history.rs", 48),
+    ("vigia/src/render.rs", 53),
+    ("vigia/src/glyphs.rs", 63),
+    ("vigia/src/lib.rs", 69),
+    ("vigia/src/config.rs", 54),
+    ("vigia/src/view.rs", 44),
 ];
 
 /// Comments carrying a date or the narrative of a change.
@@ -75,7 +75,7 @@ const SESSION_CONTEXT_CEILING: usize = 0;
 /// `//!` is deliberately outside it. A module header is the one place RFC 505
 /// asks for length — it documents a file rather than an item, so there is no
 /// item for it to be longer than.
-const DOCBLOCK_LINES_CEILING: usize = 70;
+const DOCBLOCK_LINES_CEILING: usize = 67;
 
 /// Comments citing a tracker issue or pull request, as a ceiling that may only
 /// fall.

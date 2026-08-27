@@ -1,27 +1,4 @@
 //! The budgets from `SPEC.md` §3, as gates rather than aspirations.
-//!
-//! The gates come in two tiers, because absolute wall-clock thresholds are a
-//! weak instrument on a shared CI runner and a strong one on a known machine.
-//!
-//! **Structural gates** compare the engine against itself: bytes read for one
-//! file versus all of them, time to diff one versus time to diff every one.
-//! They are ratios, so they are hardware-independent, they take no slack, and
-//! they are what actually catches the regression that matters. Making the frame
-//! path re-diff everything is a 5x wall-clock change that a generous absolute
-//! threshold would wave through, and a 100x ratio change that these cannot.
-//!
-//! **Absolute gates** hold the wall clock to the numbers in `SPEC.md`. They run
-//! only in release, because the budgets were set against optimised code, and
-//! they accept a slack multiplier so a hosted runner's variance does not read
-//! as a code regression. A developer machine runs them with no slack at all.
-//!
-//! **I10 is the one budget that is not here**, and the pointer is worth a line
-//! so nobody concludes it is ungated. Every gate in this file is either a ratio
-//! between two fixtures or a duration; I10's budget is a **count** (256 paths,
-//! a 120s window) with neither shape, and the fixture that puts it under
-//! pressure is ten thousand paths rather than two worktrees. It lives in
-//! `tests/history.rs`, named for the invariant, and `SPEC.md` §3's proof column
-//! names that file the way I6's names `crates/vigia/tests/legibility.rs`.
 
 mod support;
 
@@ -45,9 +22,6 @@ const I7_STARTUP: Duration = Duration::from_millis(50);
 const I9_FRAME: Duration = Duration::from_millis(16);
 
 /// Files in the large fixture, and lines in each.
-///
-/// 100 x 500, rewritten line for line, is 50k removed plus 50k added: the
-/// 100k-line diff I4 is written against.
 const FILES: usize = 100;
 const LINES: usize = 500;
 
@@ -69,17 +43,9 @@ fn changes_of(worktree: &Worktree) -> Vec<FileChange> {
 }
 
 /// Frames discarded before sampling begins.
-///
-/// I9 is a claim about *steady state*, so the cold path is out of scope by
-/// definition: the first frames after a fixture is built pay for a cold page
-/// cache and first-touch of every code path. Measured here, the cold frames run
-/// to roughly 40ms against a warm p99 of 3ms.
 const WARMUP_FRAMES: usize = 50;
 
 /// Frames actually sampled.
-///
-/// A percentile needs enough samples to be one. At 30, nearest-rank p99 *is*
-/// the maximum, so the gate would report the worst frame and call it a tail.
 const SAMPLED_FRAMES: usize = 250;
 
 /// Files in the small fixture, which differs from the large one only in count.
@@ -124,12 +90,6 @@ fn cost_of_a_one_line_edit(scratch: &Scratch, files: usize) -> FrameStats {
 fn a_frame_recomputes_only_what_changed() {
     // I2a, and the counts are exact rather than ratios, so this gate is
     // hardware-independent and takes no slack.
-    //
-    // Measured across two fixtures whose per-file content is identical and
-    // whose file counts differ 25-fold, because the tempting form of this gate
-    // compares one file against the sum of all files, and that form passes
-    // against the exact regression it is written to catch: when every call
-    // inflates by N the sum inflates by N too, and the ratio never moves.
     let few = Scratch::large_diff("i2a-few", FEW_FILES, LINES);
     let many = Scratch::large_diff("i2a-many", FILES, LINES);
 
@@ -360,12 +320,6 @@ fn a_real_frame_holds_the_frame_budget() {
     // I9 through the type a monitor drives, which the gate above does not touch:
     // it times the primitives, and a frame path with no memory of the previous
     // frame is not a frame shape that exists once I2a is in.
-    //
-    // "Under continuous edits" is taken literally. One line is rewritten before
-    // every frame, so each frame revalidates ninety-nine files and recomputes
-    // the one that moved, which is the steady state the budget describes. The
-    // edit is deliberately outside the timed region: it stands in for the agent
-    // in the other pane, and its cost is not ours.
     let scratch = Scratch::large_diff("i9-frame", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -404,9 +358,6 @@ fn a_real_frame_holds_the_frame_budget() {
     // unsettled for the whole settle margin, so every frame inside that window
     // recomputes it whether or not anything is still being edited. Counting
     // would pass against a test that edited once and then sat still.
-    //
-    // What cannot be manufactured by the margin is the *content*: the frame has
-    // to be handing back the last edit actually made.
     let last = marker.borrow().clone();
     let shared = frame
         .files()
@@ -445,23 +396,12 @@ fn a_real_frame_holds_the_frame_budget() {
 }
 
 /// Lines between one change and the next in the I2b fixtures.
-///
-/// Comfortably over twice `CONTEXT`, so each change gets a hunk of its own and
-/// the gates below can name one. `Scratch::sparse_edits` asserts the same thing
-/// rather than trusting this constant to stay right.
 const HUNK_SPACING: usize = 20;
 
 /// Hunks one screenful of the sparse fixture shows.
-///
-/// Each hunk here is three context lines, a removal, an addition and three more
-/// context, under a header: nine rows. Three of them is an ordinary terminal.
 const WINDOW_HUNKS: usize = 3;
 
 /// The two file sizes I2b's claim is measured across.
-///
-/// Ten-fold, and identical wherever they overlap, because `generated` writes the
-/// same line at the same index whatever the file's length. That is what makes
-/// the comparison like for like.
 const SMALL_FILE: usize = 500;
 const LARGE_FILE: usize = 5_000;
 
@@ -483,12 +423,6 @@ fn hunk_bytes(frame: &mut Frame, path: &str, ordinal: usize) -> u64 {
 /// What re-highlighting cost after one line changed, and what it should have.
 struct Rehighlight {
     /// What the **first** window cost, with nothing to reuse.
-    ///
-    /// Carried because the edit lands in hunk 1 of both fixtures, at the same
-    /// offset from the top of each, so a design that parsed forward from the
-    /// start of the file would cost the same in both and [`Rehighlight::cost`]
-    /// alone could not tell. A cold window is where a cost that follows the
-    /// file rather than the screen becomes visible.
     first: HighlightStats,
     cost: HighlightStats,
     /// Bytes of the single hunk the edit landed in.
@@ -498,10 +432,6 @@ struct Rehighlight {
 }
 
 /// Settle, draw a window, edit one line inside its middle hunk, and draw again.
-///
-/// The edit lands at `HUNK_SPACING * 2`, which the fixture puts in hunk 1: its
-/// n-th change sits at line `n * HUNK_SPACING`, so hunk 0 holds the first and
-/// hunk 1 the second. Hunks 0 and 2 are untouched and are what "reused" counts.
 fn cost_of_rehighlighting_a_one_line_edit(scratch: &Scratch) -> Rehighlight {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -536,12 +466,6 @@ fn cost_of_rehighlighting_a_one_line_edit(scratch: &Scratch) -> Rehighlight {
 fn only_the_hunk_that_changed_is_reparsed() {
     // I2b, and the counts are exact rather than ratios, so this gate is
     // hardware-independent and takes no slack.
-    //
-    // The fixture matters as much as the assertions. `large_diff` rewrites every
-    // line and so produces exactly **one** hunk per file, where reusing nothing
-    // and reusing everything are indistinguishable. `sparse_edits` gives a file
-    // many small hunks, which is the only shape in which "only the one that
-    // changed" is a claim at all.
     let scratch = Scratch::sparse_edits("i2b-hunks", 1, SMALL_FILE, HUNK_SPACING);
     let after = cost_of_rehighlighting_a_one_line_edit(&scratch);
 
@@ -646,12 +570,6 @@ fn reparsing_after_an_edit_costs_the_same_however_large_the_file() {
 fn a_redraw_inside_the_settle_margin_reparses_nothing() {
     // The gate that decides how a hunk is identified, and the reason the cache
     // is keyed on content rather than on a counter the frame path bumps.
-    //
-    // For two seconds after a write the frame path cannot prove the file
-    // unchanged, so it re-diffs it on **every** frame by design. A highlighter
-    // keyed on "did the frame recompute this diff" would therefore re-parse
-    // every hunk of an edited file, every frame, for the whole margin. Content
-    // keying costs a hash and is exact.
     let scratch = Scratch::sparse_edits("i2b-margin", 1, SMALL_FILE, HUNK_SPACING);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -751,13 +669,6 @@ fn a_hunk_scrolled_back_to_is_not_re_parsed() {
     // The invariant `RETAINED_HUNKS` exists for, and the one the viewport bound
     // above cannot express: it says the cache does not grow, and a cache of size
     // zero satisfies that perfectly.
-    //
-    // Highlighting is forward-only, so a hunk re-entered from *below* is parsed
-    // from its first line down to the visible row. Sweeping on exit meant a
-    // reader who scrolled back over what they had just read paid that walk
-    // again, with the answer having been in memory one frame earlier: measured
-    // over 120-row hunks of Japanese, **26.39ms** against a 16ms budget, once
-    // per file.
     let scratch = Scratch::sparse_edits("i2b-scrollback", 1, LARGE_FILE, HUNK_SPACING);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -869,15 +780,6 @@ fn frame_time_distribution() {
 fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
     // The other half of `a_hunk_scrolled_back_to_is_not_re_parsed`, and the one
     // that decides whether retention is *correct* rather than merely fast.
-    //
-    // This is the monitor's whole workload: the agent in the other pane is
-    // writing while the reader scrolls. So a retained parse is a parse of
-    // content that may no longer exist, and handing it back unchecked would show
-    // colours for a version of the file nobody has. Reuse must lose to the
-    // digest, exactly as it does for a hunk that never left the screen.
-    //
-    // The failure this rules out is silent and permanent: nothing on screen says
-    // the colours are stale, and the entry stays wrong until it is evicted.
     let scratch = Scratch::sparse_edits("i2b-scrollback-edit", 1, LARGE_FILE, HUNK_SPACING);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -934,10 +836,6 @@ fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
 }
 
 /// A distribution of `slow` samples among `n`, the rest at 1ms.
-///
-/// Ten samples, because nearest-rank p99 over ten *is* the maximum, so one slow
-/// sample moves the tail and leaves the median alone. That is the shape the whole
-/// retry exists for, in the smallest fixture that can express it.
 fn spiked(n: usize, slow: usize) -> Samples {
     let mut samples = Samples::new(n);
     for at in 0..n {
@@ -951,9 +849,6 @@ fn spiked(n: usize, slow: usize) -> Samples {
 }
 
 /// Every sample slow on the wall clock, and `cpu` of CPU time each.
-///
-/// The pair is the whole subject of the gates below: a stall is a wall clock nobody
-/// can explain from the work that was done.
 fn every_sample(wall: u64, cpu: u64) -> impl FnMut() -> (Duration, Duration) {
     move || (Duration::from_millis(wall), Duration::from_millis(cpu))
 }
@@ -1032,10 +927,6 @@ fn the_cpu_clock_tells_waiting_from_working() {
     // the whole loop and the gate measured two hundred nanoseconds of nothing. A
     // wall-clock deadline with an opaque accumulator is busy for as long as it says
     // whatever the optimiser does.
-    //
-    // Eighty milliseconds because of the coarsest clock in play: `GetThreadTimes` is
-    // quantized to the scheduler tick, about 15.6ms, so a few milliseconds of work
-    // reports zero CPU on Windows and would say nothing about the clock.
     let busy = Duration::from_millis(80);
     let (wall, cpu) = time_cpu(|| {
         let deadline = std::time::Instant::now() + busy;
@@ -1066,10 +957,6 @@ fn the_cpu_clock_tells_waiting_from_working() {
 }
 
 /// `n` samples of `ms` each, with no spike at all.
-///
-/// The shape the three gates above never build: they vary *what* a sample costs
-/// and hold the count at ten. The defect [#269](https://github.com/breferrari/vigia/issues/269)
-/// records rides on the **count**, so a fixture that cannot vary it cannot see it.
 fn flat(n: usize, ms: u64) -> Samples {
     let mut samples = Samples::new(n);
     for _ in 0..n {
@@ -1089,13 +976,6 @@ fn a_long_round_slightly_over_budget_on_work_is_not_excused_by_accumulated_noise
     // scheduling
     // noise out-accumulated the thing it had to explain and every long round
     // drifted toward acquittal regardless of what the code did.
-    //
-    // Here: 250 samples of 12ms wall against a 10ms budget, each carrying 0.1ms of
-    // perfectly ordinary off-CPU time. The deficit sums to 25ms, which is more than
-    // the 2ms a single sample went over by, and **nothing here is a stall** — the
-    // process was running for 11.9ms of every 12ms. Under the old comparison this
-    // acquitted. It is the exact shape #261's prose gate hit at 250 samples, where
-    // a 108ms deficit excused 21.76s of genuine parse.
     holds_p99_rounds(
         "a long round that is simply slow",
         Duration::from_millis(10),

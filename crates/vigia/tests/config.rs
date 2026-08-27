@@ -1,29 +1,9 @@
 //! `SPEC.md` §11.2 **B6** as amended: the pane a reader starts with.
-//!
-//! Every gate here is one line of [#309](https://github.com/breferrari/vigia/issues/309)'s
-//! own gate list, and the list is worth restating because it is what the ruling
-//! promised rather than what the parser happens to do: no file is today's pane;
-//! each key sets the state the pane starts in and the key still toggles from
-//! there; a file that does not parse names its line and is refused **before** the
-//! terminal is taken; absent is not an error and unreadable is; `rail = on` below
-//! 134 columns keeps the request; and `follow` is not a key.
-//!
-//! **A separate binary from `palette.rs` for that file's own reason.** It gates the
-//! *theme* file's discovery and grammar, and the two files share both, so a gate
-//! living there would be answering the question through the wrong subject. What is
-//! shared is the machinery; what is gated here is the ruling.
-//!
-//! The home directory is placed through the `lookup` both `from_env` functions
-//! take, not through the process environment, so nothing here needs a lock and
-//! nothing here can leak into another binary.
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
 
 /// A home directory holding a config file, or holding none.
-///
-/// Named per test so two of them cannot collide in the temp directory, which is
-/// `palette.rs`'s own shape one file over.
 fn home_with(name: &str, contents: Option<&str>) -> std::path::PathBuf {
     let home = std::env::temp_dir().join(format!("vigia-config-{name}"));
     let dir = home.join(".config").join("vigia");
@@ -72,23 +52,6 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 }
 
 /// What a config file can reach on the chrome, read off a drawn one.
-///
-/// **Through `Chrome` rather than through `App`'s fields**, which are private on
-/// purpose: what the ruling promises is a *pane*, and a gate reading the struct
-/// would pass against a shell that stored the settings and drew none of them.
-///
-/// **`following` is in the tuple**, without which `App::configured`'s
-/// `..Self::new()` is ungated: mutating it to `..Self::default()` flips
-/// `following` to false and reddens nothing, so a config file would
-/// silently killed I5 for everyone who wrote one.
-///
-/// **`single` is deliberately absent, because `Chrome` has no such field.** It
-/// reaches the walk rather than the chrome, so no comparison of chromes can see
-/// it and a gate claiming otherwise would be describing itself wrongly. The gate
-/// that covers it drives a gesture and reads the resolved position.
-///
-/// It takes no area because `App::chrome` is width-independent; taking one and
-/// ignoring it reads as a sweep and is not.
 fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
@@ -559,12 +522,6 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
     // `palette!` macro, and gates it anyway at
     // `palette.rs::every_key_the_struct_has_is_a_key_a_file_can_set`; three keys
     // do not earn a second macro, so this is the gate without it.
-    //
-    // **The struct literal is the mechanism.** It names every field, so adding one
-    // stops this file compiling until somebody decides whether it is configurable,
-    // which is the compile-time half. The loop is the other half: every key in
-    // `KEYS` has to be one `parse` accepts, so a name that drifts out of
-    // `Config::set` is red rather than a message advertising a key nothing takes.
     let mut source = String::new();
     for key in vigia::config::KEYS {
         source.push_str(key);
@@ -607,18 +564,6 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
 }
 
 /// **`staged = on` in the file reaches the frame, not just the shell.**
-///
-/// The other three keys decide how rows the frame already holds are *arranged*,
-/// so setting them on `App` is the whole of what they need. `staged` decides what
-/// the frame **walks**, and `vigia_core::Frame::show_staged` is what tells it —
-/// so a shell configured from a file has to say so before its first advance or
-/// the key sets a flag nothing acts on and the reader sees the pane they were
-/// trying to change.
-///
-/// It is the same defect `Action::ToggleStaged` had against the keypress, on the
-/// path that has no keypress to trigger it, which is why it is worth a gate of its
-/// own rather than an assertion inside one: nothing about the toggle's own test
-/// reaches this.
 #[test]
 fn a_configured_staged_run_is_walked_on_the_first_frame() {
     let scratch = support::Scratch::new("config-staged");

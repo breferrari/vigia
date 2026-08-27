@@ -1,15 +1,4 @@
 //! What the palettes actually put on the screen.
-//!
-//! `tests/colour.rs` covers the depth ladder as arithmetic, over styles that never
-//! reach a buffer. This covers the other end: a real [`View`] through the real
-//! renderer, read back **cell by cell**, because the two properties #11 turns on
-//! are both invisible to a snapshot. `TestBackend`'s `Display` writes symbols and
-//! drops styles, so a row wash and a bar are exactly the kind of change that can
-//! ship broken under a green snapshot suite.
-//!
-//! A separate file from `render.rs` rather than more of it: that file is about
-//! what the body *draws*, this is about what the palette *colours*, and the two
-//! ask different questions of the same buffer.
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -23,10 +12,6 @@ use vigia::{
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// Buckets a sparkline draws on the panes this file renders at.
-///
-/// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**. That
-/// constant is the resolution the shell projects *from*; what a row draws is
-/// the rung its pane affords, which is twelve at every width here.
 const DRAWN_BUCKETS: usize = 12;
 
 /// The heat strip's slice, restated rather than imported: a test sharing the
@@ -39,11 +24,6 @@ const HEAT_SLICE: &str = "■";
 const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
 /// Every stop of the sparkline's ramp, quietest first, with the key it came from.
-///
-/// [`heat_stops`]' sibling and named for the same reason that one is: adding a
-/// stop to the theme should be one edit here rather than three, and a missed one
-/// makes a gate quietly stop seeing a colour rather than fail. Three sites in
-/// this file spelled the triple out before it had a name.
 fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
     [
         ("spark", theme.spark),
@@ -87,9 +67,6 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 }
 
 /// A file, a hunk, and one line of each kind, in a known order.
-///
-/// The row indices below are counted from this: 0 is the file heading, 1 the hunk
-/// header, then context, added, removed.
 fn three_kinds() -> View {
     View {
         landed: false,
@@ -141,10 +118,6 @@ fn three_kinds() -> View {
 }
 
 /// Row 0 is the header, so the body's first row is 1 and these are offset by it.
-///
-/// Written as constants and asserted once, in [`the_fixture_lands_where_these_say`],
-/// rather than recomputed per gate: a test that derived the layout would be a
-/// second implementation of it agreeing with itself.
 const HEADING: u16 = 1;
 const CONTEXT: u16 = 3;
 const ADDED: u16 = 4;
@@ -177,11 +150,6 @@ fn backgrounds(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
 
 /// The same, from a given column, so a gate can ask about the row **without** the
 /// pane's leading cell.
-///
-/// **That cell stopped being part of the wash's question**: it carries §5.1's
-/// left bar, which is a background on a blank column of margin and degrades on
-/// its own terms. A gate asking *does this palette wash* has to skip it or it
-/// is asking two questions and failing the one it did not mean.
 fn backgrounds_from(backend: &TestBackend, y: u16, from: u16) -> Vec<Option<Color>> {
     let buffer = backend.buffer();
     (from..buffer.area.width)
@@ -265,9 +233,6 @@ fn the_sigil_keeps_its_own_colour_on_the_wash() {
     // front) reads as a solid block: it takes the one glyph carrying the diff
     // signal and turns it into a background. The mockup draws its bar as a sliver
     // *beside* a green `+`, not as a recolouring of it.
-    //
-    // So the sigil keeps the diff colour and sits on the row's wash like every
-    // other cell in the row.
     let dark = Theme::dark().resolve(Depth::Truecolor);
     let backend = draw(60, 12, &three_kinds(), dark);
     let buffer = backend.buffer();
@@ -300,9 +265,6 @@ fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
     // depth by contract, because a wash has to assume a background and that
     // palette's whole point is that it assumes none. Overriding the two keys is
     // the reader supplying the assumption themselves.
-    //
-    // Restated here rather than read out of `README.md`. A test that parsed the
-    // file would pass on a README that had quietly stopped saying this.
     let theme = vigia::theme::parse(
         "base        = ansi\n\
          added_row   = on #1b3d29\n\
@@ -340,18 +302,6 @@ fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
     // built-in's `_bar` keys as unset, which is how §5.1's *tinted row with a
     // coloured left bar* shipped as the tint alone for three phases: the key
     // existed, the renderer consumed it, and a gate held it empty.
-    //
-    // The refusal it encoded rested on *the bar has no terminal equivalent that
-    // does not spend a column I6 forbids*, which stopped being true when
-    // [#119](https://github.com/breferrari/vigia/issues/119) gave the pane a
-    // margin. So the gate inverts, and it inverts on the premise rather than on
-    // taste.
-    //
-    // **Background, never foreground**, which is the property that makes it free:
-    // the bar lands on a blank column of that margin, so it recolours no glyph and
-    // needs no contrast against one. A foreground here would be a colour on a
-    // space, which is nothing, and would mean the element had quietly gone back to
-    // riding the sigil.
     for (name, theme) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -411,33 +361,6 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
     // in it can land a few points off the background and vanish. Reported from a
     // real terminal, where the key hints, the readouts, the empty state and the
     // line numbers were all invisible at once.
-    //
-    // The rule is about *text*, not about the colour. `heat_track` is deliberately
-    // still colour 8 and is exempt by name: a track is a solid block that should
-    // sit just above the background, which is exactly what the colour is for.
-    //
-    // **The exemption is by omission, whatever a comment claiming otherwise
-    // says.** "The exemption is listed rather than inferred, so adding a field
-    // cannot join it by accident" lists the *readable* side, so
-    // every field not in that array was exempt by default. `spark_track` joined
-    // that way in [#78](https://github.com/breferrari/vigia/issues/78): a track
-    // drawn as one stroke rather than a solid block, taking the colour this gate
-    // exists to keep off anything a reader has to see, and no gate said a word.
-    // Whether that value is right is [#60](https://github.com/breferrari/vigia/issues/60)'s
-    // question; that it was never a decision is this gate's.
-    //
-    // **So the partition is made by the compiler.** Destructuring `Theme` with no
-    // `..` rest pattern means a new field cannot reach this gate unclassified.
-    // Verified by adding one: the three palette constructors fail first with
-    // `E0063: missing field`, and once those are filled in this file fails with
-    // `E0027: pattern does not mention field`, naming it. So the author is made
-    // to say which side it is on, after doing the work they had to do anyway.
-    //
-    // Strictly better than the field count this briefly used, which could be
-    // silenced by bumping a number, and available only because every field is
-    // `pub`. What is *not* available is walking the styles by key string:
-    // `Theme::KEYS` is public and the values behind those names are not, which is
-    // why this is a destructure rather than a loop.
     let ansi = Theme::ansi();
     let Theme {
         // Read by a reader, so none of these may be colour 8.
@@ -450,15 +373,6 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // Text, so it is checked with the rest, and the one field here that
         // carries a modifier as part of its meaning: `path_hover` underlines,
         // which is the whole of what keeps it apart from the recency ladder.
-        //
-        // **It is the quietest of the four rather than the brightest**. It
-        // holds `bar_hover`'s value, which on this palette is `Gray` and
-        // therefore `path_cold`'s foreground **exactly**, so the modifier is
-        // not merely the last separation left, it is the only one. That is why
-        // it is still checked here: `Gray` is not colour 8 and must not become
-        // it, and `a_palette_never_draws_text_in_colour_8` is about the
-        // foreground alone. The modifier rides along untested here and is gated
-        // in `tests/render.rs`, where the row is actually drawn.
         path_hover,
         kind,
         hunk,
@@ -580,15 +494,6 @@ fn the_ansi_palette_draws_no_wash_at_any_depth() {
     // The ruling that keeps palette and depth genuinely independent axes. A wash
     // has to assume a background; `ansi` resolves to the reader's own scheme and so
     // assumes none, and it refuses at truecolour just as firmly as at sixteen.
-    //
-    // **Read past the pane's leading cell, because the bar is not the wash**. A
-    // wash has to be a *tint*, and a tint is the thing that cannot be chosen
-    // without knowing the background behind it. The bar is a **saturated block
-    // on a blank column**, which is what the mockup draws and what needs no
-    // such knowledge, so this palette can carry one and the loss §11.1 records
-    // at sixteen colours is smaller than it was. The two are separate keys
-    // precisely so they can degrade apart, and a gate that read them together
-    // would report a ruling it was not asked about.
     for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let backend = draw(60, 8, &three_kinds(), Theme::ansi().resolve(depth));
         for row in [CONTEXT, ADDED, REMOVED] {
@@ -640,9 +545,6 @@ fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
     // change that must not touch that. Asserted by rendering the same view through
     // a palette that washes and one that does not and comparing **symbols**: if the
     // wash ever consumed a column, this is what fails.
-    //
-    // Swept across widths rather than asserted at one, because a layout only breaks
-    // at the width where something stops fitting.
     for width in [40, 60, 80, 120] {
         let washed = draw(
             width,
@@ -666,21 +568,9 @@ fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
 }
 
 /// The pane the graded fixture is drawn on.
-///
-/// **Wide enough to take the widest heat rung**, which is what keeps
-/// [`graded_heat`]'s premise true: at any narrower rung the renderer sums
-/// adjacent source slices, and the four graded values would arrive as two summed
-/// ones with shares nobody chose. It was 120 columns while the source resolution
-/// and the widest rung were the same number
-/// ([#161](https://github.com/breferrari/vigia/issues/161) separated them).
 const GRADED_PANE: u16 = 140;
 
 /// A file whose heat profile has a slice in each band.
-///
-/// Drawn at [`GRADED_PANE`], so no re-projection happens and the drawn slices are
-/// the source slices. The busiest is 12, so 8 is hot (two thirds), 4 is warm (one
-/// third) and 1 is low, which puts one slice in every band by construction rather
-/// than by luck.
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
     heat[0] = HeatBucket {
@@ -771,12 +661,6 @@ fn each_slice_lands_in_the_band_its_share_puts_it_in() {
     // one half leaves the fixture with three distinct colours either way, so the
     // count is satisfied while every slice is in the wrong band. Only asserting
     // *which* band a given share falls into can tell the two apart.
-    //
-    // The fixture's busiest slice is 12, so the shares are 12, 7, 4 and 3 against
-    // it, and two of those exist only to pin a threshold. Seven is above half and
-    // below two thirds, so it is warm under the rule and hot if the hot cut slips.
-    // Three is just under a third, so it is low under the rule and warm if the warm
-    // cut slips. Without both, moving either constant leaves every gate green.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let got = heat_sequence(theme);
 
@@ -797,9 +681,6 @@ fn a_ramp_that_survives_sixteen_colours_is_still_a_ramp() {
     // ramp becomes at sixteen colours is decided by the bright-variant threshold in
     // `to_ansi16` and by nothing else. At a lower threshold all three greens land
     // on the same name and the strip stops saying anything about where the work is.
-    //
-    // Two rather than three, because sixteen names hold a normal and a bright of
-    // each hue. Collapsing to one is the failure.
     let flat = Theme::dark().resolve(Depth::Ansi16);
     let mut seen: Vec<Color> = Vec::new();
     for colour in [flat.heat_added, flat.heat_added_warm, flat.heat_added_hot] {
@@ -828,10 +709,6 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
 }
 
 /// One file whose eight buckets climb, so every stop of the ramp is on one row.
-///
-/// `peak` is the busiest bucket **anywhere on screen**, which is what the ramp is
-/// measured against, so it is set to the tallest bucket here rather than left at
-/// zero: a zero peak is the empty-store path and draws nothing but track.
 fn climbing() -> View {
     View {
         rows: vec![Row::file(FileEntry {
@@ -862,9 +739,6 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
     // cannot reach: that one holds the palette apart, this one holds that the
     // renderer spends it in the right order. A ramp whose stops were distinct and
     // applied backwards would satisfy the other gate exactly.
-    //
-    // `assets/preview.svg` has drawn this since the start, tallest brightest, and
-    // the shell drew one flat colour until #196.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let backend = draw(60, 4, &climbing(), theme);
     let buffer = backend.buffer();
@@ -926,10 +800,6 @@ fn the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them() {
     // its sparkline across five greens where the shell drew one flat colour
     // (#196). Three rather than five, because three is what `Band` distinguishes
     // and what the depth ladder can draw.
-    //
-    // Read off the resolved theme rather than off cells, which is where the heat
-    // one differs: heat has a kind-by-band cross product worth drawing through,
-    // and this is one hue at three weights.
     for (name, base) in [("dark", Theme::dark()), ("light", Theme::light())] {
         for depth in [Depth::Truecolor, Depth::Ansi256] {
             let theme = base.resolve(depth);
@@ -970,19 +840,6 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     // already separates them for a reader. Colour is what separates them for a
     // reader who is *glancing*, which is the whole of `SPEC.md` §5, and it has to
     // survive the ladder rather than only the palette it was authored in.
-    //
-    // Against `chrome_dim` as well, because that is the one other style that
-    // draws a `·`-weight mark on a chrome line: two dim greys carrying two
-    // meanings is the collision `Theme::bar` records being hit twice already.
-    //
-    // **`Depth::None` is left out on purpose and it is the interesting one.**
-    // There every foreground resolves to `Color::Reset`, so this property is
-    // false by construction: a reader on `NO_COLOR` or `TERM=dumb` has no colour
-    // channel at all. That depth is exactly why the track is `_` rather than the
-    // ramp's `▁`, because the glyph is then the only thing left carrying the
-    // distinction, and `a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all`
-    // is where that is asserted. The depths are listed rather than iterated so
-    // the omission is visible instead of silent.
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -1020,17 +877,6 @@ fn a_sparkline_track_is_never_the_colour_behind_it() {
     // [#78](https://github.com/breferrari/vigia/issues/78) exists to remove: the
     // element would have looked exactly as broken as before, on the one frame it
     // was added for.
-    //
-    // Against the background rather than against `spark`, because those are two
-    // different failures and the gate above catches only the second. `ansi` is
-    // exempt, and stated rather than skipped: it names no background at all,
-    // which is that palette's whole contract.
-    //
-    // `heat_track` and `bar_track` fail this today and are deliberately not
-    // asserted here. Their truecolour values are read off `assets/preview.svg`
-    // and are right, so the defect is in what sixteen colours do to them rather
-    // than in the value, which is a different repair from this one and is filed
-    // separately.
     for (name, base, behind) in [
         ("dark", Theme::dark(), Color::Black),
         ("light", Theme::light(), Color::White),
@@ -1055,32 +901,6 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
     // The two are drawn on the same row, so if a path style and the track style
     // ever resolve alike, that helper counts a file name as track cells and a
     // reader sees one dim underscore run where there are two things.
-    //
-    // **`light` at `Ansi16` is exempt, and enumerating why is the point.** That
-    // rung has exactly four greys and this palette has spent all of them. The
-    // occupants that matter here, since a `_` on a file row is what the track can
-    // be confused with: `White` is the pane, `Black` is `path` and `path_live`,
-    // `Gray` is `path_cold` **and `gutter`**, `DarkGray` is `chrome_dim`. There
-    // is no fifth for a track to take, so the collision is arithmetic rather than
-    // a choice, and moving the track onto `DarkGray` only trades it for the
-    // `chrome_dim` one.
-    //
-    // Not an exhaustive census of the rung and it does not need to be: `Black`
-    // also holds `context`, `DarkGray` also holds `bar` and `comment`, and
-    // `White` also holds `heat_track` and `bar_track`, which is
-    // [#98](https://github.com/breferrari/vigia/issues/98) showing up here of all
-    // places. None of those is drawn as a `_` on a file heading row, which is the
-    // only confusion this gate is about.
-    //
-    // Left where it is because the two collisions are not equally bad: a path's
-    // underscores sit inside a word in the left column, the track is eight
-    // contiguous ones in a reserved slot, and nothing in the suite reads a track
-    // under this palette (`Theme::default` is `ansi`, where the track is
-    // `DarkGray` and `path_cold` is `Gray`).
-    //
-    // `gutter` was missing from the list for one round, which mattered less for
-    // the count than for the staleness check below: keyed to `path_cold` alone it
-    // would have called the exemption stale while `gutter` still held `Gray`.
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -1119,19 +939,6 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
 
     // The exemption is a measurement, not a licence: if the palette ever frees a
     // grey, this fails and the `continue` above comes out.
-    //
-    // **The exact negation of the one comparison that is skipped**, which is
-    // narrower than it was and had to become so. While the `continue` skipped the
-    // whole rung, a disjunction over `path_cold` and `gutter` was right, because
-    // either one holding `Gray` kept some skipped comparison live. Now that only
-    // the `path_cold` comparison is skipped, `gutter` is not among the three
-    // fields the loop compares at all, so accepting it as evidence would keep the
-    // exemption alive after the thing it exempts had gone: move `path_cold` off
-    // `Gray` and the skipped comparison would pass, the `continue` would be dead
-    // weight, and this would stay green on `gutter`'s account.
-    //
-    // The narrowing and the disjunction were landed in different rounds, which is
-    // how the two ended up disagreeing about which fact keeps the exemption alive.
     let light = Theme::light().resolve(Depth::Ansi16);
     assert_eq!(
         light.spark_track.fg, light.path_cold.fg,
@@ -1147,11 +954,6 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     // ramp's floor for the track: the heat strip may draw a live slice and its
     // track from one `█` because colour is its only channel, and here the
     // sparkline has no colour channel either, so the glyph has to carry it.
-    //
-    // Read by symbol alone, which is correct exactly here and nowhere else:
-    // every other gate in this suite matches symbol and colour together because
-    // two elements can share a glyph. At this depth matching on colour would
-    // match everything.
     let mut view = three_kinds();
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [
@@ -1215,11 +1017,6 @@ fn a_theme_file_can_set_the_sparkline_track() {
     // `every_key_the_struct_has_is_a_key_a_file_can_set` asserts that shape. What
     // that cannot assert is that a *new* key reaches the field a reader meant,
     // since it only checks each key is accepted.
-    //
-    // Worth its own gate for this key rather than in general: `README.md` lists
-    // the theme keys by hand and omitted this one until an audit found it, so a
-    // reader following the README could not reach it at all. A parse test is what
-    // makes the documented key and the drawn colour the same thing.
     let theme = theme::parse("base = dark\nspark_track = #ff00ff\n").expect("parses");
     assert_eq!(
         theme.spark_track.fg,
@@ -1543,10 +1340,6 @@ fn a_theme_is_resolved_to_the_depth_it_will_be_drawn_at() {
 }
 
 /// A home directory holding a theme file, and an environment that points at it.
-///
-/// The lookup is injected rather than the process environment being touched,
-/// because `cargo test` runs these on threads of one process and `set_var` is both
-/// racy and, since Rust 2024, `unsafe`.
 fn home_with(name: &str, contents: Option<&str>) -> std::path::PathBuf {
     let home = std::env::temp_dir().join(format!("vigia-theme-{name}"));
     let dir = home.join(".config").join("vigia");
@@ -1701,13 +1494,6 @@ fn the_ramp_collapses_to_two_stops_where_it_must_and_says_so_in_the_palette() {
 }
 
 /// The reference background each truecolour palette is designed against.
-///
-/// **A terminal does not tell this program its background**, which is why the
-/// `ansi` palette exists and why `theme.rs` opens by saying a tint has to assume
-/// one. So this is an assumption, stated rather than smuggled: it is the
-/// background `assets/preview.svg` paints and the one each palette's greys were
-/// picked against. A colour that vanishes on the background it was designed for
-/// has no chance on any other.
 const DARK_PANE: (u8, u8, u8) = (0x0d, 0x11, 0x17);
 const LIGHT_PANE: (u8, u8, u8) = (0xff, 0xff, 0xff);
 
@@ -1731,13 +1517,6 @@ fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
 }
 
 /// The two truecolour palettes and the pane each is authored against.
-///
-/// **Data only, and deliberately not a shared assertion.** Two gates enumerate
-/// this same triple and their bodies make different claims: one is about all three
-/// tracks against the pane, the other about the bar's marks across every row the
-/// bar crosses. Merging the gates would let one claim's failure read as the
-/// other's, so only the enumeration is shared, which carries no rationale of its
-/// own.
 fn palettes() -> [(&'static str, Theme, (u8, u8, u8)); 2] {
     [
         ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
@@ -1750,12 +1529,6 @@ fn palettes() -> [(&'static str, Theme, (u8, u8, u8)); 2] {
 }
 
 /// The channels of a truecolour value, named so a failure says which one.
-///
-/// **One extractor rather than one per field.** A second copy was written for
-/// backgrounds when [`a_bar_track_is_visible_on_every_row_it_crosses`] landed, and
-/// the two differed only in the field read and the noun in the panic. The washes
-/// this file compares against already arrive as a `Color` from [`wash_of`], so a
-/// background extractor was never needed at all.
 fn channels_of(colour: Color, which: &str) -> (u8, u8, u8) {
     match colour {
         Color::Rgb(r, g, b) => (r, g, b),
@@ -1769,11 +1542,6 @@ fn rgb_of(style: ratatui::style::Style) -> (u8, u8, u8) {
 }
 
 /// The floor a mark meant to be *seen but subordinate* has to clear.
-///
-/// Well under WCAG's 4.5:1 for text, deliberately: none of these is text, and a
-/// track that competed with its own thumb would break the ruling that the track
-/// is context and the thumb is the reading. What it rules out is the case that
-/// actually shipped, which is not a subtle colour but an **absent** one.
 const TRACK_FLOOR: f64 = 2.0;
 
 #[test]
@@ -1785,17 +1553,6 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
     // `bar` at 6.15:1. The light palette had the same defect at 1.45:1, and this
     // gate then found a third nobody had reported: the sparkline's own track at
     // 1.55:1, which is the empty bucket §5.1 rules must draw something.
-    //
-    // **The gate that existed could not see any of it.** The sparkline tests
-    // below assert a track is not the *same palette colour* as the background,
-    // which was true of every one of these while all three were invisible.
-    // Identity is not visibility, and the difference is this test.
-    //
-    // The earlier reading was that these truecolour values were right because
-    // they are read off `assets/preview.svg`, and that the defect belonged to
-    // the sixteen-colour rung. That is the picture-versus-cell-grid distinction
-    // `SPEC.md` §5.1 already draws: a 1.24:1 edge across many pixels of SVG is
-    // perceptible, and the same ratio inside one terminal cell is not.
     for (name, theme, pane) in palettes() {
         for (element, style) in [
             ("bar_track", theme.bar_track),
@@ -1837,23 +1594,6 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
 }
 
 /// The bar's track and thumb are legible on **every** row the bar crosses.
-///
-/// [`a_track_is_visible_against_the_pane_it_is_drawn_on`] checks all three tracks
-/// against the pane, and for two of them that is the whole story: the heat strip
-/// and the sparkline draw on list rows and file headings, which are never washed.
-///
-/// **The bar is the exception**. The row wash runs under the bar's own column,
-/// so on a changed row the track and the thumb sit on `added_row` or
-/// `removed_row` rather than on the pane. Every ratio in the older gate is
-/// measured against the pane, so it could not see that `#57606a` fell to
-/// **1.88:1** on an added row: a value this palette calls absent at 1.24:1 and
-/// chose 2.96:1 to escape. The bar would have drawn as a dashed line, solid on
-/// context rows and faint on the rows a reader is looking at.
-///
-/// This is the gate that would have caught it, and it is why the fix could not be
-/// the one-line widening it looks like. It asserts both halves on all three
-/// backgrounds, because a track that clears the floor by reaching its own thumb has
-/// satisfied one rule by destroying the other.
 #[test]
 fn a_bar_track_is_visible_on_every_row_it_crosses() {
     for (name, theme, pane) in palettes() {
@@ -1901,36 +1641,6 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
 }
 
 /// Every bar style says everything [`Painter::bar_cell`] reads from it.
-///
-/// The bar and the wash touching **disjoint** style fields is true of `fg` and
-/// `bg` and false overall, so it is not why the draw order does not matter: a
-/// **modifier** is a third field, `Cell::set_style` inserts one
-/// unconditionally, and `VIGIA_THEME` lets a reader put `reverse` on a row wash. The
-/// order was never free, and the reason recorded here was wrong rather than
-/// incomplete.
-///
-/// It is free now because `bar_cell` assigns rather than merges: the band's
-/// background is kept and the bar owns the symbol, the foreground and the modifier
-/// outright. `tests/render.rs::a_row_washs_modifier_never_reaches_the_scrollbar` is
-/// the gate over that, from the drawn side.
-///
-/// What is left for a palette to get wrong is the other half of that bargain, and it
-/// is what this gate now holds. `bar_cell` reads exactly two things from the style it
-/// is handed, so:
-///
-/// - **A foreground is required.** It falls back to the cell's own, which under a
-///   band is the *wash's* foreground, so a bar style without one would draw the
-///   diff's colour and still pass every contrast gate here, which measures the
-///   palette rather than the screen.
-/// - **A background is declined, not forbidden.** `bar_cell` falls back to the
-///   band's only where the style carries none, so a palette declaring one opts its
-///   own bar out of the band #239 ruled should run under it. That is a legitimate
-///   thing for a *reader's* theme to do and the wrong default to ship.
-///   `render.rs::a_bar_styles_own_background_wins_over_the_band` holds the other
-///   side, that a declared background really does draw.
-///
-/// Both are the same failure in opposite directions, a field that looks authored and
-/// is not what draws.
 #[test]
 fn every_bar_style_says_what_bar_cell_reads() {
     // **Its own enumeration, and `ansi` is why.** [`palettes`] cannot carry it:
@@ -1940,11 +1650,6 @@ fn every_bar_style_says_what_bar_cell_reads() {
     // two structurally cannot, and `ansi` is the one that matters most: it is the
     // default when nothing is detected, so leaving it out meant the shipped
     // default was compliant by luck.
-    //
-    // **Unresolved, which is stricter than resolving.** `Depth::resolve` only ever
-    // strips a background and always maps a foreground to `Some`, so a resolved
-    // palette passes both assertions more easily than the authored one. The
-    // authored values are also what a theme file writes and what a reader edits.
     let palettes = [
         ("dark", Theme::dark()),
         ("light", Theme::light()),

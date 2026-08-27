@@ -1,66 +1,7 @@
 //! This process's own resident set size, cheaply enough to read every frame.
-//!
-//! `SPEC.md` §5.1 draws a memory cell on the status bar, and the thing that had
-//! to be settled before it could ship was not what to draw but **what reading it
-//! costs**. A monitor's frame budget is 16ms (I9), and a readout that spends a
-//! meaningful slice of the budget it sits beside is worse than an absent one.
-//!
-//! ## Why this is not the reader `soak.rs` had
-//!
-//! `crates/vigia/tests/soak.rs` answered the same question first, for I3, and
-//! reached for the shell: `ps` on macOS and `tasklist` on Windows. That is right
-//! *there* and wrong here, and the difference is the sample rate. The soak takes
-//! 288 samples across a window measured in hours, so a process spawn is free.
-//! This runs once per painted frame.
-//!
-//! Measured on the reference machine, twelve spawns of
-//! `tasklist /FI "PID eq <pid>" /NH /FO CSV`: min 41.4ms, **median 42.8ms**, max
-//! 81.2ms. That is **2.7x the whole frame budget** for the read alone, before
-//! anything is diffed, highlighted or painted. No sampling interval rescues it
-//! either: the frame that pays it is still a visible hitch, and a cached value
-//! is stale by an amount the reader cannot see.
-//!
-//! So the soak keeps its subprocesses and this module does not use them.
-//!
-//! ## Why it costs no new crate
-//!
-//! Two of the three answers are `unsafe` FFI, and both go through a crate `gix`
-//! already puts in that target's graph: `libc` reaches the Apple graph through
-//! `gix-hash` to `sha1-checked` to `cpufeatures`, and `windows-sys` 0.61 reaches
-//! the Windows graph through `gix-sec`. `cargo tree -i` says so and the lock
-//! diff that added them says so louder: two edges, zero packages. `SPEC.md` §6
-//! carries the warning that nearly cost this the Windows half, which is that a
-//! dependency's cost is a fact about the lock file rather than something to
-//! recall.
-//!
-//! Linux needs neither. `/proc/self/status` is a file read.
-//!
-//! ## What it does *not* fix
-//!
-//! The number is **as of the last change**, not as of now, on every platform.
-//! This shell wakes only on a filesystem event, so a pane left open on an idle
-//! tree keeps showing whatever was true when the last write landed. Refreshing
-//! it would need a wake nothing schedules, which is the timer I1 forbids, and
-//! the escape the pulse used against the same wall does not transfer here: a
-//! filesystem event names paths and never bytes, so there is no event identity
-//! to define a magnitude against. Ruled and accepted in `SPEC.md` §5.1 rather
-//! than solved.
 
 /// Resident set size of this process in bytes, or `None` where there is no way
 /// to ask that is cheap enough to ask every frame.
-///
-/// `None` is a real answer rather than a failure: the caller draws nothing, and
-/// `SPEC.md` §11.1 makes that safe by keeping the footer's height independent of
-/// whether this cell exists. Every tier-1 target answers `Some`; a platform
-/// outside those three reports unavailable instead of guessing, for the same
-/// reason `soak.rs` prints "unavailable" for file handles off Linux rather than
-/// letting two platforms read as covered when they are not.
-///
-/// One documented entry point over four `#[cfg]` bodies, rather than four
-/// `#[cfg]`-ed public functions: the contract above is the same on every
-/// platform and is the thing a caller reads, while which syscall answers it is
-/// not. Written the other way, three of the four copies are unreachable from any
-/// given build's documentation and drift without anyone seeing it.
 pub fn resident() -> Option<u64> {
     read()
 }
@@ -160,13 +101,6 @@ fn read() -> Option<u64> {
 mod tests {
     //! Beside the code rather than in `tests/`, the way `app.rs` and `view.rs`
     //! keep theirs: this needs no repository, no terminal and no fixture.
-    //!
-    //! **It is also the only thing that executes two of the three readers.** The
-    //! reference machine is Windows, so the `unsafe` `proc_pidinfo` block and
-    //! the Linux `/proc` read are compiled here and run only in CI. A gate that
-    //! asserts a *number* rather than a return code is what makes that
-    //! difference safe: an FFI call that fills nothing still returns, and the
-    //! struct it did not fill reads as whatever was on the stack.
 
     use super::*;
 
@@ -196,10 +130,6 @@ mod tests {
         // above forever. The vault's note on reading RSS makes the same point
         // about the `tasklist` parse, which was trusted only once an injected
         // leak produced a monotonic ramp rather than a flat line.
-        //
-        // Touched page by page, not merely allocated. Every one of these
-        // platforms hands out address space lazily, so a `Vec` that is never
-        // written to costs no resident pages and this would measure nothing.
         const GROWTH: usize = 64 << 20;
         let before = resident().expect("a reader");
 

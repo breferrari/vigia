@@ -4,9 +4,6 @@ use std::fmt;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Everything that can go wrong reading a working tree.
-///
-/// Boxed inner errors keep `Result<T>` small, which matters because the change
-/// stream yields one `Result` per file and sits on the first-paint path (I4).
 #[derive(Debug)]
 pub enum Error {
     /// No git repository was found at or above the given path.
@@ -25,25 +22,13 @@ pub enum Error {
     /// The filesystem watch could not be established.
     Watch(Box<dyn std::error::Error + Send + Sync>),
     /// A blob named by the index is absent from the object database.
-    ///
-    /// A monitor must survive this rather than exit: it happens legitimately
-    /// mid-`git gc` and during a partial clone.
     MissingBlob {
         /// Repository-relative path whose blob is missing.
         path: String,
     },
     /// The filter configuration git would apply could not be assembled.
-    ///
-    /// One failure for the whole repository rather than one per file: it is the
-    /// index, the attribute globals or `core.autocrlf` that could not be read,
-    /// and none of those belongs to a path.
     FilterSetup(Box<dyn std::error::Error + Send + Sync>),
     /// One file could not be normalised the way git's clean filter would.
-    ///
-    /// Deliberately an error rather than a fallback to the raw bytes. Falling
-    /// back would put the pane straight back to drawing whole-file rewrites for
-    /// every CRLF file, with nothing anywhere saying why: the defect this
-    /// reports would return, invisibly. See `filter.rs`.
     Filter {
         /// Repository-relative path that could not be normalised.
         path: String,
@@ -54,13 +39,6 @@ pub enum Error {
 
 impl Error {
     /// A working-tree path could not be read.
-    ///
-    /// A constructor rather than a struct literal because
-    /// [`Worktree::read_worktree`](crate::Worktree) now reaches the filesystem by
-    /// three primitives and **two of them report through this variant**:
-    /// `fs::read` and `read_link` (`symlink_metadata`'s failure is folded into
-    /// the read that follows it). Both have to name the path in the same shape,
-    /// and [#18](https://github.com/breferrari/vigia/issues/18) adds a third.
     pub(crate) fn read(path: &str, source: std::io::Error) -> Self {
         Error::Read {
             path: path.to_owned(),
