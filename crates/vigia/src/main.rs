@@ -12,12 +12,9 @@ fn main() -> ExitCode {
     // run: a function handed a single argument cannot notice a second.
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
 
-    // The classification is `vigia::request_for` rather than a test on these
-    // strings, because the surface it decides is one B6 rules on and `SPEC.md`
-    // §7 wants it where a test can reach it. Saying "no such option" plainly is
-    // worth the arm: without it `vigia --colour=never` reports "not a git
-    // repository: --colour=never", which reads as a bug in the path handling
-    // rather than as an answer.
+    // The classification is `vigia::request_for` rather than a test on these strings,
+    // because the surface it decides is one B6 rules on and `SPEC.md` §7 wants it where
+    // a test can reach it.
     match vigia::request_for(&args) {
         // Before anything else happens. No terminal is taken, no repository is
         // opened, and nothing is watched, which is exactly what makes this not

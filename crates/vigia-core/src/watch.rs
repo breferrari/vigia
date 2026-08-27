@@ -48,7 +48,7 @@ pub struct Tick {
 }
 
 impl Tick {
-    /// The write that landed **last** in this tick.
+    /// The write that landed last in this tick.
     pub fn newest(&self) -> Option<&str> {
         self.paths.last().map(String::as_str)
     }
@@ -67,12 +67,9 @@ impl Burst {
     fn push(&mut self, path: String) {
         if !self.seen.contains(&path) {
             if self.seen.len() >= HISTORY_PATHS {
-                // Displace something rather than refuse this one. Refusing
-                // would eventually refuse the newest path, and losing that is
-                // losing follow mode's answer at the exact moment it had one.
-                // Which path goes is arbitrary and says so: past the cap this
-                // is a bulk operation, where no individual membership is
-                // information a reader could act on.
+                // Displace something rather than refuse this one. Refusing would
+                // eventually refuse the newest path, and losing that is losing follow
+                // mode's answer at the exact moment it had one.
                 let victim = self.seen.iter().next().cloned();
                 if let Some(victim) = victim {
                     self.seen.remove(&victim);
@@ -156,11 +153,8 @@ impl<'repo> Watcher<'repo> {
         workdir: &Path,
         options: WatchOptions,
     ) -> Result<Self> {
-        // Everything that reads the repository happens before the watch is
-        // armed, so the watcher never observes its own construction. Reading
-        // `.git/index` and the gitignore files is enough to register on
-        // backends that report reads or attribute touches, and Linux and macOS
-        // both do.
+        // Everything that reads the repository happens before the watch is armed, so
+        // the watcher never observes its own construction.
         let index = repo
             .index_or_empty()
             .map_err(|e| Error::Watch(Box::new(e)))?;
@@ -255,19 +249,11 @@ impl<'repo> Watcher<'repo> {
                     Ok(message) => {
                         self.stats.wakeups += 1;
                         match self.accept(message) {
-                            // A stop ends the wait whether or not a burst is
-                            // open. Returning the partial burst instead would
-                            // make a stop mean "one more tick, then stop",
-                            // which is neither what `Stop` documents nor what a
-                            // timeout built on it can read.
+                            // A stop ends the wait whether or not a burst is open.
                             None => return None,
                             Some(accepted) if accepted.relevant => {
                                 events += 1;
-                                // Only an event that named a file adds one. An
-                                // agent that edits and then stages ends its
-                                // burst on an index write, and letting that
-                                // blank the target would lose follow mode's
-                                // answer at the exact moment it had one.
+                                // Only an event that named a file adds one.
                                 if let Some(path) = accepted.newest {
                                     burst.push(path);
                                 }
@@ -327,10 +313,8 @@ impl<'repo> Watcher<'repo> {
             return watched_in_git_dir(rela).then_some(rela);
         }
 
-        // The mode is not cosmetic. A rule like `target/` matches directories
-        // only, and creating `target/debug/x.o` also emits an event for
-        // `target` itself. Probing that as a file finds no match, and the
-        // whole build tree leaks through.
+        // The mode is not cosmetic. A rule like `target/` matches directories only, and
+        // creating `target/debug/x.o` also emits an event for `target` itself.
         let mode = match std::fs::symlink_metadata(path) {
             Ok(meta) if meta.is_dir() => gix::index::entry::Mode::DIR,
             // Missing means deleted, and nothing is left to inspect. File is
@@ -407,7 +391,7 @@ fn watched_in_git_dir(rela: &Path) -> bool {
         return inside.peek().is_none();
     }
 
-    // `refs/heads/**`, at any depth, because a branch name may carry slashes.
+    // `refs/heads/`, at any depth, because a branch name may carry slashes.
     // A bare `refs/heads` directory event names no ref and is dropped with it.
     first == OsStr::new("refs")
         && inside.next().map(|c| c.as_os_str()) == Some(OsStr::new("heads"))
@@ -415,11 +399,8 @@ fn watched_in_git_dir(rela: &Path) -> bool {
 }
 
 /// Pure, and deliberately not inlined into [`Watcher::accept`], for the reason
-/// `SPEC.md` §7 gives: neither of the two things it decides has a reachable
-/// integration path on every platform. The separator rule is unobservable on
-/// Unix and load bearing on Windows, and the `.git` rule needs a burst that
-/// ends on an index write. A test that can only run on one platform, or only
-/// under a race, is not the gate this needs.
+/// `SPEC.md` §7 gives: neither of the two things it decides has a reachable integration
+/// path on every platform.
 fn followable(rela: &Path) -> Option<String> {
     let mut components = rela.components().peekable();
     if components.peek().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
@@ -431,11 +412,8 @@ fn followable(rela: &Path) -> Option<String> {
         if !path.is_empty() {
             path.push('/');
         }
-        // Lossy for the same reason `FileChange::path` is, and it has to be
-        // the same reason or the two would not compare equal. That both sides
-        // lose the same information is what makes them match; that they lose
-        // it at all is
-        // [#17](https://github.com/breferrari/vigia/issues/17).
+        // Lossy for the same reason `FileChange::path` is, and it has to be the same
+        // reason or the two would not compare equal.
         path.push_str(&component.as_os_str().to_string_lossy());
     }
 
@@ -523,8 +501,7 @@ mod tests {
         assert_eq!(followable(&native(&[".git", "index.lock"])), None);
     }
 
-    /// **A branch tip moving is a change the monitor must see**, and until
-    /// [#313](https://github.com/breferrari/vigia/issues/313) it did not.
+    /// A branch tip moving is a change the monitor must see, and until it did not.
     #[test]
     fn a_branch_tip_moving_is_a_change_the_monitor_must_see() {
         let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
@@ -545,8 +522,8 @@ mod tests {
         );
     }
 
-    /// **What stays excluded, and why each one would be a wake that draws exactly
-    /// what was already on screen.**
+    /// What stays excluded, and why each one would be a wake that draws exactly
+    /// what was already on screen.
     #[test]
     fn the_rest_of_the_git_directory_still_wakes_nothing() {
         let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
@@ -559,13 +536,8 @@ mod tests {
         assert!(!watched(&[".git", "COMMIT_EDITMSG"]));
         assert!(!watched(&[".git", "config"]));
 
-        // **The lock file itself is not the write, and that is deliberate rather
-        // than an oversight this widening should have swept up.** Git publishes a
-        // new index by writing `index.lock` and renaming it over `index`, and it
-        // is the rename's destination that names `index`. Waking on the lock too
-        // would draw the *old* index a moment before the new one landed, then
-        // draw it again — one wasted frame per stage, and the first of the two
-        // showing a comparison that is about to stop being true.
+        // The lock file itself is not the write, and that is deliberate rather than an
+        // oversight this widening should have swept up.
         assert!(!watched(&[".git", "index.lock"]));
 
         // A directory event rather than a file one. `refs/heads` itself names no
@@ -616,11 +588,9 @@ mod tests {
         Some(path)
     }
 
-    /// The one case where the order of an event's paths is observable, and the
-    /// reason it is unreachable from an integration test: a rename is the only
-    /// event that names two files, and every other event makes first and last
-    /// the same path. Reading them forwards passed every integration test in
-    /// the suite.
+    /// The one case where the order of an event's paths is observable, and the reason
+    /// it is unreachable from an integration test: a rename is the only event that
+    /// names two files, and every other event makes first and last the same path.
     #[test]
     fn a_rename_follows_the_destination_rather_than_the_source() {
         let paths = [native(&["src", "before.rs"]), native(&["src", "after.rs"])];

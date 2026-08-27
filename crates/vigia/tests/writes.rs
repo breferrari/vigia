@@ -28,8 +28,8 @@ fn area() -> Rect {
 /// What one filesystem entry looked like.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Stamp {
-    /// Directories are stamped too, which is what catches a file created **and
-    /// deleted** inside one window: adding or removing a child moves the parent's
+    /// Directories are stamped too, which is what catches a file created and
+    /// deleted inside one window: adding or removing a child moves the parent's
     /// own modification time, and the file itself is in neither map.
     dir: bool,
     len: u64,
@@ -41,13 +41,7 @@ struct Stamp {
 /// Every entry under `root`, keyed by its path relative to it.
 fn snapshot(root: &Path) -> BTreeMap<PathBuf, Stamp> {
     let mut found = BTreeMap::new();
-    // **The root is stamped as well, and it was not until the mutation run said
-    // so.** Every directory below it is reached as an entry of its parent, so the
-    // one directory nothing stamps is the top one, and a file created and deleted
-    // directly under it inside one window would leave both maps agreeing. The
-    // first mutation of this gate reported *"1 entries"* for a created file where
-    // the parent's own modification time should have made it two, which is what
-    // pointed at the hole.
+    // The root is stamped as well, and it was not until the mutation run said so.
     found.insert(PathBuf::from("."), stamp_of(root));
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
@@ -56,10 +50,8 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Stamp> {
             let entry = entry.expect("read a fixture directory entry");
             let path = entry.path();
             let stamp = stamp_of(&path);
-            // `rela` first so `path` can be *moved* into the queue rather than
-            // cloned into it. One allocation a directory, on a tree this gate
-            // keeps small by design, so the reason to do it is that the clone had
-            // no reason at all.
+            // `rela` first so `path` can be *moved* into the queue rather than cloned
+            // into it.
             let rela = path
                 .strip_prefix(root)
                 .expect("an entry below the root it was walked from")
@@ -74,7 +66,7 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Stamp> {
     found
 }
 
-/// One entry's stamp, from a **fresh** query rather than a cached one.
+/// One entry's stamp, from a fresh query rather than a cached one.
 fn stamp_of(path: &Path) -> Stamp {
     let meta = std::fs::symlink_metadata(path)
         .unwrap_or_else(|e| panic!("stamp the fixture entry {}: {e}", path.display()));
@@ -127,22 +119,12 @@ fn drive(root: &Path) -> Driven {
     };
     rig.frame.advance().expect("advance");
 
-    // **A real watch, armed for the length of the run.** `Frame::advance` called by
-    // hand is not what "while it runs" means: `vigia::run` arms a `notify` watch and
-    // so does the soak. `Watcher::new` reads `.git/index` and the gitignore rules
-    // the filter needs, and then arms `notify` over the whole worktree, which is
-    // both a second reader of the repository's own files and the one stage that
-    // registers with the OS. Calling `advance` directly walks past all of it.
+    // A real watch, armed for the length of the run.
     let watcher = worktree
         .watch(WatchOptions::default())
         .expect("arm a real watch");
 
-    // **The height comes from the frame before each action, not from the first
-    // one.** `Action::Page` is measured in the diff's rows, and the diff's rows are
-    // what is left after `Footer::plan`, which depends on the follow state that
-    // `Action::ToggleFollow` moves three actions in. Carrying the first paint's
-    // number through all six would page by a step the screen stopped having, which
-    // is a defect a gate about writes would never fail on and a reader would copy.
+    // The height comes from the frame before each action, not from the first one.
     let mut height = rig.paint();
     for action in [
         Action::Scroll(12),
@@ -161,12 +143,8 @@ fn drive(root: &Path) -> Driven {
     rig.frame.advance().expect("advance a second time");
     rig.paint();
 
-    // **Joined rather than detached, which is the opposite of what `run` does and
-    // is right here.** `run` drops the handle because nothing needs the result;
-    // this gate needs the thread to have *finished* before the second stamp, or a
-    // write it made would land after the comparison and the gate would pass by
-    // racing. It is the one stage that both spawns a thread and touches the
-    // filesystem, so it is the last place a write could hide.
+    // Joined rather than detached, which is the opposite of what `run` does and is
+    // right here.
     let warmer = rig.highlighter.warm_ahead(
         worktree.workdir().to_path_buf(),
         rig.frame
@@ -177,23 +155,15 @@ fn drive(root: &Path) -> Driven {
             .collect(),
         None,
     );
-    // **The watch is read here and torn down by going out of scope**, which is what
-    // puts its teardown inside the window: `drive` returns before the caller takes
-    // the second reading. Calling `watcher.stopper().stop()` first does **not**
-    // order the teardown, whatever a comment beside it says.
-    // `Stop::stop` is `let _ = tx.send(Message::Stop)`, nothing here ever calls
-    // `next_tick`, so the message was never read and the call had no observable
-    // effect at all; what actually stops the OS watch is dropping `_backend`, which
-    // that field's own doc in `watch.rs` says. It was not the product's shutdown
-    // path either, which was the other half of the excuse: `vigia::run` never calls
-    // `stopper` or `stop`. A line doing nothing under a comment claiming it does
-    // something is worse than no line, so it is gone.
+    // The watch is read here and torn down by going out of scope, which is what puts
+    // its teardown inside the window: `drive` returns before the caller takes the
+    // second reading.
     Driven {
         frames: rig.frames,
         body_rows: rig.body_rows,
         content_rows: rig.painted.rows,
-        // **Collapsed to zero when no frame ran, so the guard rests on its own
-        // evidence.** The running minimum starts at `u64::MAX` and a `drive` that
+        // Collapsed to zero when no frame ran, so the guard rests on its own
+        // evidence. The running minimum starts at `u64::MAX` and a `drive` that
         // painted nothing would carry that into a `> 0` check and pass it.
         leanest_frame: if rig.frames == 0 {
             0
@@ -212,13 +182,13 @@ struct Driven {
     frames: usize,
     /// The tallest body any of them drew, so a blank pane cannot pass as a run.
     body_rows: usize,
-    /// Rows of **content**, summed across the whole run.
+    /// Rows of content, summed across the whole run.
     content_rows: u64,
-    /// Content rows in the **leanest** frame, which is the statistic that bites.
+    /// Content rows in the leanest frame, which is the statistic that bites.
     leanest_frame: u64,
     /// Files the warmer compiled, which is the one stage that spawns a thread.
     warmed: usize,
-    /// Raw events the armed watch was handed, **reported and not gated.**
+    /// Raw events the armed watch was handed, reported and not gated.
     events: u64,
 }
 
@@ -272,13 +242,11 @@ fn the_monitor_writes_nothing_while_it_runs() {
     let scratch = Scratch::large_diff("writes-nothing", FILES, LINES);
     let root = scratch.root().to_path_buf();
 
-    // **A symlink, because [`Stamp`] argues about links at length and no fixture
-    // here had one.** §7's rule is that an axis named as unspanned is a prediction,
-    // and this file was making the prediction in a doc comment: the reason given for
-    // `symlink_metadata` over `metadata` could not fail, because nothing under the
-    // root was a link. With one present the choice becomes load bearing rather than
-    // argued, and mutation says so: swapped to `metadata`, the walk panics on this
-    // entry, which is #15's Windows reading exactly.
+    // A symlink, because [`Stamp`] argues about links at length and no fixture here had
+    // one. §7's rule is that an axis named as unspanned is a prediction, and this file
+    // was making the prediction in a doc comment: the reason given for
+    // `symlink_metadata` over `metadata` could not fail, because nothing under the root
+    // was a link.
     let linked = made_link(&scratch, "src/mod_0.rs", "link_to_mod_0.rs");
 
     // The fixture's own git writes must have landed before the window opens,
@@ -302,10 +270,7 @@ fn the_monitor_writes_nothing_while_it_runs() {
 
     let driven = drive(&root);
 
-    // **Before the filesystem is compared, not after.** "Nothing was written" is
-    // satisfied perfectly by a run that did nothing, so these are what stop the gate
-    // below passing against a `drive` somebody gutted. Same order `first_paint.rs`
-    // uses: assert the frame was real, then assert the property.
+    // Before the filesystem is compared, not after.
     assert_eq!(
         driven.frames, 8,
         "the drive painted {} frames rather than the first paint, six actions and \
@@ -313,10 +278,8 @@ fn the_monitor_writes_nothing_while_it_runs() {
          describes",
         driven.frames
     );
-    // **A heading is pushed per changed file before any hunk is reached**, so a body
-    // with rows in it proves only that the fixture had files. Content is what a
-    // build with its line-drawing deleted stops producing, which is the mutation
-    // `first_paint.rs` names in its own comment.
+    // A heading is pushed per changed file before any hunk is reached, so a body with
+    // rows in it proves only that the fixture had files.
     assert!(
         driven.leanest_frame > 0,
         "the leanest of {} frames drew no content at all, against a tallest body of \
@@ -356,16 +319,10 @@ fn the_snapshot_sees_a_write_that_does_happen() {
     settle_tree(&root);
     let before = snapshot(&root);
 
-    // **A different length, deliberately.** Two writes of the same length inside
-    // one modification-time granule are indistinguishable by `stat`, which is
-    // §6's racily-clean case and is the flake a stamp resting on the clock alone
-    // would be. Growing the file takes the comparison off that axis entirely.
+    // A different length, deliberately.
     scratch.write("src/mod_0.rs", "one line\n".repeat(LINES * 2));
     scratch.write("untracked.txt", "and a file that was not there before\n");
-    // The third direction, and it had no case here until round 3 of the audit said
-    // so. `difference` reports removals, and a comparator with one of its three arms
-    // undriven is two thirds tested: a `before` key that vanishes is how a deleted
-    // file, a rename's old side, and a temp file cleaned up after itself all look.
+    // The third direction, and it had no case here until round 3 of the audit said so.
     scratch.remove("src/mod_1.rs");
 
     let moved = difference(&before, &snapshot(&root));

@@ -83,7 +83,7 @@ impl FileChange {
         self.is_diffable() && matches!(self.after, Some(Side::Worktree))
     }
 
-    /// Whether this change can alter what git's clean filter does to **other**
+    /// Whether this change can alter what git's clean filter does to other
     /// files.
     pub(crate) fn rewrites_attributes(&self) -> bool {
         let name = |path: &str| {

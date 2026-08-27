@@ -66,12 +66,8 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let parsed_first = highlight_delta(before, highlighter.stats()).lines;
     let plain = stripped(&view.rows);
 
-    // The frame after it, timed separately, and **it is an eager highlighter's
-    // second frame rather than the product's**. `Highlighter::eager` parses
-    // whatever it resolves, so this is where the compile lands for a caller with
-    // nowhere to send a demand, which is what this gate wants: it holds
-    // `parsed_second > 0` below, and that non-vacuity check is the whole reason
-    // the first frame's zero means anything.
+    // The frame after it, timed separately, and it is an eager highlighter's second
+    // frame rather than the product's.
     let before = highlighter.stats();
     let began = Instant::now();
     let view = app
@@ -121,10 +117,8 @@ fn the_shells_first_paint_holds_the_startup_budget() {
     // cannot check the clock.
     let run = cold_start(scratch.root());
 
-    // Non-vacuity, in the direction that matters most here: a frame is not
-    // allowed to be fast because it drew less. The whole risk of a plain first
-    // paint is that it quietly becomes a *smaller* paint, and then this gate
-    // passes while the reader looks at an empty pane.
+    // Non-vacuity, in the direction that matters most here: a frame is not allowed to
+    // be fast because it drew less.
     assert_eq!(
         run.plain.len(),
         run.height,
@@ -134,7 +128,7 @@ fn the_shells_first_paint_holds_the_startup_budget() {
         run.height
     );
 
-    // **The assertion the row count cannot make.** Deferring colour has to
+    // The assertion the row count cannot make. Deferring colour has to
     // change colour and nothing else, so the two frames must draw the same rows
     // once spans are taken out of the comparison.
     assert_eq!(
@@ -167,9 +161,8 @@ fn the_shells_first_paint_holds_the_startup_budget() {
     let _timed = exclusively_timed();
 
     // Best of three, the idiom `crates/vigia-core/tests/budgets.rs` uses for its
-    // absolute tier: what the code can do rather than what the machine happened
-    // to be doing. Each run is a fresh `SyntaxSet`, or the second would measure a
-    // compile that has already happened.
+    // absolute tier: what the code can do rather than what the machine happened to be
+    // doing.
     let mut runs = Vec::new();
     for _ in 0..3 {
         runs.push(cold_start(scratch.root()));
@@ -281,7 +274,7 @@ fn a_shell_past_its_first_paint_owes_nothing_and_colours_at_once() {
     assert!(!app.owes_repaint());
 }
 
-/// **The opening the shipped shell actually has**, which the gate above
+/// The opening the shipped shell actually has, which the gate above
 /// deliberately does not measure.
 #[test]
 fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
@@ -311,22 +304,13 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
     let first = draw(&mut app, &mut highlighter);
     let second = draw(&mut app, &mut highlighter);
 
-    // **Asserted apart, because only one of them is about this change.** The
-    // first frame parses nothing whatever the highlighter is: `App`'s `Paint`
-    // ladder leaves `Viewport::highlight` false until a frame is on screen,
-    // which is I7's original half and which `Highlighter::eager` satisfies too.
-    // Reported here so the second assertion has a stated baseline rather than
-    // looking like the same claim twice.
+    // Asserted apart, because only one of them is about this change.
     assert_eq!(
         first, 0,
         "the first frame parsed {first} lines, so I7's opening rule is broken \
          before this gate's own subject is even reached"
     );
-    // **The one the deferral owns.** With `Highlighter::eager` this is where
-    // the compile lands and the number is in the hundreds
-    // (`cold_start` above reports it); with the shipped constructor it is zero,
-    // because the grammar is uncompiled and the frame declines to be the one
-    // that compiles it.
+    // The one the deferral owns.
     assert_eq!(
         second, 0,
         "the second frame parsed {second} lines under a grammar nothing has \

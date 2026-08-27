@@ -50,9 +50,8 @@ fn committed_scratch(name: &str) -> Scratch {
     scratch.write("a.txt", "x\n");
     scratch.commit_all("initial");
     // The watcher is created on the caller's next line, so the commit's own
-    // `.git/index`, `.git/HEAD` and `.git/refs` writes must have landed before
-    // it starts. They are relevant by `watched_in_git_dir`, and arriving late
-    // they open a burst the test then reads as its own subject.
+    // `.git/index`, `.git/HEAD` and `.git/refs` writes must have landed before it
+    // starts.
     scratch.settled()
 }
 
@@ -111,14 +110,7 @@ fn an_idle_worktree_produces_no_tick_and_accepts_nothing() {
 fn a_burst_of_writes_becomes_one_tick() {
     let scratch = Scratch::new("watch-burst");
     scratch.write("a.txt", "x\n");
-    // The burst directory has to exist, and be watched, before the burst lands
-    // in it. A recursive watch does not cover a directory that did not exist
-    // when it was armed: the backend has to notice the new directory and add a
-    // watch of its own, and on Linux anything written in the gap between those
-    // two is never reported. Creating the directory here rather than with the
-    // first write is what makes this test about coalescing rather than about
-    // inotify's directory race. Observed on CI as `got 1`, where the tick had
-    // folded the directory-creation event and nothing else.
+    // The burst directory has to exist, and be watched, before the burst lands in it.
     scratch.write("burst/.keep", "\n");
     scratch.commit_all("initial");
     let worktree = scratch.worktree();
@@ -146,7 +138,7 @@ fn a_burst_of_writes_becomes_one_tick() {
     );
 }
 
-/// I5's input: B2 says follow the write that landed **last** in the batch.
+/// I5's input: B2 says follow the write that landed last in the batch.
 #[test]
 fn a_tick_names_the_file_whose_write_landed_last() {
     let scratch = Scratch::new("watch-newest");
@@ -234,11 +226,7 @@ fn a_continuous_writer_still_gets_a_tick_within_max_delay() {
     let _ = stop_writing.send(());
     writer.join().expect("writer thread");
 
-    // Two assertions in one, and it is worth separating what each catches. That a
-    // tick arrived at all is the invariant: `quiet` is 500ms and is reset by every
-    // accepted event, so while the writer runs it can never be satisfied, and only
-    // `max_delay` can end the burst. Drop `max_delay` from the engine and the
-    // `expect` above fires.
+    // Two assertions in one, and it is worth separating what each catches.
     assert!(
         tick.coalesced_for < budget(MAX_DELAY_BOUND),
         "the burst was held for {:?}, past the {:?} its max_delay allows",

@@ -136,10 +136,7 @@ fn main() -> ExitCode {
         }
     }
 
-    // Deliberately not labelled I9. These are the raw primitives with no memory
-    // of the previous frame, which is the floor a frame cannot beat rather than
-    // any frame a monitor has. The frame path is measured below, and it is what
-    // `tests/budgets.rs` gates I9 over.
+    // Deliberately not labelled I9.
     println!("primitives, the floor  (warm, n={WARM_SWEEPS})");
     if let (Some(p50), Some(p99)) = (incremental.percentile(0.50), incremental.percentile(0.99)) {
         println!(

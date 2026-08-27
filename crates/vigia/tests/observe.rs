@@ -22,7 +22,7 @@ use vigia_core::{
 const TREE: &str = "VIGIA_OBSERVE_TREE";
 /// How long to watch for, in seconds.
 const SECS: &str = "VIGIA_OBSERVE_SECS";
-/// A path whose existence ends the run early, **with its report**.
+/// A path whose existence ends the run early, with its report.
 const STOP: &str = "VIGIA_OBSERVE_STOP";
 
 /// Window used when nothing asks for another, short enough that a mistaken
@@ -115,7 +115,7 @@ impl Histogram {
         self.sum = self.sum.saturating_add(us);
     }
 
-    /// Frames at or over `edge`, which **must** be one of [`EDGES`].
+    /// Frames at or over `edge`, which must be one of [`EDGES`].
     fn at_or_over(&self, edge: u64) -> Option<u64> {
         let first = EDGES.iter().position(|&e| e == edge)?;
         Some(self.counts[first + 1..].iter().sum())
@@ -248,7 +248,7 @@ fn parse_numstat(raw: &str) -> Vec<Row> {
         else {
             continue;
         };
-        // A rename or a copy. The **postimage** is the path both sides name,
+        // A rename or a copy. The postimage is the path both sides name,
         // which is what `ChangeKind::Renamed` carries as its own `path` with the
         // preimage in `from`.
         let path = if path.is_empty() {
@@ -372,7 +372,7 @@ fn git(tree: &Path, args: &[&str]) -> String {
 struct Sample {
     at: Duration,
     rss: u64,
-    /// What the **status bar** was showing at that moment, which is the number
+    /// What the status bar was showing at that moment, which is the number
     /// #72 item 2 names and the only one a reader glancing at the pane ever
     /// sees. A different statistic from the whole-session histogram and allowed
     /// to disagree with it: this is a p99 over the last 128 frames, so a breach
@@ -453,11 +453,8 @@ impl Report {
             self.ticks,
             self.idle_waits,
         ));
-        // Whether the series below is evenly spaced, which nothing else on this
-        // page says. The soak learned the same thing one statistic over: a
-        // sample index is only a clock while the loop keeps up, and a series
-        // read as evenly spaced when it was not is wrong in whichever direction
-        // the stall happened to fall.
+        // Whether the series below is evenly spaced, which nothing else on this page
+        // says.
         match self
             .samples
             .windows(2)
@@ -658,12 +655,8 @@ struct Pane<'w> {
 impl Pane<'_> {
     /// `Shell::draw`: one paint, and a second when the first left a debt.
     fn draw(&mut self, worktree: &Worktree, now: Instant) {
-        // **The roll, because `Shell::draw` does it and this file's whole claim
-        // is that it does what the shell does**. Without it this harness models
-        // a window that never ages, so `tracked_history` reports a store that
-        // only ever grows and the sampled readout draws a burst pinned where it
-        // was: the freeze that row removed, preserved in the instrument that is
-        // supposed to notice it.
+        // The roll, because `Shell::draw` does it and this file's whole claim is that
+        // it does what the shell does.
         self.history.record_sized([], now);
         self.paint(worktree);
         if self.app.owes_repaint() {
@@ -673,10 +666,6 @@ impl Pane<'_> {
 
     /// One collect and one paint, in the order `Shell::paint` performs them.
     fn paint(&mut self, worktree: &Worktree) {
-        // Every frame, matching `Shell::paint` since #158. This went through a
-        // `branch_for` seam whose guard was *only the empty state names a
-        // branch*; the header names it always, so the guard's premise went and
-        // the wrapper with it.
         self.branch = worktree.branch();
         let chrome = self.app.chrome(
             &self.name,
@@ -746,10 +735,8 @@ impl<'w> Pane<'w> {
         frame.advance().expect("the first walk");
 
         let highlighter = Highlighter::new();
-        // The warmer, because `run` spawns one and this claims to be `run` with
-        // the terminal taken out. Joined rather than detached, so a one-off
-        // startup cost cannot land inside the first sample. The soak gives the
-        // same reason.
+        // The warmer, because `run` spawns one and this claims to be `run` with the
+        // terminal taken out.
         highlighter
             .warm_ahead(
                 worktree.workdir().to_path_buf(),
@@ -823,12 +810,8 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
             continue;
         }
 
-        // One instant for the turn, read by the tick's record and by the roll
-        // inside `Pane::draw`. Distinct from `began` below, which starts the
-        // timed region: this harness has always begun timing after the walk
-        // where `vigia::run` begins before the drain, so the two are not the
-        // same boundary and merging them would move every number this reports.
-        // That divergence is older than this row and is left alone here.
+        // One instant for the turn, read by the tick's record and by the roll inside
+        // `Pane::draw`.
         let received = rx.recv_timeout(deadline - now);
         let turn = Instant::now();
         let tick_paths = match received {
@@ -836,10 +819,7 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
                 idle_waits += 1;
                 continue;
             }
-            // The watcher gave up. Unlike the soak this is not a panic, because
-            // the run has real numbers behind it by then and losing them to
-            // prove a point about the watch would be the wrong trade. The report
-            // carries it as the last error and `ticks` says how far it got.
+            // The watcher gave up.
             Err(RecvTimeoutError::Disconnected) => {
                 pane.last_error = Some("the watch thread ended before the window did".to_owned());
                 break;
@@ -921,7 +901,7 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
 /// `#[ignore]` because it watches for minutes or hours against a tree the
 /// environment names, and because it asserts nothing.
 ///
-/// **Run it as the built test binary, copied out of `target/` first.** Two
+/// Run it as the built test binary, copied out of `target/` first. Two
 /// separate frictions, and the second cost a window before it was understood.
 /// Through `cargo test` a cargo process holds the `target/` lock for its whole
 /// life, so the session being measured cannot build. And a running executable
@@ -991,10 +971,8 @@ fn observe_the_diff_against_git() {
         .collect();
 
     let mut ours = Vec::new();
-    // A conflict or a type change is a real change with no line diff, and git
-    // counts something for one. Named rather than compared: reporting it as a
-    // disagreement every sweep would train a reader to skip the list, which is
-    // how a real finding gets lost.
+    // A conflict or a type change is a real change with no line diff, and git counts
+    // something for one.
     let mut undiffable = Vec::new();
     for (index, (path, kind)) in listed.iter().enumerate() {
         if matches!(kind, ChangeKind::Conflict | ChangeKind::TypeChange) {
@@ -1012,21 +990,15 @@ fn observe_the_diff_against_git() {
     let numstat = parse_numstat(&git(&tree, &["diff", "--numstat", "-z"]));
     let porcelain = parse_porcelain(&git(&tree, &["status", "--porcelain", "-z"]));
 
-    // Untracked is read off git's own marker rather than inferred from absence
-    // in `numstat`. Inferring it would classify "vigia lists a path git has
-    // never heard of" as expected, which is the defect this sweep exists to
-    // find, laundered by the code looking for it.
+    // Untracked is read off git's own marker rather than inferred from absence in
+    // `numstat`.
     let untracked: BTreeSet<String> = porcelain
         .iter()
         .filter(|(status, _)| status.starts_with('?'))
         .map(|(_, path)| path.clone())
         .collect();
-    // Excluded from the **counts** comparison on both sides, so the exclusion
-    // cannot hide a one-sided disagreement. `git diff` compares the index
-    // against the worktree and an untracked file is in neither side of it,
-    // while `SPEC.md` §11.1 makes including them load-bearing here: that
-    // asymmetry is correct rather than a finding. The path set below still
-    // covers every one of them.
+    // Excluded from the counts comparison on both sides, so the exclusion cannot hide a
+    // one-sided disagreement.
     let excluded: BTreeSet<String> = untracked
         .iter()
         .cloned()
@@ -1236,11 +1208,8 @@ mod statistic {
 
     #[test]
     fn a_p99_is_the_maximum_below_a_hundred_frames_and_the_report_is_told_so() {
-        // The boundary is arithmetic, not taste: `ceil(0.99n)` reaches `n` for
-        // every count under 100 and is 99 at 100, where exactly one outlier is
-        // excluded. This is the check the first real window needed and did not
-        // have: 55 frames cleared a 40-frame floor and printed a p99 that was
-        // the run's single 591.74ms frame.
+        // The boundary is arithmetic, not taste: `ceil(0.99n)` reaches `n` for every
+        // count under 100 and is 99 at 100, where exactly one outlier is excluded.
         assert!(hist_of(&[800; 99]).rank_is_max(0.99), "99 frames");
         assert!(!hist_of(&[800; 100]).rank_is_max(0.99), "100 frames");
         assert!(

@@ -20,7 +20,7 @@ fn a_fresh_demand_is_worth_a_thread() {
     ));
 }
 
-/// **The defect this rule exists for.** A demand the last warm was already
+/// The defect this rule exists for. A demand the last warm was already
 /// handed, and which came back unchanged, is not offered again.
 #[test]
 fn a_demand_that_did_not_move_is_not_offered_twice() {
@@ -33,7 +33,7 @@ fn a_demand_that_did_not_move_is_not_offered_twice() {
     );
 }
 
-/// And it cannot stall a demand that **is** making progress.
+/// And it cannot stall a demand that is making progress.
 #[test]
 fn a_demand_that_shrank_is_offered_again_immediately() {
     let before = vec![
@@ -60,7 +60,7 @@ fn a_reordered_demand_is_a_different_demand() {
     assert!(worth_warming(&after, &before, false));
 }
 
-/// **A tick overrides the memo, and exactly once.**
+/// A tick overrides the memo, and exactly once.
 #[test]
 fn a_write_reopens_a_demand_the_memo_is_holding_back() {
     let demand = vec!["ui/strings.ts".to_owned()];
@@ -76,7 +76,7 @@ fn a_write_reopens_a_demand_the_memo_is_holding_back() {
     );
 }
 
-/// And a write does not make an **empty** demand worth a thread.
+/// And a write does not make an empty demand worth a thread.
 #[test]
 fn a_write_does_not_conjure_a_demand_from_nothing() {
     assert!(!worth_warming(&[], &[], true));

@@ -103,14 +103,6 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
         target,
         "the view did not move to the file that changed"
     );
-    // **And this is the other half of #257's rule**, on the fixture that has
-    // it: every block here is five rows against a thirteen-row region, so the
-    // busiest hunk is already drawn from the heading and the heading stays. A
-    // landing that fired unconditionally would cost the path, the counts, the
-    // sigil and the heat strip to show the reader rows they could already see,
-    // and it would turn this assertion red. Both sides of the edge it turns on
-    // are gated exactly in `view.rs`'s
-    // `a_busiest_hunk_already_on_screen_keeps_the_heading`.
     assert_eq!(
         app.position().row,
         0,
@@ -118,11 +110,10 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
          heading of what just changed is scrolled off"
     );
 
-    // **A request answered with "keep the heading" is still answered**, and
-    // saying otherwise is not harmless: the caller clears the debt on this, so a
-    // frame that resolved to row zero and reported nothing leaves a request
-    // armed to fire on the next resize. Every other gate here lands on a row
-    // above zero, so this is the only place the distinction is visible.
+    // A request answered with "keep the heading" is still answered, and saying
+    // otherwise is not harmless: the caller clears the debt on this, so a frame that
+    // resolved to row zero and reported nothing leaves a request armed to fire on the
+    // next resize.
     app.follow(&target, &frame);
     let view = app
         .view(&mut frame, &mut highlighter, &history, layout())
@@ -136,10 +127,8 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
 
 #[test]
 fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
-    // I5's proof exactly as `SPEC.md` §3 words it: a scripted edit sequence,
-    // snapshot the frame, no input given. `path_at` is not used here because
-    // the point is to read the picture, and the picture has to name the file
-    // the script touched last without anything in the test saying so.
+    // I5's proof exactly as `SPEC.md` §3 words it: a scripted edit sequence, snapshot
+    // the frame, no input given.
     let scratch = Scratch::new("shell-follow-scripted");
     scratch.write("README.md", "docs\n");
     scratch.write("src/first.rs", "fn first() {}\n");
@@ -233,10 +222,7 @@ fn scrolling_disengages_follow_and_the_next_change_does_not_move_the_view() {
 
 #[test]
 fn f_re_engages_follow_and_jumps_to_the_newest_change() {
-    // The half of B1 that is easy to get half right. Re-engaging has to *jump*,
-    // not merely arm: `less +F` goes to the end when you ask it to follow, and
-    // a reader pressing `f` is asking to see what changed rather than to wait
-    // for the next thing that does.
+    // The half of B1 that is easy to get half right.
     let scratch = fixture("shell-follow-toggle");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -305,10 +291,7 @@ fn a_resize_does_not_disengage_follow() {
 
 #[test]
 fn jumping_to_the_last_file_disengages_rather_than_re_engaging() {
-    // B1's rationale as a test. "Jump to the last changed file" and "resume
-    // following" are different intents, and overloading `G` with both would
-    // leave a reader unable to look at the newest file without re-arming the
-    // view. Both ends, because `g` and `G` are the same decision.
+    // B1's rationale as a test.
     let scratch = fixture("shell-follow-ends");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -328,13 +311,6 @@ fn jumping_to_the_last_file_disengages_rather_than_re_engaging() {
 #[test]
 fn a_file_step_disengages_follow_at_both_ends_of_the_diff() {
     // `n` moves the diff, so it disengages for the reason every other jump does.
-    // The half worth asserting is the **second** one: `p` at the first file moves
-    // nothing at all, and it still disengages, because on this map follow yields
-    // to a reader's intent rather than to whether the arithmetic landed
-    // somewhere new. `Action::Top` at the top already behaves this way and the
-    // test one row up pins it; a file step that quietly took the other rule would
-    // leave a reader who asked to go somewhere being dragged back on the next
-    // write, with nothing on screen to say why.
     let scratch = fixture("shell-follow-file-step");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -355,10 +331,8 @@ fn a_file_step_disengages_follow_at_both_ends_of_the_diff() {
 
 #[test]
 fn a_change_to_a_file_that_is_not_in_the_diff_leaves_the_view_where_it_was() {
-    // Ordinary rather than exceptional: an edit reverted before the tick
-    // landed, or a file written back to the bytes the index already holds.
-    // There is no newest *change*, so there is nowhere to go, and jumping
-    // anywhere would be worse than staying.
+    // Ordinary rather than exceptional: an edit reverted before the tick landed, or a
+    // file written back to the bytes the index already holds.
     let scratch = fixture("shell-follow-unknown");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -389,12 +363,7 @@ fn a_change_to_a_file_that_is_not_in_the_diff_leaves_the_view_where_it_was() {
 
 #[test]
 fn following_a_file_costs_no_diff_and_no_read() {
-    // I4 and I2a, held over the path I5 added. Following looks up a name in a
-    // list the frame already has, so it must cost nothing: no diff computed,
-    // no file read, and not even the `stat` a revalidation would take. The
-    // rejected alternative for finding "the newest file" was one `stat` per
-    // changed file, which is #19's breach, so this is the gate that stops it
-    // creeping back in through the front door.
+    // I4 and I2a, held over the path I5 added.
     let scratch = fixture("shell-follow-cost");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -424,10 +393,8 @@ fn following_a_file_costs_no_diff_and_no_read() {
 
 #[test]
 fn a_position_survives_the_file_it_points_at_being_committed() {
-    // Follow mode writes a raw index into the position, and the agent in the
-    // other pane can shorten the list underneath it. `Frame::diff` panics on
-    // an index past the end deliberately, so this is the crash that would
-    // reach a reader who touched nothing at all.
+    // Follow mode writes a raw index into the position, and the agent in the other pane
+    // can shorten the list underneath it.
     let scratch = fixture("shell-follow-shrink");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -464,10 +431,7 @@ fn tall(name: &str) -> Scratch {
     scratch.write(TALL, support::numbered_lines(TALL_LINES));
     scratch.commit_all("baseline");
 
-    // Split from the same helper the baseline was written with, rather than
-    // re-spelled. Two definitions of one format sitting a line apart is one
-    // change to `numbered_lines` away from making this a whole-file rewrite,
-    // which would still be a diff and would no longer be this fixture.
+    // Split from the same helper the baseline was written with, rather than re-spelled.
     let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
         .lines()
         .map(str::to_owned)
@@ -514,11 +478,7 @@ fn tall_layout(app: &App) -> Body {
 
 #[test]
 fn following_a_tall_file_lands_on_its_busiest_change() {
-    // I5 says the viewport goes to what just changed. On a file whose diff is
-    // one screenful the heading and the change are the same place and the
-    // promise is kept by accident of size; on this one they are twenty-odd rows
-    // apart, and landing on the heading shows the reader a filename and three
-    // one-line tweaks instead of the 76 lines that just went.
+    // I5 says the viewport goes to what just changed.
     let scratch = tall("shell-follow-tall");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -571,11 +531,9 @@ fn following_a_tall_file_lands_on_its_busiest_change() {
         "the view landed on the hunk header and drew none of what it removed"
     );
 
-    // **And the entry for this file was recorded**, which is the other side of
-    // the counter the listless-pane gate reads: that one asserts none is built
-    // where none can be drawn, and a counter that never counts satisfies it
-    // vacuously. One, because the walk reaches one file and its heading is above
-    // the window.
+    // And the entry for this file was recorded, which is the other side of the counter
+    // the listless-pane gate reads: that one asserts none is built where none can be
+    // drawn, and a counter that never counts satisfies it vacuously.
     assert_eq!(
         view.recorded, 1,
         "the file the viewport is inside was not recorded, so the pinned list \
@@ -585,11 +543,8 @@ fn following_a_tall_file_lands_on_its_busiest_change() {
 
 #[test]
 fn a_landing_resolves_once_and_the_next_frame_does_not_move_it() {
-    // The defect class `SPEC.md` §11.1 keeps ruling against is a row moving
-    // under a reader. A landing is resolved by the frame that draws it, so the
-    // second frame has nothing left to resolve and must draw the same screen: a
-    // rule that re-derived the row every frame would walk the viewport down a
-    // file as an agent's hunks grew.
+    // The defect class `SPEC.md` §11.1 keeps ruling against is a row moving under a
+    // reader.
     let scratch = tall("shell-follow-once");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -633,13 +588,8 @@ fn a_landing_resolves_once_and_the_next_frame_does_not_move_it() {
 
 #[test]
 fn landing_on_a_change_costs_no_extra_diff() {
-    // I4 over the *resolution*, where `following_a_file_costs_no_diff_and_no_read`
-    // is I4 over the jump. The landing is arithmetic on a diff the walk has
-    // already fetched, so a frame that lands must cost exactly what the same
-    // frame costs without one. The version that is wrong here is the readable
-    // one: asking `Frame::diff` for the file a second call earlier, which
-    // re-reads any file written in the last two seconds and so would put a
-    // second whole-file read on the one file that is always inside that margin.
+    // I4 over the *resolution*, where `following_a_file_costs_no_diff_and_no_read` is
+    // I4 over the jump.
     let scratch = tall("shell-follow-landing-cost");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -682,15 +632,8 @@ fn landing_on_a_change_costs_no_extra_diff() {
 
 #[test]
 fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
-    // **A tick and a keystroke coalesce into one batch**, so a landing armed by
-    // the follow can still be unresolved when a reader's own gesture runs. The
-    // request is settled by every gesture `Action::is_manual_scroll` calls one,
-    // or the frame after it draws over the row the reader just asked for, and a
-    // request that outlived its jump would be inherited by the next one:
-    // `SPEC.md` §11.1 rules that `G`, the digits and `n`/`p` land on a heading,
-    // and a debt left armed makes them land mid-file instead. `n` at an end
-    // writes no position at all and still settles it, which is why the predicate
-    // is the rule rather than the write.
+    // A tick and a keystroke coalesce into one batch, so a landing armed by the follow
+    // can still be unresolved when a reader's own gesture runs.
     let scratch = tall("shell-follow-settled");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -707,7 +650,7 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
         // A drag of the diff's own bar to the very top, which writes a position
         // of its own rather than going through either of the two above.
         ("a drag", Action::DiffTo(0), 0),
-        // **`n` at the end of the changed set**, which moves nothing and so
+        // `n` at the end of the changed set, which moves nothing and so
         // reaches no jump at all, while still disengaging follow. The fixture is
         // one file, so a step forward from it is always that case.
         ("n at the end", Action::File(1), 0),
@@ -734,10 +677,8 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
 
 #[test]
 fn disengaging_follow_settles_an_owed_landing() {
-    // `f` is the reader asking the view to stop moving itself, and a tick can
-    // land in the same batch as the keystroke. A request the frame has not
-    // resolved yet would move the viewport once more after that, which is the
-    // one thing the key was pressed to stop.
+    // `f` is the reader asking the view to stop moving itself, and a tick can land in
+    // the same batch as the keystroke.
     let scratch = tall("shell-follow-disengaged");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -769,12 +710,8 @@ fn disengaging_follow_settles_an_owed_landing() {
 
 #[test]
 fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
-    // **Two ticks in one batch, with an advance between them**, which is what
-    // the drain does: every wake is handled in arrival order and only the paint
-    // is shared. The second names a path the walk no longer reports, an edit
-    // reverted before the tick landed, so it writes no position at all. A debt
-    // left over from the first would then resolve against an *index*, and the
-    // advance has just renumbered every one of them.
+    // Two ticks in one batch, with an advance between them, which is what the drain
+    // does: every wake is handled in arrival order and only the paint is shared.
     let scratch = Scratch::new("shell-follow-stale-debt");
     scratch.write(TALL, support::numbered_lines(TALL_LINES));
     scratch.write("src/aaa.rs", "fn a() {}\n");
@@ -841,7 +778,7 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
     );
 }
 
-/// A file whose busiest hunk is **near its end and shorter than the pane**.
+/// A file whose busiest hunk is near its end and shorter than the pane.
 fn tail(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write(TAIL, support::numbered_lines(TALL_LINES));
@@ -866,11 +803,8 @@ const TAIL: &str = "src/shallow.rs";
 
 #[test]
 fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
-    // A jump clears `anchored`, which switches the short-tail back-up off on
-    // purpose: follow's claim is about what belongs at the top. The claim is met
-    // by any row the change is visible from, though, so honouring it past the
-    // end of the diff draws a handful of rows over a block of blanks. Every
-    // other file has the next one's rows under it and cannot do this.
+    // A jump clears `anchored`, which switches the short-tail back-up off on purpose:
+    // follow's claim is about what belongs at the top.
     let scratch = tail("shell-follow-tail");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -899,7 +833,7 @@ fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
         layout.diff.saturating_sub(view.rows.len()),
         layout.diff
     );
-    // **And the bottom row is the diff's last**, which fullness alone does not
+    // And the bottom row is the diff's last, which fullness alone does not
     // say: a back-up one row too far also fills the pane, and leaves the final
     // row of the diff undrawn under it.
     assert_eq!(
@@ -923,13 +857,7 @@ fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
 
 #[test]
 fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
-    // **A tick that names no path never reaches `App::follow`.** The drain
-    // advances the frame on every tick and follows only when the burst carried
-    // one, and a `.git/index` write carries none: an agent running `git add` or
-    // `git commit` beside the pane produces exactly that. The advance renumbers
-    // every index, and a landing armed by the tick before it holds nothing but
-    // an index, so resolving it puts the viewport deep inside whichever file
-    // inherited the number.
+    // A tick that names no path never reaches `App::follow`.
     let scratch = Scratch::new("shell-follow-renumbered");
     scratch.write("src/aaa.rs", "fn a() {}\n");
     scratch.write("src/mmm.rs", support::numbered_lines(TALL_LINES));
@@ -1000,7 +928,7 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
 
 #[test]
 fn a_refused_landing_is_settled_rather_than_deferred() {
-    // **The guard is re-read every frame**, so refusing a landing and keeping it
+    // The guard is re-read every frame, so refusing a landing and keeping it
     // is not the same as dropping it: the debt fires the moment an index names
     // the followed path again, on a frame no tick armed.
     let scratch = Scratch::new("shell-follow-deferred");
@@ -1083,13 +1011,7 @@ fn a_refused_landing_is_settled_rather_than_deferred() {
 
 #[test]
 fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
-    // The last file is not the only one whose rows can run out. A file followed
-    // only by hunkless ones has a one-row block under it and cannot fill the
-    // pane either, which is why the first fix here, a clamp on the last file,
-    // covered one case of the class rather than the class. A binary file is the
-    // cheapest hunkless block the default view can hold: a heading and one line
-    // saying why. (A rename is cheaper still and unreachable here, because
-    // `git mv` stages it and the default view is the unstaged one.)
+    // The last file is not the only one whose rows can run out.
     let scratch = Scratch::new("shell-follow-hunkless");
     scratch.write(TAIL, support::numbered_lines(TALL_LINES));
     scratch.write("src/zzz.bin", b"\0\0committed\0\0".as_slice());
@@ -1147,11 +1069,7 @@ fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
 
 #[test]
 fn a_landing_survives_a_pane_with_no_diff_region() {
-    // **The reason the request is cleared on `View::landed` rather than
-    // unconditionally.** A pane dragged below the floor draws no diff at all, so
-    // that frame resolves nothing, and forgetting the request there would leave
-    // the reader on the heading for good: the tick that armed it has been spent
-    // and no other will re-arm it until the agent writes again.
+    // The reason the request is cleared on `View::landed` rather than unconditionally.
     let scratch = tall("shell-follow-kept");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1188,11 +1106,7 @@ fn a_landing_survives_a_pane_with_no_diff_region() {
 
 #[test]
 fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
-    // **The one guard here that nothing else can see.** The walk records an
-    // entry for the file the viewport is inside so the pinned list does not ask
-    // the frame for it a second time, and on a pane too short for a list there
-    // is no list to serve: the record is dropped unread, and building it is the
-    // heat projection over that file's whole diff, every frame.
+    // The one guard here that nothing else can see.
     let scratch = tall("shell-follow-listless");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1225,12 +1139,7 @@ fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
 
 #[test]
 fn the_landing_turns_on_the_diff_regions_own_height() {
-    // **What the unit battery cannot see.** `landing_of`'s own tests pin both
-    // edges of the rule as a function of the `height` they hand it, and never go
-    // through `View::collect`, so they say nothing about *which* number the walk
-    // passes. Every other gate here sits far from both edges, so the call site
-    // could add or subtract a row and the whole suite would stay green while a
-    // reader on a pane one row either side of an edge got the wrong screen.
+    // What the unit battery cannot see.
     let scratch = tall("shell-follow-heights");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

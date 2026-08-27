@@ -10,11 +10,8 @@ const TOKEN_CAP: usize = 400;
 /// a pair.
 const MAX_DISTANCE: f32 = 0.6;
 
-/// One side's within-line changes: byte ranges of `text` that are not shared
-/// with the partner line. Empty means the line is identical to its partner in
-/// content terms, which for a changed pair means the difference is invisible
-/// at token level (whitespace shape inside tokens is a token too, so in
-/// practice: never for a real pair).
+/// One side's within-line changes: byte ranges of `text` that are not shared with the
+/// partner line.
 pub type Emphasis = Vec<Range<u32>>;
 
 /// Pair `removed[i]` with `added[i]` and mark each side's unshared bytes.

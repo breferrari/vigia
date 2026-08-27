@@ -415,10 +415,7 @@ fn a_recomputed_diff_invalidates_its_span() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Symlinks. Git stores one as a mode `120000` blob whose *content is the target
-// path*, so every gate below is about reading the link rather than through it:
-// [#15](https://github.com/breferrari/vigia/issues/15).
+// --------------------------------------------------------------------------- Symlinks.
 
 /// A target large enough and binary enough that reading *through* a link to it
 /// is unmistakable rather than a subtle count difference.
@@ -506,11 +503,7 @@ fn a_symlink_to_a_nested_path_reports_forward_slashes() {
 
     let diff = worktree.diff(&changes[0]).expect("diff the nested link");
 
-    // The separator gate. A Windows reparse point stores `dir\other.txt` where
-    // git stores `dir/other.txt`, so without the conversion in `link_target`
-    // this reads as changed on one tier-1 target and unchanged on the other
-    // two, which is exactly the class of defect
-    // [#65](https://github.com/breferrari/vigia/issues/65) was.
+    // The separator gate.
     assert_eq!(texts(&diff, LineKind::Removed), ["dir/target.txt"]);
     assert_eq!(
         texts(&diff, LineKind::Added),
@@ -521,12 +514,8 @@ fn a_symlink_to_a_nested_path_reports_forward_slashes() {
 
 #[test]
 fn a_symlink_git_checked_out_reads_as_unchanged() {
-    // **A link git wrote, rather than one this harness wrote, which is a
-    // different fixture axis.** `Scratch::symlink_file` hands the target string
-    // to the OS verbatim, so `read_link` gives it straight back; git checkout on
-    // Windows stores `dir\other.txt` where the blob holds `dir/other.txt`
-    // (measured). Every other symlink gate here sits on the harness side of that
-    // axis.
+    // A link git wrote, rather than one this harness wrote, which is a different
+    // fixture axis.
     let scratch = Scratch::new("symlink-checked-out");
     scratch.write("dir/other.txt", "X\n");
     if !checkout_link(&scratch, "dir/other.txt", "nested.txt") {
@@ -586,12 +575,9 @@ fn a_broken_symlink_diffs_as_its_target_path() {
 
 #[test]
 fn an_untracked_symlink_is_added_as_its_target_path() {
-    // **The second of `maybe_symlink`'s three arms**, and until this it was
-    // unexercised: every other symlink gate here commits the link first, so all
-    // of them arrive as `Item::Modification` and are classified off the *index*
-    // entry's mode. An untracked link has no index entry at all and is
-    // classified off the dirwalk entry's `disk_kind` instead, which is a
-    // different `gix` field on a different code path.
+    // The second of `maybe_symlink`'s three arms, and until this it was unexercised:
+    // every other symlink gate here commits the link first, so all of them arrive as
+    // `Item::Modification` and are classified off the *index* entry's mode.
     let scratch = Scratch::new("symlink-untracked");
     scratch.write("keep.txt", "tracked\n");
     scratch.write("target_b.txt", binary_target());
@@ -630,14 +616,8 @@ fn an_untracked_symlink_is_added_as_its_target_path() {
 
 #[test]
 fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
-    // **The mode the type-change argument does not cover, found by the round 3
-    // adversarial pass.** `FileChange::maybe_symlink` is sound because a regular
-    // file replaced by a link is reported as a *type change* and never reaches a
-    // read. That holds for `100644` and **not** for `100755`: `gix`'s
-    // `change_to_match_fs_with_values` has a `Mode::FILE if !is_file` arm and no
-    // `Mode::FILE_EXECUTABLE` equivalent, so an executable replaced by a link
-    // falls through to `ExecutableBit` or to no change at all, and arrives as
-    // `Modified` with the index still saying `100755`.
+    // The mode the type-change argument does not cover, found by the round 3
+    // adversarial pass.
     let scratch = Scratch::new("symlink-executable");
     scratch.write("target_b.txt", binary_target());
     scratch.write("exe.sh", "#!/bin/sh\necho hi\n");
@@ -661,7 +641,7 @@ fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
         .find(|c| c.path == "exe.sh")
         .unwrap_or_else(|| panic!("exe.sh is not in {changes:#?}"));
 
-    // **Whatever kind `gix` assigns, the read must not follow the link.**
+    // Whatever kind `gix` assigns, the read must not follow the link.
     if !change.is_diffable() {
         let diff = worktree.diff(change).expect("diff the type change");
         assert!(
@@ -687,11 +667,9 @@ fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
 
 #[test]
 fn a_renamed_symlink_diffs_as_its_target_path() {
-    // **The third arm of `maybe_symlink`**, which nothing exercised: a rename
-    // arrives as `Item::Rewrite` and is classified off the *destination* dirwalk
-    // entry rather than off the source index entry. Rename tracking is on by
-    // default (`ChangeOptions::default`), so this is a live path, and mutating
-    // the arm to `false` left the entire crate suite green.
+    // The third arm of `maybe_symlink`, which nothing exercised: a rename arrives as
+    // `Item::Rewrite` and is classified off the *destination* dirwalk entry rather than
+    // off the source index entry.
     let scratch = Scratch::new("symlink-renamed");
     scratch.write("target_b.txt", binary_target());
     if !committed_link(&scratch, "target_b.txt", "old-link.txt") {
@@ -724,15 +702,7 @@ fn a_renamed_symlink_diffs_as_its_target_path() {
 
 #[test]
 fn an_intent_to_add_path_that_became_a_symlink_diffs_as_its_target_path() {
-    // **The population `maybe_symlink` got wrong, found by the round 2
-    // adversarial pass.** `git add -N` stakes a claim on a path with the empty
-    // blob and mode `100644` whatever is on disk. Replace that path with a
-    // symlink and `gix` reports `IntentToAdd` rather than a type change, so the
-    // index mode says "plain file" while the working tree holds a link, and both
-    // `is_diffable` and `reads_worktree` are true. The hint therefore said
-    // `false` and the read followed the link: #15's headline defect, intact, in
-    // the one corner the two-directions argument on `FileChange::maybe_symlink`
-    // did not cover, because that argument is about *tracked* entries.
+    // The population `maybe_symlink` got wrong, found by the round 2 adversarial pass.
     let scratch = Scratch::new("symlink-intent-to-add");
     scratch.write("target_b.txt", binary_target());
     scratch.write("ita.txt", "plain\n");
@@ -779,12 +749,9 @@ fn an_intent_to_add_path_that_became_a_symlink_diffs_as_its_target_path() {
 
 #[test]
 fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
-    // **The boundary, and it is also the premise `FileChange::maybe_symlink`
-    // rests on**, which is why it asserts what git calls each direction rather
-    // than only what `vigia` does with it. The hint reads the *index* entry's
-    // mode, so it is only sound while a working tree that disagrees with the
-    // index about a file's **type** is something git reports as a type change
-    // rather than as a modification.
+    // The boundary, and it is also the premise `FileChange::maybe_symlink` rests on,
+    // which is why it asserts what git calls each direction rather than only what
+    // `vigia` does with it.
     let scratch = Scratch::new("symlink-typechange");
     scratch.write("target.txt", "AAAA\n");
     scratch.write("swap.txt", "plain content\n");
@@ -792,10 +759,7 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
         return;
     }
 
-    // A link becomes a regular file. The index still says `120000`, so the hint
-    // says "maybe", the `lstat` finds a plain file, and the read is an ordinary
-    // one. git calls this a *modification*, which is the case the hint has to
-    // get right by asking rather than by trusting the mode.
+    // A link becomes a regular file.
     scratch.remove("link.txt");
     scratch.write("link.txt", "now a real file\n");
 
@@ -812,13 +776,8 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
             .unwrap_or_else(|| panic!("{path} is not in {changes:#?}"))
     };
 
-    // **Direction one, and its classification is not portable, which this test
-    // originally asserted that it was.** A link replaced by a regular file is
-    // reported `Modified` by some git and `gix` builds and `TypeChange` by
-    // others; CI returns `TypeChange` on all three tier-1 targets where this
-    // machine returned `Modified`. Pinning one of them was the same fixture-axis
-    // mistake #15 is about, one axis further out again: a fixture on *this*
-    // installation's answer, asserted as though it were the rule.
+    // Direction one, and its classification is not portable, which this test originally
+    // asserted that it was.
     let became_file = of("link.txt");
     let diff = worktree.diff(became_file).expect("diff the replaced link");
     if became_file.is_diffable() {
@@ -837,12 +796,8 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
         );
     }
 
-    // **Direction two is the one the hint's soundness rests on**, and it is
-    // asserted as the property rather than as a label for the same reason. A
-    // regular file replaced by a link either never reaches a read (`TypeChange`,
-    // which `is_diffable` rejects) or reaches one that must still read the link
-    // rather than follow it. Either is safe; reading the target's contents is
-    // not, and that is what this pins.
+    // Direction two is the one the hint's soundness rests on, and it is asserted as the
+    // property rather than as a label for the same reason.
     let became_link = of("swap.txt");
     let diff = worktree.diff(became_link).expect("diff the replaced file");
     if became_link.is_diffable() {
@@ -863,14 +818,8 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
 
 #[test]
 fn editing_a_symlinks_target_leaves_the_link_out_of_the_changed_set() {
-    // **Named for what it holds rather than for the direction it was written
-    // against**, which is `SPEC.md` §7's rule about a gate asserting the defect
-    // it is named for. Written as "editing a target does not change the link's
-    // diff", it survived the mutation that deletes the `is_symlink` branch in
-    // `read_worktree`, because the *status walk* already agreed with git here
-    // and the read is never reached: an unchanged path has no diff to be wrong
-    // about. So this gates `gix`'s walk, which is what `fidelity.rs` is for, and
-    // it is worth keeping for that.
+    // Named for what it holds rather than for the direction it was written against,
+    // which is `SPEC.md` §7's rule about a gate asserting the defect it is named for.
     let scratch = Scratch::new("symlink-target-edit");
     scratch.write("target_a.txt", "AAAAAAAA\n");
     if !committed_link(&scratch, "target_a.txt", "link.txt") {

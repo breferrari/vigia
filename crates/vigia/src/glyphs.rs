@@ -1,26 +1,11 @@
 //! Which drawing glyphs this terminal's font can be asked for, and what the
 //! sparkline becomes at each rung.
 //!
-//! `SPEC.md` §10's Windows bullet asked for this and said it could not be built:
-//! *"`Depth` is a ladder with a gate on every rung, and there is no equivalent
-//! for characters."*
-//!
-//! ## That sentence is true of probing and false of deciding
-//!
-//! No terminal reports which glyphs its font carries. There is no escape
-//! sequence for it, and the cursor-position trick detects a glyph's *width*
-//! rather than its presence, so a missing glyph rendered as tofu measures one
-//! column exactly as a present one does.
-//!
-//! But [`Depth`](crate::Depth) never asked a terminal anything either. It reads
-//! `TERM_PROGRAM` and `TERM`, which is the terminal **naming itself**, and looks
-//! the name up in a table of what somebody checked. That mechanism transfers
-//! whole. What does not transfer is the direction of the safe error: an
-//! over-claimed colour paints a colour nobody chose, where an over-claimed glyph
-//! paints **tofu**, which is worse than flat. So every rung above the floor here
-//! rests on a positive answer.
-//!
-//! ## The rungs are two densities, not three capabilities
+//! No terminal reports its font's coverage, and a tofu box measures one column
+//! exactly as a real glyph does. So this reads `TERM_PROGRAM`/`TERM` against a
+//! table of what was probed by hand, and every rung above the floor needs a
+//! positive answer: an over-claimed colour paints the wrong colour, an
+//! over-claimed glyph paints tofu.
 //!
 //! | Rung | Buckets per cell | Levels above the baseline |
 //! |---|---|---|
@@ -28,32 +13,13 @@
 //! | [`Glyphs::Braille`] | 2 | 3 |
 //! | [`Glyphs::Octant`] | 2 | 3 |
 //!
-//! Braille and octants are the same 2x4 grid and differ only in whether the dots
-//! are dots or solid; their arithmetic is identical. **So this deliberately does
-//! not derive `Ord`**, where [`Depth`](crate::Depth) does: there `>=` is a
-//! capability test and the ladder is totally ordered, and here `Octant` is not
-//! "more" than `Braille`, it is the same rung spelled differently for a font
-//! that has one and not the other.
+//! Braille and octants are the same 2x4 grid with identical arithmetic, differing
+//! only in whether the dots are dots. So this does not derive `Ord`, where
+//! [`Depth`](crate::Depth) does: `Octant` is not more than `Braille`.
 //!
-//! ## What was measured, because this bullet has been wrong twice
-//!
-//! Probed through `System.Windows.Media.GlyphTypeface`, 2026-08-17:
-//!
-//! - **Consolas carries none of U+2800**, and Lucida Console and Courier New
-//!   carry none either. Consolas is what the legacy console draws with, so
-//!   Windows outside Windows Terminal takes the floor.
-//! - **Cascadia Mono and Cascadia Code carry all of it.** That is what Windows
-//!   Terminal ships, and `WT_SESSION` is how it says so.
-//! - **No font measured carries U+1CD00**, the octants, including the newest
-//!   Cascadia; `microsoft/cascadia-code#711` is still open. The terminals that
-//!   draw them do so natively rather than from the font, which nothing in the
-//!   environment distinguishes. So [`Glyphs::Octant`] is reachable **only**
-//!   through [`GLYPHS_VAR`] and detection never returns it.
-//!
-//! The Windows rung is therefore the exact inverse of [`Depth`](crate::Depth)'s,
-//! which claims 24-bit for the whole platform. That is not an inconsistency:
-//! colour aged out on that console and glyphs did not, because the font did not
-//! age with it.
+//! No measured font carries U+1CD00; terminals that draw octants do so natively,
+//! which nothing in the environment distinguishes, so [`Glyphs::Octant`] is
+//! reachable only through [`GLYPHS_VAR`] and detection never returns it.
 
 use std::fmt;
 
@@ -123,10 +89,8 @@ impl Glyphs {
             }
         }
 
-        // **`NO_COLOR` is deliberately not consulted.** It asks for no *colour*,
-        // and a glyph is not colour: honouring it here would take the sparkline's
-        // shape from a reader who asked only for its ink, which is the same
-        // reading that keeps `Depth::None` carrying bold.
+        // `NO_COLOR` is not consulted: it asks for no *colour*, and a glyph is
+        // not colour. Same reading that keeps `Depth::None` carrying bold.
         let term = lookup("TERM").unwrap_or_default().to_ascii_lowercase();
         if term == "dumb" || term == "linux" {
             return Ok(Self::Block);

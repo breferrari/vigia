@@ -60,7 +60,7 @@ fn chrome(app: &App) -> Chrome {
 
 #[test]
 fn the_shipped_shell_starts_with_the_band_hidden() {
-    // **The default, read off the chrome the shell actually publishes** rather
+    // The default, read off the chrome the shell actually publishes rather
     // than off the field, because the field is private and the chrome is what
     // every drawer sees.
     let shipped = chrome(&App::new());
@@ -69,7 +69,7 @@ fn the_shipped_shell_starts_with_the_band_hidden() {
         "a shell nobody has pressed a key on published a masthead"
     );
 
-    // And the default reaches the **layout**, which is the half a boolean cannot
+    // And the default reaches the layout, which is the half a boolean cannot
     // prove: the rows are the cost, and a default that never got as far as
     // `Body::split` would leave them reserved and blank.
     let hidden = body_layout(area(), &shipped, FILES, FILES);
@@ -79,7 +79,7 @@ fn the_shipped_shell_starts_with_the_band_hidden() {
         "the shipped default still reserved masthead rows"
     );
 
-    // **Not vacuous**, and this is the assertion that makes it so. The same pane
+    // Not vacuous, and this is the assertion that makes it so. The same pane
     // asked for a band draws one, so what the two above measured is the default
     // rather than a pane too small to carry the element at all.
     let asked = body_layout(
@@ -99,21 +99,15 @@ fn the_shipped_shell_starts_with_the_band_hidden() {
 
 #[test]
 fn m_shows_the_band_and_hides_it_again() {
-    // **The only way to the element now.** With the default hidden there is no
-    // config file, no flag and nothing that persists between runs, so a `m` that
-    // stopped flipping the state would put the band out of reach with every
-    // other gate in the suite staying green: they all build their own chrome.
+    // The only way to the element now.
     let scratch = Scratch::large_diff("masthead-toggle", FILES, 20);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
 
     let mut app = App::new();
-    // The diff's height, which is what `App::apply` takes and what a scroll
-    // would be clamped against. The masthead's own arm reads neither, and this
-    // gate deliberately hands it the real number anyway rather than a zero:
-    // an arm that grew a dependency on either should be caught by the gate that
-    // presses the key, not by the next reader.
+    // The diff's height, which is what `App::apply` takes and what a scroll would be
+    // clamped against.
     let height = body_layout(area(), &chrome(&app), FILES, FILES).diff;
 
     assert!(!chrome(&app).masthead, "the shell did not start hidden");
@@ -133,7 +127,7 @@ fn m_shows_the_band_and_hides_it_again() {
             if shown { "drawn" } else { "gone" }
         );
 
-        // Through the layout as well as through the flag, and on **every** press
+        // Through the layout as well as through the flag, and on every press
         // rather than at the end: a toggle that flipped a boolean the split had
         // stopped reading would satisfy a flag-only gate on all four.
         let body = body_layout(area(), &now, FILES, FILES);
@@ -147,13 +141,7 @@ fn m_shows_the_band_and_hides_it_again() {
 
 #[test]
 fn the_branch_stays_on_a_pane_with_no_masthead() {
-    // **What keeps the every-frame `.git/HEAD` read honest.** `Shell::paint`
-    // reads the branch on every frame under the rule *never touch a file the
-    // frame does not draw*, and what satisfies that rule is the header's ladder
-    // rather than the masthead: the branch belongs to the header, and the
-    // difference is load bearing because the masthead is absent unless
-    // a reader asks for it. A branch that had stayed up there would make most
-    // frames read a file they draw nothing from.
+    // What keeps the every-frame `.git/HEAD` read honest.
     let scratch = Scratch::large_diff("masthead-branch", FILES, 20);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -193,10 +181,8 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
 
 /// A view whose band has a known series, drawn on a pane that allocates one.
 fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
-    // **One list row and nothing else specified**, because the band draws above
-    // the list and no gate here reads a glance element. The two sibling fixtures
-    // in `tests/render.rs` and `tests/legibility.rs` are empty in the same
-    // fields for the same reason.
+    // One list row and nothing else specified, because the band draws above the list
+    // and no gate here reads a glance element.
     let entry = FileEntry {
         origin: Origin::Unstaged,
         path: "crates/vigia/src/render.rs".to_owned(),
@@ -296,8 +282,8 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
                 &shown,
             );
 
-            // **The bottom band row, which is the axis and is solid since
-            // #232.** Every row above it is a height and carries only the columns
+            // The bottom band row, which is the axis and is solid since
+            // #232. Every row above it is a height and carries only the columns
             // tall enough to reach it, so counting one of those would measure the
             // series rather than the graph.
             let top = 1 + body.lead as u16;
@@ -321,15 +307,8 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
             };
             compared += 1;
 
-            // **Each side times its own element's density, which stopped
-            // cancelling on 2026-08-22.** The claim is sub-columns against
-            // buckets. While both elements followed one ladder a dense glyph
-            // packed two of each into one cell and the factor stood on both
-            // sides, so it was left out;
-            // [#244](https://github.com/breferrari/vigia/issues/244) took the
-            // band off the ladder and the sparkline kept it, so on a dense pane
-            // the densities are now 1 and 2 and the bare comparison claims
-            // something twice as weak as the sentence above it.
+            // Each side times its own element's density, which stopped cancelling on
+            // 2026-08-22.
             let (columns, samples) = (cells * glyphs.density(), buckets * glyphs.density());
             assert!(
                 columns >= samples,
@@ -375,12 +354,7 @@ fn a_wider_pane_buys_finer_time() {
     for width in [60u16, 80, 120, 160, 200] {
         let rows = band_strip(width, BURSTY);
         let ink: usize = rows.iter().map(|row| drawn_ink(row)).sum();
-        // **Distinct glyphs, and this field is named for that now.** It was
-        // called `heights`, which is the conflation `SPEC.md` §5.1 corrects: a
-        // glyph is one cell of one row, so counting glyphs is
-        // not counting column heights, and at a dense rung it is not even
-        // counting one column. What it does measure is how much of the ramp the
-        // shape uses, which is what the assertion below wants.
+        // Distinct glyphs, and this field is named for that now.
         let mut seen: Vec<char> = Vec::new();
         for glyph in rows.iter().flat_map(|row| row.chars()) {
             if !glyph.is_whitespace() && !seen.contains(&glyph) {
@@ -418,13 +392,8 @@ fn a_wider_pane_buys_finer_time() {
 
 #[test]
 fn an_empty_column_draws_the_axis() {
-    // **The reversal of the empty-column rule, and it is the whole of why the
-    // band reads as a graph.** Giving an empty column nothing rests on a full
-    // track of `_` "reading as a dashed rule
-    // across the pane". It does, and that is what a graph's axis is, and what
-    // every graph of a signal that is zero most of the time draws. Without
-    // it, the filled columns float with nothing to stand on and the element reads
-    // as separated blocks, which is what was reported from a live pane.
+    // The reversal of the empty-column rule, and it is the whole of why the band reads
+    // as a graph.
     let rows = band_strip(WIDE, BURSTY);
     let baseline = rows.last().expect("a band row");
     // Between the pane's own inset and the scrollbar's reserve, which is the
@@ -466,11 +435,9 @@ fn the_band_reaches_both_edges_of_its_slot() {
             .map(|row| row.trim_end().chars().count())
             .max()
             .unwrap_or(0);
-        // **Exact rather than within a fudge**, which is what `+ 2` was: the
-        // last column's span ends at the width itself, so the band stops
-        // precisely where the scrollbar's reserve begins. Counted in `char`s on
-        // both sides, since a byte length would disagree the moment a glyph is
-        // not ASCII.
+        // Exact rather than within a fudge, which is what `+ 2` was: the last column's
+        // span ends at the width itself, so the band stops precisely where the
+        // scrollbar's reserve begins.
         let inset = drawn_inset(rows.last().expect("a band row"));
         assert_eq!(
             widest,
@@ -483,11 +450,9 @@ fn the_band_reaches_both_edges_of_its_slot() {
 /// Two columns of known height against one peak.
 const QUARTERED: [u32; HISTORY_SAMPLES] = {
     let mut s = [0; HISTORY_SAMPLES];
-    // **Plateaus rather than two lone samples**, the band drawing a level: two
-    // isolated writes smooth into one another's tails and the graded
-    // column this gate needs disappears. Sustained runs at a four-to-one ratio
-    // hold their heights through the kernel, which is what "quartered" always
-    // meant and what a lone sample only approximated.
+    // Plateaus rather than two lone samples, the band drawing a level: two isolated
+    // writes smooth into one another's tails and the graded column this gate needs
+    // disappears.
     let mut at = 0;
     while at < WINDOW_SAMPLES / 4 {
         s[at] = 16;
@@ -509,13 +474,7 @@ const GRAPH_ROWS: usize = 2;
 
 #[test]
 fn the_band_stacks_its_rows_from_the_bottom() {
-    // **Aimed at the drawer that replaced `band_cell`.** The rule is unchanged
-    // and its code moved: a column's height climbs a whole ramp per row, so a
-    // column that does
-    // not fill the baseline row may not put anything in the row above it. Every
-    // other band gate reads presence, ink, axis or span and none reads a drawn
-    // column's glyph, so without this the hero element of the pane can stack
-    // arbitrarily and only an eye would catch it.
+    // Aimed at the drawer that replaced `band_cell`.
     let rows = band_strip(WIDE, QUARTERED);
     assert_eq!(rows.len(), GRAPH_ROWS, "the band drew the wrong row count");
     let strip = rows.join("\n");
@@ -568,7 +527,7 @@ const EXACT_PANE: u16 = 124;
 
 #[test]
 fn the_band_scales_against_the_ordinary_write_rather_than_the_largest() {
-    // **The scale rule, pinned by the two glyphs it produces.** The denominator
+    // The scale rule, pinned by the two glyphs it produces. The denominator
     // sits above the ordinary write rather than at the window's maximum, so one
     // outlier saturates instead of crushing every ordinary write beneath it.
     let rows = band_strip(EXACT_PANE, [7; HISTORY_SAMPLES]);
@@ -585,11 +544,7 @@ fn the_band_scales_against_the_ordinary_write_rather_than_the_largest() {
 
 #[test]
 fn the_band_draws_the_newest_writes_on_the_right() {
-    // **Nothing gated time order, and a mirrored graph is a silent lie.** A band
-    // drawn backwards would put a burst that just landed at the far left, where a
-    // reader reads history, and nothing on screen would say so. Every other gate
-    // here reads presence, ink, axis, span, stacking or resolution, and a
-    // mirrored band has all six.
+    // Nothing gated time order, and a mirrored graph is a silent lie.
     let mut newest = [0u32; HISTORY_SAMPLES];
     for sample in newest.iter_mut().skip(HISTORY_SAMPLES * 3 / 4) {
         *sample = 50;
@@ -713,30 +668,19 @@ const LONG_BURST_THEN_ORDINARY: [u32; HISTORY_SAMPLES] = {
 /// One loud burst does not press every ordinary write onto the floor.
 #[test]
 fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
-    // **Two traces, and the second is not a duplicate.** They bind opposite ends
-    // of the multiple the cut is taken at: a burst filling a third of the window
-    // is what puts the floor back if the multiple is raised, and the reported
-    // shape, whose burst covers about a fifth, is what the multiple was fixed
-    // for.
+    // Two traces, and the second is not a duplicate.
     for (name, series) in [
         ("reported", BURST_THEN_ORDINARY),
         ("long burst", LONG_BURST_THEN_ORDINARY),
     ] {
-        // **Both rungs, because the band follows the pane**, so a braille
-        // reader's band is a different picture. Sweeping one rung covers only a
-        // band pinned to
-        // blocks, correctly: the two vectors were identical then.
+        // Both rungs, because the band follows the pane, so a braille reader's band is
+        // a different picture.
         for pane in [Glyphs::Block, Glyphs::Braille] {
             let ceiling = GRAPH_ROWS * pane.levels();
             for width in [40u16, 60, 80, 109, 124] {
                 let heights = column_heights(width, series, pane);
 
-                // **Non-vacuity first, and it is two claims.** The trace has to carry
-                // a genuinely loud event, or there is no yardstick to be dragged; and
-                // it has to carry ordinary writes after it, or there is nothing the
-                // dragging could have flattened. Both are read off the drawn band
-                // rather than off the fixture, so a projection that dropped the tail
-                // fails here rather than passing quietly.
+                // Non-vacuity first, and it is two claims.
                 assert!(
                     heights.contains(&ceiling),
                     "{name}, {pane:?} at {width}: nothing in the trace saturated, so \
@@ -753,14 +697,7 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                 // The defect itself: nothing that was written may sit on the lowest
                 // level the band has.
                 let floored = heights.iter().filter(|height| **height == 1).count();
-                // **Zero where the rung can express it, and bounded where it
-                // cannot.** The defect is the *denominator*: a burst dragging the
-                // mean up until every ordinary write rounds onto the lowest
-                // level. A rung answers a different question, and a dense cell
-                // carries six levels over the band's two rows, so everything
-                // under a sixth of the scale lands on level one by quantisation
-                // whatever the denominator is. Asserting zero there would be
-                // asserting the rung away.
+                // Zero where the rung can express it, and bounded where it cannot.
                 let allowed = if ceiling >= GRAPH_ROWS * RAMP.len() {
                     0
                 } else {
@@ -776,13 +713,9 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                     band_at(width, series, pane).join("\n")
                 );
 
-                // **And the shape is back, not merely off the floor**, which is a
-                // separate claim: a band lifted off the axis and drawn flat would
-                // satisfy the assertion above and still say nothing. A flat band
-                // is one or two distinct heights. Measured on the shipped rule,
-                // the reported trace draws 11 to 14 across these widths and the
-                // long burst draws 7 at the narrowest, so four is below every one
-                // of them with room and is not a number tuned to pass.
+                // And the shape is back, not merely off the floor, which is a separate
+                // claim: a band lifted off the axis and drawn flat would satisfy the
+                // assertion above and still say nothing.
                 let drawn = {
                     let mut seen = heights.clone();
                     seen.sort_unstable();
@@ -790,11 +723,8 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                     seen.len()
                 };
 
-                // **Scaled to the rung, because the rungs do not offer the same
-                // number of heights.** Blocks carry sixteen over the band's two rows
-                // and a dense cell carries six, so a fixed count would ask the two
-                // for different fractions of what they have. A quarter of the rung
-                // is the claim: four of sixteen, two of six.
+                // Scaled to the rung, because the rungs do not offer the same number of
+                // heights.
                 assert!(
                     drawn * 4 > ceiling,
                     "{name}, {pane:?} at {width}: the band drew {drawn} distinct \
@@ -816,7 +746,7 @@ fn the_band_divides_by_the_stores_own_figure() {
         QUARTERED,
         wave(),
     ] {
-        // **Every rung, because the band follows the pane.** Pinned to blocks
+        // Every rung, because the band follows the pane. Pinned to blocks
         // one rung is enough; a braille
         // reader's band is a different picture and is the one that row is about.
         for pane in [Glyphs::Block, Glyphs::Braille] {
@@ -824,7 +754,7 @@ fn the_band_divides_by_the_stores_own_figure() {
             for width in [40u16, 60, 80, 109, 124] {
                 // `column_heights` is sized to the pane and carries the margin's
                 // cells as zeroes, so the band's own span is read off the axis row,
-                // which is solid since #232, and the heights are sliced to it.
+                // which is solid, and the heights are sliced to it.
                 let rows = band_at(width, series, pane);
                 let axis = rows.last().expect("a band row");
                 let inset = drawn_inset(axis) * pane.density();
@@ -863,8 +793,8 @@ fn the_band_divides_by_the_stores_own_figure() {
 
 /// The band's yardstick does not lurch when the pane is resized by a column.
 ///
-/// **The defect this catches came in with the cut itself and was found by
-/// measuring rather than by a gate.** The cut needs a population, and the
+/// The defect this catches came in with the cut itself and was found by
+/// measuring rather than by a gate. The cut needs a population, and the
 /// band's first
 /// shape took it over the series it draws. That series is a *projection*:
 /// `Churn::projected` sums where the pane holds fewer columns than the window
@@ -879,13 +809,13 @@ fn the_band_divides_by_the_stores_own_figure() {
 ///
 /// | fixture | shipped | plain mean | cut on the projection |
 /// |---|---|---|---|
-/// | burst then ordinary | **6.5%** | 2.9% | 41.3% |
-/// | long burst | **7.3%** | 2.9% | 91.4% |
-/// | quartered | **14.3%** | 14.3% | 14.3% |
-/// | wave | **2.9%** | 2.9% | 2.9% |
+/// | burst then ordinary | 6.5% | 2.9% | 41.3% |
+/// | long burst | 7.3% | 2.9% | 91.4% |
+/// | quartered | 14.3% | 14.3% | 14.3% |
+/// | wave | 2.9% | 2.9% | 2.9% |
 ///
 /// So the gate is two claims and neither needs a tuned number. Where nothing is
-/// outlying the figure is the plain mean's **exactly**, at every width. Where
+/// outlying the figure is the plain mean's exactly, at every width. Where
 /// something is, the step is at most half what cutting the projection would have
 /// cost, and the measurement above says the real margin is six times that.
 ///
@@ -952,7 +882,7 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
                 );
 
                 let drawn = Churn(series).levels(slots);
-                // **The rule's own figure, exactly.** That the *drawer* uses it is
+                // The rule's own figure, exactly. That the *drawer* uses it is
                 // `the_band_divides_by_the_stores_own_figure`'s claim, made cell for
                 // cell, and keeping the two apart is what lets this one be exact.
                 let shipped = Churn(series).scale_at(slots);
@@ -961,8 +891,8 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
                 // the drawn series rather than over the window.
                 let on_projection = vigia_core::scale_of(drawn.iter().copied());
 
-                // **Where nothing is outlying, exactly the figure the plain rule
-                // sets**, at every width rather than at the worst of them.
+                // Where nothing is outlying, exactly the figure the plain rule
+                // sets, at every width rather than at the worst of them.
                 if !outlying {
                     assert_eq!(
                         shipped, unmoved,
@@ -972,10 +902,7 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
                 }
 
                 if let Some((was, was_on_projection)) = previous {
-                    // Only where the two shapes differ. The fixtures with nothing
-                    // outlying are pinned exactly by the assertion above at every
-                    // width, so accumulating a worst step for them would be
-                    // arithmetic that nothing reads.
+                    // Only where the two shapes differ.
                     if outlying {
                         worst = worst.max(step(was, shipped));
                         worst_on_projection =
@@ -990,8 +917,8 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
                 compared > 100,
                 "{name}, {pane:?}: only {compared} widths compared"
             );
-            // **Only where the two shapes differ, and with no equality to hide
-            // behind.** This carried `|| worst == worst_on_projection` so that the
+            // Only where the two shapes differ, and with no equality to hide
+            // behind. This carried `|| worst == worst_on_projection` so that the
             // fixtures where nothing is outlying, and all three rules agree, would
             // pass. That disjunct made the gate blind to the defect it is named for:
             // rewrite `Churn::scale_at` as the withdrawn shape and the two numbers
@@ -1000,14 +927,7 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
             // assertion above already pins every width, so this arm is not needed
             // there and is scoped away instead of excused.
             if outlying {
-                // **Fifteen, below both measured values rather than at one of
-                // them.** Cutting the projection moves 41.3% at the block rung
-                // and 20.0% at the dense one, where the shipped rule moves 6.5%
-                // at both; a dense cell asks for twice the sub-columns, so it
-                // crosses the window's sample count at half the width and
-                // repeats over more of the range. The guard exists to catch a
-                // fixture that stopped being heavy tailed, not to pin either
-                // number.
+                // Fifteen, below both measured values rather than at one of them.
                 assert!(
                     worst_on_projection > 15.0,
                     "{name}, {pane:?}: cutting the projection moved only \
@@ -1047,32 +967,22 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
         // about the rule rather than about one glyph set.
         for pane in [Glyphs::Block, Glyphs::Braille] {
             for width in [40u16, 60, 80, 109, 124] {
-                // **The drawn series, which is what the band divides**, and the span
-                // is read off the axis row rather than off `width`. The band is
-                // planned inside the pane's margin and the scrollbar's reserve, so
-                // levelling onto the raw width would divide a projection no pane ever
-                // produces: at forty columns the band draws about thirty-seven
-                // sub-columns. The axis is solid since #232, so its ink is exactly
-                // that span.
+                // The drawn series, which is what the band divides, and the span is
+                // read off the axis row rather than off `width`.
                 let axis = band_at(width, series, pane)
                     .last()
                     .expect("a band row")
                     .clone();
                 let slots = drawn_ink(&axis) * pane.density();
-                // **Non-vacuity, and it is the whole gate.** A band that drew nothing
-                // makes `slots` zero, `levels(0)` empty, and the comparison below
-                // `0 == 0`, so twenty series-and-width pairs would agree about
-                // nothing at all.
+                // Non-vacuity, and it is the whole gate.
                 assert!(
                     slots > 0,
                     "the band drew no axis at {width} columns, so this compared \
                  nothing"
                 );
                 let levelled = Churn(series).levels(slots);
-                // **`Churn::scale_at`, which is what the band calls**, and not
-                // `scale_of` over the same series. The two are the whole
-                // subject: one cuts the samples and projects what is left,
-                // the other cuts the projection, and only the first is a no-op here.
+                // `Churn::scale_at`, which is what the band calls, and not `scale_of`
+                // over the same series.
                 assert_eq!(
                     Churn(series).scale_at(slots),
                     plain(&levelled),
@@ -1086,7 +996,7 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
 
 #[test]
 fn the_band_follows_the_rung_the_pane_detects() {
-    // **The reverse of pinning the band to blocks.** Taking it off the glyph
+    // The reverse of pinning the band to blocks. Taking it off the glyph
     // ladder pins it there; the band follows the pane
     // again, so a reader whose font carries braille gets a braille band.
     let series = wave();
@@ -1105,10 +1015,7 @@ fn the_band_follows_the_rung_the_pane_detects() {
 
 #[test]
 fn a_dense_band_is_drawn_in_the_glyphs_its_pane_detected() {
-    // **The half that says the band is decodable where it is drawn.** Drawing
-    // *differently* per rung would also be true of a band emitting glyphs the
-    // pane cannot render, which is the defect rather than the feature: the rung
-    // ladder exists because a font that has no braille draws a question mark.
+    // The half that says the band is decodable where it is drawn.
     let series = wave();
     for pane in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
         for width in [40u16, 60, 80, 109, 124] {
@@ -1145,13 +1052,7 @@ fn burst_at(now: Instant) -> History {
 
 #[test]
 fn a_quiet_window_slides_left_rather_than_freezing() {
-    // **The reported defect.** The window's axis is time, so a burst that has
-    // not moved is
-    // a burst still claiming to be happening now. Rolling it thirty seconds with
-    // nothing written has to move the ink left, and the gate reads the drawn
-    // band rather than the store, because a store that rolls while the paint
-    // reads a snapshot taken earlier would pass a store-level assertion and still
-    // freeze the screen.
+    // The reported defect.
     let now = Instant::now();
     let mut history = burst_at(now);
 
@@ -1194,12 +1095,7 @@ fn a_quiet_window_slides_left_rather_than_freezing() {
 
 #[test]
 fn the_band_and_the_sparklines_age_together() {
-    // **The coherence requirement, stated as a gate rather than left as a
-    // mechanism.** One store
-    // and one roll is *why* they agree; this is what fails if the band ever gets
-    // a clock of its own. Both elements read the same window, so a roll that
-    // moved one and not the other would leave the pane saying two different
-    // things about what time it is.
+    // The coherence requirement, stated as a gate rather than left as a mechanism.
     let now = Instant::now();
     let mut history = burst_at(now);
 
@@ -1229,10 +1125,8 @@ fn the_band_and_the_sparklines_age_together() {
 
 #[test]
 fn the_band_climbs_the_ramp_toward_the_top() {
-    // btop's multi-row rule: one colour per row against the vertical
-    // axis, quiet at the baseline and hot at the top, so a column that climbs
-    // reads hotter as it does. Read off the cells at a truecolour palette; the
-    // gate below it holds the ladder's other half.
+    // btop's multi-row rule: one colour per row against the vertical axis, quiet at the
+    // baseline and hot at the top, so a column that climbs reads hotter as it does.
     let theme = vigia::Theme::dark().resolve(vigia::Depth::Truecolor);
     let ramp = theme.spark_ramp().expect("dark at truecolour interpolates");
 

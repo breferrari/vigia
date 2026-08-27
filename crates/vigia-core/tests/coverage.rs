@@ -19,9 +19,8 @@ fn embedded() -> SyntaxSet {
         .expect("the embedded dump deserialises")
 }
 
-/// Every format the ruling names, as (what a reader would call it, the grammar
-/// name in the dump). One row per formerly missing format from #235's survey,
-/// plus the covered-before set that must never regress.
+/// Every format the ruling names, as (what a reader would call it, the grammar name in
+/// the dump).
 const RULED: &[(&str, &str)] = &[
     // The 2026 survey's missing languages, now covered.
     ("TypeScript", "TypeScript"),
@@ -61,7 +60,6 @@ const RULED: &[(&str, &str)] = &[
     ("v.mod", "V Module"),
     ("Gleam", "Gleam"),
     ("PowerShell", "PowerShell"),
-    // Covered before #235, and covered still: the set may only grow.
     ("Rust", "Rust"),
     ("Python", "Python"),
     ("JavaScript", "JavaScript"),
@@ -128,18 +126,14 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
     }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        // No extras directory means the dump should be exactly two-face's
-        // set, whose guarantee is upstream's. That is a legal state — but
-        // only if the dump agrees, so the absence is asserted rather than
-        // returned on.
+        // No extras directory means the dump should be exactly two-face's set, whose
+        // guarantee is upstream's.
         assert_no_orphan_vendored_grammars();
         return;
     };
 
-    // Collected once, then every collected path is checked or the loop
-    // panics, so nothing can be skipped by construction. The vendored tail is
-    // four grammars today; a count pin here would just restate the roster the
-    // pin gate already holds.
+    // Collected once, then every collected path is checked or the loop panics, so
+    // nothing can be skipped by construction.
     let sources: Vec<_> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -188,7 +182,7 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
     }
 }
 
-/// The other half of the abort-on-first-use guarantee, over the **whole**
+/// The other half of the abort-on-first-use guarantee, over the whole
 /// dump rather than the extras: `find_syntax_by_first_line` compiles each
 /// grammar's `first_line_match` behind the same lazy `expect` as any match
 /// pattern, `two-face`'s vetting covers match patterns, and a first-line
@@ -253,12 +247,9 @@ fn the_committed_dump_matches_its_sources() {
         .collect();
     sources.sort();
 
-    // The notice lives beside the dump rather than beside the sources, because
-    // it has to ship: a crates.io consumer and a release archive both get the
-    // grammars, so they both have to get the attribution. `include_str!` would
-    // read it at compile time, and a plain read is used instead so that this
-    // gate fails with the path when the file has moved rather than failing the
-    // build for every consumer.
+    // The notice lives beside the dump rather than beside the sources, because it has
+    // to ship: a crates.io consumer and a release archive both get the grammars, so
+    // they both have to get the attribution.
     let notice_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/NOTICE.md");
     let notice = std::fs::read_to_string(&notice_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", notice_path.display()));
@@ -277,11 +268,8 @@ fn the_committed_dump_matches_its_sources() {
         "the vendored sources and NOTICE.md's Sources table disagree, so the          committed dump was not built from these sources; run `cargo run -p          xtask` and commit what it writes"
     );
 
-    // The hashes above tie the sources to `NOTICE.md`, which `xtask` writes in
-    // the same run as the dump. This ties [`VENDORED`] to the sources, which
-    // is the half nothing else could see: the roster is hand-written, so a
-    // fifth vendored grammar nobody added to it would simply never be checked
-    // by the absence direction.
+    // The hashes above tie the sources to `NOTICE.md`, which `xtask` writes in the same
+    // run as the dump.
     let mut parsed: Vec<String> = paths
         .iter()
         .map(|path| {
@@ -303,12 +291,7 @@ fn the_committed_dump_matches_its_sources() {
          looking for the wrong set"
     );
 
-    // **And every vendored grammar's attribution reaches the notice.** The
-    // dump is a copy of somebody else's work, so the upstream it came from and
-    // the licence it came under have to travel with it. Both live in the
-    // vendored file's header, which is outside the package and reaches nobody
-    // who installs the crate; the notice is the copy that ships. A name in a
-    // list is not attribution, which is what this file said for one release.
+    // And every vendored grammar's attribution reaches the notice.
     for path in &paths {
         let text = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
@@ -338,8 +321,8 @@ fn the_committed_dump_matches_its_sources() {
         }
     }
 
-    // **And the licence text, per upstream, driven from the grammars rather
-    // than from the licence files.**
+    // And the licence text, per upstream, driven from the grammars rather
+    // than from the licence files.
     let mut upstreams: Vec<(String, String)> = Vec::new();
     for path in &paths {
         let text = std::fs::read_to_string(path)
@@ -408,7 +391,7 @@ fn the_committed_dump_matches_its_sources() {
         );
     }
 
-    // And to the **dump**, which is the artefact that actually ships.
+    // And to the dump, which is the artefact that actually ships.
     let names: HashSet<String> = embedded()
         .syntaxes()
         .iter()
@@ -476,8 +459,8 @@ const fn snip(
     }
 }
 
-/// A representative snippet per ruled format, with the bar set to **what the
-/// snippet actually reaches**, measured rather than chosen.
+/// A representative snippet per ruled format, with the bar set to what the
+/// snippet actually reaches, measured rather than chosen.
 const SNIPPETS: &[Snippet] = &[
     snip(
         "TypeScript",
@@ -890,10 +873,8 @@ const SNIPPETS: &[Snippet] = &[
     ),
 ];
 
-/// Parse every snippet through the crate's own public path — the same
-/// resolution, the same scope table, the same parser a frame uses — and
-/// assert the spread. A resolution-only test would pass while a language
-/// draws plain, which is #235's second half.
+/// Parse every snippet through the crate's own public path — the same resolution, the
+/// same scope table, the same parser a frame uses — and assert the spread.
 #[test]
 fn every_ruled_format_reaches_a_spread_of_classes() {
     use vigia_core::{Class, Highlighter, Hunk, Line, LineKind};
@@ -1000,8 +981,8 @@ fn exactly_one_pattern_carries_the_table_guard_twice() {
     );
 }
 
-/// The guard changes what the grammar costs and **nothing about what it
-/// matches**.
+/// The guard changes what the grammar costs and nothing about what it
+/// matches.
 #[test]
 fn the_guarded_grammar_highlights_identically() {
     let guarded = embedded();
@@ -1176,8 +1157,8 @@ fn op_stream(set: &SyntaxSet, ext: &str, body: &str) -> Vec<String> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut ops = Vec::new();
-    // **`split_inclusive`, not `lines`, and it is the guard's own alphabet that
-    // makes the difference.** The dump is the `extra_newlines` variant and the
+    // `split_inclusive`, not `lines`, and it is the guard's own alphabet that
+    // makes the difference. The dump is the `extra_newlines` variant and the
     // shipped path hands `syntect` newline-terminated lines (`Side::spans`, and
     // the warmer's own `split_inclusive('\n')`). The guard is `(?=[^|\n]*\|)`,
     // so half of its character class is the newline: stripping the terminator

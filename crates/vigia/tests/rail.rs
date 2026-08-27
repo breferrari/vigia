@@ -1,4 +1,4 @@
-//! The left rail: the layout where the pinned list sits **beside** the diff
+//! The left rail: the layout where the pinned list sits beside the diff
 //! rather than above it, `SPEC.md` §11.1's widest arrangement.
 
 mod support;
@@ -208,7 +208,7 @@ fn columns_of(region: vigia::Region) -> std::ops::Range<u16> {
     region.left..region.left + region.width
 }
 
-/// The rung each region draws at this width, read at each region's **own** first
+/// The rung each region draws at this width, read at each region's own first
 /// row.
 fn rungs(width: u16, view: &View) -> (Rung, Rung) {
     rungs_at(width, view, Glyphs::Block)
@@ -220,10 +220,8 @@ fn rungs_at(width: u16, view: &View, glyphs: Glyphs) -> (Rung, Rung) {
     let theme = Theme::default();
     let buf = drawn_at(width, TALL, view, glyphs);
     let told = regions(area, &chrome(), view);
-    // **Both regions have to hold rows**, or a "list" rung read at the diff's own
-    // first row across the whole pane would pass for a rung this layout never
-    // drew. Asserted rather than assumed: it is a property of the fixture, and a
-    // fixture is the thing most likely to change under a gate.
+    // Both regions have to hold rows, or a "list" rung read at the diff's own first row
+    // across the whole pane would pass for a rung this layout never drew.
     assert!(
         told.list.rows > 0 && told.diff.rows > 0,
         "at {width} columns a region drew no rows, so its rung is being read off \
@@ -420,12 +418,8 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
         let told = regions(area, &chrome(), &view);
         let buf = drawn(width, TALL, &view);
 
-        // **The path's own columns: from after the kind letter to the pulse that
-        // opens the glance cluster.** Bounded on the right by an *element* rather
-        // than by a blank run, which is what makes this gate able to fail at
-        // all. Splitting on a double space measures the path plus the whole
-        // cluster, there being no double space between a path and the pulse, and
-        // stays green while the floor is two columns short.
+        // The path's own columns: from after the kind letter to the pulse that opens
+        // the glance cluster.
         let row: String = columns_of(told.list)
             .map(|x| buf[(x, told.list.top)].symbol().to_owned())
             .collect::<Vec<_>>()
@@ -435,11 +429,7 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
             .find(|(_, glyph)| *glyph == '●')
             .map(|(at, _)| at)
             .expect("the rail's first row draws a pulse");
-        // **The kind letter is skipped by position, never by glyph.** Trimming a
-        // leading `M` would eat the first character of a path that happens to
-        // begin with one, and `KIND_WIDTH`'s own docblock in `render.rs` is about
-        // exactly this: the row's opening cell is a fixed allowance, not something
-        // to be recognised.
+        // The kind letter is skipped by position, never by glyph.
         let opening: String = row.chars().take(CARET_WIDTH + KIND_WIDTH).collect();
         let path = row[opening.len()..cluster].trim();
         assert!(
@@ -470,11 +460,9 @@ fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
          describes what the tool draws"
     );
 
-    // **Read off the drawn screen rather than from `Body`**, because
-    // `body_layout(..).rail` and `first_rail()` both reduce to the same predicate
-    // and comparing them is comparing an expression with itself. What a reader
-    // gets below the arrival width is a *rule* between the regions and one column
-    // of content, and that is what this asserts.
+    // Read off the drawn screen rather than from `Body`, because `body_layout(..).rail`
+    // and `first_rail()` both reduce to the same predicate and comparing them is
+    // comparing an expression with itself.
     let view = beside();
     for width in [40u16, 80, PICTURED_PANE, arrives - 1] {
         let area = Rect::new(0, 0, width, TALL);
@@ -566,15 +554,8 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     let mut heights = 0usize;
     let mut banded = 0usize;
 
-    // **Both masthead settings, every file count that changes the answer, and
-    // every height to two hundred rows.** Sweeping one file count and one
-    // masthead setting leaves the defect this is written for alive in the cell
-    // that is not looked at: beside a rail `after` still holds the row the
-    // stacked
-    // list would have taken and the rule's, so the band's fit test sees more rows
-    // and the band can arrive *earlier* than on the strip the rail replaces. With
-    // one changed file the strip costs two rows and the band costs three, so the
-    // rail came out a row short.
+    // Both masthead settings, every file count that changes the answer, and every
+    // height to two hundred rows.
     for masthead in [false, true] {
         let chrome = Chrome {
             masthead,
@@ -599,11 +580,8 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
                     rail.diff
                 );
 
-                // **The map's own crossing**, which nothing asserted until the
-                // exhaustive sweep went looking for it. A rail exists to show more
-                // of the changed set, so a pane widened into one handing back
-                // *fewer* files would be the same failure on the region the layout
-                // is named for.
+                // The map's own crossing, which nothing asserted until the exhaustive
+                // sweep went looking for it.
                 assert!(
                     rail.list >= stacked.list,
                     "with masthead {masthead} over {files} files at {height} rows, \
@@ -614,12 +592,7 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
                     rail.list
                 );
 
-                // **And the same failure mirrored.** `Body::beside` charges the
-                // band against fewer rows than it has, so it can only ever band
-                // *later* than the stacked layout; if it ever banded so much later
-                // that the stacked layout had one and the rail did not, a reader
-                // narrowing the pane would gain a band. The delay is bounded by
-                // two rows and this is what says so.
+                // And the same failure mirrored.
                 assert!(
                     !(stacked.graph > 0 && rail.rail && rail.graph == 0),
                     "with masthead {masthead} over {files} files at {height} rows, \
@@ -800,12 +773,7 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
         }
     }
 
-    // **The ceiling is a pinned width, not a phrase.** `SPEC.md` §11.1 said the
-    // rail keeps the pictured complement *at any pane anyone runs*, which is a
-    // claim no sweep can fail: the width where it stops being true is simply
-    // outside the sweep. It is 402 columns, the rail's share reaching the 130
-    // planning columns the ladder's next rung asks for, and naming it is what
-    // makes the sentence checkable. If the share moves, this reddens.
+    // The ceiling is a pinned width, not a phrase.
     assert!(
         climbed,
         "the rail never left the pictured complement by {PAST_THE_CLIMB} columns, \
@@ -861,7 +829,7 @@ fn a_stale_view_shortens_the_rail_and_moves_nothing_else() {
 }
 
 /// Crossing into the rail never removes a glance element, and never takes either
-/// region below the complement the published picture draws, **at any glyph rung**.
+/// region below the complement the published picture draws, at any glyph rung.
 #[test]
 fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
     let view = beside();
@@ -912,10 +880,7 @@ fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
         }
     }
 
-    // **The dense rungs' cost, pinned rather than merely allowed.** Two rungs,
-    // two regions, one fall each: the block rung must not fall and the other two
-    // must, or the ladder has moved and `SPEC.md` §11.1's paragraph about it has
-    // gone stale without anything saying so.
+    // The dense rungs' cost, pinned rather than merely allowed.
     assert_eq!(
         fell, 4,
         "the crossing cost a rung in {fell} region-rung pairs; blocks should cost \
@@ -944,10 +909,8 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         boundary, told.diff.left,
         "the two regions do not meet, so there is no boundary to probe"
     );
-    // **And the boundary is interior**, or the columns probed below are off the
-    // pane and every routing assertion is about a cell nobody can point at. Found
-    // by mutation: widening the rail to the whole pane left this gate green while
-    // four of its neighbours reddened.
+    // And the boundary is interior, or the columns probed below are off the pane and
+    // every routing assertion is about a cell nobody can point at.
     assert!(
         told.diff.width > 0 && boundary < area.x + area.width,
         "the diff has no columns of its own at {width}, so the boundary is the \
@@ -964,7 +927,7 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
     };
     let row = told.list.top;
 
-    // **The last column of the rail and the first of the diff**, which is the one
+    // The last column of the rail and the first of the diff, which is the one
     // pair a row cannot tell apart in this layout and the only pair that could
     // ever have been got wrong.
     assert!(
@@ -984,7 +947,7 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         action_for(&event(boundary, row), told)
     );
 
-    // **A click on a listed file, at the rail's own columns.** The pointer has to
+    // A click on a listed file, at the rail's own columns. The pointer has to
     // land on the file the rail drew there rather than on the row of a region
     // seventy columns away.
     let click = |column: u16, row: u16| {
@@ -1009,10 +972,8 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         action_for(&click(boundary + 2, told.list.top + 1), told)
     );
 
-    // **The rail's column below its last file belongs to neither region**, which
-    // is the shipped common case: three changed files in a body of twenty. It
-    // falls through to the diff exactly as the band's rows do, and saying so here
-    // is what makes it a decision rather than an accident nobody noticed.
+    // The rail's column below its last file belongs to neither region, which is the
+    // shipped common case: three changed files in a body of twenty.
     let empty = told.list.top + told.list.rows;
     assert!(
         empty < told.diff.top + told.diff.rows,
@@ -1028,11 +989,7 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
 
 #[test]
 fn the_rail_is_off_until_the_reader_asks_for_it() {
-    // **`SPEC.md` §11.2 B14's whole claim.** The rail arrives at 134 columns and
-    // until this row it arrived on its own, so a reader who had not asked for a
-    // narrower diff got one: at 133 the diff plans against 129 columns and at 134
-    // against 60. #252's derivation of *where* the split can happen is untouched;
-    // what changes is that crossing it is a gesture.
+    // `SPEC.md` §11.2 B14's whole claim.
     let files = 3;
     for width in 1..=WIDEST {
         let at = Rect::new(0, 0, width, TALL);
@@ -1045,7 +1002,7 @@ fn the_rail_is_off_until_the_reader_asks_for_it() {
 
 #[test]
 fn r_asks_for_the_rail_and_r_puts_it_back() {
-    // **The gesture, end to end**: the key resolves to the action, the action moves
+    // The gesture, end to end: the key resolves to the action, the action moves
     // the state, and the state reaches the layout. Three links, and the gate above
     // reads only the last of them, so a key bound to nothing would leave it green.
     let scratch = repo::Scratch::large_diff("rail-gesture", 3, 40);
@@ -1093,7 +1050,7 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
 
 #[test]
 fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
-    // **`m`'s own behaviour one region over**: a pane that cannot carry the thing
+    // `m`'s own behaviour one region over: a pane that cannot carry the thing
     // draws nothing different, and the request is still kept, so a reader who
     // narrows a railed pane and widens it again gets the rail back rather than the
     // question.
@@ -1107,7 +1064,7 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
         );
     }
 
-    // **The request survives a pane that cannot honour it**, which is the half
+    // The request survives a pane that cannot honour it, which is the half
     // that would be lost by clearing the flag instead of ignoring it, and it is
     // driven through an `App` rather than through a chrome built railed.
     let scratch = repo::Scratch::large_diff("rail-survives-narrow", 3, 40);
@@ -1139,11 +1096,9 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
 
 #[test]
 fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
-    // **`ToggleMasthead`'s own promise one region over**, and the half the gesture
-    // gate above does not reach: a reader asking where the map goes is not asking
-    // to be moved inside the diff. A rail narrows the diff rather than reflowing
-    // it, so a preserved position looks like the same line clipped shorter, and
-    // the narrower row is a **prefix** of the wider one.
+    // `ToggleMasthead`'s own promise one region over, and the half the gesture gate
+    // above does not reach: a reader asking where the map goes is not asking to be
+    // moved inside the diff.
     let scratch = repo::Scratch::large_diff("rail-keeps-the-row", 3, 200);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1184,7 +1139,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
 
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
-    // **Without this the gate passes against a `ToggleRail` that does nothing**,
+    // Without this the gate passes against a `ToggleRail` that does nothing,
     // because the two rows are then identical and a string is trivially a prefix
     // of itself. Found by mutation.
     assert!(
@@ -1194,10 +1149,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     );
     let beside = top_row(&mut app, &mut frame);
 
-    // **The comparison length comes from the drawn row, not from a constant.** A
-    // hand-tuned number compares whatever it happens to reach and loosens silently
-    // when the pane or the margins move; the railed row's own content, once its
-    // right-edge furniture is off it, is exactly the overlap the two layouts have.
+    // The comparison length comes from the drawn row, not from a constant.
     let content = beside.trim_end_matches([' ', '▲', '▼', '█', '│']);
     assert!(
         content.chars().count() > 20,
@@ -1212,11 +1164,9 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
 
 #[test]
 fn r_reaches_the_painted_screen_and_not_only_the_layout() {
-    // **Every other gesture gate here stops at `Body::rail`**, so a painter that
-    // ignored the flag entirely would leave the whole file green: the layout would
-    // say rail, the regions would say rail, and the screen would draw a strip.
-    // Read off the buffer instead, at the one place the two shapes differ most
-    // plainly: whether the row under the header carries a file path or the diff.
+    // Every other gesture gate here stops at `Body::rail`, so a painter that ignored
+    // the flag entirely would leave the whole file green: the layout would say rail,
+    // the regions would say rail, and the screen would draw a strip.
     let scratch = repo::Scratch::large_diff("rail-painted", 3, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1261,8 +1211,8 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     );
 }
 
-/// **The rail draws both runs whole, and it was the layout the row-budget fix
-/// missed.**
+/// The rail draws both runs whole, and it was the layout the row-budget fix
+/// missed.
 #[test]
 fn a_rail_draws_the_tail_of_the_staged_run() {
     let scratch = repo::Scratch::large_diff("rail-staged-tail", 6, 8);

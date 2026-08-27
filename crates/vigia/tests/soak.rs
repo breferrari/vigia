@@ -102,12 +102,12 @@ struct Drift {
     /// [`WARMUP_FRACTION`]'s prefix: see [`settled_at`].
     warm: usize,
     /// Where the series settled, in samples, or `None` for a run that never
-    /// came inside the band. **Reported, never gated**: [`settled_at`].
+    /// came inside the band. Reported, never gated: [`settled_at`].
     settled: Option<usize>,
     /// The same position as an elapsed time.
     settled_at: Option<Duration>,
     /// The same ends-ratio taken from [`Drift::settled`] instead of the floor.
-    /// **Reported, never gated.**
+    /// Reported, never gated.
     settled_ratio: Option<f64>,
     /// Least-squares gradient over the post-warmup series, in MiB per hour.
     slope: f64,
@@ -170,7 +170,7 @@ fn warmup_floor(len: usize) -> usize {
     (len as f64 * WARMUP_FRACTION).ceil() as usize
 }
 
-/// Where the series settled, as a **reported** diagnostic and never as a gate.
+/// Where the series settled, as a reported diagnostic and never as a gate.
 fn settled_at(values: &[u64]) -> Option<usize> {
     let quarter = values.len() / 4;
     let level = quarter_medians(values).map(|whole| whole[3])?;
@@ -199,27 +199,19 @@ fn drift(samples: &[(Duration, u64)]) -> Option<Drift> {
     // own tests call it through.
     let values: Vec<u64> = samples.iter().map(|&(_, rss)| rss).collect();
 
-    // **The gate's baseline, and the only one it has.** See [`settled_at`] for
+    // The gate's baseline, and the only one it has. See [`settled_at`] for
     // why the measured plateau below is printed and never substituted here.
     let warm = warmup_floor(values.len());
     let rest = samples.get(warm..)?;
     let quarters = quarter_medians(&values[warm..])?;
 
-    // A zero at either end means the platform stopped reporting RSS, and
-    // neither end may be one. A zero *baseline* makes the ratio an infinity
-    // that passes or fails by luck. A zero *settled* figure is worse, because
-    // it passes quietly: [`ends_ratio`] clamps a fall to zero, so a run whose
-    // reads vanish half way through reported 0.00% drift and looked like the
-    // flattest process ever measured. Only the baseline was guarded until a
-    // mutation went looking for the other end.
+    // A zero at either end means the platform stopped reporting RSS, and neither end
+    // may be one.
     if quarters[0] == 0 || quarters[3] == 0 {
         return None;
     }
 
-    // The plateau, reported beside the verdict and never inside it. Its own
-    // drift is taken through the same cut the gate uses, so the two figures a
-    // reader compares are the same statistic over two baselines rather than two
-    // statistics.
+    // The plateau, reported beside the verdict and never inside it.
     let settled = settled_at(&values);
     let settled_ratio = settled
         .and_then(|at| quarter_medians(&values[at..]))
@@ -428,11 +420,7 @@ impl Report {
                         println!("soak: rss plateau: none inside this window (reported, not gated)")
                     }
                 }
-                // The shape, and the gradient through it. `SPEC.md` §10's open
-                // question about I3 is a *sign* disagreement between two runs,
-                // and it was settled by hand off the series below the last time
-                // anyone asked. Printing both is what makes the next long run
-                // answer it from its own report.
+                // The shape, and the gradient through it.
                 println!(
                     "soak: rss quarters {:.2}, {:.2}, {:.2}, {:.2} MiB, \
                      slope {:+.2} MiB/h over {} (reported, not gated){}",
@@ -526,12 +514,8 @@ fn workload(
     rounds: &AtomicU64,
     created: &AtomicU64,
 ) {
-    // The file the viewport spends its life on, made of many small hunks
-    // rather than one enormous one. `fill_large_diff` rewrites every line, so
-    // each of its files is a single thousand-row hunk, and a screenful of that
-    // holds one or two: the highlight cache would then be bounded by the
-    // viewport and never asked to hold more than a couple of entries. Restored
-    // after every bulk rewrite below, which flattens it again.
+    // The file the viewport spends its life on, made of many small hunks rather than
+    // one enormous one.
     scratch.write("src/mod_0.rs", sparse(lines, SPARSE_EVERY));
 
     let mut round = 0u64;
@@ -559,10 +543,7 @@ fn workload(
             );
         }
 
-        // A new path appears, and one from a few rounds ago goes away. This is
-        // what makes the *set* of changed paths churn while its size does not,
-        // which is the difference between "bounded by the current diff" and
-        // "bounded by the session".
+        // A new path appears, and one from a few rounds ago goes away.
         if at % CREATE_EVERY == 0 {
             scratch.write(
                 &format!("scratch/new_{made}.rs"),
@@ -619,12 +600,9 @@ fn sparse(lines: usize, every: usize) -> String {
 /// Rounds between each phase of [`workload`].
 const WRITE_PAUSE: Duration = Duration::from_millis(50);
 const COLD_EVERY: usize = 4;
-// Churn, and the reason it moved is in `DEFAULT_FILES` above: paths ever
-// changed is the fixture size plus write rounds over this, so this is the term
-// that keeps I3's situation guard satisfiable now that the pinned list has
-// widened the working set. Two rather than three for margin on a slow runner,
-// where fewer rounds fit in the window: macOS managed 104, and at 2 that is
-// still ~72 paths against a high-water mark of 23.
+// Churn, and the reason it moved is in `DEFAULT_FILES` above: paths ever changed is the
+// fixture size plus write rounds over this, so this is the term that keeps I3's
+// situation guard satisfiable now that the pinned list has widened the working set.
 const CREATE_EVERY: usize = 2;
 const KEEP_CREATED: u64 = 6;
 const REVERT_EVERY: usize = 13;
@@ -667,10 +645,9 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration) -> Repo
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let root = scratch.root().to_path_buf();
 
-    // The product's own shape: the watcher owns its repository on its own
-    // thread, because `gix::Repository` is `Send` and not `Sync`, and it is
-    // detached because nothing can wake a blocked `next_tick` except a `Stop`.
-    // See `vigia::run`.
+    // The product's own shape: the watcher owns its repository on its own thread,
+    // because `gix::Repository` is `Send` and not `Sync`, and it is detached because
+    // nothing can wake a blocked `next_tick` except a `Stop`.
     std::thread::spawn(move || {
         let worktree = Worktree::discover(&root).expect("discover for the watch thread");
         let mut watcher = worktree
@@ -711,11 +688,8 @@ fn drive(
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
 
-    // **The warmer, because `run` spawns one and this harness claims to be `run`
-    // with the terminal taken out.** It compiles grammars ahead of the reader,
-    // and what it leaves behind is `syntect`'s compiled-pattern cache, which is
-    // the one thing in the process that grows as more grammars are touched and
-    // is never evicted.
+    // The warmer, because `run` spawns one and this harness claims to be `run` with the
+    // terminal taken out.
     highlighter
         .warm_ahead(
             worktree.workdir().to_path_buf(),
@@ -778,10 +752,8 @@ fn drive(
             }
             Ok(paths) => {
                 ticks += 1;
-                // Sampled on the wake, before the walk, exactly where
-                // `vigia::run` samples it. I10 is a claim about a store fed one
-                // tick at a time, so a soak feeding it any other way would bound
-                // something the product never builds.
+                // Sampled on the wake, before the walk, exactly where `vigia::run`
+                // samples it.
                 history.record(paths.iter().map(String::as_str), Instant::now());
                 // Advance first, follow second: the path is looked up in the
                 // file list, and before the walk that list is the previous
@@ -815,14 +787,8 @@ fn drive(
             buffer = Buffer::empty(area);
         }
 
-        // Both status readouts, in the order `vigia::run` performs them, and
-        // they belong in a soak for a different reason than they belong in a
-        // budget gate. I9 asks what one frame costs; I3 asks what a **week** of
-        // them retains, and these are the two newest things on the frame path
-        // that allocate: a syscall's buffer and a hundred and twenty-eight
-        // durations that a percentile copies and sorts every frame. A soak that
-        // drove a screen without them would report drift for a process nobody
-        // runs.
+        // Both status readouts, in the order `vigia::run` performs them, and they
+        // belong in a soak for a different reason than they belong in a budget gate.
         let frame_began = Instant::now();
         app.sample_memory();
         let chrome = app.chrome(NAME, None, Pointing::default(), 0, "");
@@ -831,11 +797,8 @@ fn drive(
             Ok(fresh) => {
                 view = fresh;
                 // Every hunk that put a line on this screen, which is what the
-                // highlighter was asked for, plus the ones it is allowed to keep
-                // for a reader who scrolls back. One more than the headers drawn,
-                // because the top of the screen can sit inside a hunk whose
-                // header is above it, and never more: a hunk with no line on
-                // screen is never asked for at all.
+                // highlighter was asked for, plus the ones it is allowed to keep for a
+                // reader who scrolls back.
                 let bound = 1
                     + RETAINED_HUNKS
                     + view
@@ -916,10 +879,7 @@ impl Report {
             "I3: nothing was highlighted, so this soak measured the frame path \
              with the syntax parser missing"
         );
-        // Both paths, not just the expensive one. A workload that rewrites every
-        // file inside the settle margin never lets a fingerprint be trusted, so
-        // it recomputes every diff and never exercises the cache it is here to
-        // bound. That is what this run did before `COLD_EVERY` existed.
+        // Both paths, not just the expensive one.
         assert!(
             self.frame.reused > 0,
             "I3: {} diffs were computed and none reused over {} frames, so every \
@@ -960,12 +920,8 @@ impl Report {
             self.samples.len()
         );
 
-        // The four retained caches, each against the thing that is supposed to
-        // bound it. `Frame` keeps two, both bounded by the current diff;
-        // `Highlighter` is bounded by the screen, which is the stronger claim;
-        // `History` is bounded by a fixed cap, which is I10 and is the only one
-        // of the four that has to keep holding a path *after* it has left the
-        // diff.
+        // The four retained caches, each against the thing that is supposed to bound
+        // it.
         for (at, sample) in self.samples.iter().enumerate() {
             assert!(
                 sample.tracked_diffs <= sample.files,
@@ -1008,11 +964,7 @@ impl Report {
              than the viewport"
         );
 
-        // **And the span bound above cannot be satisfied by an empty map.**
-        // `tracked_spans <= files` holds trivially against a frame that keeps no
-        // span at all, which is precisely what the pre-#101 code did: it cleared
-        // the map on every tick. A bound is only evidence when something reached
-        // it, which is the rule I10's own gate is written against one cache over.
+        // And the span bound above cannot be satisfied by an empty map.
         assert!(
             self.max_tracked_spans() > 0,
             "I3: no sample held a single height across {} frames, so the span \
@@ -1051,11 +1003,8 @@ impl Report {
         let counts: Vec<usize> = self.samples.iter().filter_map(|s| s.fds).collect();
         let complete = counts.len() == self.samples.len();
 
-        // On the one platform that can answer, not answering is a broken reader
-        // rather than an absent feature, so it fails instead of printing. A
-        // passing CI run is otherwise indistinguishable from one where this
-        // metric quietly collected nothing, because the note below is invisible
-        // unless a test fails or `--nocapture` is on.
+        // On the one platform that can answer, not answering is a broken reader rather
+        // than an absent feature, so it fails instead of printing.
         #[cfg(target_os = "linux")]
         assert!(
             complete,
@@ -1137,10 +1086,9 @@ impl Report {
                 self.window
             )
         });
-        // The quarters and the gradient travel with the failure, because the
-        // first question asked of a breach is whether it was a trend or a step
-        // and neither is legible from a ratio. The ends are `quarters[0]` and
-        // `quarters[3]`, so they are stated once rather than twice.
+        // The quarters and the gradient travel with the failure, because the first
+        // question asked of a breach is whether it was a trend or a step and neither is
+        // legible from a ratio.
         assert!(
             drift.ratio < DRIFT_BUDGET,
             "I3: RSS drifted {:.2}% over {:?}, over the {:.0}% budget: quarters {:.2}, {:.2}, {:.2}, {:.2} MiB at {:+.2} MiB/h, peak {:.2} MiB over {} frames, from the {:.0}% baseline at sample {}. {}",
@@ -1220,13 +1168,8 @@ fn resources_are_flat_and_nothing_is_retained() {
         "the soak failed ({}):\n{report}",
         output.status
     );
-    // **What the report says is an invariant too, and the parent is the only
-    // place that can hold it.** `SPEC.md` §7 states in bold that the four
-    // quarter medians and the gradient with its span are carried beside the
-    // ratio, and nothing read this string until now: deleting either from
-    // `Report::print` left the whole suite green, which is the shape
-    // `CLAUDE.md` calls a wish. The statistic is gated by `mod statistic`; this
-    // is the line that says it reaches a reader.
+    // What the report says is an invariant too, and the parent is the only place that
+    // can hold it.
     for expected in [
         "soak: rss quarters ",
         " MiB/h over ",
@@ -1290,10 +1233,8 @@ fn soak_child() {
         scratch.root()
     );
 
-    // The fixture is built by real `git`, which inherits this process's
-    // environment and therefore its temp directory. Checked here rather than
-    // only at the end, so fixture leftovers are never reported as a leak in the
-    // code under test.
+    // The fixture is built by real `git`, which inherits this process's environment and
+    // therefore its temp directory.
     assert!(
         listing(&private).is_empty(),
         "building the fixture left {:?} in the temp directory, which would be \
@@ -1444,16 +1385,8 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
 
     let mut soaking = 0;
     for (job, block) in &jobs {
-        // **The job that soaks is the one that runs the soak**, which is a
-        // property of what it does rather than of what it depends on. Keying
-        // on `needs: plan` instead reads as the same thing and is not: it
-        // misses the equally valid `needs: [plan]` and then reports the miss
-        // as a bad timeout, and it would force a future summary job that also
-        // depends on `plan` down a branch demanding it carry a soak window.
-        // Through the setting scan rather than a raw `contains` either, so a
-        // comment mentioning the key could not be read as the key. No comment
-        // in this file does today; the scan costs nothing and the raw form was
-        // demonstrated to misfire on one.
+        // The job that soaks is the one that runs the soak, which is a property of what
+        // it does rather than of what it depends on.
         let soaks = !workflow_settings(block, "VIGIA_SOAK_SECS:").is_empty();
         soaking += usize::from(soaks);
         let timeouts = workflow_settings(block, "timeout-minutes:");
@@ -1494,12 +1427,7 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
                  the run fails on the runner rather than here"
             );
 
-            // Every planned number, not only the timeout. The platform list is
-            // the third, and it is the one the `runner` input travels through:
-            // pinning `os:` back to a literal matrix leaves that input inert
-            // while the file stays valid and every other assertion here holds,
-            // and an inert `runner` is the one thing standing between this
-            // repository and I3's twenty-four hours.
+            // Every planned number, not only the timeout.
             for (key, output) in [
                 ("VIGIA_SOAK_SECS:", "needs.plan.outputs.seconds"),
                 ("os:", "needs.plan.outputs.os"),
@@ -1533,13 +1461,9 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
         }
     }
 
-    // And exactly one job soaked, so the branch carrying every assertion above
-    // was actually taken: with none, every job takes the literal branch and the
-    // file passes as a workflow that soaks nothing. Exactly one rather than at
-    // least one, because the
-    // concurrency group at the top of this workflow exists to stop two soaks
-    // sharing a runner's memory pressure, and two soaking jobs inside one
-    // workflow would be that same mistake a level up.
+    // And exactly one job soaked, so the branch carrying every assertion above was
+    // actually taken: with none, every job takes the literal branch and the file passes
+    // as a workflow that soaks nothing.
     assert_eq!(
         soaking,
         1,
@@ -1574,10 +1498,7 @@ fn plan_script(path: &Path, source: &str) -> String {
 struct Planned {
     ok: bool,
     emitted: String,
-    /// **Both streams.** The script writes its refusals to stdout, because a
-    /// `::error::` workflow command has to go there to become an annotation,
-    /// which is also what `ci.yml` does. An assertion printing only stderr
-    /// therefore printed nothing for every refusal the script can produce.
+    /// Both streams.
     said: String,
 }
 
@@ -1609,8 +1530,8 @@ fn run_plan_on(script: &str, seconds: &str, runner: &str, daily: &str) -> Option
         .env("SOAK_DAILY", daily)
         .env("GITHUB_OUTPUT", &out);
 
-    // Probe before building anything for it to write into, and **probe for a
-    // `bash` that works rather than for one that exists**.
+    // Probe before building anything for it to write into, and probe for a
+    // `bash` that works rather than for one that exists.
     let usable = Command::new("bash")
         .arg("-c")
         .arg("exit 0")
@@ -1719,11 +1640,7 @@ fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
             .to_owned()
     };
 
-    // **The flag has to name a cron this workflow actually runs on.** The three
-    // legs below drive `SOAK_DAILY` directly, so they gate the script's
-    // branches and not the trigger that sets the flag: change either the
-    // schedule or the string it is compared against, and the daily cron takes
-    // the weekly leg with everything here still green.
+    // The flag has to name a cron this workflow actually runs on.
     let daily_cron = workflow_settings(&source, "SOAK_DAILY:")
         .into_iter()
         .next()
@@ -1814,11 +1731,7 @@ fn the_plan_job_gives_every_window_room_to_finish() {
              run for a length nobody asked for"
         );
 
-        // The bound, in seconds, against the window plus a cold build. Ninety
-        // minutes is what the file allows; anything at or over the window
-        // itself would already be a real improvement on the pinned 330, so the
-        // floor is deliberately under the current headroom rather than equal
-        // to it.
+        // The bound, in seconds, against the window plus a cold build.
         let timeout = value("timeout=") * 60;
         assert!(
             timeout >= seconds + 1800,
@@ -2027,11 +1940,7 @@ mod statistic {
         // No outlier: see above.
         let series = ramp(RAMP_STEP);
         let warm = warmup_floor(series.len());
-        // **The same guard the ends test carries, and for a sharper reason.**
-        // Where the post-warmup length divides by four, the inward cut and the
-        // `end * k / 4` cut are the *same four windows*, so this test would
-        // pass against the slicing it exists to reject. A change to
-        // `WARMUP_FRACTION` or to the fixture length is all it would take.
+        // The same guard the ends test carries, and for a sharper reason.
         let remainder = (series.len() - warm) % 4;
         assert_eq!(
             remainder,
@@ -2090,12 +1999,7 @@ mod statistic {
                  baseline the gate used, so it describes a different window \
                  from the gradient it is printed beside"
             );
-            // **And the gradient itself, not only its span.** The two are
-            // separate expressions over what is meant to be one slice, so a
-            // slope fitted from the fraction while the span is taken from the
-            // plateau leaves both fields present, plausible, and describing
-            // different windows. Mutation confirmed it: pointing `slope` at
-            // the floor left the whole suite green until this line existed.
+            // And the gradient itself, not only its span.
             assert_eq!(
                 drift.slope,
                 mib_per_hour(&sampled(&series[drift.warm..])),

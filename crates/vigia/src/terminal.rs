@@ -35,7 +35,7 @@ enum Step {
     Cursor,
 }
 
-/// The order the terminal is taken in. Giving it back walks this **backwards**.
+/// The order the terminal is taken in. Giving it back walks this backwards.
 const TAKEOVER: [Step; 5] = [
     Step::RawMode,
     Step::AlternateScreen,
@@ -123,7 +123,7 @@ fn give_back_all<C: Console>(console: &mut C, taken: usize) {
 
 /// A taken terminal that gives itself back.
 pub struct Session {
-    /// Declared **first**, so it drops first and no live `Terminal` outlives the
+    /// Declared first, so it drops first and no live `Terminal` outlives the
     /// screen it draws on, even for the length of a drop.
     screen: Screen,
     /// Second, so the terminal goes back after the screen is gone. Never read;
@@ -369,7 +369,7 @@ mod tests {
         log: Arc<Mutex<Vec<Event>>>,
         /// The index into [`TAKEOVER`] whose `take` fails, if any.
         fail_at: Option<usize>,
-        /// Calls to [`Console::take`] so far, **including** the one that fails.
+        /// Calls to [`Console::take`] so far, including the one that fails.
         attempts: usize,
     }
 
@@ -568,10 +568,7 @@ mod tests {
 
     #[test]
     fn the_panic_hook_gives_back_everything_in_reverse() {
-        // What the hook does, minus which console it writes to. Without this the
-        // production panic path is reached by no test at all: the test below
-        // installs its own counting closure, so it pins that the hook fires once
-        // and says nothing about what the real one restores.
+        // What the hook does, minus which console it writes to.
         let mut recorder = Recorder::new();
         restore_everything(&mut recorder);
 
@@ -592,20 +589,15 @@ mod tests {
         // parallel harness.
         let restores = Arc::new(Mutex::new(0usize));
 
-        // Silence the hook that is already there *before* chaining onto it. The
-        // chain defers to whatever it replaced, and what it replaced would print
-        // a backtrace for a panic this test causes deliberately. Doing it the
-        // other way round, installing and then replacing, would take the chained
-        // hook straight back out and leave nothing to count.
+        // Silence the hook that is already there *before* chaining onto it. The chain
+        // defers to whatever it replaced, and what it replaced would print a backtrace
+        // for a panic this test causes deliberately.
         let real = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
 
-        // Counted per thread, not per process. The hook is global for as long as
-        // this test holds it, so a *different* test failing in that window would
-        // run this restore too and report a second failure here, pointing at code
-        // that is fine. The harness gives each test its own thread and a hook runs
-        // on the thread that panicked, so this is exact rather than a narrowed
-        // race.
+        // Counted per thread, not per process. The hook is global for as long as this
+        // test holds it, so a *different* test failing in that window would run this
+        // restore too and report a second failure here, pointing at code that is fine.
         let me = std::thread::current().id();
 
         let once = Once::new();
@@ -625,10 +617,7 @@ mod tests {
         // installed would run the restore counter again on the way out.
         std::panic::set_hook(real);
 
-        // Read out, then assert. `assert_eq!(*m.lock(), ..)` holds the guard for
-        // the whole macro, so a failure panics while holding it, and a panic hook
-        // that touches the same mutex deadlocks against a test that was only
-        // trying to report a wrong number.
+        // Read out, then assert.
         let count = *restores.lock().expect("count");
 
         assert!(panicked, "the panic did not happen, so nothing was proven");
@@ -648,11 +637,10 @@ mod tests {
 
     #[test]
     fn every_command_is_the_escape_sequence_it_is_named_for() {
-        // The oracle is DEC's own private mode numbers, not crossterm restating
-        // itself: 1049 is the alternate screen buffer, 25 is cursor visibility,
-        // 1000/1002/1003/1015/1006 are the mouse reporting modes, and 1004 is
-        // focus reporting. `h` sets a mode and `l` resets it, so a swapped pair
-        // is visible here as a letter.
+        // The oracle is DEC's own private mode numbers, not crossterm restating itself:
+        // 1049 is the alternate screen buffer, 25 is cursor visibility,
+        // 1000/1002/1003/1015/1006 are the mouse reporting modes, and 1004 is focus
+        // reporting.
         assert_eq!(ansi(&EnterAlternateScreen), "\x1b[?1049h");
         assert_eq!(ansi(&LeaveAlternateScreen), "\x1b[?1049l");
         assert_eq!(ansi(&Hide), "\x1b[?25l");
@@ -667,12 +655,7 @@ mod tests {
 
     #[test]
     fn the_takeover_takes_every_step_there_is() {
-        // **The assertion no other gate here can make, and it is general on
-        // purpose.** Every other test in this module *derives* from `TAKEOVER`:
-        // the order walk compares against the array itself, the give-back and the
-        // panic restore invert whatever it holds, and the byte gate is per
-        // command. So all of them stay green if a step is simply deleted, and
-        // nothing said the takeover has to contain anything at all.
+        // The assertion no other gate here can make, and it is general on purpose.
         const EVERY: [Step; 5] = [
             Step::RawMode,
             Step::AlternateScreen,
@@ -777,22 +760,15 @@ mod tests {
 
         let took = modes(&taken);
 
-        // Non-vacuity. A platform that routed every one of these through a
-        // console API would leave both streams empty, and every assertion below
-        // would hold over nothing. That is a result worth failing on rather than
-        // passing quietly.
+        // Non-vacuity. A platform that routed every one of these through a console API
+        // would leave both streams empty, and every assertion below would hold over
+        // nothing.
         assert!(
             !took.is_empty(),
             "the real console wrote no escape sequences at all, so this proves nothing"
         );
 
-        // **The wiring, which is the one thing neither of the other two layers
-        // can see.** The recorder is blind to which crossterm command a `Step`
-        // is bound to, and `every_command_is_the_escape_sequence_it_is_named_for`
-        // asserts what each command emits without knowing that any step uses it.
-        // So `Step::FocusChange => execute!(out, EnableMouseCapture)` would leave
-        // both green, and the inverse check below would too, because it only
-        // demands that giving back undoes whatever taking did.
+        // The wiring, which is the one thing neither of the other two layers can see.
         assert!(
             took.contains(&(1004, true)),
             "the takeover wrote no `?1004h`, so `Step::FocusChange` is wired to \
@@ -829,11 +805,8 @@ mod tests {
 
     #[test]
     fn no_exit_path_in_the_shell_skips_the_destructors() {
-        // The structural half of "the terminal is restored on every exit". What
-        // makes that true is that every exit drops `Shell`, which owns the
-        // `Session`. Nothing in this crate may reach for a call that skips
-        // destructors, because one of those anywhere in the shell would put the
-        // reader back in raw mode with no message and nothing to report.
+        // The structural half of "the terminal is restored on every exit". What makes
+        // that true is that every exit drops `Shell`, which owns the `Session`.
         const SOURCES: [(&str, &str); 14] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
@@ -883,10 +856,7 @@ mod tests {
         }
 
         for (name, source) in SOURCES {
-            // Only what ships. Cutting at the test module is what lets this file
-            // scan itself rather than being exempt from its own rule: the names
-            // being searched for appear literally below this line, and nowhere
-            // above it.
+            // Only what ships.
             let shipped = source.split("#[cfg(test)]").next().expect("split");
 
             // Non-vacuity, per file rather than in aggregate: a path that read
@@ -939,21 +909,13 @@ mod tests {
         // platform actually emits rather than what a recorder was told to expect.
         let sink = std::fs::File::create(dir.join("restored")).expect("create the restore sink");
 
-        // **The expectation is derived here, in the child, and that placement is
-        // the whole of it.** `crossterm` decides once per process whether the
-        // takeover is ANSI or console-API calls, and caches the answer. The parent
-        // may have decided *before* the console this fixture allocates existed and
-        // the child *after*, in which case a parent-side expectation is a
-        // different platform's answer: zero bytes against real escape sequences,
-        // reported as I8 having broken. Same process, same answer, no straddle.
+        // The expectation is derived here, in the child, and that placement is the
+        // whole of it.
         let mut owed = Crossterm { out: Vec::new() };
         give_back_all(&mut owed, TAKEOVER.len());
 
         // Non-vacuity, asserted where the fact lives rather than inferred across a
-        // process boundary. This is layer 3's rule (`the_real_console_gives_back_
-        // every_mode_it_set`) applied in the process that is about to be measured:
-        // if this console emits nothing, the sink below can prove nothing and
-        // saying so is the only honest outcome.
+        // process boundary.
         assert!(
             !owed.out.is_empty(),
             "this console emits no escape sequences for the takeover, so the sink \
@@ -965,13 +927,9 @@ mod tests {
         crate::signal::forward(tx).expect("arm the signal handler");
 
         {
-            // **Built rather than taken**, and that is the one departure from the
-            // production path. `Takeover::take` would enable raw mode on the
-            // console running this test, which layer 3 above rules out in so many
-            // words. Giving it back is the direction under test and the safe one:
-            // `disable_raw_mode` does nothing on Unix when this process never
-            // stored a prior mode, and on Windows it ORs the ordinary bits back
-            // on, which is a restoration and never a takeover.
+            // Built rather than taken, and that is the one departure from the
+            // production path. `Takeover::take` would enable raw mode on the console
+            // running this test, which layer 3 above rules out in so many words.
             let _takeover = Takeover {
                 console: Crossterm { out: sink },
                 taken: TAKEOVER.len(),
@@ -982,11 +940,9 @@ mod tests {
             // finds is a terminal already owed back.
             std::fs::write(dir.join("ready"), b"armed").expect("write the ready marker");
 
-            // What this borrows from `run`'s loop, and all it borrows: block on
-            // the channel, recognise the wake, leave. Everything else there is
-            // about frames, and `run` owns a terminal so no test can drive the
-            // real one. Said out loud because a copy nobody names is a copy that
-            // drifts.
+            // What this borrows from `run`'s loop, and all it borrows: block on the
+            // channel, recognise the wake, leave. Everything else there is about
+            // frames, and `run` owns a terminal so no test can drive the real one.
             match rx.recv() {
                 Ok(crate::Wake::Signalled) => {}
                 Ok(_) => panic!("the forwarder sent a wake that was not the signal"),
@@ -1042,10 +998,7 @@ mod tests {
         }
 
         if let Err(why) = deliver(child.id()) {
-            // A printed skip rather than a pass. On a runner with no console at
-            // all there is no way to deliver a control event, and a green tick
-            // over a check that did not run is the shape `SPEC.md` §7 exists to
-            // refuse.
+            // A printed skip rather than a pass.
             let _ = child.kill();
             let _ = child.wait();
             let _ = std::fs::remove_dir_all(&dir);
@@ -1053,12 +1006,10 @@ mod tests {
             return;
         }
 
-        // Bounded, rather than `child.wait()` straight away, which has no
-        // timeout: a defect that stopped the wake from ever arriving would leave
-        // the child blocked on its `recv` forever and **hang** this test instead
-        // of failing it, and a hang reports the runner rather than the defect.
-        // The marker is written after the guard's `Drop` has returned, so once it
-        // exists the sink beside it is complete too.
+        // Bounded, rather than `child.wait()` straight away, which has no timeout: a
+        // defect that stopped the wake from ever arriving would leave the child blocked
+        // on its `recv` forever and hang this test instead of failing it, and a hang
+        // reports the runner rather than the defect.
         let dropped = wait_for(&dir.join("dropped"));
         if !dropped {
             let _ = child.kill();
@@ -1071,10 +1022,7 @@ mod tests {
         // call putting the bits back would be the global mutation layer 3
         // refuses.
 
-        // Both facts in one message, in this order and deliberately. A child that
-        // panicked has no `dropped` marker *and* a failing status, and reporting
-        // only the missing marker would say "it never left its loop" about a
-        // process that left rather noisily.
+        // Both facts in one message, in this order and deliberately.
         assert!(
             dropped,
             "the child was signalled and left no marker, so the guard never dropped. \
@@ -1110,11 +1058,9 @@ mod tests {
 
     #[test]
     fn a_second_external_signal_kills_a_shell_that_ignored_the_first() {
-        // **The failing test I8's new by-choice exclusion needs.** `SPEC.md` §11.1
-        // rules that the second ask takes the default disposition: it kills the
-        // process and restores nothing. Without a gate that is a paragraph, and the
-        // property it protects is the one that keeps the graceful path honest,
-        // because an armed handler is what took the sender's guarantee away.
+        // The failing test I8's new by-choice exclusion needs. `SPEC.md` §11.1 rules
+        // that the second ask takes the default disposition: it kills the process and
+        // restores nothing.
         let dir = std::env::temp_dir().join(format!("vigia-wedged-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create the child's directory");

@@ -146,9 +146,6 @@ pub fn holds_p99_rounds(
     let (again, cpu) = round();
     let two = Shape::of(&again);
     if two.p99 <= budget {
-        // Reported rather than swallowed, so the flake rate stays visible in the
-        // log even when the gate goes green. #178 exists because two occurrences
-        // were only found by reading PR bodies.
         eprintln!(
             "note: {claim} breached on the first round and held on the second, \
              which is #178's stall shape: {one} then {two}, against {budget:?}. \
@@ -164,23 +161,13 @@ pub fn holds_p99_rounds(
     // establishes it, because no amount of host contention inflates work done.
     if let Some(cpu) = cpu.as_ref() {
         let deficit = again.total().saturating_sub(cpu.total());
-        // What the deficit has to explain: the round's own excess, in the same
-        // units as the deficit. The p99 overshoot is still reported alongside it,
-        // because it is the number the budget is written in and the one a reader
-        // is looking for, but it is no longer what decides.
+        // What the deficit has to explain: the round's own excess, in the same units as
+        // the deficit.
         let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
-        // **Both sides are sums over the round, and that is the whole
-        // correction, in two parts.** This compared `deficit`, a whole round's
-        // off-CPU time,
-        // against a single frame's excess over budget. Over a long round the
-        // ordinary per-frame scheduling noise sums to more than one frame's
-        // overshoot, so the test drifted toward "the host did it" as the sample
-        // count rose, independent of what the code was doing. Caught by #261's
-        // prose gate, which could not fail on the defect it exists to catch: a
-        // real 109.09ms p99 against a 16ms budget, with a 104.51ms p50 and a
-        // grammarless control arm at 0.44ms proving the parse, was excused by
-        // 107.92ms of deficit summed over 250 frames.
+        // Both sides are sums over the round, and that is the whole correction, in two
+        // parts. This compared `deficit`, a whole round's off-CPU time, against a
+        // single frame's excess over budget.
         if deficit >= excess {
             eprintln!(
                 "note: {claim} was over the {budget:?} budget on wall clock twice \
@@ -291,16 +278,10 @@ pub fn git_stored_a_symlink(scratch: &Scratch, link: &str) -> bool {
     if mode == "120000" {
         return true;
     }
-    // **An empty mode is the caller's bug, not the platform's, so it panics
-    // rather than skipping.** `index_mode` shells out to `git ls-files -s`,
-    // which reports nothing at all for a path that is not in the index, so
-    // asking before `commit_all` returns `""` here. That is indistinguishable
-    // from "this checkout does not do symlinks" at the call site, and it would
-    // print the note and skip: a green test that ran no assertion, which is the
-    // exact failure both these helpers exist to prevent. Six hand-written copies
-    // of the link/commit/verify order made that a live risk; `committed_link`
-    // now owns the order, and this is what catches the seventh site that does
-    // not use it.
+    // An empty mode is the caller's bug, not the platform's, so it panics rather than
+    // skipping. `index_mode` shells out to `git ls-files -s`, which reports nothing at
+    // all for a path that is not in the index, so asking before `commit_all` returns
+    // `""` here.
     assert!(
         !mode.is_empty(),
         "{link} is not in the index, so this fixture was checked before it was \
@@ -316,10 +297,9 @@ pub fn git_stored_a_symlink(scratch: &Scratch, link: &str) -> bool {
 /// Commit `link` as a mode `120000` blob and then let **git** write the
 /// working-tree side.
 pub fn checkout_link(scratch: &Scratch, target: &str, link: &str) -> bool {
-    // Set for the same reason `Scratch::new` sets `core.autocrlf`: a developer's
-    // global config decides this, and on Windows it is commonly off, which would
-    // make git write a plain file and skip the one gate this fixture exists for.
-    // Asking for it is not the same as getting it, so the check below stays.
+    // Set for the same reason `Scratch::new` sets `core.autocrlf`: a developer's global
+    // config decides this, and on Windows it is commonly off, which would make git
+    // write a plain file and skip the one gate this fixture exists for.
     scratch.git(&["config", "core.symlinks", "true"]);
     if !committed_link(scratch, target, link) {
         return false;
@@ -885,7 +865,7 @@ pub fn wide_generated(lines: usize, tag: &str) -> String {
 /// The one line [`wide_generated`] writes at `at`, with no line ending.
 ///
 /// **The shape, stated rather than left to be counted**, because
-/// [#45](https://github.com/breferrari/vigia/issues/45)'s first acceptance
+/// The first acceptance
 /// criterion asks for it and because every number the gates report is relative to
 /// it. An `at` under 1000 gives a prefix of 10 or 11 characters, so a line is
 ///
@@ -985,12 +965,10 @@ const _: () = assert!(
 /// Markdown prose carrying [`PROSE_SPANS`] inline code spans per line and **no
 /// pipe character**, newline terminated.
 pub fn prose_generated(lines: usize, tag: &str) -> String {
-    // **One line per paragraph, and the blank line between them is the
-    // fixture.** Markdown runs its block-start lookahead, which is where the
-    // table-row test lives, only on the *first* line of a block: continuation
-    // lines of a paragraph take a much cheaper inline path. So a screenful of
-    // one continuous paragraph pays the cost once and a screenful of one-line
-    // paragraphs pays it every row.
+    // One line per paragraph, and the blank line between them is the fixture. Markdown
+    // runs its block-start lookahead, which is where the table-row test lives, only on
+    // the *first* line of a block: continuation lines of a paragraph take a much
+    // cheaper inline path.
     (0..lines)
         .map(|at| format!("{}\n\n", prose_line(at, tag)))
         .collect()
@@ -998,14 +976,10 @@ pub fn prose_generated(lines: usize, tag: &str) -> String {
 
 /// The one line [`prose_generated`] writes at `at`, with no line ending.
 fn prose_line(at: usize, tag: &str) -> String {
-    // **It may not begin `N. `, and that is the whole reason this is spelled
-    // out rather than reusing [`generated_line`]'s prefix.** A leading ordinal
-    // and a period is an *ordered list marker* in Markdown, so a fixture
-    // written that way is a list and takes the block-start path a list takes,
-    // not the one ordinary prose takes. Measured both ways against the
-    // unguarded grammar: as a list the frame sat at 15.17ms p99, under the 16ms
-    // budget and therefore green against the very defect the gate exists for.
-    // The ordinal still varies the content, it just may not lead.
+    // It may not begin `N. `, and that is the whole reason this is spelled out rather
+    // than reusing [`generated_line`]'s prefix. A leading ordinal and a period is an
+    // *ordered list marker* in Markdown, so a fixture written that way is a list and
+    // takes the block-start path a list takes, not the one ordinary prose takes.
     let mut line = format!("Line {at} of the {tag} frame path calls ");
     for span in 0..PROSE_SPANS {
         line.push_str(&format!("`sym_{at}_{span}` and "));

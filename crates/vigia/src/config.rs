@@ -154,32 +154,21 @@ impl std::error::Error for ConfigError {}
 /// staged   = on    # both runs, every session
 /// ```
 ///
-/// **The theme file's grammar, with three deliberate divergences**, all of them
-/// the same trade in different clothes: this file has no `base` and no value that
-/// begins with `#`, so several things a theme legitimately expresses are mistakes
-/// here. They are [`ConfigError::RepeatedKey`], a value with a trailing token, and
-/// the comment-only value below. A byte order mark
-/// is stripped, because U+FEFF is `Cf` rather than `White_Space` and survives
-/// every trim, landing inside the first key: a file saved by Notepad would
-/// otherwise stop the shell with an error naming an invisible byte. A comment is
-/// recognised on the trimmed *line* for a blank-or-comment line, and stripped from
-/// the *value* so `rail = on # from 134` works. And an unknown key is **refused
-/// rather than ignored**, because a silently dropped key is a setting that does
-/// nothing, and "it was discarded" is the one explanation a reader cannot arrive
-/// at by looking at their screen.
+/// The theme file's grammar, less what a config has no use for. A theme is a base
+/// plus overrides and its values are several words; this has no base and its
+/// values are one word, so three things a theme expresses legitimately are
+/// mistakes here: a repeated key ([`ConfigError::RepeatedKey`]), a trailing token,
+/// and a value that is nothing but a comment ([`ConfigError::MissingValue`] —
+/// `theme::words_of` keeps a bare `#` because `added = #3fb950` has to parse, and
+/// no value here begins with one).
 ///
-/// **The third is a value that is nothing but a comment.** `theme::words_of` keeps
-/// a bare `#` as a token, because a theme value legitimately begins with one and
-/// `added = #3fb950` has to parse. No value here begins with `#`, so
-/// `rail = # oops` is a key with nothing after its `=` rather than a key whose
-/// value is `#`, and it reports [`ConfigError::MissingValue`] accordingly.
+/// An unknown key is refused rather than ignored: a silently dropped key is a
+/// setting that does nothing, which is the one explanation a reader cannot reach
+/// by looking at their screen.
 ///
-/// The other two are the same shape. A theme is a base plus overrides, so a
-/// repeated key is a later line replacing an earlier one and `theme::parse` takes
-/// the last; here there is no base, so a repeat is a mistake and
-/// [`ConfigError::RepeatedKey`] says so. And a theme value is several words, so
-/// `theme::style_of` reads them all; here a value is one word, so a second is a
-/// typo rather than more value.
+/// A byte order mark is stripped. U+FEFF is `Cf` rather than `White_Space`, so it
+/// survives every trim and lands inside the first key, and a file saved by Notepad
+/// would otherwise stop the shell with an error naming an invisible byte.
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
 
@@ -205,12 +194,8 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
         };
         let key = key.trim();
 
-        // **The key is judged before its value, which is the theme parser's order
-        // and was not this one's.** Written the other way round, `sidebar = yes`
-        // reported that `sidebar` is *"neither `on` nor `off`"*, which asserts
-        // that `sidebar` is a setting; and `sidebar =` reported a missing value
-        // and named no key at all. The first thing wrong with a line is the thing
-        // to say about it.
+        // The key is judged before its value, which is the theme parser's order and was
+        // not this one's.
         if !KEYS.contains(&key) {
             return Err(ConfigError::UnknownKey {
                 line,
@@ -218,7 +203,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             });
         }
 
-        // **And a repeat is judged before the value too**, so `rail = on` followed
+        // And a repeat is judged before the value too, so `rail = on` followed
         // by `rail = yes` reports the repeat rather than the typo: the repeat is
         // the reason the line should not be there at all.
         if let Some((_, first)) = seen.iter().find(|(name, _)| name == key) {
@@ -229,11 +214,8 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             });
         }
 
-        // **The whole value, not its first word.** A `#` ends it, so
-        // `rail = on # from 134` works; everything before that `#` has to be the
-        // value. Taking only the first token accepted `rail = on off` and
-        // `rail=on=off` by discarding what it did not understand, which is the
-        // silence this parser refuses unknown keys to avoid, one field over.
+        // The whole value, not its first word. A `#` ends it, so `rail = on # from 134`
+        // works; everything before that `#` has to be the value.
         let value: Vec<&str> = value
             .split_whitespace()
             .take_while(|word| !word.starts_with('#'))
@@ -255,13 +237,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             }
         };
 
-        // **The return is read, and discarding it is the hole.** The check
-        // above admits a key by [`KEYS`]; this applies it by [`Config::set`];
-        // and with the `bool` unread, a name in the first and
-        // not the second parsed to `Ok` and set nothing. A key that did nothing,
-        // silently, is exactly what refusing unknown keys exists to prevent, so
-        // the drift produced the failure the whole grammar is designed against.
-        // `theme::parse` has always read its own `set` for this reason.
+        // The return is read, and discarding it is the hole.
         if !config.set(key, on) {
             return Err(ConfigError::UnknownKey {
                 line,

@@ -56,10 +56,9 @@ macro_rules! palette {
 palette! {
     /// The header and footer lines.
     chrome,
-    /// Secondary text on those lines: key hints, the follow marker, the footer's
-    /// `N/M` position, the readouts, and the header's mode word **while the watch
-    /// is live**, since a lost one takes [`Theme::alert`] instead. It is also the
-    /// background a chrome row is painted with before anything is drawn on it.
+    /// Secondary text on those lines: key hints, the follow marker, the footer's `N/M`
+    /// position, the readouts, and the header's mode word while the watch is live,
+    /// since a lost one takes [`Theme::alert`] instead.
     chrome_dim,
 
     /// A changed file's path, at the recency the reader should read it as.
@@ -113,7 +112,7 @@ palette! {
 
     /// The letter naming what happened to a file.
     kind,
-    /// The kind letter and the run label that mark a **staged** change.
+    /// The kind letter and the run label that mark a staged change.
     staged,
     /// A hunk's `@@` header.
     hunk,
@@ -248,27 +247,14 @@ impl Theme {
         let low = rgb(self.spark)?;
         let warm = rgb(self.spark_warm)?;
         let hot = rgb(self.spark_hot)?;
-        // Interpolated in Oklab rather than raw RGB, which is what keeps a
-        // wide-hue ramp from sagging into grey-olive in the middle: a straight
-        // RGB line between a cyan and a red passes through mud, a perceptual
-        // line does not. lipgloss v2 blends in CIELAB for exactly this reason
-        // (#318 research, section 1.3); Oklab is the same idea with a cheaper,
-        // newer fit, and the difference is invisible on narrow ramps like the
-        // built-ins' while rescuing the wide ones a reader's own theme can ask
-        // for.
         let lerp = |a: (u8, u8, u8), b: (u8, u8, u8), t: f32| {
             let (la, aa, ba) = oklab_of(a);
             let (lb, ab, bb) = oklab_of(b);
             let mix = |x: f32, y: f32| x + (y - x) * t;
             rgb_of(mix(la, lb), mix(aa, ab), mix(ba, bb))
         };
-        // Stops at 0, 4 and 7: the warm key sits where Band::of's middle
-        // third sits on the eight-level height ramp. The three stops
-        // themselves are placed, never round-tripped, so the ramp's ends are
-        // byte-identical to the keys on every platform: `powf` and `cbrt`
-        // round differently across libms, and an endpoint that drifted a byte
-        // on one platform is exactly the cross-platform flake the budget
-        // suite would catch last.
+        // Stops at 0, 4 and 7: the warm key sits where Band::of's middle third sits on
+        // the eight-level height ramp.
         let colour = |(r, g, b)| Color::Rgb(r, g, b);
         let mut out = [Color::Reset; 8];
         out[0] = colour(low);
@@ -321,15 +307,11 @@ impl Theme {
     pub fn ansi() -> Self {
         Self {
             chrome: fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            // **Readable, at the cost of not being dim, and that trade is the
-            // ruling.**
+            // Readable, at the cost of not being dim, and that trade is the
+            // ruling.
             chrome_dim: fg(Color::Gray),
-            // Three rungs of one ramp: bright and bold, bright, then plain.
-            // `Gray` rather than `DarkGray` for the coldest, deliberately. Every
-            // file in an already-dirty worktree is cold until something writes to
-            // it, so this is what the **first** frame of a session looks like, and
-            // a path drawn in the same near-invisible grey as a comment would open
-            // the tool on a screen nobody can read.
+            // Three rungs of one ramp: bright and bold, bright, then plain. `Gray`
+            // rather than `DarkGray` for the coldest, deliberately.
             path: fg(Color::White).add_modifier(Modifier::BOLD),
             path_live: fg(Color::White),
             path_cold: fg(Color::Gray),
@@ -348,32 +330,22 @@ impl Theme {
             spark: fg(Color::Cyan),
             spark_warm: fg(Color::Cyan),
             spark_hot: fg(Color::LightCyan),
-            // `DarkGray`, and the one palette where the track does *not* step
-            // towards the foreground the way `dark` and `light` do. Sixteen names
-            // hold nothing between colour 8 and `Gray`, and `Gray` is what this
-            // palette draws content in, so a step up would put a track at the
-            // weight of the counts beside it. The field's own doc carries the
-            // rule this is the exception to.
+            // `DarkGray`, and the one palette where the track does *not* step towards
+            // the foreground the way `dark` and `light` do.
             spark_track: fg(Color::DarkGray),
-            // Grey rather than cyan, for the reason the field's own doc gives:
-            // the thumb is a full block and cyan is the sparkline's, so the two
-            // would be one colour drawing two meanings. Grey is what this palette
-            // already uses for everything structural.
+            // Grey rather than cyan, for the reason the field's own doc gives: the
+            // thumb is a full block and cyan is the sparkline's, so the two would be
+            // one colour drawing two meanings.
             bar: fg(Color::Gray),
             bar_active: fg(Color::White),
             bar_hover: fg(Color::Gray).add_modifier(Modifier::BOLD),
             bar_track: fg(Color::DarkGray),
-            // **The one place colour 8 is the right answer**, and the exception
-            // proves the rule that sent everything else to `DIM`. A track is not
-            // text: it is a solid block that should sit just above the background,
-            // and "just above the background" is exactly what most schemes define
-            // colour 8 to be. What is fatal for a key hint is correct for this.
+            // The one place colour 8 is the right answer, and the exception proves the
+            // rule that sent everything else to `DIM`.
             heat_track: fg(Color::DarkGray),
-            // Two stops of hue where the other palettes have three. Sixteen names
-            // hold a normal and a bright of each colour and no third, so the middle
-            // stop is the normal one and the ramp reads as two. Written out rather
-            // than left to the depth ladder, because this palette is authored *in*
-            // names and has nothing to quantise.
+            // Two stops of hue where the other palettes have three. Sixteen names hold
+            // a normal and a bright of each colour and no third, so the middle stop is
+            // the normal one and the ramp reads as two.
             heat_added: fg(Color::Green),
             heat_added_warm: fg(Color::Green),
             heat_added_hot: fg(Color::LightGreen),
@@ -401,20 +373,15 @@ impl Theme {
             removed_word: Style::new(),
             added_gutter: Style::new(),
             removed_gutter: Style::new(),
-            // **The bar, in names, and it is the one row-level diff signal this
-            // palette can carry.** §11.1 records the loss it is fixing: at sixteen
-            // colours the signal degrades to the sigil column, because a wash has
-            // to assume a background and this palette assumes none. That argument
-            // is about text on a background, and the bar has none: one blank cell
-            // of the pane's own margin, so there is nothing behind it to destroy.
+            // The bar, in names, and it is the one row-level diff signal this palette
+            // can carry. §11.1 records the loss it is fixing: at sixteen colours the
+            // signal degrades to the sigil column, because a wash has to assume a
+            // background and this palette assumes none.
             added_bar: Style::new().bg(Color::Green),
             removed_bar: Style::new().bg(Color::Red),
             note: fg(Color::Magenta),
             alert: fg(Color::Red).add_modifier(Modifier::BOLD),
-            // The mockup's hues, mapped onto the sixteen names every terminal
-            // resolves. String, number and comment are not in the picture and are
-            // chosen to sit clear of the diff colours: a green string on a red
-            // removal would read as an addition.
+            // The mockup's hues, mapped onto the sixteen names every terminal resolves.
             keyword: fg(Color::LightRed),
             type_name: fg(Color::LightYellow),
             function: fg(Color::LightMagenta),
@@ -422,10 +389,8 @@ impl Theme {
             constant: fg(Color::Yellow),
             string: fg(Color::LightGreen),
             number: fg(Color::LightCyan),
-            // The mockup draws comments no differently from its own dimmed text,
-            // and a comment is the one thing on a diff line a reader routinely
-            // wants to skip. Dimmed rather than colour 8, for the reason
-            // `chrome_dim` gives: a comment should recede, not vanish.
+            // The mockup draws comments no differently from its own dimmed text, and a
+            // comment is the one thing on a diff line a reader routinely wants to skip.
             comment: fg(Color::Gray),
         }
     }
@@ -438,41 +403,27 @@ impl Theme {
             path: rgb(0xe6, 0xed, 0xf3).add_modifier(Modifier::BOLD),
             path_live: rgb(0xe6, 0xed, 0xf3),
             path_cold: rgb(0x7d, 0x85, 0x90),
-            // `bar_hover`'s `#a8b1bb`, which is **8.71:1** on this pane: quieter
+            // `bar_hover`'s `#a8b1bb`, which is 8.71:1 on this pane: quieter
             // than `path_live`'s `#e6edf3` and a long way clear of unreadable.
             path_hover: rgb(0xa8, 0xb1, 0xbb).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x39, 0xc5, 0xcf),
-            // Cyan, where the picture's sparkline is green. What decides the hue
-            // is that green already means addition two rows down, and a churn
-            // sparkline is about *when*, not *what*. The picture is silent on
-            // the hue and not on the ramp: it draws one.
-            // **The quietest stop keeps today's value**, so a worktree nobody
-            // is writing to looks exactly as it did and only the busy buckets
-            // gain. Brighter as it climbs, which is this palette's direction for
-            // every ramp it has.
+            // Cyan, where the picture's sparkline is green. What decides the hue is
+            // that green already means addition two rows down, and a churn sparkline is
+            // about *when*, not *what*.
             spark: rgb(0x39, 0xc5, 0xcf),
             spark_warm: rgb(0x7a, 0xe9, 0xf0),
             spark_hot: rgb(0xa8, 0xf2, 0xf7),
-            // **One step above `heat_track`, which is the rule this field always
-            // had and could not satisfy while the thing it was a step above was
-            // itself invisible.** A stroke needs more contrast than a block to
-            // read as the same weight: `_` is one line in a cell where `▄` is
-            // half of one. With `heat_track` at 2.96:1 this is 4.12:1, where
-            // `#30363d` is **1.55:1**, below even the block it must outrank.
+            // One step above `heat_track`, which is the rule this field always had and
+            // could not satisfy while the thing it was a step above was itself
+            // invisible.
             spark_track: rgb(0x6e, 0x76, 0x81),
             bar: rgb(0x8b, 0x94, 0x9e),
             bar_active: rgb(0xc9, 0xd1, 0xd9),
             bar_hover: rgb(0xa8, 0xb1, 0xbb),
-            // **`#57606a`, where `#21262d` is invisible.** Reported from use:
-            // the scrollbar's track and its step buttons could not be seen at
-            // all, and a button appeared only while it was pressed, because a
-            // press draws in `bar` above and everything
-            // else on that column drew in this.
             bar_track: rgb(0x65, 0x6c, 0x76),
-            // **Left at `#57606a` deliberately, and not an oversight.** The move
-            // above is paid for by the wash, and the heat strip does not sit on
-            // one: it draws on list rows and on file headings, which are never
-            // washed. Only the diff's bar crosses a changed row.
+            // The move above is paid for by the wash, and the heat strip does not sit
+            // on one: it draws on list rows and on file headings, which are never
+            // washed.
             heat_track: rgb(0x57, 0x60, 0x6a),
             heat_added: rgb(0x3f, 0xb9, 0x50),
             heat_added_warm: rgb(0x56, 0xd3, 0x64),
@@ -492,17 +443,9 @@ impl Theme {
             added: rgb(0x3f, 0xb9, 0x50),
             removed: rgb(0xf8, 0x51, 0x49),
             context: rgb(0xe6, 0xed, 0xf3),
-            // The two rects the picture draws behind changed lines, and the two
-            // bars at their left edge. Backgrounds, so the depth ladder drops them
-            // below 24-bit on its own and these are only ever drawn as authored.
-            // **Stronger than the picture's, and that is a correction rather than
-            // a liberty.** `assets/preview.svg` washes with `#0f2c1c` and
-            // `#2d1416`, which it can, because it also paints its own background
-            // `#0d1117` and knows the contrast it is getting. A terminal is not a
-            // picture: a reader's pane is whatever they set it to, and every common
-            // dark scheme is *lighter* than the mockup's. A wash darker than the
-            // background reads as nothing at all, which is what it did on the first
-            // terminal it met.
+            // The two rects the picture draws behind changed lines, and the two bars at
+            // their left edge. Backgrounds, so the depth ladder drops them below 24-bit
+            // on its own and these are only ever drawn as authored.
             added_row: Style::new().bg(Color::Rgb(0x1b, 0x3d, 0x29)),
             removed_row: Style::new().bg(Color::Rgb(0x45, 0x22, 0x2a)),
             // The washes stepped hotter, same hue, roughly delta's line-to-emph
@@ -511,11 +454,7 @@ impl Theme {
             removed_word: Style::new().bg(Color::Rgb(0x7e, 0x2f, 0x3a)),
             added_gutter: Style::new().bg(Color::Rgb(0x14, 0x2e, 0x1f)),
             removed_gutter: Style::new().bg(Color::Rgb(0x33, 0x1a, 0x20)),
-            // **Unset, and that is a ruling rather than a gap.** Inverting the
-            // sigil cell — diff hue behind, the row's wash in front — rests on
-            // the argument that the sigil is the one cell that already
-            // means "this line changed" and so could carry §5.1's left bar without
-            // spending a column.
+            // Unset, and that is a ruling rather than a gap.
             added_bar: Style::new().bg(Color::Rgb(0x3f, 0xb9, 0x50)),
             removed_bar: Style::new().bg(Color::Rgb(0xf8, 0x51, 0x49)),
             note: rgb(0xd2, 0xa8, 0xff),
@@ -539,31 +478,21 @@ impl Theme {
             path: rgb(0x1f, 0x23, 0x28).add_modifier(Modifier::BOLD),
             path_live: rgb(0x1f, 0x23, 0x28),
             path_cold: rgb(0x81, 0x8b, 0x98),
-            // `bar_hover`'s `#3d4650`, **9.59:1** on white. The direction flips
-            // with the palette and the rule does not: quieter here means lighter
-            // than `path`'s `#1f2328`, not darker.
             path_hover: rgb(0x3d, 0x46, 0x50).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x0a, 0x62, 0x6b),
-            // **Darker as it climbs**, which is the same rule as `dark`'s and
+            // Darker as it climbs, which is the same rule as `dark`'s and
             // not a second one: both move towards the foreground, and on a light
             // background that direction is down.
             spark: rgb(0x5a, 0xa6, 0xae),
             spark_warm: rgb(0x0a, 0x62, 0x6b),
             spark_hot: rgb(0x03, 0x28, 0x2e),
-            // **Darker** here where `dark`'s is brighter, which is the same rule
-            // and not a second one: both move one step *towards* the foreground,
-            // and on a light background that direction is down. `#d0d7de` is a
-            // block colour on white and a stroke drawn in it is barely there.
-            // One step above `heat_track` for the reason `Theme::dark`'s carries;
-            // `#afb8c1` was 2.01:1, under the block it is meant to outrank.
+            // Darker here where `dark`'s is brighter, which is the same rule and not a
+            // second one: both move one step *towards* the foreground, and on a light
+            // background that direction is down.
             spark_track: rgb(0x7d, 0x85, 0x90),
             bar: rgb(0x59, 0x63, 0x6e),
             bar_active: rgb(0x24, 0x29, 0x2f),
             bar_hover: rgb(0x3d, 0x46, 0x50),
-            // `#8c959f` at 3.04:1 on white, where `#d0d7de` was **1.45:1** and
-            // invisible for the same reason the dark palette's was. See the note
-            // on `Theme::dark`'s `bar_track`; the two were wrong together and are
-            // fixed together, and the gap below `bar`'s 6.11:1 matches.
             bar_track: rgb(0x7d, 0x85, 0x90),
             // Light enough to read as a track on white, dark enough to be visible.
             // Unmoved for the reason `Theme::dark`'s twin gives: the heat strip
@@ -585,10 +514,9 @@ impl Theme {
             added: rgb(0x1a, 0x7f, 0x37),
             removed: rgb(0xcf, 0x22, 0x2e),
             context: rgb(0x1f, 0x23, 0x28),
-            // The same correction one background over: a wash has to be *further*
-            // from the pane than the pane is from white, or a reader on an
-            // off-white terminal sees nothing. Darker here, where `dark` went
-            // lighter, for the reason every ramp in this palette is reversed.
+            // The same correction one background over: a wash has to be *further* from
+            // the pane than the pane is from white, or a reader on an off-white
+            // terminal sees nothing.
             added_row: Style::new().bg(Color::Rgb(0xc0, 0xf0, 0xcd)),
             removed_row: Style::new().bg(Color::Rgb(0xff, 0xd4, 0xd1)),
             // Hotter is *more saturated* here, the direction every ramp in this
@@ -784,11 +712,7 @@ pub fn from_env(
     lookup: impl Fn(&str) -> Option<String>,
     detected: Option<crate::terminal::Background>,
 ) -> Result<Theme, ThemeError> {
-    // **Chosen here, resolved once on the way out.** Writing `.resolve(depth)`
-    // on each of three exits is a rule spelled out three times: a fourth source
-    // returns a `Theme` either way so the compiler stays silent, and
-    // the omission is invisible at truecolour, where `resolve` is the identity. It
-    // would surface only on somebody else's sixteen-colour terminal.
+    // Chosen here, resolved once on the way out.
     let theme = if let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) {
         let named = named.trim();
         // A built-in wins over a file of the same name. The three names are short,
@@ -799,18 +723,9 @@ pub fn from_env(
             None => load(Path::new(named))?,
         }
     } else if let Some(path) = home_file(THEME_FILE, &lookup).filter(|path| path.is_file()) {
-        // Then the file, which is where a preference set once lives. **Absent is
-        // not an error and unreadable is**, which is the distinction that matters:
-        // nobody has to have one, but a reader who wrote one and got the default
-        // silently would have no way to find out why.
+        // Then the file, which is where a preference set once lives.
         load(&path)?
     } else {
-        // **The detected background picks the showcase, and no answer keeps
-        // the palette that assumes nothing** (`SPEC.md` §11.2 B18,
-        // [#325](https://github.com/breferrari/vigia/issues/325)). An explicit
-        // name and the theme file both outrank this, exactly as before: a
-        // reader who said something is never overruled by a guess about their
-        // terminal, however good the guess.
         match detected {
             Some(crate::terminal::Background::Dark) => Theme::dark(),
             Some(crate::terminal::Background::Light) => Theme::light(),
@@ -822,12 +737,8 @@ pub fn from_env(
 
 /// `rela` under the reader's home directory, if there is one.
 pub(crate) fn home_file(rela: &str, lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    // **Each candidate is emptied-checked before the next is tried**, which is the
-    // whole of this function and was wrong on the first write. Filtering after the
-    // fallback reads naturally and is a different rule: `HOME=""` is `Some("")`, so
-    // `or_else` never fires, and the filter then discards it having already skipped
-    // `USERPROFILE`. A reader with an empty `HOME` would get no theme file and no
-    // way to know why.
+    // Each candidate is emptied-checked before the next is tried, which is the whole of
+    // this function and was wrong on the first write.
     ["HOME", "USERPROFILE"]
         .into_iter()
         .filter_map(lookup)
@@ -859,20 +770,17 @@ pub fn load(path: &Path) -> Result<Theme, ThemeError> {
 /// A value is `[<colour>] [on <colour>] [<modifier>...]`, where a colour is
 /// `#rrggbb`, a palette index `0` to `255`, one of the sixteen names, or `default`.
 ///
-/// **Hand-rolled rather than TOML, and that is a dependency decision.** `toml` is
+/// Hand-rolled rather than TOML, and that is a dependency decision. `toml` is
 /// not in the lock file; taking it means `toml`, `toml_edit`, `winnow` and
 /// `serde_spanned`, none of which `SPEC.md` names, for a grammar that is one line
 /// shape. CLAUDE.md's rule is that a dependency reaches the spec before it reaches
 /// a manifest, and this surface does not earn the argument.
 ///
-/// **An unknown key is refused rather than ignored.** A silently dropped key is a
+/// An unknown key is refused rather than ignored. A silently dropped key is a
 /// theme that does nothing, and "it was discarded" is the one explanation a reader
 /// cannot arrive at by looking at their screen.
 pub fn parse(source: &str) -> Result<Theme, ThemeError> {
-    // **A BOM is stripped, and `trim` will not do it.** U+FEFF is `Cf` rather
-    // than `White_Space`, so it survives every trim here and lands inside the
-    // first key: a theme file saved by Notepad, whose UTF-8 default writes one,
-    // stops the shell from starting with an error naming an invisible byte.
+    // A BOM is stripped, and `trim` will not do it.
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
 
     let mut theme = Theme::default();
@@ -896,11 +804,6 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
             });
         };
         let key = key.trim();
-        // Comments are stripped from the *value* only, and only after the `=`, so
-        // `added = #3fb950 # the picture's green` works and a bare `#` line is
-        // still a comment.
-        // Comments are handled token-wise inside the value rather than by cutting
-        // the line here: see `words_of` for the two rules that were wrong first.
         let value = value.trim();
 
         if key == "base" {
@@ -914,10 +817,8 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
                 return Err(ThemeError::RepeatedBase { line });
             }
             based = true;
-            // Through `words_of` like every other value, so the documented
-            // comment idiom works on the one line every theme file starts with.
-            // Reading the raw value made `base = dark # the picture` report that
-            // there is no theme called "dark # the picture".
+            // Through `words_of` like every other value, so the documented comment
+            // idiom works on the one line every theme file starts with.
             let name = words_of(value).first().copied().unwrap_or_default();
             theme = Theme::named(name).ok_or_else(|| ThemeError::UnknownBase {
                 line,
@@ -966,12 +867,9 @@ fn is_hex(word: &str) -> bool {
 
 /// `[<colour>] [on <colour>] [<modifier>...]`.
 fn style_of(value: &str, line: usize, current: Style) -> Result<Style, ThemeError> {
-    // **Seeded from the key's current value, not from nothing.** `added = bold`
-    // reads as "make additions bold"; built from `Style::new()`, where `set`
-    // replaces the whole thing, it means "make additions bold and colourless".
-    // That is the same invisible change
-    // [`ThemeError::MissingValue`] exists to prevent, reached from the other
-    // direction: a line that says one thing and silently does two.
+    // Seeded from the key's current value, not from nothing. `added = bold` reads as
+    // "make additions bold"; built from `Style::new()`, where `set` replaces the whole
+    // thing, it means "make additions bold and colourless".
     let mut style = current;
     let tokens = words_of(value);
     if tokens.is_empty() {
@@ -979,8 +877,6 @@ fn style_of(value: &str, line: usize, current: Style) -> Result<Style, ThemeErro
     }
     let mut words = tokens.into_iter().peekable();
 
-    // A leading `on` means this value sets only a background, which is how a row
-    // wash is written: `added_row = on #0f2c1c`.
     if words.peek().is_some_and(|word| *word != "on") {
         let word = words.next().unwrap_or_default();
         if let Some(colour) = colour_of(word) {

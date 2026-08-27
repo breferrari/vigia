@@ -1,4 +1,4 @@
-//! The staged run: `SPEC.md` §11.2 **B17**.
+//! The staged run: `SPEC.md` §11.2 B17.
 
 mod support;
 
@@ -110,10 +110,8 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
     let added_unstaged = frame.diff(unstaged).expect("unstaged diff").1.added;
     let added_staged = frame.diff(staged).expect("staged diff").1.added;
 
-    // The unstaged run holds the one line added since the file was staged; the
-    // staged run holds the line staged before that. A cache keyed by path alone
-    // hands the same number back twice, which is exactly the failure this pair
-    // of assertions exists to catch.
+    // The unstaged run holds the one line added since the file was staged; the staged
+    // run holds the line staged before that.
     assert_eq!(
         (added_unstaged, added_staged),
         (1, 1),
@@ -128,12 +126,7 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
             .any(|line| line.text.contains("AND UNSTAGED")),
         "the unstaged run draws the edit that is not staged yet"
     );
-    // **Which side each line is on, not merely that it appears.** Found by
-    // mutation: swapping `before` and `after` on a staged modification left the
-    // whole suite green, because a fixture that rewrites one line is +1/-1 either
-    // way and the word is in the hunk whichever side it lands on. A diff drawn
-    // backwards shows every staged addition as a removal, in green and red, on
-    // every row of the run.
+    // Which side each line is on, not merely that it appears.
     let (_, staged_diff) = frame.diff(staged).expect("staged diff");
     let side = |want: &str| {
         staged_diff
@@ -156,7 +149,7 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
     );
 }
 
-/// **A staged diff reads no file at all**, which is what makes the second walk
+/// A staged diff reads no file at all, which is what makes the second walk
 /// affordable and is the premise the whole design rests on.
 #[test]
 fn a_staged_diff_reads_no_file_from_the_working_tree() {
@@ -386,7 +379,7 @@ fn a_run_can_be_counted_without_being_walked_for_content() {
     );
 }
 
-/// **The whole staged run survives the working tree being deleted**, which is the
+/// The whole staged run survives the working tree being deleted, which is the
 /// same claim as the test above made over one file, made over every file and
 /// without naming a counter.
 #[test]
@@ -460,7 +453,7 @@ fn the_staged_run_is_unchanged_by_the_working_tree_disappearing() {
     }
 }
 
-/// **A sparse index yields no staged run rather than a dead pane.**
+/// A sparse index yields no staged run rather than a dead pane.
 #[test]
 fn a_sparse_index_leaves_the_unstaged_run_drawn() {
     let scratch = Scratch::new("staged-sparse");
@@ -520,7 +513,7 @@ fn a_sparse_index_leaves_the_unstaged_run_drawn() {
     );
 }
 
-/// **A staged submodule bump does not take the process with it.**
+/// A staged submodule bump does not take the process with it.
 #[test]
 fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     let inner = Scratch::new("staged-submodule-inner");
@@ -553,13 +546,7 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     frame.show_staged(true);
     frame.advance().expect("advance");
 
-    // **Every staged row must diff without an error, not merely without a panic.**
-    // That is the claim, and asserting only "no panic" is what let a mutation
-    // removing the gitlink drop survive: `try_into_blob` refuses safely either
-    // way, so both arms are panic-free and only one is usable. An `Err` here is
-    // not benign — `View::collect` propagates it with `?`, so the whole collect
-    // fails, the shell keeps the previous screen, and the pane freezes exactly the
-    // way a sparse index made it freeze.
+    // Every staged row must diff without an error, not merely without a panic.
     for at in 0..frame.files().len() {
         let path = frame.files()[at].path.clone();
         let origin = frame.files()[at].origin;
@@ -570,15 +557,10 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
         );
     }
 
-    // **And the same when the submodule is replaced by a real file**, which is the
-    // case a one-sided guard lets through: the destination is an ordinary blob and
-    // the *source* is the commit, so a guard that asks only about the destination
-    // passes it to a read that must then refuse it. Same freeze, by the door the
-    // first fix left open.
-    // **Committed first**, so `HEAD` really holds the gitlink and the staged change
-    // is a modification *from* it. Without that the tree has no `sub` at all and
-    // the change is an ordinary addition, which is the case a one-sided guard
-    // already handles: the fixture would pass while proving nothing.
+    // And the same when the submodule is replaced by a real file, which is the case a
+    // one-sided guard lets through: the destination is an ordinary blob and the
+    // *source* is the commit, so a guard that asks only about the destination passes it
+    // to a read that must then refuse it.
     scratch.git(&["commit", "-m", "the submodule"]);
     scratch.git(&["rm", "-f", "--cached", "sub"]);
     std::fs::remove_dir_all(scratch.path_of("sub")).ok();
@@ -611,7 +593,7 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     );
 }
 
-/// **The run boundary is the walk's own answer, on every path out of it.**
+/// The run boundary is the walk's own answer, on every path out of it.
 #[test]
 fn the_run_boundary_agrees_with_the_files_it_partitions() {
     let scratch = fixture("staged-boundary");
@@ -640,7 +622,7 @@ fn the_run_boundary_agrees_with_the_files_it_partitions() {
     frame.advance().expect("advance");
     boundary_agrees(&frame);
 
-    // **Flipped but not yet walked**: the pair still describes the frame that is
+    // Flipped but not yet walked: the pair still describes the frame that is
     // actually in hand, which is what everything reading it between a keypress
     // and its walk depends on.
     frame.show_staged(false);

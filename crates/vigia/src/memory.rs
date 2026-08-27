@@ -8,13 +8,9 @@ pub fn resident() -> Option<u64> {
 
 #[cfg(target_os = "linux")]
 fn read() -> Option<u64> {
-    // `VmRSS` rather than `/proc/self/statm`, which is a shorter read and about
-    // 3x cheaper. `statm` reports pages, so it would need `sysconf(_SC_PAGESIZE)`
-    // and therefore `unsafe` and `libc` on the one platform that currently needs
-    // neither. Hard-coding 4096 is not available: arm64 Linux ships 16K and 64K
-    // page sizes. At 0.2% of the frame budget the cheaper read buys nothing worth
-    // that, and this is the exact reader `soak.rs` has already driven across
-    // 288-sample series.
+    // `VmRSS` rather than `/proc/self/statm`: the cheaper read reports pages and
+    // would need `sysconf(_SC_PAGESIZE)`, so `unsafe` and `libc` on the one
+    // platform that needs neither.
     let status = std::fs::read_to_string("/proc/self/status").ok()?;
     let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
     let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
@@ -23,10 +19,9 @@ fn read() -> Option<u64> {
 
 #[cfg(target_os = "macos")]
 fn read() -> Option<u64> {
-    // `proc_pidinfo` rather than `task_info(mach_task_self(), ...)`, which is the
-    // other route to the same number: this one is a plain function call against a
-    // pid, where the mach route needs a task port and gets the type of
-    // `mach_task_self` wrong in a way that compiles.
+    // `proc_pidinfo` rather than `task_info(mach_task_self(), ...)`: the mach
+    // route needs a task port and gets `mach_task_self`'s type wrong in a way
+    // that compiles.
     let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::uninit();
     let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
 
@@ -45,9 +40,8 @@ fn read() -> Option<u64> {
         )
     };
 
-    // A partial write is the documented failure mode, and it is **not** signalled
-    // by a negative return: the call reports the byte count it managed, so
-    // checking only for `> 0` would read an uninitialised struct on a short one.
+    // A partial write is not signalled by a negative return: checking `> 0`
+    // reads an uninitialised struct on a short one.
     if written != size {
         return None;
     }
@@ -66,9 +60,7 @@ fn read() -> Option<u64> {
 
     let mut counters = PROCESS_MEMORY_COUNTERS {
         // The struct is versioned by its own size, which is how the ABI stays
-        // compatible across Windows releases. Getting this wrong fails the call
-        // rather than corrupting anything, which is why it is set from the type
-        // rather than written as a number.
+        // compatible across Windows releases.
         cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
         ..Default::default()
     };
@@ -85,10 +77,9 @@ fn read() -> Option<u64> {
         )
     };
 
-    // `WorkingSetSize` rather than `PagefileUsage`, because the working set is
-    // what `tasklist` reports and what I3's budget is written against. The two
-    // differ by several MiB on the same process, so mixing them would read as
-    // drift. `soak.rs` documents the same trap one layer up.
+    // `WorkingSetSize` rather than `PagefileUsage`, because the working set is what
+    // `tasklist` reports and what I3's budget is written against. The two differ by
+    // several MiB on the same process, so mixing them would read as drift.
     (ok != 0).then_some(counters.WorkingSetSize as u64)
 }
 
@@ -111,11 +102,8 @@ mod tests {
              fires on Linux, macOS or Windows the readout has silently stopped \
              being drawn rather than being drawn wrongly",
         );
-        // A floor and a ceiling rather than an exact number, because the value is
-        // a real measurement of a real process and nothing here can predict it.
-        // What they catch is the failure that matters: a struct the call never
-        // filled reads as stack garbage, which lands outside these by orders of
-        // magnitude far more often than it lands inside them.
+        // A floor and a ceiling rather than an exact number, because the value is a
+        // real measurement of a real process and nothing here can predict it.
         assert!(
             (1 << 20..1 << 36).contains(&bytes),
             "resident set size is {bytes} bytes, which is not a number a test \
@@ -125,11 +113,8 @@ mod tests {
 
     #[test]
     fn the_number_follows_the_process_rather_than_standing_still() {
-        // **The half a range check cannot do**, and the reason it is worth its
-        // own test: a reader hard-wired to a plausible constant passes the gate
-        // above forever. The vault's note on reading RSS makes the same point
-        // about the `tasklist` parse, which was trusted only once an injected
-        // leak produced a monotonic ramp rather than a flat line.
+        // The half a range check cannot do, and the reason it is worth its own test: a
+        // reader hard-wired to a plausible constant passes the gate above forever.
         const GROWTH: usize = 64 << 20;
         let before = resident().expect("a reader");
 

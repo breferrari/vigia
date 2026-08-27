@@ -96,7 +96,7 @@ impl Samples {
             .fold(Duration::ZERO, |sum, each| sum.saturating_add(*each))
     }
 
-    /// How much of this round sat **above** `budget`, summed over the samples
+    /// How much of this round sat above `budget`, summed over the samples
     /// that exceeded it.
     pub fn excess_over(&self, budget: Duration) -> Duration {
         self.values[..self.len()]

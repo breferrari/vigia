@@ -85,12 +85,7 @@ fn a_window_of_silence_empties_the_store() {
     assert!(history.stats().evicted_by_window >= HISTORY_PATHS as u64);
     assert_eq!(history.scale(), 0, "the shared scale outlived its samples");
 
-    // **Every figure, not only the finest**, and the band's series with them.
-    // `History::repeak` leaves early when the window holds nothing, and that exit
-    // has to set exactly what the long one sets: it took a second assignment of
-    // the worktree series to do it, and dropping that line would freeze the band
-    // on the last shape it had while every number beside it read zero. Nothing
-    // asserted it, because this gate stopped at the first figure.
+    // Every figure, not only the finest, and the band's series with them.
     assert_eq!(
         history.scales(),
         [0; SPARK_GROUPS.len()],
@@ -137,7 +132,7 @@ fn a_path_ages_out_through_ordinary_ticks_and_not_only_through_one_long_gap() {
     assert!(history.stats().evicted_by_window > 0);
 }
 
-/// A path that ages out is **dropped**, not drawn empty.
+/// A path that ages out is dropped, not drawn empty.
 #[test]
 fn a_path_that_ages_out_is_dropped_rather_than_kept_empty() {
     let now = base();
@@ -199,7 +194,7 @@ fn total(drawn: &[u32; HISTORY_BUCKETS]) -> u32 {
     drawn.iter().copied().sum()
 }
 
-/// A drawn column is the **sum** of the samples under it, not one of them.
+/// A drawn column is the sum of the samples under it, not one of them.
 #[test]
 fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
     let now = base();
@@ -253,30 +248,16 @@ fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
 
 #[test]
 fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
-    // **The period the spec names, gated where it is computed.** `SPEC.md`
-    // §5.1 says a source bucket is five seconds, and it is a division of one
-    // window by one constant. A `const` block already refuses a division that is
-    // not exact; this refuses one that is exact and wrong, which is the case that
-    // would leave the spec's numbers false while everything still compiled.
+    // The period the spec names, gated where it is computed.
     assert_eq!(HISTORY_BUCKET, Duration::from_secs(5));
 
     // And it tiles the window, which is what makes a drawn bucket mean the same
     // amount of time wherever it sits.
     assert_eq!(HISTORY_BUCKET * HISTORY_BUCKETS as u32, HISTORY_WINDOW);
 
-    // **The band half of this gate is gone with the constants it read**
-    // ([#232](https://github.com/breferrari/vigia/issues/232)). It asserted
-    // `GRAPH_PERIOD < HISTORY_BUCKET`, "the band stopped being finer than the
-    // sparkline, which is the whole reason they are two elements", against a band
-    // that drew fifteen fixed columns. The band draws one value per sub-column
-    // now, so its period is a property of the pane rather than a constant, and at
-    // any wide pane it is the store's own one-second resolution. It is therefore
-    // finer than a drawn bucket at every width, and the comparison has nothing
-    // left to compare.
+    // The band half of this gate is gone with the constants it read
+    // ([#232](https://github.com/breferrari/vigia/issues/232)).
 }
-
-// **The sparkline's ceiling gate is gone, and #161's ruling with it**
-// ([#232](https://github.com/breferrari/vigia/issues/232)).
 
 /// The newest drawn bucket of a path, which is where a write just landed.
 fn newest(history: &History, path: &str) -> u32 {
@@ -441,7 +422,7 @@ fn the_scale_rule_holds_at_its_edges() {
     assert_eq!(scale_of([10, 10, 10].into_iter()), 13);
     assert_eq!(scale_of([0, 10, 0, 10].into_iter()), 13);
 
-    // **Above every input by design**, which is what stops a uniformly busy
+    // Above every input by design, which is what stops a uniformly busy
     // worktree drawing as a solid block.
     assert!(scale_of([10, 10].into_iter()) > 10);
 
@@ -536,23 +517,15 @@ fn the_cut_is_ten_times_the_median() {
 /// What the cut keeps, pinned by the figure it produces rather than by a floor.
 #[test]
 fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
-    // Three values, median 1, cut 10. The million is dropped, so the figure is
-    // thirteen tenths of the mean of the two ones, which floors to one. Leave the
-    // cut out and it is 433_334, so this cannot pass against a rule that does not
-    // cut.
+    // Three values, median 1, cut 10.
     assert_eq!(
         scale_of([1u32, 1, 1_000_000].into_iter()),
         1,
         "the outlier set the yardstick for the two values beside it"
     );
 
-    // **And one whose answer is mid-range, because the assertion above lands on
-    // the arithmetic floor.** Any rule that keeps a small enough set answers one
-    // there, so it kills "no cut" and not much else. Here the pivot is the whole
-    // question: the median is 40 and drops the 2_000, leaving 281 over 8; a mean
-    // pivot is 253 and its cut of 2_530 keeps everything, leaving 2_281 over 9; a
-    // minimum pivot is 1 and its cut of 10 keeps only the 1. Three different
-    // figures, so this fixture tells them apart where the first cannot.
+    // And one whose answer is mid-range, because the assertion above lands on the
+    // arithmetic floor.
     let bulk = [1u32, 40, 40, 40, 40, 40, 40, 40, 2_000];
     assert_eq!(
         scale_of(bulk.into_iter()),
@@ -561,11 +534,8 @@ fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
          minimum pivot answers 1"
     );
 
-    // **A population of two never cuts, and that is the median's rounding rather
-    // than an accident.** `len / 2` lands in the upper half, so the larger of a
-    // pair is the median and nothing can exceed ten times itself. Stated as a
-    // gate because it is the one size at which the rule is inert, and a reader
-    // meeting it should find it asserted rather than be surprised by it.
+    // A population of two never cuts, and that is the median's rounding rather than an
+    // accident.
     assert!(
         scale_of([1u32, 1_000_000].into_iter()) > 500_000,
         "a population of two cut something, where the larger value is the median"
@@ -718,16 +688,9 @@ fn deleting_a_file_weighs_what_it_removed() {
     );
 }
 
-// ── #242: the glance elements draw a level ───────────────────────────────────
-
 /// A store holding one agent burst centred `ago` seconds back.
 fn burst_at(history: &mut History, now: Instant, ago: u64, grown: u64) -> u64 {
-    // **Cumulative sizes, because a sample weighs a difference.** `Track::wrote`
-    // charges the change in a file's size, so handing the same four sizes twice
-    // would make the second burst weigh nothing and handing four constants would
-    // make it weigh whatever the gap between them happened to be. `grown` is what
-    // the file already held, so each burst adds the same four deltas and two
-    // bursts really are two of the same thing.
+    // Cumulative sizes, because a sample weighs a difference.
     let mut size = grown;
     for (offset, delta) in [(3u64, 1_000u64), (2, 3_500), (1, 4_500), (0, 9_000)] {
         size += delta;
@@ -763,14 +726,8 @@ fn a_single_burst_draws_a_wave_rather_than_a_spike() {
         .map(|(at, _)| at)
         .expect("a peak");
 
-    // Non-vacuity first: a wave needs more than one non-empty bucket, and a
-    // spike train is exactly the case where it has one.
-    // **And the far end of the window is empty.** Without this the gate passes
-    // against a floor that lights every sample: a solid bar rises to a peak and
-    // falls back to the bar, which is monotone in both directions and is the
-    // defect this feature removes. Measured, that bug drew
-    // `[10, 12, 58, 302, 1594, 8015, 5698, 1077, 204, 38, 10, 10]` and satisfied
-    // every other assertion here.
+    // Non-vacuity first: a wave needs more than one non-empty bucket, and a spike train
+    // is exactly the case where it has one.
     assert_eq!(
         (drawn[0], drawn[HISTORY_BUCKETS - 1]),
         (0, 0),
@@ -810,10 +767,7 @@ fn two_bursts_thirty_seconds_apart_still_read_as_two() {
     let drawn = history
         .level("src/engine/watch.rs")
         .expect("the path is tracked");
-    // Each burst's own peak, found in its own half. **Not one global maximum
-    // over both**: a sample weighs the *difference* a write made to a file's
-    // size, so two identical bursts do not weigh the same, and a gate keyed on
-    // equal peaks would read one bucket twice and see no trough at all.
+    // Each burst's own peak, found in its own half.
     let split = HISTORY_BUCKETS / 2;
     let argmax = |slice: &[u32]| {
         slice
@@ -877,16 +831,6 @@ fn a_burst_at_the_newest_sample_reads_full_height() {
 
 #[test]
 fn an_empty_window_is_never_due() {
-    // **The half of [#243](https://github.com/breferrari/vigia/issues/243) that
-    // keeps I1.** The clock the shell runs to age this window is admissible only
-    // because it stops, and what stops it is this answering `None`. Asserted on
-    // the value rather than on anything downstream, because the loop's receive
-    // branches on exactly this and a plausible-looking duration here is a poll
-    // loop on an idle monitor.
-    // `starting_at`, not `new`: `new` opens the window at its own
-    // `Instant::now()`, so a second sample taken on the next line leaves
-    // `opened < start` and every offset below is measured against a boundary
-    // that has already moved.
     let start = base();
     let mut history = History::starting_at(start);
 
@@ -906,7 +850,7 @@ fn an_empty_window_is_never_due() {
          the grid it rolls on"
     );
 
-    // **Overdue asks for zero rather than panicking**, which is the ordinary
+    // Overdue asks for zero rather than panicking, which is the ordinary
     // case on the first wake after the process was busy elsewhere: the roll is
     // already late and the answer is to do it now.
     assert_eq!(
@@ -918,15 +862,8 @@ fn an_empty_window_is_never_due() {
 
 #[test]
 fn a_drained_window_stops_asking_to_age() {
-    // **The bound, and the reason the amendment to I1 is one sentence rather
-    // than a licence to run a timer.** A burst arms the clock; the window empties
-    // `HISTORY_WINDOW` after it, and the clock has to stop with it or the budget
-    // is *some wakeups forever* rather than *at most `HISTORY_SAMPLES` after a
-    // burst*.
-    // `starting_at`, not `new`: `new` opens the window at its own
-    // `Instant::now()`, so a second sample taken on the next line leaves
-    // `opened < start` and every offset below is measured against a boundary
-    // that has already moved.
+    // The bound, and the reason the amendment to I1 is one sentence rather than a
+    // licence to run a timer.
     let start = base();
     let mut history = History::starting_at(start);
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
@@ -950,11 +887,8 @@ fn a_drained_window_stops_asking_to_age() {
          everything it had to show"
     );
 
-    // **And it stays stopped across an ageing wake, which is the property this
-    // was written for.** Asking `ages_in` a second time does not test it:
-    // the method takes `&self`, so with nothing mutating between the two calls
-    // the answer cannot differ and the line could not fail. What can re-arm the
-    // clock is a roll, so the roll has to happen first.
+    // And it stays stopped across an ageing wake, which is the property this was
+    // written for.
     history.record_sized([], start + HISTORY_WINDOW * 2);
     assert_eq!(
         history.ages_in(start + HISTORY_WINDOW * 2),
@@ -966,14 +900,6 @@ fn a_drained_window_stops_asking_to_age() {
 
 #[test]
 fn a_tick_that_moves_nothing_does_no_work() {
-    // **The guard [#277](https://github.com/breferrari/vigia/issues/277) needed
-    // once it put `record_sized` on the shell loop's timeout arm.** That arm also
-    // fires every `STEP_REPEAT` while a scrollbar button is held, twenty times a
-    // second, and nineteen of those cross no sample boundary. Without the guard
-    // each one paid `repeak`, priced in its own docblock at 150.1µs p50 at the
-    // path cap, to recompute an answer that cannot have changed.
-    // Measured at the cap after it: a same-sample timeout is **20ns** against
-    // **137µs** for one that crosses a boundary.
     let start = base();
     let mut history = History::starting_at(start);
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
@@ -994,10 +920,8 @@ fn a_tick_that_moves_nothing_does_no_work() {
         "a timeout inside one sample walked every track, which is the 150µs a \
          held scrollbar button would pay for it nineteen times a second"
     );
-    // **Read through `recency`, which is sample-granular, rather than through
-    // `scales` and `worktree_churn`, which `repeak` caches.** The cached pair
-    // cannot move while the counter above says no walk happened, so comparing
-    // them here was a line that could not fail while its predecessor passed.
+    // Read through `recency`, which is sample-granular, rather than through `scales`
+    // and `worktree_churn`, which `repeak` caches.
     assert_eq!(
         history.recency("src/a.rs"),
         Recency::Pulse,
@@ -1005,7 +929,7 @@ fn a_tick_that_moves_nothing_does_no_work() {
          mark it had just earned and the skipped walk was hiding a real roll"
     );
 
-    // **Both halves of the guard, or it is half a guard.** A tick that names a
+    // Both halves of the guard, or it is half a guard. A tick that names a
     // path inside the same sample changed a track without moving the window, and
     // skipping the walk there would freeze the projection against live data.
     history.record_sized([("src/a.rs", Some(9_000u64))], start + HISTORY_SAMPLE / 2);
@@ -1035,11 +959,7 @@ fn a_tick_that_moves_nothing_does_no_work() {
 
 #[test]
 fn a_burst_lands_in_the_sample_the_roll_opened() {
-    // **Order inside `record_sized`: the window rolls, and *then* the burst is
-    // written.** Swap those and the write lands in the sample the roll is about
-    // to shift out of, so it moves one cell left the instant it arrives and the
-    // newest sample is zero: the path is `Live` on the frame it was written on,
-    // and every drawn cell is one sample stale forever after.
+    // Order inside `record_sized`: the window rolls, and *then* the burst is written.
     let start = base();
     let mut history = History::starting_at(start);
     history.record(["src/a.rs"], start);
@@ -1056,17 +976,8 @@ fn a_burst_lands_in_the_sample_the_roll_opened() {
 
 #[test]
 fn a_write_after_the_whole_window_turned_over_still_accumulates() {
-    // **The overnight case, and the branch that serves it is the one branch that
-    // re-bases the window's origin.** `roll` clears every track when the whole
-    // window has turned over rather than shifting each one past its own length,
-    // and it has to move `opened` to `now` on the way out. Leave that line off
-    // and the store still *looks* right for one call: the clear happens, the
-    // window reads empty, and the next write lands. It is the call after that
-    // one which never recovers, because `opened` is still pointing at whenever
-    // the session began, so every later roll measures the same overnight gap and
-    // clears the store again. The graph can then never hold more than the burst
-    // being written at that instant, forever, on a monitor whose whole job is to
-    // be left open for days.
+    // The overnight case, and the branch that serves it is the one branch that re-bases
+    // the window's origin.
     let start = base();
     let mut history = History::starting_at(start);
     history.record(["src/a.rs"], start);
@@ -1104,19 +1015,13 @@ fn a_write_after_the_whole_window_turned_over_still_accumulates() {
 
 #[test]
 fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
-    // **[#243](https://github.com/breferrari/vigia/issues/243) one field over.**
-    // The mark was the burst ordinal alone, which only advances when a burst
-    // names something, so an empty roll left it lit: a file written a hundred and
-    // nineteen seconds ago drew at full brightness beside a band that had almost
-    // drained, and then lost the mark all at once when its track was evicted.
-    // Once the window ages on its own that is visible every second.
     let start = base();
     let mut history = History::starting_at(start);
     history.record(["src/a.rs"], start);
     assert_eq!(history.recency("src/a.rs"), Recency::Pulse);
 
-    // **[`PULSE_SAMPLES`] boundaries, and the mark expires by construction rather
-    // than by anything retiring it**: `Track::shift` walks the write out of the
+    // [`PULSE_SAMPLES`] boundaries, and the mark expires by construction rather
+    // than by anything retiring it: `Track::shift` walks the write out of the
     // newest end of the track and the mark goes with it.
     for step in 1..PULSE_SAMPLES as u32 {
         history.record_sized([], start + HISTORY_SAMPLE * step);
@@ -1135,18 +1040,12 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
          it just wrote"
     );
 
-    // **The rung above already carries "still tracked", so nothing asserts it
-    // separately.** Two attempts did. The first asked `recency` again and
-    // compared it to the same rung. The second asked `churn(..).is_some()`, on
-    // the stated ground that "a `Live` that came from an eviction would read
-    // identically", which is not true of this enum: `recency` returns `Cold` for
-    // a path it cannot find and `Live` only for one it can, so `Live` is the
-    // evidence and a second line restating it is a line that cannot fail.
+    // The rung above already carries "still tracked", so nothing asserts it separately.
     history.record_sized([], start + HISTORY_WINDOW * 2);
     assert_eq!(history.recency("src/a.rs"), Recency::Cold);
 }
 
-/// **The pulse must last long enough to be seen, whenever the write lands.**
+/// The pulse must last long enough to be seen, whenever the write lands.
 #[test]
 fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
     // Every corner of the grid, including the two that measured 10ms and 5ms.
@@ -1182,13 +1081,8 @@ fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
              The mark is the whole of B2 and one this short is one a reader \
              never catches"
         );
-        // **The ceiling is written out rather than computed from
-        // [`PULSE_SAMPLES`], and that is the whole difference between a gate and
-        // a tautology.** Stated as `HISTORY_SAMPLE * PULSE_SAMPLES` it adds the
-        // constant under test to both sides: widening the window to three
-        // samples widened the assertion with it and this test stayed green,
-        // which is exactly what happened when it was mutated. A bound on a
-        // constant has to come from somewhere the constant cannot reach.
+        // The ceiling is written out rather than computed from [`PULSE_SAMPLES`], and
+        // that is the whole difference between a gate and a tautology.
         assert!(
             alive <= Duration::from_secs(2),
             "a write at +{offset}ms into the sample pulsed for {alive:?}, which \
@@ -1198,7 +1092,7 @@ fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
     }
 }
 
-/// And a newer burst still takes the mark from an older one **immediately**.
+/// And a newer burst still takes the mark from an older one immediately.
 #[test]
 fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
     let start = base();
@@ -1237,11 +1131,7 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
         "a write does not carry the mark at all"
     );
 
-    // **Ten seconds of quiet, rolled the way `Shell::draw` rolls it.** The number
-    // is written from the ruling rather than from `PULSE_SAMPLES`: a gate stated
-    // in terms of the constant it pins moves with it, which `RULINGS.md` records
-    // this very mark having been caught by once. What a reader means by "it stays"
-    // is measured in seconds of watching an agent, not in samples.
+    // Ten seconds of quiet, rolled the way `Shell::draw` rolls it.
     let mut now = wrote;
     for _ in 0..2_000u32 {
         now += Duration::from_millis(5);
@@ -1258,7 +1148,7 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
         now.duration_since(wrote)
     );
 
-    // **And the ink is gone by then, which is what says the two are separate.**
+    // And the ink is gone by then, which is what says the two are separate.
     // A build that answered the mark out of `recency` would fail here rather than
     // above, and a build that never expired the ink would fail here too.
     assert_ne!(

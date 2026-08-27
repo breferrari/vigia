@@ -55,7 +55,7 @@ fn is_bar_glyph(symbol: &str) -> bool {
 /// What a sparkline bucket nothing was written in draws.
 const SPARK_TRACK: &str = "_";
 
-/// Every foreground a **written** sparkline bucket can take.
+/// Every foreground a written sparkline bucket can take.
 fn spark_colours(theme: &Theme) -> Vec<Option<Color>> {
     [theme.spark, theme.spark_warm, theme.spark_hot]
         .into_iter()
@@ -87,7 +87,7 @@ fn heat_colours(theme: &Theme) -> Vec<Option<Color>> {
 }
 
 /// The margin ladder, widest pane first: blank columns the pane keeps between
-/// its own edge and any glyph, **both sides counted together**.
+/// its own edge and any glyph, both sides counted together.
 const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
 
 /// The column every row's text begins at, on a pane this wide: the margin above,
@@ -140,7 +140,7 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
     terminal.backend().clone()
 }
 
-/// The neutral chrome, which is deliberately **not** the state a shell starts
+/// The neutral chrome, which is deliberately not the state a shell starts
 /// in.
 fn text_rows(drawn: &ratatui::backend::TestBackend, width: u16, height: u16) -> Vec<String> {
     (0..height)
@@ -179,10 +179,7 @@ fn chrome() -> Chrome {
         masthead: true,
         rail: false,
         sheet: None,
-        // The first paint's chrome: no frame has completed, so there is no p99
-        // to draw. Every snapshot below inherits it, which keeps them comparing
-        // the same screen they compared before the readouts existed, and
-        // [`diagnostics_chrome`] is what covers the other shape.
+        // The first paint's chrome: no frame has completed, so there is no p99 to draw.
         frame: None,
         memory: None,
     }
@@ -237,10 +234,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 
 /// A one-line view whose single content row carries `spans`.
 fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
-    // Guard the fixture. `Span` promises the runs of a line sum to its bytes,
-    // and a fixture that broke that would have the renderer drawing an
-    // unclassified tail while the assertions below read columns nobody
-    // classified.
+    // Guard the fixture.
     let covered: usize = spans.iter().map(|span| span.len).sum();
     assert!(
         spans.is_empty() || covered == text.len(),
@@ -394,20 +388,10 @@ fn the_same_screenful_at_a_hundred_and_twenty_columns() {
 
 #[test]
 fn a_content_row_stands_its_sigil_off_the_line() {
-    // `SPEC.md` §5.1's fifth departure, closed. `assets/preview.svg` states its
-    // own grid in a comment, one cell at 13.5px being ~8.1px, and in the diff
-    // body it puts the sigil at x=72 and every content origin at x=88. The sigil
-    // is one cell, 72 to 80.1, so the picture has always drawn **one clear
-    // column** between a sigil and its line, and the shell drew none: `-` ran
-    // into the first token a reader scans for, on the column that *is* the diff
-    // signal wherever the palette or the depth cannot wash the row.
+    // `SPEC.md` §5.1's fifth departure, closed.
     let view = one_file();
     // Read off the fixture rather than restated beside it, which is the move the
-    // counters' gate on this same branch already makes. A hand-written table of
-    // indents is a second copy of `one_file()`: re-indent one of its lines and
-    // this gate fails naming the renderer for a fixture edit. Derived, it also
-    // covers **every** content row instead of the four somebody typed out, and
-    // the deepest two are exactly where a gap and an indent would be confused.
+    // counters' gate on this same branch already makes.
     let indents: Vec<(u16, usize)> = view
         .rows
         .iter()
@@ -427,12 +411,10 @@ fn a_content_row_stands_its_sigil_off_the_line() {
         let removed = column_of(&backend, 5, "-");
         let added = column_of(&backend, 6, "+");
 
-        // **Asserted before anything reads from it**, because it is a
-        // precondition rather than an afterthought: every comparison below
-        // measures from `origin`, and if the two sigils disagreed about their
-        // column then `origin` came from a row the loop never checks and each
-        // comparison is against itself. Stated first, a disagreement fails as
-        // itself instead of as whichever assertion it corrupted.
+        // Asserted before anything reads from it, because it is a precondition rather
+        // than an afterthought: every comparison below measures from `origin`, and if
+        // the two sigils disagreed about their column then `origin` came from a row the
+        // loop never checks and each comparison is against itself.
         assert_eq!(
             removed, added,
             "at {width} columns the two sigils sit in different columns, so the \
@@ -440,10 +422,8 @@ fn a_content_row_stands_its_sigil_off_the_line() {
         );
         let origin = usize::from(removed) + 2;
 
-        // The sigil has not moved: it still sits one space past the gutter's
-        // digits, which is the half of the row this change must leave alone.
-        // Both rows of the changed pair are line 260, the removal and the
-        // addition replacing it.
+        // The sigil has not moved: it still sits one space past the gutter's digits,
+        // which is the half of the row this change must leave alone.
         for y in [5u16, 6] {
             let before: String = row_text(&backend, y).chars().take(origin - 2).collect();
             assert!(
@@ -481,12 +461,8 @@ fn a_content_row_stands_its_sigil_off_the_line() {
             );
         }
 
-        // **The unindented line, which is the row this was reported on and the
-        // only one where the gap is visible to a reader.** Every line in
-        // `one_file()` is indented, so the loop above proves the *origin* moved
-        // and never shows the case the issue was filed about: `-pub fn …` with
-        // the sigil against the token. Asserted through the same origin, on its
-        // own fixture, so the two claims stay separable.
+        // The unindented line, which is the row this was reported on and the only one
+        // where the gap is visible to a reader.
         let bare = highlighted(LineKind::Removed, "pub fn generated_889() {}", Vec::new());
         let flush = screen(width, 6, &bare, &chrome());
         let sigil = column_of(&flush, CONTENT_ROW, "-");
@@ -530,10 +506,8 @@ fn nothing_changed() -> View {
 
 #[test]
 fn a_clean_worktree_says_so_rather_than_showing_nothing() {
-    // A monitor is read by glancing at it, so "nothing has changed" and "I am
-    // broken" must not look identical. An empty pane says both, which is B3, and
-    // this is the picture of the answer: the header carries which tree and that
-    // it is watching, the body carries which branch and what it did not find.
+    // A monitor is read by glancing at it, so "nothing has changed" and "I am broken"
+    // must not look identical.
     insta::assert_snapshot!(screen(40, 6, &nothing_changed(), &empty_chrome()));
 }
 
@@ -579,28 +553,15 @@ fn the_header_says_which_mode_it_is_in() {
 
 #[test]
 fn the_header_carries_no_changed_line_total() {
-    // The ruling `SPEC.md` §10 closed with. The header carries which
-    // tree, the mode word and the file count, and there is no fourth fact. A
-    // repository-wide `+`/`-` needs every changed file diffed, so it would make
-    // first paint follow the size of the diff, which is the one thing I4 exists
-    // to forbid. The only variant that dodges that is to compute it behind the
-    // frame and reveal it when it arrives, which is a wake no filesystem event
-    // caused and a number that is stale between the tick and the reveal: the
-    // frozen-clock failure §11.1 already rejected for the pulse.
+    // The ruling `SPEC.md` §10 closed with.
     let backend = screen(80, 6, &glancing(), &chrome());
     let header = row_text(&backend, 0);
 
-    // What a header total would have to draw, in **either** form: the counters'
-    // own sigils, or the bare sum if it dropped them. `+42 −7`, `+11 −3` and
-    // `+2 −0` sum to `+55 −10`, so all four are things only an aggregate could
-    // put on the top row.
+    // What a header total would have to draw, in either form: the counters' own sigils,
+    // or the bare sum if it dropped them.
     const TOTALS: [&str; 4] = ["+", "-", "55", "10"];
 
-    // Guard the fixture, the way [`highlighted`] guards its spans. The assertion
-    // below reads the **whole** row rather than recomputing where the right-hand
-    // side begins, and that is only sound while the left-hand side contains none
-    // of these itself. A worktree named `my-repo` would make it lie, silently and
-    // in the passing direction.
+    // Guard the fixture, the way [`highlighted`] guards its spans.
     let worktree = chrome().worktree;
     for needle in TOTALS {
         assert!(
@@ -610,10 +571,7 @@ fn the_header_carries_no_changed_line_total() {
         );
     }
 
-    // Non-vacuity, and it is what makes the rest worth asserting. The counters
-    // have to really be on this screen, or a header with no numbers in it would
-    // pass against a fixture that had none to draw and the test would be
-    // checking that nothing is nothing.
+    // Non-vacuity, and it is what makes the rest worth asserting.
     let height = backend.buffer().area.height;
     let body: String = (1..height).map(|y| row_text(&backend, y)).collect();
     // The two halves separately rather than as one joined string: each is
@@ -643,13 +601,9 @@ fn the_header_carries_no_changed_line_total() {
 
 #[test]
 fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
-    // The header's two facts are about two different
-    // subjects: the mode word says whether the **watch thread** is live, and the
-    // count says how many files **differ from the index**. Drawn as
-    // `watching · 3 files` they fuse, because English reads a participle
-    // followed by a number as a verb with an object, and the set that names does
-    // not exist: `vigia` watches the whole worktree minus gitignore, and the
-    // count is what changed inside it.
+    // The header's two facts are about two different subjects: the mode word says
+    // whether the watch thread is live, and the count says how many files differ from
+    // the index.
     let worktree = chrome().worktree;
 
     for (mode, word) in [(Mode::Watching, "watching"), (Mode::Lost, "not watching")] {
@@ -665,10 +619,7 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                 files,
                 ..one_file()
             };
-            // Every width §3 names. Forty is where the ladder is under most
-            // pressure and a hundred and twenty where nothing degrades, so a
-            // renderer that only fused when it was short and a renderer that
-            // only fused when it was roomy are both caught.
+            // Every width §3 names.
             for width in [40u16, 80, 120] {
                 let header = row_text(&screen(width, 8, &view, &Chrome { mode, ..chrome() }), 0);
 
@@ -684,21 +635,14 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                 );
 
                 // The count is drawn, and it is drawn against the worktree name.
-                // Non-vacuity and placement in one: a header that had dropped
-                // the count entirely would pass the two assertions above while
-                // saying nothing.
                 assert!(
                     header.contains(&format!("{worktree}{FACT_JOIN}{files} changed")),
                     "at {width} columns the count is not beside the worktree: \
                      {header:?}"
                 );
 
-                // And the mode word ends the row, with blank before it, which is
-                // what "the right-hand side carries it alone" means where a test
-                // can see it. The leading space is half the assertion rather
-                // than tidiness: `1 changedwatching` would satisfy every check
-                // above and is the one arrangement that fuses harder than the
-                // defect being fixed.
+                // And the mode word ends the row, with blank before it, which is what
+                // "the right-hand side carries it alone" means where a test can see it.
                 assert!(
                     header.trim_end().ends_with(&ends_row),
                     "at {width} columns the row does not end in the mode word \
@@ -824,13 +768,7 @@ fn guard_sigil_free_paths(view: &View) {
 
 #[test]
 fn the_counters_take_the_pictures_green_and_red() {
-    // `SPEC.md` §5.1's third departure, colour half. `assets/preview.svg` has
-    // drawn `+42` in `.grn` and `-7` in `.red` since before anything was built,
-    // and §5.3 already licensed the loan: green and red "are loaned out only
-    // where they restate the same fact (the footer's follow marker, the
-    // counters)". The shell shipped the marker half and drew both counters in
-    // one dim grey, so the two numbers a reader takes at a glance looked like
-    // chrome.
+    // `SPEC.md` §5.1's third departure, colour half.
     let view = ragged_counts();
     let theme = Theme::default();
     guard_sigil_free_paths(&view);
@@ -854,10 +792,8 @@ fn the_counters_take_the_pictures_green_and_red() {
          unasserted and the ruling is gated in one region of two"
     );
 
-    // Paired with what the fixture says each row's churn is, because the ruling
-    // is value-dependent: a half takes a diff colour where it has something to
-    // say. Row order is the pairing, which
-    // `the_glance_columns_agree_down_the_list` already rests on.
+    // Paired with what the fixture says each row's churn is, because the ruling is
+    // value-dependent: a half takes a diff colour where it has something to say.
     let expected: Vec<(u16, (u32, u32))> = list_rows
         .iter()
         .copied()
@@ -899,10 +835,9 @@ fn the_counters_take_the_pictures_green_and_red() {
         }
     }
 
-    // Non-vacuity by *case* rather than by count: a fixture that lost every
-    // removal, or every addition, would leave the loop above asserting nothing
-    // on that half while the region checks stayed green. Derived from the same
-    // table the loop skips on, so the two cannot disagree.
+    // Non-vacuity by *case* rather than by count: a fixture that lost every removal, or
+    // every addition, would leave the loop above asserting nothing on that half while
+    // the region checks stayed green.
     let greens = expected.iter().filter(|(_, (added, _))| *added > 0).count();
     let reds = expected
         .iter()
@@ -998,11 +933,9 @@ fn a_zero_counter_stays_grey_because_it_restates_no_change() {
 
 #[test]
 fn the_glance_columns_agree_down_the_list() {
-    // `assets/preview.svg` puts every glance element at the same x on every
-    // file row, which is what makes three sparklines read as one small-multiples
-    // chart and three heat strips as a comparison. The shell right-packed
-    // instead, so each element's x was a function of the widths of the elements
-    // outside it, and the counts cell is the widest variable thing there.
+    // `assets/preview.svg` puts every glance element at the same x on every file row,
+    // which is what makes three sparklines read as one small-multiples chart and three
+    // heat strips as a comparison.
     let view = ragged_counts();
 
     // Guard the fixture first. If every row's counts were the same width, right
@@ -1027,10 +960,8 @@ fn the_glance_columns_agree_down_the_list() {
     let theme = Theme::default();
     let backend = screen(80, 10, &view, &chrome());
 
-    // Each element by its own colour, and the counts cell by the `+` it opens
-    // with, which nothing else on a list row draws. Read off the cells rather
-    // than computed, because recomputing where the renderer put them would be
-    // its own arithmetic agreeing with itself.
+    // Each element by its own colour, and the counts cell by the `+` it opens with,
+    // which nothing else on a list row draws.
     let spark = spark_colours(&theme);
     let heats_fg = heat_colours(&theme);
 
@@ -1102,13 +1033,7 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
                     } else if RAMP.contains(&sym) && spark.contains(&fg) {
                         's'
                     } else if sym == SPARK_TRACK && fg == theme.spark_track.fg {
-                        // Its own class rather than folded into `s`. A track and
-                        // a bar occupy the same slot and must therefore compare
-                        // equal *positionally*, which they do because both are
-                        // read; but a row that lost its buckets and a row that
-                        // kept them are different screens, and collapsing the
-                        // two would make the non-vacuity check below unable to
-                        // tell them apart.
+                        // Its own class rather than folded into `s`.
                         't'
                     } else if sym.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                         'n'
@@ -1125,11 +1050,6 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
 fn a_row_missing_a_glance_element_keeps_its_column() {
     // The launch case, and the reason the fixed slots are universal rather than
     // occasional.
-    // `spark_of` yields nothing until a file has been written once, which is
-    // every file on the first frame, and `heat_at` yields nothing for a file
-    // with no line diff. Under right-packing each absence lets that row's
-    // remaining elements slide right into the space, so one quiet file pulled
-    // its neighbours out of line.
     for path in support::listed_files(&ragged_counts()).map(|entry| entry.path.clone()) {
         assert!(
             !path.contains(|c: char| c.is_ascii_digit()),
@@ -1151,36 +1071,14 @@ fn a_row_missing_a_glance_element_keeps_its_column() {
         "the first row moved when a *different* row lost its sparkline"
     );
 
-    // **The load-bearing half, and it has to be read across rows of the *same*
-    // screen.** The comparison above is between two screens, and row 0's own
-    // data is identical in both, so right-packing draws it identically too: it
-    // is a real property but not one that can fail against the defect. What
-    // separates a column from a cluster is that a row which drew *less* still
-    // has its remaining elements where its neighbours have theirs. Under
-    // right-packing the freed columns are reclaimed and everything outside them
-    // slides.
+    // The load-bearing half, and it has to be read across rows of the *same* screen.
     let columns_of = |row: &str, class: char| -> Vec<usize> {
         row.char_indices()
             .filter(|(_, c)| *c == class)
             .map(|(i, _)| i)
             .collect()
     };
-    // The strip and the sparkline only. The digits are *not* comparable across
-    // rows here and that is not a gap: `ragged_counts` gives each row a
-    // different count, and each half is right-aligned inside its fixed field, so
-    // `+2` and `+139` legitimately occupy different columns of the same slot.
-    // What pins the field itself is
-    // `a_counts_cell_never_rounds_a_change_to_nothing`, which holds the removed
-    // half still while the added half grows.
-    // **Only the sparkline's slot is readable here, and that is a property of
-    // the drawing order rather than an omission.** The elements are placed right
-    // to left, so a closed slot pulls what is *left* of it rightwards and leaves
-    // everything right of it alone. The sparkline sits between the heat strip
-    // and the counts, so closing its slot moves the strip and this can see it.
-    // The strip's own slot is the leftmost of the three, and the only things
-    // left of *it* are the pulse and the path, both of which `glance_columns`
-    // maps to `_`. Pairing the heat-losing row with the sparkline would assert
-    // something that cannot fail, and an earlier form of this test did.
+    // The strip and the sparkline only.
     assert_eq!(
         columns_of(&after[1], 'h'),
         columns_of(&after[0], 'h'),
@@ -1198,13 +1096,7 @@ fn a_row_missing_a_glance_element_keeps_its_column() {
         before[1],
         after[1]
     );
-    // **Sorted, or this asserts an ordering rather than a set.** `ragged_counts`
-    // happens to put its empty buckets to the left of its written ones, so a
-    // plain chain of "was track" then "was bar" comes out ascending today; a
-    // fixture with an interleaved gap would make the same correct renderer fail
-    // on the order. The sibling gate
-    // `an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar` sorts for
-    // exactly this reason, against a fixture that *is* interleaved.
+    // Sorted, or this asserts an ordering rather than a set.
     let mut was_slot: Vec<usize> = columns_of(&before[1], 't')
         .into_iter()
         .chain(columns_of(&before[1], 's'))
@@ -1228,13 +1120,8 @@ fn a_row_missing_a_glance_element_keeps_its_column() {
 
 #[test]
 fn scrolling_the_list_does_not_move_the_columns() {
-    // **Reported from use, and the reason the columns are a property of the pane
-    // rather than of the rows.** The first attempt sized the counts field to the
-    // widest count among the rows the region was about to draw. That holds
-    // *within* a window and moves *between* windows: scroll a list until a file
-    // with `+1500 -1500` enters it and the field widens by six columns, sliding
-    // every heat strip and sparkline on every row. Intermittent, and therefore
-    // worse than a layout that was simply wrong.
+    // Reported from use, and the reason the columns are a property of the pane rather
+    // than of the rows.
     let mut view = ragged_counts();
     view.list = vec![
         listed("src/small.rs", 1, 1).into(),
@@ -1286,14 +1173,8 @@ fn scrolling_the_list_does_not_move_the_columns() {
 
 #[test]
 fn a_changed_file_appearing_does_not_move_the_glance_columns() {
-    // **The scrollbar is the other way the contents reached the layout**, and it
-    // survived the fix above because it does not look like contents. A region's
-    // bar is drawn when `scrollable` finds the region cannot show everything it
-    // holds, so a seventh changed file makes one appear, which narrows the region
-    // by two columns, which re-plans every row in it. At some widths that merely
-    // slid every element sideways; at others it crossed a rung boundary and took
-    // the whole counts cell off every row of the list, for no reason a reader
-    // could see and on the exact frame they were looking at.
+    // The scrollbar is the other way the contents reached the layout, and it survived
+    // the fix above because it does not look like contents.
     let entries: Vec<_> = (0..8)
         .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
         .collect();
@@ -1318,11 +1199,8 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
     // Few enough to need no bar, and enough to force one, at a height that shows
     // the list region.
     let (few, many) = (view_of(2), view_of(8));
-    // Non-vacuity, and it has to be counted rather than flagged: a `differed`
-    // bool set beside the assertion below can never be read, because the
-    // assertion panics first. What can go wrong silently is the sweep drawing
-    // *nothing* at every width, so what is counted is the widths that drew a
-    // glance element at all.
+    // Non-vacuity, and it has to be counted rather than flagged: a `differed` bool set
+    // beside the assertion below can never be read, because the assertion panics first.
     let mut drew = 0usize;
     for width in 16..=120u16 {
         let quiet = glance_columns(&screen(width, 12, &few, &chrome()));
@@ -1344,8 +1222,8 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
          blank rows"
     );
 
-    // **The stream, whose bar answers to the diff's height rather than the file
-    // count.** A separate fixture pair, because nothing about the list can make
+    // The stream, whose bar answers to the diff's height rather than the file
+    // count. A separate fixture pair, because nothing about the list can make
     // the stream's bar appear.
     let short = View {
         total_rows: 2,
@@ -1357,11 +1235,8 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
         rows_above: 0,
         ..view_of(2)
     };
-    // Compared with the bar's own column stripped, since that column is what
-    // differs by construction; what must not differ is everything left of it.
-    // **All four of the bar's glyphs**, not the two it had before step buttons:
-    // a heading is a region's first row, so the up button lands on exactly the
-    // rows this sweep compares.
+    // Compared with the bar's own column stripped, since that column is what differs by
+    // construction; what must not differ is everything left of it.
     let strip = |row: String| {
         row.trim_end_matches(BAR_GLYPHS.as_slice())
             .trim_end()
@@ -1384,12 +1259,7 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
 
 #[test]
 fn the_mark_follows_the_newest_write_and_not_the_rows_brightness() {
-    // **The wiring gate the pulse's separation cannot be made without.**
-    // `History` answers *which file was written last* separately from *how
-    // brightly to draw it*, and the
-    // painter has to read the first. Nothing else here can see that: every other
-    // pulse gate sets both fields together, so a painter that went on reading the
-    // brightness would satisfy all of them. Mutation found exactly that.
+    // The wiring gate the pulse's separation cannot be made without.
     let mut settled = ragged_counts();
     listed_mut(&mut settled, 0).recency = Recency::Live;
     listed_mut(&mut settled, 0).newest = true;
@@ -1413,16 +1283,11 @@ fn the_mark_follows_the_newest_write_and_not_the_rows_brightness() {
 
 #[test]
 fn a_pulse_does_not_move_the_columns() {
-    // **The pulse has a reserved slot, and that is the mechanism being
-    // asserted.** It is reserved on every row of the region whether or not any
-    // row is pulsing, so a file starting or stopping to pulse changes what is
-    // *drawn* in that slot and never where any column sits.
+    // The pulse has a reserved slot, and that is the mechanism being asserted.
     let quiet = ragged_counts();
     let mut pulsing = ragged_counts();
-    // **The mark is its own field**, because the ink and the dot answer
-    // different questions. Setting the recency
-    // alone no longer draws one, which is the whole of that change: a row can be
-    // at full brightness and not be the file the newest burst named.
+    // The mark is its own field, because the ink and the dot answer different
+    // questions.
     listed_mut(&mut pulsing, 0).recency = Recency::Pulse;
     listed_mut(&mut pulsing, 0).newest = true;
 
@@ -1449,10 +1314,7 @@ fn a_pulse_does_not_move_the_columns() {
 
 #[test]
 fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
-    // `SPEC.md` §11.1's other half of the header split. The count sits next to
-    // the worktree name because the two are one clause about one
-    // subject; drawing them in two weights would say in colour that they are
-    // separate claims, which is the seam the move exists to remove.
+    // `SPEC.md` §11.1's other half of the header split.
     let view = View {
         files: 3,
         ..one_file()
@@ -1469,38 +1331,19 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
          which weight the clause got"
     );
 
-    // **Both modes and three widths**, because reading one screen is how a
-    // style gate passes while the case a reader actually hits is unasserted.
-    // A lost watch paints the right-hand side in `alert`, which is a third
-    // style on this row, so the clause has to hold its own weight against that
-    // too; and the continuation mark on a cut name inherits whatever style the
-    // run that reached the edge carried, which is only exercised where the
-    // clause does not fit.
+    // Both modes and three widths, because reading one screen is how a style gate
+    // passes while the case a reader actually hits is unasserted.
     let mut saw_the_clause = 0usize;
     let mut saw_a_mark = 0usize;
     for (label, mode) in [("live", Mode::Watching), ("lost", Mode::Lost)] {
-        // Seventeen is the clause's own width, so it is where the left is cut
-        // and the continuation mark inherits a style. Without it the sweep only
-        // ever saw a clause that fitted, and the comment above claimed a case
-        // the widths could not reach.
+        // Seventeen is the clause's own width, so it is where the left is cut and the
+        // continuation mark inherits a style.
         for width in [13u16, 17, 40, 80, 120] {
             let chrome = Chrome { mode, ..chrome() };
             let backend = screen(width, 8, &view, &chrome);
             let header = row_text(&backend, 0);
 
-            // However much of the clause reached the screen. Read off the row
-            // rather than computed from the width, because where the left ends
-            // is what the ladder decided and recomputing it here would be the
-            // renderer's own arithmetic agreeing with itself.
-            // Trailing blanks are trimmed off the match, because the clause and
-            // the background agree on a space: at seventeen columns the row is
-            // `vigia watching`, and the space after the name belongs to the
-            // gap rather than to the clause the ladder drew.
-            // The pane's inset off the head first, and through `content` so
-            // that the
-            // strip is also the assertion: a `trim_start` here would let a row
-            // drawn at column zero match just as well, and `drawn.is_empty()`
-            // below would then quietly skip every screen instead of failing.
+            // However much of the clause reached the screen.
             let header = content(&header, width);
             let matched: String = header
                 .chars()
@@ -1514,10 +1357,7 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             }
             saw_the_clause += 1;
 
-            // All ASCII, so one char is one column. The mark, where the clause
-            // was cut, is included deliberately: it inherits the style of the
-            // run that reached the edge, so it is part of the clause's weight
-            // rather than a separate decision.
+            // All ASCII, so one char is one column.
             let cut = header[drawn.len()..].starts_with(CONTINUES);
             if cut {
                 saw_a_mark += 1;
@@ -1548,10 +1388,8 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
         "no width cut the clause, so the continuation mark's weight is unasserted"
     );
 
-    // And the test can tell the two apart: the blank after the clause is the
-    // background style, which is the one a dimmed count would have taken.
-    // Without this the loop above would pass against a renderer that painted the
-    // entire row in `chrome`.
+    // And the test can tell the two apart: the blank after the clause is the background
+    // style, which is the one a dimmed count would have taken.
     let backend = screen(80, 8, &view, &chrome());
     let gap = &backend.buffer()[(clause.chars().count() as u16 + 1 + inset_at(80), 0)];
     assert_eq!(
@@ -1564,25 +1402,12 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
 
 #[test]
 fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
-    // The inversion of the header split, which the count's move makes
-    // reachable. ` · `
-    // promises two facts about one subject; with the count on the right, a name
-    // that came back empty drew an empty left-hand side and nothing was joined
-    // to anything. With the count beside it, the same name builds
-    // `" · 3 changed"`: a separator modifying nothing, which is the same false
-    // promise the issue was filed about with the halves swapped.
+    // The inversion of the header split, which the count's move makes reachable.
     let view = View {
         files: 3,
         ..one_file()
     };
-    // **Empty is the easy half and not the reachable one.** Four classes,
-    // because the guard was wrong three times and each spelling failed a class
-    // the last one passed. Empty is caught by `is_empty`; the zero-width names
-    // are not, because they are non-empty `String`s that draw nothing; the
-    // whitespace names are caught by neither of those, because they *have* width
-    // and still show a reader nothing; and the control characters are caught by
-    // none of the three, because they measure a column each and `trim` keeps
-    // them while `ratatui` drops them before they reach a cell.
+    // Empty is the easy half and not the reachable one.
     let names = [
         ("empty", ""),
         ("zero-width space", "\u{200B}"),
@@ -1612,12 +1437,7 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
             ..chrome()
         };
 
-        // **Every width, and the separator looked for anywhere on the row.**
-        // Both halves of that were wrong first and both let a mutation through:
-        // asserting only that the row does not *open* with the separator passes
-        // against `3 changed · `, which is the same false promise with the
-        // halves swapped again, and sampling three widths hid that the mutant's
-        // wider clause also dropped the count entirely at 18 to 20 columns.
+        // Every width, and the separator looked for anywhere on the row.
         let mut saw_the_count = 0usize;
         for width in 1..=120u16 {
             let header = row_text(&screen(width, 8, &view, &nameless), 0);
@@ -1644,19 +1464,11 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
 
 #[test]
 fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
-    // A state nobody can see at a glance has not been reported. Drawn in the
-    // header's dim grey, `not watching` is a word a reader has to go
-    // looking for, and a monitor whose failure looks exactly like its working
-    // state has failed twice.
+    // A state nobody can see at a glance has not been reported.
     let view = one_file();
     let theme = Theme::default();
 
-    // Guard the fixture, the way `the_header_carries_no_changed_line_total`
-    // does. The mode word is found by looking for the first `w` on the row, and
-    // the left of that row carries the worktree name **and** the
-    // count. A name or a count containing a `w` would silently point this at the
-    // wrong cell, and it would fail in the passing direction: the left is drawn
-    // in `chrome`, so a live watch would still look quiet.
+    // Guard the fixture, the way `the_header_carries_no_changed_line_total` does.
     let left = format!("{}{FACT_JOIN}1 changed", chrome().worktree);
     assert!(
         !left.contains('w'),
@@ -1712,7 +1524,7 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
 
 #[test]
 fn the_empty_state_says_what_it_did_not_find_and_leaves_the_branch_to_the_header() {
-    // B3's four facts, **three** of which are the header's, so the body spends
+    // B3's four facts, three of which are the header's, so the body spends
     // one row on the one fact that is its own.
     let backend = screen(80, 6, &nothing_changed(), &empty_chrome());
     assert_eq!(
@@ -1837,12 +1649,8 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
 
 #[test]
 fn a_hunk_covering_one_line_is_written_git_s_way() {
-    // Git omits the count when a side covers exactly one line, and a reader
-    // calibrated on `git diff` reads its absence as "one". Reproducing that is
-    // cheaper than teaching them a second dialect, and a one-line file is the
-    // only way to reach it: with three lines of context either side, no larger
-    // file produces a single-line hunk. Found by mutation, which is also why it
-    // has a test of its own rather than a comment.
+    // Git omits the count when a side covers exactly one line, and a reader calibrated
+    // on `git diff` reads its absence as "one".
     let view = View {
         landed: false,
         recorded: 0,
@@ -1893,10 +1701,7 @@ fn a_notice_takes_the_footer_from_the_key_hints() {
 
 #[test]
 fn the_footer_shows_that_follow_is_engaged() {
-    // I5 is otherwise invisible. A view that has not moved because nothing
-    // changed and one that has not moved because following was switched off
-    // look identical, and the reader's next action differs completely between
-    // them.
+    // I5 is otherwise invisible.
     let view = one_file();
     insta::assert_snapshot!(screen(80, 6, &view, &following_chrome()));
 }
@@ -1954,9 +1759,6 @@ const MEMORY_SIZES: [u64; 6] = [
 #[test]
 fn the_readouts_ride_the_second_footer_line_at_forty_columns() {
     // The other half of the picture above, and the one that matters for I6.
-    // `tests/legibility.rs` proves the ladder is legal at every width from 1 to
-    // 120; a snapshot is the only artifact that shows the result is *good*, and
-    // forty columns is where the footer has least to spend.
     let view = one_file();
     insta::assert_snapshot!(screen(40, 6, &view, &diagnostics_chrome()));
 }
@@ -1972,11 +1774,7 @@ fn follow_marker_columns(chromes: impl IntoIterator<Item = Chrome>) -> Vec<u16> 
 
 #[test]
 fn the_frame_cell_never_shifts_what_is_beside_it() {
-    // **The one property that makes a per-frame readout safe to draw.** The value
-    // changes on every frame by construction, so a cell sized to its own text
-    // would be eleven columns one frame and ten the next, and `follow ▶` would
-    // slide sideways under a reader who is trying to read it. Nothing else on
-    // this screen changes width without the diff changing.
+    // The one property that makes a per-frame readout safe to draw.
     let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
         pressed: None,
         gripped: None,
@@ -1993,10 +1791,7 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
 
 #[test]
 fn the_memory_cell_never_shifts_what_is_beside_it() {
-    // [`the_frame_cell_never_shifts_what_is_beside_it`]'s property, one cell
-    // over. This one is the less obvious of the two: RSS looks like a number
-    // that barely moves, and it is, right up to the frame where it crosses from
-    // `999MiB` to `1024MiB` and takes a column with it.
+    // [`the_frame_cell_never_shifts_what_is_beside_it`]'s property, one cell over.
     let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
         pressed: None,
         gripped: None,
@@ -2013,12 +1808,7 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
 
 #[test]
 fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
-    // **A content gate, and it is the kind `reads.rs` structurally cannot be.**
-    // `reads.rs` counts bytes read from the worktree, so a readout that shelled
-    // out to `tasklist` on every frame, or read `/proc` on every frame, would
-    // leave every one of its eleven gates green. The gap between a cost gate and
-    // a content gate is where a rejected design hides, so what is asserted here
-    // is what reaches the screen.
+    // A content gate, and it is the kind `reads.rs` structurally cannot be.
     let view = one_file();
     let footer = |chrome: &Chrome| {
         let backend = screen(80, 6, &view, chrome);
@@ -2049,11 +1839,9 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
 
 #[test]
 fn the_first_paint_draws_no_readouts_at_all() {
-    // The state a reader actually starts in, and it is not reachable by
-    // narrowing: no frame has completed, so there is no p99 of anything, and
-    // `App::chrome` reports `None`. Worth its own gate because the obvious
-    // implementation draws `0.0ms frame` there, which is a measurement of
-    // nothing presented as a measurement.
+    // The state a reader actually starts in, and it is not reachable by narrowing: no
+    // frame has completed, so there is no p99 of anything, and `App::chrome` reports
+    // `None`.
     let view = one_file();
     let first = Chrome {
         pressed: None,
@@ -2076,21 +1864,15 @@ fn the_first_paint_draws_no_readouts_at_all() {
 
 #[test]
 fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
-    // The hardest screen the footer has to lay out, and the **default** one: at
-    // forty columns with follow engaged, the hints and the state cannot share a
-    // line. The footer takes a second rather than shortening anything, with the
-    // state above and the hints keeping the bottom row they hold at eighty.
+    // The hardest screen the footer has to lay out, and the default one: at forty
+    // columns with follow engaged, the hints and the state cannot share a line.
     let view = one_file();
     insta::assert_snapshot!(screen(40, 6, &view, &following_chrome()));
 }
 
 #[test]
 fn tabs_become_columns_and_control_characters_become_visible() {
-    // Not cosmetic. A raw tab occupies one cell and advances nothing, so every
-    // column after it is wrong; an escape character written through to the
-    // terminal can move the cursor or open a sequence, which corrupts the whole
-    // screen rather than one row. Both arrive from ordinary files that nobody
-    // wrote for a display.
+    // Not cosmetic.
     let view = View {
         landed: false,
         recorded: 0,
@@ -2124,12 +1906,8 @@ fn tabs_become_columns_and_control_characters_become_visible() {
 
 #[test]
 fn a_double_width_character_is_never_cut_in_half() {
-    // Diffs carry whatever is in the files, and a CJK ideograph or an emoji
-    // occupies two columns. Writing one into the last column of a row would
-    // either overflow the buffer or print half a glyph, and either way every
-    // column after it on that row is wrong. Swept across widths because the
-    // failure only happens when a character straddles the exact clip boundary,
-    // so a single width tests one alignment out of two.
+    // Diffs carry whatever is in the files, and a CJK ideograph or an emoji occupies
+    // two columns.
     let view = View {
         landed: false,
         recorded: 0,
@@ -2157,12 +1935,8 @@ fn a_double_width_character_is_never_cut_in_half() {
         let backend = screen(width, 5, &view, &chrome());
         let buffer = backend.buffer();
         for y in 0..5 {
-            // A two-column symbol lives in one cell and the cell after it is left
-            // as a blank placeholder. Counting that placeholder as a column is
-            // wrong, and getting it wrong the first time made a correct row
-            // measure two columns over: the row has to be reconstructed the way a
-            // terminal walks it, skipping what the previous symbol already
-            // covered.
+            // A two-column symbol lives in one cell and the cell after it is left as a
+            // blank placeholder.
             let mut occupied = 0usize;
             let mut covered = 0usize;
             for x in 0..width {
@@ -2228,10 +2002,7 @@ fn the_gutter_gives_way_before_the_text_does() {
 
 #[test]
 fn any_area_renders_including_the_ones_that_fit_nothing() {
-    // A pane being dragged narrow steps through every one of these sizes. A
-    // monitor that panics on the way is worse than one that draws something
-    // cramped, and `diff_height` is what the caller uses to ask for rows, so it
-    // must never ask for more rows than the screen has after its chrome.
+    // A pane being dragged narrow steps through every one of these sizes.
     let view = one_file();
     for (width, height) in [(0, 0), (1, 1), (1, 2), (80, 1), (80, 2), (80, 3), (2, 30)] {
         let backend = screen(width, height, &view, &chrome());
@@ -2285,13 +2056,10 @@ fn hostile_content_never_panics_at_any_pane_size() {
         worktree_churn: Default::default(),
     };
 
-    // Every heat and sparkline rung is reached inside this range, which is what
-    // makes the grouping arithmetic exercised at all: the six-slice rung, where
-    // the fault was, is drawn between 37 and 47 columns in a region with no
-    // caret, and 39 to 49 in the pinned list, which has one. Read off
-    // `ROW_LAYOUTS` rather than swept, because a full sparkline bucket draws the
-    // same block as a heat slice and a sweep that counted glyphs would count
-    // both.
+    // Every heat and sparkline rung is reached inside this range, which is what makes
+    // the grouping arithmetic exercised at all: the six-slice rung, where the fault
+    // was, is drawn between 37 and 47 columns in a region with no caret, and 39 to 49
+    // in the pinned list, which has one.
     for width in 0..=60u16 {
         for height in 0..=8u16 {
             let backend = screen(width, height, &view, &chrome());
@@ -2302,10 +2070,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
 
 #[test]
 fn a_rename_never_names_only_the_file_it_came_from() {
-    // `elide_head` cuts the head because a path's tail identifies the file. That
-    // premise is false of `new ← old`: cutting the head of the pair leaves
-    // `…src/main.rs`, which names the file the rename came *from* and never
-    // mentions the one the row is about.
+    // `elide_head` cuts the head because a path's tail identifies the file.
     let renamed = FileEntry {
         origin: Origin::Unstaged,
         path: "crates/vigia/src/shell.rs".to_owned(),
@@ -2361,10 +2126,9 @@ fn a_rename_never_names_only_the_file_it_came_from() {
 
 #[test]
 fn a_counts_cell_never_rounds_a_change_to_nothing() {
-    // The counts abbreviation had no gate, and it shipped a wrong number: a
-    // narrower cell left two characters, a 250-line change has no truthful form
-    // in two, and the search fell through to the thousands unit and drew `+0k`.
-    // At exactly forty columns, which is the width I6 is named for.
+    // The counts abbreviation had no gate, and it shipped a wrong number: a narrower
+    // cell left two characters, a 250-line change has no truthful form in two, and the
+    // search fell through to the thousands unit and drew `+0k`.
     const BOUNDARIES: [(u32, &str); 10] = [
         (0, "+0"),
         (1, "+1"),
@@ -2378,11 +2142,10 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
         (u32::MAX, "+4G"),
     ];
 
-    // **Whole tokens, not prefixes**, because `contains` is the wrong instrument
-    // for a value: `contains("+1")` is satisfied by `+1k`, `+1M` and `+139`, and
-    // `contains("-0")` is satisfied by `-0k`, which is precisely the wrong number
-    // this test is named after. A token counts only when what follows it cannot
-    // be part of the same number.
+    // Whole tokens, not prefixes, because `contains` is the wrong instrument for a
+    // value: `contains("+1")` is satisfied by `+1k`, `+1M` and `+139`, and
+    // `contains("-0")` is satisfied by `-0k`, which is precisely the wrong number this
+    // test is named after.
     let draws = |row: &str, want: &str| {
         row.match_indices(want).any(|(at, _)| {
             row[at + want.len()..]
@@ -2417,18 +2180,12 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
         );
         removed_at.push(column_of(&backend, LIST_TOP, "-"));
         // Where the *added* half starts, which is the half a content-sized cell
-        // actually moves. The removed half is right-anchored at the row's edge
-        // and cannot move however the cell is sized, so recording only that
-        // would state a property the layout gets for free.
+        // actually moves.
         added_at.push(column_of(&backend, LIST_TOP, "+"));
     }
 
-    // **The field is fixed, which is the whole reason `COUNT_CELL` is a constant
-    // rather than a rung.** The added half's text grows from `+0` to `+9999`
-    // across these boundaries. Right-aligned inside a fixed field its start
-    // column moves by exactly the text's length; sized to its contents, the
-    // *removed* half would move too. Both are recorded, because each catches a
-    // different way of getting this wrong and neither catches the other's.
+    // The field is fixed, which is the whole reason `COUNT_CELL` is a constant rather
+    // than a rung.
     assert!(
         removed_at.windows(2).all(|pair| pair[0] == pair[1]),
         "the removed half moved as the added half grew, so the pair is not two \
@@ -2448,10 +2205,8 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
 
 #[test]
 fn the_palette_reaches_the_cells() {
-    // Snapshots cannot see this: `TestBackend`'s `Display` writes symbols and
-    // drops styles, so every colour in the theme is invisible to the rest of this
-    // file. Without this test the palette could be one colour throughout and the
-    // whole suite would stay green.
+    // Snapshots cannot see this: `TestBackend`'s `Display` writes symbols and drops
+    // styles, so every colour in the theme is invisible to the rest of this file.
     let view = one_file();
     let backend = screen(80, 14, &view, &chrome());
     let buffer = backend.buffer();
@@ -2500,10 +2255,7 @@ const CONTENT_ROW: u16 = 3;
 
 #[test]
 fn a_syntax_class_reaches_the_cells_while_the_sigil_keeps_the_diff() {
-    // `SPEC.md` §11.1's ruling, as cells, and it is two claims at once. The
-    // mockup colours added, removed and context lines identically and leaves the
-    // diff signal to the sigil, so the text must take its class colour *and* the
-    // `+` must keep the green the text no longer has.
+    // `SPEC.md` §11.1's ruling, as cells, and it is two claims at once.
     let theme = Theme::default();
     // l0 e1 t2 ' '3 v4 a5 l6 u7 e8 ' '9 =10 ' '11 1(12) ;13
     let text = "let value = 1;";
@@ -2533,10 +2285,7 @@ fn a_syntax_class_reaches_the_cells_while_the_sigil_keeps_the_diff() {
     let backend = screen(80, 6, &view, &chrome());
     let sigil = column_of(&backend, CONTENT_ROW, "+");
     let buffer = backend.buffer();
-    // **Two past the sigil, not one.** A clear column stands between a sigil and
-    // its line, which `assets/preview.svg` draws.
-    // `a_content_row_stands_its_sigil_off_the_line` is the gate for the gap
-    // itself; what this one needs is the origin the classes are measured from.
+    // Two past the sigil, not one.
     let at = |offset: u16| buffer[(sigil + 2 + offset, CONTENT_ROW)].style().fg;
 
     assert_eq!(
@@ -2642,11 +2391,7 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
 
 #[test]
 fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
-    // The subtle half of drawing a line as runs. Tab stops are measured from the
-    // start of the line's own content, so the column counter has to be carried
-    // **across** span boundaries. Reset per span, a tab in the second run would
-    // advance to a stop measured from that run's start, which is invisible until
-    // a file indents with tabs and then wrong on every row of it.
+    // The subtle half of drawing a line as runs.
     let view = highlighted(
         LineKind::Context,
         "a\tb",
@@ -2761,7 +2506,7 @@ fn track_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
         .collect()
 }
 
-/// Which columns of row `y` carry a sparkline **bucket**.
+/// Which columns of row `y` carry a sparkline bucket.
 fn bars_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
     let buffer = backend.buffer();
     // Hoisted rather than rebuilt per cell, which is what it was on the first
@@ -2790,24 +2535,12 @@ fn launched() -> View {
 
 #[test]
 fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
-    // **The state a reader sees first, and it had no fixture.** The pane is
-    // opened *because* work is in progress, so the ordinary first frame is one
-    // where no file has been written since the watch opened. Without the track
-    // the sparkline column is blank on every row of it, and the element
-    // `SPEC.md`
-    // §5 names as one of four differentiators was absent exactly when it
-    // mattered most.
+    // The state a reader sees first, and it had no fixture.
     let theme = Theme::default();
     let spark = spark_colours(&theme);
     let backend = screen(80, 6, &launched(), &chrome());
 
-    // **Row one, not [`LIST_TOP`], and the difference is the point.** A five-row
-    // pane cannot afford a list at all — `Body::split` returns `diff_only` — so
-    // these are the *stream's* headings under the header, and neither the body's
-    // lead blank nor the list it separates exists here. The rows this gate is
-    // about are file
-    // headings either way, which is why it reads the same three cells it always
-    // did while every listed fixture in this file moved down one.
+    // Row one, not [`LIST_TOP`], and the difference is the point.
     let mut starts = Vec::new();
     for y in 1..=3u16 {
         let track = track_at(&backend, y, &theme);
@@ -2819,15 +2552,12 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
              column blank: {track:?}",
             track.len()
         );
-        // Contiguous, or the cells counted above are not one strip. A path
-        // carrying an underscore cannot reach this, because `track_at` matches
-        // the style too, but a renderer that wrote the track into the wrong
-        // columns could.
+        // Contiguous, or the cells counted above are not one strip.
         assert!(
             track.windows(2).all(|pair| pair[1] == pair[0] + 1),
             "row {y}'s track is not one run of cells: {track:?}"
         );
-        // **Nothing invented.** The track says "no churn in the window", and a
+        // Nothing invented. The track says "no churn in the window", and a
         // single bar would be a number the store never recorded.
         assert!(
             blocks_of(&backend, y, &spark).is_empty(),
@@ -2849,14 +2579,7 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
 
 #[test]
 fn the_first_tick_after_launch_moves_no_column() {
-    // **The transition, which is what the reserved slot and the track are both
-    // for.**
-    // A reader opens the pane on a dirty worktree (every row track), the agent
-    // writes one file, and that row grows a bucket. `SPEC.md` §11.1 reserves the
-    // slot from the pane precisely so this frame does not reflow, and the track
-    // is what makes the before-picture a drawn column rather than a blank one,
-    // so
-    // the two frames are comparable at all.
+    // The transition, which is what the reserved slot and the track are both for.
     let theme = Theme::default();
     let launch = screen(80, 6, &launched(), &chrome());
 
@@ -2891,7 +2614,7 @@ fn the_first_tick_after_launch_moves_no_column() {
         );
     }
 
-    // **Nothing moved.** The whole slot occupies the same columns before and
+    // Nothing moved. The whole slot occupies the same columns before and
     // after, which is what the reserved-from-the-pane ruling promises and what a
     // reader is most likely to be looking at when it is broken.
     let slot = |backend: &TestBackend, y: u16| {
@@ -2914,13 +2637,7 @@ fn the_first_tick_after_launch_moves_no_column() {
 
 #[test]
 fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
-    // **A guard that no test could fail is a wish, and this one was.** The
-    // renderer scales a bucket against `View::peak`, and a peak of zero beside a
-    // bucket that holds something is a view the store cannot produce: the peak
-    // is the maximum over every tracked path, so a non-zero bucket lifts it.
-    // Constructing one by hand is legal, though, and `SPEC.md` §11.1 rules that
-    // a monitor which dies on a file is the failure to avoid, so the division
-    // has to survive an inconsistent caller rather than assume a consistent one.
+    // A guard that no test could fail is a wish, and this one was.
     let mut view = launched();
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [3; HISTORY_BUCKETS];
@@ -2943,13 +2660,7 @@ fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
 
 #[test]
 fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
-    // The **other** inconsistent caller, and the one the clamp's upper bound is
-    // for. `peak == 0` above is the store's own empty state; this is a peak that
-    // exists and is too small, where `count * 8 / peak` runs off the end of
-    // `SPARK_RAMP` and indexing it aborts the pane. `SPEC.md` §11.1 rules that a
-    // monitor which dies on a file is the failure to avoid, and `heat_at`'s
-    // saturating fold two functions away is the same ruling applied to the same
-    // shape of arithmetic.
+    // The other inconsistent caller, and the one the clamp's upper bound is for.
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [u32::MAX; HISTORY_BUCKETS];
@@ -2967,10 +2678,8 @@ fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
 
 #[test]
 fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
-    // One rule rather than a special case for the cold file: the launch screen
-    // above is just the all-empty end of *this*. Row 2 of the mockup's own
-    // fixture holds `[0, 0, 0, 2, 1, 0, 0, 0]`, so it draws both kinds and the
-    // order has to survive.
+    // One rule rather than a special case for the cold file: the launch screen above is
+    // just the all-empty end of *this*.
     let theme = Theme::default();
     let backend = screen(80, 6, &glancing(), &chrome());
 
@@ -2996,12 +2705,7 @@ fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
 
 #[test]
 fn the_track_is_never_the_shape_of_a_written_bucket() {
-    // **The gate on the height channel, and the reason the track is not `▁`.**
-    // The heat strip beside it may reuse `█` between a live slice and its track
-    // because colour is its only channel; a sparkline's channel is height, so a
-    // track drawn at the ramp's floor would make "one write" and "no writes" the
-    // same shape and leave colour alone carrying a distinction `SPEC.md` §11.1
-    // spends the lowest block to protect.
+    // The gate on the height channel, and the reason the track is not `▁`.
     let theme = Theme::default();
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[0] {
@@ -3048,7 +2752,7 @@ fn a_scale_answers_by_grouping_and_falls_back_to_the_finest() {
     assert_eq!(scale.at(2), 20, "the settled rung took the wrong figure");
     assert_eq!(scale.at(4), 40, "the narrowest rung took the wrong figure");
 
-    // **Three divides twenty-four and is still not on the ladder**, which is the
+    // Three divides twenty-four and is still not on the ladder, which is the
     // case that makes the fallback worth having: a rung of eight would reach it,
     // pass a divisibility check, and quietly measure a row against a denominator
     // set for another width.
@@ -3066,14 +2770,8 @@ fn a_scale_answers_by_grouping_and_falls_back_to_the_finest() {
 
 #[test]
 fn a_narrowed_sparkline_covers_the_whole_window_rather_than_its_tail() {
-    // **The one property of the narrow rung nothing could see**, and it is the
-    // opposite of what a dropping rung gives. At the widths where the sparkline
-    // halves, drawing the *tail* of the window
-    // shows a narrow pane the newest half and says nothing about the rest;
-    // `spark_of` re-projects, summing adjacent source
-    // buckets so a narrower rung is a lower resolution of the whole window. That
-    // change is invisible to every gate that counts a rung, because it is the
-    // same number of cells in the same columns.
+    // The one property of the narrow rung nothing could see, and it is the opposite of
+    // what a dropping rung gives.
     let theme = Theme::default();
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[1] {
@@ -3133,11 +2831,7 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     let theme = Theme::default();
     let backend = screen(80, 6, &glancing(), &chrome());
 
-    // **Row one, and the reason is the fixture rather than the height.**
-    // `glancing()` carries an empty `list`, so `clamped_to` collapses the body to
-    // `diff_only` at *any* pane size: no list, no rule, and no lead blank, so the
-    // stream starts directly under the header. See [`LIST_TOP`], whose docblock
-    // names this as the third category.
+    // Row one, and the reason is the fixture rather than the height.
     let pulsing = row_text(&backend, 1);
     assert!(
         pulsing.contains('●'),
@@ -3152,10 +2846,8 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
         );
     }
 
-    // The path's own cell, past the pane's inset and then past the kind letter
-    // and its space. Compared on foreground and modifiers rather than on the
-    // whole `Style`, because a cell carries the buffer's own defaults for
-    // everything the theme left alone.
+    // The path's own cell, past the pane's inset and then past the kind letter and its
+    // space.
     let path_x = inset_at(80) + 2;
     let drawn = |y: u16| {
         let style = backend.buffer()[(path_x, y)].style();
@@ -3184,10 +2876,7 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
 
 #[test]
 fn a_sparkline_scales_against_the_busiest_file_not_itself() {
-    // The whole reason `View::peak` exists. Scaled per file, both rows below
-    // would top out at the full block and the eye would read two files of very
-    // different activity as equally busy. Scaled against the screen, only the
-    // busiest one reaches the top.
+    // The whole reason `View::peak` exists.
     let spark = spark_colours(&Theme::default());
     let backend = screen(80, 6, &glancing(), &chrome());
     let busiest = blocks_of(&backend, 1, &spark);
@@ -3209,12 +2898,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
         "the quieter file drew no bucket at all, so a bucket with something in \
          it is rounding down to nothing: {quieter:?}"
     );
-    // A file nothing has written since startup draws no *bar*. It draws the
-    // track instead, which is the track's own ruling and which
-    // `a_worktree_already_dirty_at_launch_draws_a_track_on_every_row` is the
-    // gate for. Stated as two halves rather than one, because the first alone
-    // was the whole assertion until then and it stays green against a renderer
-    // that draws nothing at all: `blocks_of` cannot see a track.
+    // A file nothing has written since startup draws no *bar*.
     assert!(
         blocks_of(&backend, 3, &spark).is_empty(),
         "a file with no churn drew a sparkline bar, which is churn the store \
@@ -3241,10 +2925,9 @@ fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
 
 #[test]
 fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
-    // Invisible to every snapshot in this file, and more so than the palette
-    // test above: a heat strip draws the *same glyph* for all four kinds, so a
-    // picture of one is twelve identical blocks. The colour is the entire
-    // signal, which makes this the only place the strip is really tested.
+    // Invisible to every snapshot in this file, and more so than the palette test
+    // above: a heat strip draws the *same glyph* for all four kinds, so a picture of
+    // one is twelve identical blocks.
     let theme = Theme::default();
     let backend = screen(WHOLE_STRIP_PANE, 5, &glancing(), &chrome());
     let buffer = backend.buffer();
@@ -3320,13 +3003,8 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 }
 
 // Heat-strip snapshots at 80 and 40 columns exist, and they are
-// `the_glance_elements_at_*` above: the shared fixture carries heat, so those
-// two pictures *are* the heat-strip pictures. A third one
-// was written and came out byte-identical to the 80-column glance snapshot,
-// which is a second copy of one assertion rather than a second assertion, so it
-// was deleted rather than stored. What a symbol snapshot cannot see at all is
-// the colour, and that is
-// `the_four_heat_kinds_reach_the_cells_and_are_distinct` above.
+// `the_glance_elements_at_*` above: the shared fixture carries heat, so those two
+// pictures *are* the heat-strip pictures.
 
 /// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
 fn two_regions_at(current: usize, row: usize) -> View {
@@ -3374,22 +3052,16 @@ fn two_regions(current: usize) -> View {
 #[test]
 fn the_caret_marks_the_file_the_diff_is_inside() {
     // The one thing on screen that says which of the listed files the diff below
-    // belongs to. Asserted by row rather than by presence: a caret drawn on every
-    // row, or on a fixed row, would satisfy "there is a caret somewhere" and say
-    // nothing.
+    // belongs to.
     for current in 0..3usize {
         let view = two_regions(current);
         let backend = screen(64, 18, &view, &chrome());
         let buffer = backend.buffer();
 
         for row in 0..3u16 {
-            // The list starts at [`LIST_TOP`], under the header and the body's
-            // lead blank, and the caret sits on the pane's **own leading
-            // column** rather than at its first content column. The
-            // marker stands outside the text it points into instead of pushing
-            // it right, which is what `assets/preview.svg` draws (window edge
-            // `x=8`, caret `x=8`, every content origin `x=32`) and what puts
-            // this region's sigil in the same column as a heading's.
+            // The list starts at [`LIST_TOP`], under the header and the body's lead
+            // blank, and the caret sits on the pane's own leading column rather than at
+            // its first content column.
             let marked = buffer[(0, row + LIST_TOP)].symbol() == CARET;
             assert_eq!(
                 marked,
@@ -3438,17 +3110,13 @@ fn the_rule_separates_the_regions_and_spans_the_pane() {
 
 #[test]
 fn the_caret_degrades_once_and_never_flickers() {
-    // I6's ladder applied to the newest glance element. The caret costs the list
-    // a column, so it is dropped on a pane too narrow to spare one, and the only
-    // thing that makes such a drop legible is that it happens **once**: a marker
-    // that came back at a narrower width would read as the current file changing
-    // while a reader dragged a pane edge.
+    // I6's ladder applied to the newest glance element.
     let drawn: Vec<bool> = (1..=60u16)
         .map(|width| {
             let view = two_regions(1);
             let backend = screen(width, 18, &view, &chrome());
             let buffer = backend.buffer();
-            // The list's **second** row, which is where `two_regions(1)` puts
+            // The list's second row, which is where `two_regions(1)` puts
             // the current file, offset past the header and the lead blank.
             (0..width)
                 .map(|x| buffer[(x, LIST_TOP + 1)].symbol())
@@ -3526,11 +3194,7 @@ fn the_list_scrollbar_spans_the_visible_window() {
         seen.push(marks[0]);
     }
 
-    // Monotone, and moving overall. Not strictly increasing at every step, and
-    // that is resolution rather than a defect: three rows of bar over ten files
-    // cannot separate every window, so windows 0 and 3 legitimately round to the
-    // same row. What must hold is that it never goes backwards and that it does
-    // move, which a bar ignoring its input would fail.
+    // Monotone, and moving overall.
     assert!(
         seen.windows(2).all(|pair| pair[0] <= pair[1]),
         "the thumb went back up as the window moved down: {seen:?}"
@@ -3543,18 +3207,11 @@ fn the_list_scrollbar_spans_the_visible_window() {
 
 #[test]
 fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
-    // **What the bar means since I4 was narrowed**: the thumb is the screen's
-    // rows over the diff's rows, and it sits at the rows above the screen. That
-    // is what every other scrollbar means, and it is only sayable because
-    // counting a diff's height turned out to cost 8.76ms where building it cost
-    // 442.71ms.
+    // What the bar means since I4 was narrowed: the thumb is the screen's rows over the
+    // diff's rows, and it sits at the rows above the screen.
     let width = 64u16;
     let height = 24u16;
-    // **Asked of the layout rather than counted.** This was `5..height - 1`,
-    // which is a header, three list rows and the rule added up by hand, with no
-    // room for a masthead above them. A gate about the *thumb* must not carry
-    // its own
-    // copy of the body split.
+    // Asked of the layout rather than counted.
     let laid = regions(
         Rect::new(0, 0, width, height),
         &chrome(),
@@ -3585,8 +3242,8 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
         "the thumb did not shrink as the diff grew: {lengths:?}"
     );
 
-    // And it travels the whole track, ending exactly at the bottom. **The track,
-    // which this region is tall enough to have step buttons on**, so the two ends
+    // And it travels the whole track, ending exactly at the bottom. The track,
+    // which this region is tall enough to have step buttons on, so the two ends
     // are one row inside the region rather than the region's own.
     let track = stepped_track(region.clone());
     let total = rows * 6;
@@ -3681,12 +3338,7 @@ fn the_scrollbars_degrade_once_and_never_flicker() {
         &drawn[first..]
     );
 
-    // **And the width it first appears at, which monotonicity alone cannot say.**
-    // The three claims above are all true of a bar whose floor is off by any
-    // amount: both halves of the sweep stay populated and the curve stays
-    // monotone while the boundary walks. That is the recorded shape *a
-    // monotonicity claim can be true of the broken version*: widening the floor
-    // by one column leaves such a gate green.
+    // And the width it first appears at, which monotonicity alone cannot say.
     const BAR_WIDTH: usize = 1 + 1;
     const ROW_FLOOR: usize = 2 + 12;
     const BAR_FLOOR: usize = BAR_WIDTH + ROW_FLOOR;
@@ -3701,11 +3353,7 @@ fn the_scrollbars_degrade_once_and_never_flicker() {
 
 #[test]
 fn a_one_row_region_with_somewhere_to_scroll_still_spends_no_column() {
-    // **The claim `bar_for` makes in prose, which nothing held.** `scrollable`
-    // guarantees `span < of`, so `(span * rows) / of < rows` and the thumb equals
-    // the track exactly when a region is one row: the column would say "there is
-    // nothing to scroll" while there is, which is the reading a full bar is
-    // already refused for one rung down.
+    // The claim `bar_for` makes in prose, which nothing held.
     let width = 64u16;
     let view = a_stepped_screen();
     let mut seen_list = false;
@@ -3743,11 +3391,9 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
         landed: false,
         recorded: 0,
-        // **A screenful is `shown`**, which is what this fixture's name says and
-        // what the bar is measured in: `View::list_span` is the complement of the
-        // window's ceiling, and for an ungrouped list of `shown` rows that is
-        // exactly `shown`. Written out because a hand-built view has no frame to
-        // derive it from.
+        // A screenful is `shown`, which is what this fixture's name says and what the
+        // bar is measured in: `View::list_span` is the complement of the window's
+        // ceiling, and for an ungrouped list of `shown` rows that is exactly `shown`.
         list_span: shown,
         grouped: false,
         list: (0..shown)
@@ -3774,8 +3420,8 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
 
 #[test]
 fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
-    // **The invariant `Painter::scrollbar`'s own doc claims and neither region's
-    // gate stated**: the thumb's travel maps onto the track's travel, so the last
+    // The invariant `Painter::scrollbar`'s own doc claims and neither region's
+    // gate stated: the thumb's travel maps onto the track's travel, so the last
     // position fills the bottom row exactly as the first fills the top.
     let width = 64u16;
     let shown = 6usize;
@@ -3788,10 +3434,8 @@ fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
         );
         laid.list.top..laid.list.top + laid.list.rows
     };
-    // **Six rows is above the step floor, so both ends of this bar are buttons
-    // and the thumb's ends are one row inside them.** The claim is unchanged: the
-    // last window fills the last row the thumb can reach, and the first fills the
-    // first. What moved is which rows those are.
+    // Six rows is above the step floor, so both ends of this bar are buttons and the
+    // thumb's ends are one row inside them.
     let track = stepped_track(region.clone());
 
     for files in (shown + 1)..=30 {
@@ -3863,11 +3507,7 @@ fn a_stepped_screen() -> View {
 
 #[test]
 fn the_scrollbar_draws_a_step_button_at_each_end() {
-    // The step buttons' own ask, on both regions, through the one drawer they
-    // share. The
-    // geometry comes from `regions` rather than from arithmetic here, because
-    // where a region starts is what that function is for and a gate that
-    // recomputed it would be checking its own copy.
+    // The step buttons' own ask, on both regions, through the one drawer they share.
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -3896,10 +3536,7 @@ fn the_scrollbar_draws_a_step_button_at_each_end() {
 
 #[test]
 fn a_held_step_button_lights_and_only_that_one() {
-    // **The feedback, and it is the half a reader notices most.** Pressing *up* at
-    // the top of a diff moves no row, so without a lit cell the control is
-    // indistinguishable from a decoration and a reader cannot tell a click that
-    // registered from one that missed.
+    // The feedback, and it is the half a reader notices most.
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -4022,11 +3659,7 @@ fn a_dragged_bar_lights_its_thumb_and_the_other_bar_stays_put() {
 
 #[test]
 fn a_scroll_lights_one_arrow_on_one_bar() {
-    // **Reported from use: a keypress lit the matching arrow on *both* bars.**
-    // The two regions move different things and answer different keys, so a mark
-    // that carried only a direction had no way to say which. `gripped` one field
-    // over had carried its region from the start, which is why a drag was right
-    // throughout and this was not: the correct shape was one field away.
+    // Reported from use: a keypress lit the matching arrow on *both* bars.
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -4116,11 +3749,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
 
 #[test]
 fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
-    // **`SPEC.md` §11.2 B10's mark, and the ordering is the load-bearing half.**
-    // Three rungs on one cell: `bar_track` at rest, `bar` under a pointer,
-    // `bar_active` while a gesture is on it. Read as *styles* rather than as
-    // glyphs, because the ruling is about weight and a glyph gate would pass
-    // against any colour at all.
+    // `SPEC.md` §11.2 B10's mark, and the ordering is the load-bearing half.
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -4185,12 +3814,7 @@ fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
 
 #[test]
 fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
-    // **The anti-collision property, and the whole reason this design works.**
-    // The reader chose "brighten the row's text", and SPEC.md 5.3 rules that
-    // intensity carries recency *and nothing else*, so the obvious form of that
-    // would say **recent** about a file nothing had touched. `Theme::path_hover`
-    // is a weight the ladder cannot reach, and what makes it unreachable is the
-    // **underline**.
+    // The anti-collision property, and the whole reason this design works.
     let theme = Theme::default();
     for (name, recency) in [
         ("pulse", Recency::Pulse),
@@ -4205,12 +3829,8 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
         );
     }
 
-    // And the distinguishing channel is the modifier rather than the colour,
-    // which on the default palette is the only one left. The hover's half of
-    // that is `the_pointer_never_takes_the_weight_the_caret_row_does`, which
-    // makes it on all three built-ins rather than on this one; what is asserted
-    // here is the half that gate does not reach, which is that nothing on the
-    // ladder underlines back.
+    // And the distinguishing channel is the modifier rather than the colour, which on
+    // the default palette is the only one left.
     for recency in [Recency::Pulse, Recency::Live, Recency::Cold] {
         assert!(
             !theme
@@ -4221,23 +3841,17 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
         );
     }
 
-    // **Drawn, and on the list's row rather than the diff's heading.** A diff
+    // Drawn, and on the list's row rather than the diff's heading. A diff
     // heading goes through the same `file_row` drawer, so a mark keyed on the
     // row alone would light one if the regions were ever confused.
     let width = 80u16;
     let height = 24u16;
     let view = a_stepped_screen();
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-    // **The second list row, not the first, and the caret is the reason.** The
-    // fixture's caret sits on the first, and the caret's row now adds `BOLD` to
-    // whatever it is drawn in, so hovering it produces the *pair* of marks. That
-    // composition is a claim of its own and
-    // `a_hovered_row_that_is_also_the_current_one_reads_as_both` is where it is
-    // made; this gate is about the pointer alone and wants a row the caret is
-    // not on.
+    // The second list row, not the first, and the caret is the reason.
     let row = laid.list.top + 1;
 
-    // **Two screens, drawn once each**, rather than one per row inside the loop
+    // Two screens, drawn once each, rather than one per row inside the loop
     // below, which is the same picture five times over.
     let want = weight(theme.path_hover);
     let untouched = screen(width, height, &view, &chrome());
@@ -4289,11 +3903,7 @@ fn built_ins() -> [(&'static str, Theme); 3] {
 
 #[test]
 fn the_pointer_reads_the_same_colour_wherever_it_rests() {
-    // **One reading means *the pointer is here*, on a path and on a bar alike.**
-    // A step button and a thumb take `Theme::bar_hover`; a listed path taking a
-    // colour of its own, chosen to sit above the whole recency ladder, makes the
-    // same gesture read as two different things depending on which column it
-    // lands in.
+    // One reading means *the pointer is here*, on a path and on a bar alike.
     for (name, theme) in built_ins() {
         assert_eq!(
             theme.path_hover.fg, theme.bar_hover.fg,
@@ -4305,11 +3915,7 @@ fn the_pointer_reads_the_same_colour_wherever_it_rests() {
 
 #[test]
 fn the_pointer_never_takes_the_weight_the_caret_row_does() {
-    // **The two channels, kept apart by construction.** Colour and
-    // underline are the pointer; `BOLD` is the file the diff is inside. A hover
-    // that also bolded would be indistinguishable from the current row on any
-    // palette where the two colours are close, and on `ansi` it *was* the
-    // brightest reading on the pane.
+    // The two channels, kept apart by construction.
     for (name, theme) in built_ins() {
         assert!(
             theme.path_hover.add_modifier.contains(Modifier::UNDERLINED),
@@ -4326,10 +3932,7 @@ fn the_pointer_never_takes_the_weight_the_caret_row_does() {
 
 #[test]
 fn the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret() {
-    // **A second channel on one statement rather than a second statement.** `▸`
-    // says which file the diff is in;
-    // every other durable distinction in that region is carried by weight, and
-    // the one row a reader most needs to find carried none.
+    // A second channel on one statement rather than a second statement.
     let width = 80u16;
     let height = 24u16;
     // Every entry is `Recency::Cold` and the caret sits on the first row, so the
@@ -4370,11 +3973,7 @@ fn the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret() {
 
 #[test]
 fn the_weight_arrives_and_leaves_with_the_caret() {
-    // **The tie is to `affords_caret`, not to the current file.** Below it
-    // the caret is dropped so that `MIN_PATH_WIDTH` survives, and a bold row
-    // with nothing pointing at it would be an unattributable weight: on a
-    // narrow pane the pulse's `●` has already been dropped too, so *bold* would
-    // have two readings and no glyph to tell them apart.
+    // The tie is to `affords_caret`, not to the current file.
     let width = 16u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -4404,12 +4003,8 @@ fn the_weight_arrives_and_leaves_with_the_caret() {
 
 #[test]
 fn a_diff_heading_never_takes_the_current_weight() {
-    // **The same confinement `a_hovered_row_reads_as_the_pointer_and_never_as_recency`
-    // asserts one mark over.** Both regions draw through one `Painter::file_row`,
-    // and `Heading` deliberately carries no field saying which region asked,
-    // because which file the diff is inside is a fact about the **screen**. This
-    // is what fails if that ever changes: the obvious way to plumb the mark is to
-    // hang it off the entry, and an entry is shared by both regions.
+    // The same confinement `a_hovered_row_reads_as_the_pointer_and_never_as_recency`
+    // asserts one mark over.
     let width = 80u16;
     let height = 24u16;
     let path = "src/engine/watch.rs";
@@ -4441,10 +4036,7 @@ fn a_diff_heading_never_takes_the_current_weight() {
 
 #[test]
 fn a_hovered_row_that_is_also_the_current_one_reads_as_both() {
-    // **Orthogonal on purpose.** The pointer chooses the colour and the
-    // underline; the caret adds the weight. A design that let either win would
-    // lose a fact the reader has on screen: which file the diff is in, or where
-    // the pointer is.
+    // Orthogonal on purpose.
     let width = 80u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -4477,10 +4069,7 @@ fn a_hovered_row_that_is_also_the_current_one_reads_as_both() {
 
 #[test]
 fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
-    // **The rule this column is drawn to, asserted as a rule rather than per
-    // element.** A gesture has to outrank a pointer merely resting somewhere, or
-    // the mark that says *you are doing this* stops being distinguishable from
-    // the one that says *you could*.
+    // The rule this column is drawn to, asserted as a rule rather than per element.
     const THUMB: &str = "█";
 
     let width = 64u16;
@@ -4490,13 +4079,8 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     let x = width - 1;
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
 
-    // Three distinct weights, asserted rather than assumed: on a palette where
-    // two coincided, every ordering below would hold while saying nothing.
-    // **Whole styles rather than foregrounds, because on `ansi` the rung is a
-    // modifier.** Sixteen colours have nothing between `Gray` and `White`, so
-    // there the middle weight is `Gray` made bold, which reads brighter and is a
-    // different `Style` while being the same `fg`. A gate comparing foregrounds
-    // would have declared the ladder broken on the default palette.
+    // Three distinct weights, asserted rather than assumed: on a palette where two
+    // coincided, every ordering below would hold while saying nothing.
     assert_ne!(
         weight(theme.bar_track),
         weight(theme.bar_hover),
@@ -4513,10 +4097,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
         "thumb rest vs hover"
     );
 
-    // **The button, where a press has to win.** The pressed mark exists for the
-    // case where nothing else can answer, since pressing *up* at the top of
-    // a diff moves no row, and a hover outranking it would take that answer away
-    // in the one case it exists for.
+    // The button, where a press has to win.
     let button = laid.diff.top;
     let fg = |chrome: &Chrome| {
         weight(screen(width, height, &view, chrome).buffer()[(x, button)].style())
@@ -4541,7 +4122,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
          has when pressing it moves no row"
     );
 
-    // **The thumb, where a drag has to win**, which a two-rung ladder cannot
+    // The thumb, where a drag has to win, which a two-rung ladder cannot
     // express and is the reason `bar_hover` exists.
     let thumb_fg = |chrome: &Chrome, region: Region| {
         let backend = screen(width, height, &view, chrome);
@@ -4584,7 +4165,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
          the same as a pointer resting on it"
     );
 
-    // **And hovering one bar leaves the other's thumb alone**, which is the
+    // And hovering one bar leaves the other's thumb alone, which is the
     // both-bars defect one gesture over.
     assert!(
         thumb_fg(&hovering, laid.list)
@@ -4596,13 +4177,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
 
 #[test]
 fn hovering_one_bars_button_leaves_the_other_bars_alone() {
-    // **The both-bars defect, one gesture over.** A mark carrying only a
-    // direction lights the matching arrow on *both* bars at once, because the
-    // two
-    // regions share a column and it had no way to say which. `Hovered::Button`
-    // carries the cell for that reason, so it names a bar by naming a row, and
-    // this is the gate that fails if it is ever reduced to "the pointer is on
-    // the bar".
+    // The both-bars defect, one gesture over.
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -4654,11 +4229,7 @@ fn hovering_one_bars_button_leaves_the_other_bars_alone() {
 
 #[test]
 fn the_painted_track_is_the_track_the_pointer_is_told_about() {
-    // **The agreement the whole shape rests on.** `regions` tells the pointer
-    // where a track is and `render` draws one, and the two are separate code
-    // paths reading separate inputs: a press resolved against rows the thumb does
-    // not occupy is a bar that seeks to the wrong place, and nothing about the
-    // screen would look wrong.
+    // The agreement the whole shape rests on.
     let width = 64u16;
     let height = 24u16;
 
@@ -4705,11 +4276,7 @@ fn the_painted_track_is_the_track_the_pointer_is_told_about() {
 
 #[test]
 fn the_step_buttons_arrive_at_the_step_floor_and_never_leave() {
-    // **The boundary, not the direction.** "A taller region never loses its
-    // buttons" is true of a floor set anywhere, including a wrong one, so a
-    // monotonicity claim on its own would pass against the version this gate
-    // exists to catch. What is asserted is the equality: stepped exactly when the
-    // region clears the floor.
+    // The boundary, not the direction.
     let width = 64u16;
     let view = a_stepped_screen();
     let chrome = chrome();
@@ -4763,12 +4330,9 @@ fn the_step_buttons_arrive_at_the_step_floor_and_never_leave() {
 
 #[test]
 fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
-    // The other half of the ladder, stated as its own gate because it is the half
-    // a reader on a short pane actually sees: below the floor the column is track
-    // and thumb, byte for byte what it was before there were buttons. Two buttons
-    // in three rows would leave one cell of track that is full at every window,
-    // which is the "column saying there is nothing to scroll" the bar already
-    // refuses one rung down.
+    // The other half of the ladder, stated as its own gate because it is the half a
+    // reader on a short pane actually sees: below the floor the column is track and
+    // thumb, byte for byte what it was before there were buttons.
     const TRACK: &str = "│";
     const THUMB: &str = "█";
     let width = 64u16;
@@ -4805,10 +4369,7 @@ fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
 
 #[test]
 fn both_regions_reach_the_step_buttons_through_one_drawer() {
-    // Asserted rather than assumed. The two regions have
-    // different heights, different minimums and different units, and what makes
-    // one drawer serve both is that the button ladder is decided from the region
-    // rather than from the pane. So: at the same height, the same ends.
+    // Asserted rather than assumed.
     let width = 64u16;
     let view = a_stepped_screen();
     let chrome = chrome();
@@ -4856,17 +4417,9 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
         let region = laid.diff.top..laid.diff.top + laid.diff.rows;
         let rows = usize::from(region.end - region.start);
-        // **The track, not the region.** This bar is tall enough for step
-        // buttons, so its two ends are one row inside the region, which is what
-        // `a_scrollbar_reaches_the_bottom_at_its_last_window` already says one
-        // region over. Comparing against the region asked the thumb to reach a
-        // button.
+        // The track, not the region.
         let track = stepped_track(region.clone());
-        // **The viewport actually on its last screenful**, which this fixture
-        // never was. It set `view.top` alone, and the diff's bar is scaled from
-        // `rows_above` over `total_rows`; `top` is where the walk landed and is
-        // read by the caret, not by the bar. So the thumb sat at the top for
-        // every span while the assertion below described the bottom.
+        // The viewport actually on its last screenful, which this fixture never was.
         view.total_rows = span;
         view.rows_above = span.saturating_sub(rows);
         view.top = Position {
@@ -4891,13 +4444,7 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
 
 #[test]
 fn the_caret_does_not_vanish_because_another_file_changed() {
-    // Two ladders that collide. `Painter::list` decides the caret against the
-    // width it is handed, and `render` has already taken the bar's columns off
-    // that width — so whether the caret survives depends on whether the list is
-    // *scrollable*, which depends on the changed-file count. Both floors are
-    // sixteen, so at sixteen and seventeen columns a seventh changed file made
-    // the marker saying which file the diff is inside disappear with nothing
-    // about the pane having moved.
+    // Two ladders that collide.
     let mut ever = false;
     for width in 1..=60u16 {
         let mut drawn = Vec::new();
@@ -4924,7 +4471,7 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
         );
     }
 
-    // **Or the sweep agreed about an absence.** Two screens that both draw no
+    // Or the sweep agreed about an absence. Two screens that both draw no
     // caret satisfy the equality above at every width, which is exactly how this
     // gate spent two phases proving nothing.
     assert!(
@@ -4936,21 +4483,16 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
 
 #[test]
 fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
-    // What `affords_caret`'s `BAR_WIDTH` term buys, which is not the same
-    // property as `the_caret_does_not_vanish_because_another_file_changed`. That
-    // one says the caret's presence depends on the pane alone; this one says the
-    // caret is never drawn on a row too narrow to still name its file afterwards,
-    // on a screen where the bar has already taken its columns.
+    // What `affords_caret`'s `BAR_WIDTH` term buys, which is not the same property as
+    // `the_caret_does_not_vanish_because_another_file_changed`.
     const ROW_FLOOR: usize = 2 + 12; // the kind letter and its gap, plus MIN_PATH_WIDTH
     const BAR_COLUMNS: usize = 2;
     const CARET_GLYPH: usize = 1;
     const TRACK: &str = "│";
     const THUMB: &str = "█";
 
-    // Constants restated for the reason this file always restates them: sharing
-    // the renderer's own would make the assertion agree with the code by
-    // construction. The same goes for this expression, which is `caret_gutter`
-    // written out rather than imported.
+    // Constants restated for the reason this file always restates them: sharing the
+    // renderer's own would make the assertion agree with the code by construction.
     let caret_columns = |width: u16| CARET_GLYPH.saturating_sub(usize::from(inset_at(width)));
 
     let mut saw_both = false;
@@ -4961,7 +4503,7 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         let backend = screen(width, 24, &view, &chrome());
         let buffer = backend.buffer();
 
-        // The **list's** first row, from the layout: row one is masthead air on
+        // The list's first row, from the layout: row one is masthead air on
         // any pane that affords a band, and the band draws no caret.
         let laid = regions(Rect::new(0, 0, width, 24), &chrome(), &view);
         let row: String = (0..width)
@@ -4976,10 +4518,7 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         if bar {
             saw_both = true;
         }
-        // **The pane's inset comes off before anything else does.** Left out of
-        // this sum, the gate credits the row with one or two columns it does not
-        // have and goes on passing at exactly the widths where the floor comes
-        // closest to being breached, which are the only widths it is about.
+        // The pane's inset comes off before anything else does.
         let left = usize::from(width)
             - if bar { BAR_COLUMNS } else { 0 }
             - caret_columns(width)
@@ -5001,12 +4540,9 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
 
 #[test]
 fn render_never_writes_outside_its_area_over_a_degenerate_view() {
-    // `any_area_renders_including_the_ones_that_fit_nothing` sweeps pane sizes
-    // but only over `one_file()`, whose list is empty and whose `current_span` is
-    // zero — so the three fields this branch added are never degenerate in it.
-    // Writing past a `Buffer`'s area panics inside ratatui, which is how the
-    // region overdrawing the footer was found at 1x3, and that was caught by a
-    // different sweep by luck rather than by this one.
+    // `any_area_renders_including_the_ones_that_fit_nothing` sweeps pane sizes but only
+    // over `one_file()`, whose list is empty and whose `current_span` is zero — so the
+    // three fields this branch added are never degenerate in it.
     let shapes: Vec<View> = vec![
         a_list_of(0, 0, 0),
         a_list_of(1, 1, 0),
@@ -5059,7 +4595,7 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
     }
 }
 
-/// A removed line's band runs **under** the scrollbar's own column.
+/// A removed line's band runs under the scrollbar's own column.
 fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
     let theme = vigia::Theme::dark();
@@ -5111,10 +4647,9 @@ fn a_wash_runs_under_the_scrollbar_column() {
         .find(|y| row_text(&backend, *y).contains("let stale"))
         .expect("the removed line was not drawn at all");
 
-    // The wash sampled from the row's trailing blank, not from column 1: the
-    // gutter's cells carry their own two-tone background, and
-    // at this width column 1 is the gutter's first cell. The tail of a washed
-    // row past its text is band all the way to the bar.
+    // The wash sampled from the row's trailing blank, not from column 1: the gutter's
+    // cells carry their own two-tone background, and at this width column 1 is the
+    // gutter's first cell.
     let wash = buffer[(width - 3, washed)].bg;
     let bar = buffer[(width - 1, washed)].bg;
     assert_ne!(
@@ -5130,7 +4665,7 @@ fn a_wash_runs_under_the_scrollbar_column() {
         width - 1
     );
 
-    // **And the track's own colour survived the wash**, which is the half the
+    // And the track's own colour survived the wash, which is the half the
     // whole fix rests on and the half a symbol check cannot reach.
     assert_eq!(
         buffer[(width - 1, washed)].fg,
@@ -5142,12 +4677,7 @@ fn a_wash_runs_under_the_scrollbar_column() {
          the bar rather than behind it"
     );
 
-    // The glyph too, which is a **different** claim kept for a different reason.
-    // `Buffer::set_style` never touches a symbol whether it merges or replaces, so
-    // this cannot fail from the merge changing under us and is not evidence for the
-    // paragraph above. What it does catch is content reaching this column: widening
-    // the wash means the row's rect now covers the bar, and a future change drawing
-    // text rather than only a background into that rect would erase the track.
+    // The glyph too, which is a different claim kept for a different reason.
     assert_eq!(
         buffer[(width - 1, washed)].symbol().chars().next(),
         Some(BAR_GLYPHS[0]),
@@ -5155,15 +4685,8 @@ fn a_wash_runs_under_the_scrollbar_column() {
          content into the column the bar owns"
     );
 
-    // **And the gap beside it *is* washed, which the tempting assertion has the
-    // other way round.** `BAR_WIDTH` reserves that column so the thumb does not
-    // sit flush against
-    // a count, and that reserve is about **glyph adjacency**: a full-block thumb
-    // next to `-6` reads as `-6█`. A blank cell whose background matches the
-    // band is still a blank cell, so nothing becomes adjacent to anything it was
-    // not before. Left unwashed it was a column of pane background between the
-    // band and the bar: invisible on a context row, a notch on every changed
-    // one. Reported from a real pane, against a ruling this gate held correctly.
+    // And the gap beside it *is* washed, which the tempting assertion has the other way
+    // round.
     assert_eq!(
         buffer[(width - 2, washed)].bg,
         wash,
@@ -5191,12 +4714,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
     };
     let many: Vec<Row> = (38..58).flat_map(changed).collect();
 
-    // **Two fixtures, and the second exists only to wash a button.** The first
-    // opens on a file heading, which is what a diff scrolled to a file boundary
-    // looks like and leaves the top button unwashed. The second opens mid-file on a
-    // changed line, which is what a diff scrolled *into* a file looks like, and puts
-    // a band under the top button. Both overflow the region so the bottom button
-    // lands on a changed row rather than on filler.
+    // Two fixtures, and the second exists only to wash a button.
     let mut heading = vec![file("src/engine/watch.rs", 42, 7)];
     heading.extend(many.iter().cloned());
 
@@ -5208,9 +4726,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
     let width = 64u16;
 
     /// The shortest track that can express more than one position, mirroring
-    /// `render.rs`'s `MIN_TRACK`. A bare bar at the short height draws a thumb and a
-    /// track cell and no more, so two is the real floor; the first version of this
-    /// gate wrote a bare `3`, looser than the shape allows.
+    /// `render.rs`'s `MIN_TRACK`.
     const MIN_BAR_CELLS: usize = 2;
 
     for (what, rows) in fixtures {
@@ -5221,7 +4737,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
             ..two_regions(1)
         };
 
-        // **Two heights, and the short one is the point.** `Bar::Stepped` only
+        // Two heights, and the short one is the point. `Bar::Stepped` only
         // appears above `STEP_FLOOR`; below it the bar is bare, which is a different
         // draw path and the one the gate above never exercised.
         for (height, expect_buttons) in [(11u16, false), (18, true)] {
@@ -5278,10 +4794,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
                  every comparison above was Reset against Reset"
             );
 
-            // **The shape this height was chosen for.** Without it the pair of
-            // heights is a claim in a comment, and the comment was wrong once
-            // already: the first version swept 12 and called it the bare case, and
-            // a pane of 12 draws a stepped bar.
+            // The shape this height was chosen for.
             assert_eq!(
                 saw_buttons, expect_buttons,
                 "{what} at {width}x{height}: step buttons present={saw_buttons} \
@@ -5289,10 +4802,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
                  the two heights no longer cover the two bar shapes"
             );
 
-            // **Per height, not once at the end.** An aggregate count lets three of
-            // four combinations stop covering a washed button while the fourth
-            // carries the assertion, which is the same free-riding this gate exists
-            // to remove one level down.
+            // Per height, not once at the end.
             if expect_buttons {
                 assert!(
                     washed_buttons > 0,
@@ -5305,7 +4815,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
     }
 }
 
-/// A row wash's **modifier** never reaches the scrollbar's cell.
+/// A row wash's modifier never reaches the scrollbar's cell.
 #[test]
 fn a_row_washs_modifier_never_reaches_the_scrollbar() {
     use ratatui::style::Modifier;
@@ -5462,11 +4972,8 @@ fn a_bar_styles_own_background_wins_over_the_band() {
 
 #[test]
 fn the_follow_marker_is_green_where_the_word_beside_it_is_dim() {
-    // `assets/preview.svg` draws `follow ` in `.dim` and `▶` in `.grn`, and
-    // §5.1's rule is that a published artifact answering a question is the
-    // answer. The shell drew the whole state in one dim grey, so the one glyph a
-    // reader checks at a glance rather than reads looked like the word beside
-    // it.
+    // `assets/preview.svg` draws `follow ` in `.dim` and `▶` in `.grn`, and §5.1's rule
+    // is that a published artifact answering a question is the answer.
     let view = one_file();
     let theme = Theme::default();
     let backend = screen(80, 6, &view, &following_chrome());
@@ -5494,10 +5001,8 @@ fn the_follow_marker_is_green_where_the_word_beside_it_is_dim() {
 
 #[test]
 fn the_readouts_are_coloured_and_their_label_is_not() {
-    // `assets/preview.svg` draws `0.8ms` and `24MiB` in `.cyn` and the word
-    // `frame` beside them in `.dim`. The shipped footer drew all of it in one
-    // grey, so the two numbers a reader checks at a glance looked like the words
-    // around them.
+    // `assets/preview.svg` draws `0.8ms` and `24MiB` in `.cyn` and the word `frame`
+    // beside them in `.dim`.
     let theme = Theme::default();
     let backend = screen(80, 6, &one_file(), &diagnostics_chrome());
     let footer = row_text(&backend, 5);
@@ -5518,12 +5023,6 @@ fn the_readouts_are_coloured_and_their_label_is_not() {
     }
 
     // The label beside the frame number, which must stay dim.
-    // **Found to the right of the frame number, not by the leftmost `f`.** The
-    // hint bar shares this row and opens `q quit · f follow`, so a scan from
-    // column 0 lands on the hints' own `f` at column 9 and reads a cell that is
-    // dim for reasons of its own. That made this assertion vacuous: adding
-    // `is_ascii_alphabetic` to the tint's opening test paints the whole word
-    // `frame` cyan and the old form still passed.
     let number = column_of(&backend, 5, "0");
     let at = (number..80)
         .find(|&x| backend.buffer()[(x, 5)].symbol() == "f")
@@ -5549,9 +5048,7 @@ fn the_readouts_are_coloured_and_their_label_is_not() {
 #[test]
 fn the_follow_marker_is_the_last_character_of_the_state() {
     // `FOLLOW_MARK` is restated beside `FOLLOWING` rather than composed into it,
-    // because `concat!` takes no `char`. Two spellings of one glyph can drift,
-    // and the drift is silent: the recolouring pass would simply find nothing
-    // and the marker would quietly go back to grey.
+    // because `concat!` takes no `char`.
     let backend = screen(80, 6, &one_file(), &following_chrome());
     let footer = row_text(&backend, 5);
     let mark = footer
@@ -5574,13 +5071,7 @@ fn the_follow_marker_is_the_last_character_of_the_state() {
 
 #[test]
 fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
-    // **This one gates a hang, not a colour**, and it is the more valuable half.
-    // The recolouring pass walked a run by asking two questions of a cell: does
-    // it *open* a measurement, and does it *carry* one. `>` answers yes and no,
-    // so on `>1s` the inner walk broke without consuming the column the outer
-    // walk had just accepted, and the two spun against each other forever with
-    // the pane frozen mid-frame. A monitor that stops redrawing is the one
-    // failure this product class cannot absorb.
+    // This one gates a hang, not a colour, and it is the more valuable half.
     let theme = Theme::default();
     for (what, chrome, sigil) in [
         (
@@ -5615,10 +5106,8 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             "{what} drew no {sigil:?} readout, so this proves nothing: {footer:?}"
         );
 
-        // The sigil opens the run, so it and every column of the abbreviation
-        // after it carry the measurement's colour. A `>` left grey would mean
-        // the run started one column late, which is the shape the hang came
-        // from.
+        // The sigil opens the run, so it and every column of the abbreviation after it
+        // carry the measurement's colour.
         let at = column_of(&backend, 5, ">");
         for (offset, glyph) in sigil.chars().enumerate() {
             let x = at + offset as u16;
@@ -5639,10 +5128,8 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
 
 #[test]
 fn a_notice_can_never_colour_the_follow_marker() {
-    // A notice is an error string, an error string carries a path, and `▶` is a
-    // legal character in a path on every platform this ships to. The recolouring
-    // pass scanned the whole footer row for the marker and stopped at the first
-    // one it found, so a file called `▶.rs` in an error message took the green.
+    // A notice is an error string, an error string carries a path, and `▶` is a legal
+    // character in a path on every platform this ships to.
     let theme = Theme::default();
     for following in [false, true] {
         let chrome = Chrome {
@@ -5670,10 +5157,7 @@ fn a_notice_can_never_colour_the_follow_marker() {
                  marker is green: {green:?}"
             );
             if following {
-                // **Exactly one, not at most one.** `<= 1` alone is satisfied by
-                // a pass that stopped tinting the real marker altogether, which
-                // is the other half of the same defect: the notice's glyph won
-                // the scan and the marker it should have lit stayed grey.
+                // Exactly one, not at most one.
                 assert_eq!(
                     green.len(),
                     1,
@@ -5693,11 +5177,9 @@ fn a_notice_can_never_colour_the_follow_marker() {
 
 #[test]
 fn the_position_keeps_its_grey_where_the_readouts_take_a_colour() {
-    // §11.1 rules that `N/M` stays dim: the picture gives it no colour, and it
-    // is a *place* rather than a measurement, which is the whole distinction the
-    // footer's three colours draw. It is a number sitting a few columns from two
-    // other numbers that are cyan, so the rule is one bound away from being
-    // wrong and nothing was reading it.
+    // §11.1 rules that `N/M` stays dim: the picture gives it no colour, and it is a
+    // *place* rather than a measurement, which is the whole distinction the footer's
+    // three colours draw.
     let theme = Theme::default();
     let backend = screen(80, 6, &one_file(), &diagnostics_chrome());
     let footer = row_text(&backend, 5);
@@ -5728,13 +5210,7 @@ fn the_position_keeps_its_grey_where_the_readouts_take_a_colour() {
 
 #[test]
 fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
-    // **The fixed-slot ruling one element over, and on the rows a reader
-    // actually reads.** Measured against the region's width, the stream's region
-    // loses two
-    // columns to a scrollbar, and that bar appears when the diff outgrows the
-    // pane. So crossing the pane height took the whole gutter off every content
-    // row: watching an agent write, the line numbers vanish the moment the diff
-    // gets long, for no reason on screen.
+    // The fixed-slot ruling one element over, and on the rows a reader actually reads.
     let body = |total_rows: usize| View {
         rows: vec![
             Row::file(listed("src/engine/watch.rs", 42, 7)),
@@ -5770,12 +5246,8 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
 
 #[test]
 fn render_clips_to_the_buffer_rather_than_the_area() {
-    // `render`'s own contract is that any area is legal, and most writers here
-    // reach the cells through `Buffer::set_stringn` or `set_style`, which clip.
-    // Three reached them by index and asserted: the heat strip, the rule and the
-    // scrollbar. Each traded a string call for a direct cell write to stop an
-    // allocation per cell, which was the right trade, and each traded the
-    // clipping away with it unremarked.
+    // `render`'s own contract is that any area is legal, and most writers here reach
+    // the cells through `Buffer::set_stringn` or `set_style`, which clip.
     let theme = Theme::default();
     for (buffer, area) in [
         ((40u16, 10u16), (60u16, 10u16)),
@@ -5822,13 +5294,9 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
 
 #[test]
 fn the_wash_bleeds_under_the_inset() {
-    // The half of the margin ladder that makes the inset design rather than
-    // padding, and the half that would be
-    // silently lost by an implementation that moved the *wash* instead of the
-    // *text*. `SPEC.md` §5.3: furniture runs full-bleed and text is inset, and
-    // the two roles must not swap. The issue is explicit about why: a wash that
-    // stops short reads as a misaligned highlight, where a wash the content sits
-    // *on* reads as a band.
+    // The half of the margin ladder that makes the inset design rather than padding,
+    // and the half that would be silently lost by an implementation that moved the
+    // *wash* instead of the *text*.
     fn washed(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         let theme = vigia::Theme::dark();
@@ -5897,11 +5365,7 @@ fn the_wash_bleeds_under_the_inset() {
              gate proves nothing"
         );
 
-        // **Column zero is §5.1's left bar, not the wash.** The band still
-        // reaches the pane's edge, which is this gate's whole claim; what changed
-        // is that its leading cell is the brighter of the two colours. Asserted as
-        // *different from the wash* rather than skipped, so a bar that quietly
-        // became the wash colour fails here instead of reading as a wider band.
+        // Column zero is §5.1's left bar, not the wash.
         assert_ne!(
             buffer[(0, row)].bg,
             inside,
@@ -5934,13 +5398,10 @@ fn the_wash_bleeds_under_the_inset() {
 #[test]
 fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
     // The premise `planning_width` charges the inset on one side only rests on,
-    // measured off a drawn row rather than derived: `SPEC.md` §11.1 rules that a
-    // glance row's two trailing columns are the **scrollbar's reserve** and not a
-    // margin, and the ladder adds the matching leading columns rather than a
-    // second set
-    // of trailing ones. If that is right, a file row's left blank is exactly the
-    // margin's leading half and its right blank is exactly the bar's reserve, so
-    // the margin has cost the path its own width in columns rather than twice it.
+    // measured off a drawn row rather than derived: `SPEC.md` §11.1 rules that a glance
+    // row's two trailing columns are the scrollbar's reserve and not a margin, and the
+    // ladder adds the matching leading columns rather than a second set of trailing
+    // ones.
     let mut read_at: Vec<u16> = Vec::new();
     let mut square_from: Option<u16> = None;
     for width in 43u16..=120 {
@@ -5969,12 +5430,7 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
         }
     }
 
-    // **The narrowest square pane, derived from the sweep rather than recalled.**
-    // Four prose claims on this branch stated this band from the shape of the
-    // ladder instead of its arithmetic and every one was a column out: the
-    // margin's leading half reaches the bar's two at the *odd* rung, 79, not at
-    // 80 where the pair completes. Pinned here so the fifth attempt cannot be a
-    // sentence nobody can check.
+    // The narrowest square pane, derived from the sweep rather than recalled.
     assert_eq!(
         square_from,
         Some(79),
@@ -5984,7 +5440,7 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
          itself completes"
     );
 
-    // **Named widths, not a count.** A count is satisfied by the wrong widths.
+    // Named widths, not a count. A count is satisfied by the wrong widths.
     // This sweep reads 78 of 78 and its first floor was `> 60`, which tolerates
     // seventeen skips: prefixing the skip above with `width < 60 ||` still passed
     // while the whole 43 to 59 band went unread, rungs and all. The rungs are the
@@ -6002,13 +5458,7 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
 
 #[test]
 fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
-    // Gated here because nothing else covers it. The diff region is handed a
-    // rect
-    // that has already lost the scrollbar's columns wherever a bar is drawn, and
-    // those are the same columns a right-hand margin wants. Charging both put a
-    // content line two columns left of the heading above it, and only on the
-    // screens where the diff outgrew its pane, which is the layout becoming a
-    // function of the contents that `SPEC.md` §11.1 refuses.
+    // Gated here because nothing else covers it.
 
     let mut read_at: Vec<u16> = Vec::new();
     for width in 30u16..=120 {
@@ -6051,11 +5501,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         }
         read_at.push(width);
 
-        // **Every glyph the bar can draw, not just track and thumb.** The heading
-        // this compares against is a region's first row, which is where the up
-        // button sits, so a skip list missing it measures the button as the end
-        // of the heading and the two rows stop agreeing for a reason that has
-        // nothing to do with the margin under test.
+        // Every glyph the bar can draw, not just track and thumb.
         let last_glyph = |y: u16| {
             (0..width)
                 .rev()
@@ -6077,7 +5523,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         );
     }
 
-    // **Named widths, not a count**, for the reason
+    // Named widths, not a count, for the reason
     // `a_row_pays_its_margin_once_and_the_bars_reserve_once` carries in full: the
     // `> 60` floor this replaced tolerated thirty skips out of ninety-one, enough
     // to lose every rung boundary while still reading green.
@@ -6092,7 +5538,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
 
 #[test]
 fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
-    // **Monotone in height**, which is the property a reader feels rather than
+    // Monotone in height, which is the property a reader feels rather than
     // sees: a pane dragged taller must not lose an element it had, and a
     // threshold written as two comparisons is exactly where that breaks.
     let width = 80u16;
@@ -6116,13 +5562,7 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
         }
     }
 
-    // **The height, not merely that one exists.** The comment above claimed this
-    // was asserted while the code observed it and threw it away, which review
-    // caught: a floor moving would then change where the band appears and
-    // nothing would say so.
-    // Twenty-one: one header, one footer **and the rule above it**, three list
-    // rows and the rule under them leave the masthead's four and ten of diff,
-    // which is GRAPH_KEEP. One taller than before the footer gained its mark.
+    // The height, not merely that one exists.
     assert_eq!(
         arrived,
         Some(21),
@@ -6132,10 +5572,7 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
 
 #[test]
 fn the_band_never_takes_the_diff_below_a_whole_hunk() {
-    // **The clamp order, from the diff's side.** The band is the newest luxury
-    // and yields to both the list and the diff, so wherever it is drawn the diff
-    // still holds a whole default hunk: a header, three context, a change, three
-    // more and the file's own heading.
+    // The clamp order, from the diff's side.
     let width = 80u16;
     for files in [1usize, 3, 6, 30] {
         for height in 1..=80u16 {
@@ -6154,13 +5591,7 @@ fn the_band_never_takes_the_diff_below_a_whole_hunk() {
 
 #[test]
 fn an_empty_window_draws_no_band_at_all() {
-    // **The track does not reach the band, and this is the gate that says so.**
-    // That ruling gives the sparkline's empty bucket a track because a gap would
-    // make
-    // an eight-column strip between two other elements ambiguous. The band spans
-    // the pane and the masthead's blank rows delimit it, so its extent is never
-    // in question, and a hundred columns of `_` is a dashed rule the pane did
-    // not ask for. Reported from use on the first real run.
+    // The track does not reach the band, and this is the gate that says so.
     let width = 80u16;
     let height = 24u16;
     let view = a_list_of(3, 3, 0);
@@ -6194,10 +5625,8 @@ fn an_empty_window_draws_no_band_at_all() {
 
 #[test]
 fn hiding_the_masthead_gives_its_rows_to_the_diff() {
-    // **Reported from use**: *"can we add a shortcut to hide and display this
-    // thing at the top? I see it is not always needed"*. The band costs four
-    // rows of the thing the tool exists to show, and a reader who has decided is
-    // the only one who can answer whether that is worth it.
+    // Reported from use: *"can we add a shortcut to hide and display this thing at the
+    // top? I see it is not always needed"*.
     let width = 80u16;
     let height = 24u16;
     let view = a_list_of(3, 3, 0);
@@ -6223,12 +5652,7 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
         hidden.air, 0,
         "hiding the masthead left its blank row behind"
     );
-    // **The lead blank is not the masthead's to give.** The band
-    // borrows it while it is drawn and the header's separator is what it is the
-    // rest of the time, so hiding the band hands back three rows rather than
-    // four. Asserted rather than folded into the sum below, because a lead that
-    // vanished with the band would put the header back against the list on the
-    // one screen a reader chose deliberately.
+    // The lead blank is not the masthead's to give.
     assert_eq!(
         (hidden.lead, shown.lead),
         (1, 1),
@@ -6248,11 +5672,7 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
 
 #[test]
 fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
-    // **The seam the separator's guard exists against, reached from a new
-    // direction.** A
-    // worktree whose name draws nothing is a non-empty string of invisible
-    // characters, and the guard measures the name rather than testing it for
-    // emptiness for exactly that reason.
+    // The seam the separator's guard exists against, reached from a new direction.
     let view = a_list_of(3, 3, 0);
     let mut narrowed = false;
     for worktree in ["", " ", "\u{200b}", "\u{7}"] {
@@ -6286,7 +5706,7 @@ fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
 
 #[test]
 fn a_populated_worktree_names_its_branch_in_the_header() {
-    // **The always-on rung, on a frame that has a diff in it**, which is the
+    // The always-on rung, on a frame that has a diff in it, which is the
     // case the suite most easily cannot see: a populated fixture that
     // set `branch: None`, so the rung was exercised by one assertion about the
     // empty state and by nothing else at all.
@@ -6310,7 +5730,7 @@ fn a_populated_worktree_names_its_branch_in_the_header() {
 }
 
 // ---------------------------------------------------------------------------
-// The staged run: `SPEC.md` §11.2 **B17**.
+// The staged run: `SPEC.md` §11.2 B17.
 // ---------------------------------------------------------------------------
 
 /// A view holding both runs, which is what `a` produces.
@@ -6400,17 +5820,10 @@ fn a_staged_rows_kind_letter_carries_the_mark_and_an_unstaged_rows_does_not() {
     );
 }
 
-/// **The mark takes the staged colour and never the diff's own green.**
+/// The mark takes the staged colour and never the diff's own green.
 #[test]
 fn the_mark_takes_the_staged_colour_and_never_the_diffs_green() {
-    // **A perturbed palette, because the shipped one cannot tell the two apart.**
-    // `staged` and `added` hold byte-identical values in all three palettes by
-    // design — git paints a staged path green and the mark borrows that — so an
-    // assertion against `Theme::default()` passes whether the painter reached for
-    // `staged` or for `added`, and the gate `SPEC.md` §5.3 names would have been
-    // green against the very collapse it exists to forbid. Moving one key apart
-    // is what makes the two distinguishable, and it is exactly the freedom the
-    // rule is protecting: a theme must be able to move one without the other.
+    // A perturbed palette, because the shipped one cannot tell the two apart.
     let theme = Theme {
         staged: ratatui::style::Style::new().fg(ratatui::style::Color::Magenta),
         ..Theme::default()
@@ -6516,7 +5929,7 @@ fn the_header_counts_both_runs() {
         rows[0]
     );
 
-    // **Zero is drawn**, because it is the only acknowledgment pressing `a` on a
+    // Zero is drawn, because it is the only acknowledgment pressing `a` on a
     // worktree with nothing staged can give. A key that does nothing a reader can
     // see is the defect B17 is named for, one layer down.
     let empty = Chrome {
@@ -6540,7 +5953,7 @@ fn the_header_counts_both_runs() {
     );
 }
 
-/// **The blank pane says where the work went**, which is the whole of the
+/// The blank pane says where the work went, which is the whole of the
 /// report: an agent that stages its own work empties the pane, and
 /// `no unstaged changes` reads the same on a clean tree and on a fully staged one.
 #[test]
@@ -6561,17 +5974,14 @@ fn an_empty_view_says_where_the_work_went() {
 #[test]
 fn an_empty_view_with_nothing_anywhere_says_only_that() {
     let rows = text_rows(&screen(80, 6, &nothing_changed(), &empty_chrome()), 80, 6);
-    // **`trim` and an equality, not a `contains`.** `"no unstaged changes"` has
-    // `"staged changes"` inside it, so the obvious negative assertion is satisfied
-    // by the very line it is supposed to permit — the substring trap this
-    // repository already has a recorded lesson about, on a word that invites it.
+    // `trim` and an equality, not a `contains`.
     assert_eq!(
         rows[1].trim(),
         "no unstaged changes",
         "a clean tree's empty state grew a second fact"
     );
 
-    // With the run **on** and nothing anywhere, both comparisons are named,
+    // With the run on and nothing anywhere, both comparisons are named,
     // because both were asked about and the line has to say it looked.
     let both = Chrome {
         staged: Some(0),
@@ -6626,7 +6036,7 @@ fn the_staged_run_at_forty_columns() {
     ));
 }
 
-/// **The body's split is the same whatever the staged facts say.**
+/// The body's split is the same whatever the staged facts say.
 #[test]
 fn the_layout_is_the_same_whatever_the_staged_facts_say() {
     let view = both_runs();
@@ -6790,10 +6200,8 @@ fn the_word_patch_and_gutter_tone_drop_out_below_truecolor() {
     }
 }
 
-/// The sheet's corners follow the glyph rung, and the dense rungs splice
-/// the title into the border btop's way. The Block rung keeps the square box
-/// and the inline title, because an arc is outside CP437 and that rung is the
-/// console that cannot draw one.
+/// The sheet's corners follow the glyph rung, and the dense rungs splice the title into
+/// the border btop's way.
 #[test]
 fn the_sheets_corners_follow_the_glyph_rung() {
     let view = emphasised_view();
@@ -6981,11 +6389,9 @@ fn a_linked_path_is_one_cell_carrying_the_uri() {
     }
 }
 
-/// A linked path claims its columns with `ForcedWidth`, and ratatui's differ
-/// walks straight past every column that claim covers: it emits the first cell
-/// and advances, with none of the shrink protection its `None` arm carries.
-/// So the **buffer's** record of those columns is the only thing that can ever
-/// force them repainted, and it had better be the truth.
+/// A linked path claims its columns with `ForcedWidth`, and ratatui's differ walks
+/// straight past every column that claim covers: it emits the first cell and advances,
+/// with none of the shrink protection its `None` arm carries.
 #[test]
 fn a_linked_paths_covered_columns_record_what_the_terminal_shows() {
     let area = Rect::new(0, 0, 80, 18);
@@ -7090,11 +6496,8 @@ fn nothing_claims_columns_the_sheet_is_drawn_over() {
     }
 }
 
-/// The continuation mark says *this line has more than the pane can show*, so
-/// it may only ever sit against content that reached it. Reported from a real
-/// pane: *"the arrow on the right showing there's more to the line than
-/// what's been displayed is going off as I scroll"*, with the mark floating
-/// out past the end of short lines).
+/// The continuation mark says *this line has more than the pane can show*, so it may
+/// only ever sit against content that reached it.
 #[test]
 fn a_continuation_mark_only_sits_against_content_that_reached_it() {
     let theme = vigia::Theme::dark();
@@ -7196,11 +6599,9 @@ fn a_continuation_mark_only_sits_against_content_that_reached_it() {
                  one:\n{text:?}"
             );
 
-            // The reported symptom is the mark *moving*: every content row is
-            // clipped at the same column, so every mark a frame draws has to
-            // land in that one column. A mark that sits anywhere else has been
-            // pushed by something earlier on its row, which is what a reader
-            // sees as the arrow wandering out of line while they scroll.
+            // The reported symptom is the mark *moving*: every content row is clipped
+            // at the same column, so every mark a frame draws has to land in that one
+            // column.
             marks.push((start, y, text[..at].chars().count(), text.clone()));
         }
     }
@@ -7220,7 +6621,7 @@ fn a_continuation_mark_only_sits_against_content_that_reached_it() {
     }
 }
 
-/// **No emoji presentation selector reaches the buffer.**
+/// No emoji presentation selector reaches the buffer.
 #[test]
 fn no_emoji_presentation_selector_reaches_the_buffer() {
     let theme = vigia::Theme::dark();

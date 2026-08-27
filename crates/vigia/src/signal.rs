@@ -54,10 +54,8 @@ fn pump(source: impl Iterator<Item = i32>, tx: &Sender<Wake>, escalate: impl Fn(
     let mut asked = false;
     for signal in source {
         match answer(asked) {
-            // In production this does not return: it restores the default
-            // disposition and re-raises, so the process dies inside the call. The
-            // terminal may be left as it was, which is precisely the trade the
-            // second ask is asking for.
+            // In production this does not return: it restores the default disposition
+            // and re-raises, so the process dies inside the call.
             Answer::Escalate => escalate(signal),
             Answer::Wake => {
                 if tx.send(Wake::Signalled).is_err() {
@@ -239,9 +237,7 @@ mod tests {
     #[test]
     fn a_failed_arming_keeps_the_claim() {
         // The doc says a failure consumes the claim rather than releasing it, and
-        // nothing held that. It matters because the alternative reads more
-        // forgiving and is worse: a retry would be a second attempt at whatever
-        // just failed, on a platform that has already installed half of it.
+        // nothing held that.
         let armed = OnceLock::new();
 
         let first = claim(&armed, || Err(io::Error::other("the arming failed")));
@@ -298,9 +294,7 @@ mod tests {
     #[test]
     fn the_second_ask_goes_to_the_default_disposition() {
         // The rule `pump` and `on_ctrl` both run on, asserted here because what
-        // `Escalate` names ends the process and no test can call it. Without this
-        // the escalation exists only in prose, and a monitor whose loop is wedged
-        // is a process that cannot be stopped.
+        // `Escalate` names ends the process and no test can call it.
         assert_eq!(answer(false), Answer::Wake);
         assert_eq!(answer(true), Answer::Escalate);
     }
@@ -347,10 +341,9 @@ mod tests {
 
         #[test]
         fn the_second_delivery_escalates_instead_of_waking() {
-            // The rule that keeps a wedged monitor killable. The first ask is a
-            // wake; the second is the disposition the sender would have had if
-            // nothing were armed. Swallowing it, which is what this did before the
-            // audit, is how a process becomes the one you cannot get rid of.
+            // The rule that keeps a wedged monitor killable. The first ask is a wake;
+            // the second is the disposition the sender would have had if nothing were
+            // armed.
             let (tx, rx) = mpsc::channel();
             let seen = RefCell::new(Vec::new());
 
@@ -410,10 +403,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_caught_set_is_the_one_documented() {
-        // The oracle is POSIX's own numbers rather than `signal-hook` restating
-        // itself, the same way the escape sequences in `terminal` are checked
-        // against DEC's. `SIGHUP` is 1, `SIGINT` is 2 and `SIGTERM` is 15 on
-        // every Unix this ships to.
+        // The oracle is POSIX's own numbers rather than `signal-hook` restating itself,
+        // the same way the escape sequences in `terminal` are checked against DEC's.
         assert_eq!(CAUGHT, [2, 15, 1]);
 
         // 9 is `SIGKILL`. Not an oversight and not fixable: it exists so that a
@@ -425,10 +416,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_caught_set_is_the_one_documented() {
-        // WinAPI's own numbers, for the reason the Unix twin gives. This is also
-        // what pins the handler's filter, since `on_ctrl` tests membership of
-        // this array and cannot itself be called: it never returns for an event
-        // it claims.
+        // WinAPI's own numbers, for the reason the Unix twin gives.
         assert_eq!(CAUGHT, [0, 1, 2]);
 
         // 5 is `CTRL_LOGOFF_EVENT` and 6 is `CTRL_SHUTDOWN_EVENT`, and leaving
@@ -455,11 +443,9 @@ mod tests {
 
         #[test]
         fn the_handler_maps_hand_on_to_false() {
-            // **The real handler, which is easily left with no caller at all.**
-            // Moving its decisions into `reply` makes five exits testable and
-            // leaves the mapping from a `Reply` back to a `BOOL` uncalled. An
-            // unclaimed `CTRL_SHUTDOWN_EVENT` answered TRUE tells Windows a
-            // shutdown was handled by a process that got no wake.
+            // The real handler, which is easily left with no caller at all. Moving its
+            // decisions into `reply` makes five exits testable and leaves the mapping
+            // from a `Reply` back to a `BOOL` uncalled.
             assert!(
                 !CAUGHT.contains(&5),
                 "5 is claimed now, so handing it to the real handler would park                  forever; pick a kind outside `CAUGHT` or drop this test"

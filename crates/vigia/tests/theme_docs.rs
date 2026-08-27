@@ -53,10 +53,9 @@ fn every_row_in_the_reference_is_a_key() {
 
 #[test]
 fn the_reference_reads_keys_from_rows_at_all() {
-    // The extractor above is the load-bearing part of both gates, and a change
-    // to the document's table style would empty it, making both pass over a
-    // document that documents nothing. Mutation-proofing per the house rule: a
-    // check that cannot fail has not been written.
+    // The extractor above is the load-bearing part of both gates, and a change to the
+    // document's table style would empty it, making both pass over a document that
+    // documents nothing.
     assert!(
         documented(&doc()).len() >= Theme::KEYS.len(),
         "the table extractor found fewer rows than there are keys; \

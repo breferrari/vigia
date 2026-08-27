@@ -138,13 +138,7 @@ fn the_reported_version_is_never_the_placeholder() {
          would claim a crates.io version that can never be withdrawn"
     );
 
-    // **The pre-release suffix is cut before the split, not accommodated
-    // inside it.** The first version of this asserted three dotted components
-    // over the whole string, and a comment below it claimed `0.1.0-rc.1` was
-    // covered. It is not: that splits into *four* parts, so the assertion would
-    // have gone red on the release candidate before the one publish that cannot
-    // be taken back, and the reason would have been this test rather than
-    // anything wrong with the version.
+    // The pre-release suffix is cut before the split, not accommodated inside it.
     let core = VERSION.split_once('-').map_or(VERSION, |(core, _)| core);
 
     let parts: Vec<&str> = core.split('.').collect();
@@ -192,11 +186,8 @@ fn the_binary_refuses_an_unknown_option_and_exits_non_zero() {
         "the refusal reached stdout ({stdout:?}), which is where a version \
          query answers"
     );
-    // The property, not the sentence: it must name the option that does exist
-    // and say that a path is what it takes. Pinning the exact wording reddens
-    // on an addition to the usage line, which is a documentation improvement
-    // rather than a regression, and a gate that fires on those
-    // teaches people to edit the gate instead of reading it.
+    // The property, not the sentence: it must name the option that does exist and say
+    // that a path is what it takes.
     assert!(
         stderr.contains("--version") && stderr.contains("path"),
         "the refusal should name the surface, got {stderr:?}"

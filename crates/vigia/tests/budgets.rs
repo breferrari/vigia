@@ -53,11 +53,7 @@ fn sample(history: &mut History, root: &Path, path: &str) {
 
 /// [`sample`] over a whole burst, which is what a bulk rewrite delivers.
 fn sample_all(history: &mut History, root: &Path, paths: &[String]) {
-    // **`vigia::weigh`, which is the one `run` calls.** A copy of these three
-    // lines here is the drift surface: what a gate leaves out gets cheaper, so
-    // it goes on passing while pricing a tick the product no
-    // longer has, which is the failure the comment beside every call site in this
-    // file already names.
+    // `vigia::weigh`, which is the one `run` calls.
     history.record_sized(vigia::sized(root, paths), Instant::now());
 }
 
@@ -107,10 +103,9 @@ fn shell_frame(
     let began = Instant::now();
     frame.advance().expect("advance");
     frame_body(frame, app, highlighter, history, buf, theme, screen);
-    // Recorded from an inner clock rather than handed the caller's, because
-    // every caller times this differently: some wrap it in `time`, some in
-    // `timed`, and the scroll gates wrap a whole motion. What the ring needs is
-    // one frame's cost, and this is the only place that knows where one starts.
+    // Recorded from an inner clock rather than handed the caller's, because every
+    // caller times this differently: some wrap it in `time`, some in `timed`, and the
+    // scroll gates wrap a whole motion.
     app.record_frame(began.elapsed());
 }
 
@@ -128,12 +123,7 @@ fn frame_body(
     app.sample_memory();
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let view = app.view(frame, highlighter, history, screen).expect("view");
-    // **The pane comes from the buffer being painted rather than from
-    // [`area`]**. The two were the same rect arriving twice and had to agree; a
-    // caller timing a frame on a *rail* pane would otherwise have had to
-    // remember to change both, and the failure mode is the one this file's own
-    // doc warns about, since what gets rendered against the wrong rect gets
-    // cheaper rather than louder.
+    // The pane comes from the buffer being painted rather than from [`area`].
     let pane = buf.area;
     render(buf, pane, &view, theme, Glyphs::default(), &chrome);
 }
@@ -194,14 +184,8 @@ const RAIL_PANE: Rect = Rect {
 /// on the pane every other gate here measures.
 #[test]
 fn a_frame_beside_a_rail_holds_the_frame_budget() {
-    // **The rail is asked for since §11.2 B14, and asked for the same way here as
-    // in the timed loop below.** The first spelling of this built a
-    // `Chrome { rail: true, .. }` by hand while `frame_budget_on` reached the same
-    // state through `App::apply`, so the shape this gate asserts and the shape it
-    // times were produced by two paths that can drift: if `ToggleRail` ever stopped
-    // reaching `chrome.rail`, the assertion stayed green while `shell-i9-rail`
-    // silently timed a stacked pane, which is exactly the substitution this gate's
-    // own docblock says it exists to catch.
+    // The rail is asked for since §11.2 B14, and asked for the same way here as in the
+    // timed loop below.
     let scratch = Scratch::large_diff("i9-rail-shape", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -231,12 +215,7 @@ fn a_frame_beside_a_rail_holds_the_frame_budget() {
 
 #[test]
 fn the_timed_frame_draws_the_readouts_it_is_timing() {
-    // **A gate over the gates, and this repo has paid twice for not having
-    // one.** `SPEC.md` §7 records both: `render` sat outside every budget on
-    // both crates for two phases, so a row costing 7.2x its pane passed a 16ms
-    // assertion; and a gate that settled before measuring left the one window
-    // it was written about unmeasured. Both were invisible from inside the gate,
-    // which is exactly the property that makes a comment a bad instrument here.
+    // A gate over the gates, and this repo has paid twice for not having one.
     let scratch = Scratch::large_diff("readouts-in-the-gate", 4, 20);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -267,10 +246,8 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         "the timed frame never recorded what it cost, so every wall-clock gate \
          in this file is measuring a screen without the frame readout on it"
     );
-    // Every tier-1 target has a cheap read, so this asserts unconditionally
-    // rather than behind a `cfg`. A platform outside those three would fail here
-    // and should: it means the readout silently stopped being covered, which is
-    // the thing this gate exists to notice. `SPEC.md` §5.1 names the three.
+    // Every tier-1 target has a cheap read, so this asserts unconditionally rather than
+    // behind a `cfg`.
     assert!(
         chrome.memory.is_some(),
         "the timed frame read no memory, so the syscall the status bar performs \
@@ -298,8 +275,8 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
     let mut buf = Buffer::empty(area());
     let paths = bulk_burst();
 
-    // **Interleaved, because a sequential pair under varying load is not a
-    // controlled experiment.** This repo nearly filed a phantom regression that
+    // Interleaved, because a sequential pair under varying load is not a
+    // controlled experiment. This repo nearly filed a phantom regression that
     // way: a 125ms tail landed on the arm the branch did not touch.
     let (mut sized, mut bare) = (Samples::new(SAMPLED_BURSTS), Samples::new(SAMPLED_BURSTS));
     for round in 1..=SAMPLED_BURSTS {
@@ -335,11 +312,8 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
 
     let weighed = sized.percentile(0.5).expect("a sampled round");
     let plain = bare.percentile(0.5).expect("a sampled round");
-    // Non-vacuity: both arms have to have done the work, or this compares two
-    // numbers neither of which is a frame.
-    // **Non-vacuity on what the run did, not on what the fixture is.** Asserting
-    // `paths.len() == HISTORY_PATHS` was true by construction, since `bulk_burst`
-    // *is* that range: it kills no mutation and reads as a check.
+    // Non-vacuity: both arms have to have done the work, or this compares two numbers
+    // neither of which is a frame.
     let recorded = history.stats().recorded;
     assert!(
         recorded >= (HISTORY_PATHS * SAMPLED_BURSTS) as u64,
@@ -349,31 +323,11 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
         plain > Duration::ZERO,
         "the unsized arm took no time, so this compared nothing"
     );
-    // **The delta against a fraction of the frame, not a ratio against the whole
-    // one.** A ratio hides the term it is supposed to expose: with `weigh` swapped
-    // for a whole-file read this gate measured 28.98ms against 35.27ms and passed,
-    // because both arms grew together and the quotient stayed under two. What this
-    // prices is the difference, and the difference is what a `stat` becoming a
-    // read would move.
+    // The delta against a fraction of the frame, not a ratio against the whole one.
     let delta = weighed.saturating_sub(plain);
-    // **An eighth was calibrated on one machine and the cost is host-dependent.**
-    // On the reference machine sizing is free: 18.43ms unsized against 17.93ms
-    // sized, the unsized arm slower. On `windows-latest` the same comparison is
-    // 6.36ms against 9.41ms, so sizing costs **3.04ms** there. The frame is much
-    // cheaper on that host, so the same syscalls are a far larger share of it, and
-    // "unmeasurable in situ" turned out to be a fact about one filesystem rather
-    // than about the change. CI is what found that, which is the whole reason a
-    // gate calibrated locally gets run on three platforms before it is believed.
+    // An eighth was calibrated on one machine and the cost is host-dependent.
     let allowed = budget(I9_FRAME / 2);
-    // **No absolute claim here, and the attempt to add one is worth recording.**
-    // Asserting this frame holds I9 looked like the product-level statement the
-    // ratio never made, and it is measuring the wrong thing: this fixture is a
-    // hundred-file bulk rewrite inside the settle margin, which costs 18.43ms
-    // unsized on the reference machine, and I9 is the *steady state* budget.
-    // `what_a_bulk_rewrite_of_undrawn_files_costs` reports that shape and
-    // `the_frame_budget_holds_through_a_bulk_rewrite` gates it, both against the
-    // in-margin case rather than against I9. A bound that fails on correct code
-    // is worse than no bound, and this gate's job is the comparison.
+    // No absolute claim here, and the attempt to add one is worth recording.
     assert!(
         delta <= allowed,
         "sizing a {HISTORY_PATHS}-path burst added {delta:?} to the frame          ({plain:?} to {weighed:?}) against {allowed:?}, which is a `stat` that          has become a read or a walk rather than a syscall on metadata the status          walk has already warmed"
@@ -382,11 +336,10 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
 
 #[test]
 fn the_memory_read_costs_a_fraction_of_the_frame_it_sits_in() {
-    // The one *variable* cost the readouts add, and the reason the whole design
-    // turns on it: `SPEC.md` §5.1 ships this cell precisely because the read is
-    // a syscall on all three tier-1 targets rather than the process spawn
-    // `soak.rs` uses, which is **42.8ms median** on Windows against this 16ms
-    // budget. That is the claim, so it is gated rather than quoted.
+    // The one *variable* cost the readouts add, and the reason the whole design turns
+    // on it: `SPEC.md` §5.1 ships this cell precisely because the read is a syscall on
+    // all three tier-1 targets rather than the process spawn `soak.rs` uses, which is
+    // 42.8ms median on Windows against this 16ms budget.
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
@@ -459,19 +412,14 @@ fn frame_budget_on(
     let mut highlighter = Highlighter::eager();
     let mut history = History::new();
 
-    // **Asked for before the layout is taken, because it changes the layout.**
-    // The rail is a gesture since `SPEC.md` §11.2 B14, and unlike the sheet's
-    // toggle below it moves rows: taking the height first would time a frame
-    // planned for the stacked shape. `ToggleRail` reads no height of its own
-    // (`Action::needs_height` is false for it), so the stacked figure is an
-    // honest argument here.
+    // Asked for before the layout is taken, because it changes the layout.
     if rail {
         let stacked = layout_of(&app, pane, FILES).diff;
         app.apply(vigia::Action::ToggleRail, &mut frame, stacked)
             .expect("toggle the rail");
     }
 
-    // **The pin, asked for the same way**, and it moves no rows: `SPEC.md` §11.2
+    // The pin, asked for the same way, and it moves no rows: `SPEC.md` §11.2
     // B16 narrows what the walk may *reach* rather than how tall the body is, so
     // unlike the rail above it needs no re-layout and the height taken below is
     // the same one either way.
@@ -517,17 +465,12 @@ fn frame_budget_on(
 
     let _timed = exclusively_timed();
 
-    // "Under continuous edits", taken literally and the same way the core's gate
-    // takes it: one line is rewritten before every frame, so each frame
-    // revalidates ninety-nine files, recomputes the one that moved, and
-    // re-highlights the one hunk on screen. The edit stands in for the agent in
-    // the other pane and is deliberately outside the timed region.
+    // "Under continuous edits", taken literally and the same way the core's gate takes
+    // it: one line is rewritten before every frame, so each frame revalidates
+    // ninety-nine files, recomputes the one that moved, and re-highlights the one hunk
+    // on screen.
     let mut edits = 0usize;
-    // **A cell rather than a `String`, because the sampler now outlives the
-    // reader.** `holds_p99` re-measures on a breach, so this closure is still live
-    // when `the_edits_still_land` below reads the last marker; a plain `String`
-    // would be mutably borrowed by the closure at that point and the read would not
-    // compile. Sharing it through a `RefCell` keeps both borrows short.
+    // A cell rather than a `String`, because the sampler now outlives the reader.
     let marker = RefCell::new(String::new());
     let theme = Theme::default();
     let mut buf = Buffer::empty(pane);
@@ -537,11 +480,7 @@ fn frame_budget_on(
             scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
             edits += 1;
             time_cpu(|| {
-                // Inside the timed region on purpose. `vigia::run` samples the
-                // history on the same wake that advances the frame, so a gate that
-                // recorded outside `time` would be timing a frame path the product
-                // does not have. It is what I10 costs per tick, measured where I9
-                // can see it.
+                // Inside the timed region on purpose.
                 sample(history, scratch.root(), EDITED_PATH);
                 shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
@@ -576,17 +515,11 @@ fn frame_budget_on(
         height,
     );
 
-    // And the edits have to be still landing. Checked against the frame's diff
-    // rather than against the screen, and the difference is the fixture: this
-    // one rewrites every line, so a file's hunk is five hundred removals
-    // followed by five hundred additions and the newest line sits far below any
-    // viewport. A screen assertion here would fail while the code was perfect.
+    // And the edits have to be still landing.
     the_edits_still_land(&mut frame, EDITED_PATH, &marker.borrow());
 
-    // The highlighter has to be re-parsing every frame, which is what says the
-    // edits reach *it* and not merely the diff. One hunk is on screen and its
-    // content changes before every frame, so the steady state is exactly one
-    // re-parse per frame and no reuse at all.
+    // The highlighter has to be re-parsing every frame, which is what says the edits
+    // reach *it* and not merely the diff.
     assert_eq!(
         cost.parsed, SAMPLED_FRAMES as u64,
         "{} hunks were re-parsed across {SAMPLED_FRAMES} frames, so the visible \
@@ -622,22 +555,10 @@ fn frame_budget_on(
         || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
 
-    // **And when a sheet was asked for, one has to have been on the frames that
-    // were timed.** Read out of the buffer the timed loop actually wrote to,
-    // rather than off a second `App` built beside it: the non-vacuity check in
-    // `a_frame_under_the_sheet_holds_the_frame_budget` names the rung on its own
-    // `App`, so deleting the toggle above left that gate green while it timed
-    // sheet-free frames. A gate that cannot fail is worse than no gate. `sheet`
-    // carries the word that identifies the rung, so two gates share this scaffold
-    // and neither can quietly time the other's shape.
+    // And when a sheet was asked for, one has to have been on the frames that were
+    // timed.
     if let Some(rung) = sheet {
-        // **Inside the sheet's own rect, not over the pane.** `rung` is an
-        // ordinary word (`keyboard`, `moving`), and the fixture's own diff is a
-        // hundred files of generated source: a pane-wide search can be satisfied
-        // by content the sheet is covering, which would let this pass while
-        // timing the wrong rung, or no rung at all. `read_sheet` in
-        // `tests/sheet.rs` records the same lesson from the other direction,
-        // where the hint bar's `q quit` scored on every frame.
+        // Inside the sheet's own rect, not over the pane.
         let laid = vigia::regions(
             pane,
             &app.chrome("fixture", None, Pointing::default(), 0, ""),
@@ -671,14 +592,7 @@ fn frame_budget_on(
 
 #[test]
 fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
-    // **The gate whose absence was the finding**. Every other wall-clock gate
-    // in this file opens with `settle`, and `settle` calls `materialise`, which
-    // diffs *every* file. With a `FileDiff` cached for all hundred of them,
-    // `Frame::height` rebuilds every span from memory and reads nothing, so the
-    // gate's own setup deletes the cost it would otherwise measure. That is
-    // `SPEC.md` §7's recurring shape along a fourth axis: cheapest position,
-    // cheapest state, warmed-past first frame, and now **cheapest cache
-    // population**.
+    // The gate whose absence was the finding.
     let scratch = Scratch::large_diff("shell-i9-undrawn", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -705,11 +619,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     let _timed = exclusively_timed();
 
     let mut edits = 0usize;
-    // **A cell rather than a `String`, because the sampler now outlives the
-    // reader.** `holds_p99` re-measures on a breach, so this closure is still live
-    // when `the_edits_still_land` below reads the last marker; a plain `String`
-    // would be mutably borrowed by the closure at that point and the read would not
-    // compile. Sharing it through a `RefCell` keeps both borrows short.
+    // A cell rather than a `String`, because the sampler now outlives the reader.
     let marker = RefCell::new(String::new());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
@@ -735,12 +645,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     }
     let cost = delta(before, frame.stats());
 
-    // **The non-vacuity that matters here, and it is not the usual one.** Warming
-    // fifty frames is right for a p99 and is also the thing that could quietly
-    // materialise the worktree behind this gate's back: if anything in the frame
-    // path started diffing every file, the walk would go free and this gate would
-    // pass for the same reason `settle` made the others pass. So the *undrawn*
-    // half is asserted directly.
+    // The non-vacuity that matters here, and it is not the usual one.
     let touchable = screen.list + screen.diff;
     assert!(
         frame.tracked() <= touchable,
@@ -783,7 +688,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
 
 #[test]
 fn what_a_bulk_rewrite_of_undrawn_files_costs() {
-    // **Reports, and deliberately does not assert a wall clock.** Everything
+    // Reports, and deliberately does not assert a wall clock. Everything
     // structural here is asserted and exact; the clock is printed and left to
     // `SPEC.md` §10, and that is the ruling rather than a gap.
     let scratch = Scratch::large_diff("shell-i9-undrawn-bulk", FILES, LINES);
@@ -812,13 +717,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
-    // **Frames after a rewrite are untimed, and a rewrite never lands inside a
-    // timed one.** Both halves are the instrument rather than the subject, and
-    // the first version of this gate had neither: it read **16.56ms, 46.19ms and
-    // 227.33ms p99 across three of eight runs** against a p50 that never left
-    // 13.2ms, which `SPEC.md` §7 names as the signature of the fixture rather
-    // than of the code. NTFS write-back of a 1.7 MiB rewrite arrives over several
-    // frames, so discarding one is not enough.
+    // Frames after a rewrite are untimed, and a rewrite never lands inside a timed one.
     const CYCLES: usize = 9;
     const ABSORB: usize = 10;
     const PER_CYCLE: usize = 30;
@@ -856,13 +755,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
                     screen,
                 );
             });
-            // **Split on zero, not on `FILES`.** A frame inside the margin
-            // re-measures every changed file *except* the handful the viewport
-            // drew, because those have a diff in hand and take source (1) for
-            // free. So the in-margin count is a screenful short of a hundred and
-            // never equal to it, and a settled frame measures exactly nothing.
-            // Zero is the only value that separates the two without hard-coding
-            // how many files a screen happens to reach.
+            // Split on zero, not on `FILES`.
             match frame.stats().measured - was {
                 0 => settled_frames += 1,
                 n => {
@@ -887,11 +780,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         frame.tracked()
     );
 
-    // **The premise, and it is a count rather than a clock.** A run whose spans
-    // all stayed provable measured nothing this gate is about. Two thirds is
-    // generous on purpose: it has to survive a runner slow enough that the tail
-    // of a chunk settles, while still refusing a run that never entered the
-    // corner at all.
+    // The premise, and it is a count rather than a clock.
     let wanted = CYCLES * PER_CYCLE * 2 / 3;
     let timed = in_margin.len() + settled_frames;
     assert!(
@@ -903,10 +792,8 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         in_margin.len()
     );
 
-    // **And each of those frames re-measured nearly the whole changed set**, not
-    // a handful of it. Without this, a run where every chunk went settled after
-    // three frames would satisfy the count above and measure almost nothing,
-    // which is the runner-speed dependence the partition exists to remove.
+    // And each of those frames re-measured nearly the whole changed set, not a handful
+    // of it.
     let per_frame = measured_in_margin / in_margin.len() as u64;
     let floor = (FILES - touchable) as u64;
     assert!(
@@ -955,10 +842,8 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
 
 #[test]
 fn the_frame_budget_holds_through_a_bulk_rewrite() {
-    // The third position in this gate's input space, after "at the top" and "deep
-    // in a hunk". Those two vary *where* the window is; this one varies *when*,
-    // and it is the axis `SPEC.md` §7 gained from this test existing: a gate that
-    // settles before it measures has measured the cheapest state.
+    // The third position in this gate's input space, after "at the top" and "deep in a
+    // hunk".
     let scratch = Scratch::large_diff("shell-i9-bulk", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1021,11 +906,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let cost = delta(before, frame.stats());
     let parsed = highlight_delta(highlighted, highlighter.stats());
 
-    // Non-vacuity, first in the direction this whole file exists for. Highlighting
-    // has to have actually happened, or this measures the frame path the core
-    // already gates and reports it as a shell number. One re-parse per frame is
-    // the floor: the drawn file's hunk changes before every frame, so the steady
-    // state is exactly that and no reuse at all.
+    // Non-vacuity, first in the direction this whole file exists for.
     assert!(
         parsed.lines > 0 && parsed.parsed >= SAMPLED_FRAMES as u64,
         "{} hunks were re-parsed over {} lines across {SAMPLED_FRAMES} frames, so \
@@ -1035,11 +916,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         parsed.lines
     );
 
-    // Non-vacuity. A frame that reused rather than recomputed would be a cheap
-    // frame for a reason that is not the code, and a percentile diluted with
-    // them would pass while saying nothing. One recompute per frame is the floor,
-    // and the per-frame edit above is what makes that hold at any frame rate
-    // rather than only on a machine fast enough to finish inside the margin.
+    // Non-vacuity.
     assert!(
         cost.computed >= SAMPLED_FRAMES as u64,
         "{} diffs were recomputed across {SAMPLED_FRAMES} frames, so frames were \
@@ -1047,14 +924,9 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         cost.computed
     );
 
-    // And the premise, checked rather than assumed: a file the viewport never
-    // drew is still inside its margin now, so it was for the whole window, since
-    // settledness only ever increases with time. Two diffs rather than one,
-    // because the first recomputes on any stale fingerprint and only the second
-    // can tell "still unsettled" from "settled and reusable". Without this the
-    // gate would quietly weaken on a runner slow enough to outrun the margin: the
-    // other ninety-nine files would settle, and a shell that fetched ahead would
-    // find them reusable and cheap.
+    // And the premise, checked rather than assumed: a file the viewport never drew is
+    // still inside its margin now, so it was for the whole window, since settledness
+    // only ever increases with time.
     let undrawn = FILES - 1;
     let probed = frame.stats();
     frame.diff(undrawn).expect("diff");
@@ -1080,11 +952,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         height,
     );
 
-    // Which also settles what the probe above assumed. It is named `undrawn` and
-    // nothing had checked that it was: a fixture whose files were short enough
-    // for the viewport to reach index {undrawn} would have fingerprinted it every
-    // frame, and the probe would be asking a question about the drawn path while
-    // reading as though it asked about the untouched one.
+    // Which also settles what the probe above assumed.
     assert!(
         view.top.file + view.read <= undrawn,
         "the viewport drew files {}..{} of {FILES}, which reaches the file the \
@@ -1093,12 +961,10 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         view.top.file + view.read
     );
 
-    // **The re-measure continues the sequence rather than restarting it**, which
-    // matters more here than on the steady-state gates: what this one measures
-    // is a frame *inside the settle margin* after a bulk rewrite, so a second
-    // pass that only edited one line would measure a cheaper condition and could
-    // mask a real breach. Carrying `at` forward keeps the periodic rewrite on
-    // the same cadence, so both passes are the same experiment.
+    // The re-measure continues the sequence rather than restarting it, which matters
+    // more here than on the steady-state gates: what this one measures is a frame
+    // *inside the settle margin* after a bulk rewrite, so a second pass that only
+    // edited one line would measure a cheaper condition and could mask a real breach.
     let mut at = SAMPLED_FRAMES;
     holds_p99(
         &format!(
@@ -1151,7 +1017,7 @@ const UP_FILES: usize = 4;
 /// How the worktree is brought to a settled state before a scroll is timed.
 #[derive(Clone, Copy)]
 enum Prime {
-    /// `settle`: the margin waited out **and every file diffed**. The steady
+    /// `settle`: the margin waited out and every file diffed. The steady
     /// state the wide gates are about, and the reason they could never see the
     /// walk.
     Materialised,
@@ -1166,14 +1032,14 @@ struct Scroll {
     motion: Motion,
     ext: &'static str,
     files: usize,
-    /// Frames discarded before sampling. **Zero** for the gate that exists to
+    /// Frames discarded before sampling. Zero for the gate that exists to
     /// contain the first frames rather than to begin after them.
     warmup: usize,
     prime: Prime,
 }
 
 impl Scroll {
-    /// The shape every gate had before #101: twenty files, materialised, warmed.
+    /// The shape every gate had before : twenty files, materialised, warmed.
     fn wide(motion: Motion, ext: &'static str) -> Self {
         Self {
             motion,
@@ -1278,11 +1144,6 @@ fn scrolling_down_wide_lines_holds_the_frame_budget() {
 
 #[test]
 fn scrolling_a_hundred_files_from_the_first_frame_holds_the_frame_budget() {
-    // **[#101](https://github.com/breferrari/vigia/issues/101)'s first exit
-    // criterion, which no gate crossed.** Two dimensions the suite only ever ran
-    // separately, plus the window that every other wall-clock gate here begins
-    // *after*: a hundred changed files, wide-character content, scrolled, and
-    // sampled from frame zero with no warmup at all.
     let Some(run) = scroll(
         "wide-many-first",
         Scroll {
@@ -1311,11 +1172,8 @@ fn scrolling_a_hundred_files_from_the_first_frame_holds_the_frame_budget() {
 
 #[test]
 fn scrolling_up_wide_lines_holds_the_frame_budget() {
-    // The direction `SPEC.md` §10 names as the worst case and which nothing had
-    // ever run. Scrolling **down** enters a new hunk at its top, where the
-    // forward-only parse has nothing above it to pay for; scrolling up enters
-    // the same hunk at its **bottom**, so the first frame there parses the whole
-    // file in order to draw its last rows.
+    // The direction `SPEC.md` §10 names as the worst case and which nothing had ever
+    // run.
     let Some(run) = scroll("wide-up", Scroll::wide(Motion::Up, WIDE_EXT)) else {
         return;
     };
@@ -1336,11 +1194,7 @@ fn scrolling_back_over_ground_already_read_holds_the_frame_budget() {
 
 #[test]
 fn the_parse_is_attributed_by_subtracting_a_grammarless_run() {
-    // The third suspect, given a number instead of a ranking. Two runs over
-    // byte-identical content, one under a grammar and one under an extension
-    // `syntect` has none for, so what separates them is the parse and nothing
-    // else. Reported rather than gated: a difference of two wall clocks is
-    // evidence, and `SPEC.md` §7 keeps the verdicts on named fixtures.
+    // The third suspect, given a number instead of a ranking.
     let Some(parsed) = scroll("wide-parse", Scroll::wide(Motion::Down, WIDE_EXT)) else {
         return;
     };
@@ -1410,11 +1264,9 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             height,
         )
         .expect("scroll");
-        // Resolved by the collect rather than by the scroll: `App` adds the rows
-        // to the current file's offset and lets `View::collect` carry the
-        // overrun into the files below, which is what keeps a scroll to one diff
-        // per file. So the position is asserted *after* a view, and in files
-        // rather than in rows.
+        // Resolved by the collect rather than by the scroll: `App` adds the rows to the
+        // current file's offset and lets `View::collect` carry the overrun into the
+        // files below, which is what keeps a scroll to one diff per file.
         let view = app
             .view(&mut frame, &mut highlighter, &history, screen)
             .expect("view");
@@ -1436,9 +1288,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
-    // Split rather than timed whole, because "which of the three dominates" is
-    // what #45 asks and one total cannot answer it. Their sum is what the budget
-    // is held against, so nothing is counted twice.
+    // Their sum is what the budget is held against, so nothing is counted twice.
     let mut run = Scrolled {
         warm: Samples::new(SAMPLED_FRAMES),
         warm_cpu: Samples::new(SAMPLED_FRAMES),
@@ -1462,11 +1312,6 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             .expect("scroll");
 
         let before = highlighter.stats();
-        // Wall and CPU for both stages, because #178's attribution is per
-        // sample: the question is whether the work in *this* pass was inside
-        // budget, and a
-        // total taken around the loop would fold in the untimed scrolling between
-        // frames.
         let (screen, collect, collect_cpu) = timed_cpu(|| {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
@@ -1507,20 +1352,14 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
 
         run.lines += parsed.lines;
         run.evicted += parsed.evicted;
-        // Accumulated, like the two above it and unlike the assignment this used
-        // to be. `Scrolled::report` prints all three in one sentence, so a field
-        // holding the last frame while its neighbours hold the run was a figure
-        // that read as a total and was not one.
+        // Accumulated, like the two above it.
         run.painted += painted;
         run.collect.push(collect);
         run.paint.push(paint);
 
-        // The partition, and it is `SPEC.md` §7's carve-out rather than a
-        // convenience: a frame that parses a hunk for the first time is on the
-        // cold path, which I9 excludes by definition. Diluting the steady state
-        // with those would let a regression hide behind them, and dropping them
-        // silently would hide the one number #45 exists to surface. So they are
-        // separated, both are reported, and only the steady half is asserted.
+        // The partition, and it is `SPEC.md` §7's carve-out rather than a convenience:
+        // a frame that parses a hunk for the first time is on the cold path, which I9
+        // excludes by definition.
         if parsed.parsed > 0 {
             run.cold.push(collect + paint);
             run.cold_lines = run.cold_lines.max(parsed.lines);
@@ -1646,11 +1485,7 @@ fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
          no longer grammarless and this subtraction is between two parses",
         plain.lines
     );
-    // At least one parsed line **per frame**, not one across the whole sample.
-    // `> 0` is satisfied by a single line in two hundred and fifty frames, so if
-    // hunk reuse ever started hitting here the gate would keep passing while
-    // measuring a frame path with the parser idle, and still call itself a parse
-    // measurement. The steady state this gate claims is one re-parse a frame.
+    // At least one parsed line per frame, not one across the whole sample.
     assert!(
         parsed.lines >= SAMPLED_FRAMES as u64,
         "{} lines were highlighted across {SAMPLED_FRAMES} frames, under the one \
@@ -1678,17 +1513,7 @@ fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
                 parsed.parsed, parsed.lines,
             )
         },
-        // **A whole run rather than a frame, and the difference is not
-        // cosmetic.** `holds_p99` calls its closure once per sample, which is
-        // right when a sample is one frame of an already-built fixture. Here a
-        // sample cannot be produced alone: `prose_frame` builds a git fixture,
-        // settles it and runs 50 warmup frames before the first sampled one.
-        // Wired through `holds_p99` this gate re-measured by running that whole
-        // sequence 250 times, which is 250 fixtures and over 20 minutes to
-        // produce 250 frames that were each the *first* sampled frame of a cold
-        // run. Observed, not reasoned about: a breaching pass hung for 23
-        // minutes before it was killed. `hold_the_scroll_budget` uses this
-        // variant for the identical reason.
+        // A whole run rather than a frame, and the difference is not cosmetic.
         || {
             let again = prose_frame(PROSE_EXT)
                 .expect("the re-measure skipped the absolute tier the first round ran");
@@ -1739,10 +1564,8 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
     let mut buf = Buffer::empty(area());
     let mut next_frame =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
-            // The edit is prose of the same shape, so the rewritten line costs
-            // what every other line on screen costs. An edit writing plain text
-            // would make the one line the reader is watching the cheapest on the
-            // pane, which is the opposite of the case being measured.
+            // The edit is prose of the same shape, so the rewritten line costs what
+            // every other line on screen costs.
             *marker.borrow_mut() = prose_generated(1, &format!("edit{edits}"))
                 .trim_end()
                 .to_string();
@@ -1792,13 +1615,6 @@ const SAMPLED_AGEINGS: usize = 50;
 
 #[test]
 fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
-    // **The number [#243](https://github.com/breferrari/vigia/issues/243)'s
-    // ruling rests on, gated so it cannot quietly stop being true.** I1 was
-    // amended to let a clock run while the history window holds a sample, and
-    // the amendment is affordable because an ageing wake is not a filesystem
-    // event: nothing on disk changed, so it does not walk status. If a later
-    // edit puts `Frame::advance` back on that path the clock stays correct, the
-    // graph still ages, and the cost quietly becomes a tick's.
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
@@ -1815,14 +1631,8 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
-    // **A window at the path cap, driven on a clock that actually crosses a
-    // sample boundary**, and both halves are easy to get wrong. Twenty paths is
-    // not where `repeak` is priced, which is the 256-path cap; and stamping
-    // every record with `Instant::now()` means a hundred passes of a
-    // sub-millisecond frame all landed inside one second: `rolled` was zero every
-    // time and the #277 guard skipped the walk in *both* arms. The gate behind
-    // the measurement that licensed I1's amendment was timing `Frame::advance`
-    // on and off and never once timed an ageing wake.
+    // A window at the path cap, driven on a clock that actually crosses a sample
+    // boundary, and both halves are easy to get wrong.
     let paths: Vec<String> = (0..HISTORY_PATHS).map(|n| format!("src/f{n}.rs")).collect();
     let stamped = Instant::now();
     history.record_sized(
@@ -1833,19 +1643,12 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let (mut ageing, mut ticking) = (Samples::new(SAMPLED_AGEINGS), Samples::new(SAMPLED_AGEINGS));
     for round in 1..=SAMPLED_AGEINGS {
         for walks in [false, true] {
-            // **One sample per arm, not per round.** Both arms sharing a round's
-            // instant meant only the first crossed a boundary: the ageing arm
-            // paid the projection and the arm it is compared against skipped it,
-            // which is the comparison backwards. The store takes the instant as
-            // an argument, which is what makes a synthetic clock possible here at
-            // all; the frame is still timed against the real one.
+            // One sample per arm, not per round.
             let step = u32::try_from(round * 2 + usize::from(walks)).expect("a round");
             let at = stamped + HISTORY_SAMPLE * step;
             let (wall, _) = time_cpu(|| {
-                // The ageing arm is exactly what `Shell::draw` does on a wake
-                // that changed nothing on disk: roll the window, then draw. The
-                // ticking arm adds the status walk a filesystem event brings with
-                // it, and nothing else.
+                // The ageing arm is exactly what `Shell::draw` does on a wake that
+                // changed nothing on disk: roll the window, then draw.
                 if walks {
                     frame.advance().expect("advance");
                 }
@@ -1873,7 +1676,7 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let aged = ageing.percentile(0.5).expect("a sampled round");
     let ticked = ticking.percentile(0.5).expect("a sampled round");
 
-    // **Non-vacuity on exactly that**: every pass has to have crossed a boundary
+    // Non-vacuity on exactly that: every pass has to have crossed a boundary
     // and walked the projection, or neither arm timed an
     // ageing wake and the comparison is about `Frame::advance` alone.
     let walked = history.stats().repeaks;
@@ -1978,7 +1781,7 @@ const ROOMY_PANE: Rect = Rect {
     height: 40,
 };
 
-/// I9 with the **roomy** rung drawn over the frame.
+/// I9 with the roomy rung drawn over the frame.
 #[test]
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
@@ -2006,7 +1809,7 @@ fn a_pinned_frame_holds_the_frame_budget() {
     frame_budget_on("shell-i9-single", 0, area(), None, false, true);
 }
 
-/// **What the staged run costs, in the frame it sits in rather than on its own.**
+/// What the staged run costs, in the frame it sits in rather than on its own.
 #[test]
 fn what_the_staged_run_costs_the_frame_it_is_drawn_in() {
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
@@ -2058,7 +1861,7 @@ fn what_the_staged_run_costs_the_frame_it_is_drawn_in() {
     let with = both.percentile(0.5).expect("a sampled round");
     let without = one.percentile(0.5).expect("a sampled round");
 
-    // **Non-vacuity on what the run did rather than on what the fixture is.** A
+    // Non-vacuity on what the run did rather than on what the fixture is. A
     // fixture assertion would be true by construction; this says the frame really
     // did hold two runs on the arm that claims to.
     frame.show_staged(true);

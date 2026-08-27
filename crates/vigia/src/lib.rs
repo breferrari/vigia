@@ -8,22 +8,16 @@ mod colour;
 /// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
 pub mod config;
 mod glyphs;
-/// Public where its seven siblings are private, and for one reason: `soak.rs` is
-/// an integration test, so it can only reach what the crate exports, and I3's
-/// harness needs the same reader the shell uses. Two implementations of "read
-/// this process's RSS" that could disagree is exactly what one of them existing
-/// is meant to prevent.
+/// Public where its siblings are private: I3's harness in `soak.rs` is an
+/// integration test and must measure through the same reader the shell uses.
 pub mod icons;
 mod input;
 pub mod memory;
 mod render;
 mod signal;
 mod terminal;
-/// Public for the same reason [`memory`] is: a theme file is parsed by a pure
-/// function over a string, `tests/palette.rs` is an integration test and can only
-/// reach what the crate exports, and the alternative is re-exporting three free
-/// functions into the crate root under names invented to avoid colliding with
-/// [`colour`](Depth)'s.
+/// Public for [`memory`]'s reason: `tests/palette.rs` is an integration test and
+/// can only reach what the crate exports.
 pub mod theme;
 mod view;
 
@@ -120,10 +114,9 @@ fn request_for_one(arg: &OsStr) -> Request {
     if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
         return Request::Version;
     }
-    // The first byte, rather than a decoded first character. `-` is ASCII and
-    // both encodings behind `OsStr` are self-synchronising there, so a leading
-    // `b'-'` cannot be the tail of some other character however the rest of the
-    // argument is spelled.
+    // The first byte rather than a decoded character: both encodings behind
+    // `OsStr` are self-synchronising at ASCII, so a leading `b'-'` cannot be the
+    // tail of another character.
     match arg.as_encoded_bytes().first() {
         Some(b'-') => Request::NoSuchOption,
         _ => Request::Watch,
@@ -141,58 +134,31 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let worktree = Worktree::discover(path)?;
     let mut frame = worktree.frame();
 
-    // Same rule, same reason, one input over: a `VIGIA_THEME` that names nothing
-    // or a file that does not parse has to be said on a terminal the reader can
-    // still read. `SPEC.md` §11.1 states it for a path that is not a repository,
-    // and an error painted inside a TUI that then hands the terminal back is an
-    // error nobody sees.
+    // Same rule one input over: an error painted inside a TUI that then hands
+    // the terminal back is an error nobody sees. `SPEC.md` §11.1.
     let detected = terminal::background(std::time::Duration::from_millis(150));
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok(), detected)?;
 
-    // Beside the depth and for the same reason: a property of the terminal,
-    // resolved once before the screen is taken, so the frame path never asks the
-    // environment anything. Refused rather than defaulted when the variable is
-    // set to something this does not recognise, which is `VIGIA_COLOR`'s rule and
-    // reaches the reader on a terminal they can still see, exactly as the line
-    // above does. **Not** when the variable is unreadable: `env::var` drops a
-    // non-UTF-8 value, so that case falls through to detection rather than
-    // refusing, which is the same behaviour the depth ladder has and is stated
-    // here because the two are easy to conflate.
+    // Resolved once before the screen is taken, so the frame path never asks the
+    // environment anything. An unrecognised value is refused, not defaulted.
     let glyphs = Glyphs::detect()?;
 
-    // **Beside the palette and for the palette's reason**, which is the whole of
-    // why it is here rather than inside `App`: a config file that does not parse
-    // has to be said on a terminal the reader can still read, and an error painted
-    // inside a TUI that then hands the terminal back is an error nobody sees.
-    // `SPEC.md` §11.2 B6 as amended by
-    // [#306](https://github.com/breferrari/vigia/issues/306).
+    // Here rather than inside `App` for the palette's reason: a config file that
+    // does not parse has to be reported on a terminal the reader can still read.
+    // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
-    // **The view defaults reach the frame before its first walk, not just the
-    // shell**. Three of the four keys decide how rows the frame already holds
-    // are arranged, so setting them on `App` is all they need. `staged` decides
-    // what the frame *walks*, so a reader whose file says `staged = on` has to
-    // be honoured here or the key sets a flag nothing acts on and the opening
-    // pane is the one they were trying to change. Same defect
-    // `Action::ToggleStaged` had against the keypress, on the path that has no
-    // keypress to trigger it.
+    // The view defaults reach the frame before its first walk, not just the
+    // shell. Three of the four keys only arrange rows the frame already holds;
+    // `staged` decides what it *walks*, so it must be honoured here.
     arm_frame(&mut frame, config);
     frame.advance()?;
 
-    // Inert until something sends: it costs nothing, wakes nobody, and I1 never
-    // sees it. Built here because the handler on it is armed on the next line,
-    // before the terminal is taken, and the other two senders are armed after the
-    // first paint.
+    // Inert until something sends, so I1 never sees it. Built here because the
+    // handler on it is armed on the next line, before the terminal is taken.
     let (tx, rx) = mpsc::channel();
 
-    // **Before the terminal is taken, which is the whole point of it being here.**
-    // `Session::enter` installs the panic hook before its first step for exactly
-    // this reason: the window a safety net has to cover starts at the *first* step
-    // of the takeover, not after the fourth. Armed afterwards, a signal arriving
-    // between raw mode and the cursor was still an uncaught kill, and two earlier
-    // versions of this line got that wrong in two different ways: inside the
-    // struct literal it also sat after `Highlighter::new`'s 318µs grammar load,
-    // because fields evaluate in written order.
+    // Before the terminal is taken, which is the whole point of it being here.
     let armed = signal::forward(tx.clone());
 
     let mut shell = Shell {
@@ -203,10 +169,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // percent of it and deferring it would only move it onto the first frame
         // that draws something.
         highlighter: Highlighter::new(),
-        // Empty at startup, so every file in an already-dirty worktree draws
-        // cold until something writes to it. That is the honest first frame: a
-        // monitor has no way to know what happened before it was looking, and
-        // inventing a recency for it would light up rows nothing has touched.
+        // Empty at startup, so every file in an already-dirty worktree draws cold until
+        // something writes to it.
         history: History::new(),
         theme,
         glyphs,
@@ -235,7 +199,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         ));
     }
 
-    // **For a screen with rows on it, so a clean worktree spawns nothing.**
+    // For a screen with rows on it, so a clean worktree spawns nothing.
     // Starting a monitor on a tree nobody has touched is an ordinary way to
     // start one, and there is no grammar to compile for an empty state.
     if !frame.files().is_empty() {
@@ -253,25 +217,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         );
     }
 
-    // **One call, two frames.** `Shell::draw` settles the repaint debt itself,
-    // so the opening is one mechanism rather than two statements in a row that a
-    // future edit can separate. `App::paint` records why that matters: deleting
-    // the second statement left the whole suite green while the product sat on a
-    // permanently uncoloured screen.
+    // One call, two frames. `Shell::draw` settles the repaint debt itself, so the
+    // opening is one mechanism rather than two statements in a row that a future edit
+    // can separate.
     shell.draw(&mut frame, &worktree, Instant::now())?;
 
-    // Armed only now. Everything above read `.git/index` and the gitignore
-    // files, and a watch armed before those reads observes them: inotify and
-    // FSEvents both report reads and attribute touches, so the shell would wake
-    // itself up once for free at startup. The channel they send on is older than
-    // they are: the signal handler above shares it, and has the opposite
-    // requirement about when it is armed.
+    // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone());
 
-    // **What the tree is made of, which the changed set cannot say on a tree
-    // nobody has written to yet.** A pane is opened beside an agent *before* the
-    // agent writes, so the warm above very often has nothing to warm, and then
-    // the agent's first write arrives under a grammar nothing has compiled.
+    // What the tree is made of, which the changed set cannot say on a tree nobody has
+    // written to yet.
     shell
         .highlighter
         .warm_repository(worktree.workdir().to_path_buf(), Some(warmed(&tx)));
@@ -281,11 +236,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // agent's next write, which on a tree nobody is touching is never.
     shell.request_warm(&worktree, &tx);
 
-    // Cloned rather than moved, because the loop below keeps `tx` to hand a
-    // sender to each warm it spawns. That the channel can therefore never
-    // disconnect is not a change: `spawn_input` reports the one end that
-    // matters as `Wake::InputLost` before its thread returns, and the
-    // disconnect arm below was already unreachable through it.
+    // Cloned rather than moved, because the loop below keeps `tx` to hand a sender to
+    // each warm it spawns.
     spawn_input(tx.clone());
 
     // Reused across iterations rather than allocated per wake. A monitor is left
@@ -293,11 +245,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // loop needs is the one buffer it keeps.
     let mut batch = Vec::with_capacity(DRAIN_CAP);
 
-    // **Three clocks now, and `Shell::patience` is the seam that keeps every one
-    // of them honest.** With `None` from it the receive below is untimed, which
-    // is I1's *0 wakeups while idle* unchanged and unmeasurable-away; the
-    // invariant is that nothing can arm a clock without going through that
-    // function. `SPEC.md` §11.1 carries all three rulings.
+    // Three clocks now, and `Shell::patience` is the seam that keeps every one of them
+    // honest.
     'awake: loop {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
@@ -316,21 +265,15 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             },
         };
 
-        // **The step, folded to however many intervals actually elapsed.** One
-        // `apply` and one paint whatever the terminal has been doing, so the rate
-        // is a fact about time rather than about paint speed. Taken before the
-        // drain so a repeat that coincides with a filesystem tick still lands in
-        // that tick's frame rather than in one of its own.
+        // The step, folded to however many intervals actually elapsed. One `apply` and
+        // one paint whatever the terminal has been doing, so the rate is a fact about
+        // time rather than about paint speed.
         let repeat = shell.held.and_then(|hold| hold.fire(Instant::now()));
         if let Some((step, next)) = repeat {
             shell.held = Some(next);
-            // **The third of three, and it joined last.** `Regions::step_at`
-            // yields only `Scroll` and `ScrollList` today, neither of which reads
-            // a height, so the literal zero this replaced was right by accident
-            // rather than by rule. It is the identical shape to the drag site
-            // [`Shell::diff_rows_for`] was extracted for, and the identical shape
-            // to `Action::Bottom` being classified wrongly: a call site that
-            // decides a height instead of asking for one.
+            // The third of three, and it joined last. `Regions::step_at` yields only
+            // `Scroll` and `ScrollList` today, neither of which reads a height, so the
+            // literal zero this replaced was right by accident rather than by rule.
             let height = shell.diff_rows_for(step, frame.files())?;
             match shell.app.apply(step, &mut frame, height) {
                 Ok(true) => {}
@@ -340,36 +283,20 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         }
 
         let Some(wake) = wake else {
-            // A timeout woke this, so there is nothing to drain and the paint
-            // below is the whole of the frame. Either a step fell due, which the
-            // block above has already applied, or a scroll burst went quiet and
-            // the arrows stop claiming a direction.
-            // **No `Frame::advance` on this path**, deliberately: an ageing wake
-            // is not a filesystem event, nothing on disk changed, and walking
-            // status anyway is the difference between an ageing wake and a tick,
-            // which `SPEC.md` §11.1 prices. The window is rolled by `Shell::draw`
-            // rather than here, for the reason that function's own comment gives.
+            // A timeout woke this, so there is nothing to drain and the paint below is
+            // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
-            // **A timeout is a frame and belongs in the frame time the bar
-            // reports**, which `SPEC.md` §5.1 defines as the whole turn of this
-            // loop. It was absent while the only timeouts were a held step's,
-            // and [#243](https://github.com/breferrari/vigia/issues/243) makes
-            // this the most common frame on a quiet tree: a p99 that could not
-            // see it would be reporting on the frames a reader is *not* looking
-            // at.
+            // A timeout is a frame and belongs in the frame time the bar reports, which
+            // `SPEC.md` §5.1 defines as the whole turn of this loop.
             shell.app.record_frame(began.elapsed());
             continue;
         };
-        // Started before the drain, not after it, because the drain is part of
-        // what a frame costs. `SPEC.md` §5.1 rules that the number on the status
-        // bar is the whole turn of this loop, and the batch that a flick of a
-        // trackpad produces is exactly the case where a narrower definition
-        // would flatter the readout: sixty-four wakes handled and one paint is
-        // one frame to a reader, whatever it is to the channel.
+        // Started before the drain, not after it, because the drain is part of what a
+        // frame costs.
         let began = Instant::now();
         drain(&mut batch, wake, &rx, DRAIN_CAP);
 
@@ -381,63 +308,26 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 Wake::InputLost => {
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
-                // The quit key's arm without the key, so `break` and not
-                // `return`: nothing failed, and a message printed after the
-                // terminal came back would be a message the sender did not ask
-                // for. Breaking drops `shell`, which drops `Session`, which is
-                // what puts the terminal back — the same three steps every other
-                // exit takes, which is the whole reason the handler in `signal`
-                // restores nothing itself.
+                // The quit key's arm without the key, so `break` and not `return`:
+                // nothing failed, and a message printed after the terminal came back
+                // would be a message the sender did not ask for.
                 Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
-                    // **Checked before the event is interpreted**, because a
-                    // release is not an action and would otherwise fall through
-                    // the `else` below with the repeat still armed. `Held::ends`
-                    // carries the five ways a hold finishes and why.
-                    // **The regions the last paint actually drew.** A pointer is
-                    // told what it is over by asking the same function `render`
-                    // asks, against the view that is on screen, so the wheel can
-                    // never scroll the region beside the one under it. Free: no
-                    // syscall and no allocation, unlike the height below, and a
-                    // gesture that arrives before the first paint sees
-                    // `Regions::default()`, which is a screen with no region and
-                    // no bars.
+                    // Checked before the event is interpreted, because a release is not
+                    // an action and would otherwise fall through the `else` below with
+                    // the repeat still armed.
                     let regions = shell.regions();
                     if shell.held.is_some_and(|hold| hold.ends(&event, regions)) {
                         shell.held = None;
                     }
-                    // **What the pointer is over, before anything asks what it
-                    // meant.** A mark is not an action and never becomes one
-                    // (`SPEC.md` §11.1), so this sits outside the `action_for`
-                    // path entirely: the `continue` below drops events that
-                    // request nothing, and a motion is exactly such an event, so
-                    // resolving after it would leave the mark answering the
-                    // pointer's last *click* rather than its position.
+                    // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // **A drag under way answers before the column is consulted,
-                    // and that ordering is the fix.** `action_for` asks what is
-                    // under the pointer, which is the right question for a press
-                    // and the wrong one for a hand already moving: a reader
-                    // dragging a one-column bar leaves that column immediately
-                    // and the gesture ends there. The grip decides instead, and
-                    // the row is clamped so pulling past either end holds that
-                    // end.
+                    // A drag under way answers before the column is consulted, and that
+                    // ordering is the fix.
                     if let Some(on) = shell.grabbed {
                         if let Some(drag) = drag_action(&event, regions, on) {
-                            // **The height, because a drag on the diff's bar is a
-                            // `DiffTo` and `DiffTo` reads one.** This block passed
-                            // zero from the day it was written, and the ordinary
-                            // path forty lines down has always asked
-                            // `Action::needs_height`. So the **first** event of a
-                            // drag resolved through `action_for` with a real
-                            // height and every motion after it resolved here
-                            // without one, which maps the track onto the whole
-                            // rather than onto travel: the thumb runs past its own
-                            // bottom and the last screenful of track is dead.
-                            // That is the arithmetic
-                            // `tests/scroll.rs::dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end`
-                            // pins for the press, one gesture over from where the
-                            // reader spends the rest of the drag.
+                            // The height, because a drag on the diff's bar is a
+                            // `DiffTo` and `DiffTo` reads one.
                             let height = shell.diff_rows_for(drag, frame.files())?;
                             match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
@@ -454,11 +344,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             shell.grabbed = None;
                         }
                     }
-                    // **Armed from the same press that performs the first step**,
-                    // so a click is one step and a hold is that step continued.
-                    // `Regions::step_at` is the geometry both halves read, which
-                    // is what stops the repeat and the press disagreeing about
-                    // where a button is.
+                    // Armed from the same press that performs the first step, so a
+                    // click is one step and a hold is that step continued.
                     if let Event::Mouse(mouse) = &event
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                         && let Some(step) = regions.step_at(mouse.column, mouse.row)
@@ -466,7 +353,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         shell.held =
                             Some(Held::new(step, (mouse.column, mouse.row), Instant::now()));
                     }
-                    // A press on the **track** takes hold of that bar instead,
+                    // A press on the track takes hold of that bar instead,
                     // and keeps it until the button comes up.
                     if let Event::Mouse(mouse) = &event
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -479,14 +366,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         // reason nobody asked for.
                         continue;
                     };
-                    // Asked for only by the one action that reads it, and that is
-                    // the drain's doing rather than tidiness. `Shell::area` is an
-                    // uncached terminal-size syscall and `chrome` allocates,
-                    // and a full repaint per event amortises both. With
-                    // sixty-four notches arriving between two paints, computing
-                    // a height none of them but `Page` reads would be sixty-four
-                    // syscalls and several hundred discarded
-                    // allocations inside one batch.
+                    // Asked for only by the one action that reads it, and that is the
+                    // drain's doing rather than tidiness.
                     let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
@@ -500,26 +381,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 Wake::Tick(paths) => {
                     shell.app.clear_notice();
-                    // **A tick is the world changing, so a demand that could not
-                    // be served a moment ago is worth offering again.** See
-                    // `Shell::served`: without this, one unservable demand would
-                    // keep its file plain for the rest of the session however
-                    // many times it was rewritten.
+                    // A tick is the world changing, so a demand that could not be
+                    // served a moment ago is worth offering again.
                     shell.written = true;
                     // Sampled here and nowhere else, which is the whole of I10's
-                    // relationship with I1: the window is real time, and the only
-                    // thing that moves it is a wake the loop was already having.
-                    // An empty burst still rolls the window and still leaves the
-                    // pulse where it was, which is the staging case.
-                    // **Sized, and the `stat` is here on purpose**
-                    // ([#232](https://github.com/breferrari/vigia/issues/232)).
-                    // Counting files written instead lets a worktree where one
-                    // file is saved over and over put a one in every sample,
-                    // become its own peak, and draw every active column of the
-                    // band at full height: the element says *when* and never
-                    // *how much*. Weighing a write by the bytes it moved is what
-                    // gives both glance elements the shape `SPEC.md` §5.1 names
-                    // them for.
+                    // relationship with I1: the window is real time, and the only thing
+                    // that moves it is a wake the loop was already having.
                     shell
                         .history
                         .record_sized(sized(worktree.workdir(), &paths), began);
@@ -527,12 +394,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // previous diff is still valid to draw. Saying so on the footer
                     // beats blanking a pane for a reason the reader cannot see.
                     match frame.advance() {
-                        // Advance first, follow second, and the order is the
-                        // whole of it: the path is looked up in the file list,
-                        // and before the walk that list is the previous frame's.
-                        // Following into it would jump to wherever that file used
-                        // to sit, which is the shape of a bug that only appears
-                        // when the list changes length.
+                        // Advance first, follow second, and the order is the whole of
+                        // it: the path is looked up in the file list, and before the
+                        // walk that list is the previous frame's.
                         Ok(()) => {
                             if let Some(path) = paths.last() {
                                 shell.app.follow(path, &frame);
@@ -542,45 +406,33 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                 }
                 // Both halves, and they are not the same half twice. The mode is
-                // durable and goes to the header; the message says which failure it
-                // was and goes to the footer, where a notice belongs. See
-                // `App::watch_lost`.
+                // durable and goes to the header; the message says which failure it was
+                // and goes to the footer, where a notice belongs.
                 Wake::WatchLost(message) => {
                     shell.app.watch_lost();
                     shell.app.warn(message);
                 }
-                // Deliberately nothing. The patterns are compiled and sitting in
-                // the `SyntaxSet` the highlighter already holds, so the paint
-                // below is the whole of the response and any state changed here
-                // would be state two mechanisms could disagree about.
+                // Deliberately nothing.
                 Wake::Warmed => {}
             }
         }
 
-        // Before the paint, so the cell drawn below carries this frame's number
-        // rather than the previous one's, and inside the timed region, so the
-        // read's own cost lands in the frame time it sits beside. A readout
-        // measured outside the thing it reports is the omission `SPEC.md` §7
-        // names, and this one had the opportunity to make it twice.
+        // Before the paint, so the cell drawn below carries this frame's number rather
+        // than the previous one's, and inside the timed region, so the read's own cost
+        // lands in the frame time it sits beside.
         shell.app.sample_memory();
 
-        // **Once per batch, not once per wake.** That is the whole of the
+        // Once per batch, not once per wake. That is the whole of the
         // coalescing: every wake above was handled, in arrival order, and only
         // the paint is shared. See `drain`.
         shell.draw(&mut frame, &worktree, began)?;
 
-        // **After the paint, because the paint is what raises the demand.**
-        // `Highlighter::wanted` describes the frame that just drew, so asking
-        // before it would be acting on the previous screen's answer. Inside the
-        // timed region deliberately: spawning a thread is part of what this
-        // frame cost and a readout that excluded it would be measuring a frame
-        // the product does not have.
+        // After the paint, because the paint is what raises the demand.
+        // `Highlighter::wanted` describes the frame that just drew, so asking before it
+        // would be acting on the previous screen's answer.
         shell.request_warm(&worktree, &tx);
 
-        // After the paint, because the paint is the last third of what a frame
-        // costs. The consequence is that the p99 drawn above is always the
-        // *previous* frames' and never this one's, which is the only thing a
-        // frame can honestly say about itself.
+        // After the paint, because the paint is the last third of what a frame costs.
         shell.app.record_frame(began.elapsed());
     }
 
@@ -600,26 +452,16 @@ pub fn sized<'p>(
 /// What a written path now holds on disk, for [`vigia_core::History::record_sized`].
 fn weigh(workdir: &Path, path: &str) -> Option<u64> {
     match std::fs::symlink_metadata(workdir.join(path)) {
-        // **A directory is not a write with a size**, and on the platforms where
-        // it has one it is a lie: `relative` admits directory events, and
-        // `symlink_metadata` reports 0 for a directory on Windows but 4096 and
-        // rising on Linux and macOS. Weighing those would charge `mkdir` churn as
-        // kilobytes against a path that is in no diff at all.
+        // A directory is not a write with a size, and on the platforms where it has one
+        // it is a lie: `relative` admits directory events, and `symlink_metadata`
+        // reports 0 for a directory on Windows but 4096 and rising on Linux and macOS.
         Ok(meta) if meta.is_dir() => None,
         Ok(meta) => Some(meta.len()),
-        // **A file that is gone weighs zero bytes, not "no size"**, and the
-        // difference is the largest edit a reader can make. Mapping both to
-        // `None` kept the store's baseline at whatever the file last held, so a
-        // deletion weighed the floor of one and the *recreation* after it weighed
-        // the dead file's whole size: the biggest change drawn as the smallest
-        // and a trivial one drawn as a spike. Measured at two million bytes: the
-        // delete scored 1 and the fifty-byte file that replaced it scored
-        // 1,999,950.
+        // A file that is gone weighs zero bytes, not "no size", and the difference is
+        // the largest edit a reader can make.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(0),
-        // Anything else is a size that could not be read rather than a file that
-        // is not there: a permission change, a path that stopped being valid
-        // Unicode under us. The store weighs those at its floor, because the
-        // write happened and its magnitude is genuinely unknown.
+        // Anything else is a size that could not be read rather than a file that is not
+        // there: a permission change, a path that stopped being valid Unicode under us.
         Err(_) => None,
     }
 }
@@ -661,7 +503,7 @@ struct Shell {
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     branch: Option<String>,
-    /// How many changes the run this pane is **not** drawing holds.
+    /// How many changes the run this pane is not drawing holds.
     elsewhere: usize,
     /// The last view collected successfully.
     screen: View,
@@ -777,7 +619,7 @@ impl Shell {
         Ok(screen.get_frame().area())
     }
 
-    /// Where the regions of the **last painted** screen were.
+    /// Where the regions of the last painted screen were.
     fn regions(&self) -> Regions {
         self.regions
     }
@@ -817,15 +659,7 @@ impl Shell {
         worktree: &Worktree,
         now: Instant,
     ) -> Result<(), Failure> {
-        // **The window is rolled here because this is where every frame
-        // passes**. It sat on the loop's timeout arm first, which is where the
-        // ageing clock's own wake lands, and that was wrong in a way only an
-        // audit found: `recv_timeout` returns `Ok` whenever anything is queued,
-        // so a stream of wakes that are not ticks never reaches that arm at
-        // all. Pointer motion is exactly such a stream, and the takeover asks
-        // for it, so moving the mouse over a quiet pane redrew a window that
-        // never rolled: the freeze this row exists to fix, for as long as the
-        // motion continued.
+        // The window is rolled here because this is where every frame passes.
         self.history.record_sized([], now);
         self.paint(frame, worktree)?;
         if self.app.owes_repaint() {
@@ -836,25 +670,14 @@ impl Shell {
 
     /// One collect and one paint, with no view of what it leaves owed.
     fn paint(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
-        // Before the chrome, because the chrome carries it, and from the
-        // frame's own file count so the read happens on exactly the frames that
-        // draw the answer. That is the whole of I4 for this read. **Read on
-        // every draw, because every frame draws it**. This went through a
-        // `branch_for` seam whose whole job was the guard *only the empty state
-        // names a branch, so a populated frame must not read a file it will not
-        // draw*. The **header** draws it always, so that premise is false and
-        // the wrapper became the identity over its closure: a function taking a
-        // `&Frame` it did not read, with a docblock arguing for a parameter
-        // that no longer decided anything, and a gate asserting that `read()`
-        // calls `read`.
+        // Before the chrome, because the chrome carries it, and from the frame's own
+        // file count so the read happens on exactly the frames that draw the answer.
+        // That is the whole of I4 for this read.
         self.branch = worktree.branch();
 
-        // The chrome is built before the layout, not after, because the footer
-        // takes a second line at narrow widths and `body_layout` has to know
-        // whether this frame is one of those. `frame.files().len()` is the same
-        // number `View::collect` will report as `View::files`, which is what
-        // keeps this row budget and the renderer's layout in agreement: `render`
-        // recomputes the same split from the same two inputs.
+        // The chrome is built before the layout, not after, because the footer takes a
+        // second line at narrow widths and `body_layout` has to know whether this frame
+        // is one of those.
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
@@ -876,22 +699,16 @@ impl Shell {
             Err(e) => self.app.warn(e.to_string()),
         }
 
-        // **On a frame with nothing to draw, where the work went.**
-        // [#313](https://github.com/breferrari/vigia/issues/313) was reported as an
-        // agent that stages its own work emptying the pane: `no unstaged changes`
-        // is true of a clean tree and of a fully staged one alike, and the reader
-        // had no way to tell them apart. Counting the other run turns that line
-        // into `no unstaged changes · 3 staged`.
+        // On a frame with nothing to draw, where the work went.
         self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
             worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
         } else {
             0
         };
 
-        // Rebuilt so a notice raised by the collect above reaches this frame
-        // rather than the next one. Safe to differ from the chrome the height
-        // came from: a notice cannot change how many rows the footer takes, by
-        // construction. See `Footer::plan`.
+        // Rebuilt so a notice raised by the collect above reaches this frame rather
+        // than the next one. Safe to differ from the chrome the height came from: a
+        // notice cannot change how many rows the footer takes, by construction.
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
@@ -908,17 +725,11 @@ impl Shell {
         self.session.screen().draw(|f| {
             let area = f.area();
             // Captured from inside the draw, because `Frame::area` is the size the
-            // paint actually used: `Shell::area` reads it again and a resize
-            // between the two would leave a pointer told about a screen nobody
-            // saw. Same seam #59 found on the other side.
+            // paint actually used: `Shell::area` reads it again and a resize between
+            // the two would leave a pointer told about a screen nobody saw.
             painted = render::regions(area, &chrome, screen);
-            // **A hover mark does not outlive a relayout, and it has to be
-            // retired here, between the layout and the paint that uses it.** The
-            // obvious placement is after the `draw`, and it does not work: the
-            // frame has already gone to the screen carrying the stale mark, and
-            // correcting the field only reaches the *next* paint. On an idle
-            // tree there is no next paint (I1), so a mark "wrong for one frame"
-            // is wrong until somebody writes to the worktree.
+            // A hover mark does not outlive a relayout, and it has to be retired here,
+            // between the layout and the paint that uses it.
             chrome.hovered = hover_repainted(chrome.hovered, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
@@ -946,21 +757,17 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
             }
         };
 
-        // The tick says only that something changed, which is all the shell
-        // needs: every tick triggers one status walk, and a walk finds whatever
-        // the events missed. That is what makes a recursive watch's blind spot
-        // over freshly created directories harmless here.
+        // The tick says only that something changed, which is all the shell needs:
+        // every tick triggers one status walk, and a walk finds whatever the events
+        // missed.
         while let Some(tick) = watcher.next_tick() {
             if tx.send(Wake::Tick(tick.paths)).is_err() {
                 return;
             }
         }
 
-        // Falling out of that loop should be unreachable: the only thing that
-        // ends it is a `Stop`, and nothing here holds one. Saying so out loud
-        // costs a line and turns "the pane quietly stopped updating" into
-        // something the reader can see, which is the difference between a bug
-        // they report and one they work around for a week.
+        // Falling out of that loop should be unreachable: the only thing that ends it
+        // is a `Stop`, and nothing here holds one.
         let _ = tx.send(Wake::WatchLost(
             "the watch ended; this diff is no longer live".to_owned(),
         ));
@@ -1000,11 +807,8 @@ mod tests {
 
     #[test]
     fn a_relative_worktree_root_still_names_the_folder() {
-        // `vigia .` is the invocation the tool is named after, and it headered
-        // the screen `.` for a whole phase. `gix` hands back the workdir as it
-        // was given, `Path::new(".")` has no final component, and the fallback
-        // then printed the path itself. The header's whole job is saying which
-        // tree this is, and this was the one input where it could not.
+        // `vigia .` is the invocation the tool is named after, and it headered the
+        // screen `.` for a whole phase.
         let here = std::env::current_dir().expect("a current directory");
         let expected = here
             .file_name()
@@ -1022,10 +826,9 @@ mod tests {
 
     #[test]
     fn an_absolute_worktree_root_still_names_its_last_component() {
-        // The other direction, and the one the fix could quietly break: a
-        // resolved path must not start reporting a whole path, a drive prefix or
-        // a `\\?\` extended-length form. This root exists, so resolution
-        // succeeds and the answer has to come from the same place either way.
+        // The other direction, and the one the fix could quietly break: a resolved path
+        // must not start reporting a whole path, a drive prefix or a `\\?\`
+        // extended-length form.
         let here = std::env::current_dir().expect("a current directory");
         let expected = here
             .file_name()
@@ -1075,11 +878,7 @@ mod tests {
 
     #[test]
     fn a_batch_preserves_arrival_order() {
-        // Coalescing is about the paint and not about the events. Follow mode
-        // moves to the path a tick names *last*, and the glance history is a
-        // window over when each one arrived, so a batch that reordered or
-        // dropped wakes would take the reader to the wrong file and draw a
-        // recency gradient for a sequence that never happened.
+        // Coalescing is about the paint and not about the events.
         let (tx, rx) = mpsc::channel();
         for at in 1..=3 {
             tx.send(tick(at)).expect("send");
@@ -1103,11 +902,9 @@ mod tests {
 
     #[test]
     fn a_batch_stops_at_the_cap_so_the_screen_cannot_be_starved() {
-        // The guard, and it is not a tuning knob. An event source faster than
-        // the shell would otherwise keep the queue non-empty forever and the
-        // screen would never be painted again: a stuck key, or a build touching
-        // thousands of files. The cap is what turns "drain the queue" into
-        // "drain a bounded amount of it".
+        // The guard, and it is not a tuning knob. An event source faster than the shell
+        // would otherwise keep the queue non-empty forever and the screen would never
+        // be painted again: a stuck key, or a build touching thousands of files.
         let (tx, rx) = mpsc::channel();
         for at in 0..50 {
             tx.send(tick(at)).expect("send");
@@ -1138,8 +935,7 @@ mod tests {
         // Both `try_recv` failures mean the same thing here, and conflating them
         // deliberately is worth stating: empty means nothing more *yet*, and
         // disconnected means nothing more *ever*, and either way this batch is
-        // complete. The disconnect is then reported by the `recv` that follows,
-        // which is the one place that can act on it.
+        // complete.
         let (tx, rx) = mpsc::channel();
         tx.send(tick(1)).expect("send");
         drop(tx);
@@ -1161,22 +957,17 @@ mod tests {
             "lib.rs was not read, so scanning it proves nothing"
         );
 
-        // **Comments stripped, because both names appear in prose in this file and
-        // a check that reads prose is a check on prose.** Every comment above the
-        // arming discusses `Session::enter`, so one sentence moved earlier would
-        // either fail this test against correct code or pass it against wrong code,
-        // depending on which name it mentioned. Both failure directions are the
-        // gate proving nothing, which is the whole thing this test exists against.
+        // Comments stripped, because both names appear in prose in this file and a
+        // check that reads prose is a check on prose.
         let code: String = shipped
             .lines()
             .filter(|line| !line.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n");
 
-        // **Order.** The handler has to be armed before the first step of the
-        // takeover, not after the fourth: a signal arriving mid-takeover is
-        // otherwise still an uncaught kill. Two earlier versions of this line were
-        // in the wrong place, one of them after a 318µs grammar load.
+        // Order. The handler has to be armed before the first step of the takeover, not
+        // after the fourth: a signal arriving mid-takeover is otherwise still an
+        // uncaught kill.
         let arming = code
             .find("signal::forward(")
             .expect("`run` no longer arms the signal handler at all");
@@ -1189,12 +980,8 @@ mod tests {
              arriving during the takeover is uncaught"
         );
 
-        // **Every input a reader can get wrong is read before the takeover too**,
-        // and the same scan is what says so. `SPEC.md` §11.1 rules that a path
-        // that is not a repository, a `VIGIA_THEME` naming nothing, a variable
-        // this does not recognise and a file that does not parse are all reported
-        // on a terminal the reader can still see, because an error painted inside
-        // a TUI that then hands the terminal back is an error nobody reads.
+        // Every input a reader can get wrong is read before the takeover too, and the
+        // same scan is what says so.
         for reader in [
             "Worktree::discover(",
             "frame.advance()",
@@ -1212,25 +999,17 @@ mod tests {
             );
         }
 
-        // **Form.** `signal`'s escalation latches after one ask: the second goes to
-        // the default disposition and kills the process. That is only safe because
-        // this arm leaves the loop unconditionally, so one ask is always enough. An
-        // arm that merely continued would make the first signal a no-op and the
-        // second a hard kill, which is worse than either alone.
+        // Form. `signal`'s escalation latches after one ask: the second goes to the
+        // default disposition and kills the process. That is only safe because this arm
+        // leaves the loop unconditionally, so one ask is always enough.
         assert!(
             code.contains("Wake::Signalled => break 'awake"),
             "the signalled wake no longer unconditionally leaves the loop, which is \
              what makes `signal`'s one-way escalation latch safe"
         );
 
-        // **Order, again, and this one fixes the state and not the screen when it
-        // is wrong.** `hover_repainted` retires a mark the new layout has
-        // invalidated, and it has to run between `render::regions` and `render`.
-        // Placed after the `draw` it still compiles, still passes every other
-        // gate, and still leaves the stale mark on the glass: the frame carrying
-        // it has already gone out, and the corrected field only reaches the next
-        // paint, which on an idle tree never comes. That was the shipped
-        // behaviour until an audit read the two lines in order.
+        // Order, again, and this one fixes the state and not the screen when it is
+        // wrong.
         let layout = code
             .find("render::regions(area, &chrome, screen)")
             .expect("`draw` no longer computes the layout it is about to paint");
@@ -1247,20 +1026,8 @@ mod tests {
              resolved against and nothing repaints to correct it"
         );
 
-        // **Every frame rolls the window before it paints, and `Shell::draw` is
-        // where every frame passes**. Position is the whole of it: a roll after
-        // the paint draws the picture it was woken to change, and a roll on
-        // only one of the loop's paths leaves the other redrawing a frozen
-        // window. This lived on the timeout arm first and was exactly that
-        // second bug, because `recv_timeout` returns `Ok` whenever anything is
-        // queued and a stream of pointer motion never reaches that arm.
-        // Anchored on the newline and the indentation rather than on the
-        // argument list, because the argument list is the thing this row
-        // changed: the previous anchor spelled the whole signature out and went
-        // red the moment `now: Instant` pushed it onto five lines, reporting
-        // "`Shell::draw` is gone" about a function three lines above it. An
-        // anchor that has to be edited whenever the thing it guards is edited
-        // is an anchor that gets edited to whatever makes the test pass.
+        // Every frame rolls the window before it paints, and `Shell::draw` is where
+        // every frame passes.
         let drawer = &code[code.find("\n    fn draw(").expect("`Shell::draw` is gone")..];
         let signature = &drawer[..drawer
             .find("-> Result<(), Failure>")
@@ -1271,13 +1038,8 @@ mod tests {
              rolling on a clock of its own"
         );
 
-        // **And every caller inside the loop hands it the turn's own instant,
-        // which the two checks above cannot see.** They gate the callee: that the
-        // parameter exists and that the roll reads it. A caller passing
-        // `Instant::now()` satisfies both and puts the defect straight back, one
-        // token wide, compiling clean and green across the whole suite. That
-        // mutation was found by review rather than by this file, which is the
-        // reason it is written down here.
+        // And every caller inside the loop hands it the turn's own instant, which the
+        // two checks above cannot see.
         let turns = &code[code.find("'awake: loop {").expect("the loop is gone")..];
         let calls: Vec<&str> = turns
             .match_indices("shell.draw(")
@@ -1321,15 +1083,7 @@ mod tests {
              late"
         );
 
-        // **And it rolls on the caller's clock, not its own.** This is the
-        // clock-discipline half of the same mechanism and nothing else in the
-        // repo can see it: a tick records its burst at the top of the turn and
-        // reaches the draw only after the status walk, so a `Instant::now()`
-        // taken here rolls away the sample that burst just wrote whenever a
-        // boundary falls in the gap. The store cannot catch it (both calls are
-        // well formed and it has no view of the turn) and no rendering test can
-        // (it needs a boundary inside one frame's cost), so the parameter is the
-        // gate.
+        // And it rolls on the caller's clock, not its own.
         assert!(
             drawer[..painted].contains("self.history.record_sized([], now)"),
             "`Shell::draw` rolls on a clock of its own rather than the turn's, so \
@@ -1351,13 +1105,7 @@ mod tests {
              the measurement I1's amendment was granted on no longer holds"
         );
 
-        // **The arm draws, and that is a liveness gate rather than a tidiness
-        // one.** `Shell::draw` is now the only thing that advances `opened`, so
-        // an arm that woke on the ageing deadline and returned without drawing
-        // would leave `ages_in` pinned at zero and put the loop on
-        // `recv_timeout(0)`: a spin, at full CPU, on an idle worktree, which is
-        // the precise failure I1 exists to forbid and which every gate over
-        // `ages_in` and `patience` would sit through green.
+        // The arm draws, and that is a liveness gate rather than a tidiness one.
         let drew = arm.find("shell.draw(").expect(
             "the timeout arm no longer draws, so the ageing deadline never \
              advances and the loop spins on a zero timeout",
@@ -1371,10 +1119,7 @@ mod tests {
              defines as the whole turn of the loop silently omits what is now the \
              most common frame on a quiet tree",
         );
-        // **Position, not presence.** Containment alone let the call move *above*
-        // the paint and stay green, which reports a frame time excluding the
-        // paint: the most common frame on a quiet tree would then be measured on
-        // everything except the work it does.
+        // Position, not presence.
         assert!(
             drew < timed,
             "the timeout arm records its frame time before it paints, so the \
@@ -1382,12 +1127,8 @@ mod tests {
              excludes the paint that frame exists to do"
         );
 
-        // **The idle receive is untimed, and that is I1's budget as a structure
-        // rather than as an observation.** `Held::wait` returning `None` is gated
-        // in `tests/input.rs`, and it buys nothing unless this loop actually
-        // branches on it: a `recv_timeout` reached unconditionally would put an
-        // idle monitor on a poll loop while every gate over `Held` stayed green,
-        // because none of them can see which receive the loop calls.
+        // The idle receive is untimed, and that is I1's budget as a structure rather
+        // than as an observation.
         let untimed = code
             .find("None => match rx.recv()")
             .expect("the loop no longer has an untimed receive for the idle case");
@@ -1399,12 +1140,9 @@ mod tests {
             "the loop reaches `recv_timeout` before it has decided whether \
              anything is held, so an idle monitor is being given a deadline"
         );
-        // **Three clocks now, and one function that answers for all of them.** A
-        // deadline asked separately would be another chance to leave one armed on
-        // an idle monitor, and the gate above can only see the branch, not what
-        // fed it. Matched on the arguments rather than on the whole call, because
-        // the call spans lines and a formatter deciding otherwise is not a defect
-        // this should report.
+        // Three clocks now, and one function that answers for all of them. A deadline
+        // asked separately would be another chance to leave one armed on an idle
+        // monitor, and the gate above can only see the branch, not what fed it.
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );

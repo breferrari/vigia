@@ -22,10 +22,8 @@ fn the_branch_is_the_short_name_of_what_head_points_at() {
 
 #[test]
 fn a_detached_head_names_no_branch() {
-    // Ordinary rather than exceptional: a rebase or a bisect leaves an agent
-    // here routinely. `SPEC.md` §11.1 rules that the line drops the branch
-    // instead of inventing one, because `HEAD@abc123` would put a commit id in a
-    // monitor that shows no commits.
+    // Ordinary rather than exceptional: a rebase or a bisect leaves an agent here
+    // routinely.
     let scratch = Scratch::new("branch-detached");
     scratch.write("a.txt", "one\n");
     scratch.commit_all("first");

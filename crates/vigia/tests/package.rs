@@ -45,10 +45,7 @@ fn test_files() -> Vec<(String, String)> {
         })
         .collect();
     found.sort();
-    // Twenty-one today. The floor is set just under that rather than at some round
-    // number well below it, because the only thing this guards is the scan
-    // pointing at the wrong directory, and a loose floor makes that survivable:
-    // `> 10` would still pass if half the suite went missing.
+    // Twenty-one today.
     assert!(
         found.len() >= 20,
         "found only {} test files, which means the scan is looking in the wrong \
@@ -73,10 +70,7 @@ fn escaping_tests() -> Vec<String> {
         .map(|(name, _)| name)
         .collect();
 
-    // **Exactly this many, not at least.** A floor was the first spelling and it
-    // reopens the very defect this file exists to close: adding one more escaping
-    // test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml` and
-    // `RELEASE-SMOKE.md` all go on saying the old number with nothing red.
+    // Exactly this many, not at least.
     assert_eq!(
         escaping.len(),
         ESCAPING_FILES,
@@ -85,9 +79,8 @@ fn escaping_tests() -> Vec<String> {
         escaping.len()
     );
     // This file must be among them, which is the check with the sharpest teeth:
-    // `package.rs` reads `SPEC.md` and three workflows, so if the scanner stops
-    // seeing it, the scanner is broken rather than the repository clean. It was
-    // detected for the wrong reason once already; see `PATH_ATTRIBUTE`.
+    // `package.rs` reads `SPEC.md` and three workflows, so if the scanner stops seeing
+    // it, the scanner is broken rather than the repository clean.
     assert!(
         escaping.iter().any(|name| name == "package.rs"),
         "the scanner no longer detects its own escape, so it has stopped \
@@ -99,11 +92,9 @@ fn escaping_tests() -> Vec<String> {
 
 /// The entries of a TOML array declared as `key = [ … ]`.
 fn toml_array(source: &str, key: &str) -> Vec<String> {
-    // Comments first, on the same rule as `without_comments` for YAML: a `#`
-    // anywhere inside a multi-line array would otherwise be split on commas
-    // along with everything else and produce entries made of prose. Every array
-    // this reads is a list of bare strings, so there is no `#`-inside-a-value
-    // case to protect.
+    // Comments first, on the same rule as `without_comments` for YAML: a `#` anywhere
+    // inside a multi-line array would otherwise be split on commas along with
+    // everything else and produce entries made of prose.
     let source = without_comments(source);
     let start = source
         .find(&format!("\n{key} = ["))
@@ -129,13 +120,8 @@ fn run_commands(yaml: &str) -> Vec<String> {
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.trim_start();
-        // `- run:` as well as `run:`, since the first step of a list carries the
-        // dash on the same line as its first key.
-        // The dash form carries the key on the same line as the list marker, so
-        // the indent that bounds a block body is the **key's**, not the dash's.
-        // Measuring from the dash makes the body look two columns wider than it
-        // is, and the scan then swallows the step's sibling `env:` and `if:`
-        // keys into the command.
+        // `- run:` as well as `run:`, since the first step of a list carries the dash
+        // on the same line as its first key.
         let (rest, indent) = if let Some(rest) = trimmed.strip_prefix("- run:") {
             (rest, line.len() - trimmed.len() + 2)
         } else if let Some(rest) = trimmed.strip_prefix("run:") {
@@ -157,13 +143,7 @@ fn run_commands(yaml: &str) -> Vec<String> {
                     .chars()
                     .all(|c| matches!(c, '-' | '+' | '0'..='9')));
 
-        // **Both arms absorb the continuation lines, and only the block one did
-        // at first.** The inline arm took its single line and moved on, which
-        // was fail-open on precisely the flag this scan exists to reject: the
-        // real publish step *is* the inline form, so appending
-        // `\` and `--dry-run` on the next line gave GitHub one command carrying
-        // `--dry-run` and gave this scan one command without it. Every
-        // assertion passed while the release published nothing.
+        // Both arms absorb the continuation lines, and only the block one did at first.
         let mut collected: Vec<String> = if is_block {
             Vec::new()
         } else {
@@ -208,11 +188,7 @@ fn registry_unreachable(stderr: &str) -> bool {
         "could not connect",
         "could not resolve",
     ];
-    // **Only the lines cargo failed on.** A network blip that cargo *recovers*
-    // from prints `warning: spurious network error` and then carries on, so
-    // matching the whole stderr would let a recovered blip vouch for a run that
-    // went on to fail for an unrelated reason, skipping the gate on a broken
-    // manifest. The failure is what is being classified, not the transcript.
+    // Only the lines cargo failed on.
     let lowered = stderr.to_lowercase();
     lowered
         .lines()
@@ -330,7 +306,7 @@ fn assert_step_skips_a_rehearsal(bump: &str, name: &str) {
         .trim()
         .trim_start_matches("if:")
         .trim();
-    // **The whole condition, not a substring of it.** `!inputs.rehearse ||
+    // The whole condition, not a substring of it. `!inputs.rehearse ||
     // github.event_name == 'workflow_dispatch'` contains the needle and is
     // always true, so a `contains` check licenses the exact thing it forbids.
     assert_eq!(
@@ -418,13 +394,11 @@ fn workspace_members() -> Vec<(String, String)> {
     toml_array(&repo_file("Cargo.toml"), "members")
         .into_iter()
         .map(|dir| {
-            // **Comments stripped first**, which is the rule every other parser
-            // in this file follows and the one a line-prefix scan needs most: a
-            // `# name = "the-old-name"` sitting between `[package]` and the real
-            // field is exactly what someone leaves behind while renaming a
-            // crate, and `find_map` would take it. `toml_array` strips for the
-            // same reason, and there is no `#`-inside-a-value case here because
-            // a crates.io name cannot contain one.
+            // Comments stripped first, which is the rule every other parser in this
+            // file follows and the one a line-prefix scan needs most: a `# name =
+            // "the-old-name"` sitting between `[package]` and the real field is exactly
+            // what someone leaves behind while renaming a crate, and `find_map` would
+            // take it.
             let manifest = without_comments(&repo_file(&format!("{dir}/Cargo.toml")));
             let package = manifest
                 .split_once("[package]")
@@ -466,12 +440,7 @@ fn package_list(package: &str, gate: &str) -> Option<String> {
     let output = Command::new(env!("CARGO"))
         .args(["package", "--list", "--allow-dirty", "-p", package])
         .current_dir(repo_root())
-        // **Colour off, or the classifier below cannot see a `warning:`.**
-        // `ci.yml` sets `CARGO_TERM_COLOR: always` for the whole workflow, so in
-        // CI cargo writes `\e[1m\e[93mwarning\e[0m:` and a prefix test for
-        // `warning:` is false on every line. That would put the one filter that
-        // stops a recovered network blip excusing a broken manifest out of
-        // action precisely where it matters, and nowhere else.
+        // Colour off, or the classifier below cannot see a `warning:`.
         .env("CARGO_TERM_COLOR", "never")
         .output();
 
@@ -533,19 +502,7 @@ fn the_spec_names_every_test_that_escapes_the_package() {
         );
     }
 
-    // **And every document that states the count states the right one.**
-    // Asserting the number in a test and leaving the three files to agree with
-    // it by hand is the same defect with a smaller radius: bumping the constant
-    // for a seventeenth escaping test would otherwise leave all three saying
-    // "sixteen", green.
-    // Each document's own sentence, not the bare numeral, and the reason survives
-    // every bump rather than being about one number: a bare `contains("fifteen")`
-    // is satisfied by "sixteen**th**" the moment the manifest writes about a
-    // seventeenth escape, and the numeral for the previous count was already sitting
-    // in SPEC.md about column widths, so two of the three documents would pass
-    // untouched while still saying the old number. Found at thirteen, paid for at
-    // fourteen, and it is why these are phrases: a count assertion an unrelated
-    // numeral satisfies is the same failure as a count in prose.
+    // And every document that states the count states the right one.
     for (path, text, phrase) in [
         (
             "SPEC.md",
@@ -611,11 +568,7 @@ fn only_the_commands_a_workflow_runs_are_read_as_commands() {
         "a `\\` continuation joins, or a flag on the next line is invisible"
     );
 
-    // **A continuation after the *inline* form.** This is the shape the real
-    // publish step has, and the arm that handled it took one line and stopped,
-    // so `--dry-run` on the next line was invisible to the assertion that
-    // exists to reject it while GitHub ran it. Fail-open, on the one flag that
-    // makes the whole job a no-op.
+    // A continuation after the *inline* form.
     let inline_continued = run_commands(
         "        run: cargo publish --workspace --locked \\\n          --dry-run\n        env:\n          TOKEN: x\n",
     );
@@ -703,10 +656,8 @@ fn the_unreachable_registry_is_told_apart_from_a_broken_manifest() {
          unavailable"
     );
 
-    // Every marker is exercised, because a marker nobody has ever matched is
-    // the thing this whole function was rewritten to stop being. Four of the
-    // seven were unreached by the cases above, which is the same "prose wearing
-    // a const" the docblock complains about, one level in.
+    // Every marker is exercised, because a marker nobody has ever matched is the thing
+    // this whole function was rewritten to stop being.
     for marker in [
         "error: failed to fetch `https://github.com/rust-lang/crates.io-index`",
         "error: failed to download from `https://crates.io/api/v1/crates/gix`",
@@ -736,13 +687,8 @@ fn the_internal_dependency_tracks_the_workspace_version() {
     let root = repo_file("Cargo.toml");
     let clean = without_comments(&root);
 
-    // **Scoped to the `[workspace.package]` block, not the first `version = `
-    // in the file.** The unscoped form was demonstrated green against a stale
-    // pin: put any table declaring a `version` above `[workspace.package]`, and
-    // this read *that* one, compared it against a `vigia-core` pin of the same
-    // number, and reported agreement while the workspace sat at a different
-    // version. A vacuity guard on the shape of the string cannot see that,
-    // because both strings are perfectly well-formed versions.
+    // Scoped to the `[workspace.package]` block, not the first `version = ` in the
+    // file.
     let package_block = clean
         .split("\n[workspace.package]")
         .nth(1)
@@ -784,10 +730,7 @@ fn the_internal_dependency_tracks_the_workspace_version() {
         "parsed {workspace_version:?} as the workspace version, which is not one"
     );
 
-    // And the shell must still *use* the workspace entry. Everything above
-    // checks the entry is correct; none of it notices if `crates/vigia` stops
-    // reading it and inlines its own `version` again, which is precisely the
-    // shape this whole gate was written against, one file over.
+    // And the shell must still *use* the workspace entry.
     let shell = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"));
     assert!(
         without_comments(&shell).contains("vigia-core.workspace = true"),
@@ -802,10 +745,8 @@ fn the_internal_dependency_tracks_the_workspace_version() {
 fn nothing_excluded_has_since_stopped_existing() {
     let names: Vec<String> = test_files().into_iter().map(|(name, _)| name).collect();
 
-    // Both arms of `covers` are exercised here rather than left to whatever
-    // `exclude` happens to hold. The literal arm is unreachable from the current
-    // manifest, and an unreachable branch in a gate's own helper is the thing
-    // that breaks the first time someone narrows the pattern.
+    // Both arms of `covers` are exercised here rather than left to whatever `exclude`
+    // happens to hold.
     assert!(covers("tests/**", "soak.rs"), "the glob arm covers a test");
     assert!(
         covers("tests/soak.rs", "soak.rs"),
@@ -817,10 +758,7 @@ fn nothing_excluded_has_since_stopped_existing() {
     );
     assert!(!covers("benches/**", "soak.rs"), "a glob elsewhere misses");
 
-    // And the third arm, the one that refuses to guess. `covers` panics rather
-    // than answering "no" for a pattern shape it does not understand, because a
-    // silent no here reads as a finding, and that arm was unexercised while the
-    // comment above claimed both arms were covered.
+    // And the third arm, the one that refuses to guess.
     let unknown = std::panic::catch_unwind(|| covers("tests/*.rs", "soak.rs"));
     assert!(
         unknown.is_err(),
@@ -828,11 +766,7 @@ fn nothing_excluded_has_since_stopped_existing() {
          pattern this gate cannot evaluate reads as an escape it has caught"
     );
 
-    // Only patterns aimed at `tests/` are checked against test names. This gate
-    // is about the exclusion that keeps escaping tests out of the tarball; an
-    // `assets/**` added later for an unrelated reason is not stale merely
-    // because no test matches it, and asserting otherwise would make a correct
-    // edit go red.
+    // Only patterns aimed at `tests/` are checked against test names.
     for pattern in exclude_patterns()
         .into_iter()
         .filter(|pattern| pattern.starts_with("tests/"))
@@ -875,11 +809,8 @@ fn the_profile_that_ships_is_the_profile_the_budgets_measure() {
     );
 
     // The scan above ends the block at the next `\n[`, so a sub-table like
-    // `[profile.dist.package."gix"]` would sit *outside* what it read and tune
-    // the release build without this assertion ever seeing it. Cargo supports
-    // per-package profile overrides, so that is a real edit somebody could make
-    // in good faith, and the block scan cannot be widened to catch it without
-    // becoming a TOML parser.
+    // `[profile.dist.package."gix"]` would sit *outside* what it read and tune the
+    // release build without this assertion ever seeing it.
     assert!(
         !root.contains("\n[profile.dist."),
         "a [profile.dist.*] sub-table overrides the shipped profile where the \
@@ -901,23 +832,15 @@ fn the_release_pipeline_publishes_to_the_registry() {
          publishes to crates.io on a tag. It holds {jobs:?}"
     );
 
-    // Comment-stripped, because this repository comments heavily and the
-    // paragraph above the `run:` line in that workflow quotes the very command
-    // asserted here. Against the raw text, commenting out the publish and
-    // leaving its explanation in place keeps this gate green.
+    // Comment-stripped, because this repository comments heavily and the paragraph
+    // above the `run:` line in that workflow quotes the very command asserted here.
     let job = without_comments(&repo_file(WORKFLOW));
     assert!(
         job.contains("workflow_call"),
         "{WORKFLOW} must be a reusable workflow; dist calls it with `uses:`"
     );
 
-    // **Only a `run:` body counts as publishing.** Stripping comments was not
-    // enough: a step called
-    // `- name: publish (was cargo publish --workspace, split for retries)`
-    // satisfies a whole-file `contains` while the `run:` beneath it does
-    // something else entirely, and that is a plausible edit rather than a
-    // contrived one, because it is what somebody writes while debugging a
-    // failed release. So the search is scoped to the command lines.
+    // Only a `run:` body counts as publishing.
     let commands = run_commands(&job);
     let publishes: Vec<&String> = commands
         .iter()
@@ -944,26 +867,15 @@ fn the_release_pipeline_publishes_to_the_registry() {
          resolution this repository tested"
     );
 
-    // **The one flag that makes this whole job a no-op.** Every assertion above
-    // passes with `--dry-run` appended, and so does the release: binaries build,
-    // the tap is written, the announcement goes out, and the name is never
-    // claimed. It is also the likeliest edit anybody makes, because it is what
-    // you add to test the workflow and the easiest thing to forget to remove.
+    // The one flag that makes this whole job a no-op.
     assert!(
         !publish.contains("--dry-run"),
         "{publish:?} carries --dry-run, so the release would do everything \
          except the publish and report success"
     );
 
-    // `--workspace` publishes every member that does not opt out, so what the
-    // workspace *holds* is part of what the release ships. A crate added for
-    // any reason, a fixture generator, a proc macro, an experiment, would be
-    // published to crates.io permanently on the next tag, and nothing else
-    // here would mention it. The member list is therefore pinned whole: two
-    // published crates is a deliberate number (`SPEC.md` §6's engine/shell
-    // split), `xtask` is deliberately unpublished (`publish = false`, §6's
-    // grammar-dump builder), and any new name is a decision that should be
-    // made here rather than discovered at the tag.
+    // `--workspace` publishes every member that does not opt out, so what the workspace
+    // *holds* is part of what the release ships.
     let members = toml_array(&repo_file("Cargo.toml"), "members");
     assert_eq!(
         members,
@@ -980,16 +892,8 @@ fn the_release_pipeline_publishes_to_the_registry() {
          crates, and a third publish is a decision, not a side effect"
     );
 
-    // dist generates release.yml from the config above, so this asserts the
-    // generated file is current rather than that the config is right. A stale
-    // release.yml is the failure mode of editing the config and not
-    // regenerating, and it is a real one **for the publish wiring specifically**:
-    // dropping `./publish-crates-io` from the config and not regenerating leaves
-    // `dist generate --check` red and both assertions
-    // below red too, while the *target* list bakes into release.yml not at all
-    // (zero triples appear in it; the build matrix is computed at release time
-    // from `dist plan`). So this checks the half that can actually go stale, and
-    // `ci.yml`'s `dist generate --check` covers the whole file.
+    // dist generates release.yml from the config above, so this asserts the generated
+    // file is current rather than that the config is right.
     let release = without_comments(&repo_file(".github/workflows/release.yml"));
     assert!(
         release.contains("uses: ./.github/workflows/publish-crates-io.yml"),
@@ -1000,11 +904,9 @@ fn the_release_pipeline_publishes_to_the_registry() {
         "release.yml must schedule the registry job at all; run `dist generate`"
     );
 
-    // **The mechanism is asserted rather than the conclusion**, because the
-    // obvious ordering claim is false: `announce` waiting on the publish job
-    // does not stop a release half-shipping. It
-    // does not: `host` runs `gh release create` with no `--draft`, so the
-    // binaries are public before the registry job starts.
+    // The mechanism is asserted rather than the conclusion, because the obvious
+    // ordering claim is false: `announce` waiting on the publish job does not stop a
+    // release half-shipping.
     let gh_release_line = release
         .lines()
         .find(|line| line.contains("gh release create"))
@@ -1020,10 +922,9 @@ fn the_release_pipeline_publishes_to_the_registry() {
          four places. Better behaviour, but it has to be written down \
          deliberately rather than become true by accident: {gh_release_line}"
     );
-    // The flag can also arrive through a variable, which is exactly how the
-    // prerelease flag on that same line is passed, so reading the literal alone
-    // is defeated by dist's own idiom. Any `DRAFT` in the generated file means
-    // the assumption above needs re-reading rather than trusting.
+    // The flag can also arrive through a variable, which is exactly how the prerelease
+    // flag on that same line is passed, so reading the literal alone is defeated by
+    // dist's own idiom.
     assert!(
         !release.to_uppercase().contains("DRAFT"),
         "release.yml mentions a draft somewhere, and the ordering documented \
@@ -1054,15 +955,10 @@ fn the_release_pipeline_publishes_to_the_registry() {
 /// than from a second hand-typed copy.
 #[test]
 fn the_purity_gate_derives_its_targets_from_the_release_config() {
-    // Comment-stripped before slicing, because the region is heavily commented
-    // and those comments discuss targets by name. The non-vacuity check below
-    // asks whether a triple is spelled literally in the job, and prose about a
-    // triple is not the job spelling one.
+    // Comment-stripped before slicing, because the region is heavily commented and
+    // those comments discuss targets by name.
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    // Bounded at both ends. Taking everything *after* the marker was the first
-    // spelling and it reached into the `musl` job below, which names its target
-    // literally and for good reason, so the non-vacuity check below fired on a
-    // different job's line. `exit $status` is this script's last line.
+    // Bounded at both ends.
     let job = ci
         .split_once("assert no cc, cmake or bindgen")
         .map(|(_, rest)| rest)
@@ -1117,8 +1013,8 @@ fn the_release_button_reaches_the_release() {
         .find(|command| command.contains("gh workflow run"))
         .expect("bump.yml dispatches the release");
 
-    // **The word immediately after `gh workflow run`, not a mention anywhere in
-    // the step.** A `run: |` body is one string here, and that body ends with an
+    // The word immediately after `gh workflow run`, not a mention anywhere in
+    // the step. A `run: |` body is one string here, and that body ends with an
     // `echo` naming `release.yml` for the log. Asserting `contains` over the
     // whole block therefore passed against `gh workflow run releases.yml`,
     // matching the echo while the dispatch went to a workflow that does not
@@ -1154,35 +1050,21 @@ fn the_release_button_reaches_the_release() {
          rehearsal in bump.yml may now publish"
     );
 
-    // **All three tokens are checked before the version moves, and the two that
-    // must write are checked for `push`.** This is v0.1.0's actual failure as a
-    // gate. `HOMEBREW_TAP_TOKEN` could read the tap and not write to it; the
-    // formula job checked the tap out successfully and then failed `git push`
-    // with a 403, by which point the GitHub release and the crates.io publish
-    // had both already happened.
+    // All three tokens are checked before the version moves, and the two that must
+    // write are checked for `push`.
     let preflight = commands
         .iter()
         .find(|command| command.contains(r#"-z "${CARGO_REGISTRY_TOKEN"#))
         .expect(
             "bump.yml must guard on the registry token being empty before it              bumps anything. Finding the *name* is not enough: it appears in              this step's own error message and in its `env:` block, so a              search for it passes against a check that has been disabled",
         );
-    // Each assertion names a form only the *check* has, never one an error
-    // message or an `env:` entry also carries. Both of these were written the
-    // loose way first and both survived mutation: deleting the tap presence
-    // check left `HOMEBREW_TAP_TOKEN` in the curl and the env block, and
-    // replacing the jq path left `permissions.push` in the failure message.
-    // That is the fourth time in this file a mention has stood in for the thing.
+    // Each assertion names a form only the *check* has, never one an error message or
+    // an `env:` entry also carries.
     assert!(
         preflight.contains(r#"-z "${HOMEBREW_TAP_TOKEN"#),
         "the pre-flight does not check the tap token is set, and that is the          one that failed a release: {preflight}"
     );
-    // **An actual write, not a report about one.** The first version read
-    // `.permissions.push` from the API, and that is a proxy which does not
-    // predict the thing: it answered `true` for the very token whose `git push`
-    // had been denied 403, because for a fine-grained token that field reflects
-    // the user's role on the repository rather than the token's grants. So the
-    // check creates a ref in the tap and deletes it, and this asserts that
-    // shape rather than any wording.
+    // An actual write, not a report about one.
     assert_write_probe(preflight, "probe", "${tap}");
 
     // And it has to run before the commit, or it reports a problem the version
@@ -1210,16 +1092,11 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
              anything, in the form only the check has",
         );
 
-    // **A real write to *this* repository, told apart from the tap's probe by
-    // the repository it names.** Both probes are the same shape on purpose, so
-    // the assertions have to say which one they are looking at, in both
-    // directions: see [`assert_write_probe`] for the direction that was missed.
+    // A real write to *this* repository, told apart from the tap's probe by the
+    // repository it names.
     assert_write_probe(preflight, "mine", "${GITHUB_REPOSITORY}");
 
-    // **The other half of the bypass, because the write probe does not imply
-    // it.** A token with `Contents: Read and write` still cannot move a
-    // protected branch unless the account behind it is an admin. The probe
-    // above covers the grant; this covers the standing.
+    // The other half of the bypass, because the write probe does not imply it.
     let admin = preflight
         .find(".permissions.admin")
         .expect("nothing reads the standing of the account behind RELEASE_TOKEN");
@@ -1248,18 +1125,14 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     // promise the whole rehearsal path makes.
     assert_step_skips_a_rehearsal(&bump, "commit the bump");
 
-    // **No step anywhere forgives its own failure.** Named steps are checked
-    // above, but `continue-on-error` is worse than an `if:` wherever it lands:
-    // on `commit the bump` it lets a *failed push* dispatch the release anyway,
-    // and it sets that step's outcome to `failure`, which also silences the
-    // recovery notice that exists for exactly this case.
+    // No step anywhere forgives its own failure.
     assert!(
         !keys_at_indent(&bump, 8).contains(&"continue-on-error".to_owned()),
         "a step in bump.yml carries `continue-on-error:`, so the release can \
          proceed past a step that failed"
     );
 
-    // **The commit happens before the dispatch.** Reordering them dispatches a
+    // The commit happens before the dispatch. Reordering them dispatches a
     // release for a version the default branch does not carry yet, which
     // publishes the old code under the new number.
     assert_precedes(
@@ -1270,10 +1143,8 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
          release would build whatever the default branch carried beforehand",
     );
 
-    // **A rehearsal dispatches `dry-run` and a real release does not, and the
-    // polarity is the assertion.** Flipping this one comparison makes every
-    // rehearsal publish to crates.io for real, which is the irreversible half
-    // of the release and the one thing the rehearsal path exists to avoid.
+    // A rehearsal dispatches `dry-run` and a real release does not, and the polarity is
+    // the assertion.
     let dispatch = commands
         .iter()
         .find(|command| command.contains("gh workflow run"))
@@ -1285,12 +1156,8 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
          on every rehearsal: {dispatch}"
     );
 
-    // **The checkout persists no credentials, and this is the assertion the
-    // push assertion above rests on.** With the default, the workflow's own
-    // token sits in `.git/config` as an `Authorization` header and git prefers
-    // it over the userinfo in the push URL, so the push goes out as the bot and
-    // is rejected exactly as run 31435812487 was, with every other check here
-    // green. Naming the token in the URL is necessary and not sufficient.
+    // The checkout persists no credentials, and this is the assertion the push
+    // assertion above rests on.
     assert!(
         bump.contains("persist-credentials: false"),
         "the checkout persists the workflow's token into .git/config, where git \
@@ -1298,7 +1165,7 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
          as the bot and be rejected, with this whole pre-flight passing"
     );
 
-    // **The remote the push names carries the token.** This is the assertion the
+    // The remote the push names carries the token. This is the assertion the
     // whole gate exists for: `git push origin` is what failed, it is one word
     // away from what ships, and every check above passes with it restored.
     let commit = commands
@@ -1318,12 +1185,7 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
          the checks main requires"
     );
 
-    // **And it pushes the bump at the default branch.** The remote being right
-    // says nothing about the refspec: `HEAD:refs/heads/scratch` authenticates
-    // perfectly, lands the version somewhere nothing tags, and leaves the
-    // release dispatching against a branch that never moved. Found by mutation,
-    // after the remote assertion had already been mutation-tested and looked
-    // like enough.
+    // And it pushes the bump at the default branch.
     let refspec = commit
         .split("git push")
         .nth(1)
@@ -1365,10 +1227,8 @@ fn the_packaged_artifact_carries_no_tests() {
          something the tarball does not contain"
     );
 
-    // The other direction, so the assertion above cannot pass because the list
-    // came back empty. `README.md` is in the package only because `readme` points
-    // outside this directory and cargo copies it in, which is itself worth
-    // holding: a registry page with no readme reads as abandoned.
+    // The other direction, so the assertion above cannot pass because the list came
+    // back empty.
     assert!(
         listed.contains("src/main.rs"),
         "the package list has no src/main.rs in it, so it is not the list this \
@@ -1405,12 +1265,7 @@ fn every_published_crate_ships_the_licence() {
              the list this gate thinks it is reading:\n{listed}"
         );
 
-        // **And the grammar dump, for the engine.** `vigia-core` reaches it
-        // with `include_bytes!`, so a `.crate` without it does not merely lack
-        // an asset: it does not compile, and the failure lands inside `cargo
-        // publish` at release time rather than in any test here. It is one
-        // `exclude` line away from happening, which is the same distance the
-        // licence was.
+        // And the grammar dump, for the engine.
         if package == "vigia-core" {
             assert!(
                 listed_has(&listed, "assets/syntaxes.bin"),
@@ -1418,27 +1273,14 @@ fn every_published_crate_ships_the_licence() {
                  `Highlighter::new` embeds it with `include_bytes!`, so the \
                  published crate would not build at all:\n{listed}"
             );
-            // **And the roster, for the same reason one level over.** This
-            // crate publishes its own test suite, so `tests/coverage.rs` ships
-            // too, and it reaches the roster with `include_str!`. A `.crate`
-            // without it compiles the library and fails the tests a consumer
-            // runs, which is the failure this file exists to keep out of a
-            // release. Verified once by hand as well: the extracted 0.19.0
-            // tarball builds and passes `cargo test --test coverage`.
+            // And the roster, for the same reason one level over.
             assert!(
                 listed_has(&listed, "assets/GRAMMARS.txt"),
                 "the .crate for {package} carries no assets/GRAMMARS.txt, and \
                  its published test suite embeds it with `include_str!`:\n{listed}"
             );
-            // **And the attribution, which is the one whose reason lives
-            // outside this repository.** The dump embeds a few hundred
-            // third-party grammars, each under its own licence. For two
-            // releases the notice describing them sat at the repository root,
-            // so `cargo package` left it behind and nobody who installed the
-            // crate ever saw it. It ships beside the dump now;
-            // `workspace.metadata.dist`'s `include` is what puts it in the
-            // binary archives, and this is what keeps it in the source
-            // package.
+            // And the attribution, which is the one whose reason lives outside this
+            // repository.
             assert!(
                 listed_has(&listed, "assets/NOTICE.md"),
                 "the .crate for {package} carries no assets/NOTICE.md, so it \

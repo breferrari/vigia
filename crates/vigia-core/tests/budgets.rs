@@ -158,10 +158,8 @@ fn a_frame_recomputes_only_what_changed() {
 
 #[test]
 fn diffing_one_file_costs_the_same_however_much_else_changed() {
-    // Comparing one call against the sum of all calls would prove nothing: if
-    // `diff` inflated uniformly, the sum would inflate with it and the ratio
-    // would hold. The claim only has teeth across two fixtures whose per-file
-    // content is identical and whose file counts are not.
+    // Comparing one call against the sum of all calls would prove nothing: if `diff`
+    // inflated uniformly, the sum would inflate with it and the ratio would hold.
     let few = Scratch::large_diff("budget-scale-few", FEW_FILES, LINES);
     let many = Scratch::large_diff("budget-scale-many", FILES, LINES);
 
@@ -283,11 +281,7 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
         budget(I7_STARTUP)
     );
 
-    // I9 over the primitives: one enumeration plus the file that changed. This
-    // is the floor, not a frame any monitor has, because it has no memory of the
-    // frame before it. `a_real_frame_holds_the_frame_budget` gates the shape a
-    // monitor actually drives. p99 rather than a mean, because the budget is a
-    // tail claim.
+    // I9 over the primitives: one enumeration plus the file that changed.
     let frame = || {
         time_cpu(|| {
             let change = worktree
@@ -353,11 +347,7 @@ fn a_real_frame_holds_the_frame_budget() {
     }
     let cost = delta(before, frame.stats());
 
-    // Non-vacuity, and it deliberately does not count recomputes. A recompute
-    // count cannot show that the edits are landing: one write keeps its file
-    // unsettled for the whole settle margin, so every frame inside that window
-    // recomputes it whether or not anything is still being edited. Counting
-    // would pass against a test that edited once and then sat still.
+    // Non-vacuity, and it deliberately does not count recomputes.
     let last = marker.borrow().clone();
     let shared = frame
         .files()
@@ -422,7 +412,7 @@ fn hunk_bytes(frame: &mut Frame, path: &str, ordinal: usize) -> u64 {
 
 /// What re-highlighting cost after one line changed, and what it should have.
 struct Rehighlight {
-    /// What the **first** window cost, with nothing to reuse.
+    /// What the first window cost, with nothing to reuse.
     first: HighlightStats,
     cost: HighlightStats,
     /// Bytes of the single hunk the edit landed in.
@@ -504,12 +494,7 @@ fn only_the_hunk_that_changed_is_reparsed() {
 
 #[test]
 fn reparsing_after_an_edit_costs_the_same_however_large_the_file() {
-    // I2b's budget: re-parse follows the edit, not the file. One fixture cannot
-    // say that, for the reason `SPEC.md` §3 gives on both I2a's row and this
-    // one. The two differ ten-fold in length and are byte-identical wherever
-    // they overlap, so the hunk the edit lands in holds the same content in
-    // both and there is no shared term for a uniform inflation to cancel
-    // against.
+    // I2b's budget: re-parse follows the edit, not the file.
     let small = Scratch::sparse_edits("i2b-small", 1, SMALL_FILE, HUNK_SPACING);
     let large = Scratch::sparse_edits("i2b-large", 1, LARGE_FILE, HUNK_SPACING);
 
@@ -540,13 +525,8 @@ fn reparsing_after_an_edit_costs_the_same_however_large_the_file() {
     );
     assert_eq!(in_small.cost.parsed, in_large.cost.parsed);
 
-    // And the same claim about the **cold** window, which is the half the
-    // re-highlight cost cannot make. The edit lands in hunk 1 of both fixtures,
-    // at the same offset from the top of each, so a highlighter that parsed
-    // forward from the start of the file would re-parse identical amounts in
-    // both and every equality above would hold. What such a design cannot hide
-    // is the first window, where a cost that follows the file rather than the
-    // screen shows up at full size.
+    // And the same claim about the cold window, which is the half the re-highlight cost
+    // cannot make.
     assert_eq!(
         in_small.drawn, in_large.drawn,
         "the first window drew {} lines in the {SMALL_FILE}-line file and {} in \
@@ -613,10 +593,7 @@ fn a_redraw_inside_the_settle_margin_reparses_nothing() {
 
 #[test]
 fn the_highlight_cache_is_bounded_by_the_viewport() {
-    // I3's shape, held against the one structure this change adds. The frame
-    // path's own map is bounded by the current diff; this is bounded by the
-    // screen, which is the stronger claim and the one that survives a reader
-    // scrolling through a large file for a day.
+    // I3's shape, held against the one structure this change adds.
     const STEPS: usize = 30;
 
     let scratch = Scratch::sparse_edits("i2b-bounded", 1, LARGE_FILE, HUNK_SPACING);
@@ -633,10 +610,7 @@ fn the_highlight_cache_is_bounded_by_the_viewport() {
             first,
             WINDOW_HUNKS,
         );
-        // The window, plus the hunks a reader may scroll back to. The second
-        // term is a constant rather than a function of how far the loop has
-        // gone, which is what keeps this a claim about the screen: at step 29
-        // the reader has read thirty-two hunks and the cache holds seven.
+        // The window, plus the hunks a reader may scroll back to.
         assert!(
             highlighter.tracked() <= WINDOW_HUNKS + RETAINED_HUNKS,
             "after scrolling to hunk {first} the cache holds {} hunks for a \
@@ -647,10 +621,8 @@ fn the_highlight_cache_is_bounded_by_the_viewport() {
         );
     }
 
-    // Non-vacuity: a cache that never stored anything would satisfy the bound,
-    // and one that never *retired* anything would satisfy it for the wrong
-    // reason. Both ends are pinned to equality, so the gate is pressed rather
-    // than merely true.
+    // Non-vacuity: a cache that never stored anything would satisfy the bound, and one
+    // that never *retired* anything would satisfy it for the wrong reason.
     assert_eq!(highlighter.tracked(), WINDOW_HUNKS + RETAINED_HUNKS);
 
     // Each step retires the one hunk that left the window, and the queue holds
@@ -688,10 +660,8 @@ fn a_hunk_scrolled_back_to_is_not_re_parsed() {
         );
     }
 
-    // The premise, checked before the return rather than inferred from it: the
-    // three hunks really did leave the screen. Held but not drawn is exactly
-    // what the queue is, and without that this would be measuring a window that
-    // never moved.
+    // The premise, checked before the return rather than inferred from it: the three
+    // hunks really did leave the screen.
     assert_eq!(
         highlighter.tracked(),
         WINDOW_HUNKS * 2,
@@ -855,10 +825,6 @@ fn every_sample(wall: u64, cpu: u64) -> impl FnMut() -> (Duration, Duration) {
 
 #[test]
 fn a_breached_p99_is_re_measured_before_it_is_believed() {
-    // **The instrument gets its own gates**, because #178's fix is a claim about
-    // the measurement rather than about the code, and prose about a measurement
-    // proves nothing. One stalled sample in the first round, a clean second round:
-    // the gate holds, and the log says it had to look twice.
     holds_p99(
         "a probe that stalled once",
         Duration::from_millis(10),
@@ -870,11 +836,8 @@ fn a_breached_p99_is_re_measured_before_it_is_believed() {
 
 #[test]
 fn a_wall_clock_breach_the_cpu_clock_acquits_is_reported_and_not_failed() {
-    // **The attribution, and it is why the CPU clock was worth two test-only
-    // dependencies.** Every sample in the second round is 500ms of wall clock and
-    // 1ms of work: the process was not running, and no frame path getting slower
-    // could produce that shape. This is what #178's three occurrences were, and it
-    // is the only weakening in the whole ruling.
+    // The attribution, and it is why the CPU clock was worth two test-only
+    // dependencies.
     holds_p99(
         "a probe on a runner that took the CPU away",
         Duration::from_millis(10),
@@ -887,10 +850,6 @@ fn a_wall_clock_breach_the_cpu_clock_acquits_is_reported_and_not_failed() {
 #[test]
 #[should_panic(expected = "work done")]
 fn a_p99_that_breaches_twice_on_work_done_still_fails() {
-    // The half that keeps this a gate rather than a retry loop, and #178's own
-    // acceptance: the unchanged code must still fail when the budget is genuinely
-    // breached. Wall and CPU both out, so the frame path is what moved, and the
-    // message says which.
     holds_p99(
         "a probe that is simply slow",
         Duration::from_millis(10),
@@ -917,16 +876,8 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
 
 #[test]
 fn the_cpu_clock_tells_waiting_from_working() {
-    // **Non-vacuity for the two gates above, and the only thing here that touches
-    // the platform.** A clock stuck at zero would make every breach look like
-    // somebody else's load; a clock that returned the wall clock would make every
-    // stall look like a regression. Both directions are checked, and the second is
-    // a sleep, because a sleep is exactly the case the attribution rests on.
-    // **Bounded by a deadline rather than by an iteration count**, and that is a
-    // correction: eighty million multiplications is a closed form, so release folded
-    // the whole loop and the gate measured two hundred nanoseconds of nothing. A
-    // wall-clock deadline with an opaque accumulator is busy for as long as it says
-    // whatever the optimiser does.
+    // Non-vacuity for the two gates above, and the only thing here that touches the
+    // platform.
     let busy = Duration::from_millis(80);
     let (wall, cpu) = time_cpu(|| {
         let deadline = std::time::Instant::now() + busy;
@@ -968,14 +919,7 @@ fn flat(n: usize, ms: u64) -> Samples {
 #[test]
 #[should_panic(expected = "work done")]
 fn a_long_round_slightly_over_budget_on_work_is_not_excused_by_accumulated_noise() {
-    // **The gate this instrument was missing, and the defect it now catches was
-    // live.** The acquittal compares the round's off-CPU deficit against what the
-    // round spent over budget. Both are sums, so both grow with the sample count
-    // and the comparison is stable. Comparing that sum against a *single*
-    // frame's overshoot, which does not grow, lets ordinary per-frame
-    // scheduling
-    // noise out-accumulated the thing it had to explain and every long round
-    // drifted toward acquittal regardless of what the code did.
+    // The gate this instrument was missing, and the defect it now catches was live.
     holds_p99_rounds(
         "a long round that is simply slow",
         Duration::from_millis(10),
@@ -993,15 +937,8 @@ fn a_long_round_slightly_over_budget_on_work_is_not_excused_by_accumulated_noise
 
 #[test]
 fn a_long_round_that_is_genuinely_stalled_is_still_excused() {
-    // The other side of the same fixture, and the reason the fix is a unit
-    // correction rather than a shape rule. A first attempt required the p50 to sit
-    // inside budget before the host could be blamed, on the reasoning that a stall
-    // moves the tail rather than the median. **That is false**, and this is the
-    // counter-example: a runner that takes the CPU away for a whole round produces
-    // a breach that is uniform, not tail-shaped, with a median fifty times the
-    // budget. `a_wall_clock_breach_the_cpu_clock_acquits_is_reported_and_not_failed`
-    // is the same claim at ten samples; this is it at two hundred and fifty, so the
-    // count cannot quietly become the thing that decides.
+    // The other side of the same fixture, and the reason the fix is a unit correction
+    // rather than a shape rule.
     holds_p99_rounds(
         "a long round on a runner that took the CPU away",
         Duration::from_millis(10),

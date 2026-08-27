@@ -42,10 +42,8 @@ fn a_worktree_discovered_by_a_relative_path_still_ticks() {
     let original = std::env::current_dir().expect("read the working directory");
     std::env::set_current_dir(scratch.path_of(".")).expect("enter the scratch repository");
 
-    // Everything that can fail happens in here, so the working directory is put
-    // back before any assertion runs. On Windows a directory that is some
-    // process's current one cannot be removed, so a panic inside this block
-    // would leak the whole fixture past `Scratch`'s own `Drop`.
+    // Everything that can fail happens in here, so the working directory is put back
+    // before any assertion runs.
     let outcome = std::panic::catch_unwind(|| {
         let worktree = Worktree::discover(".").expect("discover by a relative path");
         let workdir = worktree.workdir().to_path_buf();

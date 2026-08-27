@@ -1,65 +1,25 @@
 //! How many colours this terminal has, and what a palette becomes when it has
-//! fewer than the palette was written in.
+//! fewer.
 //!
-//! `SPEC.md` §5 makes shape and colour the whole differentiator, so a palette that
-//! assumed truecolour would be a palette that silently degrades to noise on the
-//! terminals that do not have it. §10 named the case and left it open: *"Truecolor
-//! needs Win10+, and legacy conhost degrades."*
-//!
-//! ## The ladder is a product, not a fallback
-//!
-//! [`Theme`](crate::Theme) decides **what** may be drawn and this decides **how
-//! finely it can be expressed**. Both have to allow an element before it appears,
-//! and keeping them separate is what makes this a mechanism rather than a second
-//! hand-written palette: a theme is authored once, in the colours it means, and
-//! every rung below is derived from it.
-//!
-//! The rungs are ordered and each loses exactly one thing:
+//! [`Theme`](crate::Theme) decides what may be drawn; this decides how finely it
+//! can be expressed. The rungs are ordered and each loses one thing:
 //!
 //! | Rung | Foreground | Background |
 //! |---|---|---|
 //! | [`Depth::Truecolor`] | 24-bit, as authored | as authored |
-//! | [`Depth::Ansi256`] | quantised to the 256-colour palette | **dropped** |
+//! | [`Depth::Ansi256`] | quantised to the 256-colour palette | dropped |
 //! | [`Depth::Ansi16`] | nearest of the sixteen names | dropped |
 //! | [`Depth::None`] | dropped | dropped |
 //!
-//! **A background needs 24-bit and a foreground does not**, and that asymmetry is
-//! the one thing here worth arguing. `SPEC.md` §5.1 records that an ANSI background
-//! is a solid block rather than a tint: the darkest available green behind a line of
-//! code is a slab, not the wash `assets/preview.svg` draws, and a slab is worse than
-//! nothing because it destroys the syntax colours sitting on it.
+//! A background needs 24-bit and a foreground does not. Below it an authored wash
+//! quantises to a saturated primary at roughly 2.5x the intended luminance, which
+//! is a slab behind the syntax colours rather than a tint; the grey ramp is no
+//! escape either, since an added and a removed wash average to the same grey.
+//! `SPEC.md` §5.1.
 //!
-//! **That argument was applied at sixteen and it holds one rung higher, which took a
-//! screen to establish.** The 256-colour cube has six levels per axis and its darkest
-//! two are 0 and 95, so a *subtle* colour has nowhere to land: the wash `#1b3d29`
-//! quantises to `#005f00` and `#45222a` to `#5f0000`, which are saturated primaries
-//! at roughly two and a half times the authored luminance. On a hunk or two that
-//! reads as a strong tint. On a newly added file, where every row is an addition, it
-//! is a screen of flat green, and `SPEC.md` §5's whole claim is that colour carries
-//! signal. This was already written down as the reason Windows detects 24-bit rather
-//! than 256; what was missing was applying it to the rung itself.
-//!
-//! The grey ramp is not the escape. It is much nearer in distance, and it is where
-//! [`to_indexed`] would send a desaturated wash if its chroma gate did not stop it,
-//! but `#1b3d29` and `#45222a` both average to the *same* grey. An added row and a
-//! removed row would be one colour, which is the one thing §5 says may never happen.
-//!
-//! So there is no honest wash below 24-bit, and the diff signal narrows back to the
-//! sigil column exactly as it did before #11. A reader whose terminal draws more
-//! than detection can prove says so with `VIGIA_COLOR`.
-//!
-//! ## Modifiers survive every rung
-//!
-//! [`Depth::None`] exists for `NO_COLOR`, which asks for no *colour*. Bold is not
-//! colour. Dropping it too would take the one distinction left on a monochrome
-//! terminal, and there is no reading of the convention that asks for that.
-//!
-//! ## Quantising happens once
-//!
-//! [`Theme::resolve`](crate::Theme::resolve) walks the palette a single time at
-//! startup and stores the result. Nothing here runs on the frame path, so I9 never
-//! sees it, and the renderer keeps drawing with plain [`Style`] values that already
-//! mean what this terminal can show.
+//! [`Depth::None`] serves `NO_COLOR`, which asks for no *colour*: bold survives.
+//! Quantisation runs once, in
+//! [`Theme::resolve`](crate::Theme::resolve), so I9 never sees it.
 
 use std::fmt;
 
@@ -121,21 +81,17 @@ impl Depth {
             }
         }
 
-        // `NO_COLOR` deliberately does **not** share that rule, and the asymmetry is
-        // the point rather than an oversight. It has no valid values at all, so
-        // presence is the whole signal and an empty one still means what it says.
-        // `VIGIA_COLOR` has nothing *but* values, so an empty one means nothing was
-        // chosen.
+        // `NO_COLOR` deliberately does not share that rule, and the asymmetry is the
+        // point rather than an oversight. It has no valid values at all, so presence is
+        // the whole signal and an empty one still means what it says.
 
         if lookup("NO_COLOR").is_some() {
             return Ok(Self::None);
         }
 
-        // **Folded once, here.** `term_depth` folds again below and this arm did
-        // not fold at all, so `TERM=DUMB` was a terminal saying it cannot draw
-        // that this ladder heard and the glyph ladder did not. `TERM` is
-        // conventionally lower case and the forgiving reading is the right one
-        // when the cost of mishearing is colour a reader switched off.
+        // Folded once, here. `term_depth` folds again below and this arm did not fold
+        // at all, so `TERM=DUMB` was a terminal saying it cannot draw that this ladder
+        // heard and the glyph ladder did not.
         let term = lookup("TERM").unwrap_or_default().to_ascii_lowercase();
         if term == "dumb" {
             return Ok(Self::None);
@@ -146,12 +102,7 @@ impl Depth {
             return Ok(Self::Truecolor);
         }
 
-        // **Above `TERM`, and that order is the fix rather than a tidy-up.** Git
-        // Bash and MSYS export `TERM=xterm-256color` on Windows, so reading `TERM`
-        // first sent the most common shell for this repo to 256, where a subtle
-        // wash has nowhere to land and quantises to a saturated primary. A
-        // terminal that names itself is better evidence than a variable describing
-        // a terminfo entry.
+        // Above `TERM`, and that order is the fix rather than a tidy-up.
         if let Some(depth) = lookup("TERM_PROGRAM")
             .as_deref()
             .map(str::trim)
@@ -167,13 +118,7 @@ impl Depth {
             return Ok(depth);
         }
         if windows {
-            // **Truecolour, not 256.** The conservative answer is wrong in a
-            // way only a screen shows: the xterm cube's darkest
-            // axis levels are 0 and 95 with nothing between, so a *subtle* colour
-            // has nowhere to land. A row wash of `#1b3d29` quantises to `#005f00`,
-            // which is a saturated primary rather than a tint, and a reader looking
-            // at it asks whether the colour is right. It is not, and no better
-            // index exists.
+            // Truecolour, not 256.
             return Ok(Self::Truecolor);
         }
         Ok(Self::Ansi16)
@@ -189,10 +134,7 @@ impl Depth {
         let mut out = style;
         out.fg = style.fg.map(|colour| self.colour(colour));
         out.bg = match self {
-            // Dropped rather than mapped to `Reset`. `None` means "leave whatever is
-            // behind this cell", which is the reader's own background; `Reset` means
-            // "the terminal's default", which is not the same thing inside a pane
-            // that has been given one.
+            // Dropped rather than mapped to `Reset`.
             Self::Truecolor => style.bg,
             _ => Option::None,
         };
@@ -228,8 +170,7 @@ impl Depth {
 fn program_depth(program: &str) -> Option<Depth> {
     // Lowercased because the values are brand names and are spelled as such:
     // `Apple_Terminal`, `iTerm.app`, `WezTerm`, `WarpTerminal`, `Hyper`, `Tabby`,
-    // beside a lowercase `vscode` and `ghostty`. Matching them as written is a
-    // table that is wrong the first time a vendor re-capitalises.
+    // beside a lowercase `vscode` and `ghostty`.
     match program.to_ascii_lowercase().as_str() {
         "apple_terminal" => Some(Depth::Ansi256),
         "ghostty" | "hyper" | "iterm.app" | "rio" | "tabby" | "vscode" | "warpterminal"
@@ -240,11 +181,7 @@ fn program_depth(program: &str) -> Option<Depth> {
 
 /// What a `TERM` entry promises, or nothing when it promises neither rung.
 fn term_depth(term: &str) -> Option<Depth> {
-    // **Folded again, and deliberately.** The one caller folds before calling,
-    // so this is idempotent and redundant on that path; it stays because the
-    // alternative is a precondition living in a caller rather than in a
-    // signature, on a private function whose next caller has no way to know.
-    // It runs once at startup, so the cost is not a consideration.
+    // Folded again, and deliberately.
     let term = term.to_ascii_lowercase();
     // `contains` rather than `ends_with`, for `xterm-direct2` and friends: the
     // database numbers the direct entries by how many bits they hand each channel,
@@ -312,13 +249,8 @@ pub fn to_indexed(r: u8, g: u8, b: u8) -> u8 {
     let cube = 16 + 36 * ri + 6 * gi + bi;
     let cube_err = distance((r, g, b), (CUBE[ri], CUBE[gi], CUBE[bi]));
 
-    // **The ramp is only a candidate for something that is actually grey**, and
-    // leaving that out is a bug that reaches the screen. A row wash like `#1b3d29`
-    // is a desaturated green, so on raw distance the nearest grey beats the nearest
-    // cube entry: the cube's green axis jumps 0, 95, 135 while the ramp steps by
-    // ten, and a colour sitting between two cube levels is closer to a grey than to
-    // either. The wash then draws as a **neutral band**, which is a tint that has
-    // lost the only thing it was for.
+    // The ramp is only a candidate for something that is actually grey, and leaving
+    // that out is a bug that reaches the screen.
     if chroma(r, g, b) >= ACHROMATIC {
         return cube as u8;
     }

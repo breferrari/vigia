@@ -67,10 +67,9 @@ pub struct App {
     /// Pages the sheet has on the pane last drawn for. One frame stale after a
     /// resize, which `sheet_plan` clamps.
     sheet_pages: usize,
-    /// Whether the position was reached by scrolling rather than by a jump,
-    /// which licenses the viewport to back up and fill the pane. Pinned `G` sets
-    /// it true on purpose; see its arm. Never written from the pin's own arm:
-    /// the flag outlives the pin and leaves an unpinned frame anchored.
+    /// Whether the position was reached by scrolling rather than by a jump, which
+    /// licenses the viewport to back up and fill the pane. Pinned `G` sets it true on
+    /// purpose; see its arm.
     anchored: bool,
     /// The last path a tick named, kept while disengaged so `f` can jump to it.
     newest: Option<String>,
@@ -298,115 +297,59 @@ impl App {
 
     /// Apply one intention.
     pub fn apply(&mut self, action: Action, frame: &mut Frame, height: usize) -> Result<bool> {
-        // Once, above the match, rather than repeated in each arm that moves
-        // the view. A rule spelled out four times is a rule that is eventually
-        // spelled out three times, and the arm that forgot it would fail
-        // silently: follow mode would simply keep dragging the reader back.
+        // Once, above the match, rather than repeated in each arm that moves the view.
         if action.is_manual_scroll() {
             self.following = false;
-            // **And an owed landing is settled**, which belongs here for the
-            // reason the line above does. A tick and a keystroke coalesce into
-            // one batch, so a request armed by the follow can still be
-            // unresolved when this runs, and resolving it afterwards draws over
-            // the row the reader just asked for.
+            // And an owed landing is settled, which belongs here for the reason the
+            // line above does.
             self.landing = false;
-            // **And the map is handed back.** Every action that reaches here
-            // moves the diff, and a reader who moves the diff is asking to see
-            // where it went; a window left behind from an earlier `J` would be
-            // showing somewhere else with no caret to say so. This is the exact
-            // mirror of the line above it: manual scrolling takes the *diff*
-            // away from follow mode and gives the *list* back to it.
+            // And the map is handed back.
             self.list_follows = true;
         }
 
         match action {
             Action::Quit => return Ok(false),
-            // **`Esc` leaves the frontmost thing, and the sheet is a thing**.
-            // Reported from a real pane: a reader pressed `Esc` to put the help
-            // away and the monitor exited. `SPEC.md` §11.2 B12's rule that no
-            // key changes meaning while the sheet is up is intact, because
-            // `input::key_action` still maps this key to one action and is
-            // handed no state to branch on; what is frontmost is a question
-            // about this struct, so this struct answers it.
+            // `Esc` leaves the frontmost thing, and the sheet is a thing. Reported from
+            // a real pane: a reader pressed `Esc` to put the help away and the monitor
+            // exited.
             Action::Escape if self.sheet.is_some() => self.sheet = None,
             Action::Escape => return Ok(false),
             Action::Redraw => {}
-            // Re-engaging jumps rather than arming: `less +F` goes to the end
-            // when you ask it to follow, and a reader who presses `f` is
-            // asking to see what changed, not to wait for the next thing that
-            // does. `SPEC.md` §11.1.
+            // Re-engaging jumps rather than arming: `less +F` goes to the end when you
+            // ask it to follow, and a reader who presses `f` is asking to see what
+            // changed, not to wait for the next thing that does.
             Action::ToggleFollow => {
                 self.following = !self.following;
                 if self.following {
                     self.jump_to_newest(frame);
                 } else {
-                    // **Disengaging settles an owed landing.** A tick and the
-                    // keystroke can arrive in one batch, so `f` can run with a
-                    // request the frame has not resolved yet, and resolving it
-                    // afterwards would move the viewport for a reader who has
-                    // just asked the view to stop moving itself.
+                    // Disengaging settles an owed landing.
                     self.landing = false;
                 }
             }
-            // **No jump, unlike follow.** Re-engaging follow is a move as well
-            // as a state change because a reader asking to follow is asking to
-            // see what changed. Asking for the masthead back is asking for the
-            // masthead back: the diff keeps the row it was on, and the region
-            // above it grows or goes.
+            // No jump, unlike follow. Re-engaging follow is a move as well as a state
+            // change because a reader asking to follow is asking to see what changed.
             Action::ToggleMasthead => self.masthead = !self.masthead,
-            // **The same answer one region over.** The rail moves the map to the
-            // side of the pane and takes the diff's columns to do it; the diff
-            // keeps the row it was on, because a reader asking where the map goes
-            // is not asking to be moved inside the diff.
+            // The same answer one region over.
             Action::ToggleRail => self.rail = !self.rail,
-            // **No jump and no clamp here, which is the arm doing the least of
-            // the four and is deliberate.** Every other toggle in this family
-            // leaves the viewport exactly where it was; this one narrows what
-            // the viewport is allowed to reach, and the position it already
-            // holds may be outside that. Resolving it *here* would mean asking
-            // how tall the pinned file is at the moment of the keystroke, which
-            // is a second place that decides where a viewport lands.
+            // No jump and no clamp here, which is the arm doing the least of the four
+            // and is deliberate.
             Action::ToggleSingle => self.single = !self.single,
-            // **The bar's scale does not move.** The position is a logical row
-            // and stays one, so a reader who presses `w` is looking at the same
-            // line of the same file, drawn over more of the pane. That is
-            // `SPEC.md` §11.2 B19's own claim about the scrollbar restated where a
-            // reader can feel it. **The one place the row itself moves is the
-            // diff's last screenful**, where wrapping means fewer of the diff's
-            // rows fit and the clamp gives the difference back, which is the clamp
-            // keeping the last row on the last row rather than an exception.
+            // The bar's scale does not move.
             Action::ToggleWrap => self.wrap = !self.wrap,
-            // **The one toggle that changes what the frame *walks*.** The other
-            // three rearrange rows the frame already holds; this one adds a second
-            // status walk and a second set of diffs, so the frame is told rather
-            // than the shell remembering on its own. `Frame::show_staged` drops
-            // both caches when the answer actually moves and is a no-op when it
-            // does not, so calling it here rather than once a frame costs nothing
-            // and keeps one owner of the fact.
+            // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;
                 frame.show_staged(self.staged);
                 self.position = Position::default();
-                // **And the frame is walked here, which no other toggle needs.**
-                // `Frame::advance` runs on a **tick**, and a keypress is not one:
-                // the other three rearrange rows the frame already holds, so a
-                // paint is the whole of what they owe. This one changes what the
-                // frame *contains*, and without a walk the reader pressed `a`,
-                // the header said `0 staged` over a worktree with two staged
-                // files, and the pane went on drawing exactly what it drew before
-                // — until something happened to be written, which on a tree an
-                // agent has finished with may be never. Found in a live pane, and
-                // it is the failure §11.2 B17 is named for one layer down: a key
-                // that does nothing a reader can see.
+                // And the frame is walked here, which no other toggle needs.
                 if let Err(e) = frame.advance() {
                     self.warn(e.to_string());
                 }
             }
-            // **No jump and no move at all**, which is one better than the
-            // masthead: that toggle resizes the diff's region, and this one draws
-            // over rows the diff keeps. Nothing about the viewport changes, so a
-            // reader who opens the sheet and closes it is looking at exactly the
-            // screen they left.
+            // No jump and no move at all, which is one better than the masthead: that
+            // toggle resizes the diff's region, and this one draws over rows the diff
+            // keeps.
             Action::ToggleSheet => {
                 self.sheet = match self.sheet {
                     None => Some(0),
@@ -414,17 +357,13 @@ impl App {
                     Some(_) => None,
                 };
             }
-            // **The control means close, where `?` means the sheet**, which is why
-            // B13 needs a second variant. Sending `ToggleSheet` from a click on
-            // `✕` made the sheet's only pointer escape *advance*, so a reader on
-            // page one of six needed six clicks to get out, and both `SPEC.md`
-            // §11.1 and `Action::ToggleSheet`'s own docblock claimed otherwise
-            // while it did. Found by #286's adversarial round.
+            // The control means close, where `?` means the sheet, which is why B13
+            // needs a second variant.
             Action::CloseSheet => self.sheet = None,
             Action::Scroll(rows) => {
                 self.scroll(rows, frame)?;
             }
-            // **Moves the window and nothing else**, which is the whole of
+            // Moves the window and nothing else, which is the whole of
             // `SPEC.md` §11.1's ruling: the diff does not move, follow is not
             // disengaged (see `Action::is_manual_scroll`), and `anchored` is
             // untouched because that word is about how the *diff's* position was
@@ -433,35 +372,19 @@ impl App {
                 self.browse(self.list_top.saturating_add_signed(rows), frame);
             }
             // Dragging the list's own bar. The fraction is resolved against the
-            // changed-file count here rather than in `input`, which has no frame
-            // to ask.
-            // Both bars map the track onto **travel** rather than onto the whole,
-            // which is the arithmetic the thumb is drawn with. Mapping onto the
-            // whole instead leaves the last screenful's worth of track dead: the
-            // pointer reaches the bottom and the view is still short of the end.
+            // changed-file count here rather than in `input`, which has no frame to
+            // ask.
             Action::ListTo(at) => {
-                // The same ceiling `browse` clamps with, for the same reason: the
-                // track maps onto **travel**, and travel is how far the window can
-                // actually go rather than how many files there are. `View::list_span`
-                // is that same number seen from the other end, so the drawn thumb's
-                // travel and this one are one quantity.
+                // The same ceiling `browse` clamps with, for the same reason: the track
+                // maps onto travel, and travel is how far the window can actually go
+                // rather than how many files there are.
                 let travel = crate::view::last_top(frame.files(), self.list_rows.max(1));
                 self.browse(scaled(at, travel), frame);
             }
-            // A click on a listed file, or one of the digits `1`-`6`. Out of
-            // range is not a file and so is not a jump: silently doing nothing is
-            // right where clamping to the last file would move the diff somewhere
-            // nobody pointed at.
+            // A click on a listed file, or one of the digits `1`-`6`.
             Action::ListRow(offset) => {
-                // **Resolved through the list's own plan, not by adding the
-                // offset to the window's first file**. Those are the same
-                // number only while every drawn row is a file, and since B17 a
-                // grouped window opens each run with a separator. Added blind,
-                // a click or a digit past the first separator names the file
-                // *before* the one under the pointer, and it does it silently:
-                // there is a file at that index, the jump lands, and the only
-                // sign is that the reader ends up somewhere they did not point
-                // at.
+                // Resolved through the list's own plan, not by adding the offset to the
+                // window's first file.
                 let offset = usize::from(offset);
                 if offset >= self.list_rows {
                     return Ok(true);
@@ -472,11 +395,8 @@ impl App {
                     self.jump_to(file);
                 }
             }
-            // **One rule: step the file index, land on the heading, do nothing
-            // when there is no such file.** Row zero is the heading, which is the
-            // resolution a list click and `jump_to_newest` already use, and it
-            // costs no diff: nothing here asks how tall anything is, so I4 never
-            // sees this.
+            // One rule: step the file index, land on the heading, do nothing when there
+            // is no such file.
             Action::File(step) => {
                 if let Some(file) = self.position.file.checked_add_signed(step)
                     && file < frame.files().len()
@@ -484,7 +404,7 @@ impl App {
                     self.jump_to(file);
                 }
             }
-            // Dragging the diff's bar, which counts **rows**, so this resolves a
+            // Dragging the diff's bar, which counts rows, so this resolves a
             // row of the whole diff back into the file it falls inside and the
             // offset within it.
             Action::DiffTo(at) => self.diff_to(at, height, frame)?,
@@ -493,22 +413,13 @@ impl App {
             Action::Page(pages) => {
                 self.step_by(pages, self.screenful(height).saturating_sub(1), frame)?;
             }
-            // **And a half page keeps none, which is not an inconsistency with
-            // the arm above.** The overlap row exists to leave a reader something
-            // shared across the seam; a half page already leaves half the screen
-            // standing, so a row taken off the step would be paying twice for one
-            // anchor. `less` and vim both move exactly half a window and this is
-            // their binding.
+            // And a half page keeps none, which is not an inconsistency with the arm
+            // above.
             Action::HalfPage(halves) => {
                 self.step_by(halves, self.screenful(height) / 2, frame)?;
             }
-            // **The first row of what the reader can reach**, which is the
-            // first changed file unpinned and the pinned file's own heading
-            // under B16. One meaning over two subjects rather than two meanings:
-            // `g` has always been *the top*, and the pin is what decides the top
-            // of what. Jumping to file zero under a pin would change which file
-            // is pinned, which is the one thing this gesture takes away from
-            // everything that is not `n`, `p`, a digit or a click.
+            // The first row of what the reader can reach, which is the first changed
+            // file unpinned and the pinned file's own heading under B16.
             Action::Top => {
                 self.jump_to(if self.single { self.position.file } else { 0 });
             }
@@ -517,44 +428,16 @@ impl App {
             // up their heights, which is the read I4 forbids.
             Action::Bottom => {
                 if let Some(file) = self.pinned_file(frame) {
-                    // **`true`, unlike every other jump on this map, and it is
-                    // what makes the resting row survive a stale height.**
-                    // `anchored` means *reached by scrolling*, and it licenses
-                    // `View::collect`'s back-up: a screen that came out short
-                    // rests its last row on the bottom. `G` under a pin is asking
-                    // for exactly that. It is not a claim about what belongs on
-                    // the **top** row, which is what a jump is and why `jump_to`
-                    // clears this.
+                    // `true`, unlike every other jump on this map, and it is what makes
+                    // the resting row survive a stale height.
                     self.anchored = true;
-                    // **The resting row rather than the file's height, and the
-                    // difference is a whole batch of keystrokes.** `View::collect`
-                    // clamps an overrun to the last screenful either way, so
-                    // writing the raw span draws the right screen; what it does
-                    // not do is leave a *position* a later action in the same
-                    // wake can move from. The shell drains actions in a batch and
-                    // paints once at the end of it, so `G` and then a held `k`
-                    // arrive together: the `k`s walk `span` down toward
-                    // `span - height`, every one of them still clamps to the same
-                    // row, and the reader presses a key up to `span - height`
-                    // times before the screen moves. Nine on this file at this
-                    // pane. Unpinned the case cannot arise, because `G` there is
-                    // `jump_to`, which resolves to row zero.
+                    // The resting row rather than the file's height, and the difference
+                    // is a whole batch of keystrokes.
                     let span = crate::view::span_in(frame, file)?;
                     self.position = Position {
                         file,
-                        // **Unchanged by B19, and that is a finding rather than
-                        // an oversight**. `span` is a count of the file's own
-                        // rows and `height` a count of the terminal's, which
-                        // are the same number only while nothing wraps, so this
-                        // lands short with `w` on. A branch asking for a row
-                        // past the end was written, and mutation then showed it
-                        // changed nothing: `View::collect` derives *at the
-                        // bottom* from the walk having drawn the block to its
-                        // end, which is exactly this case, and rests the last
-                        // row on the last row whatever this arithmetic said.
-                        // Two answers to one question is what this repo has
-                        // been bitten by, so the walk keeps it and this stays
-                        // the subtraction it has always been.
+                        // Unchanged by B19, and that is a finding rather than an
+                        // oversight.
                         row: span.saturating_sub(height),
                     };
                 } else {
@@ -573,7 +456,7 @@ impl App {
         (self.single && files > 0).then(|| self.position.file.min(files - 1))
     }
 
-    /// Put the viewport at the top of `file`, which is what a **jump** means.
+    /// Put the viewport at the top of `file`, which is what a jump means.
     fn jump_to(&mut self, file: usize) {
         self.anchored = false;
         self.position = Position { file, row: 0 };
@@ -581,13 +464,7 @@ impl App {
 
     /// Move the list's window, and take the map over only if it moved.
     fn browse(&mut self, to: usize, frame: &Frame) {
-        // **The list's own ceiling, not `files - rows`**. The naive bound
-        // compares a count of files against a count of drawn rows, and a
-        // grouped window spends one or two of those on separators — so `J`, the
-        // wheel and a drag to the bottom of the track all stopped one or two
-        // files short of the end, with nothing on screen saying the map had
-        // more. Clamping in `take_list` alone could not fix it: that only ever
-        // takes the *smaller* of the two, so a bound already too low stays.
+        // The list's own ceiling, not `files - rows`.
         let bound = crate::view::last_top(frame.files(), self.list_rows.max(1));
         let moved = to.min(bound);
         if moved != self.list_top {
@@ -638,14 +515,8 @@ impl App {
         };
         for file in 0..files {
             let rows = crate::view::block_rows(frame, file)?;
-            // **Written every iteration rather than only on the hit**, which is
-            // what makes a target *past* the last row land past the last row.
-            // The fall-through otherwise leaves the initial `row: 0`, so a drag
-            // to the very end of the track, which [`Self::dragged_to`]
-            // deliberately maps past the end so the walk can clamp it in
-            // display rows, goes to the **top** of the last file instead of its
-            // bottom. On a one-file diff that is the top of the diff, which is
-            // as wrong as a drag can be.
+            // Written every iteration rather than only on the hit, which is what makes
+            // a target *past* the last row land past the last row.
             position = Position {
                 file,
                 row: target.saturating_sub(seen),
@@ -661,27 +532,15 @@ impl App {
 
     /// Clamps the walk-back index: it reaches the frame before the collect can.
     fn up(&mut self, rows: usize, frame: &mut Frame) -> Result<()> {
-        // **The upper clamp B16 needs, and the only one that cannot live in the
-        // walk.** Scrolling *down* overruns into a row number `View::collect`
-        // resolves, so the pin is enforced there by the walk simply not
-        // advancing. Scrolling up is resolved here instead, because stepping off
-        // the top of a file means knowing how tall the one above it is, and
-        // under a pin there is no file above it to step into: the pin is a
-        // claim about one file, and the top of that file is where up stops.
+        // The upper clamp B16 needs, and the only one that cannot live in the walk.
+        // Scrolling *down* overruns into a row number `View::collect` resolves, so the
+        // pin is enforced there by the walk simply not advancing.
         if self.single {
             self.position.row = self.position.row.saturating_sub(rows);
             return Ok(());
         }
-        // **The walk back reaches the frame before anything has clamped, so it
-        // panics on a stale index without the clamp below**.
-        // [`crate::view::rows_in`] is [`vigia_core::Frame::diff`], which
-        // indexes `files` directly and panics past the end; a position is
-        // exactly the index that outlives the list it was resolved against,
-        // since [`vigia_core::Frame::advance`] rebuilds the changed set
-        // whenever the worktree moves. So a reader scrolled deep into the
-        // changed set, an agent committing in the other pane, and a wheel-up
-        // batched into the same drain as that tick is a crash, with no paint in
-        // between to clamp anything.
+        // The walk back reaches the frame before anything has clamped, so it panics on
+        // a stale index without the clamp below.
         let files = frame.files().len();
         if files == 0 {
             self.position = Position::default();
@@ -716,32 +575,16 @@ impl App {
         history: &History,
         body: Body,
     ) -> Result<View> {
-        // **Refused is settled, not deferred**, and taking it out of the clear
-        // below is what makes that true. A debt the guard refuses is a debt for a
-        // file the viewport is no longer on, and the guard is re-read every
-        // frame: kept, it fires the moment an index happens to name that path
-        // again, on a frame no tick armed. Reachable by opening the sheet, which
-        // moves no viewport and whose own ruling says a reader who opens it and
-        // closes it sees the screen they left.
+        // Refused is settled, not deferred, and taking it out of the clear below is
+        // what makes that true.
         let owed = self.landing && self.still_the_followed_file(frame);
-        // **Recorded here because this is the one call every frame makes with the
-        // pane's own layout in hand.** `?` advancing needs to know which page is
+        // Recorded here because this is the one call every frame makes with the
+        // pane's own layout in hand. `?` advancing needs to know which page is
         // the last, and `Action` carries no pane; see [`App::sheet_pages`].
         if let Some(pages) = body.sheet_pages {
             self.sheet_pages = pages;
-            // **And the page is clamped to what this pane has**, so the state and
-            // the screen agree about which page is up. `sheet_plan` clamps too, and
-            // has to, because it is the last thing standing between a stale index
-            // and the tables; what it cannot do is write the answer back. Without
-            // this, a pane that shrank its page count left `self.sheet` pointing
-            // past the end and every `?` after it walked the gap one dead press at
-            // a time while the screen showed the same page.
-            // **Not on a pane with no pages at all**, which is a pane below the
-            // sheet's own floor: there `pages` is zero, a saturating subtraction
-            // makes the clamp read `Some(0)`, and a reader who dragged a pane
-            // narrow and back would find themselves on page one of a sheet they
-            // had left on page four. Nothing was drawn in between, so nothing
-            // asked for the move.
+            // And the page is clamped to what this pane has, so the state and the
+            // screen agree about which page is up.
             if let (true, Some(page)) = (pages > 0, self.sheet) {
                 self.sheet = Some(page.min(pages - 1));
             }
@@ -761,28 +604,17 @@ impl App {
                 // `body_layout` already decided by giving the diff more than one
                 // row. A pane too short for a bar pays nothing.
                 measured: body.diff > 1,
-                // **Only for the file it was armed for**, which is the whole of
-                // the staleness rule and is one rule rather than a list of the
-                // ways an index can go stale. A landing names a *row inside a
-                // file* and the position holds an index, and
-                // [`vigia_core::Frame::advance`] renumbers every index whenever
-                // the changed set moves: a file committed, an edit reverted, a
-                // branch switched. Ticks coalesce and only the paint is shared,
-                // so an advance can happen between the follow that armed this
-                // and the frame that would resolve it, including on a tick that
-                // names no path at all and so never reaches [`Self::follow`].
-                // A `.git/index` write is exactly that. Resolved against the
-                // renumbered index, the viewport lands deep inside whichever
-                // file inherited the number, which is worse than the heading it
-                // replaced.
+                // Only for the file it was armed for, which is the whole of the
+                // staleness rule and is one rule rather than a list of the ways an
+                // index can go stale.
                 landing: owed,
                 // Passed through rather than resolved here, for the reason the
                 // arm that sets it gives: the walk is where a position meets the
                 // file it is inside, so the walk is where a pin can be enforced
                 // without asking the frame anything twice.
                 single: self.single,
-                // **From the layout rather than from this method's idea of the
-                // pane**, which is the reason `body` is a parameter at all: the
+                // From the layout rather than from this method's idea of the
+                // pane, which is the reason `body` is a parameter at all: the
                 // width a row is laid out against decides where a line breaks,
                 // and a second derivation of it here is a pane whose rows were
                 // counted against one width and drawn against another.
@@ -802,27 +634,18 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
-        // **Cleared only once it was served.** A pane with no diff region
+        // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.
         self.landing = owed && !view.landed;
         self.list_rows = body.list;
-        // **The staged total, below the collect and for the reason `elsewhere` is.**
-        // The header draws it beside `View::files`, and `Shell::screen` keeps the
-        // previous view when a collect fails — so taken from the frame it could
-        // pair this frame's staged count with last frame's changed count and read
-        // `3 changed · 5 staged`, which cannot happen: staged is a subset. The
-        // same split on `elsewhere` is its sibling and is easy to fix alone.
+        // The staged total, below the collect and for the reason `elsewhere` is.
         self.staged_files = frame.files().len() - frame.staged_at();
         // Stored back for the reason the position is: resolution happens once,
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
-        // **What a page step is measured in, recorded where the frame is
-        // built**. `View::rows` is display rows since B19 and a step moves the
-        // position, which is logical, so the two have to be told apart here
-        // rather than at the stepping site: a continuation is a row of the
-        // terminal that is not a row of the diff. See [`Self::shown`].
+        // What a page step is measured in, recorded where the frame is built.
         self.shown = view
             .rows
             .iter()
@@ -833,32 +656,19 @@ impl App {
 
     /// Where a drag on the diff's bar lands, in rows of the diff.
     fn dragged_to(&self, at: u32, total: usize, height: usize) -> usize {
-        // **Only the far end is special, and the rest of the track is the
-        // thumb's own arithmetic**. Measuring the whole track in drawn rows is
-        // a *different* travel from the one the thumb is drawn against: the
-        // painter draws it from the region's height over the diff's rows, so a
-        // drag measured in drawn rows landed below the thumb everywhere but the
-        // ends. A readout and the gesture performed on it are one contract, and
-        // this repo has already been corrected once on exactly that.
+        // Only the far end is special, and the rest of the track is the thumb's own
+        // arithmetic.
         if self.wrap && at >= crate::input::TRACK_SCALE {
             return total;
         }
         scaled(at, total.saturating_sub(height))
     }
 
-    /// Rows of the **diff** one screenful holds, which is not `height` when
+    /// Rows of the diff one screenful holds, which is not `height` when
     /// lines wrap.
     fn screenful(&self, height: usize) -> usize {
         if self.wrap && self.shown > 0 {
-            // **Clamped by the pane this step is being taken in.** `shown` is the
-            // last frame's and `height` is this batch's, and the two are measured
-            // at different moments: `lib.rs` drains a batch and paints once at the
-            // end of it, so a resize and a `Space` arriving together give a fresh
-            // height against a stale count. A fifty-row pane dragged to twelve
-            // would otherwise step forty-nine rows through a body of twelve and
-            // walk over what nobody saw. It can only ever be too large, because a
-            // screen of `height` display rows never holds more than `height` rows
-            // of the diff.
+            // Clamped by the pane this step is being taken in.
             self.shown.min(height)
         } else {
             height
@@ -878,12 +688,7 @@ mod tests {
 
     #[test]
     fn the_chrome_carries_every_gesture_mark_it_is_handed() {
-        // **The wire nothing else covers, and it is invisible from both ends.**
-        // Every one of the thirty-odd `App::chrome` call sites in the suite
-        // passes `None` for all four marks, and every render gate builds a
-        // `Chrome` literal directly rather than going through here, so dropping
-        // a mark on the floor in this function leaves the whole workspace green
-        // while the feature does nothing on screen.
+        // The wire nothing else covers, and it is invisible from both ends.
         let app = App::new();
         let chrome = app.chrome(
             "fixture",
@@ -929,12 +734,9 @@ mod tests {
             Mode::Lost
         );
 
-        // One way, and asserted rather than left implied by the absence of a
-        // setter. Nothing can revive a watch: the one handle that unblocks the
-        // watcher makes `next_tick` return `None` permanently. A later
-        // convenience that reset this alongside a notice is exactly how a still
-        // picture would start claiming to be live again, and the two are next to
-        // each other precisely because they arrive from one event.
+        // One way, and asserted rather than left implied by the absence of a setter.
+        // Nothing can revive a watch: the one handle that unblocks the watcher makes
+        // `next_tick` return `None` permanently.
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(

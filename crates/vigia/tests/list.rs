@@ -31,9 +31,7 @@ const REFERENCE: u16 = 24;
 /// More changed files than any cap the sweeps below can reach.
 const MANY: usize = 500;
 
-/// The tall pane [#125](https://github.com/breferrari/vigia/issues/125) named
-/// when it filed this rung: *"a 50-row pane keeping six draws void where the map
-/// could be"*. Taken from the issue rather than derived from the share.
+/// Taken from the issue rather than derived from the share.
 const DEEP: u16 = 50;
 
 fn chrome(app: &App) -> vigia::Chrome {
@@ -57,7 +55,7 @@ fn split(width: u16, height: u16, files: usize) -> Body {
     )
 }
 
-/// [`split`], sized the way the shell sizes a region for **this** changed set.
+/// [`split`], sized the way the shell sizes a region for this changed set.
 fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
@@ -67,7 +65,7 @@ fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
     )
 }
 
-/// Each region reports its **own** bar's column, not the pane's.
+/// Each region reports its own bar's column, not the pane's.
 #[test]
 fn each_region_reports_its_own_bar_column() {
     // Enough files to overflow the list and enough rows to overflow the diff, so
@@ -200,8 +198,6 @@ fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
 /// A taller pane never costs the masthead its band.
 #[test]
 fn a_taller_pane_never_costs_the_band_its_rows() {
-    // The masthead is off by default since #204, and the band only exists with it
-    // on, so this gate has to ask for the screen it is about.
     let raised = vigia::Chrome {
         masthead: true,
         ..chrome(&App::new())
@@ -269,11 +265,7 @@ fn the_list_region_gives_way_before_the_diff_falls_below_min_body() {
 
 #[test]
 fn a_notice_does_not_change_the_list_height() {
-    // §11.1's no-jog rule, one region up from the footer it was written for. A
-    // notice is transient: a file that vanished between being named and being
-    // read, a repository mid-`git gc`. If one could resize the region, the
-    // reader's diff would jump a row and back every time one flickered, which is
-    // the same thing a resize is forbidden from doing.
+    // §11.1's no-jog rule, one region up from the footer it was written for.
     let mut app = App::new();
     let quiet = railed(&app);
     app.warn("a file vanished between being named and being read");
@@ -368,11 +360,7 @@ fn the_list_window_slides_to_keep_the_current_file_visible() {
 
 #[test]
 fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
-    // `View::current` is resolved **after** the walk, and this is why. A position
-    // can overshoot its file, point past a list the agent in the other pane has
-    // shortened, or be backed up to rest the diff's last row on the bottom. Mark
-    // the caret from the request and it names a file the diff is not in, on
-    // exactly the frames that moved.
+    // `View::current` is resolved after the walk, and this is why.
     const FILES: usize = 12;
 
     let scratch = Scratch::large_diff("list-jump", FILES, 1);
@@ -420,10 +408,7 @@ fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
 
 #[test]
 fn scrolling_the_list_leaves_the_diff_where_it_was() {
-    // The half of the ruling that is about state rather than about keys. `J`
-    // moves a window over the map; the diff does not move, and follow stays
-    // engaged, so an agent writing in the other pane goes on dragging the diff
-    // to what it just wrote while a reader browses the changed set.
+    // The half of the ruling that is about state rather than about keys.
     const FILES: usize = 40;
 
     let scratch = Scratch::large_diff("list-browse", FILES, 1);
@@ -467,10 +452,8 @@ fn scrolling_the_list_leaves_the_diff_where_it_was() {
         "the window shrank instead of sliding"
     );
 
-    // The caret is gone from the region, because the diff is no longer inside
-    // any file the window is showing. That is honest rather than a gap: the map
-    // is deliberately looking somewhere else, and inventing a caret would say
-    // the diff had moved.
+    // The caret is gone from the region, because the diff is no longer inside any file
+    // the window is showing.
     assert!(
         after.top.file < after.list_top || after.top.file >= after.list_top + after.list.len(),
         "the fixture did not browse past the current file, so this proves nothing"
@@ -479,10 +462,7 @@ fn scrolling_the_list_leaves_the_diff_where_it_was() {
 
 #[test]
 fn the_window_is_overtaken_when_the_diff_leaves_it() {
-    // The other side of the rule above. Browsing sticks, right up until the
-    // thing the map is a map *of* moves somewhere the map cannot show, at which
-    // point the map has to follow. Without this, a reader who scrolled the list
-    // once would have a region that never agreed with the diff again.
+    // The other side of the rule above.
     const FILES: usize = 40;
 
     let scratch = Scratch::large_diff("list-overtaken", FILES, 1);
@@ -526,7 +506,7 @@ fn the_window_is_overtaken_when_the_diff_leaves_it() {
 
 /// A picture of the two regions at a scale the snapshots do not reach.
 ///
-/// **Ignored, diagnostic, not a gate**, the way `vigia-core`'s
+/// Ignored, diagnostic, not a gate, the way `vigia-core`'s
 /// `frame_time_distribution` is. Every assertion above is structural, and
 /// structure is exactly what cannot tell you whether a screen is *good*: the cap,
 /// the caret and both scrollbars are each proved by a number somewhere, and none
@@ -594,13 +574,7 @@ fn the_region_at_fifty_files() {
 
 #[test]
 fn the_window_survives_a_pane_too_short_to_show_it() {
-    // **The asymmetry `View::collect` already argues against, one region up.**
-    // For the diff, a frame with no room to draw "resolved nothing, so it has
-    // nothing to say about where the reader is", and reporting a zero would drag
-    // them to the top for as long as the pane stayed short. The list did the
-    // opposite in exactly that situation: `take_list` zeroed `list_top`, `App`
-    // stored it back, and because nothing but a diff-moving action hands the map
-    // back, the window never recovered.
+    // The asymmetry `View::collect` already argues against, one region up.
     const FILES: usize = 40;
 
     let scratch = Scratch::large_diff("list-short-pane", FILES, 1);
@@ -643,27 +617,22 @@ fn the_window_survives_a_pane_too_short_to_show_it() {
 
 #[test]
 fn the_two_regions_tile_the_body_exactly() {
-    // `Body::clamped_to` holds the layout's only subtraction and had no direct
-    // test: mutating its give-back term left the suite green, because no fixture
-    // reached a stale view. This is the property in full — the header, the list,
-    // the rule, the diff and the footer account for every row of the pane, at
-    // every height and for every number of entries a view might carry.
+    // `Body::clamped_to` holds the layout's only subtraction and had no direct test:
+    // mutating its give-back term left the suite green, because no fixture reached a
+    // stale view.
     let mut checked = 0;
     let mut saw_a_clamp = false;
     let mut saw_rail = false;
 
     for height in 1..=40u16 {
-        // **Two widths past the rail's arrival**, so the one subtraction this
-        // gate exists for is exercised in both shapes. `clamped_to`'s rail arm
-        // shortens the list and gives nothing back, because beside a rail there
-        // is no region below it to give to, and that arm had no direct test
-        // until these two widths were added.
+        // Two widths past the rail's arrival, so the one subtraction this gate exists
+        // for is exercised in both shapes.
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [0usize, 1, 3, LIST_SETTLED, LIST_SETTLED + 1, 200] {
                 let area = Rect::new(0, 0, width, height);
                 // Railed, so the two widths past 134 reach `clamped_to`'s rail
                 // arm rather than sweeping the stacked shape five times. Since
-                // #295 the default chrome never draws one.
+                // The default chrome never draws one.
                 let chrome = railed(&App::new());
                 let full = body_layout(area, &chrome, files, files);
                 saw_rail |= full.rail;
@@ -674,13 +643,9 @@ fn the_two_regions_tile_the_body_exactly() {
                         saw_a_clamp = true;
                     }
 
-                    // The footer's own height is not exposed, so it is recovered
-                    // from the unclamped split rather than restated: whatever it
-                    // is, clamping must not change it.
-                    // Every region the body has, so the sum is the body rather
-                    // than a subset of it. #158 added the masthead and its air,
-                    // and a tiling check that missed a region would report the
-                    // pane as short by exactly that region.
+                    // The footer's own height is not exposed, so it is recovered from
+                    // the unclamped split rather than restated: whatever it is,
+                    // clamping must not change it.
                     let footer = usize::from(height).saturating_sub(1 + full.rows());
                     assert_eq!(
                         1 + body.rows() + footer,
@@ -689,11 +654,9 @@ fn the_two_regions_tile_the_body_exactly() {
                          entries, {body:?} plus a header and {footer} footer rows \
                          does not tile the pane"
                     );
-                    // **Beside a rail there is no rule at all**, which is
-                    // §11.2 B11 dissolved rather than reopened: the list is beside
-                    // the diff and there is no boundary for a horizontal rule to
-                    // be drawn on. Written as the conjunction rather than as two
-                    // gates, so the stacked claim keeps its exact form.
+                    // Beside a rail there is no rule at all, which is §11.2 B11
+                    // dissolved rather than reopened: the list is beside the diff and
+                    // there is no boundary for a horizontal rule to be drawn on.
                     assert_eq!(
                         body.rule,
                         !body.rail && body.list > 0,
@@ -725,10 +688,8 @@ fn the_two_regions_tile_the_body_exactly() {
 
 #[test]
 fn collect_resolves_every_degenerate_viewport() {
-    // `View::take_list` indexes the frame through `Frame::diff`, which **panics**
-    // by design on an index past the end of the file list. That it cannot be
-    // reached is currently proved only by a comment. This drives the public
-    // signature with the positions that comment is about.
+    // `View::take_list` indexes the frame through `Frame::diff`, which panics by design
+    // on an index past the end of the file list.
     const FILES: usize = 12;
 
     let scratch = Scratch::large_diff("list-degenerate", FILES, 1);
@@ -757,23 +718,14 @@ fn collect_resolves_every_degenerate_viewport() {
                                 list_rows,
                                 list_follows,
                                 measured: true,
-                                // **A sweep dimension rather than a constant**,
-                                // because a landing resolves inside the same
-                                // walk and every degenerate shape here is one it
-                                // can be asked for in. Pinned at `false` it left
-                                // the whole grid blind to it.
+                                // A sweep dimension rather than a constant, because a
+                                // landing resolves inside the same walk and every
+                                // degenerate shape here is one it can be asked for in.
                                 landing,
-                                // **Not a sweep dimension, unlike `landing`
-                                // above.** This grid is about how the two
-                                // regions divide a pane, and a pinned diff
-                                // divides it identically: B16 changes which rows
-                                // the body may reach, never how many rows the
-                                // body has. `tests/single.rs` sweeps the pin.
+                                // Not a sweep dimension, unlike `landing` above.
                                 single: false,
-                                // This sweep is about where the two regions
-                                // land, which is decided before anything is
-                                // coloured. Highlighting on keeps it the same
-                                // collect the shell runs after its first frame.
+                                // This sweep is about where the two regions land, which
+                                // is decided before anything is coloured.
                                 highlight: true,
                             },
                         )
@@ -784,15 +736,7 @@ fn collect_resolves_every_degenerate_viewport() {
                             "asked for {list_rows} list rows and got {}",
                             view.list.len()
                         );
-                        // **Only while there is a window.** A pane with no region
-                        // hands `list_top` back untouched, which is the whole
-                        // point of `the_window_survives_a_pane_too_short_to_show_it`
-                        // and is what the diff's own walk does with `top.row`. So
-                        // an out-of-range request survives a region-less frame and
-                        // is clamped by the next one that draws. What must always
-                        // hold is that a window which exists fits inside the file
-                        // list, because that is what keeps `Frame::diff` — which
-                        // panics on an out-of-range index by design — in range.
+                        // Only while there is a window.
                         if !view.list.is_empty() {
                             assert!(
                                 view.list_top + view.list.len() <= FILES,
@@ -815,10 +759,7 @@ fn collect_resolves_every_degenerate_viewport() {
 
 #[test]
 fn browsing_back_up_returns_the_window_to_the_top() {
-    // `Action::ScrollList(-1)` end to end. `input.rs` gates the key mapping and
-    // the follow ruling, but nothing drove the negative delta through
-    // `App::apply` and `App::view`, so `saturating_add_signed`'s down-path and
-    // the browse-back-up journey were untested.
+    // `Action::ScrollList(-1)` end to end.
     const FILES: usize = 40;
 
     let scratch = Scratch::large_diff("list-back-up", FILES, 1);
@@ -1220,11 +1161,7 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
         "`5` moved the diff with three files changed"
     );
 
-    // Fewer rows than digits. Eight files rather than forty: all this half needs
-    // is more files than the region has rows, so the extra thirty-two are two
-    // `git` fixtures' worth of setup and a `materialise` over five times the
-    // diffs, on every platform in the matrix, proving the same thing. Kept clear
-    // of `LIST_SETTLED` so the number does not read as related to the cap.
+    // Fewer rows than digits.
     const MANY: usize = 8;
     const SHORT: u16 = 9;
     let scratch = Scratch::large_diff("list-digit-short-pane", MANY, 1);
@@ -1259,7 +1196,7 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
 }
 
 // ---------------------------------------------------------------------------
-// The two runs, and what a drawn row addresses: `SPEC.md` §11.2 **B17**.
+// The two runs, and what a drawn row addresses: `SPEC.md` §11.2 B17.
 // ---------------------------------------------------------------------------
 
 /// A changed set with two runs in it, built by real `git`.
@@ -1281,8 +1218,8 @@ fn two_runs(name: &str) -> support::Scratch {
     scratch
 }
 
-/// **A separator opens each run, and a window scrolled into the middle of one
-/// still opens with that run's own label.**
+/// A separator opens each run, and a window scrolled into the middle of one
+/// still opens with that run's own label.
 #[test]
 fn each_run_opens_with_its_own_separator_wherever_the_window_starts() {
     let scratch = two_runs("list-runs");
@@ -1313,7 +1250,7 @@ fn each_run_opens_with_its_own_separator_wherever_the_window_starts() {
     );
 
     // Scrolled so the window starts inside the staged run: it still opens with
-    // that run's label, and the count is the run's **total** rather than what is
+    // that run's label, and the count is the run's total rather than what is
     // visible, so the number answers *how much is there*.
     let plan = vigia::list_plan(files, 4, 3);
     assert_eq!(
@@ -1326,7 +1263,7 @@ fn each_run_opens_with_its_own_separator_wherever_the_window_starts() {
     );
 }
 
-/// **One run draws no separators at all**, which is what keeps the default pane
+/// One run draws no separators at all, which is what keeps the default pane
 /// exactly what it has always been.
 #[test]
 fn a_single_run_spends_no_row_on_a_label_that_says_nothing() {
@@ -1343,7 +1280,7 @@ fn a_single_run_spends_no_row_on_a_label_that_says_nothing() {
     );
 }
 
-/// **A separator with no room for a file under it is not drawn.**
+/// A separator with no room for a file under it is not drawn.
 #[test]
 fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
     let scratch = two_runs("list-tight");
@@ -1362,7 +1299,7 @@ fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
     );
 }
 
-/// **A digit and a click address a *file*, and never the separator above it.**
+/// A digit and a click address a *file*, and never the separator above it.
 #[test]
 fn a_drawn_row_addresses_the_file_under_it_and_a_separator_addresses_nothing() {
     let scratch = two_runs("list-address");
@@ -1420,7 +1357,7 @@ fn the_list_asks_for_the_rows_its_separators_will_take() {
     );
 }
 
-/// **Pressing `a` shows the staged run on that frame, not on the next write.**
+/// Pressing `a` shows the staged run on that frame, not on the next write.
 #[test]
 fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
     let scratch = two_runs("list-toggle-advances");
@@ -1462,7 +1399,7 @@ fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
     );
 }
 
-/// **Every file in the list is reachable when both runs are drawn.**
+/// Every file in the list is reachable when both runs are drawn.
 #[test]
 fn the_last_file_is_reachable_when_the_list_is_grouped() {
     let scratch = two_runs("list-tail-reachable");
@@ -1490,10 +1427,8 @@ fn the_last_file_is_reachable_when_the_list_is_grouped() {
              cannot reach the last file: it draws {reached:?}"
         );
 
-        // **And the old arithmetic really does fall short here**, or this fixture
-        // cannot see the defect it exists for. The naive clamp compares a count of
-        // files against a count of drawn rows, and the separators are the
-        // difference.
+        // And the old arithmetic really does fall short here, or this fixture cannot
+        // see the defect it exists for.
         let naive = files.saturating_sub(rows);
         let naive_reach: Vec<usize> = vigia::list_plan(frame.files(), naive, rows)
             .iter()
@@ -1521,7 +1456,7 @@ fn the_last_file_is_reachable_when_the_list_is_grouped() {
     );
 }
 
-/// **The height a scroll step is measured in is the height the paint lays out.**
+/// The height a scroll step is measured in is the height the paint lays out.
 #[test]
 fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
     let scratch = two_runs("list-diff-height");
@@ -1551,12 +1486,7 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
              paint lays out {laid}"
         );
 
-        // **And the two inputs are not interchangeable, which is the finding.**
-        // `diff_height` took one number and passed it for both until B17 gave the
-        // list a row budget its file count no longer equals. Counting the heights
-        // where the old form disagrees is what stops this gate from being the
-        // identity it would otherwise be: `diff_height` *is* `body_layout(..).diff`,
-        // so comparing them with the same arguments asserts nothing at all.
+        // And the two inputs are not interchangeable, which is the finding.
         if vigia::diff_height(at, &chrome, count, count) != laid {
             separated += 1;
         }
@@ -1569,7 +1499,7 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
     );
 }
 
-/// **`last_top` is the *tightest* ceiling, not merely a top that works.**
+/// `last_top` is the *tightest* ceiling, not merely a top that works.
 #[test]
 fn the_lists_ceiling_is_the_tightest_top_that_still_shows_the_last_file() {
     let scratch = two_runs("list-tight-ceiling");
@@ -1602,7 +1532,7 @@ fn the_lists_ceiling_is_the_tightest_top_that_still_shows_the_last_file() {
     }
 }
 
-/// **Follow keeps the caret's own file inside the window it computes.**
+/// Follow keeps the caret's own file inside the window it computes.
 #[test]
 fn follow_marks_the_current_file_at_every_window_it_chooses() {
     let scratch = two_runs("list-follow-caret");
@@ -1648,7 +1578,7 @@ fn follow_marks_the_current_file_at_every_window_it_chooses() {
     }
 }
 
-/// **`J` reaches the end of a grouped list.**
+/// `J` reaches the end of a grouped list.
 #[test]
 fn browsing_reaches_the_bottom_of_a_grouped_list() {
     let scratch = two_runs("list-browse-tail");
@@ -1688,7 +1618,7 @@ fn browsing_reaches_the_bottom_of_a_grouped_list() {
     );
 }
 
-/// **A one-row grouped window draws the run's label, not an unlabelled file.**
+/// A one-row grouped window draws the run's label, not an unlabelled file.
 #[test]
 fn a_one_row_list_draws_its_runs_label() {
     let scratch = two_runs("list-one-row");
@@ -1723,8 +1653,8 @@ fn a_one_row_list_draws_its_runs_label() {
     );
 }
 
-/// **The plan's files run contiguously from `top`, which is what lets the painter
-/// count rather than ask.**
+/// The plan's files run contiguously from `top`, which is what lets the painter
+/// count rather than ask.
 #[test]
 fn the_plans_files_run_contiguously_from_the_top_it_was_given() {
     let scratch = two_runs("list-contiguous");
@@ -1769,7 +1699,7 @@ fn the_plans_files_run_contiguously_from_the_top_it_was_given() {
     );
 }
 
-/// **The list's scrollbar and its drag agree about how far the window can go.**
+/// The list's scrollbar and its drag agree about how far the window can go.
 #[test]
 fn the_lists_bar_is_measured_in_files_at_both_ends() {
     let scratch = two_runs("list-bar-units");
@@ -1821,7 +1751,7 @@ fn the_lists_bar_is_measured_in_files_at_both_ends() {
     );
 }
 
-/// **The thumb keeps its length as the window scrolls.**
+/// The thumb keeps its length as the window scrolls.
 #[test]
 fn the_lists_thumb_keeps_its_length_as_the_window_moves() {
     let scratch = support::Scratch::large_diff("list-thumb-constant", 24, 6);
@@ -1907,7 +1837,7 @@ fn the_lists_thumb_keeps_its_length_as_the_window_moves() {
     }
 }
 
-/// **A screenful is the complement of the ceiling**, which is the definition the
+/// A screenful is the complement of the ceiling, which is the definition the
 /// bar, the drag and the clamp all read.
 #[test]
 fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
@@ -1949,7 +1879,7 @@ fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
     );
 }
 
-/// **Every frame leaves a screenful a scrollbar can be asked about**, including
+/// Every frame leaves a screenful a scrollbar can be asked about, including
 /// the two that return before one is computed.
 #[test]
 fn a_frame_with_no_list_still_reports_a_screenful_that_scrolls_nothing() {
@@ -1999,7 +1929,7 @@ fn a_frame_with_no_list_still_reports_a_screenful_that_scrolls_nothing() {
     );
 }
 
-/// **A drag on the list's track reaches the last file when both runs are drawn.**
+/// A drag on the list's track reaches the last file when both runs are drawn.
 #[test]
 fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
     let scratch = two_runs("list-drag-grouped");
@@ -2039,7 +1969,7 @@ fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
     );
 }
 
-/// **A file is never drawn without the label of the run it belongs to.**
+/// A file is never drawn without the label of the run it belongs to.
 #[test]
 fn no_file_is_ever_planned_without_its_own_runs_label() {
     let scratch = two_runs("list-labelled");
@@ -2075,8 +2005,8 @@ fn no_file_is_ever_planned_without_its_own_runs_label() {
     assert!(saw_a_boundary, "the sweep never drew a label at all");
 }
 
-/// **A list that is entirely staged still says so, and its rows still read as
-/// staged.**
+/// A list that is entirely staged still says so, and its rows still read as
+/// staged.
 #[test]
 fn an_entirely_staged_list_announces_itself() {
     let scratch = support::Scratch::new("list-all-staged");
@@ -2106,8 +2036,6 @@ fn an_entirely_staged_list_announces_itself() {
         "an entirely staged list drew no staged heading, so it reads as the \
          default unstaged view:\n{plan:?}"
     );
-    // And the region must be sized for the heading it now draws, or the label
-    // is announced and the run's tail falls off the bottom (#313).
     assert_eq!(
         vigia::list_rows_wanted(files),
         files.len() + 1,
@@ -2126,9 +2054,6 @@ fn the_mark_reaches_the_drawn_pane_after_the_ink_has_drained() {
     let mut highlighter = Highlighter::eager();
 
     // A write, then ten seconds of quiet rolled in the steps `Shell::draw` uses.
-    // The number is the ruling's rather than `PULSE_SAMPLES`', for the reason the
-    // core's own gate gives: a gate written in terms of the constant it pins moves
-    // with it.
     let path = frame.files()[0].path.clone();
     let start = std::time::Instant::now();
     let mut history = History::starting_at(start);
@@ -2164,10 +2089,7 @@ fn the_mark_reaches_the_drawn_pane_after_the_ink_has_drained() {
         .collect();
     let drawn = rows.join("\n");
 
-    // **On the written file's own row, not anywhere on the pane.** The first
-    // spelling asked whether a `●` reached the screen at all, which a mark on the
-    // wrong row satisfies just as well: the fixture has three files and only one
-    // of them was written.
+    // On the written file's own row, not anywhere on the pane.
     let name = path.rsplit('/').next().expect("a file name");
     let row = rows
         .iter()
@@ -2177,10 +2099,10 @@ fn the_mark_reaches_the_drawn_pane_after_the_ink_has_drained() {
         row.contains('●'),
         "ten seconds after the only write, its own row carries no mark: {row:?}"
     );
-    // **Every marked row names the written file**, which is the claim rather than
-    // "exactly one row": `SPEC.md` §11.1 draws a file through one `Painter::file_row`
-    // in both regions, so the file the diff is inside is marked in the map and on
-    // its own heading. Counting rows would have made that design a failure.
+    // Every marked row names the written file, which is the claim rather than "exactly
+    // one row": `SPEC.md` §11.1 draws a file through one `Painter::file_row` in both
+    // regions, so the file the diff is inside is marked in the map and on its own
+    // heading.
     for marked in rows.iter().filter(|row| row.contains('●')) {
         assert!(
             marked.contains(name),

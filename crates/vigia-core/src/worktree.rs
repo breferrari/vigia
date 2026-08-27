@@ -92,13 +92,7 @@ impl Worktree {
 
     /// How many changes one comparison holds, without keeping any of them.
     pub fn count_of(&self, origin: Origin) -> Result<usize> {
-        // **Rename tracking on, and the cheaper spelling is wrong here.** A count
-        // does not care about pairing *in the abstract* — but this number is drawn
-        // beside the one `Frame::advance` produces, and that walk pairs. With
-        // tracking off a staged rename counts two, so the empty state said
-        // `· 4 staged` and pressing `a` drew three rows. Two numbers about one
-        // worktree that disagree is worse than a walk that costs a little more, on
-        // the one frame that has no diff to compute anyway.
+        // Rename tracking on, and the cheaper spelling is wrong here.
         self.changes_of(origin, ChangeOptions::default())?
             .try_fold(0, |n, change| change.map(|_| n + 1))
     }
@@ -107,10 +101,7 @@ impl Worktree {
     fn staged(&self, options: ChangeOptions) -> Result<Vec<FileChange>> {
         let tree = match self.repo.head_tree_id() {
             Ok(id) => id.detach(),
-            // Unborn, detached at nothing, or an unreadable `HEAD`. All three
-            // reach the same place for the same reason `branch` returns `None`
-            // for them: a monitor that refused to draw because it could not
-            // resolve a ref has stopped doing its job.
+            // Unborn, detached at nothing, or an unreadable `HEAD`.
             Err(_) => self.repo.empty_tree().id().detach(),
         };
         let index = self
@@ -134,15 +125,7 @@ impl Worktree {
                 Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
             });
 
-        // **A sparse index yields no staged run rather than a dead pane.**
-        // `gix_diff::index` refuses outright on one (`Error::IsSparse`), and it is
-        // a refusal the index-worktree walk beside it does not have — so before
-        // this arm, pressing `a` in a `git sparse-checkout --sparse-index`
-        // repository made **every** later `Frame::advance` fail for as long as the
-        // toggle stayed on. The core leaves a frame intact on failure, which is
-        // the right rule and is exactly what made this bad: the pane kept its
-        // pre-`a` contents and stopped updating, quietly, on a tree the reader was
-        // watching precisely because it was changing.
+        // A sparse index yields no staged run rather than a dead pane.
         if let Err(e) = walked {
             if matches!(
                 e,
@@ -179,11 +162,8 @@ impl Worktree {
                 hunks: Vec::new(),
                 added: 0,
                 removed: 0,
-                // A conflict and a type change are states rather than diffs, and
-                // this method deliberately reads nothing for them. Reporting a
-                // length would mean opening the file to find one, which is the
-                // read the early return exists to avoid — and the same read a
-                // first line would need.
+                // A conflict and a type change are states rather than diffs, and this
+                // method deliberately reads nothing for them.
                 lines: 0,
                 first_line: None,
                 bytes: 0,
@@ -229,13 +209,7 @@ impl Worktree {
         Ok((before, after))
     }
 
-    /// **`try_into_blob`, never `into_blob`, and the difference is a panic.**
-    /// `gix`'s `into_blob` is documented as *"or panic if it is none"*, and an id
-    /// that names something other than a blob is reachable: a **gitlink** — a
-    /// submodule's recorded commit — is an ordinary index entry whose id is a
-    /// *commit*. On a repository whose object database can resolve it (a clone
-    /// made with `--reference`, or any alternates setup) `find_object` succeeds
-    /// and the conversion aborts the process.
+    /// `try_into_blob`, never `into_blob`, and the difference is a panic.
     fn blob(&self, id: gix::ObjectId, path: &str) -> Result<Vec<u8>> {
         let missing = || Error::MissingBlob {
             path: path.to_owned(),
@@ -254,12 +228,7 @@ impl Worktree {
         let rela_path = change.path.as_str();
         let full = self.workdir.join(rela_path);
 
-        // **Counted, and that is what gives this branch a failing test.**
-        // Uncounted, deleting [`FileChange::maybe_symlink`] and making this
-        // `lstat` unconditional left the whole suite green: the syscall is here
-        // and `FrameStats::probes` is one layer up, so the gate that holds this
-        // corner at one stat per file could see neither the cost nor the saving.
-        // See [`Worktree::diff_counted`].
+        // Counted, and that is what gives this branch a failing test.
         if change.maybe_symlink {
             *probes += 1;
             if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
@@ -330,15 +299,8 @@ fn path_of(raw: &gix::bstr::BStr) -> String {
 
 /// Whether this item's working-tree side may be a symlink.
 fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
-    // **An intent-to-add entry's mode describes nothing**, and trusting it was a
-    // live instance of exactly the defect this whole field guards against.
-    // `git add -N` stakes a claim on a path with the empty blob and mode
-    // `100644`, whatever is on disk; replace that path with a symlink and `gix`
-    // reports `IntentToAdd` rather than a type change, so the index says "plain
-    // file", `is_diffable` and `reads_worktree` are both true, and the read
-    // followed the link. Measured: git says `+target.txt`, `vigia` said the
-    // target's contents, and on Windows a link whose target holds a `/` failed
-    // `fs::read` outright and re-failed on every tick.
+    // An intent-to-add entry's mode describes nothing, and trusting it was a live
+    // instance of exactly the defect this whole field guards against.
     if matches!(summary, Summary::IntentToAdd) {
         return true;
     }
@@ -367,7 +329,7 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     }
 }
 
-/// Whether either side of a tree-index change is a **gitlink**.
+/// Whether either side of a tree-index change is a gitlink.
 fn touches_gitlink(change: &gix::diff::index::ChangeRef<'_, '_>) -> bool {
     use gix::diff::index::ChangeRef;
     let commit = |mode: &gix::index::entry::Mode| *mode == gix::index::entry::Mode::COMMIT;
@@ -392,14 +354,7 @@ fn touches_gitlink(change: &gix::diff::index::ChangeRef<'_, '_>) -> bool {
 fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileChange> {
     use gix::diff::index::ChangeRef;
 
-    // **A gitlink is dropped, on either side.** A submodule's recorded commit is an
-    // ordinary index entry whose id names a *commit*, so there is no content to
-    // compare; `blob` refuses them safely now, but a refusal is an
-    // `Err`, and `View::collect` propagates one — so the collect failed, the shell
-    // kept the previous screen, and the pane froze exactly the way the sparse index
-    // made it freeze. Found by an adversarial pass reading the arms against the
-    // paragraph above them, which is the "promised and absent" shape rather than a
-    // wrong branch.
+    // A gitlink is dropped, on either side.
     if touches_gitlink(change) {
         return None;
     }
@@ -460,11 +415,7 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
         origin: Origin::Staged,
         before,
         after,
-        // **Conservative, and it costs nothing here.** Nothing on the staged path
-        // reads a file, so this is never consulted; `true` is the value every arm
-        // of [`maybe_symlink`] defaults to when the walk cannot positively call an
-        // entry a plain file, and claiming `false` would be claiming something
-        // this walk never looked at.
+        // Conservative, and it costs nothing here.
         maybe_symlink: true,
     })
 }
@@ -540,10 +491,7 @@ impl Iterator for Changes {
                 kind,
                 origin: Origin::Unstaged,
                 before: index_blob,
-                // The working tree, unless there is nothing there to read. A
-                // removal and the two states `is_diffable` refuses all reach the
-                // same `None`, which `reads_worktree` reads straight off rather
-                // than deriving from the kind.
+                // The working tree, unless there is nothing there to read.
                 after,
                 maybe_symlink: maybe_symlink(&item, &summary),
             }));
@@ -612,10 +560,8 @@ pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
         let slot = counts
             .entry(extension)
             .or_insert_with(|| (0, Vec::with_capacity(per_extension)));
-        // Counted whatever its length, because the count is what the merge
-        // ranks on and a path too long to open is still a file of that language.
-        // Only the retained sample is bounded, and a path this long cannot be
-        // warmed from anyway.
+        // Counted whatever its length, because the count is what the merge ranks on and
+        // a path too long to open is still a file of that language.
         slot.0 += 1;
         if slot.1.len() < per_extension && path.len() <= INDEXED_PATH {
             slot.1.push(path.to_owned());

@@ -24,10 +24,8 @@ pub struct Line {
     pub kind: LineKind,
     /// Line content with any trailing `\n` or `\r\n` stripped.
     pub text: String,
-    /// Byte ranges of `text` that are not shared with this line's partner on
-    /// the other side of the change, per [`crate::emphasis`]. Empty for
-    /// context, for an unpaired changed line, and for a pair too far apart to
-    /// be one; the shell then draws the whole-line wash it always drew.
+    /// Byte ranges of `text` that are not shared with this line's partner on the other
+    /// side of the change, per [`crate::emphasis`].
     pub emph: crate::emphasis::Emphasis,
 }
 
@@ -59,7 +57,7 @@ pub struct FileDiff {
     pub added: u32,
     /// Total removed lines.
     pub removed: u32,
-    /// Lines on the **working-tree** side, which is the whole file rather than
+    /// Lines on the working-tree side, which is the whole file rather than
     /// the diff.
     pub lines: u32,
     /// The file's own first line, worktree side, falling back to the index
@@ -193,11 +191,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
             hunks: Vec::new(),
             added: 0,
             removed: 0,
-            // Not "unknown" and not counted. A newline in a binary file is a
-            // byte that happens to be 0x0A, so counting them would produce a
-            // confident number describing nothing, and the heat strip would
-            // then locate changes inside a file that has no lines to locate
-            // them in.
+            // Not "unknown" and not counted.
             lines: 0,
             // The same reasoning one field over: bytes that happen to precede
             // an 0x0A are not a line, and nothing should resolve a grammar
@@ -242,10 +236,9 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
                 });
                 o += 1;
             }
-            // One raw hunk is one change block: a removal run followed by the
-            // addition run that replaced it, which is exactly the unit
-            // [`crate::emphasis`] pairs. Marked here, once per computed diff,
-            // so the frame path inherits the ranges for free.
+            // One raw hunk is one change block: a removal run followed by the addition
+            // run that replaced it, which is exactly the unit [`crate::emphasis`]
+            // pairs.
             let removed_texts: Vec<String> = raw.before.clone().map(&line_before).collect();
             let added_texts: Vec<String> = raw.after.clone().map(&line_after).collect();
             let (removed_emph, added_emph) = crate::emphasis::mark(&removed_texts, &added_texts);
@@ -407,7 +400,7 @@ mod tests {
 
         // A cut through a four-byte character: 255 ASCII bytes then one lead
         // byte, which `from_utf8_lossy` replaces with a three-byte U+FFFD. The
-        // cap is on bytes **read**, so the answer is 258 and still bounded.
+        // cap is on bytes read, so the answer is 258 and still bounded.
         let mut split = vec![b'x'; 255];
         split.extend_from_slice("🔥".as_bytes());
         let diff = compute("bundle.js".to_owned(), b"", &split);

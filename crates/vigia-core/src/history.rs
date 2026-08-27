@@ -6,18 +6,13 @@ use std::time::{Duration, Instant};
 /// How far back a churn sparkline reaches.
 pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 
-/// The resolution a sparkline is projected **from**, oldest bucket first.
+/// The resolution a sparkline is projected from, oldest bucket first.
 pub const HISTORY_BUCKETS: usize = 24;
 
-// Eight, twelve and twenty-four were each argued from a different thing. Eight
-// was one element's column count.
-// Twelve was a period: a fifteen-second bucket is coarse enough that a steady
-// worktree drew five and a half of the ramp's nine rungs, which is a block rather
-// than a shape, and ten seconds took it to 6.5 without crossing into scatter.
-// Twenty-four is neither, because a *rung* has no single period: it is the widest
-// division the ladder can halve twice through twelve.
+// Eight, twelve and twenty-four were each argued from a different thing. Eight was one
+// element's column count.
 
-/// Source buckets one **drawn** bucket may cover, finest first.
+/// Source buckets one drawn bucket may cover, finest first.
 pub const SPARK_GROUPS: [usize; 3] = [1, 2, 4];
 
 const _: () = {
@@ -28,13 +23,8 @@ const _: () = {
             "a sparkline grouping does not divide the source resolution, so a \
              drawn bucket would cover less time than its neighbours"
         );
-        // **Each grouping divides the next, which is stronger than ascending and
-        // is what [`History::repeak`]'s ordering proof actually rests on.** That
-        // proof says a coarser rung's figure cannot be smaller because coarsening
-        // *merges* groups, so the kept sum is shared and the non-empty count can
-        // only fall. Merging is what needs this: chunks of four are unions of
-        // chunks of two, so every group at one rung lies inside one group at the
-        // next.
+        // Each grouping divides the next, which is stronger than ascending and is what
+        // [`History::repeak`]'s ordering proof actually rests on.
         assert!(
             at == 0 || SPARK_GROUPS[at] % SPARK_GROUPS[at - 1] == 0,
             "a sparkline grouping does not divide into the next, so a coarser \
@@ -45,37 +35,27 @@ const _: () = {
     }
 };
 
-/// How much time one **source** bucket covers, which is the finest a rung draws.
+/// How much time one source bucket covers, which is the finest a rung draws.
 pub const HISTORY_BUCKET: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_BUCKETS as u64);
 
-// **`GRAPH_COLUMNS` and `GRAPH_PERIOD` were here and are retired**
-// ([#232](https://github.com/breferrari/vigia/issues/232)). They fixed the
-// band's period at fifteen columns of eight seconds, tuned over forty seeded
-// series. That diagnosed the right defect, a save drawing a
-// one-column hairline between two blanks, and reached for the wrong fix: the
-// answer to the
-// same defect on the same shape of signal is the **axis**, and with a
-// floor under it a narrow column is a spike rather than a mark in a void. The
-// band draws one value per sub-column now, so its period is a property of the
-// pane and there is no constant to name.
+// `GRAPH_COLUMNS` and `GRAPH_PERIOD` were here and are retired
+// ([#232](https://github.com/breferrari/vigia/issues/232)). They fixed the band's
+// period at fifteen columns of eight seconds, tuned over forty seeded series.
 
 /// Samples the store keeps per path, oldest first.
 pub const HISTORY_SAMPLES: usize = 120;
 
-/// How much time one **sample** covers, which is the grid the window rolls on.
+/// How much time one sample covers, which is the grid the window rolls on.
 pub const HISTORY_SAMPLE: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
 
 /// Samples at the newest end of a track that keep [`Recency::Pulse`] on it.
 pub const PULSE_SAMPLES: usize = 2;
 
-// **A slice of the newest samples has to fit inside the window it slices**, and
-// `recency` indexes with a subtraction: past `HISTORY_SAMPLES` that underflows and
-// panics on the frame path, where a monitor that panics is the worst failure this
-// product has. A `const` block is the instrument this repository already reaches
-// for when a claim no test can fail is a wish, and it stops the build rather than
-// a suite.
+// A slice of the newest samples has to fit inside the window it slices, and `recency`
+// indexes with a subtraction: past `HISTORY_SAMPLES` that underflows and panics on the
+// frame path, where a monitor that panics is the worst failure this product has.
 const _: () = assert!(
     PULSE_SAMPLES >= 1 && PULSE_SAMPLES <= HISTORY_SAMPLES,
     "PULSE_SAMPLES must name at least one sample and no more than the window holds"
@@ -102,7 +82,7 @@ pub const HISTORY_PATHS: usize = 256;
 /// How recently a path changed, as three rungs of one ladder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Recency {
-    /// Named by the most recent tick **and** holding ink in the newest sample.
+    /// Named by the most recent tick and holding ink in the newest sample.
     /// Drawn brightest.
     Pulse,
     /// Changed inside [`HISTORY_WINDOW`], but not in the newest tick.
@@ -129,7 +109,7 @@ pub struct HistoryStats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Churn(pub [u32; HISTORY_SAMPLES]);
 
-/// How far a write's weight is spread when the series is read as a **level**.
+/// How far a write's weight is spread when the series is read as a level.
 pub const HISTORY_LEVEL: Duration = Duration::from_secs(6);
 
 /// [`HISTORY_LEVEL`] in samples, which is what the filter actually steps in.
@@ -150,7 +130,7 @@ fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
     let decay = (-1.0 / LEVEL_SAMPLES).exp();
 
     // Two passes over the samples, and two more over a flat series of ones. The
-    // second pair is the **weight actually available** at each position, and
+    // second pair is the weight actually available at each position, and
     // dividing by it is what makes this a weighted average rather than a sum.
     let mut smoothed = [0.0f64; HISTORY_SAMPLES];
     let mut weight = [0.0f64; HISTORY_SAMPLES];
@@ -172,7 +152,7 @@ fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
         let total = smoothed[at] + value - f64::from(samples[at]);
         let share = weight[at] + mass - 1.0;
         let level = if share > 0.0 { total / share } else { 0.0 };
-        // **One is the floor where a write actually landed, and nowhere else.**
+        // One is the floor where a write actually landed, and nowhere else.
         let rounded = level.round().clamp(0.0, f64::from(u32::MAX));
         out[at] = if rounded < 1.0 && samples[at] > 0 {
             1
@@ -207,7 +187,7 @@ impl Churn {
             .collect()
     }
 
-    /// The series read as a **level**, re-projected onto `width` columns.
+    /// The series read as a level, re-projected onto `width` columns.
     pub fn levels(&self, width: usize) -> Vec<u32> {
         Churn(levelled(&self.0)).projected(width)
     }
@@ -245,7 +225,7 @@ pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
 /// How many times the median a value may be before it stops setting the scale.
 const SCALE_OUTLIER: u64 = 10;
 
-/// [`scale_of`] over a scratch of the **non-empty** values, which it reorders.
+/// [`scale_of`] over a scratch of the non-empty values, which it reorders.
 fn scale_of_busy(busy: &mut [u32]) -> u32 {
     let Some(cut) = outlier_cut(busy) else {
         return 0;
@@ -272,11 +252,7 @@ fn outlier_cut(busy: &mut [u32]) -> Option<u64> {
 /// Thirteen tenths of the mean of what the cut kept.
 fn scale_from(sum: u64, kept: u64) -> u32 {
     if kept == 0 {
-        // Nothing to average. The cut never causes it, because `outlier_cut`
-        // answers `None` for an empty population and every non-empty one keeps
-        // its own median; what does is a caller with no columns to measure, which
-        // is [`Churn::scale_at`] at width zero. Zero is what every caller reads
-        // as "no scale yet".
+        // Nothing to average.
         return 0;
     }
     // Thirteen tenths: above the mean, so an ordinary write does not sit at the
@@ -328,15 +304,14 @@ impl Track {
     /// The samples summed into the source buckets a sparkline is drawn from,
     /// oldest first.
     fn drawn(&self) -> [u32; HISTORY_BUCKETS] {
-        // Sliced rather than zipped against `chunks`, which **truncates**: a
-        // division that stopped being exact would silently drop the last group,
-        // and the last group is the newest, so every fresh write would vanish
-        // from the screen with nothing failing. Slicing panics instead, and the
-        // `const` assertion beside `SAMPLES_PER_BUCKET` means it cannot.
+        // Sliced rather than zipped against `chunks`, which truncates: a division that
+        // stopped being exact would silently drop the last group, and the last group is
+        // the newest, so every fresh write would vanish from the screen with nothing
+        // failing.
         bucketed(&self.samples)
     }
 
-    /// [`Track::drawn`] read as a **level** rather than as the writes that made
+    /// [`Track::drawn`] read as a level rather than as the writes that made
     /// it. See [`levelled`] for the kernel and [`HISTORY_LEVEL`] for its
     /// constant.
     fn levelled(&self) -> [u32; HISTORY_BUCKETS] {
@@ -397,12 +372,12 @@ pub struct History {
     tracks: HashMap<String, Track>,
     /// Ticks that named at least one path.
     tick: u64,
-    /// When the newest **sample** opened, which is the grid the window rolls on.
+    /// When the newest sample opened, which is the grid the window rolls on.
     opened: Instant,
     /// What a drawn bucket's height is divided by, one figure per
     /// [`SPARK_GROUPS`] entry. See [`scale_of`].
     scales: [u32; SPARK_GROUPS.len()],
-    /// Every tracked path's levelled **source** buckets, one path's contiguous,
+    /// Every tracked path's levelled source buckets, one path's contiguous,
     /// held between ticks so [`Self::repeak`] allocates nothing.
     scratch: Vec<u32>,
     /// The non-empty members of [`Self::scratch`], which is the population the
@@ -474,14 +449,10 @@ impl History {
             self.tracks.insert(path.to_owned(), track);
         }
 
-        // **Skipped when nothing moved and nothing was written**, which is not
-        // an optimisation looking for a problem: this call sits on the shell
-        // loop's *timeout* arm, which also fires every `STEP_REPEAT` while
-        // a scrollbar button is held. At 50ms a held button drives twenty
-        // timeouts a second and nineteen of them cross no sample boundary, so
-        // without this guard each one pays the walk priced at **150.1µs p50** in
-        // [`Self::repeak`]'s own docblock, for an answer that
-        // cannot have changed.
+        // Skipped when nothing moved and nothing was written, which is not an
+        // optimisation looking for a problem: this call sits on the shell loop's
+        // *timeout* arm, which also fires every `STEP_REPEAT` while a scrollbar button
+        // is held.
         if rolled > 0 || named {
             self.stats.repeaks += 1;
             self.repeak();
@@ -493,7 +464,7 @@ impl History {
         self.tracks.get(path).map(Track::drawn)
     }
 
-    /// This path's churn read as a **level** rather than as the writes that made
+    /// This path's churn read as a level rather than as the writes that made
     /// it, in the same source buckets [`History::churn`] returns.
     pub fn level(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
         self.tracks.get(path).map(Track::levelled)
@@ -511,11 +482,8 @@ impl History {
     /// Which rung of the recency ladder this path is on.
     pub fn recency(&self, path: &str) -> Recency {
         match self.tracks.get(path) {
-            // `self.tick` is zero until something is recorded and no track can
-            // exist before then, so this never reads a pulse out of an empty
-            // store. `Track::bump` floors a write at one, so a non-zero sample in
-            // the newest [`PULSE_SAMPLES`] is exactly "written within the last
-            // sample or the one before it".
+            // `self.tick` is zero until something is recorded and no track can exist
+            // before then, so this never reads a pulse out of an empty store.
             Some(track)
                 if track.named_by(self.tick)
                     && track.samples[HISTORY_SAMPLES - PULSE_SAMPLES..]
@@ -529,7 +497,7 @@ impl History {
         }
     }
 
-    /// What a **source** bucket's height is divided by, across every tracked path.
+    /// What a source bucket's height is divided by, across every tracked path.
     pub fn scale(&self) -> u32 {
         self.scales[0]
     }
@@ -550,9 +518,6 @@ impl History {
     }
 
     /// Advance the window to `now`, dropping whatever fell out of it.
-    /// Returns how many whole samples the window moved, which is what lets
-    /// [`Self::record_sized`] skip [`Self::repeak`] over state that did not
-    /// change.
     fn roll(&mut self, now: Instant) -> usize {
         let elapsed = now.saturating_duration_since(self.opened);
         // Saturating into `usize` before the comparison below, so an instant far
@@ -564,20 +529,12 @@ impl History {
         }
 
         if steps >= HISTORY_SAMPLES {
-            // The whole window has turned over, so nothing tracked can have a
-            // sample left in it. Clearing beats shifting every track by more
-            // samples than it has, and it is the state a monitor left open
-            // overnight wakes up in.
+            // The whole window has turned over, so nothing tracked can have a sample
+            // left in it.
             self.stats.evicted_by_window += self.tracks.len() as u64;
             self.tracks.clear();
             self.opened = now;
-            // **`repeak` owns both derived fields, so neither is zeroed here.**
-            // Zeroing `scales` and leaving `worktree` alone is harmless only
-            // while the caller repeaks unconditionally. It does not, and a
-            // branch that clears one of two derived fields is one edit from
-            // a window that reads as full ink forever while `ages_in` says there
-            // is nothing left to age. The caller repeaks whenever this returns
-            // non-zero, and this branch always does.
+            // `repeak` owns both derived fields, so neither is zeroed here.
             return steps;
         }
 
@@ -592,23 +549,18 @@ impl History {
             !track.empty()
         });
         self.stats.evicted_by_window += (before - self.tracks.len()) as u64;
-        // **No repeak here**, deliberately: `record_sized` is this function's
-        // only caller and repeaks after it returns whenever this reported a
-        // non-zero step, so a second full projection of every track would be pure
-        // duplicate work. That was survivable while a track held eight samples
-        // and is a quarter of the tick's cost now that it holds a hundred and
-        // twenty. (Repeaking *unconditionally* is what this function's step
-        // count lets the caller skip.)
+        // No repeak here, deliberately: `record_sized` is this function's only caller
+        // and repeaks after it returns whenever this reported a non-zero step, so a
+        // second full projection of every track would be pure duplicate work.
         steps
     }
 
     /// Drop the least recently changed path to make room for a new one.
     fn evict_one(&mut self) {
-        // Compared rather than keyed, because a key has to be **owned**: the
-        // keyed form cloned every path it looked at, so one eviction allocated
-        // two hundred and fifty-six strings and a burst that filled the cap
-        // allocated them again per victim. The ordering is identical, oldest
-        // tick first and the path breaking ties so the choice is deterministic.
+        // Compared rather than keyed, because a key has to be owned: the keyed form
+        // cloned every path it looked at, so one eviction allocated two hundred and
+        // fifty-six strings and a burst that filled the cap allocated them again per
+        // victim.
         let victim = self
             .tracks
             .iter()
@@ -639,31 +591,13 @@ impl History {
         let mut worktree = [0u32; HISTORY_SAMPLES];
         for track in self.tracks.values() {
             for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
-                // **Saturating, like every other add on this path.** It was a
-                // plain `+=` while a sample was a `u16` and the sum a `u32`, where
-                // 256 paths of `u16::MAX` could not reach the ceiling. A sample is
-                // a `u32` of bytes now and [`Track::bump`] saturates at its own
-                // ceiling, so two large writes in one second would panic in debug
-                // and wrap in release, drawing the busiest worktree there has ever
-                // been as the quietest. That is the exact failure `bump` and
-                // `drawn` already saturate against, reached through the widening
-                // rather than through a count.
+                // Saturating, like every other add on this path: a sample is a `u32`
+                // of bytes, so two large writes in one second would otherwise panic in
+                // debug and wrap in release.
                 *total = total.saturating_add(count);
             }
         }
-        // **Collected rather than streamed.** Walking the buckets through an
-        // iterator means nothing has to hold them, and the rule takes a median,
-        // which no running pair can answer.
-        // [`Self::scratch`] is what keeps that from costing an allocation a tick.
-        // **Measured rather than assumed, since this is the frame path, and
-        // re-measured when this body changes** rather than left describing the
-        // code it was taken against. At the full
-        // 256-path cap over a populated window this walk costs **150.1µs p50 and
-        // 154.2µs p99**, from 147.0 and 150.7 with the cut disabled and the rest
-        // of the body unchanged, measured interleaved in one process so a loaded
-        // machine moves both arms. `levelled` is two O(n) passes over 120 samples per track rather
-        // than the O(n·k) convolution its shape suggests, which is why the gather
-        // and the median are not what costs here.
+        // Collected rather than streamed.
         self.scratch.clear();
         self.scratch
             .reserve(self.tracks.len().saturating_mul(HISTORY_BUCKETS));
@@ -671,11 +605,8 @@ impl History {
             self.scratch.extend_from_slice(&track.levelled());
         }
 
-        // **What is outlying is decided once, at the source resolution, and then
-        // every rung sums one kept series.** That ordering is not a detail: it is
-        // what makes a coarser rung's figure provably no smaller than a finer
-        // rung's, which is what `SPEC.md` §11.1 needs for a width rung to be a
-        // change of resolution rather than of height.
+        // What is outlying is decided once, at the source resolution, and then every
+        // rung sums one kept series.
         self.busy.clear();
         self.busy.reserve(self.scratch.len());
         self.busy
@@ -691,17 +622,7 @@ impl History {
         for buckets in self.scratch.chunks(HISTORY_BUCKETS) {
             for (part, group) in parts.iter_mut().zip(SPARK_GROUPS) {
                 for chunk in buckets.chunks(group) {
-                    // The kept series, summed at this rung. A source bucket past
-                    // the cut contributes nothing here and still draws at its own
-                    // height: this decides the yardstick, never the bar.
-                    // **Summed in `u64`, and that is load bearing rather than
-                    // tidy.** A `u32` fold saturates, and four kept buckets can
-                    // saturate as one chunk where the same four do not one at a
-                    // time: the total would then be smaller at a coarse rung than
-                    // at a fine one, the shared sum in the proof above would stop
-                    // being shared, and the ordering would fail in the exact
-                    // direction this row exists to fix. The accumulator was
-                    // already `u64`; the widening was one line too late.
+                    // The kept series, summed at this rung.
                     let total: u64 = chunk
                         .iter()
                         .map(|bucket| u64::from(*bucket))
@@ -860,16 +781,8 @@ mod tests {
         let ordinary = history.scale();
         assert!(ordinary > 0, "an ordinary window produced no scale at all");
 
-        // **The claim, asserted by moving the outlier rather than by comparing
-        // against one bucket.** `scale < busiest` is a true consequence of a
-        // mean-based scale while the buckets are spiky and stops being one once
-        // levelling makes them smooth: a smooth series has few outliers, so a
-        // mean is
-        // representative and thirteen tenths of it sits *above* a typical bucket
-        // rather than below the tallest. The property that actually matters never
-        // depended on which side it landed: one enormous write must not drag the
-        // denominator with it, because against a maximum every ordinary edit for
-        // the next two minutes draws one level high.
+        // The claim, asserted by moving the outlier rather than by comparing against
+        // one bucket.
         let mut spiked = History::starting_at(now);
         spiked.record(["a"], now);
         spiked.record(["a"], now);
@@ -906,7 +819,7 @@ mod tests {
         let mut history = History::starting_at(now);
         let mut track = Track::new(1);
         track.samples[HISTORY_SAMPLES - 1] = u32::MAX;
-        // Both ends of the weight, because #232 gave a sample one: the floor a
+        // Both ends of the weight, because a sample has one: the floor a
         // sizeless write takes, and a full-range one from a large edit. Neither
         // may wrap.
         track.bump(1);

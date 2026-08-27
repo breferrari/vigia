@@ -53,11 +53,9 @@ fn two_changed(name: &str) -> Scratch {
 
 #[test]
 fn every_line_number_names_the_line_it_is_on() {
-    // The fixture is built so the two sides cannot agree by accident: two lines
-    // are deleted near the top, which offsets every later line, and a separate
-    // edit far enough below to make a second hunk. A same-length one-line change
-    // would leave old and new numbering identical and the assertion would hold
-    // against a shell that counted only one side.
+    // The fixture is built so the two sides cannot agree by accident: two lines are
+    // deleted near the top, which offsets every later line, and a separate edit far
+    // enough below to make a second hunk.
     let scratch = Scratch::new("shell-rows-numbers");
     scratch.write(PATH, numbered(40));
     scratch.commit_all("baseline");
@@ -204,14 +202,7 @@ fn a_file_is_its_heading_then_its_hunks() {
 
 #[test]
 fn each_kind_of_change_gets_its_own_letter() {
-    // Git's letters, because they are the ones a reader already knows. Asserted
-    // against changes a real repository produces rather than against the mapping
-    // function, so a kind the core reports and the shell does not recognise shows
-    // up here as a wrong letter instead of never being noticed.
-    // Every file's content is unique to it except the pair meant to be a rename.
-    // With shared content the deletion and the addition below get paired into one
-    // rename, and the assertion fails for a reason that is about the fixture and
-    // not about the shell.
+    // Git's letters, because they are the ones a reader already knows.
     let scratch = Scratch::new("shell-rows-letters");
     scratch.write("src/kept.rs", unique("kept", 4));
     scratch.write("src/gone.rs", unique("gone", 4));
@@ -221,10 +212,7 @@ fn each_kind_of_change_gets_its_own_letter() {
     scratch.edit_line("src/kept.rs", 0, "changed");
     scratch.remove("src/gone.rs");
     scratch.write("src/fresh.rs", unique("fresh", 2));
-    // `I` is the one letter here that is not git's. Git renders an intent-to-add
-    // as a staged addition, and a monitor of the working tree has to distinguish
-    // it from content that is really in the index, so the choice is ours and gets
-    // its own case.
+    // `I` is the one letter here that is not git's.
     scratch.write("src/promised.rs", unique("promised", 2));
     scratch.git(&["add", "-N", "--", "src/promised.rs"]);
     // A rename is a deletion paired with an addition, which the core reports as
@@ -288,12 +276,7 @@ fn each_kind_of_change_gets_its_own_letter() {
 
 #[test]
 fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
-    // The property that pins the windowing arithmetic. Rows above the window are
-    // counted rather than built, and a hunk entirely above it is skipped by
-    // arithmetic rather than walked, because cloning a hundred thousand lines to
-    // show twenty-four of them is a per-frame cost that grows with the file. Two
-    // separate places to be off by one, and neither is reachable from a fixture
-    // with one hunk or a view that starts at the top.
+    // The property that pins the windowing arithmetic.
     let scratch = Scratch::new("shell-rows-window");
     scratch.write(PATH, numbered(60));
     scratch.commit_all("baseline");
@@ -318,10 +301,8 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         &history,
         Viewport {
             position: Position { file: 0, row: 0 },
-            // Unanchored, because this slides a window and compares it against
-            // slices of the whole. Letting the viewport back up to fill a short
-            // tail would be comparing a different window from the one the offset
-            // names.
+            // Unanchored, because this slides a window and compares it against slices
+            // of the whole.
             anchored: false,
             wrap: false,
             width: 0,
@@ -381,11 +362,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
 #[test]
 fn a_real_repository_draws() {
     // The only test that runs the whole composition: a working tree, a frame, the
-    // scroll position, the rows, and the cells. Everything else in the suite cuts
-    // it somewhere. `render.rs` hand-builds its rows because `FileChange` cannot
-    // be constructed outside the core, so nothing there proves the rows a real
-    // frame produces are the ones the renderer was designed against; the rest of
-    // this file builds rows and never draws them.
+    // scroll position, the rows, and the cells.
     let scratch = two_changed("shell-rows-draw");
 
     let worktree = scratch.worktree();
@@ -397,11 +374,7 @@ fn a_real_repository_draws() {
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
-    // **The shipped split, because this is the only whole-composition test.**
-    // Everything else in the suite holds the pinned list out on purpose, to keep
-    // some other measurement clean. If this one did too, no test anywhere would
-    // draw a real frame's two regions together and the snapshot would be a
-    // picture of a screen nobody gets.
+    // The shipped split, because this is the only whole-composition test.
     let split = body_layout(
         area,
         &app.chrome("fixture", None, Pointing::default(), 0, ""),
@@ -443,12 +416,7 @@ fn a_real_repository_draws() {
 fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// The figure the store answers with at each grouping, finest first.
     const PINNED: [u32; 3] = [418, 837, 1_116];
-    // **The producer, not the decider.** `spark_of` and the painter are mutation
-    // tested from every side in `render.rs`, and every one of those fixtures
-    // hands `View` a `peak` by hand. Nothing drove a *recorded* one through
-    // `App::view`, so `View::peak = history.scale()` was untested: hardcoding it
-    // to zero passed the entire workspace suite, all 426 tests, while making
-    // every sparkline on every screen draw pure track forever.
+    // The producer, not the decider.
     let scratch = Scratch::new("shell-rows-recorded-tick");
     scratch.write("src/lib.rs", numbered(12));
     scratch.commit_all("baseline");
@@ -456,11 +424,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 
     let now = Instant::now();
     let mut history = History::starting_at(now);
-    // **Sized writes rather than bare ticks.** A sample weighs a difference, and
-    // the sparkline draws a *level* since #242, so two unsized ticks weigh one
-    // each, spread to a scale of exactly 1: the value a hardcoded denominator
-    // would reach for, which is the one thing this gate exists to tell apart.
-    // A first write is a baseline, so the weight is the second one's growth.
+    // Sized writes rather than bare ticks.
     history.record_sized([("src/lib.rs", Some(4_000))], now);
     history.record_sized([("src/lib.rs", Some(28_000))], now);
 
@@ -514,7 +478,6 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
         .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
         .filter(|&at| {
             let cell = &buffer[at];
-            // Any stop of the ramp, which is three since #196.
             "▁▂▃▄▅▆▇█".contains(cell.symbol())
                 && [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg]
                     .contains(&cell.style().fg)
@@ -554,12 +517,7 @@ fn every_rung_draws_from_the_stores_own_figures() {
     let ink = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
 
     for (pane, rung) in RUNGS {
-        // **A fresh `App` per width, so each iteration is its own observation.**
-        // One shared across the loop carries `App::paint` forward, so the first
-        // pane draws plain and the rest draw coloured, and it carries the scroll
-        // position and the follow state with it. None of that reaches a glance
-        // slot today, which is exactly the kind of accident a later assertion
-        // added to this loop would inherit without noticing.
+        // A fresh `App` per width, so each iteration is its own observation.
         let mut app = App::new();
         let mut terminal = Terminal::new(TestBackend::new(pane, 12)).expect("terminal");
         let area = Rect::new(0, 0, pane, 12);
@@ -601,10 +559,7 @@ fn every_rung_draws_from_the_stores_own_figures() {
              rather than the {rung} its rung asks for"
         );
 
-        // **And the heights came from the store rather than from nothing.** A
-        // denominator of zero draws pure track, which is what a hardcode or the
-        // wrong entry of `Scale` would most easily produce, and it is
-        // indistinguishable from a correct launch by eye.
+        // And the heights came from the store rather than from nothing.
         let bars: usize = (0..buffer.area.height).map(|y| count(y, &bar)).sum();
         assert!(
             bars > 0,
@@ -657,12 +612,6 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
 
 #[test]
 fn a_files_block_ends_in_a_blank_row() {
-    // [#165](https://github.com/breferrari/vigia/issues/165). A file's last
-    // content row and the next file's heading sat on adjacent rows, and a
-    // heading is a `Painter::file_row` carrying the kind letter, the path, the
-    // pulse, the heat strip, the sparkline and the counters, so a dense row
-    // landed directly under a dense row and the only thing marking the boundary
-    // was the content itself.
     let scratch = two_changed("shell-rows-gap");
 
     let worktree = scratch.worktree();
@@ -723,14 +672,7 @@ fn a_files_block_ends_in_a_blank_row() {
             view.rows.get(at - 1)
         );
     }
-    // **And the last file does not get one.** That is the exception rather than
-    // an oversight, and it is the half of this ruling that was reversed while it
-    // was being built: `SPEC.md` §11.1 rules the bottom of the diff is
-    // **content**, `scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank`
-    // is the gate over it, and that gate carries its own warning about having
-    // once been weakened. A blank there would separate the diff from nothing,
-    // since the footer is chrome with a row of its own. Asserted here as well,
-    // because this is the file that would notice a uniform gap coming back.
+    // And the last file does not get one.
     assert!(
         !matches!(view.rows.last(), Some(Row::Gap)),
         "the stream ends on a blank, so the gap has gone uniform and the bottom \

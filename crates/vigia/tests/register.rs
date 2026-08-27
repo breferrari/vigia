@@ -5,7 +5,7 @@
 //! explains what the code cannot, and the record of a change belongs in the
 //! commit message and the tracker, which already hold it.
 //!
-//! Every gate here is a **ratchet**: the ceiling is today's measurement and it
+//! Every gate here is a ratchet: the ceiling is today's measurement and it
 //! may only fall. A ratchet cannot fail on the commit that introduces it and
 //! cannot be satisfied by adding, which is the property a wall does not have
 //! when the work it gates is spread over many commits. Lowering one is how a
@@ -18,32 +18,37 @@
 
 use std::path::{Path, PathBuf};
 
-/// Comment lines per hundred lines of code, per file, as a ceiling that may
-/// only fall.
+/// Comment lines per ten thousand lines of code, per file, as a ceiling that
+/// may only fall.
 ///
-/// Integer hundredths rather than a float, because this is the structural tier
-/// and a ratio equal to its own ceiling must pass: `2.48 > 2.48` is true in
-/// binary floating point often enough to have failed this gate on the commit
-/// that introduced it.
+/// Integer rather than a float, because this is the structural tier and a ratio
+/// equal to its own ceiling must pass: `2.48 > 2.48` is true in binary floating
+/// point often enough to have failed this gate on the commit that introduced it.
+///
+/// Ten-thousandths rather than the hundredths this first counted in, because a
+/// coarse unit is slack wearing a ratchet's clothes. At 354 comment lines
+/// against 1,318 of code, `view.rs` measured 26 per hundred either way, so
+/// thirteen more lines of prose could land before the number moved and a
+/// deliberate mutation passed. One line moves this.
 ///
 /// Files absent from this table are unbounded, which is deliberate: a table
 /// naming every file would need editing whenever one is added, and the ones
 /// worth bounding are the ones that were furthest out when the ratchet landed.
 const RATIO_CEILING: [(&str, u64); 9] = [
-    ("vigia-core/src/change.rs", 47),
-    ("vigia/src/input.rs", 65),
-    ("vigia/src/app.rs", 80),
-    ("vigia-core/src/history.rs", 48),
-    ("vigia/src/render.rs", 53),
-    ("vigia/src/glyphs.rs", 63),
-    ("vigia/src/lib.rs", 69),
-    ("vigia/src/config.rs", 54),
-    ("vigia/src/view.rs", 44),
+    ("vigia-core/src/change.rs", 4705),
+    ("vigia/src/input.rs", 4387),
+    ("vigia/src/app.rs", 4165),
+    ("vigia-core/src/history.rs", 3350),
+    ("vigia/src/render.rs", 3314),
+    ("vigia/src/glyphs.rs", 3947),
+    ("vigia/src/lib.rs", 3588),
+    ("vigia/src/config.rs", 4114),
+    ("vigia/src/view.rs", 2685),
 ];
 
 /// Comments carrying a date or the narrative of a change.
 ///
-/// **Counted per line, which is a blind spot worth naming**: a marker split
+/// Counted per line, which is a blind spot worth naming: a marker split
 /// across a line break is invisible to this, and rewrapping a paragraph is what
 /// surfaces one. Closing it means joining a comment block before matching, and
 /// the block-joining that would take is the same operation that flattened
@@ -53,13 +58,13 @@ const RATIO_CEILING: [(&str, u64); 9] = [
 /// lowers it moves file by file and a per-file table would be edited in every
 /// commit of the pass rather than read.
 ///
-/// The ceiling is what **this gate** counts, which is not what a hand probe
+/// The ceiling is what this gate counts, which is not what a hand probe
 /// with a wider marker list counted: the first value written here was 1,807
 /// from such a probe, and it left 161 of slack, so the gate stayed green
 /// against a deliberate mutation. A ceiling above the measurement is a bound
 /// nothing can reach.
 ///
-/// **It is zero, so this is a wall rather than a ratchet from here on.** The
+/// It is zero, so this is a wall rather than a ratchet from here on. The
 /// class is gone from the tree; the only direction left is back.
 ///
 /// A tracker reference is counted separately by [`TRACKER_CEILING`], because the
@@ -75,18 +80,19 @@ const SESSION_CONTEXT_CEILING: usize = 0;
 /// `//!` is deliberately outside it. A module header is the one place RFC 505
 /// asks for length — it documents a file rather than an item, so there is no
 /// item for it to be longer than.
-const DOCBLOCK_LINES_CEILING: usize = 67;
+const DOCBLOCK_LINES_CEILING: usize = 31;
 
 /// Comments citing a tracker issue or pull request, as a ceiling that may only
 /// fall.
 ///
-/// **Not zero, and that is why it is a ratchet where the one above is a wall.**
+/// Not zero, and that is why it is a ratchet where the one above is a wall.
 /// A citation splits by the state of what it cites, which no offline gate can
-/// read: **89** of these name an issue that is still open, which is a live
-/// forward pointer of exactly the kind `SPEC.md` §10's own bullets carry, and
-/// **1,099** name one that is closed, which is the commit's history restated in
-/// a file nobody reads it from. Only the second class is going.
-const TRACKER_CEILING: usize = 1_246;
+/// read: one of an open issue is a live forward pointer of exactly the kind
+/// `SPEC.md` §10's own bullets carry, and one of a closed issue is the commit's
+/// history restated in a file nobody reads it from. Every citation left in the
+/// tree is of the first kind, so this cannot fall further without the tracker
+/// moving first, and it must not rise.
+const TRACKER_CEILING: usize = 9;
 
 fn crates_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -162,12 +168,17 @@ fn the_comment_to_code_ratio_only_falls() {
             .count();
         assert!(code > 0, "{name} has no code lines");
 
-        let hundredths = (comments as u64 * 100) / code as u64;
+        let ten_thousandths = (comments as u64 * 10_000) / code as u64;
         measured += 1;
-        if hundredths > ceiling {
+        if ten_thousandths > ceiling {
             breaches.push(format!(
                 "  {name}: {comments} comment lines against {code} of code is \
-                 {hundredths} per hundred, over the {ceiling} ceiling"
+                 {}.{:02} per hundred ({ten_thousandths}), over the {ceiling} \
+                 ceiling ({}.{:02})",
+                ten_thousandths / 100,
+                ten_thousandths % 100,
+                ceiling / 100,
+                ceiling % 100
             ));
         }
     }
@@ -195,7 +206,7 @@ fn a_comment_carries_no_record_of_its_own_change() {
     // matched: a pointer to a section, a ruling id or an invariant id says
     // "this code implements that rule", which is what a comment is for.
     //
-    // Each marker names a comment describing the **change** rather than the
+    // Each marker names a comment describing the change rather than the
     // code. Two phrasings that look like markers and are not were tried and
     // dropped, because they made the gate measure a proxy: "the reader asked"
     // is how `Action`'s own docblock describes input, and a bare "round"
@@ -263,7 +274,13 @@ fn has_issue_number(line: &str) -> bool {
                 .iter()
                 .take_while(|c| c.is_ascii_digit())
                 .count();
-            (1..=4).contains(&digits)
+            // The digit run has to end the token. A hex colour is `#` and digits
+            // too: `#3fb950` is `#3` followed by a letter, and counting it made
+            // this gate report citations in a palette file that cites nothing.
+            let ends = bytes
+                .get(i + 1 + digits)
+                .is_none_or(|c| !c.is_ascii_alphanumeric() && *c != b'_');
+            (1..=4).contains(&digits) && ends
         }
     })
 }
@@ -282,7 +299,7 @@ fn contains_word(haystack: &str, needle: &str) -> bool {
     })
 }
 
-/// A date that says **when something changed**, rather than one that stamps a
+/// A date that says when something changed, rather than one that stamps a
 /// measurement.
 ///
 /// The distinction is the gate's whole subject, and a bare date test does not

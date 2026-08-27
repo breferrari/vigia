@@ -13,9 +13,8 @@ use vigia_core::{
 #[test]
 fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
     // The same answer `syntax_for` gives the frame path for a file type nothing
-    // recognises, and it has to be reachable without panicking because the
-    // warmer walks whatever status named. Skipped **before** the read, which is
-    // what makes an unknown file type free rather than merely harmless.
+    // recognises, and it has to be reachable without panicking because the warmer walks
+    // whatever status named.
     let scratch = Scratch::large_diff("warm-no-grammar", 1, 4);
     std::fs::write(scratch.path_of("data.unknownext"), "some bytes\n").expect("write");
     let highlighter = Highlighter::new();
@@ -46,11 +45,11 @@ fn an_empty_changed_set_warms_nothing() {
 
 #[test]
 fn many_files_of_one_language_warm_only_a_few() {
-    // **The bound that decides what the warmer costs.** Compiling a grammar is
+    // The bound that decides what the warmer costs. Compiling a grammar is
     // one file's work and every later file of the same language buys only a
     // decaying residual, so a changed set of eighty-four Rust files must not be
     // eighty-four parses. Measured before this cap existed: sixty-four files was
-    // **1.053s** of held core, about 96% of it re-parsing an already-compiled
+    // 1.053s of held core, about 96% of it re-parsing an already-compiled
     // grammar next to the frame path.
     let files = WARM_FILES + 20;
     let scratch = Scratch::large_diff("warm-one-language", files, 4);
@@ -102,10 +101,8 @@ fn many_files_of_one_language_are_not_even_read() {
 #[test]
 fn the_path_cap_stops_the_walk_before_a_language_it_has_not_reached() {
     // The outer bound, and it needs a fixture that can *see* it: with every path
-    // sharing one grammar the per-grammar cap binds first and a missing path cap
-    // would be invisible. So the run is `WARM_FILES` Rust files, which contribute
-    // exactly `WARM_PER_GRAMMAR` parses, followed by a Markdown file that is
-    // reachable only if the walk runs past its cap.
+    // sharing one grammar the per-grammar cap binds first and a missing path cap would
+    // be invisible.
     let scratch = Scratch::large_diff("warm-path-cap", WARM_FILES, 4);
     std::fs::write(scratch.path_of("README.md"), "# heading\n\ntext\n").expect("write");
     let highlighter = Highlighter::new();
@@ -129,11 +126,8 @@ fn the_path_cap_stops_the_walk_before_a_language_it_has_not_reached() {
 
 #[test]
 fn a_path_that_is_not_there_is_skipped_rather_than_fatal() {
-    // A file can vanish between status naming it and this thread reaching it,
-    // which is ordinary beside an agent. The run has to continue: a warmer that
-    // gave up on the first missing path would stop warming exactly when the
-    // other pane is busiest. A missing path also must not spend the per-grammar
-    // budget, since nothing was compiled from it.
+    // A file can vanish between status naming it and this thread reaching it, which is
+    // ordinary beside an agent.
     let scratch = Scratch::large_diff("warm-missing", 2, 4);
     let highlighter = Highlighter::new();
 
@@ -167,11 +161,10 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
-    // Taken for the reason `crates/vigia/tests/budgets.rs` takes it: this binary
-    // also runs `many_files_of_one_language_warm_only_a_few`, which builds an
-    // eighty-four file fixture, and a polyglot gate that writes twenty-five files
-    // and compiles up to twelve grammars on a thread. A wall clock measured
-    // beside either is measuring the neighbour.
+    // Taken for the reason `crates/vigia/tests/budgets.rs` takes it: this binary also
+    // runs `many_files_of_one_language_warm_only_a_few`, which builds an eighty-four
+    // file fixture, and a polyglot gate that writes twenty-five files and compiles up
+    // to twelve grammars on a thread.
     let _timed = exclusively_timed();
 
     let scratch = Scratch::large_diff("warm-cost", 1, 40);
@@ -195,8 +188,8 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
 
     eprintln!("note: a first parse is {cold_parse:?}, the same parse warmed is {after:?}");
 
-    // **An absolute saving, not a ratio, and the ratio it replaces is a
-    // cautionary tale rather than a tightening.**
+    // An absolute saving, not a ratio, and the ratio it replaces is a
+    // cautionary tale rather than a tightening.
     const WARMED_CEILING: Duration = Duration::from_millis(8);
     const LEAST_SAVING: Duration = Duration::from_millis(5);
     assert!(
@@ -217,11 +210,8 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
 
 #[test]
 fn the_per_grammar_cap_is_per_grammar_and_not_one_shared_counter() {
-    // **The bound the docs call "the bound that matters" had no test saying it
-    // was per grammar at all.** Replacing the map with a single counter left
-    // every other gate here green, because each of their fixtures is one
-    // language. `SPEC.md` §7's ASCII-fixture rule one axis over: a
-    // single-language fixture cannot tell a per-grammar cap from a global one.
+    // The bound the docs call "the bound that matters" had no test saying it was per
+    // grammar at all.
     let scratch = Scratch::large_diff("warm-two-languages", 1, 4);
     let mut paths = Vec::new();
     for n in 0..WARM_PER_GRAMMAR + 1 {
@@ -249,10 +239,7 @@ fn the_per_grammar_cap_is_per_grammar_and_not_one_shared_counter() {
 
 #[test]
 fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
-    // The per-grammar cap gives a polyglot tree as many budgets as it has
-    // languages. Measured before `WARM_TOTAL` existed: fifty extensions warmed
-    // forty-three files in 3.93s of held core, against the 1.053s worst case the
-    // per-grammar cap was reasoned about with.
+    // The per-grammar cap gives a polyglot tree as many budgets as it has languages.
     let scratch = Scratch::large_diff("warm-polyglot", 1, 4);
     let exts = [
         "rs", "md", "py", "js", "go", "toml", "json", "yaml", "c", "cpp", "h", "rb", "sh", "php",
@@ -277,10 +264,9 @@ fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
         .expect("the warmer thread")
         .warmed;
 
-    // `assert_eq!` rather than `<=`, because a bound is only evidence when
-    // something reached it: `warmed <= WARM_TOTAL` is satisfied by a `warm_ahead`
-    // whose loop body was deleted. The fixture offers twice the cap, so equality
-    // is what says the run both reached it and stopped there.
+    // `assert_eq!` rather than `<=`, because a bound is only evidence when something
+    // reached it: `warmed <= WARM_TOTAL` is satisfied by a `warm_ahead` whose loop body
+    // was deleted.
     assert_eq!(
         warmed, WARM_TOTAL,
         "the warmer parsed {warmed} files across distinct languages against a \
@@ -291,10 +277,7 @@ fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
 
 #[test]
 fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
-    // A UTF-16 BOM is the ordinary way a path with a known extension is not
-    // text. It trims to the empty string and can compile nothing, so counting it
-    // both overstates the result and burns one of three per-grammar slots. The
-    // sibling rule is already asserted for a path that vanished.
+    // A UTF-16 BOM is the ordinary way a path with a known extension is not text.
     let scratch = Scratch::large_diff("warm-not-text", 5, 4);
     std::fs::write(scratch.path_of("src/utf16.rs"), [0xFFu8, 0xFE, 0x66, 0x00]).expect("write");
 
@@ -332,11 +315,10 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
 /// The escape spelling this platform has that the others do not.
 #[cfg(windows)]
 fn rooted_spelling(outside: &std::path::Path, root: &std::path::Path) -> Option<String> {
-    // Asserted to round-trip rather than assumed: `get(2..)` strips two bytes,
-    // not a prefix, so on a machine whose temp directory is a UNC share or a
-    // verbatim path it yields something the guard *accepts* and that joins to
-    // nothing under the worktree. The gate would then pass while asserting
-    // nothing, which is the failure it exists to prevent one level up.
+    // Asserted to round-trip rather than assumed: `get(2..)` strips two bytes, not a
+    // prefix, so on a machine whose temp directory is a UNC share or a verbatim path it
+    // yields something the guard *accepts* and that joins to nothing under the
+    // worktree.
     outside
         .to_string_lossy()
         .get(2..)
@@ -351,20 +333,13 @@ fn rooted_spelling(_outside: &std::path::Path, _root: &std::path::Path) -> Optio
 
 #[test]
 fn the_warmer_reads_nothing_outside_the_worktree() {
-    // `PathBuf::join` silently discards the root for an absolute path. Not
-    // reachable from the shell, which passes what status reported, but
-    // `warm_ahead` is public on a public type with no other precondition.
-    // The bait lives in its own `Scratch` rather than at a fixed name beside the
-    // worktree: the temp directory is shared, and a fixed name is one panic away
-    // from being left behind, against the soak's zero-retained-temp-files claim.
+    // `PathBuf::join` silently discards the root for an absolute path.
     let scratch = Scratch::large_diff("warm-escape", 1, 4);
     let bait = Scratch::large_diff("warm-escape-bait", 1, 4);
     let outside = bait.path_of("src/mod_0.rs");
 
-    // **Every spelling here has to resolve to a file that exists**, or refused
-    // and not-found are the same answer and the gate is green either way. That
-    // is not hypothetical: with the `..` spelling pointing at nothing, adding
-    // `ParentDir` back to the whitelist leaves this passing.
+    // Every spelling here has to resolve to a file that exists, or refused and
+    // not-found are the same answer and the gate is green either way.
     let sibling = bait
         .root()
         .file_name()
@@ -384,8 +359,8 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
          find it are the same answer and this gate cannot fail"
     );
 
-    // **The spelling a blacklist misses, and it has to name a file that really
-    // exists.** A path pointing at nothing is refused and not-found alike, so a
+    // The spelling a blacklist misses, and it has to name a file that really
+    // exists. A path pointing at nothing is refused and not-found alike, so a
     // gate built on one is green either way: an `is_absolute() || ParentDir`
     // guard passes against a bait that names nothing.
     // `Path::is_absolute` on Windows wants a prefix *and* a root, so
@@ -442,11 +417,8 @@ fn a_file_cut_mid_character_still_parses() {
 
 #[test]
 fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
-    // **Two problem sizes whose first `WARM_BYTES` are byte-identical**, which is
-    // the only shape that can see this bound. Every structural assertion here is
-    // satisfied whether or not the read is capped — a warm counts the same either
-    // way — and mutating the `take` away survived all of them. What separates the
-    // two is wall clock against file size, so it takes the absolute tier.
+    // Two problem sizes whose first `WARM_BYTES` are byte-identical, which is the only
+    // shape that can see this bound.
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
@@ -508,10 +480,8 @@ fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
         big.len()
     );
 
-    // A file 256 times larger, read to its end, cannot come out inside four
-    // times the cost of the capped one. Loose on purpose: the point is to catch
-    // a read proportional to the file, which is two orders of magnitude, not to
-    // track microseconds on a shared runner.
+    // A file 256 times larger, read to its end, cannot come out inside four times the
+    // cost of the capped one.
     assert!(
         large <= small * 4,
         "warming a {}-byte file took {large:?} against {small:?} for the \
@@ -543,13 +513,6 @@ fn link_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
 #[test]
 fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
     // The hole a lexical check cannot see, and the one Copilot's review found.
-    // Every component of `link/mod_0.rs` is `Normal`, so the whitelist passes
-    // it, and the read then lands wherever the link points, because the warmer
-    // reads with `fs::read` and `fs::read` follows a link. Note that
-    // `Worktree::read_worktree` stopped following one in
-    // [#15](https://github.com/breferrari/vigia/issues/15): the diff path and
-    // the warmer answer different questions about a link, so this gate cannot
-    // be retired on the strength of that change.
     let scratch = Scratch::large_diff("warm-symlink", 1, 4);
     let bait = Scratch::large_diff("warm-symlink-bait", 1, 4);
 
@@ -595,7 +558,7 @@ const FRAME_BUDGET: Duration = Duration::from_millis(16);
 /// Rows one screenful shows, and so lines this gate asks the highlighter for.
 const SCREENFUL: usize = 24;
 
-/// **The frame a reader actually meets, and the one nothing gated.**
+/// The frame a reader actually meets, and the one nothing gated.
 #[test]
 fn a_frame_that_meets_a_new_grammar_holds_the_frame_budget() {
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
@@ -698,7 +661,7 @@ fn a_warm_turns_the_plain_hunk_into_colour() {
     );
 }
 
-/// **A demand that can never be served must still stop.**
+/// A demand that can never be served must still stop.
 #[test]
 fn a_path_that_vanished_does_not_leave_the_frame_asking() {
     let scratch = Scratch::large_diff("warm-defer-vanished", 1, SCREENFUL / 2);
@@ -737,7 +700,7 @@ fn a_path_that_vanished_does_not_leave_the_frame_asking() {
     );
 }
 
-/// The demand describes **this** frame, not every frame there has ever been.
+/// The demand describes this frame, not every frame there has ever been.
 #[test]
 fn a_settled_frame_asks_for_nothing() {
     let scratch = Scratch::large_diff("warm-defer-settled", 1, SCREENFUL / 2);
@@ -883,8 +846,8 @@ fn a_directory_that_is_not_a_repository_leads_with_nothing() {
     assert!(indexed_extensions(scratch.root(), 0).is_empty());
 }
 
-/// **A language spelled two ways is one grammar, and the budget must see it
-/// that way.**
+/// A language spelled two ways is one grammar, and the budget must see it
+/// that way.
 #[test]
 fn a_language_spelled_two_ways_is_counted_once() {
     let scratch = indexed(
@@ -923,8 +886,8 @@ fn a_language_spelled_two_ways_is_counted_once() {
     );
 }
 
-/// **The product claim: a language the repository leads with is compiled before
-/// anybody writes to it, and the tail is not.**
+/// The product claim: a language the repository leads with is compiled before
+/// anybody writes to it, and the tail is not.
 #[test]
 fn the_repositorys_leading_grammars_are_compiled_and_its_tail_is_not() {
     let scratch = indexed(
@@ -1087,8 +1050,8 @@ fn an_extension_longer_than_any_grammar_registers_is_skipped() {
     );
 }
 
-/// **The count stays exact past the cap, which is the half that decides the
-/// merge.**
+/// The count stays exact past the cap, which is the half that decides the
+/// merge.
 #[test]
 fn an_extension_already_tracked_keeps_counting_past_the_cap() {
     let scratch = Scratch::new("warm-index-exact");
@@ -1118,7 +1081,7 @@ fn an_extension_already_tracked_keeps_counting_past_the_cap() {
     );
 }
 
-/// **The grammar charged is the one compiled, not the one the extension named.**
+/// The grammar charged is the one compiled, not the one the extension named.
 #[test]
 fn a_qt_translation_file_charges_xml_and_not_typescript() {
     // Committed thin and then written full, so every one of the three differs

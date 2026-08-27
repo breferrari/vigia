@@ -19,7 +19,7 @@ const DRAWN_BUCKETS: usize = 12;
 const HEAT_SLICE: &str = "■";
 
 /// The sparkline's ramp, shortest first, restated for [`HEAT_SLICE`]'s reason
-/// and declared **once** for `tests/render.rs`'s: two copies in one binary check
+/// and declared once for `tests/render.rs`'s: two copies in one binary check
 /// each other rather than the renderer, and they drift independently.
 const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
@@ -99,13 +99,7 @@ fn three_kinds() -> View {
             line(LineKind::Context, 1, "let a = 1;"),
             line(LineKind::Added, 2, "let b = 2;"),
             line(LineKind::Removed, 2, "let c = 3;"),
-            // **Below** the changed rows, and that placement is the whole reason
-            // it exists. A wash painted with an inherited height runs from its own
-            // row to the bottom of the pane, so it can only ever spill *downwards*
-            // and a context row above every changed row cannot witness it. The
-            // first version of this fixture had exactly one context line, first,
-            // and `a_context_row_is_never_washed` passed against a renderer that
-            // washed the footer.
+            // Below the changed rows, and that placement is the whole reason it exists.
             line(LineKind::Context, 3, "let d = 4;"),
         ],
         files: 1,
@@ -122,7 +116,7 @@ const HEADING: u16 = 1;
 const CONTEXT: u16 = 3;
 const ADDED: u16 = 4;
 const REMOVED: u16 = 5;
-/// The context row **under** both changed rows. See [`three_kinds`].
+/// The context row under both changed rows. See [`three_kinds`].
 const CONTEXT_BELOW: u16 = 6;
 
 fn draw(width: u16, height: u16, view: &View, theme: Theme) -> TestBackend {
@@ -148,7 +142,7 @@ fn backgrounds(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
     backgrounds_from(backend, y, 0)
 }
 
-/// The same, from a given column, so a gate can ask about the row **without** the
+/// The same, from a given column, so a gate can ask about the row without the
 /// pane's leading cell.
 fn backgrounds_from(backend: &TestBackend, y: u16, from: u16) -> Vec<Option<Color>> {
     let buffer = backend.buffer();
@@ -174,11 +168,9 @@ fn wash_of(theme: Theme, added: bool) -> Color {
 
 #[test]
 fn the_fixture_lands_where_these_say() {
-    // Every gate below indexes rows by the constants above, so if the layout ever
-    // moves this is the one that says so, by name, instead of five gates failing
-    // with assertions about colour.
-    // One row taller since the footer gained a rule, which takes a body row and
-    // would otherwise land on the last line this gate reads by name.
+    // Every gate below indexes rows by the constants above, so if the layout ever moves
+    // this is the one that says so, by name, instead of five gates failing with
+    // assertions about colour.
     let backend = draw(60, 9, &three_kinds(), Theme::ansi());
     let buffer = backend.buffer();
     let row = |y: u16| -> String { (0..60).map(|x| buffer[(x, y)].symbol()).collect::<String>() };
@@ -196,10 +188,7 @@ fn the_fixture_lands_where_these_say() {
 
 #[test]
 fn a_changed_row_is_washed_to_the_pane_edge() {
-    // To the **edge**, which is the whole assertion. A wash that stopped where the
-    // text stops would be a highlight behind some words; what `assets/preview.svg`
-    // draws is a band across the row, and the trailing blanks are most of it on a
-    // wide pane.
+    // To the edge, which is the whole assertion.
     let dark = Theme::dark().resolve(Depth::Truecolor);
     let backend = draw(60, 8, &three_kinds(), dark);
 
@@ -228,11 +217,8 @@ fn a_changed_row_is_washed_to_the_pane_edge() {
 
 #[test]
 fn the_sigil_keeps_its_own_colour_on_the_wash() {
-    // **The sigil is not the bar**, which is a ruling this branch made and then
-    // reversed on seeing it. Inverting the sigil cell (diff hue behind, wash in
-    // front) reads as a solid block: it takes the one glyph carrying the diff
-    // signal and turns it into a background. The mockup draws its bar as a sliver
-    // *beside* a green `+`, not as a recolouring of it.
+    // The sigil is not the bar, which is a ruling this branch made and then reversed on
+    // seeing it.
     let dark = Theme::dark().resolve(Depth::Truecolor);
     let backend = draw(60, 12, &three_kinds(), dark);
     let buffer = backend.buffer();
@@ -259,12 +245,7 @@ fn the_sigil_keeps_its_own_colour_on_the_wash() {
 
 #[test]
 fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
-    // **A published recipe with no gate is a promise nothing keeps.** The README
-    // answers "I want my own scheme *and* the row tint" with three lines of theme
-    // file, and it is the only answer there is: `ansi` refuses a wash at every
-    // depth by contract, because a wash has to assume a background and that
-    // palette's whole point is that it assumes none. Overriding the two keys is
-    // the reader supplying the assumption themselves.
+    // A published recipe with no gate is a promise nothing keeps.
     let theme = vigia::theme::parse(
         "base        = ansi\n\
          added_row   = on #1b3d29\n\
@@ -297,11 +278,7 @@ fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
 
 #[test]
 fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
-    // **The opposite of what a gate here would naturally assert**. Written as
-    // `a_palette_that_declines_a_bar_leaves_the_sigil_alone` it pins every
-    // built-in's `_bar` keys as unset, which is how §5.1's *tinted row with a
-    // coloured left bar* shipped as the tint alone for three phases: the key
-    // existed, the renderer consumed it, and a gate held it empty.
+    // The opposite of what a gate here would naturally assert.
     for (name, theme) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -326,10 +303,8 @@ fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
 
 #[test]
 fn a_context_row_is_never_washed() {
-    // The wash *is* the diff signal once the sigil column stops being it, so a
-    // context line carrying one would say a line changed that did not.
-    // Drawn taller than the fixture needs, so there are blank rows and a footer
-    // below the last changed line for a spill to land on.
+    // The wash *is* the diff signal once the sigil column stops being it, so a context
+    // line carrying one would say a line changed that did not.
     let dark = Theme::dark().resolve(Depth::Truecolor);
     let backend = draw(60, 12, &three_kinds(), dark);
 
@@ -340,12 +315,7 @@ fn a_context_row_is_never_washed() {
         );
     }
 
-    // And nothing below the diff either. A wash is a property of one row; a
-    // wash that reached the blank rows would be a rectangle, which is what an
-    // inherited `Rect` height produced before this gate could see it. The
-    // sweep stops short of the footer since #323: its chip pills are chrome
-    // backgrounds with their own gates, not washes, and a diff signal never
-    // reaches that row in the first place.
+    // And nothing below the diff either.
     for row in CONTEXT_BELOW + 1..11 {
         assert!(
             backgrounds(&backend, row).iter().all(Option::is_none),
@@ -356,11 +326,7 @@ fn a_context_row_is_never_washed() {
 
 #[test]
 fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
-    // **Colour 8 is not a colour, it is a relationship to the background.** Most
-    // schemes define "bright black" as a shade just above the pane, so text drawn
-    // in it can land a few points off the background and vanish. Reported from a
-    // real terminal, where the key hints, the readouts, the empty state and the
-    // line numbers were all invisible at once.
+    // Colour 8 is not a colour, it is a relationship to the background.
     let ansi = Theme::ansi();
     let Theme {
         // Read by a reader, so none of these may be colour 8.
@@ -382,11 +348,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         alert,
         comment,
 
-        // Exempt: a track is not text. It is a mark that should sit just above
-        // the pane, which is what colour 8 is for. `spark_track` is the awkward
-        // one and says so in its own doc: it is a single stroke rather than a
-        // solid block, so the premise reaches it less well, and on this palette
-        // there is nothing between colour 8 and the weight content is drawn in.
+        // Exempt: a track is not text.
         heat_track: _,
         bar_track: _,
         spark_track: _,
@@ -401,10 +363,6 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
 
         // Exempt: marks and fills, none of them text, none of them colour 8.
         pulse: _,
-        // Three stops of one ramp since #196, all three exempt for the reason
-        // the first always was: a sparkline bucket is a block, not a glyph a
-        // reader has to make out. `a_sparkline_track_is_never_the_colour_of_a_bucket`
-        // is where every stop is held apart from the track it sits on.
         spark: _,
         spark_warm: _,
         spark_hot: _,
@@ -444,11 +402,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
     let readable = [
         ("chrome", chrome),
         ("chrome_dim", chrome_dim),
-        // **A run separator's word and a staged row's gutter mark, and both are
-        // read**. The bar is a glyph rather than prose, but it is the only
-        // thing on a row that says which comparison the row belongs to, so a
-        // palette that put it on the background would take the distinction off
-        // the screen entirely.
+        // A run separator's word and a staged row's gutter mark, and both are read.
         ("staged", staged),
         ("path", path),
         ("path_live", path_live),
@@ -471,11 +425,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         );
     }
 
-    // And it may not reach for `DIM` either, which was the first replacement and
-    // was invisible on the same terminal that colour 8 was: a terminal is free to
-    // reduce intensity as far as it likes. Both ways of saying "dim" in the
-    // sixteen-colour world have now failed in the field, so this palette says it
-    // in neither and takes colour 7, which is readable by construction.
+    // And it may not reach for `DIM` either, which was the first replacement and was
+    // invisible on the same terminal that colour 8 was: a terminal is free to reduce
+    // intensity as far as it likes.
     for (name, style) in [
         ("chrome_dim", ansi.chrome_dim),
         ("gutter", ansi.gutter),
@@ -509,14 +461,8 @@ fn the_ansi_palette_draws_no_wash_at_any_depth() {
 
 #[test]
 fn sixteen_colours_draw_no_background_and_keep_the_sigil() {
-    // `SPEC.md` §11.1's recorded loss, now a property of the *depth* rather than of
-    // the tool. What must not go with the wash is the sigil's own colour: patching
-    // an unset bar over the diff style has to leave the diff style alone, and
-    // getting that wrong blanks the last thing distinguishing an addition.
-    // **`Ansi256` is in this list rather than the washing one.** The cube
-    // cannot hold a subtle colour: `#1b3d29` quantises to `#005f00`, and over a
-    // newly added file that is a screen of flat green rather than a tint. The
-    // arithmetic is in `tests/colour.rs`; this is the half that draws.
+    // `SPEC.md` §11.1's recorded loss, now a property of the *depth* rather than of the
+    // tool.
     let dark = Theme::dark();
     for depth in [Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let backend = draw(60, 8, &three_kinds(), dark.resolve(depth));
@@ -541,10 +487,8 @@ fn sixteen_colours_draw_no_background_and_keep_the_sigil() {
 
 #[test]
 fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
-    // I6 is a claim about where things land, and a background is the one kind of
-    // change that must not touch that. Asserted by rendering the same view through
-    // a palette that washes and one that does not and comparing **symbols**: if the
-    // wash ever consumed a column, this is what fails.
+    // I6 is a claim about where things land, and a background is the one kind of change
+    // that must not touch that.
     for width in [40, 60, 80, 120] {
         let washed = draw(
             width,
@@ -627,10 +571,7 @@ fn heat_stops(theme: Theme) -> Vec<Color> {
     let mut seen: Vec<Color> = Vec::new();
     for x in 0..GRADED_PANE {
         let cell = &buffer[(x, HEADING)];
-        // **Symbol and style together.** Every heat slice is a full block and so is
-        // a sparkline's top rung, and the counters on the same row share the
-        // track's grey. Either half alone is a coincidence waiting to happen, and
-        // has already happened once in this suite.
+        // Symbol and style together.
         if cell.symbol() != HEAT_SLICE {
             continue;
         }
@@ -656,11 +597,8 @@ fn heat_sequence(theme: Theme) -> Vec<Color> {
 
 #[test]
 fn each_slice_lands_in_the_band_its_share_puts_it_in() {
-    // **Counting distinct colours cannot test the thresholds**, and this gate
-    // exists because a mutation proved it. Moving the hot cut from two thirds to
-    // one half leaves the fixture with three distinct colours either way, so the
-    // count is satisfied while every slice is in the wrong band. Only asserting
-    // *which* band a given share falls into can tell the two apart.
+    // Counting distinct colours cannot test the thresholds, and this gate exists
+    // because a mutation proved it.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let got = heat_sequence(theme);
 
@@ -677,10 +615,9 @@ fn each_slice_lands_in_the_band_its_share_puts_it_in() {
 
 #[test]
 fn a_ramp_that_survives_sixteen_colours_is_still_a_ramp() {
-    // `dark` is authored in 24-bit and quantised down, unlike `ansi`, so what its
-    // ramp becomes at sixteen colours is decided by the bright-variant threshold in
-    // `to_ansi16` and by nothing else. At a lower threshold all three greens land
-    // on the same name and the strip stops saying anything about where the work is.
+    // `dark` is authored in 24-bit and quantised down, unlike `ansi`, so what its ramp
+    // becomes at sixteen colours is decided by the bright-variant threshold in
+    // `to_ansi16` and by nothing else.
     let flat = Theme::dark().resolve(Depth::Ansi16);
     let mut seen: Vec<Color> = Vec::new();
     for colour in [flat.heat_added, flat.heat_added_warm, flat.heat_added_hot] {
@@ -698,9 +635,7 @@ fn a_ramp_that_survives_sixteen_colours_is_still_a_ramp() {
 #[test]
 fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
     // The picture ramps its additions across three greens and the strip is the one
-    // element whose intensity `assets/preview.svg` actually specifies. Sixteen
-    // names draw two, holding a normal and a bright of each hue and no third
-    // stop.
+    // element whose intensity `assets/preview.svg` actually specifies.
     let three = heat_stops(Theme::dark().resolve(Depth::Truecolor));
     assert_eq!(three.len(), 3, "expected three stops, got {three:?}");
 
@@ -734,11 +669,10 @@ fn climbing() -> View {
 
 #[test]
 fn a_taller_sparkline_bucket_is_drawn_hotter() {
-    // **The ramp, read off the cells rather than off the theme**, which is the
-    // half `the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them`
-    // cannot reach: that one holds the palette apart, this one holds that the
-    // renderer spends it in the right order. A ramp whose stops were distinct and
-    // applied backwards would satisfy the other gate exactly.
+    // The ramp, read off the cells rather than off the theme, which is the half
+    // `the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them` cannot reach:
+    // that one holds the palette apart, this one holds that the renderer spends it in
+    // the right order.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let backend = draw(60, 4, &climbing(), theme);
     let buffer = backend.buffer();
@@ -758,12 +692,6 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
     );
 
     // Rank, not identity: the claim is monotone, so it survives the stops moving.
-    // Ranked once per bucket rather than once per comparison, which also puts the
-    // "no stop of the ramp" panic on the bucket that caused it.
-    // Since #322 a truecolour palette interpolates its three stops into an
-    // eight-step ramp, so the rank comes from the ramp where one exists and
-    // from the stops where it does not; the claim below is the same either
-    // way, because it was always about order rather than identity.
     let ramp = theme.spark_ramp();
     let stops = spark_stops(&theme);
     let ranked: Vec<(usize, usize)> = drawn
@@ -795,11 +723,6 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
 
 #[test]
 fn the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them() {
-    // [`the_heat_ramp_has_three_stops_where_the_depth_can_draw_them`] one element
-    // over, and the same picture is what asks for it: `assets/preview.svg` ramps
-    // its sparkline across five greens where the shell drew one flat colour
-    // (#196). Three rather than five, because three is what `Band` distinguishes
-    // and what the depth ladder can draw.
     for (name, base) in [("dark", Theme::dark()), ("light", Theme::light())] {
         for depth in [Depth::Truecolor, Depth::Ansi256] {
             let theme = base.resolve(depth);
@@ -817,11 +740,9 @@ fn the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them() {
         }
     }
 
-    // **And `ansi` spends two, which is a fact about the palette rather than a
-    // shortfall**, exactly as `heat_added` records for itself: sixteen names hold
-    // a normal and a bright of each hue and no third, so the middle stop is the
-    // normal one. Written out in the palette rather than left to the depth ladder
-    // to collapse by accident, which is what this asserts.
+    // And `ansi` spends two, which is a fact about the palette rather than a shortfall,
+    // exactly as `heat_added` records for itself: sixteen names hold a normal and a
+    // bright of each hue and no third, so the middle stop is the normal one.
     let ansi = Theme::ansi();
     assert_eq!(
         ansi.spark.fg, ansi.spark_warm.fg,
@@ -835,11 +756,9 @@ fn the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them() {
 
 #[test]
 fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
-    // The track and the bars land on the same eight columns of the same row, and
-    // the track is drawn from `_` where a bar is drawn from a block, so glyph
-    // already separates them for a reader. Colour is what separates them for a
-    // reader who is *glancing*, which is the whole of `SPEC.md` §5, and it has to
-    // survive the ladder rather than only the palette it was authored in.
+    // The track and the bars land on the same eight columns of the same row, and the
+    // track is drawn from `_` where a bar is drawn from a block, so glyph already
+    // separates them for a reader.
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -847,10 +766,6 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     ] {
         for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
             let theme = base.resolve(depth);
-            // **Every stop of the ramp, not only its quietest.** #196 made this
-            // three values where it was one, and a gate that checked the first
-            // would have let the other two collide with the track they are drawn
-            // beside.
             for (stop, style) in spark_stops(&theme) {
                 assert_ne!(
                     theme.spark_track.fg, style.fg,
@@ -867,16 +782,7 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
 
 #[test]
 fn a_sparkline_track_is_never_the_colour_behind_it() {
-    // **The failure a track has that a bucket does not: quantising into the
-    // background.** A track is authored just above the pane, which is the point
-    // of it, and the sixteen-colour rung has nothing that close to either end.
-    // `dark`'s track was `#21262d` and resolves to `Color::Black` at `Ansi16` on
-    // a `#0d1117` pane; `light`'s was `#d0d7de` and resolves to `Color::White` on
-    // white. Either one draws a full row of track in the pane's own colour, which
-    // is pixel for pixel the blank column
-    // [#78](https://github.com/breferrari/vigia/issues/78) exists to remove: the
-    // element would have looked exactly as broken as before, on the one frame it
-    // was added for.
+    // The failure a track has that a bucket does not: quantising into the background.
     for (name, base, behind) in [
         ("dark", Theme::dark(), Color::Black),
         ("light", Theme::light(), Color::White),
@@ -896,11 +802,8 @@ fn a_sparkline_track_is_never_the_colour_behind_it() {
 
 #[test]
 fn a_sparkline_track_is_never_the_colour_of_a_path() {
-    // `track_at` in `tests/render.rs` reads a track by symbol and style, and the
-    // symbol is `_`, which is also most of what a `snake_case` path is made of.
-    // The two are drawn on the same row, so if a path style and the track style
-    // ever resolve alike, that helper counts a file name as track cells and a
-    // reader sees one dim underscore run where there are two things.
+    // `track_at` in `tests/render.rs` reads a track by symbol and style, and the symbol
+    // is `_`, which is also most of what a `snake_case` path is made of.
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -912,19 +815,12 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
                 ("path", theme.path),
                 ("path_live", theme.path_live),
                 ("path_cold", theme.path_cold),
-                // `path_hover` belongs here for the same reason the other three
-                // do: it is drawn on a path, so an underscore in a file name
-                // must not resolve to the sparkline's own track colour at any
-                // depth. It read "the fourth weight" until #193, which is a
-                // framing that no longer describes it: it is a fourth entry in
-                // this list and no longer a fourth rung above the ladder.
+                // `path_hover` belongs here for the same reason the other three do: it
+                // is drawn on a path, so an underscore in a file name must not resolve
+                // to the sparkline's own track colour at any depth.
                 ("path_hover", theme.path_hover),
             ] {
-                // **Only the comparison that actually collides is skipped.**
-                // Skipping the whole rung would take `path` and `path_live` with
-                // it, and both are `Black` there against a `Gray` track, so a
-                // future move of either onto the track's colour would go unseen
-                // behind an exemption that was never about them.
+                // Only the comparison that actually collides is skipped.
                 if name == "light" && depth == Depth::Ansi16 && which == "path_cold" {
                     continue;
                 }
@@ -948,12 +844,7 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
 
 #[test]
 fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
-    // **The depth the whole glyph choice was made for.** At `Depth::None` every
-    // style is `Color::Reset`, so a track and a bucket are the same colour and
-    // the shape is all a reader has. That is why `SPEC.md` §5.1 refuses the
-    // ramp's floor for the track: the heat strip may draw a live slice and its
-    // track from one `█` because colour is its only channel, and here the
-    // sparkline has no colour channel either, so the glyph has to carry it.
+    // The depth the whole glyph choice was made for.
     let mut view = three_kinds();
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [
@@ -974,11 +865,10 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     let row: Vec<&str> = (0..buffer.area.width)
         .map(|x| buffer[(x, HEADING)].symbol())
         .collect();
-    // Guard the fixture, the way `a_row_missing_a_glance_element_keeps_its_column`
-    // does for digits: at this depth colour is gone, so `_` is counted by symbol
-    // alone across the whole row, and an underscore in the path would be counted
-    // as a track cell. `three_kinds` draws `src/a.rs`; this fails loudly if that
-    // ever changes rather than quietly counting one cell too many.
+    // Guard the fixture, the way `a_row_missing_a_glance_element_keeps_its_column` does
+    // for digits: at this depth colour is gone, so `_` is counted by symbol alone
+    // across the whole row, and an underscore in the path would be counted as a track
+    // cell.
     let path_has_underscore = view.rows.iter().any(|row| match row {
         Row::File(entry) => entry.path.contains('_'),
         _ => false,
@@ -1014,9 +904,7 @@ use vigia::theme;
 fn a_theme_file_can_set_the_sparkline_track() {
     // Every palette field is a key by construction, because the `palette!` macro
     // derives `Theme::KEYS` from the struct, and
-    // `every_key_the_struct_has_is_a_key_a_file_can_set` asserts that shape. What
-    // that cannot assert is that a *new* key reaches the field a reader meant,
-    // since it only checks each key is accepted.
+    // `every_key_the_struct_has_is_a_key_a_file_can_set` asserts that shape.
     let theme = theme::parse("base = dark\nspark_track = #ff00ff\n").expect("parses");
     assert_eq!(
         theme.spark_track.fg,
@@ -1205,10 +1093,7 @@ fn a_comment_does_not_eat_a_hex_colour() {
 
 #[test]
 fn a_modifier_only_value_keeps_the_colour_it_did_not_name() {
-    // `added = bold` reads as "make additions bold". Built from `Style::new()`,
-    // where `set` replaces the whole field, it means "make additions bold and
-    // colourless". That is the same invisible change
-    // `MissingValue` exists to prevent, reached from the other direction.
+    // `added = bold` reads as "make additions bold".
     let theme = theme::parse("base = dark\nadded = bold\n").expect("parses");
     assert_eq!(
         theme.added.fg,
@@ -1242,10 +1127,9 @@ fn a_second_base_is_refused_rather_than_silently_winning() {
 
 #[test]
 fn a_theme_file_saved_by_notepad_still_parses() {
-    // Notepad's default UTF-8 save writes a BOM, and `str::trim` will not strip
-    // one: U+FEFF is `Cf`, not `White_Space`, so it survives every trim in the
-    // parser and lands inside the first key. That stopped the shell from starting
-    // with an error naming an invisible byte.
+    // Notepad's default UTF-8 save writes a BOM, and `str::trim` will not strip one:
+    // U+FEFF is `Cf`, not `White_Space`, so it survives every trim in the parser and
+    // lands inside the first key.
     let with_bom = theme::parse("\u{FEFF}base = dark\nadded = #ff0000\n").expect("parses");
     let without = theme::parse("base = dark\nadded = #ff0000\n").expect("parses");
     assert_eq!(with_bom, without);
@@ -1273,11 +1157,10 @@ fn base_takes_a_trailing_comment_like_every_other_key() {
 
 #[test]
 fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
-    // `.resolve(depth)` written on each of three exits is gated on the built-in
-    // arm alone at a lossy depth, so deleting it from either of the other two
-    // leaves the whole suite green: at truecolour `resolve` is the
-    // identity, and every test reaching those arms ran there. This drives all
-    // three at a depth where the difference shows.
+    // `.resolve(depth)` written on each of three exits is gated on the built-in arm
+    // alone at a lossy depth, so deleting it from either of the other two leaves the
+    // whole suite green: at truecolour `resolve` is the identity, and every test
+    // reaching those arms ran there.
     let home = home_with("resolved", Some("base = dark\n"));
     let file = home
         .join(".config")
@@ -1311,10 +1194,8 @@ fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
 
 #[test]
 fn every_key_the_struct_has_is_a_key_a_file_can_set() {
-    // True by construction, since one macro emits the struct and the key list from
-    // the same declaration. Asserted anyway, because "by construction" is a claim
-    // about code that can be edited, and this is what fails if the macro is ever
-    // unrolled by hand.
+    // True by construction, since one macro emits the struct and the key list from the
+    // same declaration.
     for key in Theme::KEYS {
         let source = format!("{key} = green\n");
         theme::parse(&source).unwrap_or_else(|e| panic!("{key} is not settable: {e}"));
@@ -1406,12 +1287,7 @@ added = #ff0000
 
 #[test]
 fn no_file_is_not_an_error_but_an_unreadable_one_is() {
-    // The distinction that matters. Nobody has to have a theme file, so its absence
-    // is the ordinary case and falls back to the default. A reader who *wrote* one
-    // and silently got the default instead would have no way to find out why, so a
-    // file that exists and does not parse stops the shell before it takes the
-    // screen, which is the rule §11.1 already states for a path that is not a
-    // repository.
+    // The distinction that matters.
     let absent = home_with("absent", None);
     let env = env_of(vec![("HOME".to_owned(), absent.display().to_string())]);
     assert_eq!(
@@ -1456,11 +1332,9 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
-    // **An empty `HOME` must not hide a good `USERPROFILE`**, which is the case the
-    // first version of this got wrong: filtering after the fallback means `Some("")`
-    // stops `or_else` from ever firing. Reachable on any Windows shell that exports
-    // an empty `HOME`, and invisible everywhere else, which is the worst shape a
-    // bug can have.
+    // An empty `HOME` must not hide a good `USERPROFILE`, which is the case the first
+    // version of this got wrong: filtering after the fallback means `Some("")` stops
+    // `or_else` from ever firing.
     let home = home_with(
         "empty-home",
         Some(
@@ -1481,10 +1355,8 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
 
 #[test]
 fn the_ramp_collapses_to_two_stops_where_it_must_and_says_so_in_the_palette() {
-    // `ansi` writes its middle stop as the same name as its low one rather than
-    // leaving the depth ladder to collapse them by accident. The distinction
-    // matters: a collapse that happens *in the palette* is a decision a reader can
-    // look up, and one that happens in the quantiser is a surprise.
+    // `ansi` writes its middle stop as the same name as its low one rather than leaving
+    // the depth ladder to collapse them by accident.
     let two = heat_stops(Theme::ansi());
     assert_eq!(two.len(), 2, "expected two stops, got {two:?}");
 
@@ -1546,9 +1418,9 @@ const TRACK_FLOOR: f64 = 2.0;
 
 #[test]
 fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
-    // **Reported from use, and the numbers say why nothing was visible.** The
+    // Reported from use, and the numbers say why nothing was visible. The
     // scrollbar's track and its step buttons drew in `bar_track`, which was
-    // `#21262d` on `#0d1117`: **1.24:1**, where 1.0 is the background exactly.
+    // `#21262d` on `#0d1117`: 1.24:1, where 1.0 is the background exactly.
     // Only the thumb and a *pressed* button could be seen, because those draw in
     // `bar` at 6.15:1. The light palette had the same defect at 1.45:1, and this
     // gate then found a third nobody had reported: the sparkline's own track at
@@ -1568,7 +1440,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
             );
         }
 
-        // **And a stroke outranks a block**, which is the rule `spark_track`'s
+        // And a stroke outranks a block, which is the rule `spark_track`'s
         // own docblock always stated and could not satisfy while the block it
         // was a step above was itself invisible.
         let stroke = contrast(rgb_of(theme.spark_track), pane);
@@ -1580,7 +1452,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
              it has to read level with"
         );
 
-        // **And still subordinate to what it is a track for.** A track that
+        // And still subordinate to what it is a track for. A track that
         // reached its own thumb would satisfy the floor above and destroy the
         // reading it exists to support.
         let thumb = contrast(rgb_of(theme.bar), pane);
@@ -1593,7 +1465,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
     }
 }
 
-/// The bar's track and thumb are legible on **every** row the bar crosses.
+/// The bar's track and thumb are legible on every row the bar crosses.
 #[test]
 fn a_bar_track_is_visible_on_every_row_it_crosses() {
     for (name, theme, pane) in palettes() {
@@ -1624,11 +1496,7 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
                  that row, so this is a background it is drawn on"
             );
 
-            // **Subordinate on the same background it was measured legible on.**
-            // Clearing the floor on the wash while checking the separation only
-            // against the pane would pass a value that is illegible on one and
-            // indistinguishable on the other, which is the shape SPEC.md section 7
-            // keeps finding: two true assertions with the failure between them.
+            // Subordinate on the same background it was measured legible on.
             let lit = contrast(thumb, behind);
             assert!(
                 lit > seen * 1.5,
@@ -1643,13 +1511,7 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
 /// Every bar style says everything [`Painter::bar_cell`] reads from it.
 #[test]
 fn every_bar_style_says_what_bar_cell_reads() {
-    // **Its own enumeration, and `ansi` is why.** [`palettes`] cannot carry it:
-    // every other gate there extracts channels, and `Theme::ansi` is named colours
-    // by construction, so `rgb_of` would panic on it. This gate asks about a
-    // style's *shape* rather than its values, so it can hold the palette the other
-    // two structurally cannot, and `ansi` is the one that matters most: it is the
-    // default when nothing is detected, so leaving it out meant the shipped
-    // default was compliant by luck.
+    // Its own enumeration, and `ansi` is why.
     let palettes = [
         ("dark", Theme::dark()),
         ("light", Theme::light()),
@@ -1681,7 +1543,7 @@ fn every_bar_style_says_what_bar_cell_reads() {
 
 #[test]
 fn the_spark_ramp_interpolates_only_where_stops_are_rgb() {
-    // #322: the ramp is derived from the three stop keys, so its ends must BE
+    // The ramp is derived from the three stop keys, so its ends must BE
     // those stops, and it must refuse to exist where the stops are not RGB,
     // which is the whole of how the depth ladder gates it.
     let dark = Theme::dark().resolve(Depth::Truecolor);

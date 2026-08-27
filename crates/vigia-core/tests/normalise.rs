@@ -210,12 +210,7 @@ fn attributes_written_mid_session_reach_the_next_frame() {
 
 #[test]
 fn a_running_frame_drops_what_it_cached_when_attributes_change() {
-    // **The gate above cannot see a cache, and that is why this one exists.**
-    // Its `diff_of` opens `worktree.frame()` afresh on every call, so nothing is
-    // ever carried into the measured frame: it proves `invalidate_filter` makes
-    // the next *read* correct and says nothing about an answer already in hand.
-    // The shell holds one `Frame` for the life of the session, which is the only
-    // state in which the defect exists.
+    // The gate above cannot see a cache, and that is why this one exists.
     let scratch = Scratch::crlf_worktree("normalise-carried", None);
     scratch.write("a.txt", numbered_lines(20));
     scratch.commit_all("initial");
@@ -236,12 +231,7 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     assert_eq!(primed, 1, "the fixture is not one changed file");
     let carried = rows(&mut frame);
 
-    // **And the diff cache is populated too, before anything changes.** Without
-    // this the diff half below is vacuous: nothing in `settle_spans` or
-    // `Frame::height` ever calls `Frame::diff`, so the first `diff` of the run
-    // would be the one *after* the attributes change and would compute fresh
-    // whether or not the cache had been dropped. Found by audit, in a test whose
-    // own comment claimed to cover both caches.
+    // And the diff cache is populated too, before anything changes.
     let at = frame
         .files()
         .iter()
@@ -321,7 +311,7 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     );
 }
 
-/// A configured external clean driver is **not** executed.
+/// A configured external clean driver is not executed.
 #[test]
 fn an_external_clean_driver_is_never_run() {
     let scratch = Scratch::crlf_worktree("normalise-driver", None);

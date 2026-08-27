@@ -27,9 +27,9 @@ pub struct Region {
     pub left: u16,
     /// How many columns it has.
     pub width: u16,
-    /// First row of its bar's **track**, and how many rows that is.
+    /// First row of its bar's track, and how many rows that is.
     pub track: (u16, u16),
-    /// The column **this region's** bar is drawn in, when it has one.
+    /// The column this region's bar is drawn in, when it has one.
     pub bar: Option<u16>,
 }
 
@@ -51,7 +51,7 @@ impl Region {
         Self::within(row, (self.top, self.rows))
     }
 
-    /// Whether `column`, `row` is a cell of **this region's** scrollbar.
+    /// Whether `column`, `row` is a cell of this region's scrollbar.
     fn on_bar(self, column: u16, row: u16) -> bool {
         self.bar == Some(column) && self.contains(row)
     }
@@ -67,10 +67,7 @@ impl Region {
     /// The same test against a bare `(top, rows)` span, for the track.
     fn within(row: u16, span: (u16, u16)) -> bool {
         let (top, rows) = span;
-        // Saturating, matching [`Region::covers`] beside it. Every live `Region`
-        // comes from `Body::areas`, whose own arithmetic saturates and is bounded
-        // by a real terminal, so nothing reaches the overflow; the fields are
-        // `pub` and the two tests should not disagree at the edge of the type.
+        // Saturating, matching [`Region::covers`] beside it.
         rows > 0 && row >= top && row < top.saturating_add(rows)
     }
 
@@ -97,14 +94,7 @@ impl Region {
         if !Self::within(row, self.track) {
             return None;
         }
-        // **Divided by the last row's index, not by the row count.** Over `rows`
-        // the last row yields `(rows - 1) / rows`, which is short of the full
-        // fraction by one row's worth and therefore can never ask for the end:
-        // the pointer sits on the bottom cell of the track and the view stops a
-        // step early. That is the same defect as mapping a track onto the whole
-        // instead of onto its travel, arriving one layer down, and the gates for
-        // that one missed it because they called the resolver with a fraction
-        // rather than going through a real event.
+        // Divided by the last row's index, not by the row count.
         let travel = u32::from(rows - 1);
         if travel == 0 {
             return Some(0);
@@ -168,10 +158,7 @@ impl Regions {
 
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
-        // **Before the columns, because the sheet is drawn over them.** The order
-        // is [`Regions::hover_at`]'s own and for the same reason: the sheet
-        // swallows what lands on it rather than passing it down, so a cell it
-        // covers is not a button however the bars are laid out underneath.
+        // Before the columns, because the sheet is drawn over them.
         if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
             return None;
         }
@@ -188,8 +175,8 @@ impl Regions {
 
     /// The bar a press at `column`, `row` takes hold of, or `None` off them.
     pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
-        // **The sheet first, for [`Regions::step_at`]'s reason and in the same
-        // words**: it is drawn over the bars, and it swallows what lands on it
+        // The sheet first, for [`Regions::step_at`]'s reason and in the same
+        // words: it is drawn over the bars, and it swallows what lands on it
         // rather than passing it down.
         if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
             return None;
@@ -200,20 +187,17 @@ impl Regions {
         (self.diff.bar == Some(column) && self.diff.along(row).is_some()).then_some(Grabbed::Diff)
     }
 
-    /// What a pointer at `column`, `row` is **over**, for the mark `SPEC.md`
+    /// What a pointer at `column`, `row` is over, for the mark `SPEC.md`
     /// §11.2 B10 adopts.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
-        // **The sheet first, because it is drawn over everything.** Its close
-        // control is the only thing on it a click acts on, and the rest of the
-        // sheet swallows gestures rather than passing them down, so a pointer
-        // resting anywhere on it must not mark a bar or a listed file underneath.
+        // The sheet first, because it is drawn over everything.
         if let Some(sheet) = self.sheet {
             if sheet.covers(column, row) {
                 return ((column, row) == sheet.close).then_some(Hovered::Button(column, row));
             }
         }
-        // **The bar's column first, for [`Regions::grab_at`]'s reason one
-        // function up**: the scrollbar is drawn *inside* whichever region owns
+        // The bar's column first, for [`Regions::grab_at`]'s reason one
+        // function up: the scrollbar is drawn *inside* whichever region owns
         // those rows, so asking the list first would answer `Row` for a pointer
         // resting on the bar and mark a file the reader is not pointing at.
         let (on_list_bar, on_diff_bar) =
@@ -262,13 +246,8 @@ pub enum Hovered {
 /// The mark after `event`, given the one before it.
 pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
     match event {
-        // **A drag is not a hover, and it is the one mouse event that does not
-        // re-resolve.** A reader pulling a grabbed thumb travels over the step
-        // button at that end of the track, and lighting it would promise a step
-        // that releasing there will not perform: `Grabbed` owns the gesture
-        // until the button comes up, so a press on the button is not what the
-        // release means. This is [`Grabbed`]'s own doctrine one mark over, that
-        // a gesture outlives the target it began on.
+        // A drag is not a hover, and it is the one mouse event that does not
+        // re-resolve.
         Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(_)) => None,
         Event::Mouse(mouse) => regions.hover_at(mouse.column, mouse.row),
         Event::FocusLost => None,
@@ -308,7 +287,7 @@ impl Grabbed {
     }
 }
 
-/// What a drag already under way makes of `event`, **ignoring the column**.
+/// What a drag already under way makes of `event`, ignoring the column.
 pub fn drag_action(event: &Event, regions: Regions, on: Grabbed) -> Option<Action> {
     let Event::Mouse(mouse) = event else {
         return None;
@@ -440,14 +419,8 @@ impl Held {
                 }
                 _ => false,
             },
-            // **A window that lost focus has ended the gesture**, and this arm is
-            // owed to I1 rather than to tidiness. The clock a hold owns is
-            // licensed on three conditions, and the second is that it *may not
-            // outlive the gesture that armed it*: a reader who has tabbed away is
-            // not holding this button in any sense the repeat should honour, and
-            // without this the loop keeps stepping and repainting a pane nobody
-            // is looking at, on a timer, which is the state I1's measure exists
-            // to protect.
+            // A window that lost focus has ended the gesture, and this arm is owed to
+            // I1 rather than to tidiness.
             Event::FocusLost => true,
             _ => false,
         }
@@ -464,13 +437,13 @@ pub enum Action {
     Quit,
     /// Move the viewport by this many rows, negative for up.
     Scroll(isize),
-    /// Move the **pinned file list's** window by this many rows, negative for up.
+    /// Move the pinned file list's window by this many rows, negative for up.
     ScrollList(isize),
     /// Move the viewport by whole screens, negative for up.
     Page(isize),
     /// Move the viewport by half screens, negative for up.
     HalfPage(isize),
-    /// Move the viewport by this many **changed files**, negative for back.
+    /// Move the viewport by this many changed files, negative for back.
     File(isize),
     /// Go to the first changed file.
     Top,
@@ -552,36 +525,21 @@ impl Action {
             | Self::File(_)
             | Self::Top
             | Self::Bottom => true,
-            // A resize moves no viewport and expresses no intent, and a pane
-            // beside an agent is resized constantly, so treating it as a
-            // scroll would disengage follow mode for free. `ToggleFollow` is
-            // the reader asking for the opposite of disengaging, and quitting
-            // has nothing left to disengage from.
+            // A resize moves no viewport and expresses no intent, and a pane beside an
+            // agent is resized constantly, so treating it as a scroll would disengage
+            // follow mode for free.
             Self::Quit
             | Self::Escape
             | Self::Redraw
             | Self::ToggleFollow
-            // Showing or hiding the masthead resizes the diff's region and does
-            // not move the reader inside it, which is a resize by another name
-            // and the same answer §11.1 gives one: a resize expresses no intent
-            // about what the diff should show.
-            // A rail moves the map to the other side of the pane and the diff
-            // keeps the row it was on, which is `ToggleMasthead`'s own answer one
-            // region over: a resize expresses no intent about what the diff shows.
+            // Showing or hiding the masthead resizes the diff's region and does not
+            // move the reader inside it, which is a resize by another name and the same
+            // answer §11.1 gives one: a resize expresses no intent about what the diff
+            // should show.
             | Self::ToggleRail
             | Self::ToggleMasthead
-            // **And a pin is the one of the three that can move the viewport,
-            // and still expresses no intent about where it should be.** B16 asks
-            // for a *subject*, not a position: a screen straddling two files
-            // comes to rest on the pinned file's last screenful because that is
-            // the nearest legal answer to the position the reader already had,
-            // which is the same resolution a diff shrinking under them gets. (The
-            // arm that anchors on the way in is what makes that hold from a
-            // position a *drag* placed as well as one a scroll did; see
-            // `App::apply`.)
-            // Calling it a manual scroll would disengage follow for a reader who
-            // asked to see one file, which is the pairing the ruling is most
-            // useful in: follow chooses the file, the pin keeps the diff on it.
+            // And a pin is the one of the three that can move the viewport, and still
+            // expresses no intent about where it should be.
             | Self::ToggleSingle
             | Self::ToggleStaged
             | Self::ToggleWrap
@@ -590,8 +548,8 @@ impl Action {
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::ScrollList(_) => false,
-            // Dragging the **list's** bar moves the map and not the diff, so it
-            // is `ScrollList` by another input device. Dragging the **diff's**
+            // Dragging the list's bar moves the map and not the diff, so it
+            // is `ScrollList` by another input device. Dragging the diff's
             // moves the viewport and is a manual scroll like any other.
             Self::ListTo(_) => false,
             // A click on a row moves the diff, so it is a manual scroll for the
@@ -603,21 +561,12 @@ impl Action {
     /// Whether applying this needs to know how tall the body is.
     pub fn needs_height(self) -> bool {
         match self {
-            // A page steps by a screenful and a half page by half of one, and a
-            // drag on the diff's bar maps the track onto everything *but* the
-            // last screenful, so all three need to know how tall one is.
-            // `ListTo` does not: the list's travel is a question about the *list*
-            // rather than about the diff's height, and `App` answers it from the
-            // changed set and its own row count. It stopped being the row count
-            // outright in [#313](https://github.com/breferrari/vigia/issues/313),
-            // where a grouped list gained separators and the travel became
-            // `view::last_top`; what has not changed is that this arm needs no
-            // height passed to it.
+            // A page steps by a screenful and a half page by half of one, and a drag on
+            // the diff's bar maps the track onto everything *but* the last screenful,
+            // so all three need to know how tall one is.
             Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) | Self::Bottom => true,
-            // `File` steps a file index and lands on a heading, so it is
-            // measured in files and never in rows: no height can change where it
-            // arrives. `Top` is a heading under a pin too, which is why it stays
-            // here and `Bottom` does not.
+            // `File` steps a file index and lands on a heading, so it is measured in
+            // files and never in rows: no height can change where it arrives.
             Self::Scroll(_) | Self::File(_) | Self::Top | Self::ScrollList(_) => false,
             Self::ListTo(_) | Self::ListRow(_) => false,
             // A toggle changes the region's height; it does not need to be
@@ -649,13 +598,8 @@ pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
     }
 }
 
-/// **It takes the key and nothing else, and that is what makes "not a mode"
-/// structural rather than a claim.** `SPEC.md` §11.2 B4 refuses a navigable list,
-/// B12 reconciles the gestures sheet with it by ruling that no key changes meaning
-/// while the sheet is up, and B14 inherits the same for the left rail. None of
-/// those needs a gate: this function is handed no shell state, so a key whose
-/// meaning depended on one could not be written here without changing the
-/// signature, and that is a compile error rather than a red test.
+/// It takes the key and nothing else, and that is what makes "not a mode" structural
+/// rather than a claim.
 fn key_action(key: &KeyEvent) -> Option<Action> {
     // Windows reports press *and* release; Unix terminals report press only.
     // Acting on both would double every keystroke on one platform and not the
@@ -666,20 +610,13 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
 
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         return match key.code {
-            // Ctrl-C is handled here rather than by a signal handler. In raw
-            // mode the terminal does not translate it into SIGINT at all, so it
-            // arrives as an ordinary key event; I8's "restored on SIGINT" is
-            // about the signal a *non-raw* terminal would have sent, and is
-            // issue #8's to prove.
+            // Ctrl-C is handled here rather than by a signal handler.
             KeyCode::Char('c') | KeyCode::Char('d') => Some(Action::Quit),
             _ => None,
         };
     }
 
-    // **Before the plain arrow arms, or `Shift-↓` falls through to a diff
-    // scroll.** The letters below would still work, so the defect would be one
-    // binding silently doing the other's job on terminals that report modifiers
-    // and nothing at all to see on terminals that do not.
+    // Before the plain arrow arms, or `Shift-↓` falls through to a diff scroll.
     if key.modifiers.contains(KeyModifiers::SHIFT) {
         match key.code {
             KeyCode::Down => return Some(Action::ScrollList(1)),
@@ -693,20 +630,15 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Esc => Some(Action::Escape),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::Scroll(1)),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Scroll(-1)),
-        // Shift is the modifier because the alternatives are all taken or
-        // unreliable: `Ctrl-J` is LF, `Ctrl-C` and `Ctrl-D` already quit, and
-        // Alt is intercepted by terminal emulators and by macOS Option. `G`
-        // below has already taught a reader that case is load bearing here.
+        // Shift is the modifier because the alternatives are all taken or unreliable:
+        // `Ctrl-J` is LF, `Ctrl-C` and `Ctrl-D` already quit, and Alt is intercepted by
+        // terminal emulators and by macOS Option.
         KeyCode::Char('J') => Some(Action::ScrollList(1)),
         KeyCode::Char('K') => Some(Action::ScrollList(-1)),
         KeyCode::PageDown | KeyCode::Char(' ') => Some(Action::Page(1)),
         KeyCode::PageUp => Some(Action::Page(-1)),
-        // `less`'s own half-page pair, and the shell already claims `less +F`
-        // semantics one row down, so the precedent is internal as well as
-        // cultural. **`Ctrl-D` and `Ctrl-U` are refused rather than overlooked**:
-        // `Ctrl-D` quits, four rows up, and rebinding a way out to a scroll is
-        // the surprise this map has avoided everywhere else. Plain letters or
-        // nothing.
+        // `less`'s own half-page pair, and the shell already claims `less +F` semantics
+        // one row down, so the precedent is internal as well as cultural.
         KeyCode::Char('d') => Some(Action::HalfPage(1)),
         KeyCode::Char('u') => Some(Action::HalfPage(-1)),
         KeyCode::Home | KeyCode::Char('g') => Some(Action::Top),
@@ -716,29 +648,18 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // reflex from `:n`/`:p` already. `N` and `P` are unbound for the reason
         // `D`, `U` and `F` are, one row above a pair where `g`/`G` have already
         // taught that case is load bearing here.
-        // **Aliases in the letter's own arm**, which is the shape `Down |
+        // Aliases in the letter's own arm, which is the shape `Down |
         // Char('j')` above already has and what stops the two directions drifting
         // apart. Why the arrows and what they spend is `Action::File`'s docblock,
         // not repeated here.
         KeyCode::Right | KeyCode::Char('n') => Some(Action::File(1)),
         KeyCode::Left | KeyCode::Char('p') => Some(Action::File(-1)),
-        // **The digits address the drawn window, and there are six of them
-        // because `render::LIST_SETTLED` is six.** The digits address the rows
-        // **every** pane drawing a list has, so `3` means the same thing at
-        // every height, where a key live only above some pane height would be
-        // the intermittent affordance `SPEC.md` §11.1 refuses one region over.
-        // The rows a taller pane adds are reached with `J`/`K`, `n`/`p` and the
-        // pointer.
+        // The digits address the drawn window, and there are six of them because
+        // `render::LIST_SETTLED` is six.
         KeyCode::Char(digit @ '1'..='6') => Some(Action::ListRow(row_of(digit))),
-        // Lower case only, and `G` above is why. `g`/`G` already mean two
-        // different things here, so a reader has been taught that shift
-        // matters, and folding case would hand `F` a meaning nobody asked for
-        // next to a key where case is load bearing.
+        // Lower case only, and `G` above is why.
         KeyCode::Char('f') => Some(Action::ToggleFollow),
-        // `m` for masthead, and it was free. Reported from use: *"can we add a
-        // shortcut to hide and display this thing at the top? I see it is not
-        // always needed"*, which is the honest read of an element that costs
-        // four rows of the thing the tool exists to show.
+        // `m` for masthead, and it was free.
         KeyCode::Char('m') => Some(Action::ToggleMasthead),
         KeyCode::Char('r') => Some(Action::ToggleRail),
         // `s` for single, unbound and in the same lowercase family as `f`, `m`
@@ -746,19 +667,13 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // where in it the reader is. B16.
         KeyCode::Char('s') => Some(Action::ToggleSingle),
         KeyCode::Char('a') => Some(Action::ToggleStaged),
-        // **`w`, and it is the reflex rather than what was free.** `ov` binds
-        // `[w]`, `[W]` to a character-based wrap toggle, `bat` spells the
-        // opposite state `-S` / `--chop-long-lines`, and `less` toggles the same
-        // state with `-S`. It was also free, which is the weaker half of the
-        // case: `SPEC.md` §11.2 B19.
+        // `w`, and it is the reflex rather than what was free. `ov` binds `[w]`, `[W]`
+        // to a character-based wrap toggle, `bat` spells the opposite state `-S` /
+        // `--chop-long-lines`, and `less` toggles the same state with `-S`.
         KeyCode::Char('w') => Some(Action::ToggleWrap),
-        // **`?` and nothing else**, which is `SPEC.md` §11.2's B12: `btop`,
-        // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
-        // is refused because it is a vi motion everywhere else on a pane with no
-        // horizontal scroll. `Esc` is refused too, and that one is a fact about
-        // *this* keymap rather than about the convention: `Esc` is Quit four rows
-        // up, so teaching it to dismiss would put *dismiss this* one keystroke
-        // from *end the program*.
+        // `?` and nothing else, which is `SPEC.md` §11.2's B12: `btop`, `bottom` and
+        // `rtop` all open help on it, it was unbound here, and `h` is refused because
+        // it is a vi motion everywhere else on a pane with no horizontal scroll.
         KeyCode::Char('?') => Some(Action::ToggleSheet),
         _ => None,
     }
@@ -772,12 +687,9 @@ fn row_of(digit: char) -> u16 {
 }
 
 fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
-    // **The sheet is checked before everything, because it is drawn over
-    // everything.** `SPEC.md` §11.2's B12: the close control dismisses, and any
-    // other event landing on the sheet does nothing at all. Falling through would
-    // let a click seek a scrollbar the reader cannot see and a wheel scroll a
-    // diff the sheet is covering, which is the one way an overlay that moves no
-    // content could still move content.
+    // The sheet is checked before everything, because it is drawn over everything.
+    // `SPEC.md` §11.2's B12: the close control dismisses, and any other event landing
+    // on the sheet does nothing at all.
     if let Some(sheet) = regions.sheet {
         if sheet.covers(mouse.column, mouse.row) {
             return matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -787,12 +699,9 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         }
     }
 
-    // **The bar is checked before the region it sits in.** A press on the
-    // scrollbar column is a gesture about position, and the same column is inside
-    // whichever region drew it, so testing the region first would turn every drag
-    // into a wheel.
-    // **A cell of a bar, not merely its column.** Asking the column alone let one
-    // region's bar swallow the other's rows, which `Region::on_bar` records.
+    // The bar is checked before the region it sits in. A press on the scrollbar column
+    // is a gesture about position, and the same column is inside whichever region drew
+    // it, so testing the region first would turn every drag into a wheel.
     let on_bar = regions.list.on_bar(mouse.column, mouse.row)
         || regions.diff.on_bar(mouse.column, mouse.row);
     if on_bar
@@ -801,26 +710,14 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
             MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
         )
     {
-        // **A step button answers a press and not a drag**, and that asymmetry is
-        // a ruling rather than an omission. A reader who grabbed the thumb and
-        // pulled past the end of the track is over a button, and the honest
-        // reading of that gesture is *nothing further*: the last track row
-        // already reaches the last window, so the view is where they asked for it
-        // to be. Stepping instead would make a press-and-jiggle on the top button
-        // walk the view up a row per twitch, and clamping to the end would
-        // teleport it there; both need to know a drag *began* on a button, which
-        // is state, and this module has none by design.
-        // **Through `step_at`, which knows whose bar the column is**, since
-        // [#251](https://github.com/breferrari/vigia/issues/251). This asked
-        // `Regions::step`, which walked both regions' buttons by row alone: with
-        // the two bars sharing a column that is the same answer, and beside a rail
-        // it is a press on the diff's bar stepping the map.
+        // A step button answers a press and not a drag, and that asymmetry is a ruling
+        // rather than an omission.
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
             && let Some(step) = regions.step_at(mouse.column, mouse.row)
         {
             return Some(step);
         }
-        // **The track, not the region**, so a stepped bar seeks from the rows its
+        // The track, not the region, so a stepped bar seeks from the rows its
         // thumb actually occupies. Where there are no buttons the two are the
         // same span and this is what it always was.
         if regions.list.bar == Some(mouse.column)
@@ -837,7 +734,7 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     }
 
     match mouse.kind {
-        // **The wheel scrolls whatever it is over.** A reader hovering the map
+        // The wheel scrolls whatever it is over. A reader hovering the map
         // and turning the wheel means the map; `SPEC.md` §2 makes `btop` the
         // reference and that is what `btop` does.
         MouseEventKind::ScrollDown if regions.over_list(mouse.column, mouse.row) => {
@@ -848,18 +745,13 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         }
         MouseEventKind::ScrollDown => Some(Action::Scroll(WHEEL_ROWS)),
         MouseEventKind::ScrollUp => Some(Action::Scroll(-WHEEL_ROWS)),
-        // **A click on a listed file sends the diff to it.** The row is reported
-        // as an offset into the window; the app owns where the window is. Only
-        // the list, because the diff below is already showing what it is showing
-        // and a click on it would have nothing to mean.
+        // A click on a listed file sends the diff to it. The row is reported as an
+        // offset into the window; the app owns where the window is.
         MouseEventKind::Down(MouseButton::Left) if regions.over_list(mouse.column, mouse.row) => {
             Some(Action::ListRow(mouse.row - regions.list.top))
         }
-        // Everything else is deliberately inert. Horizontal wheels exist and
-        // lines do not pan: the renderer clips instead, which is what I6 asks
-        // for. A click on the diff does nothing, because nothing there is
-        // selectable in a monitor and §11.2 B4 keeps it that way, and plain
-        // movement is not an event worth a frame.
+        // Everything else is deliberately inert. Horizontal wheels exist and lines do
+        // not pan: the renderer clips instead, which is what I6 asks for.
         _ => None,
     }
 }
