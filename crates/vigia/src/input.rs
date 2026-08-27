@@ -328,67 +328,35 @@ impl Regions {
 
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
     ///
-    /// **Geometry alone, with no event kind in it**, which is what makes it
-    /// usable by the three callers that ask different questions of the same
-    /// cell: [`action_for`] asks *what does this press mean*, the loop asks *is
-    /// the pointer still on the button it is repeating*, and [`Regions::hover_at`]
-    /// asks *is this a surface a press would act on at all*. Deriving any of
-    /// them from a copy of this arithmetic is how they would come to disagree
-    /// about where a button is, which is the defect
-    /// [#166](https://github.com/breferrari/vigia/issues/166) found two
-    /// expressions of and reduced to one.
+    /// **Geometry alone, with no event kind in it**, which is what lets three
+    /// callers ask different questions of the same cell: [`action_for`] asks
+    /// *what does this press mean*, the loop asks *is the pointer still on the
+    /// button it is repeating*, and [`Regions::hover_at`] asks *is this a
+    /// surface a press would act on at all*. A second copy of this arithmetic
+    /// is how they would come to disagree about where a button is.
     ///
-    /// **The sheet is not geometry the other two could hold for it, and that is
-    /// what [#298](https://github.com/breferrari/vigia/issues/298) found.**
-    /// `SPEC.md` §11.1 rules that a gesture landing on the sheet does nothing at
-    /// all, and two of the three callers honoured it on their own: [`action_for`]
-    /// returns before it reaches here, and [`Regions::hover_at`] answers the close
-    /// control and nothing else. **The loop's arming site went through neither**,
-    /// so a press on a step button the sheet was covering armed a [`Held`] and the
-    /// repeat then scrolled a region the reader could not see, every
-    /// [`STEP_REPEAT`] until the button came up. Measured over widths 30 to 140
-    /// against heights 8 to 40: **85** covered cells answered a step, at the four
-    /// widths 30, 32, 35 and 38, which are the panes narrow enough for a centred
-    /// sheet to reach a bar's own column.
+    /// **The sheet guard is here rather than at the loop's arming site**, for
+    /// that same reason. `SPEC.md` §11.1 rules that a gesture landing on the
+    /// sheet does nothing, and the arming site honoured it through neither of
+    /// the two callers that did, so a press on a step button the sheet covered
+    /// armed a [`Held`] and repeated into a region the reader could not see.
+    /// It reaches **85** covered cells, at the four widths narrow enough for a
+    /// centred sheet to touch a bar's column. [`Regions::grab_at`] is the loop's
+    /// other direct question and carries the same guard.
+    /// [`Regions::hover_at`]'s own sheet branch stays, because it answers
+    /// [`Hovered::Button`] for the close control where this answers `None` for
+    /// every cell: a mark is not a press.
     ///
-    /// So the guard is **here** rather than at that site, which is #166's rule
-    /// applied to the same function a second time: three callers reading one
-    /// expression of *where a press acts* cannot come to disagree about it, where
-    /// a fourth copy in `run` is exactly how this one did. [`Regions::grab_at`] is
-    /// the loop's **other** direct question and carries the same guard for the same
-    /// reason; guarding one and not the other is how the class recurs, and it is
-    /// what this ruling's own first draft did. [`Regions::hover_at`]'s
-    /// own sheet branch stays, because it answers [`Hovered::Button`] for the close
-    /// control where this answers `None` for every cell of the sheet including
-    /// that one: a mark is not a press, and the control is dismissed through
-    /// [`action_for`] rather than held.
+    /// **`Regions` is a pre-batch snapshot, so this guard has a hole in it.**
+    /// `Shell::regions` is written once per painted frame, so a `?` and a press
+    /// that coalesce into one batch test the press against a sheet that was not
+    /// yet open. It bypasses [`action_for`]'s guard alike and is tracked as
+    /// [#307](https://github.com/breferrari/vigia/issues/307).
     ///
-    /// It also settles the ladder one element over. `Chrome::pressed` is
-    /// [`Held::at`], so with nothing on the sheet able to arm a hold, the close
-    /// control's pressed weight is unreachable, which is what #298 rules it
-    /// down to two rungs on. `crates/vigia/tests/sheet.rs::nothing_can_press_the_close_control`
-    /// is that half.
-    ///
-    /// **Not *by construction*, and two drafts of this claimed more than they
-    /// could carry.** The first said the guard makes it so, which would need
-    /// `Regions` to always describe the sheet the reader is looking at: it does not,
-    /// because `Shell::regions` is written once per painted frame, so every event in
-    /// one drained batch reads the same pre-batch snapshot and a `?` and a press
-    /// that coalesce test the press against a sheet that was not yet open. That
-    /// bypasses this guard and [`action_for`]'s alike, is older and wider than #298,
-    /// and is tracked as
-    /// [#307](https://github.com/breferrari/vigia/issues/307). The second appealed
-    /// to the sweep instead, and a sweep cannot reach it either: it compares a
-    /// pane's close cell against **that same pane's** bars, where a hold armed on a
-    /// genuine bar cell survives a resize ([`Held::ends`] has no arm for one) and
-    /// the next paint recomputes `plan.close` at the new size.
-    ///
-    /// **What is airtight is the mechanism, and it needs neither.** The control
-    /// answers a press with [`Action::CloseSheet`], so the sheet is gone before the
-    /// next paint and there is no frame in which that cell is drawn *and* pressed.
-    /// `Painter::sheet` accordingly no longer asks: the comparison against
-    /// `Chrome::pressed` is deleted rather than merely unreachable, so even the
-    /// resize case above has no live reader.
+    /// **What is airtight needs neither guard.** The close control answers a
+    /// press with [`Action::CloseSheet`], so the sheet is gone before the next
+    /// paint and no frame draws that cell pressed. `Painter::sheet` accordingly
+    /// does not ask.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
         // **Before the columns, because the sheet is drawn over them.** The order
         // is [`Regions::hover_at`]'s own and for the same reason: the sheet
@@ -450,38 +418,18 @@ impl Regions {
     /// What a pointer at `column`, `row` is **over**, for the mark `SPEC.md`
     /// §11.2 B10 adopts.
     ///
-    /// **Geometry alone, like [`Regions::step_at`] above**, and the third caller
-    /// of the same arithmetic rather than a fourth copy of it: a button is
-    /// `Region::button`'s answer and a track row is `Region::along`'s, which are
-    /// the two the press path already asks. The #166 pass consolidated one such
-    /// copy and recorded why, so this deliberately composes rather than
-    /// re-deriving where a button ends.
-    ///
     /// **Defined as *wherever a press would step*, which is the ruling rather
     /// than an optimisation.** §11.1 licenses the mark on "the surfaces a click
     /// already acts on", so this asks [`Regions::step_at`] the question it
-    /// already answers and marks the cell when the answer is yes. Spelling the
-    /// column guard and the two `Region::button` calls again would be a second
-    /// copy of where a button is, which is the defect
-    /// [#166](https://github.com/breferrari/vigia/issues/166) found two
-    /// expressions of and reduced to one.
+    /// already answers. Spelling the column guard and the two `Region::button`
+    /// calls again would be a second copy of where a button is.
     ///
-    /// **Three answers, and the order they are asked in is the whole of it.** A
-    /// step button, then the bar it sits on, then a listed file. The column is
-    /// tested before the list because the scrollbar is drawn *inside* whichever
-    /// region owns those rows, so asking the list first would mark a file the
-    /// reader is pointing past. That is [`Regions::grab_at`]'s ordering one
-    /// function up, for the same reason.
-    ///
-    /// **The diff's rows answer nothing**, which is the one region §11.1 keeps
-    /// unmarked: nothing there is clickable and a mark would imply it is.
-    ///
-    /// [#186](https://github.com/breferrari/vigia/issues/186) answered only for
-    /// a button, on the reasoning that the thumb rests at `Theme::bar` and drags
-    /// at `Theme::bar_active` with no rung between, so a hover there would tie
-    /// with a drag. The reasoning was right and the conclusion was not: *there is
-    /// no rung* is a reason to build one, which is what `Theme::bar_hover` and
-    /// `Theme::path_hover` are ([#189](https://github.com/breferrari/vigia/issues/189)).
+    /// **Three answers, and the order is the whole of it.** A step button, then
+    /// the bar it sits on, then a listed file. The column is tested before the
+    /// list because the scrollbar is drawn *inside* whichever region owns those
+    /// rows, so asking the list first would mark a file the reader is pointing
+    /// past. **The diff's rows answer nothing**, which is the one region §11.1
+    /// keeps unmarked: nothing there is clickable and a mark would imply it is.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
         // **The sheet first, because it is drawn over everything.** Its close
         // control is the only thing on it a click acts on, and the rest of the
@@ -596,35 +544,29 @@ pub enum Hovered {
 ///
 /// **A free function for the reason [`Held::ends`] is one**: the loop that owns
 /// this state cannot be driven by a test, so a rule written inline in `run` is a
-/// rule with no gate. Everything decidable about a hover mark is decidable from
-/// an event, a layout and the previous mark, so all of it lives here.
+/// rule with no gate.
 ///
-/// §11.1 states the rule this implements: a mark is retired by whatever the
-/// program can still observe about its subject, and a hover's subject **moves**
-/// rather than ending, so what retires it is the next observation of where the
-/// pointer is. Four cases, and the last two are the ones that are not obvious:
+/// §11.1's rule is that a mark is retired by whatever the program can still
+/// observe about its subject, and a hover's subject **moves** rather than
+/// ending. Four cases, the last two being the ones that are not obvious:
 ///
 /// - **Any mouse event that is not a drag re-resolves.** Motion, press, release
-///   and the wheel all carry a column and a row, so all of them place the mark,
-///   and one that lands on no target clears it. There is no need to single out
-///   `Moved`: an event that says where the pointer is *is* the observation.
+///   and the wheel all carry a column and a row, so all of them place the mark
+///   and one landing on no target clears it.
 /// - **A drag clears it, and is the one mouse event that does not re-resolve.**
 ///   A reader pulling a grabbed thumb travels over the step button at that end
 ///   of the track, and lighting it would promise a step that releasing there
 ///   will not perform, because [`Grabbed`] owns the gesture until the button
-///   comes up. That is `Grabbed`'s own doctrine one mark over: a gesture
-///   outlives the target it began on. Nothing is left stuck dark, because the
-///   `Up` that ends the drag carries a position and re-arms the mark.
+///   comes up. Nothing is left stuck dark: the `Up` that ends the drag carries a
+///   position and re-arms the mark.
 /// - **[`Event::FocusLost`] clears it.** The window is gone, so the pointer's
-///   last known position has stopped being a claim about anything. This is the
-///   rung `TAKEOVER` gained a step for, and without that step this arm never
-///   fires on Unix.
-/// - **Everything else leaves it alone, and keys above all.** This is
-///   deliberately *not* [`Held::ends`]'s rule, which ends a hold on any key
-///   because a hand that has reached the keyboard is not holding a mouse button.
-///   That is evidence about a **button**; it is no evidence at all about where a
-///   pointer is resting, and clearing here would make the mark flicker off under
-///   a reader who is scrolling with `j` while the pointer sits on the bar.
+///   last known position has stopped being a claim about anything. Without
+///   `TAKEOVER`'s focus step this arm never fires on Unix.
+/// - **Everything else leaves it alone, and keys above all.** Deliberately not
+///   [`Held::ends`]'s rule, which ends a hold on any key because a hand that has
+///   reached the keyboard is not holding a mouse button. That is evidence about
+///   a **button** and none at all about where a pointer rests; clearing here
+///   would flicker the mark off under a reader scrolling with `j`.
 pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
     match event {
         // **A drag is not a hover, and it is the one mouse event that does not
@@ -644,37 +586,29 @@ pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Opt
 /// The mark after a paint, given the layout before it and the layout it drew.
 ///
 /// **A mark outlives a frame; it does not outlive a relayout.** [`hover_after`]
-/// resolves against the geometry on screen, so the mark is only ever a claim
-/// about *that* screen. When a tick moves the bars, every cell it named may now
-/// belong to something else, and §11.1's clearing ladder has an accepted
-/// residual where the pointer is no longer there to say so.
+/// resolves against the geometry on screen, so the mark is only a claim about
+/// *that* screen. When a tick moves the bars, every cell it named may now belong
+/// to something else.
 ///
-/// **Two narrower rules were tried first and both were wrong**, which is worth
-/// keeping because each looked sufficient:
+/// **Any change to the layout retires the mark**, and the next motion re-arms it
+/// against current geometry. Two narrower rules look sufficient and are not.
+/// *Keeping the cell and trusting it* fails in exactly the residual case: a list
+/// of six with its down button on row 6, the pointer resting and leaving, two
+/// files reverted, and row 6 is now the diff's up button, lit without ever
+/// having been hovered. *Re-validating the cell against the new layout* is a
+/// **tautology** — `Regions::hover_at` builds its answer out of its own
+/// arguments, so `hover_at(c, r) == Some(mark)` reduces to
+/// `hover_at(c, r).is_some()`, which catches *this is no longer a button* and is
+/// blind to *this is now a different button*.
 ///
-/// - *Keep the cell and trust it.* The argument was that a cell the pointer
-///   rests on is the same cell whichever region comes to own it, so a relayout
-///   could only ever draw **no** mark. That holds while the pointer is there and
-///   fails in exactly the residual: a list of six with its down button on row 6,
-///   the pointer resting and leaving, two files reverted, and row 6 is now the
-///   *diff's up button*, lit without ever having been hovered.
-/// - *Re-validate the cell against the new layout.* That is what this replaced,
-///   and it was a **tautology**: `Regions::hover_at` builds its answer out of its
-///   own arguments, so `hover_at(c, r) == Some(mark)` reduces to
-///   `hover_at(c, r).is_some()`. It catches *this is no longer a button* and is
-///   blind to *this is now a different button*, which is the whole case.
-///
-/// So the rule does not try to tell one button from another: **any change to the
-/// layout retires the mark**, and the next motion re-arms it against geometry
-/// that is current. The cost is a mark dropped while it was still correct, when
-/// a write moves the bars under a pointer that has not left, and that is the
+/// The cost is a mark dropped while it was still correct, and that is the
 /// conservative direction: the mark says *the pointer is here*, and after a
 /// relayout nothing in this process knows whether it still is.
 ///
 /// Called from the paint rather than from the next frame's chrome, so the
-/// staleness cannot outlive the frame that caused it. That matters because on an
-/// idle tree there is no next frame: I1 means a wrong mark left for "one frame"
-/// could sit lit for as long as nobody writes to the worktree.
+/// staleness cannot outlive the frame that caused it. On an idle tree there is
+/// no next frame: I1 means a wrong mark left for "one frame" could sit lit until
+/// somebody writes to the worktree.
 pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) -> Option<Hovered> {
     (before == after).then_some(was).flatten()
 }
@@ -1436,34 +1370,24 @@ impl Action {
 
     /// Whether applying this needs to know how tall the body is.
     ///
-    /// Mostly the actions measured in screens rather than in rows. Everything
-    /// else is given the height and ignores it.
-    ///
-    /// **It is *reads it in some reachable state*, not *always reads it*, and
-    /// `SPEC.md` §11.2 B16 is what made the distinction load-bearing.**
+    /// **It is *reads it in some reachable state*, not *always reads it*.**
     /// [`Action::Bottom`] is measured in files unpinned, where it lands on a
     /// heading and no height can move it, and in **rows** under a pin, where it
     /// rests the file's last row on the bottom. So it answers `true` and pays a
     /// height it ignores half the time, which is the conservative direction: the
     /// other reading hands it a zero in the state that reads one, and
-    /// `saturating_sub(0)` then quietly means *the whole file*. That shipped
-    /// once ([#297](https://github.com/breferrari/vigia/issues/297)) with the
-    /// gate for it green, because the gate drove only the unpinned state.
-    ///
-    /// No other action is state-dependent today, and that is checked rather than
-    /// assumed: `Top` writes an index and reads nothing pinned or not, and every
-    /// other `false` arm ignores the height in both states.
+    /// `saturating_sub(0)` then quietly means *the whole file*. No other action
+    /// is state-dependent, which is checked rather than assumed.
     ///
     /// This exists because the answer is **expensive**, not because it is
     /// interesting. Deriving the height costs an uncached terminal-size syscall
-    /// plus a `Chrome`, and since the shell began draining a whole gesture into
-    /// one paint there can be sixty-four actions between two frames. Paying it
-    /// per action would put the syscall back on the path the drain took it off.
+    /// plus a `Chrome`, and a drained gesture can be sixty-four actions between
+    /// two frames, so paying it per action would put the syscall back on the
+    /// path the drain took it off.
     ///
     /// Exhaustive rather than a `matches!` list, for the reason
     /// [`Action::is_manual_scroll`] gives: a new action stops this compiling and
-    /// asks, where a list would silently answer "no" and be wrong the one time
-    /// it mattered.
+    /// asks, where a list would silently answer "no".
     pub fn needs_height(self) -> bool {
         match self {
             // A page steps by a screenful and a half page by half of one, and a
@@ -1624,38 +1548,24 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Right | KeyCode::Char('n') => Some(Action::File(1)),
         KeyCode::Left | KeyCode::Char('p') => Some(Action::File(-1)),
         // **The digits address the drawn window, and there are six of them
-        // because `render::LIST_SETTLED` is six.** The numbered-jump grammar a
-        // terminal monitor's reader already has, over a region that draws its
-        // rows in an order they can count.
+        // because `render::LIST_SETTLED` is six.** The digits address the rows
+        // **every** pane drawing a list has, so `3` means the same thing at
+        // every height, where a key live only above some pane height would be
+        // the intermittent affordance `SPEC.md` §11.1 refuses one region over.
+        // The rows a taller pane adds are reached with `J`/`K`, `n`/`p` and the
+        // pointer.
         //
         // The bound is **restated rather than imported**: everything else in
         // this module is a pure function of a key code, and reaching into the
-        // renderer for a layout constant would end that. What makes the
-        // restatement safe is `tests/input.rs`, which presses every digit
-        // `1..=LIST_SETTLED` and asserts the one after it is unbound, so moving
-        // the settled cap goes red here instead of leaving a drawn row
-        // unreachable.
+        // renderer for a layout constant would end that. `tests/input.rs`
+        // presses every digit `1..=LIST_SETTLED` and asserts the one after it is
+        // unbound, so moving the settled cap goes red here instead of leaving a
+        // drawn row unreachable.
         //
-        // `0` and `7`-`9` stay unbound rather than becoming out-of-range jumps,
-        // and the difference is real: an unbound key is no action at all, where a
-        // bound one naming a row that is not drawn is the empty-list-space case
-        // and disengages follow like any other jump.
-        //
-        // **The reason that used to close this sentence has expired, and it is
-        // replaced rather than inherited**
-        // ([#160](https://github.com/breferrari/vigia/issues/160)). It read *a
-        // row that can never exist should not spend a reader's follow mode*, and
-        // a seventh row exists on any pane of 28 rows or more now that
-        // `render::list_cap` deepens the list. What survives is the other half,
-        // sharpened: the digits address the rows **every** pane drawing a list
-        // has, so `3` means the same thing on every pane, where a key live only
-        // above some height would be the intermittent affordance `SPEC.md` §11.1
-        // refuses one region over. The rows a taller pane adds are reached with
-        // `J`/`K`, `n`/`p` and the pointer, and nothing on screen ever promised a
-        // number per row, which is
-        // [#149](https://github.com/breferrari/vigia/issues/149)'s own ruling,
-        // re-ruled with this rung because deepening the list is one of the three
-        // conditions §11.1 records for reopening it.
+        // `0` and `7`-`9` stay unbound rather than becoming out-of-range jumps:
+        // an unbound key is no action at all, where a bound one naming a row
+        // that is not drawn is the empty-list-space case and disengages follow
+        // like any other jump.
         KeyCode::Char(digit @ '1'..='6') => Some(Action::ListRow(row_of(digit))),
         // Lower case only, and `G` above is why. `g`/`G` already mean two
         // different things here, so a reader has been taught that shift
