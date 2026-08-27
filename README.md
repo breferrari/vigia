@@ -494,3 +494,9 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 **MIT** · Built in the open · [SPEC](SPEC.md) · [ROADMAP](ROADMAP.md) · [Issues](https://github.com/breferrari/vigia/issues)
 
 </div>
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask — `SPEC.md` is read before code.
+
+Five issues are labelled [`good first issue`](https://github.com/breferrari/vigia/labels/good%20first%20issue).

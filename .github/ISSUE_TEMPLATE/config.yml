@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/breferrari/vigia/discussions
+    about: Anything that is not yet a bug or a proposal.
