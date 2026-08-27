@@ -46,6 +46,13 @@ use std::process::Command;
 /// true with zero `#[path]` attributes in the file.
 const PATH_ATTRIBUTE: &str = concat!("#[path = \"..", "/../");
 const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
+/// One level up reaches a sibling crate, which is outside this package just as
+/// surely as the repository root is.
+///
+/// Matching [`CLIMBING_LITERAL`] alone leaves a test that reads
+/// `crates/vigia-core/**` invisible to the scanner, because it climbs one
+/// level where every other escape climbs two.
+const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
 ///
@@ -55,10 +62,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 20;
+const ESCAPING_FILES: usize = 21;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty";
+const ESCAPING_FILES_SPELLED: &str = "twenty-one";
 
 /// The repository root, two levels above this package.
 ///
@@ -121,7 +128,8 @@ fn test_files() -> Vec<(String, String)> {
 /// first one an escape and be wrong in the direction that looks thorough.
 fn escapes(source: &str) -> bool {
     source.contains(PATH_ATTRIBUTE)
-        || (source.contains("CARGO_MANIFEST_DIR") && source.contains(CLIMBING_LITERAL))
+        || (source.contains("CARGO_MANIFEST_DIR")
+            && (source.contains(CLIMBING_LITERAL) || source.contains(SIBLING_LITERAL)))
 }
 
 /// Every test file that reads outside the package, by name, sorted.
@@ -756,7 +764,7 @@ fn package_list(package: &str, gate: &str) -> Option<String> {
 /// reader who did nothing wrong.
 ///
 /// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: nineteen of the twenty-seven test files escape
+/// per-file, and that is deliberate: twenty-one of the test files escape
 /// already, a per-file list would need editing every time a test is added, and
 /// the failure mode of forgetting is silent. This gate holds either shape,
 /// because it asks whether each escaping file is *covered*, not how.
@@ -2143,7 +2151,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 /// row shape `preflight.sh` greps; the ruling lead-ins themselves; and §7, which
 /// has no lead-in structure to lean on.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
-    ("SPEC.md", 390_530),
+    ("SPEC.md", 390_719),
     ("ROADMAP.md", 94_603),
     ("RULINGS.md", 94_423),
 ];
