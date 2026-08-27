@@ -2,17 +2,9 @@
 
 Rulings that were **withdrawn on purpose**, with who withdrew them and when.
 
-**Why this file exists.** `SPEC.md` holds what is in force and `RULINGS.md` holds
-the evidence that earned it. Neither can express *this rule is gone*. Without a
-place to say so, a deletion is indistinguishable from an accident: the acceptance
-test over the spec reported the first deliberate reversal as a lost ruling, which
-is a system that can add and cannot subtract — the failure this project spent a
-week diagnosing, reproduced inside the instrument built to guard against it.
+**Why this file exists.** `SPEC.md` holds what is in force and `RULINGS.md` holds the evidence that earned it. Neither can express *this rule is gone*. Without a place to say so, a deletion is indistinguishable from an accident: the acceptance test over the spec reported the first deliberate reversal as a lost ruling, which is a system that can add and cannot subtract — the failure this project spent a week diagnosing, reproduced inside the instrument built to guard against it.
 
-**A revocation is not a correction.** A correction says the rule was always meant
-to read otherwise. A revocation says the rule was real, was applied, and is now
-withdrawn — so the entry keeps what it used to say, verbatim, and names who ended
-it. Unattributed does not bind, and unattributed cannot revoke either.
+**A revocation is not a correction.** A correction says the rule was always meant to read otherwise. A revocation says the rule was real, was applied, and is now withdrawn — so the entry keeps what it used to say, verbatim, and names who ended it. Unattributed does not bind, and unattributed cannot revoke either.
 
 | Ruling, verbatim | Where it lived | Revoked | By | Why |
 |---|---|---|---|---|

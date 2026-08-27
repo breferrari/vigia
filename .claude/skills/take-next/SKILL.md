@@ -12,47 +12,22 @@ This is a reconstruction. The original lived in a global skills directory, was n
 > [!IMPORTANT]
 > **Run this to the end. After the plan is approved, do not stop to ask.**
 >
-> This skill is invoked and then left alone, frequently overnight. **A step that
-> can only complete by asking a question does not complete** — it halts, and the
-> answer arrives hours later with all the expensive work already done and
-> nothing merged. That has happened: a pass finished 372 green tests, a clean
-> plan diff, 17 killed mutants and before/after budgets, then stopped at the
-> audit to ask permission for something this file already mandates.
+> This skill is invoked and then left alone, frequently overnight. **A step that can only complete by asking a question does not complete** — it halts, and the answer arrives hours later with all the expensive work already done and nothing merged. That has happened: a pass finished 372 green tests, a clean plan diff, 17 killed mutants and before/after budgets, then stopped at the audit to ask permission for something this file already mandates.
 >
-> **Step 3 is the one exception, and it is not negotiable.** Plan approval is the
-> single sanctioned stop in this skill — "run to the end" starts *after* it. An
-> unattended pass that reaches step 3 **stops and waits**. It does not
-> self-approve, and it does not proceed on the grounds that nobody is awake.
-> **Not wanting to disturb someone is not approval**, and a plan nobody answered
-> is not an approved plan. Halting at step 3 costs a night. Skipping it ships
-> *what* nobody chose and silently disables the plan-fidelity gate downstream,
-> which is the one gate that would have caught it.
+> **Step 3 is the one exception, and it is not negotiable.** Plan approval is the single sanctioned stop in this skill — "run to the end" starts *after* it. An unattended pass that reaches step 3 **stops and waits**. It does not self-approve, and it does not proceed on the grounds that nobody is awake. **Not wanting to disturb someone is not approval**, and a plan nobody answered is not an approved plan. Halting at step 3 costs a night. Skipping it ships *what* nobody chose and silently disables the plan-fidelity gate downstream, which is the one gate that would have caught it.
 >
-> The line is **what** versus **how**. What gets built is settled at step 3 and
-> the plan is where a question belongs, because it is free there. Everything
-> after it is execution, and execution questions have answers in this file:
+> The line is **what** versus **how**. What gets built is settled at step 3 and the plan is where a question belongs, because it is free there. Everything after it is execution, and execution questions have answers in this file:
 >
 > - **The instruments are pre-authorized.** Invoking this skill *is* the request
->   to run them, including the parallel review agents `/simplify` and `/harden`
->   spawn. A standing "do not spawn agents unless asked" is satisfied by the
->   invocation; it is not a second gate to clear at step 6. See that step.
+> to run them, including the parallel review agents `/simplify` and `/harden` spawn. A standing "do not spawn agents unless asked" is satisfied by the invocation; it is not a second gate to clear at step 6. See that step.
 > - **Where a choice is documented, take the documented one** and say so in the
->   report. Do not offer it as a menu. This governs *how* to build a thing, and
->   it is not a licence to inherit a **refusal** unexamined: a documented "no"
->   is a conclusion someone reached from a reason, and the reason is checkable.
->   See "The record is evidence, not authority" at step 3.
+> report. Do not offer it as a menu. This governs *how* to build a thing, and it is not a licence to inherit a **refusal** unexamined: a documented "no" is a conclusion someone reached from a reason, and the reason is checkable. See "The record is evidence, not authority" at step 3.
 > - **Where a choice is genuinely open and nobody is there, take the more
->   conservative branch, finish the pass, and put the question in the report.**
->   A finished pass with a flagged decision beats an unfinished one with a
->   pending question, because the flag survives and the prompt does not.
+> conservative branch, finish the pass, and put the question in the report.** A finished pass with a flagged decision beats an unfinished one with a pending question, because the flag survives and the prompt does not.
 >
-> Three things still stop the pass, and they are all *what*-shaped: a finding
-> that contradicts `SPEC.md` (step 4 says stop and decide which is wrong),
-> discovering the task is really two tasks, and anything destructive or
-> irreversible outside this branch. Those are worth waiting for. Nothing else is.
+> Three things still stop the pass, and they are all *what*-shaped: a finding that contradicts `SPEC.md` (step 4 says stop and decide which is wrong), discovering the task is really two tasks, and anything destructive or irreversible outside this branch. Those are worth waiting for. Nothing else is.
 >
-> **"Ship it as is" is never one of the options.** It is the self-authored
-> triage step 6 refuses, wearing a question mark.
+> **"Ship it as is" is never one of the options.** It is the self-authored triage step 6 refuses, wearing a question mark.
 
 ## 1. Find your place
 
@@ -122,15 +97,7 @@ git show origin/main:SPEC.md \
 > [!NOTE]
 > **Why that pattern is phrase-shaped and not a word list**
 >
-> The obvious version greps bare `before|first|until`, and on this spec it is
-> **80% false positives**: §10 is full of "first paint", "the first frame that
-> draws deep", "the lines before it". A check that nags four times for every
-> real hit gets skipped exactly like one that never fires, which is the failure
-> this whole comparison exists to fix. Tested both directions before landing:
-> against `origin/main` it returns three bullets and all three are genuinely
-> actionable, and against `dbc97aa` — the last commit before [#32](https://github.com/breferrari/vigia/issues/32)
-> closed — it returns the settle-margin bullet, the exact prerequisite that hid
-> for two phases. Widen it only with the same two runs.
+> The obvious version greps bare `before|first|until`, and on this spec it is **80% false positives**: §10 is full of "first paint", "the first frame that draws deep", "the lines before it". A check that nags four times for every real hit gets skipped exactly like one that never fires, which is the failure this whole comparison exists to fix. Tested both directions before landing: against `origin/main` it returns three bullets and all three are genuinely actionable, and against `dbc97aa` — the last commit before [#32](https://github.com/breferrari/vigia/issues/32) closed — it returns the settle-margin bullet, the exact prerequisite that hid for two phases. Widen it only with the same two runs.
 
 Then seven comparisons. Any hit is a finding to fix **in this pass**, not a note:
 
@@ -167,14 +134,9 @@ LC_ALL=C comm -23 /tmp/withwork.sorted /tmp/order.sorted
 > [!WARNING]
 > **Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree**
 >
-> The first run of this check read the checkout, which had a feature branch
-> active, and compared branch state against the live tracker. It reported the
-> roadmap as ahead of an issue when on `main` the two agreed — and **#2 was closed
-> on the strength of a line that was not merged.** A check whose answer depends on
-> which branch happens to be checked out is worse than no check.
+> The first run of this check read the checkout, which had a feature branch active, and compared branch state against the live tracker. It reported the roadmap as ahead of an issue when on `main` the two agreed — and **#2 was closed on the strength of a line that was not merged.** A check whose answer depends on which branch happens to be checked out is worse than no check.
 >
-> Comparing uncommitted state is occasionally what you want. It has to be asked
-> for out loud, never the default.
+> Comparing uncommitted state is occasionally what you want. It has to be asked for out loud, never the default.
 
 7. **Missing row** — an issue, any state, that `ROADMAP.md` never mentions at all. The 2026-08-03 sweep found four gaps in exactly this direction while the five comparisons then existing ran clean over the same data: a drift check has a direction, chosen by whichever collection it iterates, and this is the one that iterates the tracker against the roadmap rather than the reverse.
 
@@ -405,7 +367,7 @@ At the end of the pass, diff the shipment against the plan and report the result
   gh issue create --title "..." --body-file f.md --milestone "Shelf"
   ```
 
-  That milestone is named literally because it is the shelf that exists today. **The shelf is a class, not a name** — step 1's rule 2 identifies one by a description beginning `Shelf:` — so if a second is ever added, file against the right one rather than against this string.
+That milestone is named literally because it is the shelf that exists today. **The shelf is a class, not a name** — step 1's rule 2 identifies one by a description beginning `Shelf:` — so if a second is ever added, file against the right one rather than against this string.
 - **A finding about the process files to the Shelf, and instrument work is takeable only when a product pass is blocked by it.** An audit that surfaces a defect in a gate, a check, a skill, or a workflow has found something real and not something *next*: it goes to the Shelf with its dated reason like any deferral, never into a phase. The instruments generate findings faster than the product generates users, and a queue that serves both equally serves the mirror — adopted 2026-08-07, the morning after a night of the machine's best work went to a memory meter's baseline while seven look-and-feel rows sat unbuilt. A product pass genuinely blocked by an instrument defect takes the unblock inside its own pass, sized to the blockage, and says so in the report.
 - **An invariant is not landed until a test fails when it is violated.** Write the failing test first, watch it fail, then make it pass. A test that passes against broken code is worse than no test.
 - **Budgets are tests.** If the task touches the frame path, the budget gate runs.
@@ -449,21 +411,11 @@ Then polish, and let the **diff** pick the instrument rather than your appetite.
 > [!IMPORTANT]
 > **Both instruments spawn parallel review agents, and this step authorizes them.**
 >
-> `/simplify` runs four — reuse, simplification, efficiency, altitude. `/harden`
-> runs three per round — adversarial, correctness, docs — and repeats until a
-> whole round finds nothing new. That fan-out is the instrument, not an
-> optimisation of it: the skill's own reason is that a solo reviewer
-> tunnel-visions and disjoint remits do not.
+> `/simplify` runs four — reuse, simplification, efficiency, altitude. `/harden` runs three per round — adversarial, correctness, docs — and repeats until a whole round finds nothing new. That fan-out is the instrument, not an optimisation of it: the skill's own reason is that a solo reviewer tunnel-visions and disjoint remits do not.
 >
-> So a standing "do not spawn agents unless asked" **has been satisfied** — by
-> the invocation that started this pass. Do not stop here to ask for it a second
-> time. A session that halts at this step has paid for the whole diff, the plan
-> fidelity check and the mutation run, and banked none of it.
+> So a standing "do not spawn agents unless asked" **has been satisfied** — by the invocation that started this pass. Do not stop here to ask for it a second time. A session that halts at this step has paid for the whole diff, the plan fidelity check and the mutation run, and banked none of it.
 >
-> If the environment refuses the spawn outright rather than asking, that is a
-> different thing and it is reportable: run the audit single-threaded, say in
-> the report that it ran without fan-out, and name what that costs. Degrading
-> loudly is fine. Stopping is not.
+> If the environment refuses the spawn outright rather than asking, that is a different thing and it is reportable: run the audit single-threaded, say in the report that it ran without fan-out, and name what that costs. Degrading loudly is fine. Stopping is not.
 
 - **Under ~200 lines across ≤3 files** — `/simplify` alone. A full audit workflow on a small diff is theatre. (`/harden` states this floor itself and will decline; the number lives there, so if the two ever disagree, harden wins.)
 - **Anything larger, or anything the rest of the system stands on** — `/harden` **until dry**. It runs `/simplify` as one of its own phases, so do not run one first and then the other. It also carries its own plan-fidelity phase: tell it the diff above was already done, so it records the result instead of repeating it.
@@ -471,20 +423,11 @@ Then polish, and let the **diff** pick the instrument rather than your appetite.
 
 Whichever runs, pass the docs rule into the invocation. `/simplify` is the only instrument that reduces, and freezing docs against it is what took the comments to 60% of the shell crate: the ratio could only ever climb. What actually needs protecting is a class, not a volume, so protect the class:
 
-> Documentation is in scope for `/simplify` and is judged by the same rule as
-> code: a comment exists where the code cannot explain itself. Keep why the
-> obvious approach is wrong, an invariant a caller must hold, and a cost invisible
-> at the call site. Where a comment exists because the code is unclear, the fix is
-> clearer code and the comment goes with it. Delete restatements of the code,
-> issue numbers, ruling ids, and any account of the change rather than the thing.
+> Documentation is in scope for `/simplify` and is judged by the same rule as code: a comment exists where the code cannot explain itself. Keep why the obvious approach is wrong, an invariant a caller must hold, and a cost invisible at the call site. Where a comment exists because the code is unclear, the fix is clearer code and the comment goes with it. Delete restatements of the code, issue numbers, ruling ids, and any account of the change rather than the thing.
 
 **And pass the read-only carve-out, because an agent that builds competes with you for the machine.** On 2026-08-18 four review agents were told to measure and each ran an optimised build (`lto = "thin"`, `codegen-units = 1`) concurrently with the session's own, one against a probe worktree carrying a 3.4G `CARGO_TARGET_DIR`. The machine was audibly saturated before anything in the loop noticed, because a session's picture of the machine is its own actions only. It costs nothing in review quality to prevent: round 2 of #245's audit ran read-only with the numbers pasted into the brief and was just as sharp as the round that built.
 
-> Read the code. Do not run builds, benchmarks, test suites, or anything else
-> that consumes the machine: `cargo build`, `cargo test`, `cargo bench`,
-> `cargo clippy` and the soak are all mine to run, not yours. Every measurement
-> you need is in this brief. If one you need is missing, name it and say what
-> it would change about your finding, and I will run it and hand it back.
+> Read the code. Do not run builds, benchmarks, test suites, or anything else that consumes the machine: `cargo build`, `cargo test`, `cargo bench`, `cargo clippy` and the soak are all mine to run, not yours. Every measurement you need is in this brief. If one you need is missing, name it and say what it would change about your finding, and I will run it and hand it back.
 
 Running is the orchestrator's job in both directions: the numbers an agent reasons from come from **one** run, so the audit reads a single consistent picture rather than four builds' worth of contention. This is the same rule as the concurrency clause the soak workflow already carries, applied to review instead of to instruments.
 
@@ -499,11 +442,7 @@ So do not mark ready to "see what CI says". Mark it ready when the work is finis
 > [!WARNING]
 > **A draft shows no checks, and no checks is not green**
 >
-> The jobs are skipped, so the PR page shows an empty check list rather than a
-> passing one. That is the exact shape `SPEC.md` §7 keeps finding — a gate that
-> proves nothing while looking settled — and here it is on the review surface
-> instead of in a test. Nothing in a draft has been verified by CI. The local
-> suite is your only evidence until the checks below have actually run.
+> The jobs are skipped, so the PR page shows an empty check list rather than a passing one. That is the exact shape `SPEC.md` §7 keeps finding — a gate that proves nothing while looking settled — and here it is on the review surface instead of in a test. Nothing in a draft has been verified by CI. The local suite is your only evidence until the checks below have actually run.
 
 ```sh
 gh pr ready <n>                              # the metered event: CI + Copilot
@@ -565,28 +504,9 @@ Skipping any of these is how the next session loses time.
    - `record_work` for what happened here: changes, decisions, what was learned, what is still open, how it was verified.
    - `remember` for anything that would help someone on a **different** project. A `gix` limitation that would bite any Rust project is a `remember`. "Landed the watch engine" is a `record_work`. Both, when both are true.
 
-   **This is the loop's least reliable step, so it carries a fallback and a check.**
-   The write guard has refused a legitimate record nine calls running (the #15
-   record was filed by hand), and one record returned success while writing its
-   sections into the note as raw tool markup, which sat corrupted for two days.
-   So: if `record_work` refuses or errors after a couple of honest rephrasings,
-   **file the note by hand** in the vault (`projects/vigia/notes/`, matching the
-   dated-note shape) and say so in the report — the record is the requirement,
-   the tool is only the route. And after any success, **read the note back**
-   (`search` for it) and confirm the sections landed as markdown; a success
-   return is not evidence of a clean write.
+**This is the loop's least reliable step, so it carries a fallback and a check.** The write guard has refused a legitimate record nine calls running (the #15 record was filed by hand), and one record returned success while writing its sections into the note as raw tool markup, which sat corrupted for two days. So: if `record_work` refuses or errors after a couple of honest rephrasings, **file the note by hand** in the vault (`projects/vigia/notes/`, matching the dated-note shape) and say so in the report — the record is the requirement, the tool is only the route. And after any success, **read the note back** (`search` for it) and confirm the sections landed as markdown; a success return is not evidence of a clean write.
 
-   **Then file the recurrence — this fallback has an exit condition.** Try the
-   narrow shape first: `title` and `summary` alone, then the remaining sections
-   in a second call. If it still refuses, comment the date and the received
-   field list on [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244)
-   rather than only noting it in the report. **A documented workaround suppresses
-   the bug report**: once the failure has a prescribed response it reads as a
-   handled step rather than a defect, which is exactly how this one ran ten days
-   across nine consecutive passes while every session followed the procedure
-   correctly. No session can see the rate from inside its own pass — nine here
-   each saw two or three refusals and concluded it was local. A fallback with no
-   exit condition is a permanent bug wearing a procedure.
+**Then file the recurrence — this fallback has an exit condition.** Try the narrow shape first: `title` and `summary` alone, then the remaining sections in a second call. If it still refuses, comment the date and the received field list on [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244) rather than only noting it in the report. **A documented workaround suppresses the bug report**: once the failure has a prescribed response it reads as a handled step rather than a defect, which is exactly how this one ran ten days across nine consecutive passes while every session followed the procedure correctly. No session can see the rate from inside its own pass — nine here each saw two or three refusals and concluded it was local. A fallback with no exit condition is a permanent bug wearing a procedure.
 
 ## 9. Report
 

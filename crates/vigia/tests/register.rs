@@ -454,3 +454,122 @@ fn a_comment_cites_no_more_of_the_tracker_than_it_did() {
         top.join("\n")
     );
 }
+
+/// Every tracked markdown file, so the gate reads what a session reads.
+fn markdown() -> Vec<(String, String)> {
+    let root = crates_root().join("..");
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["ls-files", "*.md"])
+        .output()
+        .expect("git ls-files");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|name| !name.contains("NOTICE"))
+        .filter_map(|name| {
+            let body = std::fs::read_to_string(root.join(name)).ok()?;
+            Some((name.to_owned(), body))
+        })
+        .collect()
+}
+
+/// No prose paragraph in a tracked markdown file spans more than one line.
+///
+/// A wall rather than a ratchet, because the tree is clean and the class is
+/// mechanical: GitHub renders a single newline inside a paragraph as a real
+/// line break, so a body wrapped at eighty arrives at its reader broken
+/// mid-sentence. 811 forced breaks across sixteen of this repository's own pull
+/// requests before anyone measured it.
+///
+/// **Gated rather than written down, because it had been written down twice
+/// and lost twice.** An instruction cannot beat a corpus: these documents held
+/// 7,351 hard-wrapped lines, and a session reads them before it writes
+/// anything. Removing the examples is what makes the rule hold.
+///
+/// Code comments are deliberately out of scope. Nothing renders them, so a
+/// break there corrupts nothing, and they sit beside code held near a hundred
+/// columns where one long line reads worse.
+///
+/// Structure is not prose and is never counted: YAML frontmatter, fenced code,
+/// tables, list items, headings, blockquotes and thematic breaks.
+#[test]
+fn no_prose_paragraph_is_hard_wrapped() {
+    let files = markdown();
+    assert!(
+        files.len() > 5,
+        "only {} markdown file(s) found, so this gate is passing on nothing",
+        files.len()
+    );
+
+    let structural = |line: &str| {
+        let t = line.trim_start();
+        t.is_empty()
+            || t.starts_with('|')
+            || t.starts_with('#')
+            || t.starts_with('>')
+            || t.starts_with("- ")
+            || t.starts_with("* ")
+            || t.starts_with("+ ")
+            || t.starts_with("---")
+            || t.starts_with("===")
+            // A raw HTML block is layout, and joining `<table>` onto `<tr>` is
+            // the same class of damage as joining a form's fields.
+            || t.starts_with('<')
+            || t.chars().next().is_some_and(|c| c.is_ascii_digit())
+                && t.contains(". ")
+                && t.split_once(". ").is_some_and(|(n, _)| {
+                    n.chars().all(|c| c.is_ascii_digit())
+                })
+    };
+
+    let mut breaches = Vec::new();
+    for (name, body) in &files {
+        // Frontmatter is `key: value` structure. Joining it once made a skill's
+        // name and description one field.
+        let body = body.strip_prefix("---\n").map_or(body.as_str(), |rest| {
+            rest.find("\n---\n").map_or(body.as_str(), |at| &rest[at + 5..])
+        });
+        let mut fence = false;
+        // An HTML comment is not prose either. The issue template's `<!-- -->`
+        // block holds the fields a reporter fills in one per line, and joining
+        // them made `Terminal and version: OS: vigia --version:` one line.
+        let mut html = false;
+        let mut prose = 0usize;
+        for (n, line) in body.lines().enumerate() {
+            if line.trim_start().starts_with("```") {
+                fence = !fence;
+                prose = 0;
+                continue;
+            }
+            if line.contains("<!--") {
+                html = true;
+            }
+            let closing = html && line.contains("-->");
+            if html || closing {
+                if closing {
+                    html = false;
+                }
+                prose = 0;
+                continue;
+            }
+            if fence || structural(line) {
+                prose = 0;
+                continue;
+            }
+            prose += 1;
+            if prose == 2 {
+                breaches.push(format!("  {name}:{}", n + 1));
+            }
+        }
+    }
+
+    assert!(
+        breaches.is_empty(),
+        "{} paragraph(s) are hard wrapped. One paragraph is one line: a newline \
+         inside one renders as a break the author did not write. Join them; do \
+         not reflow to a wider column:\n{}",
+        breaches.len(),
+        breaches.join("\n")
+    );
+}

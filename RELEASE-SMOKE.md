@@ -1,236 +1,108 @@
 # Release smoke — run against the built artifact, before the release is dispatched
 
 > [!IMPORTANT]
-> **This is not how a release is performed.** The release is one command, and it
-> lives in `CLAUDE.md`: dispatch the `bump and release` workflow. This file is
-> the **human pre-flight** that goes with it, and most of its boxes need a person
-> at a terminal on three platforms, killing the process from another pane and
-> watching what the terminal does next. Nothing here can be ticked by an agent.
+> **This is not how a release is performed.** The release is one command, and it lives in `CLAUDE.md`: dispatch the `bump and release` workflow. This file is the **human pre-flight** that goes with it, and most of its boxes need a person at a terminal on three platforms, killing the process from another pane and watching what the terminal does next. Nothing here can be ticked by an agent.
 >
-> Read it before a release that changes packaging, installation or the terminal
-> takeover. It is not a gate to clear before every dispatch, and treating it as
-> the procedure has cost a session: it is the only release-shaped document in the
-> repository root, so it is what a reader finds first.
+> Read it before a release that changes packaging, installation or the terminal takeover. It is not a gate to clear before every dispatch, and treating it as the procedure has cost a session: it is the only release-shaped document in the repository root, so it is what a reader finds first.
 
-CI green is necessary and not sufficient. A sibling project shipped two
-consecutive patches with a green matrix that broke the flagship install on day
-one, and its fix was this checklist's ancestor.
+CI green is necessary and not sufficient. A sibling project shipped two consecutive patches with a green matrix that broke the flagship install on day one, and its fix was this checklist's ancestor.
 
-**Dispatching `bump and release` is the irreversible event, and everything hangs
-off it.** Choosing *patch*, *minor* or *major* from the Actions tab raises the
-version, commits it, builds the four target artifacts, creates the GitHub
-release, publishes the Homebrew formula to the tap, and runs
-`cargo publish --workspace`. A crates.io publish is permanent: `cargo yank`
-hides a version, it does not delete it, and the name stays taken. So §0 to §4
-below run **before** the dispatch, against `dist build` output rather than
-against a published artifact, and §5 verifies what landed after it.
+**Dispatching `bump and release` is the irreversible event, and everything hangs off it.** Choosing *patch*, *minor* or *major* from the Actions tab raises the version, commits it, builds the four target artifacts, creates the GitHub release, publishes the Homebrew formula to the tap, and runs `cargo publish --workspace`. A crates.io publish is permanent: `cargo yank` hides a version, it does not delete it, and the name stays taken. So §0 to §4 below run **before** the dispatch, against `dist build` output rather than against a published artifact, and §5 verifies what landed after it.
 
-**`git tag && git push --tags` no longer releases anything.** `dispatch-releases`
-removed that trigger, for the reason `SPEC.md` §9 records: it is what lets the
-bump *start* the release without a second permanent token. Starting it and
-committing it are different questions, and only the first is answered there:
-the bump's own commit to a protected `main` does need a token of its own, which
-is the third secret in §0.
+**`git tag && git push --tags` no longer releases anything.** `dispatch-releases` removed that trigger, for the reason `SPEC.md` §9 records: it is what lets the bump *start* the release without a second permanent token. Starting it and committing it are different questions, and only the first is answered there: the bump's own commit to a protected `main` does need a token of its own, which is the third secret in §0.
 
-The gate moved twice, and both moves were the same correction. This file first
-said "before the first `publish`", which was true while the publish was a
-command somebody typed; it became a CI job on 2026-08-08, so the last human
-decision point moved to the tag. It moved again on 2026-08-09 when the tag
-became a button. **Rehearse it rather than trusting this paragraph**: the bump's
-`rehearse` option, or `release.yml`'s own dispatch with the tag left at
-`dry-run`, runs the whole path and publishes nothing.
+The gate moved twice, and both moves were the same correction. This file first said "before the first `publish`", which was true while the publish was a command somebody typed; it became a CI job on 2026-08-08, so the last human decision point moved to the tag. It moved again on 2026-08-09 when the tag became a button. **Rehearse it rather than trusting this paragraph**: the bump's `rehearse` option, or `release.yml`'s own dispatch with the tag left at `dry-run`, runs the whole path and publishes nothing.
 
-Every box carries evidence in the release notes: the command run and what it
-printed. A checked box with no evidence is a claim, and this repo's method is
-that a claim without a failing-capable check is a wish.
+Every box carries evidence in the release notes: the command run and what it printed. A checked box with no evidence is a claim, and this repo's method is that a claim without a failing-capable check is a wish.
 
 ## 0. Prerequisites, once, before the first release ever
 
-Five boxes. The first is the tap repository existing at all. Two are secrets,
-and only a person holding a token can set them: a release dispatched without
-either half fails, with the binaries built, the announcement missing and the
-crate name still unclaimed. The last two are not secrets at all: one is a
-repository setting the release depends on and deliberately does not check, and
-one is a claim nobody has yet been in a position to prove.
+Five boxes. The first is the tap repository existing at all. Two are secrets, and only a person holding a token can set them: a release dispatched without either half fails, with the binaries built, the announcement missing and the crate name still unclaimed. The last two are not secrets at all: one is a repository setting the release depends on and deliberately does not check, and one is a claim nobody has yet been in a position to prove.
 
-**Two secrets, three jobs, because one token does two of them.**
-`HOMEBREW_TAP_TOKEN` carries Contents read and write on *both*
-`breferrari/homebrew-tap` and `breferrari/vigia`, so it is the credential that
-pushes the formula to the tap **and** the credential that moves the version on
-`main`. `bump.yml` reads it into a variable named for the second role, because
-that is what the step reasons about. The name on the secret is older than the
-second use and is left alone rather than churned: renaming a secret means
-regenerating the token, and the two uses are separable whenever that is wanted,
-by minting a token scoped to this repository alone and pointing the bump at it.
+**Two secrets, three jobs, because one token does two of them.** `HOMEBREW_TAP_TOKEN` carries Contents read and write on *both* `breferrari/homebrew-tap` and `breferrari/vigia`, so it is the credential that pushes the formula to the tap **and** the credential that moves the version on `main`. `bump.yml` reads it into a variable named for the second role, because that is what the step reasons about. The name on the secret is older than the second use and is left alone rather than churned: renaming a secret means regenerating the token, and the two uses are separable whenever that is wanted, by minting a token scoped to this repository alone and pointing the bump at it.
 
 - [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
 - [x] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
-      crates.io token scoped to `publish-new` and `publish-update` on `vigia`
-      and `vigia-core`. *(Set 2026-08-09.)* `.github/workflows/publish-crates-io.yml`
-      checks for it before packaging anything, so a missing one fails in seconds
-      rather than several minutes in.
+crates.io token scoped to `publish-new` and `publish-update` on `vigia` and `vigia-core`. *(Set 2026-08-09.)* `.github/workflows/publish-crates-io.yml` checks for it before packaging anything, so a missing one fails in seconds rather than several minutes in.
 - [x] `gh secret set HOMEBREW_TAP_TOKEN` on `breferrari/vigia`, from a
-      fine-grained token with **Contents: Read and write** on **both**
-      `breferrari/homebrew-tap` and `breferrari/vigia`, **owned by an account
-      that is an admin of `breferrari/vigia`**. *(Set 2026-08-09; the vigia
-      grant recorded here 2026-08-12.)* dist's own guide asks for a classic
-      token with `repo`, which is wider than either job needs.
+fine-grained token with **Contents: Read and write** on **both** `breferrari/homebrew-tap` and `breferrari/vigia`, **owned by an account that is an admin of `breferrari/vigia`**. *(Set 2026-08-09; the vigia grant recorded here 2026-08-12.)* dist's own guide asks for a classic token with `repo`, which is wider than either job needs.
 
-      The tap half needs only contents on the tap. **The bump half needs two
-      things that are separate claims.** Contents on this repository is what
-      lets the token write at all; its owner being an admin is what lets that
-      write past `main`'s seven required status checks, which nothing else can
-      do, because a commit pushed with `GITHUB_TOKEN` triggers no workflow, so
-      the checks it needs never arrive and the push is rejected forever.
-      `bump.yml` checks both before the version moves, the first by creating a
-      ref and deleting it, the second by reading the owner's role. It probes the
-      tap the same way, and the two probes still discriminate despite sharing a
-      credential, because the token's repository-access list can drop either
-      repository on its own.
+The tap half needs only contents on the tap. **The bump half needs two things that are separate claims.** Contents on this repository is what lets the token write at all; its owner being an admin is what lets that write past `main`'s seven required status checks, which nothing else can do, because a commit pushed with `GITHUB_TOKEN` triggers no workflow, so the checks it needs never arrive and the push is rejected forever. `bump.yml` checks both before the version moves, the first by creating a ref and deleting it, the second by reading the owner's role. It probes the tap the same way, and the two probes still discriminate despite sharing a credential, because the token's repository-access list can drop either repository on its own.
 - [ ] `main` keeps **"do not allow bypassing the above settings" switched off**,
-      which is what makes an admin's push legal at all. `bump.yml` does not
-      check this and says why: reading branch protection needs admin rights on
-      the API, which the workflow's own token cannot be granted and the release
-      token should not be widened to hold. If it is ever switched on, the
-      release fails at the push with `main` unmoved and nothing published.
+which is what makes an admin's push legal at all. `bump.yml` does not check this and says why: reading branch protection needs admin rights on the API, which the workflow's own token cannot be granted and the release token should not be widened to hold. If it is ever switched on, the release fails at the push with `main` unmoved and nothing published.
 - [ ] **Unproven until the first real push:** that a fine-grained token
-      *inherits* its owner's bypass. It is documented behaviour and it is the
-      premise the whole button rests on, so it is written here as a claim rather
-      than left implied. What has been measured is the half either side of it:
-      an admin identity does bypass these exact seven checks (probed on a
-      throwaway branch protected identically to `main`, 2026-08-11), and the
-      token's own write grant is probed on every run. Tick this once a real
-      bump push to `main` has actually landed, and name the run.
+*inherits* its owner's bypass. It is documented behaviour and it is the premise the whole button rests on, so it is written here as a claim rather than left implied. What has been measured is the half either side of it: an admin identity does bypass these exact seven checks (probed on a throwaway branch protected identically to `main`, 2026-08-11), and the token's own write grant is probed on every run. Tick this once a real bump push to `main` has actually landed, and name the run.
 
 ## 1. The artifact, not the checkout
 
 - [ ] `cargo package --list -p vigia` — no `.github/`, no `tests/`, and
-      `README.md` present. SPEC.md §9 counts twenty-one test files that read
-      outside the package, and `exclude = ["tests/**"]` is what keeps them out of
-      the tarball. Gated by
-      `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests`,
-      re-checked here because that gate skips when the registry index is
-      unreachable.
+`README.md` present. SPEC.md §9 counts twenty-one test files that read outside the package, and `exclude = ["tests/**"]` is what keeps them out of the tarball. Gated by `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests`, re-checked here because that gate skips when the registry index is unreachable.
 - [ ] Unpack the built `.crate` into a clean directory; `cargo build --release`
-      there succeeds with no path leaking back into the checkout.
+there succeeds with no path leaking back into the checkout.
 - [ ] `dist plan` names all four targets (`x86_64-unknown-linux-musl`,
-      `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`),
-      three installers, and the tap rather than `homebrew-core`.
+`x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`), three installers, and the tap rather than `homebrew-core`.
 - [ ] `dist build --artifacts=lies` and read `target/distrib/vigia.rb`: the
-      Linux URL names the **musl** archive. The formula's `target_triple` helper
-      says `unknown-linux-gnu`, which is used only for binary aliases and is not
-      what the install fragments resolve, so this is worth reading rather than
-      assuming.
+Linux URL names the **musl** archive. The formula's `target_triple` helper says `unknown-linux-gnu`, which is used only for binary aliases and is not what the install fragments resolve, so this is worth reading rather than assuming.
 
 ## 2. Install the way a user does, on every platform the release builds for
 
 - [ ] `cargo install --path <unpacked crate>` (or the dist artifact) on Windows,
-      macOS, Linux: binary lands on PATH, and `vigia --version` prints the
-      release version. That flag exists as of #12; SPEC.md §11 B6 records why a
-      version query is not the kind of flag it forbids.
+macOS, Linux: binary lands on PATH, and `vigia --version` prints the release version. That flag exists as of #12; SPEC.md §11 B6 records why a version query is not the kind of flag it forbids.
 - [ ] Binary size within the documented budget (SPEC.md §10 records 5.04 MiB
-      with bundled grammars; a surprise here is a packaging change, not drift).
+with bundled grammars; a surprise here is a packaging change, not drift).
 - [ ] musl artifact: `ldd` reports no shared libraries. The static claim is
-      enforced in CI and re-checked here because this is the artifact, not the
-      build.
+enforced in CI and re-checked here because this is the artifact, not the build.
 
 ## 3. Run it against a real repository, not a fixture
 
 - [ ] Open on a real worktree with changes: first paint under the I7 feel test
-      (instant), file list + diff drawn, header names the worktree.
+(instant), file list + diff drawn, header names the worktree.
 - [ ] Edit a file while it watches: the change lands without input, follow
-      works, `f` re-engages after a scroll.
+works, `f` re-engages after a scroll.
 - [ ] Edit a file whose diff is **taller than the pane**, low down in it: the
-      change itself is on screen, not the filename above it. That is the only
-      shape [#257](https://github.com/breferrari/vigia/issues/257) is visible
-      in, and a fixture cannot judge it: the question is whether a reader
-      glancing over sees what the agent just did.
+change itself is on screen, not the filename above it. That is the only shape [#257](https://github.com/breferrari/vigia/issues/257) is visible in, and a fixture cannot judge it: the question is whether a reader glancing over sees what the agent just did.
 - [ ] Press `?`, then **resize the pane through the sheet's own ladder** and
-      watch it, rather than opening it once on one size. Start full-screen,
-      where a pane 70 columns or wider with 31 rows of body draws the roomy
-      rung, the one with sections and air in it. Shorten it until the sections
-      and their air go and the table closes up. Narrow it until the table takes
-      the tight spellings, shorten it until the mouse group moves *beside* the
-      keyboard group rather than below it (on a hundred-column pane, 19 to 23
-      rows high is the two-column rung and 24 to 33 is one column), and shorten
-      it further until rows
-      start dropping. Nothing should jump, tear, or straddle the header or the
-      footer, and `?` should still take it away at every size. A gate walks 105
-      widths by 33 heights and can only read cells; whether each snap *reads* as
-      one element changing shape or as three different boxes is a judgement only
-      an eye makes, and the roomy-to-plain snap is the largest of them: 68 by 31
-      to 56 by 21.
-      ([#220](https://github.com/breferrari/vigia/issues/220) added the
-      two-column rung and [#285](https://github.com/breferrari/vigia/issues/285)
-      the roomy one; [#286](https://github.com/breferrari/vigia/issues/286) will
-      move the floor again, so this box outlives them.)
+watch it, rather than opening it once on one size. Start full-screen, where a pane 70 columns or wider with 31 rows of body draws the roomy rung, the one with sections and air in it. Shorten it until the sections and their air go and the table closes up. Narrow it until the table takes the tight spellings, shorten it until the mouse group moves *beside* the keyboard group rather than below it (on a hundred-column pane, 19 to 23 rows high is the two-column rung and 24 to 33 is one column), and shorten it further until rows start dropping. Nothing should jump, tear, or straddle the header or the footer, and `?` should still take it away at every size. A gate walks 105 widths by 33 heights and can only read cells; whether each snap *reads* as one element changing shape or as three different boxes is a judgement only an eye makes, and the roomy-to-plain snap is the largest of them: 68 by 31 to 56 by 21. ([#220](https://github.com/breferrari/vigia/issues/220) added the two-column rung and [#285](https://github.com/breferrari/vigia/issues/285) the roomy one; [#286](https://github.com/breferrari/vigia/issues/286) will move the floor again, so this box outlives them.)
 - [ ] Quit with `q` AND with Ctrl-C: terminal restored both times, no raw-mode
-      residue.
+residue.
 - [ ] Kill it from outside and look at the terminal it was in. Unix:
-      `kill <pid>` from another pane. Windows: Ctrl+Break in the pane it is
-      running in. Prompt, echo and cursor all back, and no mouse-report
-      garbage when the pointer moves.
-      ([#24](https://github.com/breferrari/vigia/issues/24) landed this and its
-      gate signals a child process, so what is left here is the half a gate
-      cannot reach: a real terminal, and on Windows a real key, which is the
-      one delivery path #24 could not measure.)
+`kill <pid>` from another pane. Windows: Ctrl+Break in the pane it is running in. Prompt, echo and cursor all back, and no mouse-report garbage when the pointer moves. ([#24](https://github.com/breferrari/vigia/issues/24) landed this and its gate signals a child process, so what is left here is the half a gate cannot reach: a real terminal, and on Windows a real key, which is the one delivery path #24 could not measure.)
 - [ ] A non-repository path: one-line error before the alternate screen, exit
-      non-zero.
+non-zero.
 - [ ] An option that does not exist: `vigia --colour=never`
-      prints the one-line refusal and exits non-zero, rather than reporting that
-      `--colour=never` is not a repository.
+prints the one-line refusal and exits non-zero, rather than reporting that `--colour=never` is not a repository.
 - [ ] A second argument: `vigia . --colour=never` says how many it got and
-      exits non-zero, rather than watching `.` and dropping the flag. Both
-      refusals go to stderr with nothing on stdout, so a script reading
-      `vigia --version` is never handed an error message.
+exits non-zero, rather than watching `.` and dropping the flag. Both refusals go to stderr with nothing on stdout, so a script reading `vigia --version` is never handed an error message.
 
-Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are
-outside I8 on both platforms, because neither runs any code the process owns, and
-the release notes say that rather than implying more. A *second* kill is inside
-I8 as a by-choice exclusion (SPEC.md section 11.1: it takes the default
-disposition and restores nothing), and it is covered by
-`a_second_external_signal_kills_a_shell_that_ignored_the_first` rather than by a
-box that a working build can never tick.
+Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are outside I8 on both platforms, because neither runs any code the process owns, and the release notes say that rather than implying more. A *second* kill is inside I8 as a by-choice exclusion (SPEC.md section 11.1: it takes the default disposition and restores nothing), and it is covered by `a_second_external_signal_kills_a_shell_that_ignored_the_first` rather than by a box that a working build can never tick.
 
 ## 4. The claims the README makes are the claims the evidence holds
 
 - [ ] "Flat resources over days" appears only if the 24-hour window has
-      actually run ([#47](https://github.com/breferrari/vigia/issues/47));
-      otherwise the README states the window that has.
+actually run ([#47](https://github.com/breferrari/vigia/issues/47)); otherwise the README states the window that has.
 - [ ] The mockup and the shell agree at the widths the README shows (the two
-      deliberate departures SPEC.md §5.1 records are the only ones).
+deliberate departures SPEC.md §5.1 records are the only ones).
 - [ ] Windows posture (supported vs best-effort) is stated, per SPEC.md §10's
-      open half.
+open half.
 - [ ] The install section names only channels this release actually produces.
-      **The README ships inside every artifact** (`dist plan` lists it under
-      `[misc]` in each archive), so it describes the release it is packaged with
-      rather than the state of the repository on the day it was edited.
+**The README ships inside every artifact** (`dist plan` lists it under `[misc]` in each archive), so it describes the release it is packaged with rather than the state of the repository on the day it was edited.
 
 ## 5. After the dispatch
 
 The publish is a CI job now, so these verify rather than perform.
 
 - [ ] The `Release` workflow is green end to end, including
-      `custom-publish-crates-io`. **Read that job specifically rather than the
-      overall tick.** The GitHub release is created in `host`, before the
-      registry job runs and with no `--draft`, so binaries being public proves
-      nothing about crates.io. A green `announce` does not either: it is a
-      checkout.
+`custom-publish-crates-io`. **Read that job specifically rather than the overall tick.** The GitHub release is created in `host`, before the registry job runs and with no `--draft`, so binaries being public proves nothing about crates.io. A green `announce` does not either: it is a checkout.
 - [ ] `cargo install vigia` from crates.io, on one machine that has never built
-      this repo. The true cold path.
+this repo. The true cold path.
 - [ ] If the registry job failed while the release went public, that is the
-      documented half-failure. **Which recovery depends on how far it got, and
-      re-running the job is only right for one of the two cases**, because
-      publishing an already-published version is an error rather than a silent
-      no-op:
+documented half-failure. **Which recovery depends on how far it got, and re-running the job is only right for one of the two cases**, because publishing an already-published version is an error rather than a silent no-op:
       - Nothing was accepted: re-run the job.
       - `vigia-core` was accepted and `vigia` was not: a plain re-run fails on
-        `vigia-core` and never reaches `vigia`. Publish the second by hand,
-        `cargo publish -p vigia --locked`, from the tagged commit.
+`vigia-core` and never reaches `vigia`. Publish the second by hand, `cargo publish -p vigia --locked`, from the tagged commit.
 
-      Either way `vigia-core` 0.1.0 is spent permanently once it is accepted, so
-      the fix is never to bump one crate and not the other.
+Either way `vigia-core` 0.1.0 is spent permanently once it is accepted, so the fix is never to bump one crate and not the other.
 - [ ] `brew install breferrari/tap/vigia`, and the formula in the tap names the
-      tag that was just pushed.
+tag that was just pushed.
 - [ ] The GitHub release carries the artifacts `cargo-dist` built, not a
-      re-build, and the tag matches the SHA that was smoke-tested above.
+re-build, and the tag matches the SHA that was smoke-tested above.
