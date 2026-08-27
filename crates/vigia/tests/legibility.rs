@@ -67,8 +67,8 @@ const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
 /// Panes wide enough to reach every rung of the glance ladder.
 ///
-/// **[`WIDTHS`] cannot reach the top one, and that is what this exists for**
-/// ([#161](https://github.com/breferrari/vigia/issues/161)). The widest heat rung
+/// **[`WIDTHS`] cannot reach the top one, and that is what this exists for.**
+/// The widest heat rung
 /// is not taken until the glance elements fit inside their share of the row, and
 /// that share is not reached until 134 columns. A sweep stopping at 120 would
 /// report the ladder sound while its top rung was unreachable at every width it
@@ -82,9 +82,9 @@ const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=200;
 ///
 /// `SPEC.md` §5.1 rules that a published artifact answering an open question
 /// **is** the answer, and what the picture answers about the heat strip is how
-/// many slices a pane draws **at this width**. That was a claim only prose made
-/// until #161 gave the strip a rung above the pictured one, at which point the
-/// difference between "twelve always" and "twelve here" stopped being academic.
+/// many slices a pane draws **at this width**. That is a claim only prose makes
+/// until the strip has a rung above the pictured one, at which point the
+/// difference between "twelve always" and "twelve here" stops being academic.
 const PICTURED_PANE: u16 = 109;
 
 /// Slices `assets/preview.svg` draws, counted off the picture.
@@ -98,16 +98,16 @@ const PICTURED_SLICES: usize = 12;
 /// this file already declares them at the top and a second copy would check the
 /// first copy rather than the renderer.
 ///
-/// **Four rungs since #161 raised the source, and the halving is unchanged**, so
-/// what a given width under 120 columns draws is the same number it drew before.
-/// That is why `ACCEPTED_WALK` is untouched by that change.
+/// **Four rungs, the source having been raised, and the halving is unchanged**,
+/// so what a given width under 120 columns draws is unmoved. That is why
+/// `ACCEPTED_WALK` is untouched by it.
 const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
 
 /// How many buckets a sparkline may show, widest rung first.
 ///
-/// Restated for [`HEAT_RUNGS`]' reason. **Four rungs since
-/// [#234](https://github.com/breferrari/vigia/issues/234) raised the source, and
-/// the halving is unchanged**, so what a given width under 134 columns draws is
+/// Restated for [`HEAT_RUNGS`]' reason. **Four rungs, the source having been
+/// raised, and the halving is unchanged**, so what a given width under 134
+/// columns draws is
 /// the same number it drew before. The rung that was the top is the second entry
 /// now, and every boundary below it is untouched.
 ///
@@ -126,7 +126,7 @@ const SPARK_RUNGS: [usize; 4] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, HISTORY_B
 /// remembers when it was.
 const SETTLED_BUCKETS: usize = 12;
 
-/// #119's margin ladder, widest pane first: blank columns the pane keeps between
+/// The margin ladder, widest pane first: blank columns the pane keeps between
 /// its own edge and any glyph, **both sides counted together**.
 ///
 /// Restated rather than imported, for [`CONTINUES`]' and `FACT_JOIN`'s reason and
@@ -139,7 +139,8 @@ const SETTLED_BUCKETS: usize = 12;
 /// A total rather than a per-side figure because a per-side ladder steps both
 /// sides on one column and hands a widening pane a narrower row, which
 /// `a_bonus_hint_rung_never_buys_itself_a_footer_row` below is what catches. The
-/// odd rungs at 43 and 79 are the step between the two even ones #119 names.
+/// odd rungs at 43 and 79 are the step between the two even ones the picture
+/// names.
 const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
 
 /// What marks the row for the file the diff is inside.
@@ -149,8 +150,8 @@ const CARET: &str = "▸";
 
 /// Columns that mark occupies.
 ///
-/// **One since [#173](https://github.com/breferrari/vigia/issues/173)**, where it
-/// was two: a glyph and a trailing space, which the list was indented by and
+/// **One rather than two**: a glyph and a trailing space indents the list by the
+/// pair and
 /// which put its status sigil two columns right of the same sigil on a diff
 /// heading. The gap after it is [`MARGIN_RUNGS`]'s now, so it is a column wide at
 /// every width and the pane's own ladder decides what follows it.
@@ -193,10 +194,9 @@ const ROW_FLOOR: usize = 2 + 12;
 /// The columns a row is planned against on a pane this wide.
 ///
 /// The pane less the bar's reserve, the left inset, and whatever the caret cannot
-/// borrow from that inset. **Hoisted because it was written out three times**,
-/// and [#173](https://github.com/breferrari/vigia/issues/173) has already moved
-/// what the caret costs once: the next move would fix one copy and leave the
-/// others deriving boundaries from a stale floor.
+/// borrow from that inset. **Hoisted because it is otherwise written out three
+/// times**, and what the caret costs has moved once already: the next move would
+/// fix one copy and leave the others deriving boundaries from a stale floor.
 ///
 /// Saturating for the renderer's own reason: a sweep starts at one column, where
 /// the bar's reserve alone is wider than the whole pane.
@@ -243,8 +243,7 @@ fn content(row: &str, width: u16) -> &str {
     if row.is_empty() {
         return row;
     }
-    // **The caret stands in the pane's margin by licence**
-    // ([#173](https://github.com/breferrari/vigia/issues/173)), so it is taken
+    // **The caret stands in the pane's margin by licence**, so it is taken
     // off here along with the blank the margin still has left. Done in the shared
     // reader rather than at each caller, because a rule about what a row's head
     // looks like belongs where every read of a head goes through, and the
@@ -307,9 +306,8 @@ fn drawn_at(width: u16, height: u16, view: &View, chrome: &Chrome, glyphs: Glyph
 /// exactly what a reader would see.
 fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String> {
     let backend = drawn(width, height, view, chrome);
-    // The cell walk itself moved to `support` with
-    // [#272](https://github.com/breferrari/vigia/issues/272), which gave it a
-    // second caller; the docblock above is its reason and travelled with it.
+    // The cell walk itself lives in `support`, having a second caller; the
+    // docblock above is its reason and travelled with it.
     support::rows_of(backend.buffer(), Rect::new(0, 0, width, height))
 }
 
@@ -342,10 +340,9 @@ fn occupied(width: u16, height: u16, view: &View, chrome: &Chrome, y: u16) -> us
 ///
 /// A test that read `MIN_TEXT_WIDTH` would agree with the renderer by
 /// construction, and agreeing with it is exactly what let this number go
-/// unenforced: it was a threshold two expressions held by hand, and when
-/// [#164](https://github.com/breferrari/vigia/issues/164) gave the sigil a clear
-/// column one of them was not recharged, so the gutter survived on 23 columns
-/// of text while the constant read 24 and every gate stayed green.
+/// unenforced: a threshold two expressions hold by hand loses one of them the
+/// moment the sigil takes a clear column, so the gutter survives on 23 columns
+/// of text while the constant reads 24 and every gate stays green.
 const MIN_TEXT_WIDTH: usize = 24;
 
 /// The eighth-blocks a sparkline is drawn from, restated rather than imported.
@@ -373,9 +370,9 @@ const TRACK: char = '_';
 /// read "the heat track is the same dim grey as the `+42 -7` counters", which
 /// was true when `chrome_dim` was colour 8 and stopped being true when
 /// [#60](https://github.com/breferrari/vigia/issues/60) lifted it off. What
-/// makes the colour term load-bearing **now** is the other direction: since
-/// [#157](https://github.com/breferrari/vigia/issues/157) a counts cell is drawn
-/// in `Theme::added` and `Theme::removed`, and those collide with the heat
+/// makes the colour term load-bearing is the other
+/// direction: a counts cell is drawn in `Theme::added` and `Theme::removed`, and
+/// those collide with the heat
 /// strip's own ramp rather than with its track. On `ansi` they are `Green` and
 /// `Red`, the names `heat_added` and `heat_removed` also take; on `dark`
 /// `added` is `heat_added`'s `#3fb950` and `removed` is `heat_removed_warm`'s
@@ -403,8 +400,7 @@ fn cells_coloured(
 
 /// The column ranges row `y` is measured in, one per region that holds it.
 ///
-/// **Two regions can share a row since
-/// [#252](https://github.com/breferrari/vigia/issues/252)**, and the ranges come
+/// **Two regions can share a row**, and the ranges come
 /// from `regions` rather than being derived here, so a gate reading a slot is
 /// reading the same geometry the painter drew into. Falls back to the whole row
 /// where neither region holds it, which is the band, the rule and the blank rows
@@ -426,9 +422,9 @@ fn slots_on(told: &Regions, width: u16, y: u16) -> Vec<std::ops::Range<u16>> {
 /// How many columns of row `y` the sparkline slot occupies, bars and track
 /// together.
 ///
-/// **The slot rather than the data, which is what the ladder is about.** Since
-/// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
-/// the track, so counting bars alone would read a rung as narrower than it is
+/// **The slot rather than the data, which is what the ladder is about.** An
+/// empty bucket draws the track, so counting bars alone would read a rung as
+/// narrower than it is
 /// wherever a file's history has a gap in it, and as *zero* on a file with no
 /// history. Both gates below read a rung off this.
 ///
@@ -443,8 +439,7 @@ fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> u
 
 /// The same, counted inside one region's columns.
 ///
-/// **A row can hold two regions since
-/// [#252](https://github.com/breferrari/vigia/issues/252)**, and a slot counted
+/// **A row can hold two regions**, and a slot counted
 /// across the whole row adds one region's rung to the other's. That does not
 /// merely inflate the number, it lands on a *legal* one: twelve buckets beside
 /// twelve is twenty-four, which is the widest rung, so the whole-row count passes
@@ -544,7 +539,7 @@ fn chrome() -> Chrome {
         // Only the empty state names a branch, so every populated fixture leaves
         // this `None`. That is not tidiness: it is what a real frame carries,
         // because a detached head names no branch anywhere, which is the one
-        // case that draws none since #158.
+        // case that draws none.
         staged: None,
         icons: false,
         links: false,
@@ -835,7 +830,8 @@ fn entry(path: &str) -> FileEntry {
 /// Dropped entirely is legal because the right-hand text is placed first: a
 /// header at eight columns spends all of them on `watching` and shows no name at
 /// all, which `Painter::put_right` documents as deliberate.
-/// **Takes the pane width so it can strip #119's inset before matching**, and
+/// **Takes the pane width so it can strip the margin's inset before matching**,
+/// and
 /// that is a correctness argument rather than a convenience. This helper reads
 /// the row from its head, and its `common.is_empty()` arm returns *honest* — the
 /// legal "dropped entirely" case above. Once the pane insets its text, a row that
@@ -944,7 +940,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         ),
         // **A worktree whose name is two columns per character**, which nothing
         // put through the header's left before. A directory name is whatever the
-        // filesystem holds, and since #67 the left is a clause the ladder builds
+        // filesystem holds, and the left is a clause the ladder builds
         // by `format!` and `put_marked` then marks — so the reserved-mark column
         // is exercised here against wide glyphs the way
         // `a_wide_glyph_at_the_edge_does_not_swallow_the_mark` exercises it on a
@@ -1054,8 +1050,8 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 ///
 /// An empty bucket drawing a *space* would make a strip's width unreadable off
 /// the row and leave the ladder gate below unable to tell four buckets from
-/// eight. Since [#78](https://github.com/breferrari/vigia/issues/78) an empty
-/// bucket draws the track, so the width is readable off any fixture, and the
+/// eight. An empty bucket draws the track, so the width is readable off any
+/// fixture, and the
 /// third row was never non-zero anyway. `spark_slot` counts the whole slot for
 /// exactly this reason. **This is the sentence the two gates below took their
 /// rationale from**, so it is the one that had to move for their corrections to
@@ -1184,9 +1180,9 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             if row.is_empty() {
                 continue;
             }
-            // The sigil and its gap cost two columns beyond the text itself
-            // ([#164](https://github.com/breferrari/vigia/issues/164)), so a row
-            // is clipped once the text reaches `room - 1` rather than `room`.
+            // The sigil and its gap cost two columns beyond the text itself, so
+            // a row is clipped once the text reaches `room - 1` rather than
+            // `room`.
             //
             // **This guard is where that lands, and the arithmetic is easy to
             // put in the wrong place.** The `+ 1` further down is the
@@ -1197,8 +1193,8 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             // narrower set of widths than it claims, which is the shape its own
             // non-vacuity flag exists to catch and would not have caught here.
             //
-            // **Against the room the row is given, not against the pane.** #119
-            // takes the margin off both sides first, so a line whose width falls
+            // **Against the room the row is given, not against the pane.** The
+            // margin comes off both sides first, so a line whose width falls
             // between the two is genuinely clipped while a guard written against
             // `width` skips it, which is coverage lost silently rather than a
             // failure.
@@ -1283,9 +1279,10 @@ fn the_header_never_takes_a_second_line() {
                         continue;
                     };
                     saw_a_body = true;
-                    // **Where the body starts, not where row one is.** #158 put
-                    // a masthead between the header and the list, so the first
-                    // content row is one plus whatever that region takes. Asked
+                    // **Where the body starts, not where row one is.** A
+                    // masthead sits between the header and the list, so the
+                    // first content row is one plus whatever that region takes.
+                    // Asked
                     // of the layout rather than restated, which keeps this a
                     // gate on the *header* rather than a second copy of the
                     // body split.
@@ -1324,8 +1321,8 @@ fn the_header_ladder_keeps_the_mode_word_last() {
     // be counted by looking, while whether the pane is still live is recoverable
     // from nowhere at all.
     //
-    // **Since #67 the two rungs are on opposite sides**, and the order is the
-    // half that did not change. The count drops first and the mode word is last
+    // **The two rungs are on opposite sides**, and the order is the half that
+    // does not turn on it. The count drops first and the mode word is last
     // standing; what moved is which side each is dropped from, so this reads the
     // row as two halves rather than as one right-hand ladder.
     //
@@ -1348,7 +1345,8 @@ fn the_header_ladder_keeps_the_mode_word_last() {
 
             for width in WIDTHS {
                 let drawn = rows_at(width, 8, &view, &chrome)[0].clone();
-                // #119's inset comes off the head before the row is read at all,
+                // The margin's inset comes off the head before the row is read
+                // at all,
                 // through [`content`], which asserts it was exactly there rather
                 // than trimming whatever it finds. The right-hand inset never
                 // reaches the `strip_suffix` below, because `rows_at` has already
@@ -1431,7 +1429,8 @@ fn the_header_ladder_keeps_the_mode_word_last() {
 
 #[test]
 fn the_header_count_sits_with_the_worktree_at_every_width() {
-    // #67's structural half, and the one a snapshot cannot assert: a picture
+    // The header split's structural half, and the one a snapshot cannot assert:
+    // a picture
     // shows one width, and what has to hold is that the count never drifts away
     // from the noun it modifies at *any* of them.
     //
@@ -1464,8 +1463,8 @@ fn the_header_count_sits_with_the_worktree_at_every_width() {
         let joined = format!("{}{FACT_JOIN}", chrome.worktree);
         for width in WIDTHS {
             let header = rows_at(width, 8, &view, &chrome)[0].clone();
-            // The count is the only number the header can draw: `#49` ruled
-            // there is no changed-line total, the worktree name has no digit in
+            // The count is the only number the header can draw: there is no
+            // changed-line total, the worktree name has no digit in
             // it, and neither mode word does. So the first digit on this row is
             // where the count starts, wherever the renderer chose to put it.
             //
@@ -1642,7 +1641,7 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 /// The body's parts tile the pane: no gap, no overlap, nothing outside it.
 ///
 /// **The property that is otherwise true only by two functions being written
-/// correctly** ([#251](https://github.com/breferrari/vigia/issues/251)). With
+/// correctly.** With
 /// `render` walking a running `y` cursor down the body and `regions` rebuilding
 /// the same offsets from the same `Body`, the painter and the pointer agree
 /// because both are
@@ -1650,9 +1649,9 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 /// now the single answer and this is the gate over it.
 ///
 /// **It is the gate the rail inherits**, which is why it is written as a
-/// partition rather than as a list of expected row numbers.
-/// [#252](https://github.com/breferrari/vigia/issues/252) puts the list beside
-/// the diff, where the two share rows and differ in columns: a gate pinning
+/// partition rather than as a list of expected row numbers. A rail puts the list
+/// beside the diff, where the two share rows and differ in columns: a gate
+/// pinning
 /// `diff.y == list.y + list.height` would have to be rewritten for that layout,
 /// and a gate saying *the parts cover the body exactly and never each other*
 /// holds in both.
@@ -1669,8 +1668,8 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     // rather than letting the overlap rule pass over two rectangles.
     let view = pinned_and_streamed();
     // **Railed, because this gate is about tiling and the rail is one of the two
-    // shapes the body tiles in.** The rail is a gesture since `SPEC.md` §11.2 B14
-    // ([#295](https://github.com/breferrari/vigia/issues/295)), so a sweep built on
+    // shapes the body tiles in.** The rail is a gesture (`SPEC.md` §11.2 B14),
+    // so a sweep built on
     // the default chrome would cover the stacked shape at every width and the
     // side-by-side one at none, which is exactly what `saw_rail` below refuses.
     let chrome = Chrome {
@@ -1681,8 +1680,7 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     let mut saw_rule = false;
     let mut saw_rail = false;
 
-    // **Two widths past the rail's arrival**
-    // ([#252](https://github.com/breferrari/vigia/issues/252)), which is what
+    // **Two widths past the rail's arrival**, which is what
     // turns the partition this gate was written as into a partition it is
     // actually asked about. Until the rail landed every rect here shared an `x`
     // and a `width`, so the overlap rule reduced to a row comparison and the
@@ -1811,7 +1809,8 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
 
 #[test]
 fn the_glance_columns_collapse_in_one_order() {
-    // #77's ladder. The columns are decided once for a region now, so the order
+    // The glance ladder. The columns are decided once for a region, so the
+    // order
     // they give way in is a property of the region rather than of a row, and it
     // is the one `SPEC.md` §11.1 records: counts, then the pulse, then heat,
     // then sparkline.
@@ -1850,8 +1849,9 @@ fn the_glance_columns_collapse_in_one_order() {
     // fact about the contents and the layout is not allowed to be. That is the
     // whole of `planning_width`.
     //
-    // **The `inset` term is #119's, and solving for the pane rather than adding
-    // to it is why the last two rows read 49 and 53.** The pane keeps blank
+    // **The `inset` term is the margin's, and solving for the pane rather than
+    // adding to it is why the last two rows read 49 and 53.** The pane keeps
+    // blank
     // columns between its edge and any glyph, on a ladder of its own: none below
     // 44 columns, one from 44, two from 80. The first four boundaries here sit
     // under 44 and are therefore untouched. The last two sit inside the
@@ -1860,7 +1860,8 @@ fn the_glance_columns_collapse_in_one_order() {
     // layout 1 needs 46, and the boundary is the first width that clears it.
     //
     // **Both were predicted from this table before the change was run, and both
-    // came out exactly.** That is the check #119 owed here, and it is worth more
+    // came out exactly.** That is the check the ladder owes here, and it is
+    // worth more
     // than the numbers: because the layouts are a written-out table rather than a
     // greedy allocation, which boundaries move is decidable by reading, so a
     // derivation that had missed would have meant the hand table and the constant
@@ -1892,13 +1893,13 @@ fn the_glance_columns_collapse_in_one_order() {
     // The bill for both lands on the sparkline, which needs 42 columns rather
     // than 36. §11.1 carries the argument.
     //
-    // - **One more on the top two rungs only** when the pane took #119's inset
+    // - **One more on the top two rungs only** when the pane takes the margin's
+    //   inset
     //   (48, 52 became 49, 53). Nothing under 44 columns moved, because the
     //   ladder's own floor is what buys I6's forty-column pane its columns back.
     //
-    // **Swept over `GENEROUS_WIDTHS` since
-    // [#234](https://github.com/breferrari/vigia/issues/234), and the last two
-    // entries are what that bought.** A hundred and twenty columns cannot reach
+    // **Swept over `GENEROUS_WIDTHS`, and the last two entries are what that
+    // buys.** A hundred and twenty columns cannot reach
     // either rung above the settled ladder, so the walk pinned six of eight
     // states and reported the ladder sound while its top was unreachable at every
     // width it looked at. Both new boundaries are derived from the table rather
@@ -1909,8 +1910,8 @@ fn the_glance_columns_collapse_in_one_order() {
     // | 1 | 12 | 2 | 25 | 13 | 52 | 134 |
     // | 0 | 12 | 2 | 25 | 25 | 64 | 164 |
     //
-    // The `from` column is a different rule for these two, and that is #161's
-    // share clamp rather than an inconsistency: below the settled ladder a layout
+    // The `from` column is a different rule for these two, and that is the share
+    // clamp rather than an inconsistency: below the settled ladder a layout
     // arrives when the row can *survive* it, `ROW_FLOOR + width <= planning`, and
     // above it when the row can *spare* it, `width * 5 <= planning * 2`. The
     // share is what binds here, so 134 is the first pane with 130 planning
@@ -1944,7 +1945,7 @@ fn the_glance_columns_collapse_in_one_order() {
         // nobody is reading.
         let heat = cells_coloured(&backend, y, &heats, &[HEAT_SLICE]).len();
         // The whole slot, bars and track together: the ladder is about how many
-        // columns the element is given, and since #78 an empty bucket fills its
+        // columns the element is given, and an empty bucket fills its
         // column rather than leaving it. Counting bars alone happens to agree
         // here, because `glancing`'s first row has no empty bucket, and that
         // agreement is a property of the fixture rather than of the renderer.
@@ -2133,8 +2134,9 @@ fn the_header_degrades_at_the_widths_the_spec_records() {
         // space was the first spelling and it left a mutation alive: reclaiming
         // the column `put_right` reserves for the gap draws `vigiawatching`, the
         // two facts fused with nothing between them, at five widths and with the
-        // whole workspace green. That is worse than the defect #67 was filed
-        // about, and this assertion is the only thing on the row that can see it.
+        // whole workspace green. That is worse than the fused-clause defect the
+        // split was filed for, and this assertion is the only thing on the row
+        // that can see it.
         let below = row(both - 1);
         assert!(
             !below.contains(name.as_str()),
@@ -2177,7 +2179,7 @@ fn a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently() {
 
         for width in WIDTHS {
             let drawn_row = rows_at(width, 8, &view, &chrome)[0].clone();
-            // #119's margin off the head before anything reads this row from its
+            // The margin off the head before anything reads this row from its
             // start. The `drawn.is_empty()` arm below means *the mode word took
             // the whole line*, which is the ladder working; with the margin still
             // on, it would also mean *the name is drawn and simply does not begin
@@ -2262,7 +2264,7 @@ fn a_notice_too_long_for_its_pane_is_marked_rather_than_dropped() {
     for width in WIDTHS {
         let rows = rows_at(width, 8, &view, &chrome);
         let drawn_row = rows.last().expect("a footer row").clone();
-        // #119's margin off the head, through `content`, for the reason
+        // The margin off the head, through `content`, for the reason
         // `a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently`
         // carries in full: the `drawn.is_empty()` arm below is a legitimate
         // "the state took the whole line", and leaving the margin on would let it
@@ -2331,7 +2333,7 @@ fn a_notice_too_long_for_its_pane_is_marked_rather_than_dropped() {
 
 #[test]
 fn the_mode_word_alone_fills_a_row_it_exactly_fits() {
-    // The one arithmetic edge #67's deletion of the right-hand ladder touches.
+    // The one arithmetic edge deleting the right-hand ladder touches.
     // At exactly the mode word's own width `put_right` draws it flush and
     // returns `width + 1`, which saturates the left's room to zero — so the row
     // is the word and nothing else.
@@ -2362,7 +2364,7 @@ fn the_empty_state_line_marks_its_edge() {
     // path does, so the honest thing is to fill the room and mark the cut.
     //
     // Both directions, because a rule that only ever fires one way is not a rule.
-    // **No branch since #158**, which moved that fact to the header where it is
+    // **No branch**, that fact belonging to the header where it is
     // drawn on every frame rather than on this one. The line is a token either
     // way and the rule this gates is unchanged; only its length is.
     const LINE: &str = "no unstaged changes";
@@ -2378,7 +2380,8 @@ fn the_empty_state_line_marks_its_edge() {
         );
 
         // Against the room the line is actually given, which is the pane less
-        // #119's inset on both sides. Measured against the pane instead, this
+        // the margin's inset on both sides. Measured against the pane instead,
+        // this
         // predicate would claim the line fits at the two widths per rung where
         // the inset has just taken the columns it needed.
         if Span::raw(LINE).width() <= usize::from(width).saturating_sub(margin_at(width)) {
@@ -2470,7 +2473,7 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
     // **The whole body, not the diff half.** This gate is about how many rows
     // the *footer* takes, and since §11.1 split the body in two, `diff_height`
     // answers a narrower question: it is the diff's share, which also moves when
-    // the file list grows, and since #158 when the masthead appears. Summing the
+    // the file list grows, and when the masthead appears. Summing the
     // split back up isolates the footer again, which is what this has always
     // been measuring.
     let body = |width: u16, chrome: &Chrome| {
@@ -2900,8 +2903,8 @@ fn a_label_cut_at_the_right_edge_says_so() {
         let rows = rows_at(width, 8, &view, &long_name);
         // The header shares its line with the mode word and its own side with
         // the count, so how much room the name actually gets is the renderer's
-        // business and `label_is_honest` is the whole assertion for it. Since
-        // #67 the count is what gives way first, so a name this long is drawn
+        // business and `label_is_honest` is the whole assertion for it. The
+        // count is what gives way first, so a name this long is drawn
         // alone long before it is cut, and the ladder that decides the order is
         // gated by `the_header_ladder_keeps_the_mode_word_last`. The two body
         // rows own their full width, so for those the width alone decides and
@@ -2921,7 +2924,8 @@ fn a_label_cut_at_the_right_edge_says_so() {
                 "{label} was cut at {width} columns without saying so: {row:?}"
             );
             // The room the row is given, for the reason the empty state's own fit
-            // predicate carries: #119's inset comes off both sides first.
+            // predicate carries: the margin's inset comes off both sides
+            // first.
             if Span::raw(full).width() <= usize::from(width).saturating_sub(margin_at(width)) {
                 fitted += 1;
                 assert!(
@@ -3057,16 +3061,14 @@ fn a_clipped_content_line_says_it_continues() {
 /// > A thing made of items breaks, a thing made of characters marks its edge,
 /// > and content is neither.
 ///
-/// A sparkline is a **projection** since
-/// [#234](https://github.com/breferrari/vigia/issues/234), so a narrower rung
+/// A sparkline is a **projection**, so a narrower rung
 /// sums adjacent source buckets rather than dropping the oldest;
 /// `the_sparkline_reprojects_rather_than_dropping_buckets` below is the gate for
 /// that half. What this one still owns is the half the rule shares with the hint
 /// bar and the heat strip: a strip is drawn at a **whole rung** and never at a
 /// count between two. It does not rest on [`glancing`]'s buckets all being
-/// non-zero: since [#78](https://github.com/breferrari/vigia/issues/78) an empty
-/// bucket draws the track, so the strip's width is readable off any fixture and
-/// the gate no
+/// non-zero: an empty bucket draws the track, so the strip's width is readable
+/// off any fixture and the gate no
 /// longer rests on a property of the data.
 ///
 /// The rungs are read off the screen rather than imported. A test comparing the
@@ -3097,8 +3099,7 @@ fn the_sparkline_draws_whole_rungs_and_never_a_count_between_two() {
             let told = regions(Rect::new(0, 0, width, 6), &chrome, &view);
             for y in 0..6u16 {
                 let row = &rows[usize::from(y)];
-                // **One region at a time since
-                // [#252](https://github.com/breferrari/vigia/issues/252)**, and
+                // **One region at a time**, and
                 // `spark_slot_in` carries the reason: beside a rail this row holds
                 // two of them, and twelve buckets plus twelve is twenty-four, which
                 // is a legal rung. Counted whole, the assertions below would have
@@ -3224,8 +3225,8 @@ fn the_pulse_draws_a_mark_and_never_a_label() {
     }
 }
 
-/// [#149](https://github.com/breferrari/vigia/issues/149), and the same shape as
-/// the pulse's label one test up: a ruling that a glance surface refuses a
+/// The same shape as the pulse's label one test up: a ruling that a glance
+/// surface refuses a
 /// *word*, turned into something that fails.
 ///
 /// > The list does not draw the rank the digits address.
@@ -3234,9 +3235,9 @@ fn the_pulse_draws_a_mark_and_never_a_label() {
 /// cheap.** The caret gutter was two columns wide on every pane the old
 /// `CARET_FLOOR` admitted and blank on every row but the one the diff is inside,
 /// so `1`-`6` could be drawn there for no column and no frame time, and a session
-/// that read only that far would find it free. **That gutter is gone since
-/// [#173](https://github.com/breferrari/vigia/issues/173)** and a rank would now
-/// have to buy a column of its own, which cuts *for* the ruling and is exactly
+/// that read only that far would find it free. **That gutter is gone**, so a
+/// rank would have to buy a column of its own, which cuts *for* the ruling and
+/// is exactly
 /// why this gate is written against what opens a row rather than against the
 /// gutter. §11.1 refuses it on what a rank *says* (the
 /// region is a map, and a numbered list is a menu), which is an argument no
@@ -3307,7 +3308,7 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
         // Not `clamped_to`, which cannot move a figure `Body::split` has already
         // capped: the fixture is six files and this pane is 24 rows, where the cap
         // is the settled `LIST_SETTLED`, so clamping would only turn this into "at
-        // least six". The cap is a share of the pane since #160, and 24 is the
+        // least six". The cap is a share of the pane, and 24 is the
         // height at which that share is the settled number.
         let listed = body_layout(
             Rect::new(0, 0, width, tall),
@@ -3322,7 +3323,7 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
              sweep is not reading a full region"
         );
 
-        // **Skipped past the masthead as well as the header**, which #158 put
+        // **Skipped past the masthead as well as the header**, which sits
         // between them. Taken from the layout rather than counted, for the
         // reason this file gives everywhere else: a test that re-derived where
         // the list starts would be a second copy of the body split agreeing
@@ -3338,8 +3339,8 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
         let first = list_top(&split);
         let rows = rows_at(width, tall, &view, &chrome);
         for (offset, row) in rows.iter().skip(first).take(listed).enumerate() {
-            // **The mark and the content are read from two different places
-            // now** ([#173](https://github.com/breferrari/vigia/issues/173)). The
+            // **The mark and the content are read from two different
+            // places.** The
             // caret stands on the pane's own leading column, outside the region,
             // so [`content`] strips it with the margin it sits in and what is
             // left is the row proper. That splits one observation into two and
@@ -3611,8 +3612,9 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
 
 /// The width the published picture is measured from still draws what it draws.
 ///
-/// **`SPEC.md` §5.1's ruling has never had a gate, and #161 is what made it need
-/// one.** That ruling is that a published artifact answering an open question
+/// **`SPEC.md` §5.1's ruling needs a gate the moment the strip has a rung above
+/// the pictured one.** That ruling is that a published artifact answering an
+/// open question
 /// *is* the answer, and `assets/preview.svg` answers "how many slices does the
 /// heat strip have" with twelve. While twelve was the source resolution the claim
 /// was true at every width and nothing could break it. It is a **rung** now, so
@@ -3643,16 +3645,16 @@ fn the_pictured_width_still_draws_twelve_slices() {
 /// The widest heat rung waits for a pane that can spare it, rather than arriving
 /// the moment it fits.
 ///
-/// **Two floors, because the layout table answers two questions**
-/// ([#161](https://github.com/breferrari/vigia/issues/161)). Below the settled
+/// **Two floors, because the layout table answers two questions.** Below the
+/// settled
 /// ladder the question is what survives a narrowing pane, and `ROW_FLOOR` decides
 /// it. Above it the question is what a wide pane is worth spending, and "does it
 /// fit" is the wrong test there: a fixed-sum table takes a rung the instant it
 /// fits, and the widest strip fits inside a pane narrower than the one the
 /// published picture is measured from.
 ///
-/// **The boundary is derived here rather than copied out of a failure message**,
-/// which is what #161 asked for in those words. Every layout's width is the sum
+/// **The boundary is derived here rather than copied out of a failure
+/// message.** Every layout's width is the sum
 /// of its own slots, so which pane first affords one is decidable by reading.
 #[test]
 fn the_widest_strip_waits_until_the_path_keeps_the_row() {
@@ -3671,9 +3673,8 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
     // Inlined rather than named: one call site, and `reserved` is what carries
     // the idea.
     //
-    // **`SPARK_RUNGS[1]` rather than `[0]`, since
-    // [#234](https://github.com/breferrari/vigia/issues/234) put a rung above
-    // it.** This gate is about the widest **strip**, so what it has to price is
+    // **`SPARK_RUNGS[1]` rather than `[0]`, there being a rung above it.** This
+    // gate is about the widest **strip**, so what it has to price is
     // the *narrowest layout that carries one*, which is the strip's top rung
     // beside the sparkline's settled one. Pricing the widest layout instead would
     // move this boundary to where the widest *sparkline* arrives, 164 columns,
@@ -3696,7 +3697,8 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
 
     // **Non-vacuity, and it is the whole claim rather than a formality.** If
     // merely fitting and deserving were the same width, this gate would be
-    // checking `ROW_FLOOR` and nothing #161 added, and the picture would be false.
+    // checking `ROW_FLOOR` and nothing above it, and the picture would be
+    // false.
     let fitting = GENEROUS_WIDTHS
         .clone()
         .find(|pane| widest + ROW_FLOOR <= planning(*pane))
@@ -3770,9 +3772,9 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     //
     // **The same fact from the other side.** While a bonus rung exists it has to
     // be kept from buying a row, which is what makes the rule above worth
-    // gating. [#80](https://github.com/breferrari/vigia/issues/80) cut the bar
-    // to three items a reader is owed at every width, so `HINT_BASELINE`
-    // is rung zero and **no rung above it exists**. The assertion is therefore that
+    // gating. The bar is three items a reader is owed at every width, so
+    // `HINT_BASELINE` is rung zero and **no rung above it exists**. The
+    // assertion is therefore that
     // the widest pane draws exactly what the forty-column pane draws: nothing is
     // held back for a wide screen, so nothing can be spent on a row.
     //
@@ -3786,7 +3788,8 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
             .last()
             .expect("a footer")
             .to_owned();
-        // #119's inset off the head first. Split on two spaces without it and the
+        // The margin's inset off the head first. Split on two spaces without it
+        // and the
         // very first field is the inset itself, so `hints` came back empty and this
         // gate reported that the widest pane draws no hint bar at all.
         content(&line, width)
@@ -3850,18 +3853,16 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
 /// for.
 ///
 /// **These figures move whenever a hint is paid back.** B12 swapped `JK files`
-/// for the two-columns-narrower `? keys`, and
-/// [#80](https://github.com/breferrari/vigia/issues/80) cut `jk scroll` as well,
-/// taking the widest bar from 38 columns to 26, so
-/// each cell arrives about eleven columns of pane earlier than
-/// [#147](https://github.com/breferrari/vigia/issues/147) measured it. **That issue
-/// is not answered, it has lost its subject**: with every rung one a reader is owed,
-/// there is no bonus rung whose precedence over a readout could be argued.
+/// for the two-columns-narrower `? keys`, and `jk scroll` went as well, taking
+/// the widest bar from 38 columns to 26, so each cell arrives about eleven
+/// columns of pane earlier. **Whether a bonus rung may cost a readout is not
+/// answered, it has lost its subject**: with every rung one a reader is owed,
+/// there is no bonus rung whose precedence could be argued.
 const READOUT_RUNGS: [(u16, usize); 2] = [(56, 1), (64, 2)];
 
 #[test]
 fn a_wider_hint_bar_cannot_quietly_push_the_readouts_out() {
-    // #121 found this by trying to add a fifth hint. `du half` is ten columns
+    // Found by trying to add a fifth hint. `du half` is ten columns
     // including its separator, and the 80-column status bar is **exactly full**:
     // 40 of hints, 2, 19 of readouts, 2, 13 of state, into the 76 that eighty
     // columns leave after the inset. So the bonus rung fits by taking both cells,
@@ -3931,8 +3932,8 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // whether it costs anything **beyond** the column it occupies.
     //
     // **The answer is now "nothing at all", and this gate says so directly.**
-    // Until #77 the bar's column was taken only when a bar was drawn, so the
-    // question was whether it cost anything *beyond* that column, and the way to
+    // With the bar's column taken only when a bar is drawn, the question is
+    // whether it costs anything *beyond* that column, and the way to
     // ask it was to compare `width` with a bar against `width - 2` without.
     //
     // A region is planned against the pane less a scrollbar column whether or not
@@ -3981,8 +3982,8 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         let bare = rows_at(width, 24, &without_bar, &chrome());
 
         // **Where each side's list actually starts**, asked of the layout per
-        // side because the two differ in file count and #158's masthead is
-        // decided from the same split. Hardcoding row one read the band's own
+        // side because the two differ in file count and the masthead is decided
+        // from the same split. Hardcoding row one reads the band's own
         // baseline as a list row once the masthead existed.
         let first = |files: usize| {
             let split =
@@ -4008,8 +4009,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // `the_caret_does_not_vanish_because_another_file_changed`; this gate is
         // about the bar and must not be measuring both at once.
         //
-        // **Asked of the glyph, not of the indent**
-        // ([#173](https://github.com/breferrari/vigia/issues/173)). Reading
+        // **Asked of the glyph, not of the indent.** Reading
         // `row.trim_start().len() != row.len()` means *has a caret* only while
         // the caret is a two-column inset on the row. The marker sits on
         // the pane's own leading column now, so a caret row has **no** leading
@@ -4054,7 +4054,7 @@ fn a_list_shorter_than_its_region_gives_the_rows_to_the_diff() {
     // the view actually has, or it draws blank rows under a rule announcing files
     // that are not there; and the rows it gives up have to reach the diff, or
     // they are left unpainted between the rule and the content, which is the
-    // half-empty pane #59 was filed for wearing a different hat.
+    // half-empty pane, wearing a different hat.
     let tall = 24u16;
     let width = 80u16;
     let chrome = chrome();
@@ -4111,8 +4111,8 @@ fn a_list_shorter_than_its_region_gives_the_rows_to_the_diff() {
 
 #[test]
 fn the_pane_insets_its_text_at_every_rung() {
-    // [#119](https://github.com/breferrari/vigia/issues/119), swept rather than
-    // sampled. `assets/preview.svg` draws its furniture to the window edge and
+    // The margin ladder, swept rather than sampled. `assets/preview.svg` draws
+    // its furniture to the window edge and
     // its glyphs one to three cells inside it, and §5.1's law is that a picture in
     // a public README is a specification, so the shell drawing everything from
     // column 0 was a fourth undocumented departure from it.
@@ -4153,8 +4153,8 @@ fn the_pane_insets_its_text_at_every_rung() {
                         continue;
                     }
                     // **The caret is the one *glyph* licensed to stand on the
-                    // pane's own edge** ([#173](https://github.com/breferrari/vigia/issues/173)),
-                    // and `SPEC.md` §11.1 records it as such so it reads as a
+                    // pane's own edge**, and `SPEC.md` §11.1 records it as such
+                    // so it reads as a
                     // decision rather than as drift. The marker is flush
                     // against the edge with no margin of its own, which is what
                     // puts it inside the ladder this gate pins.
@@ -4214,7 +4214,8 @@ fn the_pane_insets_its_text_at_every_rung() {
 fn the_inset_never_reaches_the_forty_column_pane() {
     // I6 is named for forty columns and every one of them is already contested:
     // `SPEC.md` §11.1 records the sparkline being bought and sold twice over two
-    // columns at exactly this width. #119's ladder has a floor for that reason,
+    // columns at exactly this width. The margin ladder has a floor for that
+    // reason,
     // and a floor stated only in a docblock is a floor that moves.
     //
     // Asserted by drawing rather than by reading the ladder back, so it fails if
@@ -4289,10 +4290,9 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
 
 #[test]
 fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
-    // Found by the adversarial pass on
-    // [#119](https://github.com/breferrari/vigia/issues/119), which deleted
-    // `Painter::region_text`'s trailing term and watched the whole suite stay
-    // green while the diff's content rows ran two columns further right.
+    // Found by deleting `Painter::region_text`'s trailing term and watching the
+    // whole suite stay green while the diff's content rows ran two columns
+    // further right.
     //
     // **The gap was a fixture property rather than an oversight.**
     // `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge` in
@@ -4363,8 +4363,8 @@ fn the_hint_bar_never_marks_its_own_edge() {
     // rung is whole; this asserts the row it was drawn into was wide enough to
     // hold it, which is a different failure and was reachable.
     //
-    // Found by the adversarial pass on #119 by deleting `Footer::plan`'s
-    // trailing term: the suite stayed green while the footer drew
+    // Found by deleting `Footer::plan`'s trailing term: the suite stayed green
+    // while the footer drew
     // `q quit · f follow · jk scro›` at 44, 55, 68 and 76 columns. The plan
     // picks a rung against one width and `Painter::status_line` draws it into
     // another, so any drift between the two marks the bar rather than dropping a
@@ -4537,8 +4537,8 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
     // are drawn at all, what is left for text is at least `MIN_TEXT_WIDTH`*.
     // Every other gate in this file reads what the renderer drew, and a
     // threshold is invisible that way, so nothing here could see
-    // `gutter_width` deciding affordability against a prefix that had grown by
-    // a column ([#164](https://github.com/breferrari/vigia/issues/164)). The
+    // `gutter_width` deciding affordability against a prefix that has grown by
+    // a column. The
     // two gutter gates that do exist sample away from the boundary
     // (`render.rs::the_gutter_gives_way_before_the_text_does` takes 40 and 24)
     // and the other asserts the gutter does not *vanish* rather than that what
@@ -4618,8 +4618,8 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
 ///
 /// The list carries three files and the stream opens on a heading, so the two
 /// sigils the gates below compare are drawn by one function through two areas,
-/// which is the whole thing [#173](https://github.com/breferrari/vigia/issues/173)
-/// is about. `cases()` builds the same shape for the sweeps above; it is named
+/// which is the whole thing the caret's column is about. `cases()` builds the
+/// same shape for the sweeps above; it is named
 /// here because these gates need the two regions specifically rather than a
 /// representative screen.
 fn pinned_and_streamed() -> View {
@@ -4689,8 +4689,7 @@ fn both_runs_pinned() -> View {
 /// none.
 ///
 /// **The caret is skipped and counted rather than searched for**, which is what
-/// makes one function usable on both regions: since
-/// [#173](https://github.com/breferrari/vigia/issues/173) the marker stands on
+/// makes one function usable on both regions: the marker stands on
 /// the pane's own leading column, outside the row it points at, so it is part of
 /// the offset and never part of the content. A helper that trimmed it instead
 /// would report the marked row a column left of its neighbours, and the gates
@@ -4787,7 +4786,6 @@ fn caret_is_lent(width: u16) -> bool {
 ///
 /// > The status sigil starts at a different column in the pinned list than it
 /// > does on the diff's file headings. They should line up.
-/// > -- [#173](https://github.com/breferrari/vigia/issues/173)
 ///
 /// The gap was the old two-column `CARET_WIDTH`: the list was indented by the
 /// caret and its trailing space, so every glance element downstream of the path
@@ -4961,8 +4959,8 @@ fn the_path_starts_in_one_column_in_both_regions() {
 /// recorded lesson about hand-kept thresholds names: the drawn side stays correct
 /// and only the width at which the element vanishes drifts, invisibly.
 ///
-/// It matters more since [#173](https://github.com/breferrari/vigia/issues/173),
-/// because what the caret costs a row is a function of the width now. A restated
+/// It matters most because what the caret costs a row is a function of the
+/// width. A restated
 /// flat two would be wrong above the margin ladder's floor and a restated flat
 /// one wrong below it, and neither would show up in any rendered row.
 ///
@@ -5032,8 +5030,8 @@ fn the_caret_threshold_is_the_row_floor_it_claims() {
 /// nothing at all.
 ///
 /// > The header row sits directly against the first row of the pinned list, with
-/// > nothing between them. It should have a row, or half a row, of separation.
-/// > -- [#174](https://github.com/breferrari/vigia/issues/174)
+/// > nothing between them. It should have a row, or half a row, of
+/// > separation.
 ///
 /// **Coextensive with the list, exactly as the rule under it is.** §11.2 B11
 /// rests on `rule: list > 0` making the rule and the list one thing, and the lead
@@ -5105,14 +5103,13 @@ fn the_body_opens_with_one_blank_row_under_the_header() {
     );
 }
 
-/// What the whole of [#174](https://github.com/breferrari/vigia/issues/174)'s
-/// design rests on, and what no snapshot in this repository states.
+/// What the whole of the separator's design rests on, and what no snapshot in
+/// this repository states.
 ///
 /// The blank the body opens with **is** the masthead's leading air when a band is
 /// drawn, rather than a row on top of it. So a masthead screen spends exactly the
-/// rows it spent before the separator existed, and #174's cost falls only on the
-/// masthead-off screen, which is the default since
-/// [#204](https://github.com/breferrari/vigia/issues/204).
+/// rows it would spend without a separator, and the cost falls only on the
+/// masthead-off screen, which is the default.
 ///
 /// **Asserted as the total, because the total is the claim.** How the four rows
 /// divide between `lead`, `graph` and `air` is an arrangement that may reasonably
@@ -5207,12 +5204,12 @@ fn three_kinds_of_line() -> View {
 ///
 /// The tint shipped and the bar did not: `added_bar` and `removed_bar` existed as
 /// keys, `Painter::line_row` consumed them, and all three built-ins left them
-/// empty for three phases ([#218](https://github.com/breferrari/vigia/issues/218)).
+/// empty for three phases.
 ///
 /// **The claim that makes it affordable is that it costs no column**, and that is
-/// the half asserted hardest here. The bar lands on the pane's leading cell, which
-/// [#119](https://github.com/breferrari/vigia/issues/119)'s ladder already keeps
-/// blank and the wash already bleeds under, so a changed row and a context row
+/// the half asserted hardest here. The bar lands on the pane's leading cell,
+/// which the margin ladder already keeps blank and the wash already bleeds
+/// under, so a changed row and a context row
 /// must begin their text in the *same* column. If that ever stops holding, the
 /// element has started charging I6 for decoration, which is the refusal it was
 /// reinstated against.
@@ -5414,8 +5411,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
     let theme = theme();
     let view = glancing();
 
-    // **`GENEROUS_WIDTHS` since
-    // [#234](https://github.com/breferrari/vigia/issues/234)**, for the reason
+    // **`GENEROUS_WIDTHS`**, for the reason
     // `the_heat_strip_reprojects_rather_than_dropping_buckets` already gives: the
     // widest rung is not reachable inside 120 columns, so the closing assertion
     // that the sweep reached a full window would have had to be weakened to a
@@ -5465,7 +5461,8 @@ fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
 
 #[test]
 fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
-    // **#78 at the dense rung, read off the screen rather than off the packer.**
+    // **The track at the dense rung, read off the screen rather than off the
+    // packer.**
     // `tests/glyphs.rs` proves the glyph; this proves the renderer reaches for
     // it, which is the half a packing test cannot see.
     let theme = theme();
@@ -5494,8 +5491,9 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     // every pair whose older half is quiet, which is exactly the shape a file
     // that has just started being written has: the strip would draw a track
     // over the activity a reader opened the pane to see.
-    // Doubled through the source resolution, which is what #234 made these
-    // literals: a pair of equal source buckets sums to one rung bucket of twice
+    // Doubled through the source resolution, which is what makes these
+    // literals: a pair of equal source buckets sums to one rung bucket of
+    // twice
     // the value, so the *pattern* of quiet and busy halves is exactly the one
     // this gate was written against and only the magnitudes moved.
     for pattern in [
@@ -5591,8 +5589,8 @@ fn columns_of(
     symbols: &[char],
 ) -> Vec<u16> {
     let buffer = backend.buffer();
-    // **Through `support::columns_in`, which `tests/rail.rs` also reads**
-    // ([#252](https://github.com/breferrari/vigia/issues/252)). The predicate the
+    // **Through `support::columns_in`, which `tests/rail.rs` also reads.** The
+    // predicate the
     // docblock above argues for is one predicate, and it was about to be two: the
     // rail's gates ask the same symbol-and-colour question of the same buffer,
     // over a column range rather than a whole row. This is that function called
@@ -5602,8 +5600,7 @@ fn columns_of(
 
 /// A narrower rung shows the whole window at a lower resolution, never its tail.
 ///
-/// **`SPEC.md` §11.1's ruling, gated here**
-/// ([#234](https://github.com/breferrari/vigia/issues/234)). A sparkline is a
+/// **`SPEC.md` §11.1's ruling, gated here.** A sparkline is a
 /// projection rather than a list that drops whole buckets oldest first, on the
 /// clause the heat strip already had, so a narrow row draws sums of adjacent
 /// source buckets. `the_heat_strip_reprojects_rather_than_dropping_buckets` makes
@@ -5696,9 +5693,9 @@ fn the_sparkline_reprojects_rather_than_dropping_buckets() {
 
 /// The width the published picture is measured from still draws what it drew.
 ///
-/// **`the_pictured_width_still_draws_twelve_slices`' sibling, and
-/// [#234](https://github.com/breferrari/vigia/issues/234) is what made it
-/// needed.** Twelve buckets was the whole window, so the claim was true at every
+/// **`the_pictured_width_still_draws_twelve_slices`' sibling, needed once twelve
+/// stops being the whole window.** As the whole window the claim is true at
+/// every
 /// width and nothing could break it. It is a **rung** now, so it is true at a
 /// width, and the width worth pinning is the one `assets/preview.svg` is measured
 /// from: what this refuses is a share rule that let the new top rung arrive under
@@ -5796,7 +5793,8 @@ fn the_block_rung_spells_an_empty_bucket_with_its_own_track() {
     // empty bucket, so a renderer drawing the ramp's floor for "nothing
     // happened" was invisible to the whole suite. Mutating the track glyph
     // survived every gate until this existed, and it is the rung most readers
-    // are on: `#78` and `SPARK_TRACK` both turn on one write and no writes being
+    // are on: the track's ruling and `SPARK_TRACK` both turn on one write and no
+    // writes being
     // different *shapes*, and the ramp's floor is what that must not collapse
     // onto.
     let theme = theme();
@@ -5863,8 +5861,7 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
 
 /// Cells the settled rung occupies at `glyphs`, restated for [`RAMP`]'s reason.
 ///
-/// **The rung rather than the window since
-/// [#234](https://github.com/breferrari/vigia/issues/234)**: every caller here
+/// **The rung rather than the window**: every caller here
 /// draws at 120 columns, which is under the 134 the top rung needs at a dense
 /// glyph, so what fills the slot is [`SETTLED_BUCKETS`] and reading
 /// [`HISTORY_BUCKETS`] would be asserting the width of a rung no caller reaches.
@@ -6091,8 +6088,8 @@ fn a_pane_too_short_for_a_body_keeps_no_rule_over_its_footer() {
 
 /// Drawing both runs costs the path no column, at every width in the sweep.
 ///
-/// **This is the width-swept half of #316's claim**, and it replaces the gate that
-/// asked whether the gutter ever pushed a path off its row. That question is gone
+/// **The width-swept half of the ink ruling's claim.** Whether a gutter pushes a
+/// path off its row is a question that goes
 /// with the column: what is checked now is that a grouped screen and a plain one
 /// put the kind letter, and therefore the path that follows it, in the same place.
 ///
