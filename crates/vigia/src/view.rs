@@ -193,8 +193,8 @@ pub enum Slot {
 /// The window is `rows` **drawn rows**, separators included, so a region deep
 /// enough for six files shows fewer of them once it is paying for two labels.
 /// That is `SPEC.md` §5.3's *richness is the reward of space* in the direction it
-/// actually runs: the reader asked for a second run and the map costs what the
-/// second run costs.
+/// actually runs: asking for a second run costs the map what the second run
+/// costs.
 pub fn list_plan(files: &[vigia_core::FileChange], top: usize, rows: usize) -> Vec<Slot> {
     plan_with(files, Runs::of(files), top, rows)
 }
@@ -258,12 +258,11 @@ impl Runs {
     /// Whether the list draws run separators at all.
     ///
     /// **The question is whether a staged run exists, not whether both runs
-    /// do.** It used to be both, and that made the view which most needs to
-    /// announce itself, the one where *everything* is staged, the one that said
-    /// nothing: no heading, and `None` for
-    /// [`Heading::origin`](crate::render) to match on, which takes the ink for
-    /// unstaged. A reader could not tell it from the default view (reported
-    /// 2026-08-26).
+    /// do.** Requiring both leaves the view which most needs to announce
+    /// itself — the one where *everything* is staged — saying nothing: no
+    /// heading, and `None` for [`Heading::origin`](crate::render) to match on,
+    /// which takes the ink for unstaged. A reader cannot tell it from the
+    /// default view.
     ///
     /// Dropping the labels is still right for a list that is entirely unstaged,
     /// because unstaged is what a reader is looking at unless something says
@@ -316,12 +315,10 @@ fn plan_with(files: &[vigia_core::FileChange], runs: Runs, top: usize, rows: usi
         }
         // **A run's label is drawn before any of its files, without exception.**
         //
-        // This used to be the opposite rule: furniture gave way before content
-        // did, so a window with room for one more thing spent it on the file and
-        // dropped the label. That is what put a *staged* file on the last row
-        // under a heading that said `unstaged` (reported from a real worktree,
-        // 2026-08-26). The two outcomes are not comparable, which is why the
-        // reader overruled it. A list one row shorter is merely smaller, and the
+        // The opposite rule — furniture giving way before content — spends a
+        // window's last row on the file and drops the label, which puts a
+        // *staged* file under a heading that says `unstaged`. Reported from a
+        // real worktree, and the two outcomes are not comparable. A list one row shorter is merely smaller, and the
         // rail already says there is more to come; a file under the wrong run's
         // heading is the list asserting something false about where the reader's
         // change lives, and no amount of room saved buys that back.
@@ -455,8 +452,8 @@ pub fn following_top(
 /// The file a drawn list row addresses, or `None` for a separator.
 ///
 /// **The one place a row becomes a file**, read by the click handler and by the
-/// digit jumps alike. Both used to add the offset to the window's first *file*,
-/// which is the same number only while every row is a file.
+/// digit jumps alike. Adding the offset to the window's first *file* instead is
+/// the same number only while every row is a file.
 pub fn file_at(
     files: &[vigia_core::FileChange],
     top: usize,
@@ -538,12 +535,10 @@ pub enum Row {
     /// second rule: a continuation that *is* a row is drawn by the drawer that
     /// draws the row it continues.
     ///
-    /// **It did not make the row arithmetic free, and the first draft of this
-    /// paragraph said it had.** It claimed `rows` became a count of display rows
-    /// "with no site restated", which is false as built: [`View::wrap_rows`] runs
+    /// **It does not make the row arithmetic free.** [`View::wrap_rows`] runs
     /// *after* the walk, so every guard inside the walk still counts the diff's
-    /// own rows, and **five** separate sites went on comparing those against a
-    /// count of the terminal's. Three audit rounds found them one at a time:
+    /// own rows, and **five** separate sites compared those against a count of
+    /// the terminal's:
     /// `App`'s pinned `G`, its drag on the diff's bar, its page steps,
     /// [`landing_of`], and `collect`'s own `short` test. (This sentence said
     /// *four* and then listed five, which is the defect it is about, committed
@@ -578,7 +573,6 @@ pub enum Row {
     Note(&'static str),
     /// The blank row that closes a file's block.
     ///
-    /// **Ruled 2026-08-15** ([#165](https://github.com/breferrari/vigia/issues/165)).
     /// A file's last content row and the next file's heading sat on adjacent
     /// rows, and a heading is a `Painter::file_row` carrying the kind letter,
     /// the path, the pulse, the heat strip, the sparkline and the counters, so a
@@ -595,9 +589,8 @@ pub enum Row {
     /// by before.
     ///
     /// **After every file but the last, and that exception is [`gap_rows`]'.**
-    /// The first draft of this ruling was uniform, on the argument that a
-    /// per-file conditional costs more than one blank row at the bottom of the
-    /// stream. It does not, and the reason is not arithmetic: `SPEC.md` §11.1
+    /// A uniform rule is cheaper by one conditional and wrong, and the reason
+    /// is not arithmetic: `SPEC.md` §11.1
     /// rules that the bottom of the diff is **content**, and
     /// `tests/scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank` is
     /// the gate over it, carrying its own warning about having once been
@@ -638,8 +631,8 @@ impl Row {
 /// ceiling on that ladder rather than a column count: `heat_at` groups
 /// `HEAT_BUCKETS / width`, and a rung wider than this divides to zero.
 ///
-/// **Twelve was this constant until 2026-08-18 and is a rung now**, which keeps
-/// `SPEC.md` §5.1's ruling rather than overturning it. That ruling is that a
+/// **Twelve is a rung rather than the constant**, which keeps `SPEC.md` §5.1's
+/// ruling rather than overturning it. That ruling is that a
 /// published artifact answering an open question **is** the answer, and
 /// `assets/preview.svg` draws exactly twelve slices. What the picture answers is
 /// how many slices a pane **at its own width** draws, and its own comment records
@@ -758,8 +751,8 @@ fn bucket_of(line: u32, lines: u32) -> Option<usize> {
 /// supplies it for free; see that field for why §5.2's predicted cache is not
 /// needed.
 ///
-/// **A removed line is placed where it used to be**, which is the working-tree
-/// line number the walk has reached. It exists nowhere on the new side by
+/// **A removed line is placed at the working-tree line number the walk has
+/// reached.** It exists nowhere on the new side by
 /// definition, and the alternative to placing it is not placing it, which would
 /// draw a file whose only change was a deletion as a file with no changes.
 ///
@@ -843,15 +836,13 @@ pub struct Viewport {
     /// Columns the diff region's **glyphs** have, from
     /// [`crate::render::Body::diff`] less the inset and any scrollbar.
     ///
-    /// **The one geometry this function needs and did not used to**
-    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Every row was
-    /// built without reference to how wide the pane was, because clipping is the
+    /// **The one geometry this function needs.** A row can otherwise be built
+    /// without reference to how wide the pane is, because clipping is the
     /// painter's and clipping changes no row count. Wrapping does, so the width
     /// has to arrive here.
     ///
     /// Zero is legal and means *do not wrap*: it is what a caller that has not
-    /// been told the width passes, and it produces the rows every version before
-    /// this one produced.
+    /// been told the width passes.
     pub width: usize,
     /// Whether a content line too wide for the pane continues on the row below.
     ///
@@ -1003,21 +994,20 @@ pub struct View {
     ///
     /// **Decided where the rows are decided, and carried rather than
     /// re-derived** ([#272](https://github.com/breferrari/vigia/issues/272)).
-    /// [`crate::render::gutter_width`] used to be the painter's alone, which was
-    /// safe while nothing else needed it. Wrapping needs it *before* the painter
+    /// [`crate::render::gutter_width`] is safe as the painter's alone only
+    /// while nothing else needs it. Wrapping needs it *before* the painter
     /// runs, because the width left for text is what decides whether a line
     /// wraps at all, and the row set the painter would size it from is the one
     /// wrapping has already truncated. Two derivations over two different row
     /// sets is a pane whose text bound and whose gutter disagree by a column.
     ///
     /// So [`View::wrap_rows`] takes it once, over the rows the walk reached, and
-    /// the painter reads it. With wrapping off that is byte-identical to what the
-    /// painter used to compute for itself, which `tests/render.rs` holds as a
-    /// buffer comparison.
+    /// the painter reads it. With wrapping off that is byte-identical to the
+    /// painter's own computation, which `tests/render.rs` holds as a buffer
+    /// comparison.
     ///
     /// **`None` is *nobody decided*, and the painter then decides for itself**,
-    /// which is every version of this before
-    /// [#272](https://github.com/breferrari/vigia/issues/272) and is what a
+    /// which is what a
     /// [`Viewport`] carrying no width produces. It is a third state rather than a
     /// zero because zero is a legal answer: it is what a pane too narrow for line
     /// numbers gets, and a field that could not tell the two apart would make a
@@ -1059,10 +1049,9 @@ pub struct View {
     /// same quantity [`list_plan`] groups on, resolved once so the list's
     /// separators and the stream's cannot disagree about it.
     ///
-    /// **It used to decide a column as well**, and that is gone with
-    /// [#316](https://github.com/breferrari/vigia/issues/316): the staged mark is
-    /// the kind letter's own ink now, so nothing about the row's geometry depends
-    /// on this and a grouped pane lays out exactly like an ungrouped one.
+    /// **It decides no column.** The staged mark is the kind letter's own ink,
+    /// so nothing about the row's geometry depends on this and a grouped pane
+    /// lays out exactly like an ungrouped one.
     pub grouped: bool,
     /// Which file the pinned list starts at, once the request was resolved
     /// against the files that exist and against where the diff is.
@@ -1084,12 +1073,10 @@ pub struct View {
     /// inside it is what keeps the bar smooth while a reader scrolls one long
     /// file rather than stepping once per file.
     ///
-    /// It carried an argument that every *other* file's height was the read
-    /// §11.1 rules out for `G` and I4 forbids generally, so the bar could only
-    /// be file-granular between files. **Both halves of that expired on
-    /// 2026-08-01**: counting a height costs a fiftieth of materialising the
-    /// diff it describes, I4 was narrowed to admit the walk, and `total_rows`
-    /// below is the result. See §3's I4 note.
+    /// The bar is not file-granular between files, on the argument that every
+    /// *other* file's height is the read I4 forbids: **counting a height costs a
+    /// fiftieth of materialising the diff it describes**, I4 is narrowed to
+    /// admit the walk, and `total_rows` below is the result. See §3's I4 note.
     ///
     /// Zero when there is nothing to be inside, which a renderer must read as
     /// "no bar" rather than dividing by.
@@ -1171,12 +1158,10 @@ pub struct View {
     /// the busiest thing it has ever been, which answers a question nobody asked.
     ///
     /// **Zero means nothing is tracked, which is a scale a renderer must not
-    /// divide by.** It used to say a renderer must read zero as "draw no
-    /// sparkline", and that is the ruling
-    /// [#78](https://github.com/breferrari/vigia/issues/78) reversed: an empty
-    /// bucket draws a track, so a scale of zero means every bucket is empty and
-    /// every one of them is still drawn. `vigia_core::History::scale` carries the
-    /// same correction, and this is the copy a renderer actually reads.
+    /// divide by — and not a reason to draw no sparkline.** An empty bucket
+    /// draws a track, so a scale of zero means every bucket is empty and every
+    /// one of them is still drawn. `vigia_core::History::scale` says the same;
+    /// this is the copy a renderer actually reads.
     ///
     /// **One figure per rung since
     /// [#234](https://github.com/breferrari/vigia/issues/234)**, because a
@@ -1327,11 +1312,11 @@ fn hunk_span(hunk: &Hunk) -> usize {
 /// row of its own.
 ///
 /// **Private, and reached through [`block_of`] and [`block_rows`] rather than
-/// added by hand.** The first draft of this was `pub` and let all six
-/// expressions that sum file heights add the term themselves, under a doc
-/// enumerating them. That doc named four of the six on the day it landed and two
-/// callers were missed: `tests/reads.rs`'s cost diagnostic broke by exactly
-/// `files - 1`, and `tests/scroll.rs`'s drag gate stayed green only because two
+/// added by hand.** Public, it lets all six expressions that sum file heights
+/// add the term themselves under a doc enumerating them — a doc that named four
+/// of the six, missing two callers: `tests/reads.rs`'s cost diagnostic breaks by
+/// exactly `files - 1`, and `tests/scroll.rs`'s drag gate stays green only
+/// because two
 /// omissions cancelled. It is the third time on this branch that a quantity
 /// spelled at each site drifted from the doc naming the sites, and [`crate::Body`]
 /// one region up already had the answer: *"All three numbers come from one
@@ -1369,18 +1354,18 @@ fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> u
 /// strip, so moving it off screen for a file that fits is a loss with no gain.
 ///
 /// **What has to be on screen for that is a changed *line*, not the `@@` header
-/// above it**, and the first draft of this tested the header. On a pane one row
-/// shorter than the hunk's lead-in that draws the reader a bare hunk header with
-/// none of its content under it, which is #257's own reported symptom with the
-/// gate reporting it handled. So the visibility test is the busiest hunk's first
+/// above it.** Testing the header instead draws a bare hunk header with none of
+/// its content under it on a pane one row shorter than the hunk's lead-in, which
+/// is the reported symptom with the gate reporting it handled. So the visibility
+/// test is the busiest hunk's first
 /// changed line, and the row landed on is still its header, because a change
 /// arrives with the `@@` that says where it is.
 ///
 /// **Which makes it two tests rather than one**, and the second is the floor:
 /// a landing is worth the heading only if the change is drawn *from the
 /// landing* as well as not drawn from the heading. `Body::split` gives the diff
-/// a single row at its floor, where the first draft put one bare `@@` in the
-/// whole region and the heading it replaced carried the path, the counts, the
+/// a single row at its floor, so without that second test the whole region is
+/// one bare `@@` where the heading it replaced carried the path, the counts, the
 /// sigil and the strip.
 ///
 /// **The busiest hunk rather than the first.** A block is a heading and then a
@@ -1648,11 +1633,11 @@ pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> 
 /// is the shape [`gap_rows`]' own docblock records drifting: a term spelled at
 /// every site is a term a site eventually forgets.
 ///
-/// **The cache route, which is [`block_rows`]'s and not [`rows_in`]'s**, and the
-/// first draft of this took the other one on a reason that was false. It read
-/// *"costs what `Frame::diff` costs, which for a file the frame is already
-/// holding is one `stat` and no read"*, which is `block_rows`' cost quoted under
-/// `rows_in`'s call: [`vigia_core::Frame::diff`] **re-reads a file written in the
+/// **The cache route, which is [`block_rows`]'s and not [`rows_in`]'s.** The
+/// tempting reason for the other one — *"costs what `Frame::diff` costs, which
+/// for a file the frame is already holding is one `stat` and no read"* — is
+/// `block_rows`' cost quoted under `rows_in`'s call:
+/// [`vigia_core::Frame::diff`] **re-reads a file written in the
 /// last two seconds by design**, and the pinned file is the file an agent is
 /// writing, so that is the one file for which it is never a `stat`. It made two
 /// whole-file diffs of that file per gesture where one would do, the second of
@@ -1733,8 +1718,7 @@ impl View {
     ///
     /// **Not the bar's span**, which is [`View::list_span`]: this is what *this*
     /// window shows and that is a property of the position, so a bar drawn from it
-    /// changes length as a reader scrolls. It was the bar's span for one round of
-    /// #313's audit and the correction is recorded there.
+    /// changes length as a reader scrolls.
     ///
     /// What it is for is asking a drawn screen what it drew, which is what the
     /// gates in `tests/list.rs` want and what nothing in the renderer does.
@@ -2266,9 +2250,7 @@ impl View {
                 };
         }
 
-        // **And the clamp has to be re-derived, not remembered**
-        // ([#272](https://github.com/breferrari/vigia/issues/272), found by the
-        // second audit round against the first round's own fix). The two
+        // **And the clamp has to be re-derived, not remembered.** The two
         // assignments above fire on the frame a reader reaches the end and on no
         // frame after it: `last_screenful` stores a position from which the next
         // walk collects exactly `height` logical rows, so nothing overshoots,
@@ -2333,12 +2315,10 @@ impl View {
         // always enough to fill `height` display rows, and I4 never sees this.
         //
         // Before [`Self::take_list`] rather than after it, because the list is
-        // planned against the rows this leaves and the gutter it records. **It is
-        // no longer because the trim moves [`Self::top`]**, which is what this
-        // said until the second audit round read it against the code: the trim
-        // stopped moving anything stored when it became a display offset, and a
-        // sentence describing the mechanism that shipped the trap is the sentence
-        // a later session would restore it from.
+        // planned against the rows this leaves and the gutter it records. **Not
+        // because the trim moves [`Self::top`]**: it moves nothing stored, being
+        // a display offset. Reading it as a stored move is what shipped the trap
+        // below.
         view.wrap_rows(width, wrap, height, at_bottom);
 
         // **After the walk, because only the walk knows where the diff landed.**
@@ -2615,7 +2595,7 @@ impl View {
     /// the largest line number among the rows. Taking it once, before the
     /// expansion, breaks the loop at the only point where the answer is a
     /// property of the walk rather than of the wrap. With wrapping off it is
-    /// byte-identical to what the painter used to compute for itself.
+    /// byte-identical to the painter's own computation.
     ///
     /// **A line whose tail will not fit is drawn whole instead**, clipped and
     /// marked `›` exactly as it is today. That is the honest answer at the last
@@ -2699,8 +2679,8 @@ impl View {
         // **[`Self::top`] is not moved, and that is what makes the end of the
         // diff a place a reader can leave.**
         //
-        // The first draft advanced it by the rows the trim dropped, which reads
-        // as the tidy thing and is a **one-way trap**. `top` is stored back as the
+        // Advancing it by the rows the trim dropped reads as the tidy thing and
+        // is a **one-way trap**. `top` is stored back as the
         // scroll position, and from the advanced row fewer than `height` logical
         // rows remain, so the next frame is `short`, restarts through
         // [`Self::last_screenful`], lands on the same row and trims to the same
@@ -2827,7 +2807,7 @@ impl View {
     /// frames that ran short.
     ///
     /// **Half open, matching the walk's own bound**, so the caller passes the
-    /// pair it already holds. An inclusive `last` made the caller write
+    /// pair it already holds. An inclusive `last` makes the caller write
     /// `stop - 1` and this body write `last + 1` back, which is a round trip
     /// through an off-by-one at the one boundary in this file where an
     /// off-by-one draws a plausible screen.
@@ -2954,10 +2934,9 @@ impl View {
         n += 1;
 
         // **A labelled block so the block's closing gap has one push site.**
-        // The three paths below used to `return`, and each is a place a row can
-        // run out of room; with a trailing [`Row::Gap`] to add
-        // ([#165](https://github.com/breferrari/vigia/issues/165)) that would
-        // have been three copies of one push, which is how the copies come to
+        // The three paths below are each a place a row can run out of room, so
+        // letting them `return` means three copies of the trailing [`Row::Gap`]
+        // push, which is how the copies come to
         // disagree. Breaking out instead leaves the gap as a single tail,
         // guarded by the same `n >= skip && rows.len() < height` every other row
         // here is: a path that broke for want of room fails that guard on its
@@ -3494,9 +3473,8 @@ mod tests {
 
     #[test]
     fn a_pane_too_short_to_draw_the_change_keeps_the_heading() {
-        // **The second half of the rule**, and the half the first draft of it
-        // did not have: a landing is worth the heading only when the change is
-        // drawn *from the landing*. `three_hunks`' busiest hunk opens with six
+        // **The second half of the rule**: a landing is worth the heading only
+        // when the change is drawn *from the landing*. `three_hunks`' busiest hunk opens with six
         // context lines, so a pane of seven rows or fewer draws the `@@` and
         // none of what is under it, and one bare hunk header is strictly less
         // than the heading it replaced.

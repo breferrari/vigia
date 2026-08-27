@@ -29,15 +29,16 @@ use std::path::{Path, PathBuf};
 /// Files absent from this table are unbounded, which is deliberate: a table
 /// naming every file would need editing whenever one is added, and the ones
 /// worth bounding are the ones that were furthest out when the ratchet landed.
-const RATIO_CEILING: [(&str, u64); 8] = [
+const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia-core/src/change.rs", 192),
     ("vigia/src/input.rs", 240),
     ("vigia/src/app.rs", 246),
     ("vigia-core/src/history.rs", 236),
-    ("vigia/src/render.rs", 195),
+    ("vigia/src/render.rs", 194),
     ("vigia/src/glyphs.rs", 191),
     ("vigia/src/lib.rs", 187),
     ("vigia/src/config.rs", 163),
+    ("vigia/src/view.rs", 159),
 ];
 
 /// Comments carrying a tracker reference, a date, or the narrative of a change.
@@ -51,7 +52,7 @@ const RATIO_CEILING: [(&str, u64); 8] = [
 /// from such a probe, and it left 161 of slack, so the gate stayed green
 /// against a deliberate mutation. A ceiling above the measurement is a bound
 /// nothing can reach.
-const SESSION_CONTEXT_CEILING: usize = 1_604;
+const SESSION_CONTEXT_CEILING: usize = 1_503;
 
 /// The longest `///` run in the tree, in lines.
 ///
