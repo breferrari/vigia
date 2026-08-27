@@ -932,62 +932,16 @@ const fn affords_bar(width: u16) -> bool {
 }
 
 /// The pane's whole margin, both sides counted together: blank columns it keeps
-/// between its own edge and any glyph. Widest pane first.
+/// between its own edge and any glyph. Widest pane first. `SPEC.md` §11.1.
 ///
-/// `assets/preview.svg` draws its **furniture** to the window's edge and its
-/// **text** one to three cells inside it. Measured off the file: the nine row
-/// washes span `x=8 width=884` and the region rule runs `x1=8` to `x2=892`, which
-/// is the window exactly, while the text proper begins at `x=32`. (The caret is
-/// at `x=8`, on the pane's own edge, which is a *licensed* glyph outside the
-/// margin rather than a counterexample
-/// to it: the ladder is about text, and the sentence above is still what the picture
-/// says about text.) The shell drew everything from column 0, and by
-/// §5.1's own law a picture in a public README is a specification, so that was a
-/// fourth undocumented departure from it rather than a choice.
+/// **A total rather than per side.** A per-side ladder steps both sides on one
+/// column, so `pane - 2` goes *down* by one exactly where a widening pane should
+/// gain: it grows the footer to two rows at 44 and at 80, spending a body row on
+/// a wider pane. [`margins_of`] splits the total, and 43 and 79 are the widths
+/// that have bought one column and not the second.
 ///
-/// **Nothing below forty-three columns**, and that floor is the ladder's point
-/// rather than a rounding. I6 is named for forty and every column there is
-/// already contested: the sparkline has been bought and sold twice in this file
-/// over two columns at exactly that width. A pane that cannot afford a margin
-/// does not take one, and a reader at forty gets the pane they got before.
-///
-/// **Forty-three, not forty-four, and the difference is the odd rung rather than
-/// a slip.** The picture proposes the ladder per side, one cell each from 44 and
-/// two from 80, and that is exactly what ships at 44 and at 80. The total has
-/// to
-/// climb one column at a time to stay monotone, so the first of the two columns
-/// lands a width early, at 43. What the floor protects is I6's forty-column pane,
-/// which is three columns clear of it either way; what it does not claim is that
-/// 43 is untouched, because it is not. `the_inset_never_reaches_the_forty_column_pane`
-/// gates the claim that is actually load bearing.
-///
-/// `SPEC.md` §11.1 carries the rungs.
-///
-/// The top rung is a judgement inside what the picture shows rather than a number
-/// read off it: the mockup's own left inset is one cell at the caret and three at
-/// the kind letter, on a canvas about a hundred and nine columns wide. §5.3
-/// already rules that the picture binds the element set and each element's
-/// promises, never glyph-for-glyph fidelity.
-///
-/// **Counted as a total across both sides rather than per side, and that is the
-/// rung table rather than an arithmetic convenience.** A per-side ladder steps
-/// its two sides on the same column, so it costs two columns for the one a
-/// widening pane just gained: `pane - 2` goes *down* by one exactly where it
-/// should go up. That is what [`ROW_LAYOUTS`] is written out to refuse, one
-/// element further out, and it is not theoretical. Taking both sides at once grew
-/// the footer to two rows at 44 and at 80, spending a body row on a wider pane,
-/// and walked the header's worktree name from marked back to whole as the pane
-/// *narrowed* across 80. Both were caught by gates that already existed
-/// (`a_bonus_hint_rung_never_buys_itself_a_footer_row`,
-/// `the_header_facts_degrade_through_one_recorded_sequence`), which is what an
-/// invariant with a failing test behind it is for.
-///
-/// So the total climbs by one per rung and [`margins_of`] splits it. The two odd
-/// rungs are the widths where the pane has bought one column of margin and not
-/// yet the second: 43 and 79. **The widths the picture names are both even**,
-/// one cell a side at 44 and two at 80, so the ladder it proposes is what
-/// ships
-/// and these two rows are the step between them rather than a change to it.
+/// **Nothing below forty-three**, which keeps I6's forty-column pane three
+/// columns clear: every column there is already contested.
 const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
 
 /// The margin a pane this wide takes, both sides together.
@@ -1045,58 +999,25 @@ const fn inset_of(pane: u16) -> u16 {
     margins_of(pane).0
 }
 
-/// The pane width from which the pinned list may stop being a strip above the diff
-/// and become a **left rail** beside it.
+/// The pane width from which the pinned list may become a **left rail** beside
+/// the diff rather than a strip above it. `SPEC.md` §11.2 B14.
 ///
-/// **May, per `SPEC.md` §11.2 B14**: this decides where the gesture can be
-/// honoured, and `Chrome::rail` decides
-/// whether it is. The derivation below is untouched by that and is what makes the
-/// width the right one to offer at.
+/// **May**: this is where the gesture can be honoured, and `Chrome::rail` is
+/// whether it is.
 ///
-/// **Derived rather than chosen, and the derivation is the whole ruling.** On a
-/// wide pane a path ends near column 40 and its glance cluster is pinned to the
-/// right edge, up to 150 cells away, so the *columnar* association the fixed
-/// slots buy is kept while the *per-row* one is destroyed by the void between
-/// them.
-/// Placing the regions side by side is what closes it. Splitting the pane costs
-/// each region width, though, and [`Columns::plan`] is a ladder in that width, so
-/// the question is where the split can be made without a rung being taken away.
+/// **Derived rather than chosen.** Both regions read one glance ladder, so a
+/// split costs no rung only where both halves and the undivided pane below it sit
+/// on one plateau. [`SETTLED`]'s runs to a pane of 133; the only other needs 328
+/// columns. So 134 is the first width at which the stacked list would otherwise
+/// have spent its new columns on a wider heat strip.
+/// `the_rail_arrives_where_the_stacked_list_would_have_climbed` re-derives it
+/// from [`Columns::plan`], so moving the ladder reddens it here.
 ///
-/// **There is exactly one such place below three hundred columns.** Both regions
-/// read the same ladder, so a split costs no rung only where both halves *and*
-/// the undivided pane below the split sit on one plateau. [`SETTLED`]'s plateau
-/// runs from 54 to 129 planning columns, which is a pane of 133; the only other
-/// plateau is the top rung, which needs 160 planning columns in each half and
-/// therefore a 328-column pane. So the rail is offered from **134**, the first width
-/// at which the stacked list would have left the settled ladder and spent its new
-/// columns on a twenty-four slice heat strip. Spending them on adjacency instead
-/// is the swap, and one column later no rail narrower than 134 columns could
-/// match the wider strip.
-///
-/// `the_rail_arrives_where_the_stacked_list_would_have_climbed` re-derives this
-/// number from [`Columns::plan`] rather than restating it, so moving the glance
-/// ladder reddens it here.
-///
-/// **And it is the *block* rung's derivation, which is a limit rather than a
-/// caveat.** [`Columns::plan`] takes the glyph rung, a dense cell draws two
-/// buckets per column, and the same table is therefore reached at different
-/// widths: on a terminal carrying braille or octants the stacked ladder climbs at
-/// a pane of 119 and is already past the settled rung by 133, so the crossing
-/// costs twenty-four heat slices for twelve, in both regions. No arrival width is
-/// loss-free at every rung: the braille plateau that would allow one is empty, and
-/// the next needs a 268-column pane.
-/// [#284](https://github.com/breferrari/vigia/issues/284) is the row for an
-/// arrival that knows its rung, which needs the glyph rung to reach the layout and
-/// is a signature this constant cannot reach from here.
-/// `crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung` pins what
-/// does hold everywhere: no element is taken away, and neither region falls below
-/// the complement the published picture draws at its own rung.
-///
-/// **What the split costs is the diff's content column**, from about 129
-/// planning columns at 133 to 60 at 134. That is the feature rather than a
-/// defect: a rail at *any* width narrows the diff, because there is nowhere else
-/// for its columns to come from. `SPEC.md` §11.1 carries the number so it is met
-/// in this file rather than on a pane.
+/// **It is the block rung's derivation.** A dense cell draws two buckets per
+/// column, so on braille or octants the stacked ladder is already past the
+/// settled rung by 133 and the crossing costs slices. No arrival width is
+/// loss-free at every rung; an arrival that knows its rung is
+/// [#284](https://github.com/breferrari/vigia/issues/284).
 const RAIL_FROM: u16 = 134;
 
 /// Path columns the rail keeps beside a settled glance cluster.
@@ -2185,55 +2106,20 @@ fn bar_for(wide: bool, rows: u16, span: u64, of: u64) -> Bar {
 /// The width a region's glance columns are planned against.
 ///
 /// **The pane, less its own inset, less a caret column it may have, and less a
-/// scrollbar column whether or not one is drawn.** The bar's presence is a fact about the
-/// contents rather than the pane: [`scrollable`] asks whether what a region
-/// holds outruns what it can show, so a seventh changed file or a diff one row
-/// taller than the screen makes a bar appear and narrows the region under a
-/// layout that was supposed to be a property of the pane.
+/// scrollbar column whether or not one is drawn.** The bar's presence is a fact
+/// about the contents rather than the pane, so paying it unconditionally is what
+/// stops a seventh changed file narrowing the region under a layout that is
+/// supposed to be a property of the pane. Same ruling as [`affords_caret`].
 ///
-/// Paying it unconditionally is the ruling [`affords_caret`] already made against
-/// the identical hazard, and for the identical reason: a decision that flips
-/// with the contents flips on the frame a reader is looking at. It costs two
-/// columns of path on a pane with nothing to scroll, which is the trade
-/// [`Columns`] already makes every time it reserves a slot no row can fill.
+/// **The inset is charged on the left alone.** §11.1 rules there is no trailing
+/// reserve beyond the scrollbar column, so the bar's two columns stand in for the
+/// right-hand margin. That holds only while the margin's trailing half never
+/// outgrows the reserve, which
+/// `the_inset_never_outgrows_the_scrollbars_reserve` asserts.
 ///
-/// Written once because both regions need it and they must agree; [`Painter::body`]
-/// takes no caret, so it passes zero.
-///
-/// **And less the pane's own inset, which is paid on the left alone.** That is
-/// the margin ladder reconciled with the ruling above it rather than layered on
-/// top: `SPEC.md` §11.1 rules there is *no
-/// trailing reserve beyond the scrollbar column*, and that the two columns a row
-/// stops short of the pane's right edge are the bar's rather than a margin. So
-/// the inset does **not** buy a second set of blank columns on the right. It buys
-/// the matching set on the left, and the pane comes out even at the top rung
-/// because [`BAR_WIDTH`] and the widest **left half** of [`MARGIN_RUNGS`] are
-/// both two. The half rather than the rung, because that table counts the whole
-/// margin across both sides and [`inset_of`] is what this function charges: the
-/// widest rung is four.
-///
-/// **The gate watches the other half, and the two sentences are about different
-/// things.** What makes the pane look square at the top rung is the *left* half
-/// matching [`BAR_WIDTH`], which is the paragraph above. What makes charging the
-/// margin once *correct* is the **trailing** half never outgrowing that reserve,
-/// because the reserve is what stands in for it: a right-hand margin wider than
-/// two columns would no longer be covered and §11.1's no-trailing-reserve ruling
-/// would have to be re-decided. So
-/// `the_inset_never_outgrows_the_scrollbars_reserve` asserts the trailing half.
-///
-/// **The leading half is deliberately not claimed**, and the claim is
-/// falsifiable: a top rung of `(80, 5)` gives a left half of three and the gate
-/// stays green.
-///
-/// **Two widths, and they are one number only while a region spans the pane.**
-/// `available`
-/// is the region's own full width, before any scrollbar narrowed it; `pane` is
-/// still what the *ladder* is resolved from, so [`inset_of`] is decided from the
-/// screen and never from a region, which is the ruling [`margin_of`] already
-/// makes and this signature keeps rather than reopens. On every stacked layout
-/// the two arguments are the same number and every boundary is exactly where it
-/// was; beside a rail they differ, and passing the pane for both would plan a
-/// seventy-column rail against a two-hundred column row.
+/// **`available` is the region's own width and `pane` is the screen.** They are
+/// one number on every stacked layout; beside a rail, passing the pane for both
+/// plans a seventy-column rail against a two-hundred column row.
 const fn planning_width(available: u16, pane: u16, caret: u16) -> u16 {
     available
         .saturating_sub(BAR_WIDTH as u16)
@@ -2647,57 +2533,25 @@ impl Columns {
 
     /// The widest layout a region `width` columns wide both fits and deserves.
     ///
-    /// **Nothing here reads a row**, and that is the ruling rather than an
-    /// economy: a slot whose width depended on the rows would move whenever the
-    /// rows did, which is what scrolling a list does.
+    /// **Nothing here reads a row.** A slot whose width depended on the rows
+    /// would move whenever they did, which is what scrolling a list does, and
+    /// every slot is reserved whether or not anything can fill it — at launch no
+    /// file has a history, so a sparkline slot sized to what a row could fill
+    /// moves every column on the tick the first file is written.
     ///
-    /// **Every slot is reserved whether or not anything can fill it**, including
-    /// the sparkline in a region where no file has a history yet, which at
-    /// launch is every file. The alternative was tried: reserving only what some
-    /// drawn row could fill moves
-    /// every column on the tick the first file is written, which is precisely the
-    /// moment a reader is looking at the screen.
-    ///
-    /// **One table rather than four searches, and that is what makes it a
-    /// frame.** Allocating element by element in priority order is what the rest
-    /// of this file does, and for a *shared* layout it produces a ladder that
-    /// oscillates: swept across every width, the greedy form lost the sparkline
-    /// at 37 columns, got it back at 40 and lost both glance elements at 41,
-    /// because each element took the widest rung it could afford and starved
-    /// whatever came after. Widening a pane must never take something away, and
-    /// greedy allocation over variable rungs cannot promise that.
-    ///
-    /// Those three widths were measured when the counts cell still had a narrow
-    /// rung, so they do not reproduce against [`COUNT_CELL`] today and are kept
-    /// as the evidence that retired the greedy form rather than as a claim about
-    /// the current table. What survives the change is the shape: greedy
-    /// allocation over variable rungs oscillates, and a written-out table cannot.
-    ///
-    /// So the layouts are written out, widest first, and **each step gives up
-    /// exactly one thing and never gains any**. That makes the whole ladder
-    /// monotone by construction rather than by argument, which is the property a
-    /// reader dragging a pane edge actually notices.
-    /// **`glyphs` enters here rather than changing the table**, and that is what
-    /// keeps the ladder one ladder. The rungs are slices of the *window* and
-    /// their order is unchanged at every rung of the glyph ladder; what a denser
-    /// glyph moves is the *width* each one costs, so the same six steps are
-    /// simply reached earlier. Monotonicity is therefore still by construction
-    /// rather than by argument, and it holds separately at each rung, which is
-    /// what `tests/legibility.rs` sweeps rather than assumes.
+    /// **One table rather than four searches.** Allocating element by element in
+    /// priority order oscillates: swept across every width, the greedy form lost
+    /// the sparkline at 37 columns, got it back at 40 and lost both glance
+    /// elements at 41. Written out, each step gives up exactly one thing and
+    /// gains none, so the ladder is monotone by construction. `glyphs` enters
+    /// here rather than changing the table, so a denser cell moves what each rung
+    /// *costs* and not the order.
     ///
     /// **Two floors, because the table answers two questions.** [`ROW_FLOOR`] is
-    /// what survival costs and it decides every rung the tool shipped with.
-    /// [`generous_of`] is what generosity costs and it decides only the rungs
-    /// above [`SETTLED`], because "does it fit" stops being the right test
-    /// once a row has room to spare: a fixed-sum table takes a rung the instant
-    /// it fits, and the widest strip fits inside a pane narrower than the one the
-    /// published picture is measured from. Both constants carry the argument.
-    ///
-    /// **Monotone still, and still by construction.** The share grows with the
-    /// width it is taken from, so a rung once affordable stays affordable, and
-    /// the `max` against the settled layout means no width that had a layout can
-    /// lose it. Widening a pane cannot remove an element, which is the one
-    /// promise this whole function exists to keep.
+    /// what survival costs; [`generous_of`] is what generosity costs and decides
+    /// only the rungs above [`SETTLED`], because a fixed-sum table takes a rung
+    /// the instant it fits and the widest strip fits inside a pane narrower than
+    /// the published picture's.
     fn plan(width: u16, glyphs: Glyphs) -> Self {
         // Named rather than shadowed, because the docblock above calls them two
         // different questions and the code said `budget` twice.
