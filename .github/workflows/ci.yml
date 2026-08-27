@@ -50,6 +50,15 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets
 
+      # #131: both crates deny `rustdoc::broken_intra_doc_links` and no job ran
+      # rustdoc, so the deny was decorative. Three links had rotted behind it —
+      # one unresolved and two pointing at private items — and `cargo doc` was
+      # failing outright while every check stayed green.
+      - name: docs build
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       # `.github/workflows/release.yml` is generated from
       # `[workspace.metadata.dist]` and must never be hand-edited, so the failure
       # to worry about is editing the config and not regenerating. Nothing else
