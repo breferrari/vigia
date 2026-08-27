@@ -1458,7 +1458,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 
 /// What each document is allowed to weigh, in bytes.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
-    ("SPEC.md", 316_698),
+    ("SPEC.md", 315_805),
     ("ROADMAP.md", 94_781),
     ("RULINGS.md", 94_423),
 ];
