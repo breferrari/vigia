@@ -1457,8 +1457,12 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 }
 
 /// What each document is allowed to weigh, in bytes.
-const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
-    ("SPEC.md", 390938),
+const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
+    ("SPEC.md", 390054),
+    // The one document structurally licensed to grow every time somebody
+    // changes their mind, and it shipped ungated. A ledger of withdrawals with
+    // no ceiling is the additive system wearing the subtractive system's name.
+    ("REVOCATIONS.md", 1701),
     ("ROADMAP.md", 94777),
     ("RULINGS.md", 94399),
 ];
