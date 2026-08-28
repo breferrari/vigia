@@ -205,7 +205,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The region model assumes a vertical stack, so a rail cannot be expressed in it | [#251](https://github.com/breferrari/vigia/issues/251) |
 | ✅ | An agent's write is how the grammar compile arrives, and the warmer only ever ran at launch | [#129](https://github.com/breferrari/vigia/issues/129) |
 | ✅ | Follow jumps to the changed file's heading, so a change low in a long file lands off screen | [#257](https://github.com/breferrari/vigia/issues/257) |
-| ✅ | decision: may the graph age. **Ruled: it ages**, on a clock that stops when the window empties | [#243](https://github.com/breferrari/vigia/issues/243) |
+| ✅ | decision: may the graph age. **Ruled: it ages** | [#243](https://github.com/breferrari/vigia/issues/243) |
 | ✅ | Build: the window ages on a clock that stops when it empties | [#277](https://github.com/breferrari/vigia/issues/277) |
 | ✅ | One loud burst sets the band's yardstick, so a sparse window draws as spikes on a floor | [#256](https://github.com/breferrari/vigia/issues/256) |
 | ✅ | Three paint marks name a region by its first row, which a rail makes ambiguous | [#254](https://github.com/breferrari/vigia/issues/254) |
@@ -217,7 +217,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | decision: the keymap outgrew the hint bar, so does it get an overlay | [#167](https://github.com/breferrari/vigia/issues/167) |
 | ✅ | Build B12: `?` toggles a centred gestures sheet over the pane | [#206](https://github.com/breferrari/vigia/issues/206) |
 | ✅ | The sheet keeps the diff colours it covers, and its close control never brightens | [#211](https://github.com/breferrari/vigia/issues/211) |
-| ✅ | The sheet is 56 columns whatever the pane is, so a short one drops the mouse group with the room to draw it sitting unused | [#220](https://github.com/breferrari/vigia/issues/220) |
+| ✅ | The sheet is 56 columns whatever the pane is, so a short one drops the mouse group | [#220](https://github.com/breferrari/vigia/issues/220) |
 | ✅ | The sheet has no roomy rung: no air, no sections, and a reorder that would invert the keep-set | [#285](https://github.com/breferrari/vigia/issues/285) |
 | ✅ | At the residual floor the sheet still drops gestures in silence, and reaching them is an input-model ruling | [#286](https://github.com/breferrari/vigia/issues/286) |
 | ✅ | The sheet omits a gesture the README teaches, and the gate for exactly that is a hand-written list | [#288](https://github.com/breferrari/vigia/issues/288) |
@@ -235,6 +235,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
 | ⬜ | Turning wrap off leaves the scroll range at the wrapped row count, so scrolling goes erratic. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
 | ⬜ | research: price animation on an arriving change | [#365](https://github.com/breferrari/vigia/issues/365) |
+| ⬜ | watch.rs evicts an arbitrary path from a HashSet | [#368](https://github.com/breferrari/vigia/issues/368) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
 | ✅ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
@@ -359,7 +360,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The residual after #261 is a diffuse Markdown parse cost, largest single term an email auto-link at 94us a call | [#265](https://github.com/breferrari/vigia/issues/265) |
 | ✅ | ci complete fails on every draft PR, because its legs skip and it treats skipped as failure | [#267](https://github.com/breferrari/vigia/issues/267) |
 | ⬜ | A two-face bump with no xtask rerun leaves the committed dump stale and every gate green | [#268](https://github.com/breferrari/vigia/issues/268) |
-| ✅ | holds_p99_rounds excused a uniform breach as a host stall, because a round total was compared against a per-frame overshoot | [#269](https://github.com/breferrari/vigia/issues/269) |
+| ✅ | holds_p99_rounds excused a uniform breach as a host stall | [#269](https://github.com/breferrari/vigia/issues/269) |
 | ⬜ | The host-versus-work attribution needs a resolution floor, because the CPU clock is coarser than the budget it defends | [#270](https://github.com/breferrari/vigia/issues/270) |
 | ⬜ | A commit can describe a gate it deleted, and the suite stays green because a missing gate is what no gate can see | [#289](https://github.com/breferrari/vigia/issues/289) |
 | ✅ | `take-next` step 8 names a recurrence and prescribes a workaround, with no point at which the recurrence becomes a bug | [#290](https://github.com/breferrari/vigia/issues/290) |
