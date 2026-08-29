@@ -1382,7 +1382,7 @@ fn a_projection_covers_the_same_span_in_every_column() {
 
 /// A level is carried in a fraction of a byte, so it saturates far below what a
 /// sample can hold. Pinned rather than described, because the threshold moves
-/// with `LEVEL_UNIT` and nothing else would notice.
+/// with the unit and with the kernel's own decay, and nothing else would notice.
 #[test]
 fn a_level_saturates_rather_than_wrapping_and_keeps_its_reach() {
     // Bracketing the measured threshold at the position tested, so the pair
