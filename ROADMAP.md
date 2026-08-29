@@ -230,7 +230,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The columns left of the diff's scrollbar read as neither wash nor track | [#214](https://github.com/breferrari/vigia/issues/214) |
 | ✅ | The row wash has no left bar, and the reason it was refused expired with #119 | [#218](https://github.com/breferrari/vigia/issues/218) |
 | ✅ | decision: text cannot be selected or copied. **Ruled: the terminal selects (B20), `y` copies the path (B9)** | [#177](https://github.com/breferrari/vigia/issues/177) |
-| ⬜ | Build B9: `y` copies the caret file's path over OSC 52 | [#372](https://github.com/breferrari/vigia/issues/372) |
+| ✅ | Build B9: `y` copies the caret file's path over OSC 52 | [#372](https://github.com/breferrari/vigia/issues/372) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ⬜ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |

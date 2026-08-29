@@ -306,19 +306,27 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
 }
 
 /// `SPEC.md` §11.2 B9, and it needs its own test rather than a line in the inert
-/// list above.
+/// list above: an OSC 52 write draws nothing, so the whole rendering suite stays
+/// green whichever way the ruling goes and the keymap is where it is decidable.
 #[test]
-fn the_yank_key_is_refused_rather_than_unbound() {
+fn the_yank_key_is_bound_and_only_the_plain_one_is() {
+    assert_eq!(
+        action_for(&press(KeyCode::Char('y')), Regions::default()),
+        Some(Action::Yank),
+        "`y` is unbound, and §11.2 B9 rules that it copies the caret file's path"
+    );
+    // The neighbours stay unassigned. `Y` and `Ctrl-Y` would be a second and third
+    // way to spend the reader's clipboard, which is the one thing B9's surviving
+    // ground asks to be deliberate.
     for event in [
-        press(KeyCode::Char('y')),
         press(KeyCode::Char('Y')),
         with(KeyModifiers::CONTROL, KeyCode::Char('y')),
     ] {
         assert_eq!(
             action_for(&event, Regions::default()),
             None,
-            "{event:?} became an action, and `SPEC.md` §11.2 B9 refused the yank \
-             key rather than leaving it unassigned"
+            "{event:?} became an action, so there is more than one way to overwrite \
+             what the reader had on their clipboard"
         );
     }
 }
@@ -1616,7 +1624,7 @@ fn nothing_armed_means_no_deadline_at_all() {
     let now = Instant::now();
 
     assert_eq!(
-        patience(None, None, None, now),
+        patience(None, None, None, None, now),
         None,
         "with nothing held, nothing lingering and nothing in the window the loop \
          was handed a deadline, which is a timer on an idle monitor"
@@ -1624,13 +1632,16 @@ fn nothing_armed_means_no_deadline_at_all() {
 
     // Any one alone arms it, and none is allowed to hide the others.
     let hold = Held::new(Action::Scroll(1), (79, 5), now);
-    assert_eq!(patience(Some(hold), None, None, now), Some(STEP_DELAY));
     assert_eq!(
-        patience(None, Some(now + SCROLL_LINGER), None, now),
+        patience(Some(hold), None, None, None, now),
+        Some(STEP_DELAY)
+    );
+    assert_eq!(
+        patience(None, Some(now + SCROLL_LINGER), None, None, now),
         Some(SCROLL_LINGER)
     );
     assert_eq!(
-        patience(None, None, Some(HISTORY_SAMPLE), now),
+        patience(None, None, None, Some(HISTORY_SAMPLE), now),
         Some(HISTORY_SAMPLE),
         "a window with something in it did not ask the loop to wake, so the graph \
          freezes where it is"
@@ -1639,13 +1650,13 @@ fn nothing_armed_means_no_deadline_at_all() {
     // The nearest of them, whichever it is, because the loop has to wake for
     // the first thing due. Taking the wrong one lets the others run late.
     assert_eq!(
-        patience(Some(hold), Some(now + SCROLL_LINGER), None, now),
+        patience(Some(hold), Some(now + SCROLL_LINGER), None, None, now),
         Some(SCROLL_LINGER),
         "the linger is due first and the loop was told to sleep past it"
     );
     let soon = Held::new(Action::Scroll(1), (79, 5), now - STEP_DELAY + STEP_REPEAT);
     assert_eq!(
-        patience(Some(soon), Some(now + SCROLL_LINGER), None, now),
+        patience(Some(soon), Some(now + SCROLL_LINGER), None, None, now),
         Some(STEP_REPEAT),
         "the step is due first and the loop was told to sleep past it"
     );
@@ -1655,7 +1666,13 @@ fn nothing_armed_means_no_deadline_at_all() {
     // and a `min` written the wrong way round would be invisible against the
     // other two: they would simply always win.
     assert_eq!(
-        patience(None, Some(now + SCROLL_LINGER), Some(HISTORY_SAMPLE), now),
+        patience(
+            None,
+            Some(now + SCROLL_LINGER),
+            None,
+            Some(HISTORY_SAMPLE),
+            now
+        ),
         Some(SCROLL_LINGER),
         "the linger is due long before the next sample and the loop was told to \
          sleep past it"
@@ -1664,6 +1681,7 @@ fn nothing_armed_means_no_deadline_at_all() {
         patience(
             None,
             Some(now + HISTORY_SAMPLE * 2),
+            None,
             Some(HISTORY_SAMPLE),
             now
         ),
@@ -1679,14 +1697,14 @@ fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     let now = Instant::now();
 
     assert_eq!(
-        patience(None, None, history.ages_in(now), now),
+        patience(None, None, None, history.ages_in(now), now),
         None,
         "an empty window and nothing held handed the loop a deadline, which is a \
          timer on an idle monitor"
     );
 
     history.record_sized([("src/a.rs", Some(4_000u64))], now);
-    let armed = patience(None, None, history.ages_in(now), now)
+    let armed = patience(None, None, None, history.ages_in(now), now)
         .expect("a window holding a write did not arm the loop, so the graph freezes");
     assert!(
         armed <= HISTORY_SAMPLE,
@@ -1698,6 +1716,7 @@ fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     history.record_sized([], now + HISTORY_WINDOW);
     assert_eq!(
         patience(
+            None,
             None,
             None,
             history.ages_in(now + HISTORY_WINDOW),

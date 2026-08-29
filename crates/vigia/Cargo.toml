@@ -12,7 +12,7 @@ authors.workspace = true
 keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
-# `SPEC.md` section 9 counts twenty-one *files* here that read outside this
+# `SPEC.md` section 9 counts twenty-two *files* here that read outside this
 # package: eighteen reach `vigia-core/tests/support` by `#[path]`, and four
 # read repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
 # `sheet.rs` are in both groups, `package.rs` is the nineteenth and

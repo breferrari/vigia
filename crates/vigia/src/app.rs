@@ -38,6 +38,9 @@ pub struct App {
     position: Position,
     /// What the footer should say instead of the key hints.
     notice: Option<String>,
+    /// A path asked for and not sent yet: the escape is not a cell, and `App` has
+    /// no terminal.
+    yanking: Option<String>,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
@@ -100,6 +103,7 @@ impl Default for App {
         Self {
             position: Position::default(),
             notice: None,
+            yanking: None,
             following: false,
             masthead: false,
             rail: false,
@@ -201,6 +205,11 @@ impl App {
     /// measured in days makes every transient failure a certainty.
     pub fn warn(&mut self, message: impl Into<String>) {
         self.notice = Some(message.into());
+    }
+
+    /// The path a yank asked for, taken so it is sent once.
+    pub fn take_yank(&mut self) -> Option<String> {
+        self.yanking.take()
     }
 
     /// Drop the current message, because the frame it described has passed.
@@ -337,6 +346,12 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             // The bar's scale does not move.
             Action::ToggleWrap => self.wrap = !self.wrap,
+            // The caret file's path, not the drawn row, which elides. B9 against B20.
+            Action::Yank => {
+                if let Some(file) = frame.files().get(self.position.file) {
+                    self.yanking = Some(file.path.clone());
+                }
+            }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;

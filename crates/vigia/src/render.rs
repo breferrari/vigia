@@ -1758,7 +1758,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 15] = [
+const KEYBOARD: [Gesture; 16] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -1820,6 +1820,11 @@ const KEYBOARD: [Gesture; 15] = [
         keys: ["w", "w"],
         verb: ["wrap a long line, or clip it", "wrap long lines"],
     },
+    // Last of `view`: the one key that spends something outside this program.
+    Gesture {
+        keys: ["y", "y"],
+        verb: ["copy this file's path", "copy the path"],
+    },
     Gesture {
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
@@ -1834,7 +1839,7 @@ const KEYBOARD: [Gesture; 15] = [
 
 /// The order the height ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
-const DROP_ORDER: [usize; KEYBOARD.len()] = [14, 0, 1, 2, 3, 4, 5, 6, 9, 10, 12, 11, 7, 8, 13];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [15, 0, 1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 11, 7, 8, 14];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -1933,7 +1938,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 13 },
+        rows: Rows::Keyboard { from: 7, to: 14 },
     },
     Section {
         label: "mouse",
@@ -1941,7 +1946,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 13, to: 15 },
+        rows: Rows::Keyboard { from: 14, to: 16 },
     },
 ];
 
@@ -4462,8 +4467,9 @@ mod sheet_tables {
     }
     #[test]
     fn the_rows_given_up_before_the_keep_set_are_the_rail_then_the_pin() {
-        // Addressed by the cell it draws, not by its index.
-        const EXPECTED: [&str; 4] = ["r", "s", "w", "a"];
+        // Addressed by the cell it draws, not by its index. `y` is among the toggles
+        // rather than the keep-set: it costs less to give up than an unguessable one.
+        const EXPECTED: [&str; 5] = ["r", "s", "w", "y", "a"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
@@ -4472,8 +4478,9 @@ mod sheet_tables {
         assert_eq!(
             outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail, then the pin, then the wrap, then the staged run, so a pane at \
-             the floor is spending it on a gesture that could have fired there"
+             rail, then the pin, then the wrap, then the yank, then the staged run, \
+             so a pane at the floor is spending it on a gesture that could have \
+             fired there"
         );
     }
 

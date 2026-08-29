@@ -4,6 +4,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod app;
+mod clipboard;
 mod colour;
 /// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
 pub mod config;
@@ -191,6 +192,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         hovered: None,
         scrolling: None,
         scrolling_until: None,
+        notice_until: None,
         served: Vec::new(),
         written: false,
         warming: None,
@@ -293,6 +295,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
+            shell.settle_yank(began)?;
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -423,6 +426,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             }
         }
 
+        // Before the paint: the notice it raises has to reach this frame.
+        shell.settle_yank(began)?;
+
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
         // lands in the frame time it sits beside.
@@ -475,6 +481,9 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
+/// How long the footer says what a yank sent. One-shot, so an idle pane owns no timer.
+pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Wakes taken in one go, so one gesture costs one paint.
 const DRAIN_CAP: usize = 64;
 
@@ -525,6 +534,8 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
+    /// When the footer's notice stops being true, since a keypress produces no tick.
+    notice_until: Option<Instant>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
@@ -588,12 +599,12 @@ impl Shell {
 
     /// How long the loop may block before something here has to act.
     fn patience(&self, now: Instant) -> Option<std::time::Duration> {
-        // The history's own deadline joins the two gesture clocks here rather
-        // than at the receive, so `patience` stays the one place that decides
-        // whether this program owns a timer at all.
+        // Every deadline is folded here rather than at the receive, so `patience`
+        // stays the one place that decides whether this program owns a timer.
         input::patience(
             self.held,
             self.scrolling_until,
+            self.notice_until,
             self.history.ages_in(now),
             now,
         )
@@ -616,6 +627,23 @@ impl Shell {
             self.scrolling = None;
             self.scrolling_until = None;
         }
+    }
+
+    /// Send a path the reader yanked, and say so for `NOTICE_LINGER`.
+    ///
+    /// It says **sent** rather than copied, which is honest and not modest: OSC 52
+    /// has no reply and several terminals ship it disabled.
+    fn settle_yank(&mut self, now: Instant) -> Result<(), Failure> {
+        if input::settled(self.notice_until, now) {
+            self.app.clear_notice();
+            self.notice_until = None;
+        }
+        if let Some(path) = self.app.take_yank() {
+            self.session.send(&clipboard::copy(&path))?;
+            self.app.warn(format!("sent {path} to the clipboard"));
+            self.notice_until = Some(now + NOTICE_LINGER);
+        }
+        Ok(())
     }
 
     /// The drawable area of the terminal right now.
@@ -1146,14 +1174,19 @@ mod tests {
             "the loop reaches `recv_timeout` before it has decided whether \
              anything is held, so an idle monitor is being given a deadline"
         );
-        // Three clocks now, and one function that answers for all of them. A deadline
+        // Four clocks now, and one function that answers for all of them. A deadline
         // asked separately would be another chance to leave one armed on an idle
         // monitor, and the gate above can only see the branch, not what fed it.
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
         let sources = &code[asked..asked + 200.min(code.len() - asked)];
-        for clock in ["self.held", "self.scrolling_until", "ages_in"] {
+        for clock in [
+            "self.held",
+            "self.scrolling_until",
+            "self.notice_until",
+            "ages_in",
+        ] {
             assert!(
                 sources.contains(clock),
                 "`{clock}` is no longer among the deadlines `patience` is given, so \

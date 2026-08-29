@@ -240,6 +240,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
 | `w` | wrap a long line onto the row below, or clip it |
+| `y` | copy this file's path to the clipboard |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 
