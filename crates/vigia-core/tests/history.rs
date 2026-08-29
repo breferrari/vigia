@@ -1269,6 +1269,23 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
         "the same kernel drew {widths:?} samples for {sizes:?} bytes, so a \
          level's width reports the size of the write rather than when it landed"
     );
+
+    // And it reaches equally both ways, which the count above cannot see: a
+    // kernel bounded on one side draws the same number of samples for every
+    // magnitude too, and leans every one of them to one side of the write.
+    let at = HISTORY_SAMPLES / 2;
+    let levels = lone_write(9_000).levels(HISTORY_SAMPLES);
+    let span: Vec<usize> = levels
+        .iter()
+        .enumerate()
+        .filter(|(_, level)| **level > 0)
+        .map(|(sample, _)| sample)
+        .collect();
+    let (back, forward) = (at - span[0], span[span.len() - 1] - at);
+    assert_eq!(
+        back, forward,
+        "the level reaches {back} samples back from the write and {forward}          forward, so the kernel is bounded on one side: {levels:?}"
+    );
 }
 
 /// The axis is the half of the band a flooded window cannot draw.
