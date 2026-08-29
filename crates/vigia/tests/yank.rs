@@ -142,6 +142,9 @@ fn a_yank_with_nothing_to_copy_sends_nothing() {
     assert!(frame.files().is_empty(), "the fixture is not an empty tree");
 
     let mut app = App::new();
+    // Drawn first, or the caret would be unset because no frame has resolved one
+    // and this would pass on an empty tree and a full one alike.
+    let _ = drawn(&mut app, &mut frame);
     assert_eq!(
         yanked(&mut app, &mut frame),
         None,
