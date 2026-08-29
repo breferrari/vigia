@@ -85,10 +85,18 @@ fi
 
 # The board every comparison below reads, and whether all of it arrived. A short
 # fetch is invisible from inside a comparison: 1 reports drift that is not there,
-# 3 skips a roadmap row whose issue is missing (`[ -z "$state" ] && continue`),
-# and 2, 4 and 7 under-report in silence. Counted from the JSON rather than from
-# the TSV's line count, because a title carrying a newline would make the cheaper
-# form over-count and mask the very case this guards.
+# and 2, 4 and 7 under-report in silence. This is a precondition rather than an
+# eighth comparison, which is why it carries no number: the seven compare two
+# records against each other, and this one asks whether one of the records is
+# all here. Counted from the JSON rather than from the TSV's line count, because
+# a title carrying a newline would make the cheaper form over-count and mask the
+# very case this guards.
+#
+# `gh issue list --limit N` pages internally until N is satisfied, and SKILL.md's
+# `--paginate` trap does not reach it: that one is about `gh api --paginate --jq`
+# running the filter once per page, and the filter here is a separate jq over the
+# finished file. So the ceiling is free to be generous, and what makes it safe is
+# this guard rather than its height.
 say "the board:"
 issues=$(jq 'length' "$tmp/issues.json")
 if [ "$issues" -ge "$ISSUE_LIMIT" ]; then
@@ -121,7 +129,15 @@ found=0
 grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]' "$tmp/roadmap.md" | while IFS= read -r row; do
   n=$(printf '%s' "$row" | grep -oE '\[#[0-9]+\]' | head -1 | tr -dc '0-9')
   state=$(awk -F'\t' -v n="$n" '$1 == n { print $2 }' "$tmp/issues.tsv")
-  [ -z "$state" ] && continue
+  # A row citing an issue the board does not have used to `continue`, which is the
+  # same silence #369 was about and not the same cause: truncation is one way to
+  # get here, and a deleted issue, a transferred one and a mistyped `#N` are three
+  # more that no fetch size would fix. The board guard above cannot see any of
+  # them, because it counts what arrived rather than what was asked for.
+  if [ -z "$state" ]; then
+    printf '  DRIFT row cites #%s, which the tracker does not have\n' "$n"
+    continue
+  fi
   case "$row" in
     "| ✅"*) [ "$state" = "OPEN" ] && printf '  DRIFT row marked done, issue #%s is open\n' "$n" ;;
     *)      [ "$state" = "CLOSED" ] && printf '  DRIFT row not marked done, issue #%s is closed\n' "$n" ;;

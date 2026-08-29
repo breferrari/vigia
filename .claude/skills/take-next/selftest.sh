@@ -139,11 +139,10 @@ fi
 
 echo "preflight (the board every comparison reads):"
 
-# The fetch that feeds comparisons 1, 2, 3, 4 and 7. When it stops short, each
-# fails differently and none of them says so: 1 reports drift that is not there,
-# 3 skips a roadmap row whose issue is missing, and the rest under-report. That
-# happened at a limit of 200 against 202 issues, and the visible symptom was a
-# DRIFT line about I2a, tracked by #2 since Phase 1.
+# The tracker fetch every comparison downstream reads, and the roadmap row that
+# cites an issue no fetch contains. The two are one section because they are the
+# same silence from opposite ends: one is the record arriving short, the other is
+# a row pointing outside whatever arrived.
 PRE="$(dirname "$0")/preflight.sh"
 FIX="$(mktemp -d)"
 trap 'rm -rf "$FIX"' EXIT
@@ -154,17 +153,19 @@ cat > "$FIX/spec.md" <<'EOF'
 ## 11. Rulings
 EOF
 
+# Every fixture issue is closed, milestoned, named by a roadmap row and, for the
+# first, named by the spec, so comparisons 1 to 7 are quiet and each case below
+# reads exactly one line moving. The third row cites `#9`, which no `board` call
+# produces, and that is the comparison-3 case rather than an oversight.
 cat > "$FIX/roadmap.md" <<'EOF'
 ## Phase 8 - look
 | | Task | Issue |
 |---|---|---|
 | ✅ | one | [#1](https://example.invalid/1) |
 | ✅ | two | [#2](https://example.invalid/2) |
-| ✅ | three | [#3](https://example.invalid/3) |
+| ✅ | absent | [#9](https://example.invalid/9) |
 EOF
 
-# Three closed, milestoned, roadmap-mentioned issues, one of them naming I1, so
-# every other comparison is quiet and the board line is the only thing moving.
 board() { # count -> issues.json
   jq -n --argjson n "$1" '[range(1; $n + 1) | {
     number: ., state: "CLOSED", milestone: {title: "Phase 8 - look"},
@@ -172,22 +173,42 @@ board() { # count -> issues.json
   }]'
 }
 
-runs() { # limit, count -> the board line
+# One preflight run, filtered to the lines a case is about. `awk '{$1=$1}1'`
+# rebuilds the record on single spaces, which is what makes a case pattern
+# independent of the column padding `ok` and `hit` align their output on.
+runs() { # limit, count, pattern -> the matching lines, space-normalised
   board "$2" > "$FIX/issues.json"
-  PREFLIGHT_SPEC_FILE="$FIX/spec.md"   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md"   PREFLIGHT_ISSUES_FILE="$FIX/issues.json"   PREFLIGHT_ISSUE_LIMIT="$1"     sh "$PRE" 2>&1 | grep -E '^  (ok|DRIFT) +(all [0-9]+ issues|the fetch returned)' | sed 's/^ *//' | tr -s ' '
+  PREFLIGHT_SPEC_FILE="$FIX/spec.md" \
+  PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" \
+  PREFLIGHT_ISSUES_FILE="$FIX/issues.json" \
+  PREFLIGHT_ISSUE_LIMIT="$1" \
+    sh "$PRE" 2>&1 | awk -v p="$3" '$0 ~ p { $1 = $1; print }'
 }
 
-line=$(runs 3 3)
+BOARD='^ +(ok|DRIFT) +(all [0-9]+ issues|the fetch returned)'
+
+line=$(runs 2 2 "$BOARD")
 case "$line" in
-  "DRIFT the fetch returned 3 issues against a limit of 3"*)
+  "DRIFT the fetch returned 2 issues against a limit of 2"*)
     ok "a board at the fetch limit is reported, not read" ;;
   *) no "a board at the fetch limit is reported, not read" "a DRIFT naming the limit" "$line" ;;
 esac
 
-line=$(runs 4 3)
+line=$(runs 4 2 "$BOARD")
 case "$line" in
-  "ok all 3 issues fetched, under a limit of 4") ok "a board under the limit reads clean" ;;
-  *) no "a board under the limit reads clean" "ok all 3 issues fetched, under a limit of 4" "$line" ;;
+  "ok all 2 issues fetched, under a limit of 4"*) ok "a board under the limit reads clean" ;;
+  *) no "a board under the limit reads clean" "ok all 2 issues fetched, under a limit of 4" "$line" ;;
+esac
+
+# The other end of the same silence, and the one no fetch size fixes: #9 is cited
+# by a roadmap row and is in no board, which is what a deleted issue, a
+# transferred one and a mistyped number all look like from here.
+line=$(runs 4 2 'row cites #')
+case "$line" in
+  "DRIFT row cites #9, which the tracker does not have"*)
+    ok "a roadmap row citing an issue the board lacks is reported" ;;
+  *) no "a roadmap row citing an issue the board lacks is reported" \
+       "DRIFT row cites #9, which the tracker does not have" "$line" ;;
 esac
 
 echo "drift:"
@@ -202,18 +223,19 @@ else
   no "the tested filter is the one SKILL.md documents" "found in SKILL.md" "not found"
 fi
 
+present() { # needle, file, name
+  grep -qF "$1" "$2" 2>/dev/null && ok "$3" || no "$3" "$1" "absent"
+}
+
 # Comparison 6 says the shelf is identified by a description prefix, so the
 # marker string must appear in both places that depend on it.
-grep -qF 'startswith("Shelf:")' "$SKILL" 2>/dev/null \
-  && ok "SKILL.md still identifies the shelf by prefix" \
-  || no "SKILL.md still identifies the shelf by prefix" "startswith(\"Shelf:\")" "absent"
+present 'startswith("Shelf:")' "$SKILL" "SKILL.md still identifies the shelf by prefix"
 
-# The limit is the one thing the guard above cannot check about itself: the test
-# runs at a small override, so nothing there would notice the shipped default
+# The limit is the one thing the cases above cannot check about themselves: they
+# run at a small override, so nothing there would notice the shipped default
 # dropping back under the board. Pinned in both places that carry it.
-grep -qF 'PREFLIGHT_ISSUE_LIMIT:-1000' "$(dirname "$0")/preflight.sh" 2>/dev/null   && ok "preflight.sh still fetches to a limit of 1000"   || no "preflight.sh still fetches to a limit of 1000" "PREFLIGHT_ISSUE_LIMIT:-1000" "absent"
-
-grep -qF 'gh issue list --state all --limit 1000' "$SKILL" 2>/dev/null   && ok "SKILL.md's hand-run fetch takes the same limit"   || no "SKILL.md's hand-run fetch takes the same limit" "--limit 1000" "absent"
+present 'PREFLIGHT_ISSUE_LIMIT:-1000' "$PRE" "preflight.sh still fetches to a limit of 1000"
+present 'gh issue list --state all --limit 1000' "$SKILL" "SKILL.md's hand-run fetch takes the same limit"
 
 echo
 if [ "$FAIL" -eq 0 ]; then
