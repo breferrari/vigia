@@ -673,6 +673,7 @@ fn tag(action: Action) -> usize {
         Action::ToggleSingle => 11,
         Action::ToggleStaged => 111,
         Action::ToggleWrap => 112,
+        Action::Yank => 113,
         Action::ToggleSheet => 12,
         Action::CloseSheet => 13,
         Action::ListTo(_) => 14,

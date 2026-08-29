@@ -11,10 +11,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 21;
+const ESCAPING_FILES: usize = 22;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-one";
+const ESCAPING_FILES_SPELLED: &str = "twenty-two";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -45,7 +45,7 @@ fn test_files() -> Vec<(String, String)> {
         })
         .collect();
     found.sort();
-    // Twenty-one today.
+    // Twenty-two today.
     assert!(
         found.len() >= 20,
         "found only {} test files, which means the scan is looking in the wrong \
@@ -1458,12 +1458,12 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 
 /// What each document is allowed to weigh, in bytes.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 387899),
+    ("SPEC.md", 387934),
     // The one document structurally licensed to grow every time somebody
     // changes their mind, and it shipped ungated. A ledger of withdrawals with
     // no ceiling is the additive system wearing the subtractive system's name.
-    ("REVOCATIONS.md", 3217),
-    ("ROADMAP.md", 95356),
+    ("REVOCATIONS.md", 3192),
+    ("ROADMAP.md", 95405),
     ("RULINGS.md", 94399),
 ];
 

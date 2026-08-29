@@ -4,6 +4,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod app;
+mod clipboard;
 mod colour;
 /// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
 pub mod config;
@@ -26,9 +27,9 @@ pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
-    Action, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet,
-    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience,
-    scroll_mark, settled,
+    Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
+    Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
+    patience, scroll_mark, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -191,6 +192,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         hovered: None,
         scrolling: None,
         scrolling_until: None,
+        notice_until: None,
         served: Vec::new(),
         written: false,
         warming: None,
@@ -293,6 +295,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
+            shell.settle_yank(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -308,10 +311,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
         for wake in batch.drain(..) {
             match wake {
-                // Returning rather than breaking, so the reason travels with the
-                // exit. `shell` drops on the way out, which puts the terminal back
-                // before `main` prints this where the reader will see it.
+                // Returning rather than breaking, so the reason travels with the exit,
+                // and `shell` drops on the way out to put the terminal back first.
                 Wake::InputLost => {
+                    // The one exit by `return`, so the flush after the loop misses it.
+                    shell.settle_yank(Instant::now());
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
                 // The quit key's arm without the key, so `break` and not `return`:
@@ -423,6 +427,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             }
         }
 
+        // Before the paint: the notice it raises has to reach this frame.
+        shell.settle_yank(began);
+
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
         // lands in the frame time it sits beside.
@@ -441,6 +448,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // After the paint, because the paint is the last third of what a frame costs.
         shell.app.record_frame(began.elapsed());
     }
+
+    // `y` then `q` copies and leaves, and every arm ending the loop does so before the
+    // batch reaches its send. `InputLost` returns, and carries its own.
+    shell.settle_yank(Instant::now());
 
     Ok(())
 }
@@ -474,6 +485,9 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
+
+/// How long the footer says what a yank sent. One-shot, so an idle pane owns no timer.
+pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Wakes taken in one go, so one gesture costs one paint.
 const DRAIN_CAP: usize = 64;
@@ -525,6 +539,8 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
+    /// When the footer's transient message stops being true: a keypress makes no tick.
+    notice_until: Option<Instant>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
@@ -588,13 +604,15 @@ impl Shell {
 
     /// How long the loop may block before something here has to act.
     fn patience(&self, now: Instant) -> Option<std::time::Duration> {
-        // The history's own deadline joins the two gesture clocks here rather
-        // than at the receive, so `patience` stays the one place that decides
-        // whether this program owns a timer at all.
+        // Every deadline is folded here rather than at the receive, so `patience`
+        // stays the one place that decides whether this program owns a timer.
         input::patience(
-            self.held,
-            self.scrolling_until,
-            self.history.ages_in(now),
+            input::Deadlines {
+                held: self.held,
+                linger: self.scrolling_until,
+                notice: self.notice_until,
+                ageing: self.history.ages_in(now),
+            },
             now,
         )
     }
@@ -615,6 +633,27 @@ impl Shell {
         if input::settled(self.scrolling_until, now) {
             self.scrolling = None;
             self.scrolling_until = None;
+        }
+    }
+
+    /// Send a path the reader yanked, and say so for `NOTICE_LINGER`.
+    ///
+    /// It says **sent** rather than copied, which is honest and not modest: OSC 52
+    /// has no reply and several terminals ship it disabled.
+    /// A failed write is reported rather than propagated: a draw that fails has taken
+    /// the pane with it, but a copy is one a reader can go on watching without.
+    fn settle_yank(&mut self, now: Instant) {
+        if input::settled(self.notice_until, now) {
+            self.app.clear_flash();
+            self.notice_until = None;
+        }
+        if let Some(path) = self.app.take_yank() {
+            self.app
+                .flash(match self.session.send(&clipboard::copy(&path)) {
+                    Ok(()) => format!("sent {path} to the clipboard"),
+                    Err(e) => format!("could not send {path}: {e}"),
+                });
+            self.notice_until = Some(now + NOTICE_LINGER);
         }
     }
 
@@ -1146,14 +1185,19 @@ mod tests {
             "the loop reaches `recv_timeout` before it has decided whether \
              anything is held, so an idle monitor is being given a deadline"
         );
-        // Three clocks now, and one function that answers for all of them. A deadline
+        // Four clocks now, and one function that answers for all of them. A deadline
         // asked separately would be another chance to leave one armed on an idle
         // monitor, and the gate above can only see the branch, not what fed it.
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
-        let sources = &code[asked..asked + 200.min(code.len() - asked)];
-        for clock in ["self.held", "self.scrolling_until", "ages_in"] {
+        let sources = &code[asked..asked + 340.min(code.len() - asked)];
+        for clock in [
+            "held: self.held",
+            "linger: self.scrolling_until",
+            "notice: self.notice_until",
+            "ageing: self.history.ages_in",
+        ] {
             assert!(
                 sources.contains(clock),
                 "`{clock}` is no longer among the deadlines `patience` is given, so \

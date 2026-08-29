@@ -161,6 +161,23 @@ impl Session {
     pub fn screen(&mut self) -> &mut Screen {
         &mut self.screen
     }
+
+    /// Put `sequence` on the wire, outside the buffer.
+    ///
+    /// For an escape that draws nothing and so owns no cell. It could not go
+    /// through the painter in any case: `ratatui`'s `set_stringn` drops a
+    /// grapheme containing a control character, which is `SPEC.md` §11.2 B8's
+    /// finding. Written through the backend rather than a second handle on
+    /// stdout, so it cannot interleave with a frame mid-flush.
+    ///
+    /// # Errors
+    ///
+    /// The write or the flush fails.
+    pub fn send(&mut self, sequence: &str) -> io::Result<()> {
+        let out = self.screen.backend_mut();
+        out.write_all(sequence.as_bytes())?;
+        out.flush()
+    }
 }
 
 /// Refuse a standard output that is not a terminal.
@@ -812,10 +829,11 @@ mod tests {
     fn no_exit_path_in_the_shell_skips_the_destructors() {
         // The structural half of "the terminal is restored on every exit". What makes
         // that true is that every exit drops `Shell`, which owns the `Session`.
-        const SOURCES: [(&str, &str); 14] = [
+        const SOURCES: [(&str, &str); 15] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
             ("app.rs", include_str!("app.rs")),
+            ("clipboard.rs", include_str!("clipboard.rs")),
             ("colour.rs", include_str!("colour.rs")),
             ("config.rs", include_str!("config.rs")),
             ("glyphs.rs", include_str!("glyphs.rs")),

@@ -12,12 +12,12 @@ authors.workspace = true
 keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
-# `SPEC.md` section 9 counts twenty-one *files* here that read outside this
-# package: eighteen reach `vigia-core/tests/support` by `#[path]`, and four
-# read repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
-# `sheet.rs` are in both groups, `package.rs` is the nineteenth and
-# `theme_docs.rs` the twentieth. No destination is inside this
-# directory, so a packaged copy carries a test suite that cannot compile.
+# `SPEC.md` section 9 counts twenty-two *files* here that read outside this
+# package: nineteen reach `vigia-core/tests/support` by `#[path]`, and five read
+# repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
+# `sheet.rs` are in both groups, which is what makes the total twenty-two rather
+# than twenty-four. No destination is inside this directory, so a packaged copy
+# carries a test suite that cannot compile.
 #
 # Excluding the tests is section 9's own resolution, and the direction is the
 # point: it stops the *package* claiming a suite it cannot build, it does not

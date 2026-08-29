@@ -327,6 +327,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::CloseSheet
         | Action::Escape
         | Action::Redraw
+        | Action::Yank
         | Action::Quit => return None,
     };
     (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
@@ -337,19 +338,33 @@ pub fn settled(linger: Option<Instant>, now: Instant) -> bool {
     linger.is_some_and(|until| now >= until)
 }
 
+/// Every deadline the loop owns. Named: they fold to a minimum, so a value in the
+/// wrong slot is invisible to a test that arms one clock.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Deadlines {
+    /// A held button's next repeat.
+    pub held: Option<Held>,
+    /// When the scroll direction's mark stops being true.
+    pub linger: Option<Instant>,
+    /// When the footer's notice stops being true.
+    pub notice: Option<Instant>,
+    /// When the churn window next has to age.
+    pub ageing: Option<Duration>,
+}
+
 /// How long the loop may block before some clock here has to act.
-pub fn patience(
-    held: Option<Held>,
-    linger: Option<Instant>,
-    ageing: Option<Duration>,
-    now: Instant,
-) -> Option<Duration> {
-    let step = Held::wait(held, now);
-    let mark = linger.map(|until| until.saturating_duration_since(now));
-    // Folded rather than matched pairwise: a `match` over three options is eight
-    // arms, and the arm that returns `None` where one of them was `Some` is the
-    // one that quietly stops a clock nobody notices has stopped.
-    [step, mark, ageing].into_iter().flatten().min()
+pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
+    let since = |until: Instant| until.saturating_duration_since(now);
+    // Folded rather than matched: an arm returning `None` where one was `Some` quietly stops a clock.
+    [
+        Held::wait(due.held, now),
+        due.linger.map(since),
+        due.notice.map(since),
+        due.ageing,
+    ]
+    .into_iter()
+    .flatten()
+    .min()
 }
 
 /// What a held mouse button is repeating, and when its next step is due.
@@ -465,6 +480,8 @@ pub enum Action {
     ToggleSheet,
     /// Stop drawing the gestures sheet, whatever page it is on.
     CloseSheet,
+    /// Put the caret file's path on the clipboard. §11.2 B9.
+    Yank,
     /// Leave the frontmost thing: the gestures sheet if one is up, and the
     /// program if none is. `Esc`.
     Escape,
@@ -507,6 +524,7 @@ impl Action {
             | Self::CloseSheet
             | Self::Escape
             | Self::Redraw
+            | Self::Yank
             | Self::Quit => self,
         }
     }
@@ -547,6 +565,7 @@ impl Action {
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
             | Self::CloseSheet
+            | Self::Yank
             | Self::ScrollList(_) => false,
             // Dragging the list's bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the diff's
@@ -581,7 +600,8 @@ impl Action {
             | Self::ToggleStaged
             | Self::ToggleWrap
             | Self::ToggleSheet
-            | Self::CloseSheet => false,
+            | Self::CloseSheet
+            | Self::Yank => false,
         }
     }
 }
@@ -675,6 +695,8 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // `rtop` all open help on it, it was unbound here, and `h` is refused because
         // it is a vi motion everywhere else on a pane with no horizontal scroll.
         KeyCode::Char('?') => Some(Action::ToggleSheet),
+        // vi yanks on `y`, and `gitui` and `lazygit` both bind copy there.
+        KeyCode::Char('y') => Some(Action::Yank),
         _ => None,
     }
 }
