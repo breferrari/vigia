@@ -1401,7 +1401,7 @@ fn a_level_saturates_rather_than_wrapping_and_keeps_its_reach() {
     let over = lone_write(210_000_000);
     let levels = over.levels(HISTORY_SAMPLES);
     assert!(
-        levels.iter().any(|level| *level == u32::MAX),
+        levels.contains(&u32::MAX),
         "the largest sample a store can hold did not reach the ceiling, so the arithmetic wrapped somewhere: {levels:?}"
     );
     assert_eq!(
