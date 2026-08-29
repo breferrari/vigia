@@ -7,6 +7,10 @@
 					{
 						"type": "command",
 						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/leak-guard.mjs\""
+					},
+					{
+						"type": "command",
+						"command": "node \"$CLAUDE_PROJECT_DIR/.claude/scripts/decision-authority.mjs\""
 					}
 				]
 			}

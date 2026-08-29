@@ -1005,7 +1005,7 @@ fn reach_of(action: &Action) -> Reach {
         // `w`, and the sheet's own row for it. No mouse gesture reaches it.
         Action::ToggleWrap => Reach::Keyboard,
         // `y`. The pointer has no yank: a drag is the terminal's own selection,
-        // which §11.2 B20 rules the pane does not answer.
+        // which the pane does not answer today, and whether it should is open.
         Action::Yank => Reach::Keyboard,
         // `j`/`k`/arrows, and the wheel and the step buttons.
         Action::Scroll(_) => Reach::Both,
@@ -1331,7 +1331,7 @@ const GESTURES: [&str; 24] = [
     // control, and the hover mark.
     "click  ✕",
     "just point",
-    // B20's row, and the only one here the pane does not answer: the terminal
+    // The terminal's row, and the only one here the pane does not answer: it
     // gives selection back while the modifier is held.
     "Shift+drag",
 ];
@@ -1772,7 +1772,7 @@ fn roomy_shape() -> Vec<RoomyRow> {
         // Six since B19: `r`, `s`, `a` and `w` join `f` and `m` in `view`, which
         // is the section for the things that change what the body is made of.
         ("view", &GESTURES[7..14]),
-        // Eight, the close control, the hover mark and B20's modifier included.
+        // Eight, the close control, the hover mark and the terminal's modifier included.
         ("mouse", &GESTURES[16..24]),
         ("leaving", &GESTURES[14..16]),
     ] {
@@ -3324,7 +3324,7 @@ fn the_counter_is_right_where_a_page_spans_the_mouse_heading() {
             counter("18-20"),
             // The tail takes whatever the table's length modulo three leaves, so
             // each added gesture moves it: this is a full page where the row before
-            // B20's was a short one.
+            // the modifier's was a short one.
             counter("21-23"),
             counter("24"),
         ],

@@ -74,9 +74,9 @@ fn drawn(app: &mut App, frame: &mut Frame) -> String {
         .join("\n")
 }
 
-/// The invariant the whole ruling rests on. B20 declines an in-app selection
-/// because a cell holds what was *drawn*; B9 is worth having only because this
-/// does not.
+/// The invariant the whole ruling rests on: a cell holds what was *drawn*, so
+/// a copy taken from cells is the elided label. B9 is a semantic copy and is
+/// worth having because it is not that.
 #[test]
 fn the_yanked_path_is_the_whole_path_and_not_the_drawn_one() {
     let scratch = deep_scratch("yank-whole-path");
@@ -93,7 +93,7 @@ fn the_yanked_path_is_the_whole_path_and_not_the_drawn_one() {
     );
     assert!(
         !screen.contains(DEEP),
-        "the pane drew the whole path, so the selection B20 declines would have \
+        "the pane drew the whole path, so a copy taken from the cells would have \
          reached it and B9 is answering a question nobody has:\n{screen}"
     );
 
@@ -101,7 +101,7 @@ fn the_yanked_path_is_the_whole_path_and_not_the_drawn_one() {
     assert_eq!(
         sent, DEEP,
         "`y` sent {sent:?} rather than the path, so it is the drawn row by another \
-         route and B20 already declined that"
+         route, which is the one thing this key must not be"
     );
     assert!(
         !sent.contains(ELIDED),

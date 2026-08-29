@@ -1458,12 +1458,12 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 
 /// What each document is allowed to weigh, in bytes.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 387930),
+    ("SPEC.md", 387648),
     // The one document structurally licensed to grow every time somebody
     // changes their mind, and it shipped ungated. A ledger of withdrawals with
     // no ceiling is the additive system wearing the subtractive system's name.
-    ("REVOCATIONS.md", 3192),
-    ("ROADMAP.md", 95405),
+    ("REVOCATIONS.md", 4393),
+    ("ROADMAP.md", 95503),
     ("RULINGS.md", 94399),
 ];
 
@@ -1471,7 +1471,10 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
 ///
 /// A ceiling may rise only while another falls by at least as much. The per-file
 /// checks cannot see that trade; this exists to.
-const WRITTEN_LAYER_TOTAL: usize = 580931;
+///
+/// A ledger row is the exception it cannot express: a withdrawal recorded or an
+/// issue reopened cannot be declined to fit, which is #374.
+const WRITTEN_LAYER_TOTAL: usize = 581943;
 
 /// Each document weighs no more than its budget.
 #[test]
