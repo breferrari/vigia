@@ -1252,9 +1252,9 @@ fn lit(churn: &Churn) -> usize {
 /// A level says *when* a write happened. Its width must not say *how much*.
 #[test]
 fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
-    // Named rather than counted, and spanning six orders of magnitude, because
-    // the defect was invisible at the one size the shape gate above happens to
-    // use: unbounded, these lit 1, 33, 89, 120 and 120 samples respectively.
+    // Named rather than counted, and spanning six orders of magnitude: a kernel
+    // whose reach follows the write's size holds this at any single size and
+    // fails across them, so one size proves nothing.
     let sizes = [1u32, 100, 9_000, 127_000, 5_000_000];
     let widths: Vec<usize> = sizes.iter().map(|bytes| lit(&lone_write(*bytes))).collect();
 
@@ -1274,7 +1274,7 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
             .collect();
         assert!(
             drawn.iter().all(|lit| *lit == drawn[0]),
-            "projected onto {width} columns the same kernel drew {drawn:?} for              {sizes:?} bytes, so the write's size is back in its drawn width"
+            "projected onto {width} columns the same kernel drew {drawn:?} for {sizes:?} bytes, so the write's size is back in its drawn width"
         );
     }
 
@@ -1312,8 +1312,8 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
 #[test]
 fn a_large_burst_leaves_both_ends_of_the_window_on_the_axis() {
     // Sizes a formatter, a lockfile rewrite or a generated file reaches on an
-    // ordinary afternoon. Unbounded, every one of these lit all 120 samples and
-    // §11.1's floor had nowhere left to be drawn.
+    // ordinary afternoon, which is where §11.1's floor has the most to lose:
+    // a level reaching the window's ends leaves no quiet stretch to draw.
     for bytes in [127_000u32, 500_000, 5_000_000] {
         let levels = lone_write(bytes).levels(HISTORY_SAMPLES);
         assert_eq!(
@@ -1393,7 +1393,7 @@ fn a_level_saturates_rather_than_wrapping_and_keeps_its_reach() {
             .levels(HISTORY_SAMPLES)
             .iter()
             .all(|level| *level < u32::MAX),
-        "two hundred megabytes in one sample already saturates, so the store          represents less of a burst than it did"
+        "two hundred megabytes in one sample already saturates, so the store represents less of a burst than it did"
     );
 
     // Past it, the level pins at the ceiling rather than wrapping to nothing,
@@ -1402,11 +1402,11 @@ fn a_level_saturates_rather_than_wrapping_and_keeps_its_reach() {
     let levels = over.levels(HISTORY_SAMPLES);
     assert!(
         levels.iter().any(|level| *level == u32::MAX),
-        "the largest sample a store can hold did not reach the ceiling, so the          arithmetic wrapped somewhere: {levels:?}"
+        "the largest sample a store can hold did not reach the ceiling, so the arithmetic wrapped somewhere: {levels:?}"
     );
     assert_eq!(
         lit(&over),
         lit(&lone_write(9_000)),
-        "a saturating write drew a different width from an ordinary one, so          saturation costs the reach as well as the magnitude"
+        "a saturating write drew a different width from an ordinary one, so saturation costs the reach as well as the magnitude"
     );
 }

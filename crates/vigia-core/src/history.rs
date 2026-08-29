@@ -120,7 +120,7 @@ const _: () = assert!(
 
 /// What one unit of a level is worth, as a fraction of a byte. A level divides by
 /// its kernel's mass, so in whole bytes a write of [`Track::bump`]'s floor weight
-/// rounds away everywhere. Swept with [`LEVEL_REACH`], which the two move together.
+/// rounds away everywhere. Swept with [`LEVEL_REACH`], because the two move together.
 const LEVEL_UNIT: u32 = 256;
 
 /// Sum a retained series into the source buckets a sparkline is drawn from.
