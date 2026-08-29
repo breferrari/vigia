@@ -6,8 +6,8 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER, STEP_DELAY,
-    STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after,
+    Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER,
+    STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after,
     hover_repainted, patience, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
@@ -1624,7 +1624,7 @@ fn nothing_armed_means_no_deadline_at_all() {
     let now = Instant::now();
 
     assert_eq!(
-        patience(None, None, None, None, now),
+        patience(Deadlines::default(), now),
         None,
         "with nothing held, nothing lingering and nothing in the window the loop \
          was handed a deadline, which is a timer on an idle monitor"
@@ -1633,15 +1633,33 @@ fn nothing_armed_means_no_deadline_at_all() {
     // Any one alone arms it, and none is allowed to hide the others.
     let hold = Held::new(Action::Scroll(1), (79, 5), now);
     assert_eq!(
-        patience(Some(hold), None, None, None, now),
+        patience(
+            Deadlines {
+                held: Some(hold),
+                ..Deadlines::default()
+            },
+            now
+        ),
         Some(STEP_DELAY)
     );
     assert_eq!(
-        patience(None, Some(now + SCROLL_LINGER), None, None, now),
+        patience(
+            Deadlines {
+                linger: Some(now + SCROLL_LINGER),
+                ..Deadlines::default()
+            },
+            now
+        ),
         Some(SCROLL_LINGER)
     );
     assert_eq!(
-        patience(None, None, None, Some(HISTORY_SAMPLE), now),
+        patience(
+            Deadlines {
+                ageing: Some(HISTORY_SAMPLE),
+                ..Deadlines::default()
+            },
+            now
+        ),
         Some(HISTORY_SAMPLE),
         "a window with something in it did not ask the loop to wake, so the graph \
          freezes where it is"
@@ -1650,13 +1668,27 @@ fn nothing_armed_means_no_deadline_at_all() {
     // The nearest of them, whichever it is, because the loop has to wake for
     // the first thing due. Taking the wrong one lets the others run late.
     assert_eq!(
-        patience(Some(hold), Some(now + SCROLL_LINGER), None, None, now),
+        patience(
+            Deadlines {
+                held: Some(hold),
+                linger: Some(now + SCROLL_LINGER),
+                ..Deadlines::default()
+            },
+            now
+        ),
         Some(SCROLL_LINGER),
         "the linger is due first and the loop was told to sleep past it"
     );
     let soon = Held::new(Action::Scroll(1), (79, 5), now - STEP_DELAY + STEP_REPEAT);
     assert_eq!(
-        patience(Some(soon), Some(now + SCROLL_LINGER), None, None, now),
+        patience(
+            Deadlines {
+                held: Some(soon),
+                linger: Some(now + SCROLL_LINGER),
+                ..Deadlines::default()
+            },
+            now
+        ),
         Some(STEP_REPEAT),
         "the step is due first and the loop was told to sleep past it"
     );
@@ -1667,10 +1699,11 @@ fn nothing_armed_means_no_deadline_at_all() {
     // other two: they would simply always win.
     assert_eq!(
         patience(
-            None,
-            Some(now + SCROLL_LINGER),
-            None,
-            Some(HISTORY_SAMPLE),
+            Deadlines {
+                linger: Some(now + SCROLL_LINGER),
+                ageing: Some(HISTORY_SAMPLE),
+                ..Deadlines::default()
+            },
             now
         ),
         Some(SCROLL_LINGER),
@@ -1679,10 +1712,11 @@ fn nothing_armed_means_no_deadline_at_all() {
     );
     assert_eq!(
         patience(
-            None,
-            Some(now + HISTORY_SAMPLE * 2),
-            None,
-            Some(HISTORY_SAMPLE),
+            Deadlines {
+                linger: Some(now + HISTORY_SAMPLE * 2),
+                ageing: Some(HISTORY_SAMPLE),
+                ..Deadlines::default()
+            },
             now
         ),
         Some(HISTORY_SAMPLE),
@@ -1697,15 +1731,27 @@ fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     let now = Instant::now();
 
     assert_eq!(
-        patience(None, None, None, history.ages_in(now), now),
+        patience(
+            Deadlines {
+                ageing: history.ages_in(now),
+                ..Deadlines::default()
+            },
+            now
+        ),
         None,
         "an empty window and nothing held handed the loop a deadline, which is a \
          timer on an idle monitor"
     );
 
     history.record_sized([("src/a.rs", Some(4_000u64))], now);
-    let armed = patience(None, None, None, history.ages_in(now), now)
-        .expect("a window holding a write did not arm the loop, so the graph freezes");
+    let armed = patience(
+        Deadlines {
+            ageing: history.ages_in(now),
+            ..Deadlines::default()
+        },
+        now,
+    )
+    .expect("a window holding a write did not arm the loop, so the graph freezes");
     assert!(
         armed <= HISTORY_SAMPLE,
         "a live window asked the loop to sleep {armed:?}, past the sample it is \
@@ -1716,10 +1762,10 @@ fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     history.record_sized([], now + HISTORY_WINDOW);
     assert_eq!(
         patience(
-            None,
-            None,
-            None,
-            history.ages_in(now + HISTORY_WINDOW),
+            Deadlines {
+                ageing: history.ages_in(now + HISTORY_WINDOW),
+                ..Deadlines::default()
+            },
             now + HISTORY_WINDOW
         ),
         None,

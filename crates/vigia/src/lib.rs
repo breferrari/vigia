@@ -27,9 +27,9 @@ pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
-    Action, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet,
-    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience,
-    scroll_mark, settled,
+    Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
+    Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
+    patience, scroll_mark, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -295,7 +295,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
-            shell.settle_yank(began)?;
+            shell.settle_yank(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -427,7 +427,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         }
 
         // Before the paint: the notice it raises has to reach this frame.
-        shell.settle_yank(began)?;
+        shell.settle_yank(began);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -534,8 +534,9 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
-    /// When the footer's notice stops being true, since a keypress produces no tick.
-    notice_until: Option<Instant>,
+    /// When the footer's notice stops being true, and what it said: the message is
+    /// kept so a warning landing inside the window survives a clock armed elsewhere.
+    notice_until: Option<(Instant, String)>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
@@ -602,10 +603,12 @@ impl Shell {
         // Every deadline is folded here rather than at the receive, so `patience`
         // stays the one place that decides whether this program owns a timer.
         input::patience(
-            self.held,
-            self.scrolling_until,
-            self.notice_until,
-            self.history.ages_in(now),
+            input::Deadlines {
+                held: self.held,
+                linger: self.scrolling_until,
+                notice: self.notice_until.as_ref().map(|(until, _)| *until),
+                ageing: self.history.ages_in(now),
+            },
             now,
         )
     }
@@ -633,17 +636,25 @@ impl Shell {
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
     /// has no reply and several terminals ship it disabled.
-    fn settle_yank(&mut self, now: Instant) -> Result<(), Failure> {
-        if input::settled(self.notice_until, now) {
-            self.app.clear_notice();
-            self.notice_until = None;
+    /// A failed write is reported rather than propagated: a draw that fails has
+    /// taken the pane with it, but a copy is the one act here the reader can be
+    /// told about and go on watching without.
+    fn settle_yank(&mut self, now: Instant) {
+        if let Some((until, said)) = self.notice_until.take() {
+            if now < until {
+                self.notice_until = Some((until, said));
+            } else if self.app.notice() == Some(said.as_str()) {
+                self.app.clear_notice();
+            }
         }
         if let Some(path) = self.app.take_yank() {
-            self.session.send(&clipboard::copy(&path))?;
-            self.app.warn(format!("sent {path} to the clipboard"));
-            self.notice_until = Some(now + NOTICE_LINGER);
+            let said = match self.session.send(&clipboard::copy(&path)) {
+                Ok(()) => format!("sent {path} to the clipboard"),
+                Err(e) => format!("could not send {path}: {e}"),
+            };
+            self.app.warn(said.clone());
+            self.notice_until = Some((now + NOTICE_LINGER, said));
         }
-        Ok(())
     }
 
     /// The drawable area of the terminal right now.
@@ -1180,12 +1191,12 @@ mod tests {
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
-        let sources = &code[asked..asked + 200.min(code.len() - asked)];
+        let sources = &code[asked..asked + 340.min(code.len() - asked)];
         for clock in [
-            "self.held",
-            "self.scrolling_until",
-            "self.notice_until",
-            "ages_in",
+            "held: self.held",
+            "linger: self.scrolling_until",
+            "notice: self.notice_until",
+            "ageing: self.history.ages_in",
         ] {
             assert!(
                 sources.contains(clock),

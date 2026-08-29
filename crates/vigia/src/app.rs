@@ -38,9 +38,9 @@ pub struct App {
     position: Position,
     /// What the footer should say instead of the key hints.
     notice: Option<String>,
-    /// A path asked for and not sent yet: the escape is not a cell, and `App` has
-    /// no terminal.
+    /// Asked for and not sent yet, then the caret's path on the frame last drawn.
     yanking: Option<String>,
+    caret: Option<String>,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
@@ -104,6 +104,7 @@ impl Default for App {
             position: Position::default(),
             notice: None,
             yanking: None,
+            caret: None,
             following: false,
             masthead: false,
             rail: false,
@@ -207,7 +208,7 @@ impl App {
         self.notice = Some(message.into());
     }
 
-    /// The path a yank asked for, taken so it is sent once.
+    /// Taken, so a yank is sent once.
     pub fn take_yank(&mut self) -> Option<String> {
         self.yanking.take()
     }
@@ -346,12 +347,7 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             // The bar's scale does not move.
             Action::ToggleWrap => self.wrap = !self.wrap,
-            // The caret file's path, not the drawn row, which elides. B9 against B20.
-            Action::Yank => {
-                if let Some(file) = frame.files().get(self.position.file) {
-                    self.yanking = Some(file.path.clone());
-                }
-            }
+            Action::Yank => self.yanking = self.caret.clone(),
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;
@@ -649,6 +645,8 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
+        // By path: a tick rebuilds the list mid-batch and an index goes stale with it.
+        self.caret = frame.files().get(view.top.file).map(|at| at.path.clone());
         // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.

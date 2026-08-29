@@ -118,6 +118,9 @@ fn a_yank_is_sent_once() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    // The caret is resolved by drawing, so a yank before the first frame has
+    // nothing to point at.
+    let _ = drawn(&mut app, &mut frame);
 
     assert_eq!(yanked(&mut app, &mut frame).as_deref(), Some(DEEP));
     assert_eq!(
@@ -144,5 +147,41 @@ fn a_yank_with_nothing_to_copy_sends_nothing() {
         None,
         "a yank on an empty tree armed a write, so the reader's clipboard is spent \
          on nothing"
+    );
+}
+
+/// A tick rebuilds the file list from a fresh status walk, so an index is only
+/// good for the frame it was resolved against. `Frame::advance` between the draw
+/// and the keypress is the ordinary case in a batch, not a corner: the agent in
+/// the other pane writes while the reader watches.
+#[test]
+fn a_write_between_the_draw_and_the_key_does_not_move_the_yank() {
+    let scratch = deep_scratch("yank-across-a-tick");
+    // Sorts before DEEP's `crates/`, so creating it later shifts DEEP's index.
+    let earlier = "aaa/first.rs";
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    // The caret is resolved on this draw, against a list holding one file.
+    let _ = drawn(&mut app, &mut frame);
+    assert_eq!(frame.files().len(), 1, "the fixture is not one file");
+
+    // Then the tree changes under it, exactly as a batch carrying a tick and a
+    // key does, and DEEP is no longer index zero.
+    scratch.write(earlier, "one\n");
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().first().map(|at| at.path.as_str()),
+        Some(earlier),
+        "the fixture did not reorder, so this proves nothing about a stale index"
+    );
+
+    assert_eq!(
+        yanked(&mut app, &mut frame).as_deref(),
+        Some(DEEP),
+        "the yank followed the index rather than the path, so the reader copied a \
+         file they were not looking at"
     );
 }
