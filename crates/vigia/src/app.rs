@@ -38,6 +38,9 @@ pub struct App {
     position: Position,
     /// What the footer should say instead of the key hints.
     notice: Option<String>,
+    /// Shown over `notice` rather than into it: a confirmation must not be erased
+    /// by the next tick, nor bury a warning that has no expiry.
+    flash: Option<String>,
     /// Asked for and not sent yet, then the caret's path on the frame last drawn.
     yanking: Option<String>,
     caret: Option<String>,
@@ -103,6 +106,7 @@ impl Default for App {
         Self {
             position: Position::default(),
             notice: None,
+            flash: None,
             yanking: None,
             caret: None,
             following: false,
@@ -192,7 +196,17 @@ impl App {
 
     /// The message the footer is carrying, if any.
     pub fn notice(&self) -> Option<&str> {
-        self.notice.as_deref()
+        self.flash.as_deref().or(self.notice.as_deref())
+    }
+
+    /// Show `message` until [`Self::clear_flash`], over what the footer holds.
+    pub fn flash(&mut self, message: impl Into<String>) {
+        self.flash = Some(message.into());
+    }
+
+    /// Stop showing it, revealing anything under it.
+    pub fn clear_flash(&mut self) {
+        self.flash = None;
     }
 
     /// Record that the watch has stopped, so the header stops claiming

@@ -534,9 +534,9 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
-    /// When the footer's notice stops being true, and what it said: the message is
-    /// kept so a warning landing inside the window survives a clock armed elsewhere.
-    notice_until: Option<(Instant, String)>,
+    /// When the footer's transient message stops being true. A keypress produces no
+    /// tick, so a message raised by one needs its own deadline.
+    notice_until: Option<Instant>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
@@ -606,7 +606,7 @@ impl Shell {
             input::Deadlines {
                 held: self.held,
                 linger: self.scrolling_until,
-                notice: self.notice_until.as_ref().map(|(until, _)| *until),
+                notice: self.notice_until,
                 ageing: self.history.ages_in(now),
             },
             now,
@@ -640,20 +640,17 @@ impl Shell {
     /// taken the pane with it, but a copy is the one act here the reader can be
     /// told about and go on watching without.
     fn settle_yank(&mut self, now: Instant) {
-        if let Some((until, said)) = self.notice_until.take() {
-            if now < until {
-                self.notice_until = Some((until, said));
-            } else if self.app.notice() == Some(said.as_str()) {
-                self.app.clear_notice();
-            }
+        if input::settled(self.notice_until, now) {
+            self.app.clear_flash();
+            self.notice_until = None;
         }
         if let Some(path) = self.app.take_yank() {
-            let said = match self.session.send(&clipboard::copy(&path)) {
-                Ok(()) => format!("sent {path} to the clipboard"),
-                Err(e) => format!("could not send {path}: {e}"),
-            };
-            self.app.warn(said.clone());
-            self.notice_until = Some((now + NOTICE_LINGER, said));
+            self.app
+                .flash(match self.session.send(&clipboard::copy(&path)) {
+                    Ok(()) => format!("sent {path} to the clipboard"),
+                    Err(e) => format!("could not send {path}: {e}"),
+                });
+            self.notice_until = Some(now + NOTICE_LINGER);
         }
     }
 

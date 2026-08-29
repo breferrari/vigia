@@ -185,3 +185,39 @@ fn a_write_between_the_draw_and_the_key_does_not_move_the_yank() {
          file they were not looking at"
     );
 }
+
+/// The confirmation is the only feedback there is, because OSC 52 has no reply,
+/// and the event that would erase it is the one this tool exists to watch.
+#[test]
+fn a_write_does_not_erase_what_a_yank_just_said() {
+    let mut app = App::new();
+    app.flash("sent src/lib.rs to the clipboard");
+
+    // What `Wake::Tick` does on every write, and it must reach the lasting slot
+    // rather than the reader's own confirmation.
+    app.clear_notice();
+    assert_eq!(
+        app.notice(),
+        Some("sent src/lib.rs to the clipboard"),
+        "a file write wiped the yank's confirmation, so the one signal the reader \
+         gets is destroyed by the thing they are watching for"
+    );
+}
+
+/// A warning with no expiry outlives a confirmation with one, rather than being
+/// buried by it and then cleared on its clock.
+#[test]
+fn a_lasting_warning_survives_underneath_a_yank() {
+    let mut app = App::new();
+    app.warn("not watching: the watch stopped");
+    app.flash("sent src/lib.rs to the clipboard");
+    assert_eq!(app.notice(), Some("sent src/lib.rs to the clipboard"));
+
+    app.clear_flash();
+    assert_eq!(
+        app.notice(),
+        Some("not watching: the watch stopped"),
+        "the yank's clock took the watch-loss warning with it, and nothing will \
+         raise that warning again: the tick that would have is what stopped"
+    );
+}
