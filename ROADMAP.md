@@ -232,7 +232,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | decision: text cannot be selected or copied. **Ruled: the terminal selects (B20), `y` copies the path (B9)** | [#177](https://github.com/breferrari/vigia/issues/177) |
 | ✅ | Build B9: `y` copies the caret file's path | [#372](https://github.com/breferrari/vigia/issues/372) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
-| ⬜ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
+| ✅ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
 | ⬜ | Turning wrap off leaves the scroll range at the wrapped row count, so scrolling goes erratic. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
 | ⬜ | research: price animation on an arriving change | [#365](https://github.com/breferrari/vigia/issues/365) |

@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use vigia::{
     App, Body, Glyphs, Pointing, Position, Row, Scale, Theme, View, Viewport, body_layout, render,
 };
-use vigia_core::{Highlighter, History, LineKind};
+use vigia_core::{HISTORY_SAMPLE, Highlighter, History, LineKind};
 
 use support::Scratch;
 
@@ -415,7 +415,17 @@ fn a_real_repository_draws() {
 #[test]
 fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// The figure the store answers with at each grouping, finest first.
-    const PINNED: [u32; 3] = [418, 837, 1_116];
+    ///
+    /// Restated rather than read back from the store, because the view takes its
+    /// scale straight from `History::scales` and comparing the two would assert
+    /// nothing. It moves whenever the level filter's own constants do.
+    ///
+    /// The three are independent figures rather than one and its multiples: a
+    /// burst landing only on the newest sample fills whole groups, and then the
+    /// coarser two follow from the finest by arithmetic and assert nothing of
+    /// their own. The older write below is what makes the lit region straddle a
+    /// group boundary.
+    const PINNED: [u32; 3] = [1_067_565, 1_868_239, 3_736_478];
     // The producer, not the decider.
     let scratch = Scratch::new("shell-rows-recorded-tick");
     scratch.write("src/lib.rs", numbered(12));
@@ -423,9 +433,14 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     scratch.edit_line("src/lib.rs", 5, "let changed = true;");
 
     let now = Instant::now();
-    let mut history = History::starting_at(now);
-    // Sized writes rather than bare ticks.
-    history.record_sized([("src/lib.rs", Some(4_000))], now);
+    // Opened before the first write, so the older one lands where it was made
+    // rather than saturating into the newest sample.
+    let began = now - HISTORY_SAMPLE * 13;
+    let mut history = History::starting_at(began);
+    // Sized writes rather than bare ticks, and spread far enough apart that the
+    // levelled region does not end on a group boundary.
+    history.record_sized([("src/lib.rs", Some(4_000))], began);
+    history.record_sized([("src/lib.rs", Some(21_000))], began);
     history.record_sized([("src/lib.rs", Some(28_000))], now);
 
     let worktree = scratch.worktree();
