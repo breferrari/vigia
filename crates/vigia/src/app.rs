@@ -264,7 +264,7 @@ impl App {
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
             mode: self.mode,
-            notice: self.notice.clone(),
+            notice: self.notice().map(str::to_owned),
             following: self.following,
             masthead: self.masthead,
             rail: self.rail,

@@ -221,3 +221,19 @@ fn a_lasting_warning_survives_underneath_a_yank() {
          raise that warning again: the tick that would have is what stopped"
     );
 }
+
+/// The footer draws from `Chrome`, so a message the accessor reports and the
+/// chrome does not is a message nobody ever sees.
+#[test]
+fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
+    let mut app = App::new();
+    app.flash("sent src/lib.rs to the clipboard");
+    assert_eq!(
+        app.chrome("fixture", None, Pointing::default(), 0, "")
+            .notice
+            .as_deref(),
+        app.notice(),
+        "the chrome carries a different notice than the accessor reports, so the \
+         reader is told one thing and shown another"
+    );
+}

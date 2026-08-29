@@ -448,6 +448,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         shell.app.record_frame(began.elapsed());
     }
 
+    // `y` then `q` copies and leaves, and every arm ending the loop does so before
+    // the batch reaches its send.
+    shell.settle_yank(Instant::now());
+
     Ok(())
 }
 
@@ -534,8 +538,7 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
-    /// When the footer's transient message stops being true. A keypress produces no
-    /// tick, so a message raised by one needs its own deadline.
+    /// When the footer's transient message stops being true: a keypress makes no tick.
     notice_until: Option<Instant>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
@@ -636,9 +639,8 @@ impl Shell {
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
     /// has no reply and several terminals ship it disabled.
-    /// A failed write is reported rather than propagated: a draw that fails has
-    /// taken the pane with it, but a copy is the one act here the reader can be
-    /// told about and go on watching without.
+    /// A failed write is reported rather than propagated: a draw that fails has taken
+    /// the pane with it, but a copy is one a reader can go on watching without.
     fn settle_yank(&mut self, now: Instant) {
         if input::settled(self.notice_until, now) {
             self.app.clear_flash();

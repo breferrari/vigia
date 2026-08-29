@@ -6,9 +6,9 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER,
-    STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after,
-    hover_repainted, patience, scroll_mark, settled,
+    Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, NOTICE_LINGER, Region, Regions,
+    SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for,
+    drag_action, hover_after, hover_repainted, patience, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -1219,6 +1219,9 @@ fn repeating_an_action_that_does_not_accumulate_leaves_it_alone() {
         Action::Top,
         Action::Bottom,
         Action::ToggleFollow,
+        // Held or tapped, a yank spends the clipboard once: `repeated` folding it
+        // would be a way to write the reader's clipboard by leaning on a key.
+        Action::Yank,
         Action::Redraw,
         Action::Quit,
         Action::ListRow(2),
@@ -1652,6 +1655,33 @@ fn nothing_armed_means_no_deadline_at_all() {
         ),
         Some(SCROLL_LINGER)
     );
+    // B9's clock, which is the one a `min` cannot distinguish from its neighbours:
+    // a value put in the wrong slot still wins, so it is armed alone here and then
+    // against a nearer one.
+    assert_eq!(
+        patience(
+            Deadlines {
+                notice: Some(now + NOTICE_LINGER),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(NOTICE_LINGER),
+        "a yank's confirmation did not ask the loop to wake, so it sits on the          footer until the worktree next changes, which on a quiet tree is never"
+    );
+    assert_eq!(
+        patience(
+            Deadlines {
+                linger: Some(now + SCROLL_LINGER),
+                notice: Some(now + NOTICE_LINGER),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(SCROLL_LINGER),
+        "the scroll mark is due long before the notice and the loop was told to          sleep past it"
+    );
+
     assert_eq!(
         patience(
             Deadlines {
