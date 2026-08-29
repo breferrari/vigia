@@ -1283,6 +1283,16 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     }
 }
 
+/// A page counter as the sheet spells it.
+///
+/// The total is derived rather than re-typed, because it *is* `GESTURES.len()`
+/// by definition and carries no independent verification: hand-writing it once
+/// per assertion is what made adding one gesture a fifteen-line edit. The range
+/// stays literal, since that is the pagination arithmetic under test.
+fn counter(range: &str) -> String {
+    format!("{range} of {}", GESTURES.len())
+}
+
 /// Every gesture the sheet can draw, as the token a reader would look for.
 const GESTURES: [&str; 23] = [
     "scroll a row",
@@ -2354,9 +2364,9 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
         (13, 8, 3),
         (14, 9, 3),
         (15, 10, 3),
-        // Three pages with B19's `w`, and it is the table's length rather than the
-        // ladder that moves it: eleven rows a page over twenty-two table rows is two
-        // pages exactly, and the twenty-third row has nowhere to go.
+        // Three pages, and it is the table's length rather than the ladder that
+        // moves it: eleven rows a page over twenty-three table rows leaves a third
+        // page with one row on it.
         (16, 11, 3),
         (17, 12, 2),
         (18, 13, 2),
@@ -3028,10 +3038,10 @@ fn the_counter_names_what_the_pane_reaches() {
     for (at, want) in [
         (
             Rect::new(0, 0, 50, 8),
-            vec!["1-3 of 23", "4-6 of 23", "7-9 of 23"],
+            vec![counter("1-3"), counter("4-6"), counter("7-9")],
         ),
-        (Rect::new(0, 0, 32, 40), vec!["1-12 of 23"]),
-        (Rect::new(0, 0, 30, 40), vec!["1-8 of 23"]),
+        (Rect::new(0, 0, 32, 40), vec![counter("1-12")]),
+        (Rect::new(0, 0, 30, 40), vec![counter("1-8")]),
     ] {
         let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
         for (n, spelling) in want.iter().enumerate() {
@@ -3175,7 +3185,7 @@ fn a_resize_clamps_the_page_rather_than_closing_the_sheet() {
     let (count, drawn) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&drawn).unwrap_or_default().trim(),
-        "18-23 of 23",
+        counter("18-23"),
         "the clamped page is not the pane's last one:\n{drawn}"
     );
     assert!(count > 0, "the clamped page draws nothing:\n{drawn}");
@@ -3229,7 +3239,7 @@ fn two_presses_in_one_wake_reach_page_two() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "4-6 of 23",
+        counter("4-6"),
         "the batched second press did not land on page two:\n{sheet}"
     );
 }
@@ -3291,19 +3301,19 @@ fn the_counter_is_right_where_a_page_spans_the_mouse_heading() {
     assert_eq!(
         spellings,
         [
-            "1-3 of 23",
-            "4-6 of 23",
-            "7-9 of 23",
-            "10-12 of 23",
-            "13-15 of 23",
+            counter("1-3"),
+            counter("4-6"),
+            counter("7-9"),
+            counter("10-12"),
+            counter("13-15"),
             // The heading costs this page a row and no ordinal, so it names two
             // gestures where every page above it names three.
-            "16-17 of 23",
-            "18-20 of 23",
-            // And the tail is a full page, which each added row takes in turn: a
-            // paged rung leaves whatever the table's length modulo three leaves,
-            // and twenty-two divides where twenty-one does not.
-            "21-23 of 23",
+            counter("16-17"),
+            counter("18-20"),
+            // The tail takes whatever the table's length modulo three leaves, so
+            // each added gesture moves it: this is a full page where the row before
+            // B20's was a short one.
+            counter("21-23"),
         ],
         "the ordinals do not step over the mouse group's heading"
     );
@@ -3349,7 +3359,7 @@ fn a_resize_clamps_rather_than_wrapping() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "18-23 of 23",
+        counter("18-23"),
         "the resize wrapped the page instead of clamping it:\n{sheet}"
     );
     assert_eq!(
@@ -3456,7 +3466,7 @@ fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "10-12 of 23",
+        counter("10-12"),
         "the pane came back on a different page:\n{sheet}"
     );
 }

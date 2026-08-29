@@ -1462,22 +1462,15 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
     // The one document structurally licensed to grow every time somebody
     // changes their mind, and it shipped ungated. A ledger of withdrawals with
     // no ceiling is the additive system wearing the subtractive system's name.
-    // It grows only against a spec that shrank by more: B8's decline came out
-    // of §11.2 and its own words moved here, which is the trade this file is
-    // for, and the total below is what makes that checkable rather than said.
     ("REVOCATIONS.md", 3217),
     ("ROADMAP.md", 95356),
     ("RULINGS.md", 94399),
 ];
 
-/// What the four together are allowed to weigh, which is what the per-file
-/// ceilings above cannot say on their own.
+/// What the four together are allowed to weigh.
 ///
-/// A ruling that moves between the documents costs one file bytes and hands them
-/// to another, so a per-file ceiling has to move for the honest case and for the
-/// dishonest one alike, and from the diff the two look identical. This is the
-/// number that tells them apart: raising a ceiling is legal exactly while some
-/// other ceiling falls by at least as much.
+/// A ceiling may rise only while another falls by at least as much. The per-file
+/// checks cannot see that trade; this exists to.
 const WRITTEN_LAYER_TOTAL: usize = 580931;
 
 /// Each document weighs no more than its budget.
@@ -1498,8 +1491,9 @@ fn the_written_layer_stays_under_its_budget() {
     assert!(
         over.is_empty(),
         "the written layer grew past its budget:\n{}\n\nLower the ceiling when prose \
-         comes out. Raising it to fit what was added is the move this gate exists to \
-         refuse.",
+         comes out. Raising one to fit what was added is what this refuses, and the \
+         total below is the only exception: a ceiling may rise while another falls by \
+         at least as much.",
         over.join("\n")
     );
 
