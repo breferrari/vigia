@@ -311,10 +311,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
         for wake in batch.drain(..) {
             match wake {
-                // Returning rather than breaking, so the reason travels with the
-                // exit. `shell` drops on the way out, which puts the terminal back
-                // before `main` prints this where the reader will see it.
+                // Returning rather than breaking, so the reason travels with the exit,
+                // and `shell` drops on the way out to put the terminal back first.
                 Wake::InputLost => {
+                    // The one exit by `return`, so the flush after the loop misses it.
+                    shell.settle_yank(Instant::now());
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
                 // The quit key's arm without the key, so `break` and not `return`:
@@ -448,8 +449,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         shell.app.record_frame(began.elapsed());
     }
 
-    // `y` then `q` copies and leaves, and every arm ending the loop does so before
-    // the batch reaches its send.
+    // `y` then `q` copies and leaves, and every arm ending the loop does so before the
+    // batch reaches its send. `InputLost` returns, and carries its own.
     shell.settle_yank(Instant::now());
 
     Ok(())
