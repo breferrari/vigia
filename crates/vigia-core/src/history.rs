@@ -115,7 +115,7 @@ const LEVEL_REACH: usize = 3 * (HISTORY_LEVEL.as_nanos() / HISTORY_SAMPLE.as_nan
 
 const _: () = assert!(
     HISTORY_LEVEL.as_nanos() % HISTORY_SAMPLE.as_nanos() == 0,
-    "the level's constant is not a whole number of samples, so LEVEL_REACH      truncates away from the decay it is derived from and stops being the three      time constants it was swept as"
+    "the level's constant is not a whole number of samples, so LEVEL_REACH truncates away from the decay it is derived from"
 );
 
 /// What one unit of a level is worth, as a fraction of a byte. A level divides by
@@ -214,7 +214,16 @@ impl Churn {
                         covered
                             .saturating_add(u64::from(*sample) * upper.saturating_sub(lower) as u64)
                     });
-                u32::try_from(covered / width as u64).unwrap_or(u32::MAX)
+                // One is the floor wherever a column overlaps a write, which is
+                // [`levelled`]'s own rule one layer down: a column narrower than a
+                // sample holds a fraction of it, so flooring rounds the small end of
+                // a level away and puts the write's magnitude back into its width.
+                let value = covered / width as u64;
+                if value == 0 && covered > 0 {
+                    1
+                } else {
+                    u32::try_from(value).unwrap_or(u32::MAX)
+                }
             })
             .collect()
     }

@@ -1258,6 +1258,26 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
     let sizes = [1u32, 100, 9_000, 127_000, 5_000_000];
     let widths: Vec<usize> = sizes.iter().map(|bytes| lit(&lone_write(*bytes))).collect();
 
+    // At every width a pane produces, not only at the sample count, where the
+    // projection is the identity and cannot lose the small end of a level. Both
+    // rungs of the glyph ladder, so the dense one's doubled sub-columns are here.
+    for width in [46usize, 60, 80, 109, 134, 218, 268] {
+        let drawn: Vec<usize> = sizes
+            .iter()
+            .map(|bytes| {
+                lone_write(*bytes)
+                    .levels(width)
+                    .iter()
+                    .filter(|level| **level > 0)
+                    .count()
+            })
+            .collect();
+        assert!(
+            drawn.iter().all(|lit| *lit == drawn[0]),
+            "projected onto {width} columns the same kernel drew {drawn:?} for              {sizes:?} bytes, so the write's size is back in its drawn width"
+        );
+    }
+
     let first = widths[0];
     assert!(
         first > 1,
@@ -1284,7 +1304,7 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
     let (back, forward) = (at - span[0], span[span.len() - 1] - at);
     assert_eq!(
         back, forward,
-        "the level reaches {back} samples back from the write and {forward}          forward, so the kernel is bounded on one side: {levels:?}"
+        "the level reaches {back} back from the write and {forward} forward, so the kernel is bounded on one side: {levels:?}"
     );
 }
 
@@ -1358,4 +1378,35 @@ fn a_projection_covers_the_same_span_in_every_column() {
              of time and a steady worktree draws as a comb: {drawn:?}"
         );
     }
+}
+
+/// A level is carried in a fraction of a byte, so it saturates far below what a
+/// sample can hold. Pinned rather than described, because the threshold moves
+/// with `LEVEL_UNIT` and nothing else would notice.
+#[test]
+fn a_level_saturates_rather_than_wrapping_and_keeps_its_reach() {
+    // Bracketing the measured threshold at the position tested, so the pair
+    // reddens whether the unit rises or falls.
+    let under = lone_write(200_000_000);
+    assert!(
+        under
+            .levels(HISTORY_SAMPLES)
+            .iter()
+            .all(|level| *level < u32::MAX),
+        "two hundred megabytes in one sample already saturates, so the store          represents less of a burst than it did"
+    );
+
+    // Past it, the level pins at the ceiling rather than wrapping to nothing,
+    // and the reach is still the kernel's.
+    let over = lone_write(210_000_000);
+    let levels = over.levels(HISTORY_SAMPLES);
+    assert!(
+        levels.iter().any(|level| *level == u32::MAX),
+        "the largest sample a store can hold did not reach the ceiling, so the          arithmetic wrapped somewhere: {levels:?}"
+    );
+    assert_eq!(
+        lit(&over),
+        lit(&lone_write(9_000)),
+        "a saturating write drew a different width from an ordinary one, so          saturation costs the reach as well as the magnitude"
+    );
 }
