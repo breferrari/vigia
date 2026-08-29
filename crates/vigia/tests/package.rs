@@ -1458,14 +1458,20 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 
 /// What each document is allowed to weigh, in bytes.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 390054),
+    ("SPEC.md", 387899),
     // The one document structurally licensed to grow every time somebody
     // changes their mind, and it shipped ungated. A ledger of withdrawals with
     // no ceiling is the additive system wearing the subtractive system's name.
-    ("REVOCATIONS.md", 1701),
-    ("ROADMAP.md", 94777),
+    ("REVOCATIONS.md", 3217),
+    ("ROADMAP.md", 95356),
     ("RULINGS.md", 94399),
 ];
+
+/// What the four together are allowed to weigh.
+///
+/// A ceiling may rise only while another falls by at least as much. The per-file
+/// checks cannot see that trade; this exists to.
+const WRITTEN_LAYER_TOTAL: usize = 580931;
 
 /// Each document weighs no more than its budget.
 #[test]
@@ -1485,8 +1491,18 @@ fn the_written_layer_stays_under_its_budget() {
     assert!(
         over.is_empty(),
         "the written layer grew past its budget:\n{}\n\nLower the ceiling when prose \
-         comes out. Raising it to fit what was added is the move this gate exists to \
-         refuse.",
+         comes out. Raising one to fit what was added is what this refuses, and the \
+         total below is the only exception: a ceiling may rise while another falls by \
+         at least as much.",
         over.join("\n")
+    );
+
+    let sum: usize = WRITTEN_LAYER_BUDGET.iter().map(|(_, c)| c).sum();
+    assert!(
+        sum <= WRITTEN_LAYER_TOTAL,
+        "the ceilings above now sum to {sum} against a written layer of \
+         {WRITTEN_LAYER_TOTAL}. One of them was raised without another falling by \
+         as much, which is the per-file ceiling being edited to fit rather than a \
+         ruling moving house."
     );
 }
