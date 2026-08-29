@@ -113,9 +113,14 @@ const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_n
 /// rather than when it landed. `SPEC.md` §11.1 carries the sweep and the band.
 const LEVEL_REACH: usize = 3 * (HISTORY_LEVEL.as_nanos() / HISTORY_SAMPLE.as_nanos()) as usize;
 
+const _: () = assert!(
+    HISTORY_LEVEL.as_nanos() % HISTORY_SAMPLE.as_nanos() == 0,
+    "the level's constant is not a whole number of samples, so LEVEL_REACH      truncates away from the decay it is derived from and stops being the three      time constants it was swept as"
+);
+
 /// What one unit of a level is worth, as a fraction of a byte. A level divides by
 /// its kernel's mass, so in whole bytes a write of [`Track::bump`]'s floor weight
-/// rounds away everywhere. `SPEC.md` §11.1 carries the sweep and the band.
+/// rounds away everywhere. Swept with [`LEVEL_REACH`], which the two move together.
 const LEVEL_UNIT: u32 = 256;
 
 /// Sum a retained series into the source buckets a sparkline is drawn from.
@@ -199,14 +204,16 @@ impl Churn {
         (0..width)
             .map(|column| {
                 let (from, to) = (column * HISTORY_SAMPLES, (column + 1) * HISTORY_SAMPLES);
-                let mut covered = 0u64;
-                for at in from / width..to.div_ceil(width).min(HISTORY_SAMPLES) {
-                    let (lower, upper) = ((at * width).max(from), ((at + 1) * width).min(to));
-                    if upper > lower {
-                        covered =
-                            covered.saturating_add(u64::from(self.0[at]) * (upper - lower) as u64);
-                    }
-                }
+                let covered = self.0[..]
+                    .iter()
+                    .enumerate()
+                    .take(to.div_ceil(width))
+                    .skip(from / width)
+                    .fold(0u64, |covered, (at, sample)| {
+                        let (lower, upper) = ((at * width).max(from), ((at + 1) * width).min(to));
+                        covered
+                            .saturating_add(u64::from(*sample) * upper.saturating_sub(lower) as u64)
+                    });
                 u32::try_from(covered / width as u64).unwrap_or(u32::MAX)
             })
             .collect()

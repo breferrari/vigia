@@ -35,6 +35,14 @@ const WINDOW_SAMPLES: usize = 120;
 /// Columns the scrollbar reserves, restated for [`WINDOW_SAMPLES`]'s reason.
 const BAR_COLUMNS: usize = 2;
 
+/// How many heights a set of drawn columns takes, which is what a graph says with.
+fn distinct(heights: &[usize]) -> usize {
+    let mut seen = heights.to_vec();
+    seen.sort_unstable();
+    seen.dedup();
+    seen.len()
+}
+
 /// Cells of any glyph in a drawn row.
 fn drawn_ink(row: &str) -> usize {
     row.chars().filter(|glyph| !glyph.is_whitespace()).count()
@@ -716,12 +724,7 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                 // And the shape is back, not merely off the floor, which is a separate
                 // claim: a band lifted off the axis and drawn flat would satisfy the
                 // assertion above and still say nothing.
-                let drawn = {
-                    let mut seen = heights.clone();
-                    seen.sort_unstable();
-                    seen.dedup();
-                    seen.len()
-                };
+                let drawn = distinct(&heights);
 
                 // Scaled to the rung, because the rungs do not offer the same number of
                 // heights.
@@ -1256,12 +1259,7 @@ fn a_small_worktrees_band_is_not_axis_or_ceiling() {
         // layout that hands down a different depth cannot make this vacuous.
         let ceiling = Glyphs::default().levels() * band_strip(width, reported).len();
         let heights = band_heights(width, reported);
-        let drawn = {
-            let mut seen = heights.clone();
-            seen.sort_unstable();
-            seen.dedup();
-            seen.len()
-        };
+        let drawn = distinct(&heights);
         let between = heights
             .iter()
             .filter(|height| **height > 0 && **height < ceiling)
