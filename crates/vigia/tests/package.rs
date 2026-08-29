@@ -1458,14 +1458,27 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 
 /// What each document is allowed to weigh, in bytes.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 390054),
+    ("SPEC.md", 388278),
     // The one document structurally licensed to grow every time somebody
     // changes their mind, and it shipped ungated. A ledger of withdrawals with
     // no ceiling is the additive system wearing the subtractive system's name.
-    ("REVOCATIONS.md", 1701),
+    // It grows only against a spec that shrank by more: B8's decline came out
+    // of §11.2 and its own words moved here, which is the trade this file is
+    // for, and the total below is what makes that checkable rather than said.
+    ("REVOCATIONS.md", 2425),
     ("ROADMAP.md", 94777),
     ("RULINGS.md", 94399),
 ];
+
+/// What the four together are allowed to weigh, which is what the per-file
+/// ceilings above cannot say on their own.
+///
+/// A ruling that moves between the documents costs one file bytes and hands them
+/// to another, so a per-file ceiling has to move for the honest case and for the
+/// dishonest one alike, and from the diff the two look identical. This is the
+/// number that tells them apart: raising a ceiling is legal exactly while some
+/// other ceiling falls by at least as much.
+const WRITTEN_LAYER_TOTAL: usize = 580931;
 
 /// Each document weighs no more than its budget.
 #[test]
@@ -1488,5 +1501,14 @@ fn the_written_layer_stays_under_its_budget() {
          comes out. Raising it to fit what was added is the move this gate exists to \
          refuse.",
         over.join("\n")
+    );
+
+    let sum: usize = WRITTEN_LAYER_BUDGET.iter().map(|(_, c)| c).sum();
+    assert!(
+        sum <= WRITTEN_LAYER_TOTAL,
+        "the ceilings above now sum to {sum} against a written layer of \
+         {WRITTEN_LAYER_TOTAL}. One of them was raised without another falling by \
+         as much, which is the per-file ceiling being edited to fit rather than a \
+         ruling moving house."
     );
 }
