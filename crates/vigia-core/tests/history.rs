@@ -645,9 +645,9 @@ fn a_projection_returns_the_width_it_was_asked_for() {
         );
     }
 
-    // Below the sample count every sample lands in exactly one column, so the
-    // total is conserved. Above it, values repeat instead, which is the honest
-    // answer: the window holds what it holds.
+    // Below the sample count every sample's weight lands inside the columns that
+    // cover it, so the total is conserved whether or not the width divides the
+    // window.
     let exact: u32 = churn.projected(HISTORY_SAMPLES).iter().sum();
     assert_eq!(
         exact, 12,
@@ -657,10 +657,27 @@ fn a_projection_returns_the_width_it_was_asked_for() {
     assert_eq!(narrow, 12, "a narrower projection lost or invented churn");
 
     // The oldest value stays oldest however wide the ask, which is what stops a
-    // wide pane drawing the window mirrored.
+    // wide pane drawing the window mirrored. Above the sample count a column is
+    // a fraction of a sample rather than a whole repeated one, so what carries
+    // the claim is which end the weight is at, not what it weighs there.
     let wide = churn.projected(HISTORY_SAMPLES * 2);
-    assert_eq!(wide.first().copied(), Some(5));
-    assert_eq!(wide.last().copied(), Some(7));
+    let (head, tail) = (
+        wide.first().copied().expect("a column"),
+        wide.last().copied().expect("a column"),
+    );
+    assert!(
+        head > 0 && tail > 0,
+        "a wide projection lost both ends: {wide:?}"
+    );
+    assert!(
+        head < tail,
+        "the oldest sample weighs 5 and the newest 7, and they came out {head} \
+         and {tail}, so a wide pane draws the window mirrored: {wide:?}"
+    );
+    assert!(
+        wide[1..wide.len() - 1].iter().all(|value| *value <= tail),
+        "a wide projection put weight where the window has none: {wide:?}"
+    );
 }
 
 /// A deletion weighs what it removed, and the file after it weighs itself.
@@ -1214,4 +1231,114 @@ fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
         "the mark outlived the window it is drawn from, which is the frozen clock \
          a bounded history exists to refuse"
     );
+}
+
+/// One write in an empty window, as a series rather than through a store.
+fn lone_write(bytes: u32) -> Churn {
+    let mut samples = [0u32; HISTORY_SAMPLES];
+    samples[HISTORY_SAMPLES / 2] = bytes;
+    Churn(samples)
+}
+
+/// Samples of a level that carry anything at all.
+fn lit(churn: &Churn) -> usize {
+    churn
+        .levels(HISTORY_SAMPLES)
+        .iter()
+        .filter(|level| **level > 0)
+        .count()
+}
+
+/// A level says *when* a write happened. Its width must not say *how much*.
+#[test]
+fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
+    // Named rather than counted, and spanning six orders of magnitude, because
+    // the defect was invisible at the one size the shape gate above happens to
+    // use: unbounded, these lit 1, 33, 89, 120 and 120 samples respectively.
+    let sizes = [1u32, 100, 9_000, 127_000, 5_000_000];
+    let widths: Vec<usize> = sizes.iter().map(|bytes| lit(&lone_write(*bytes))).collect();
+
+    let first = widths[0];
+    assert!(
+        first > 1,
+        "a write of one byte, which is what `bump`'s floor weighs, lit {first} \
+         sample of the window, so the level is a mark rather than a level"
+    );
+    assert!(
+        widths.iter().all(|width| *width == first),
+        "the same kernel drew {widths:?} samples for {sizes:?} bytes, so a \
+         level's width reports the size of the write rather than when it landed"
+    );
+}
+
+/// The axis is the half of the band a flooded window cannot draw.
+#[test]
+fn a_large_burst_leaves_both_ends_of_the_window_on_the_axis() {
+    // Sizes a formatter, a lockfile rewrite or a generated file reaches on an
+    // ordinary afternoon. Unbounded, every one of these lit all 120 samples and
+    // §11.1's floor had nowhere left to be drawn.
+    for bytes in [127_000u32, 500_000, 5_000_000] {
+        let levels = lone_write(bytes).levels(HISTORY_SAMPLES);
+        assert_eq!(
+            (levels[0], levels[HISTORY_SAMPLES - 1]),
+            (0, 0),
+            "a single write of {bytes} bytes in the middle of the window lit \
+             both far ends, so a quiet stretch has no axis to draw: {levels:?}"
+        );
+    }
+}
+
+/// The ordinary case: a write whose size did not move weighs `bump`'s floor.
+#[test]
+fn a_floor_weight_write_draws_a_shape_rather_than_a_mark() {
+    let now = base();
+    let mut history = History::starting_at(now);
+    // Twice at the same size, so the second write's weight is the floor and
+    // nothing else. This is what every path's first write in the window weighs
+    // too, which is why it is the ordinary case rather than an edge.
+    history.record_sized([("src/a.rs", Some(4_096))], now);
+    history.record_sized([("src/a.rs", Some(4_096))], now + HISTORY_SAMPLE);
+
+    let levels = history.worktree_churn().levels(HISTORY_SAMPLES);
+    let mut distinct: Vec<u32> = levels.iter().copied().filter(|level| *level > 0).collect();
+    distinct.sort_unstable();
+    distinct.dedup();
+
+    assert!(
+        distinct.len() > 1,
+        "a floor-weight write levelled to {} distinct value(s), so every \
+         non-empty column is the same height, the yardstick equals it, and the \
+         band has only the axis and the ceiling to draw: {levels:?}",
+        distinct.len()
+    );
+}
+
+/// Every drawn column has to cover the same slice of the window.
+#[test]
+fn a_projection_covers_the_same_span_in_every_column() {
+    // A signal that never moves. Anything but a level projection here is the
+    // arithmetic rather than the data.
+    let flat = Churn([600; HISTORY_SAMPLES]);
+
+    // Named individually: none of them divides `HISTORY_SAMPLES`, which is the
+    // only case where whole-sample columns come out uneven, and a width that
+    // divides it would pass against the shape this gate exists to refuse.
+    for width in [46usize, 80, 109, 134] {
+        assert!(
+            HISTORY_SAMPLES % width != 0,
+            "{width} divides the window, so it cannot tell an even projection \
+             from an uneven one"
+        );
+        let drawn = flat.projected(width);
+        let (low, high) = (
+            drawn.iter().min().copied().expect("a column"),
+            drawn.iter().max().copied().expect("a column"),
+        );
+        assert_eq!(
+            low, high,
+            "a series that never moved projected onto {width} columns between \
+             {low} and {high}, so neighbouring columns carry different amounts \
+             of time and a steady worktree draws as a comb: {drawn:?}"
+        );
+    }
 }

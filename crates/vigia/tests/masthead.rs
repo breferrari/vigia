@@ -927,9 +927,14 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
             // assertion above already pins every width, so this arm is not needed
             // there and is scoped away instead of excused.
             if outlying {
-                // Fifteen, below both measured values rather than at one of them.
+                // Eight, below all four measured values rather than at one of
+                // them: 23.24 and 29.70 at the block rung, 9.54 and 10.32 at the
+                // dense one. Every drawn column covers the same span of the
+                // window, so the only thing left for the withdrawn shape to react
+                // to is where the cut is taken, and the fixture therefore
+                // discriminates by less than an uneven projection would.
                 assert!(
-                    worst_on_projection > 15.0,
+                    worst_on_projection > 8.0,
                     "{name}, {pane:?}: cutting the projection moved only \
                  {worst_on_projection:.1}%, so this fixture cannot tell the two \
                  shapes apart and the comparison below says nothing"
@@ -1057,9 +1062,13 @@ fn a_quiet_window_slides_left_rather_than_freezing() {
     let mut history = burst_at(now);
 
     let fresh = band_at(WIDE, history.worktree_churn().0, Glyphs::default());
+    // Columns, not byte offsets: the ramp's glyphs are three bytes each and the
+    // axis is one, so `char_indices` moves the answer whenever the mix of glyphs
+    // in a row changes, which is a property of the data rather than of where the
+    // ink is.
     let ink_at = |rows: &[String]| -> Vec<usize> {
         rows.iter()
-            .flat_map(|row| row.char_indices())
+            .flat_map(|row| row.chars().enumerate())
             .filter(|(_, glyph)| !glyph.is_whitespace() && *glyph != '_')
             .map(|(at, _)| at)
             .collect()
@@ -1166,4 +1175,109 @@ fn the_band_climbs_the_ramp_toward_the_top() {
         rank(buf[(x, top)].style().fg) > rank(buf[(x, base)].style().fg),
         "the top row of a full column is not hotter than its baseline"
     );
+}
+
+/// Widths the band is drawn at here, spanning the rungs the ladder serves.
+const LADDER: [u16; 5] = [46, 60, WIDE, 109, 134];
+
+/// Sub-column heights of the band alone, with the pane's margins cut away.
+///
+/// [`band_at`] hands back whole pane rows, and an untouched margin cell reads as
+/// a height of zero exactly as an axis column does, so a gate over the raw vector
+/// compares the inset against the graph.
+fn band_heights(width: u16, series: [u32; HISTORY_SAMPLES]) -> Vec<usize> {
+    let glyphs = Glyphs::default();
+    let rows = band_at(width, series, glyphs);
+    let axis = rows.last().expect("a band row");
+    // The band is contiguous and its axis row is solid, so the inset and the ink
+    // between them name the span without looking at any other row.
+    let (from, span) = (drawn_inset(axis), drawn_ink(axis));
+    let heights = column_heights(width, series, glyphs);
+    heights[from * glyphs.density()..(from + span) * glyphs.density()].to_vec()
+}
+
+/// The worktree the defect was reported from: three files, written once each.
+///
+/// Driven through the store rather than written as a series, because what makes
+/// this population what it is comes from `Track::wrote`: a path seen for the
+/// first time has no earlier size to differ from, so its write weighs the floor.
+fn three_files_written_once() -> [u32; HISTORY_SAMPLES] {
+    let now = Instant::now();
+    let began = now - HISTORY_SAMPLE * (HISTORY_SAMPLES as u32 - 1);
+    let mut history = History::starting_at(began);
+    for (second, path, bytes) in [
+        (10u32, "src/a.rs", 2_500u64),
+        (14, "src/b.rs", 1_200),
+        (20, "src/c.rs", 640),
+    ] {
+        history.record_sized([(path, Some(bytes))], began + HISTORY_SAMPLE * second);
+    }
+    // Age to now with nothing written, which is what the reported pane had done.
+    history.record_sized(core::iter::empty::<(&str, Option<u64>)>(), now);
+    history.worktree_churn().0
+}
+
+/// A signal that never moves has to draw a level band.
+#[test]
+fn a_steady_worktree_draws_a_level_band_rather_than_a_comb() {
+    // Every sample the same, so any variation across the drawn columns is the
+    // projection rather than the worktree.
+    let flat = [600u32; HISTORY_SAMPLES];
+
+    for width in LADDER {
+        let heights = band_heights(width, flat);
+        let (low, high) = (
+            heights.iter().min().copied().expect("a column"),
+            heights.iter().max().copied().expect("a column"),
+        );
+        assert!(
+            high > 0,
+            "the fixture drew nothing at {width} columns, so this compared \
+             nothing"
+        );
+        // One apart rather than equal, because the ramp quantises and the
+        // window's two ends carry less kernel than its middle.
+        assert!(
+            high - low <= 1,
+            "a worktree written at one constant rate drew heights from {low} to \
+             {high} at {width} columns, so neighbouring columns carry different \
+             amounts of time and the band reads as a comb: {heights:?}"
+        );
+    }
+}
+
+/// The reported defect: a band with only two heights cannot draw a shape.
+#[test]
+fn a_small_worktrees_band_is_not_axis_or_ceiling() {
+    let reported = three_files_written_once();
+
+    for width in LADDER {
+        // Read off the band the pane actually gave rather than restated, so a
+        // layout that hands down a different depth cannot make this vacuous.
+        let ceiling = Glyphs::default().levels() * band_strip(width, reported).len();
+        let heights = band_heights(width, reported);
+        let drawn = {
+            let mut seen = heights.clone();
+            seen.sort_unstable();
+            seen.dedup();
+            seen.len()
+        };
+        let between = heights
+            .iter()
+            .filter(|height| **height > 0 && **height < ceiling)
+            .count();
+        assert!(
+            drawn > 2,
+            "the reported worktree drew {drawn} distinct height(s) at {width} \
+             columns, so the band has the axis and the ceiling and nothing in \
+             between to make a shape out of: {heights:?}"
+        );
+        // The stronger half, and the one a count of heights cannot give: a
+        // column that is neither on the floor nor pinned at the top.
+        assert!(
+            between > 0,
+            "every drawn column at {width} is either the axis or the ceiling, \
+             so the ramp between them is unreachable: {heights:?}"
+        );
+    }
 }

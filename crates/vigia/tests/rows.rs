@@ -415,7 +415,14 @@ fn a_real_repository_draws() {
 #[test]
 fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// The figure the store answers with at each grouping, finest first.
-    const PINNED: [u32; 3] = [418, 837, 1_116];
+    ///
+    /// Restated rather than read back from the store, because the view takes its
+    /// scale straight from `History::scales` and comparing the two would assert
+    /// nothing. It moves whenever the level filter's own constants do, and last
+    /// moved with them: a level is carried in a fraction of a byte now, and
+    /// bounding its reach left the lit region contiguous, which is why the three
+    /// come out in exactly the grouping's proportion where they used not to.
+    const PINNED: [u32; 3] = [1_447_665, 2_895_330, 5_790_660];
     // The producer, not the decider.
     let scratch = Scratch::new("shell-rows-recorded-tick");
     scratch.write("src/lib.rs", numbered(12));

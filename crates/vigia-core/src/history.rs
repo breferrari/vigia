@@ -9,9 +9,6 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 /// The resolution a sparkline is projected from, oldest bucket first.
 pub const HISTORY_BUCKETS: usize = 24;
 
-// Eight, twelve and twenty-four were each argued from a different thing. Eight was one
-// element's column count.
-
 /// Source buckets one drawn bucket may cover, finest first.
 pub const SPARK_GROUPS: [usize; 3] = [1, 2, 4];
 
@@ -38,10 +35,6 @@ const _: () = {
 /// How much time one source bucket covers, which is the finest a rung draws.
 pub const HISTORY_BUCKET: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_BUCKETS as u64);
-
-// `GRAPH_COLUMNS` and `GRAPH_PERIOD` were here and are retired
-// ([#232](https://github.com/breferrari/vigia/issues/232)). They fixed the band's
-// period at fifteen columns of eight seconds, tuned over forty seeded series.
 
 /// Samples the store keeps per path, oldest first.
 pub const HISTORY_SAMPLES: usize = 120;
@@ -115,6 +108,16 @@ pub const HISTORY_LEVEL: Duration = Duration::from_secs(6);
 /// [`HISTORY_LEVEL`] in samples, which is what the filter actually steps in.
 const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_nanos() as f64;
 
+/// How far from a write a level may reach, in samples. Without it the rounding in
+/// [`levelled`] is what ends a level, so a write's drawn width reports its size
+/// rather than when it landed. `SPEC.md` §11.1 carries the sweep and the band.
+const LEVEL_REACH: usize = 3 * (HISTORY_LEVEL.as_nanos() / HISTORY_SAMPLE.as_nanos()) as usize;
+
+/// What one unit of a level is worth, as a fraction of a byte. A level divides by
+/// its kernel's mass, so in whole bytes a write of [`Track::bump`]'s floor weight
+/// rounds away everywhere. `SPEC.md` §11.1 carries the sweep and the band.
+const LEVEL_UNIT: u32 = 256;
+
 /// Sum a retained series into the source buckets a sparkline is drawn from.
 fn bucketed(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_BUCKETS] {
     std::array::from_fn(|bucket| {
@@ -134,24 +137,39 @@ fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
     // dividing by it is what makes this a weighted average rather than a sum.
     let mut smoothed = [0.0f64; HISTORY_SAMPLES];
     let mut weight = [0.0f64; HISTORY_SAMPLES];
+    // Distance to the nearest write, gathered on the passes already being made.
+    let mut behind = [HISTORY_SAMPLES; HISTORY_SAMPLES];
 
     let (mut value, mut mass) = (0.0, 0.0);
+    // Past `LEVEL_REACH` at every position, which is what "none this side" means.
+    let mut since = HISTORY_SAMPLES;
     for at in 0..HISTORY_SAMPLES {
         value = f64::from(samples[at]) + value * decay;
         mass = 1.0 + mass * decay;
         smoothed[at] = value;
         weight[at] = mass;
+        since = if samples[at] > 0 { 0 } else { since + 1 };
+        behind[at] = since;
     }
 
     let mut out = [0u32; HISTORY_SAMPLES];
     let (mut value, mut mass) = (0.0, 0.0);
+    let mut since = HISTORY_SAMPLES;
     for at in (0..HISTORY_SAMPLES).rev() {
         value = f64::from(samples[at]) + value * decay;
         mass = 1.0 + mass * decay;
+        since = if samples[at] > 0 { 0 } else { since + 1 };
+        if behind[at].min(since) > LEVEL_REACH {
+            continue;
+        }
         // The centre sample is in both passes, so it is counted once.
         let total = smoothed[at] + value - f64::from(samples[at]);
         let share = weight[at] + mass - 1.0;
-        let level = if share > 0.0 { total / share } else { 0.0 };
+        let level = if share > 0.0 {
+            total * f64::from(LEVEL_UNIT) / share
+        } else {
+            0.0
+        };
         // One is the floor where a write actually landed, and nowhere else.
         let rounded = level.round().clamp(0.0, f64::from(u32::MAX));
         out[at] = if rounded < 1.0 && samples[at] > 0 {
@@ -175,14 +193,21 @@ impl Churn {
         if width == 0 {
             return Vec::new();
         }
+        // Every column covers the same span, counted in one width-th of a sample
+        // so the boundaries are exact: taking whole samples gave neighbours one
+        // and two, so a signal that never moved drew as a comb.
         (0..width)
             .map(|column| {
-                let from = column * HISTORY_SAMPLES / width;
-                let to = ((column + 1) * HISTORY_SAMPLES / width).max(from + 1);
-                self.0[from..to]
-                    .iter()
-                    .copied()
-                    .fold(0u32, u32::saturating_add)
+                let (from, to) = (column * HISTORY_SAMPLES, (column + 1) * HISTORY_SAMPLES);
+                let mut covered = 0u64;
+                for at in from / width..to.div_ceil(width).min(HISTORY_SAMPLES) {
+                    let (lower, upper) = ((at * width).max(from), ((at + 1) * width).min(to));
+                    if upper > lower {
+                        covered =
+                            covered.saturating_add(u64::from(self.0[at]) * (upper - lower) as u64);
+                    }
+                }
+                u32::try_from(covered / width as u64).unwrap_or(u32::MAX)
             })
             .collect()
     }
