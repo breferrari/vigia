@@ -14,13 +14,19 @@
 # prerequisites) is judgment, not mechanics: its bullets are printed for
 # reading and never counted.
 #
-# Test seams (test-only, never set in a real run): PREFLIGHT_SPEC_FILE and
-# PREFLIGHT_ROADMAP_FILE substitute local files for the ref's copies, so a
-# mutation ("delete an invariant row", "flip a row's mark") can prove each
-# comparison fires. A drift check that cannot report "no drift" has not been
-# tested, and neither has one that cannot report drift.
+# Test seams (test-only, never set in a real run): PREFLIGHT_SPEC_FILE,
+# PREFLIGHT_ROADMAP_FILE and PREFLIGHT_ISSUES_FILE substitute local files for
+# the ref's copies and for the tracker fetch, so a mutation ("delete an
+# invariant row", "flip a row's mark", "hand it a board at the cap") can prove
+# each comparison fires. A drift check that cannot report "no drift" has not
+# been tested, and neither has one that cannot report drift.
 set -u
 REF="${PREFLIGHT_REF:-origin/main}"
+# Five of the seven comparisons read the tracker fetch, so a short one is not
+# one defect but five. Overridable the way REF is, and for the same reason:
+# selftest.sh proves the guard below fires without pulling a thousand-issue
+# fixture through comparison 7, and a drift case there pins this default.
+ISSUE_LIMIT="${PREFLIGHT_ISSUE_LIMIT:-1000}"
 findings=0
 say() { printf '%s\n' "$1"; }
 hit() { printf '  DRIFT %s\n' "$1"; findings=$((findings + 1)); }
@@ -29,14 +35,17 @@ ok() { printf '  ok    %s\n' "$1"; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-git fetch -q origin 2>/dev/null || true
+if [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
+  git fetch -q origin 2>/dev/null || true
+fi
 
 if [ -n "${PREFLIGHT_SPEC_FILE:-}" ]; then cp "$PREFLIGHT_SPEC_FILE" "$tmp/spec.md"
 else git show "$REF:SPEC.md" > "$tmp/spec.md" || exit 2; fi
 if [ -n "${PREFLIGHT_ROADMAP_FILE:-}" ]; then cp "$PREFLIGHT_ROADMAP_FILE" "$tmp/roadmap.md"
 else git show "$REF:ROADMAP.md" > "$tmp/roadmap.md" || exit 2; fi
 
-gh issue list --state all --limit 200 --json number,title,state,milestone > "$tmp/issues.json" || exit 2
+if [ -n "${PREFLIGHT_ISSUES_FILE:-}" ]; then cp "$PREFLIGHT_ISSUES_FILE" "$tmp/issues.json"
+else gh issue list --state all --limit "$ISSUE_LIMIT" --json number,title,state,milestone > "$tmp/issues.json" || exit 2; fi
 jq -r '.[] | "\(.number)\t\(.state)\t\(.milestone.title // "NONE")\t\(.title)"' "$tmp/issues.json" | tr -d '\r' > "$tmp/issues.tsv"
 
 grep -oE '^\| \*\*I[0-9]+[a-z]?\*\*' "$tmp/spec.md" | grep -oE 'I[0-9]+[a-z]?' | sort -u > "$tmp/spec-invariants.txt"
@@ -72,6 +81,20 @@ if [ -n "$soak_proc" ]; then
   say "          Defer release-tier timing runs; check the window's issue for when it ends."
 else
   say "  ok    no measurement window in flight"
+fi
+
+# The board every comparison below reads, and whether all of it arrived. A short
+# fetch is invisible from inside a comparison: 1 reports drift that is not there,
+# 3 skips a roadmap row whose issue is missing (`[ -z "$state" ] && continue`),
+# and 2, 4 and 7 under-report in silence. Counted from the JSON rather than from
+# the TSV's line count, because a title carrying a newline would make the cheaper
+# form over-count and mask the very case this guards.
+say "the board:"
+issues=$(jq 'length' "$tmp/issues.json")
+if [ "$issues" -ge "$ISSUE_LIMIT" ]; then
+  hit "the fetch returned $issues issues against a limit of $ISSUE_LIMIT, so every comparison below is reading a truncated board"
+else
+  ok "all $issues issues fetched, under a limit of $ISSUE_LIMIT"
 fi
 
 say "1. untracked — spec invariants no issue title names:"

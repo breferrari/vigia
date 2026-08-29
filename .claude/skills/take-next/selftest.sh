@@ -137,6 +137,59 @@ else
   ok "without the fallback, scan fails loudly"
 fi
 
+echo "preflight (the board every comparison reads):"
+
+# The fetch that feeds comparisons 1, 2, 3, 4 and 7. When it stops short, each
+# fails differently and none of them says so: 1 reports drift that is not there,
+# 3 skips a roadmap row whose issue is missing, and the rest under-report. That
+# happened at a limit of 200 against 202 issues, and the visible symptom was a
+# DRIFT line about I2a, tracked by #2 since Phase 1.
+PRE="$(dirname "$0")/preflight.sh"
+FIX="$(mktemp -d)"
+trap 'rm -rf "$FIX"' EXIT
+
+cat > "$FIX/spec.md" <<'EOF'
+| **I1** | A thing holds | a budget | a gate |
+## 10. Open
+## 11. Rulings
+EOF
+
+cat > "$FIX/roadmap.md" <<'EOF'
+## Phase 8 - look
+| | Task | Issue |
+|---|---|---|
+| ✅ | one | [#1](https://example.invalid/1) |
+| ✅ | two | [#2](https://example.invalid/2) |
+| ✅ | three | [#3](https://example.invalid/3) |
+EOF
+
+# Three closed, milestoned, roadmap-mentioned issues, one of them naming I1, so
+# every other comparison is quiet and the board line is the only thing moving.
+board() { # count -> issues.json
+  jq -n --argjson n "$1" '[range(1; $n + 1) | {
+    number: ., state: "CLOSED", milestone: {title: "Phase 8 - look"},
+    title: (if . == 1 then "I1: the first" else "issue \(.)" end)
+  }]'
+}
+
+runs() { # limit, count -> the board line
+  board "$2" > "$FIX/issues.json"
+  PREFLIGHT_SPEC_FILE="$FIX/spec.md"   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md"   PREFLIGHT_ISSUES_FILE="$FIX/issues.json"   PREFLIGHT_ISSUE_LIMIT="$1"     sh "$PRE" 2>&1 | grep -E '^  (ok|DRIFT) +(all [0-9]+ issues|the fetch returned)' | sed 's/^ *//' | tr -s ' '
+}
+
+line=$(runs 3 3)
+case "$line" in
+  "DRIFT the fetch returned 3 issues against a limit of 3"*)
+    ok "a board at the fetch limit is reported, not read" ;;
+  *) no "a board at the fetch limit is reported, not read" "a DRIFT naming the limit" "$line" ;;
+esac
+
+line=$(runs 4 3)
+case "$line" in
+  "ok all 3 issues fetched, under a limit of 4") ok "a board under the limit reads clean" ;;
+  *) no "a board under the limit reads clean" "ok all 3 issues fetched, under a limit of 4" "$line" ;;
+esac
+
 echo "drift:"
 
 # The filter above must be the filter SKILL.md tells a session to run. Checking
@@ -154,6 +207,13 @@ fi
 grep -qF 'startswith("Shelf:")' "$SKILL" 2>/dev/null \
   && ok "SKILL.md still identifies the shelf by prefix" \
   || no "SKILL.md still identifies the shelf by prefix" "startswith(\"Shelf:\")" "absent"
+
+# The limit is the one thing the guard above cannot check about itself: the test
+# runs at a small override, so nothing there would notice the shipped default
+# dropping back under the board. Pinned in both places that carry it.
+grep -qF 'PREFLIGHT_ISSUE_LIMIT:-1000' "$(dirname "$0")/preflight.sh" 2>/dev/null   && ok "preflight.sh still fetches to a limit of 1000"   || no "preflight.sh still fetches to a limit of 1000" "PREFLIGHT_ISSUE_LIMIT:-1000" "absent"
+
+grep -qF 'gh issue list --state all --limit 1000' "$SKILL" 2>/dev/null   && ok "SKILL.md's hand-run fetch takes the same limit"   || no "SKILL.md's hand-run fetch takes the same limit" "--limit 1000" "absent"
 
 echo
 if [ "$FAIL" -eq 0 ]; then

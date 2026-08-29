@@ -75,8 +75,10 @@ git fetch -q origin
 git show origin/main:SPEC.md \
   | grep -oE '^\| \*\*I[0-9]+[a-z]?\*\*' | grep -oE 'I[0-9]+[a-z]?' | sort -u
 
-# What the tracker holds.
-gh issue list --state all --limit 200 --json number,title,state,milestone
+# What the tracker holds. The limit is above the whole board on purpose: a
+# fetch that stops short is invisible from inside a comparison, and at 200
+# against 202 issues it dropped #2 and made comparison 1 report I2a untracked.
+gh issue list --state all --limit 1000 --json number,title,state,milestone
 
 # Roadmap rows that claim a state, with the issue they claim it for.
 git show origin/main:ROADMAP.md | grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]'
