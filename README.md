@@ -256,6 +256,7 @@ The blank above the band is the row the header keeps between itself and the list
 | click a file | jump the diff to it |
 | click `✕` | close the sheet |
 | just point | it marks itself |
+| `Shift`+drag | select text, the terminal's own way |
 
 </td></tr>
 </table>
@@ -269,6 +270,8 @@ The blank above the band is the row the header keeps between itself and the list
 <br>
 
 `Ctrl+D` quits too, and `Home` / `End` are aliases for `g` / `G`, `Shift+↑` / `Shift+↓` for `J` / `K`.
+
+**`Shift`+drag selects text because your terminal does it, not because `vigia` does.** The pane holds the mouse so the wheel and the scrollbars work, and every terminal keeps a modifier that hands selection back for as long as you hold it: `Shift` on xterm, GNOME Terminal, Konsole, Windows Terminal, kitty and WezTerm, and **`Option`** on iTerm2. You get the terminal's own highlight and the terminal's own clipboard, which means it works over SSH and inside tmux. What it copies is what is on screen, so a path the pane had to shorten is copied short.
 
 The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
 

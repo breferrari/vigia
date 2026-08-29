@@ -1846,7 +1846,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 }
 
 /// The mouse half, which is the first gesture the height ladder drops.
-const MOUSE: [Gesture; 7] = [
+const MOUSE: [Gesture; 8] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -1867,17 +1867,22 @@ const MOUSE: [Gesture; 7] = [
         keys: ["click a listed file", "click a file"],
         verb: ["jump the diff to it", "jump the diff to it"],
     },
-    // The sheet's own close control, which is easily named nowhere at all: not here,
-    // not in `README.md`'s Mouse table, and so not on the sheet a reader opens to find
-    // out what the pane answers.
+    // The tail is the three rows this table most easily omits, and `README.md`'s Mouse
+    // table is the other place each is named; a gate holds the two against each other.
+    // The last is the only row here the pane does not answer, since the terminal hands
+    // selection back while the modifier is held, and it keeps one spelling at both rungs
+    // because a gesture token has to be a substring of each.
     Gesture {
         keys: ["click  ✕", "click  ✕"],
         verb: ["close the sheet", "close the sheet"],
     },
-    // The hover mark, which `README.md` teaches and this table is the second place for.
     Gesture {
         keys: ["just point", "just point"],
         verb: ["it marks itself", "it marks itself"],
+    },
+    Gesture {
+        keys: ["Shift+drag", "Shift+drag"],
+        verb: ["the terminal selects text", "select text"],
     },
 ];
 
