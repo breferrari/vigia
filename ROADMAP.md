@@ -62,10 +62,6 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ✅ | The settle margin: measure before narrowing it | [#32](https://github.com/breferrari/vigia/issues/32) |
 | ✅ | I3 flat resources over days (soak) — **the gate; not the window** ([§10](SPEC.md#10-open-questions)) | [#5](https://github.com/breferrari/vigia/issues/5) |
 
-**The shell is in, so the rest of this phase has something to render into.** It draws the working-tree diff, follows the watch engine's ticks, scrolls by keyboard and wheel, and holds its own half of I4: one screenful reads only the files it draws, gated across two fixtures in `crates/vigia/tests/reads.rs`.
-
-**What has not run is the window in the budget.** An hour is what a session can measure; four hours is what CI will, nightly on Linux and weekly on all three targets; 24 hours needs a runner without the cap. The gate exists and fires, and the number it is standing on is an hour, which `SPEC.md` §10 records as open rather than closed.
-
 **Phase 2 is closed.** The shell draws the working-tree diff, follows what changed with nothing pressed, scrolls by key and wheel, degrades to forty columns without cutting a hint in half, restores the terminal on every exit the process controls, re-highlights only the hunks that changed, and holds its resources flat over a run measured in minutes locally and hours nightly. Every invariant in `SPEC.md` §3 now has a test that fails when it is violated. What the phase turned up and did not fix is on the shelf below, with an issue and a milestone each.
 
 ## Phase 3 — glanceability
@@ -176,6 +172,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | A nested git repository in the work tree stops the pane from ever advancing again. **Reported from use** | [#378](https://github.com/breferrari/vigia/issues/378) |
 | ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
 | ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
@@ -261,7 +258,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
 
-**Ordering.** [#119](https://github.com/breferrari/vigia/issues/119) sat first because it moves layout boundaries the other rows would otherwise re-derive twice. **After distribution on purpose**: the minimal real thing ships first — a crates.io name is claimed by publishing — and polish lands as visible post-release momentum, guided by [#72](https://github.com/breferrari/vigia/issues/72)'s real-use data instead of ahead of it.
+**Ordering.** [#378](https://github.com/breferrari/vigia/issues/378) is next, ahead of every open row here. It is the only one that makes the pane silently wrong: a nested checkout is ordinary, one unreadable entry fails the whole walk, and the tick handler then holds the last good frame forever — a stale pane is indistinguishable from a quiet one, so the tool stops being a monitor while still looking like one. Principle 1 does not survive that. [#119](https://github.com/breferrari/vigia/issues/119) sat first before it, because it moves layout boundaries the other rows would otherwise re-derive twice. **After distribution on purpose**: the minimal real thing ships first — a crates.io name is claimed by publishing — and polish lands as visible post-release momentum, guided by [#72](https://github.com/breferrari/vigia/issues/72)'s real-use data instead of ahead of it.
 
 
 **A `decision` row is one whose feel improvement costs an invariant a sentence; one that costs nothing is an ordinary row.** The ruling lands in `SPEC.md` §11.2 and the build follows in the same pass unless it is genuinely too large for one — [#167](https://github.com/breferrari/vigia/issues/167) shipped a ruling with nothing on screen for four hours, and a reader pressed `?` and got nothing.
