@@ -1048,6 +1048,37 @@ mod tests {
     /// Two properties of `run` that no test can execute, because `run` owns a
     /// terminal, and that are load bearing enough to gate by reading the source.
     #[test]
+    fn the_wash_is_dropped_on_every_route_that_ends_it() {
+        // `Shell` is private and holds a terminal, so its rules are read here rather
+        // than driven. Each of these was a defect: a span the collect resolved to
+        // nothing took `Esc`, and a cleared span left `App`'s lines behind for `y`.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for rule in [
+            "if !self.app.holds_a_selection() {",
+            "if action == Action::Escape && self.selected.is_some() {",
+            "if action != Action::Yank {",
+            "self.app.select(None);",
+        ] {
+            assert!(
+                shipped.contains(rule),
+                "`{rule}` is gone, so a wash outlives something that ends it"
+            );
+        }
+        let collect = shipped
+            .find(".view(frame,")
+            .expect("`paint` no longer collects");
+        let retire = shipped
+            .find("if !self.app.holds_a_selection() {")
+            .expect("checked above");
+        assert!(
+            collect < retire,
+            "the wash is retired before the collect that decides whether it resolved \
+             to anything, so it is judged on the frame before this one"
+        );
+    }
+
+    #[test]
     fn the_signal_arming_covers_the_takeover_and_the_wake_ends_the_loop() {
         // Only what ships, so the strings below cannot match this test itself.
         let source = include_str!("lib.rs");

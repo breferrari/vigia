@@ -1458,7 +1458,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
 
 /// What each document is allowed to weigh, in bytes.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 387232),
+    ("SPEC.md", 387259),
     ("REVOCATIONS.md", 4393),
     ("ROADMAP.md", 95473),
     ("RULINGS.md", 94676),
@@ -1471,7 +1471,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 581774;
+const WRITTEN_LAYER_TOTAL: usize = 581801;
 
 /// Each document weighs no more than its budget.
 #[test]

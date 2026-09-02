@@ -366,11 +366,12 @@ fn washes(
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let mut chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    // Before the layout, so a layout that reserved a row for the wash is caught too.
+    chrome.selected = selected;
     let body = body_layout(PANE, &chrome, 1, 1);
     let view = app
         .view(frame, &mut highlighter, &history, body)
         .expect("view");
-    chrome.selected = selected;
     // Named rather than defaulted: `ansi` reverses the row instead of colouring
     // it, so a background comparison there would pass by drawing nothing.
     let theme = Theme::named("dark").expect("the dark palette");
@@ -601,15 +602,32 @@ fn the_footer_counts_lines_and_not_rows() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
 
-    for (span, want) in [((2usize, 2usize), "1 line"), ((2, 4), "3 lines")] {
+    for (wrap, span, want) in [
+        (false, (2usize, 2usize), "1 line"),
+        (false, (2, 4), "3 lines"),
+        // Wrapped, so rows and lines come apart and a count of rows would say more.
+        (true, (3, 4), "1 line"),
+    ] {
         let mut app = App::new();
         let mut highlighter = Highlighter::eager();
         let history = History::new();
+        if wrap {
+            app.apply(Action::ToggleWrap, &mut frame, 24).expect("wrap");
+        }
         app.select(Some(span));
         let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
         let body = body_layout(PANE, &chrome, 1, 1);
-        app.view(&mut frame, &mut highlighter, &history, body)
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
             .expect("view");
+        // The wrapped case is only its own case while the span really covers a
+        // continuation row: without this it is two more rows of the first case.
+        assert_eq!(
+            wrap,
+            view.rows[span.0..=span.1].iter().any(vigia::Row::is_wrap),
+            "the wrapped span covers no continuation row, so it proves nothing about \
+             rows against lines"
+        );
         app.apply(Action::Yank, &mut frame, 24).expect("yank");
         let yank = app.take_yank().expect("`y` yanked nothing");
         assert_eq!(
@@ -678,5 +696,45 @@ fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
         text, DEEP,
         "a selection with no text in it sent {text:?}; an empty OSC 52 write would \\
          have wiped whatever the reader had on their clipboard"
+    );
+}
+
+/// A span over rows the diff region owns and the walk had nothing for is not a
+/// selection: it draws nothing, and the loop retires it on this answer. Left
+/// standing it took `Esc`, which on a clean worktree is the whole keyboard a
+/// reader has.
+#[test]
+fn a_span_the_walk_had_no_rows_for_holds_no_selection() {
+    let scratch = scratch_with("select-thin", "src/a.rs", "one\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut collect = |app: &mut App, frame: &mut Frame, span| {
+        app.select(Some(span));
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+        let body = body_layout(PANE, &chrome, 1, 1);
+        app.view(frame, &mut highlighter, &history, body)
+            .expect("view")
+    };
+
+    let view = collect(&mut app, &mut frame, (0, 1));
+    assert!(
+        app.holds_a_selection(),
+        "a span over rows the walk did fill resolved to nothing, so the case below \
+         is not the one this gate is named for"
+    );
+
+    // The rows the region owns but the diff has no content for, which is every row
+    // below the walk on a pane taller than the diff.
+    let below = view.rows.len();
+    collect(&mut app, &mut frame, (below, below + 3));
+    assert!(
+        !app.holds_a_selection(),
+        "a span the walk had no rows for still counts as a selection, so a click on \
+         an empty pane goes on swallowing `Esc`"
     );
 }
