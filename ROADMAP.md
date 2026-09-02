@@ -226,7 +226,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The scrollbar's track is flush right, where the glyph that centres it is also inside CP437 | [#175](https://github.com/breferrari/vigia/issues/175) |
 | ✅ | The columns left of the diff's scrollbar read as neither wash nor track | [#214](https://github.com/breferrari/vigia/issues/214) |
 | ✅ | The row wash has no left bar, and the reason it was refused expired with #119 | [#218](https://github.com/breferrari/vigia/issues/218) |
-| ⬜ | Text cannot be selected or copied. The terminal's own modifier is documented and `y` copies the caret path (B9), but in-app selection is unbuilt and the ruling against it is withdrawn. **Reported from use** | [#177](https://github.com/breferrari/vigia/issues/177) |
+| ✅ | decision: text cannot be selected or copied. **Ruled: rows in, lines out** | [#177](https://github.com/breferrari/vigia/issues/177) |
+| ⬜ | Build B20: a drag selects rows, and `y` sends their real text | [#380](https://github.com/breferrari/vigia/issues/380) |
 | ✅ | Build B9: `y` copies the caret file's path | [#372](https://github.com/breferrari/vigia/issues/372) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ✅ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
