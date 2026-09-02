@@ -5252,8 +5252,8 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
     // `render`'s contract is that any area is legal. Most writers reach cells
     // through `Buffer::set_stringn` or `set_style`, which clip, but the
     // row-drawing and recolouring paths indexed the buffer positionally and
-    // panicked when `area` was taller than `buf` (#91); the x-axis was fixed
-    // on #77 and this gate now sweeps both axes.
+    // panicked when `area` was taller than `buf`; the x-axis was fixed
+    // earlier and this gate now sweeps both axes.
     let theme = Theme::default();
     for (buffer, area) in [
         ((40u16, 10u16), (60u16, 10u16)),

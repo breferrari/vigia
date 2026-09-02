@@ -355,13 +355,52 @@ impl HeatBucket {
 
 /// Project a file's changed lines onto [`HEAT_BUCKETS`] slices of its length.
 ///
-/// A line covers a span, not a point: line `l` of `L` covers `[(l-1)*B/L,
-/// l*B/L)` where `B` is `HEAT_BUCKETS`. When `B <= L` the span is one slice;
-/// when `B > L` a line spans multiple and its weight is overlap so a uniform
-/// short file draws one band.
+/// A line covers `[(l-1)*B/L, l*B/L)`; when `B > L` weight is overlap so a
+/// short file draws one band, otherwise one line stays in one bucket to keep
+/// existing widths unchanged.
 fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
     let mut buckets = [HeatBucket::default(); HEAT_BUCKETS];
     if diff.lines == 0 {
+        return buckets;
+    }
+
+    // Keep `B <= L` on the old point projection so every width the tool
+    // draws today is unchanged. The new span projection is only for
+    // `B > L`, which is the short-file dashes case.
+    if (diff.lines as usize) >= HEAT_BUCKETS {
+        for hunk in &diff.hunks {
+            let mut new = hunk.new_start.max(1);
+            for line in &hunk.lines {
+                match line.kind {
+                    LineKind::Context => new += 1,
+                    LineKind::Added | LineKind::Removed => {
+                        if new > diff.lines {
+                            let bucket = HEAT_BUCKETS - 1;
+                            match line.kind {
+                                LineKind::Added => buckets[bucket].added += 1.0,
+                                LineKind::Removed => buckets[bucket].removed += 1.0,
+                                LineKind::Context => {}
+                            }
+                            if line.kind == LineKind::Added {
+                                new += 1;
+                            }
+                            continue;
+                        }
+                        let at =
+                            (((new as u64 - 1) * HEAT_BUCKETS as u64) / diff.lines as u64) as usize;
+                        let at = at.min(HEAT_BUCKETS - 1);
+                        match line.kind {
+                            LineKind::Added => buckets[at].added += 1.0,
+                            LineKind::Removed => buckets[at].removed += 1.0,
+                            LineKind::Context => {}
+                        }
+                        if line.kind == LineKind::Added {
+                            new += 1;
+                        }
+                    }
+                }
+            }
+        }
         return buckets;
     }
 
@@ -393,13 +432,12 @@ fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
                     let start = (new as f64 - 1.0) / lines;
                     let end = new as f64 / lines;
                     // Buckets overlapped by this line, at most ceil(B/L)+1.
-                    let first = ((new as u64 - 1) * HEAT_BUCKETS as u64
-                        / diff.lines as u64) as usize;
-                    let last = ((new as u64 * HEAT_BUCKETS as u64
-                        + diff.lines as u64
-                        - 1)
-                        / diff.lines as u64) as usize;
+                    let first =
+                        ((new as u64 - 1) * HEAT_BUCKETS as u64 / diff.lines as u64) as usize;
+                    let last =
+                        (new as u64 * HEAT_BUCKETS as u64).div_ceil(diff.lines as u64) as usize;
                     let last = last.min(HEAT_BUCKETS - 1);
+                    #[allow(clippy::needless_range_loop)]
                     for bucket in first..=last {
                         let b_start = bucket as f64 / HEAT_BUCKETS as f64;
                         let b_end = (bucket + 1) as f64 / HEAT_BUCKETS as f64;
@@ -1548,16 +1586,16 @@ mod tests {
             expected,
             "the addition drifted away from the removals above it"
         );
-        for bucket in 0..per {
-            assert!((map[bucket].removed - 1.0).abs() < 1e-6);
-            assert!((map[bucket].added - 0.5).abs() < 1e-6);
+        for entry in map.iter().take(per) {
+            assert!((entry.removed - 1.0).abs() < 1e-6);
+            assert!((entry.added - 0.5).abs() < 1e-6);
         }
     }
 
     /// Fewer lines than buckets. Every bucket still has to be reachable, or a
     /// short file would draw all its change at the left edge. With the span
     /// fix a line covers its whole slice span, so three lines over
-    /// HEAT_BUCKETS cover all slices contiguously, not three spaced dots.
+    /// `HEAT_BUCKETS` cover all slices contiguously, not three spaced dots.
     #[test]
     fn a_file_shorter_than_the_bucket_count_still_projects() {
         let map = heat_of(&diff(

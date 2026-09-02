@@ -968,7 +968,17 @@ impl Band {
 
     /// Integer variant, for sparkline and band scales that are counts.
     fn of_count(total: u32, busiest: u32) -> Self {
-        Self::of(total as f32, busiest as f32)
+        if busiest == 0 {
+            return Self::Low;
+        }
+        let (total, busiest) = (u64::from(total), u64::from(busiest));
+        if total * 3 >= busiest * 2 {
+            Self::Hot
+        } else if total * 3 >= busiest {
+            Self::Warm
+        } else {
+            Self::Low
+        }
     }
 }
 
@@ -982,17 +992,16 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
     let summed: Vec<HeatBucket> = buckets
         .chunks(group)
         .map(|chunk| {
-            chunk.iter().fold(HeatBucket::default(), |sum, bucket| HeatBucket {
-                added: sum.added + bucket.added,
-                removed: sum.removed + bucket.removed,
-            })
+            chunk
+                .iter()
+                .fold(HeatBucket::default(), |sum, bucket| HeatBucket {
+                    added: sum.added + bucket.added,
+                    removed: sum.removed + bucket.removed,
+                })
         })
         .collect();
 
-    let busiest = summed
-        .iter()
-        .map(|b| b.total())
-        .fold(0.0_f32, f32::max);
+    let busiest = summed.iter().map(|b| b.total()).fold(0.0_f32, f32::max);
     summed
         .iter()
         .map(|bucket| {
@@ -1629,9 +1638,7 @@ pub fn render(
     glyphs: Glyphs,
     chrome: &Chrome,
 ) -> PaintStats {
-    // Clip to the buffer on both axes. The x-axis was fixed for the footer;
-    // the y-axis still indexed positionally and panicked when `area` was
-    // taller than `buf`.
+    // Clip to the buffer on both axes.
     let area = buf.area.intersection(area);
     if area.is_empty() {
         return PaintStats::default();

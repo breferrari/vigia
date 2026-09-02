@@ -583,13 +583,17 @@ impl Action {
             // A page steps by a screenful and a half page by half of one, and a drag on
             // the diff's bar maps the track onto everything *but* the last screenful,
             // so all three need to know how tall one is.
-            Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) | Self::Bottom => true,
+            Self::Page(_)
+            | Self::HalfPage(_)
+            | Self::DiffTo(_)
+            | Self::Bottom
+            | Self::ToggleWrap => true,
             // `File` steps a file index and lands on a heading, so it is measured in
             // files and never in rows: no height can change where it arrives.
             Self::Scroll(_) | Self::File(_) | Self::Top | Self::ScrollList(_) => false,
             Self::ListTo(_) | Self::ListRow(_) => false,
-            // A toggle changes the region's height; it does not need to be
-            // told one to decide what it means.
+            // A toggle changes the region's height; `ToggleWrap` clamps a pinned
+            // file and a stale index, so it needs the height.
             Self::Quit
             | Self::Escape
             | Self::Redraw
@@ -598,7 +602,6 @@ impl Action {
             | Self::ToggleRail
             | Self::ToggleSingle
             | Self::ToggleStaged
-            | Self::ToggleWrap
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Yank => false,

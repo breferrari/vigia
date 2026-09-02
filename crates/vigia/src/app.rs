@@ -361,16 +361,16 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             Action::ToggleWrap => {
                 self.wrap = !self.wrap;
-                // The bar's scale does move with wrap: a wrapped long line
-                // spends several display rows where an unwrapped one spends one
-                // clipped row, so the total the scrollbar is scaled to changes and
-                // the raw row index must be clamped into the new total. Full
-                // display total needs the pane width, which this call does not
-                // have; the next `View::collect` (which does) will carry the same
-                // content under the caret for the general case. Here we clamp the
-                // logical position that `View` sees without width, which fixes the
-                // pinned-file and past-the-end cases and makes the bar's next
-                // scale the one the pane now has.
+                // The bar counts logical rows, so `w` leaves `total_rows`,
+                // `rows_above` and `top` unchanged (SPEC.md:953,
+                // `tests/wrap.rs::w_toggles_wrapping_and_leaves_the_thumb_where_it_was`).
+                // `View::measure` still reports logical rows and `View` does not
+                // re-scale the bar. Full display total needs the pane width,
+                // which this call does not have; the next `View::collect` with
+                // width carries the same content under the caret for the general
+                // case. Here we clamp the logical position that `View` sees
+                // without width, which fixes the pinned-file and past-the-end
+                // cases.
                 let files = frame.files().len();
                 if files == 0 {
                     self.position = Position::default();

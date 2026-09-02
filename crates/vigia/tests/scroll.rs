@@ -654,7 +654,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 19;
+const VARIANTS: usize = 20;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -671,16 +671,16 @@ fn tag(action: Action) -> usize {
         Action::ToggleMasthead => 9,
         Action::ToggleRail => 10,
         Action::ToggleSingle => 11,
+        Action::ToggleWrap => 12,
         Action::ToggleStaged => 111,
-        Action::ToggleWrap => 112,
         Action::Yank => 113,
-        Action::ToggleSheet => 12,
-        Action::CloseSheet => 13,
-        Action::ListTo(_) => 14,
-        Action::ListRow(_) => 15,
-        Action::DiffTo(_) => 16,
-        Action::Redraw => 17,
-        Action::Escape => 18,
+        Action::ToggleSheet => 13,
+        Action::CloseSheet => 14,
+        Action::ListTo(_) => 15,
+        Action::ListRow(_) => 16,
+        Action::DiffTo(_) => 17,
+        Action::Redraw => 18,
+        Action::Escape => 19,
     }
 }
 
@@ -718,6 +718,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // The pin itself, which moves no viewport and so must not be told a
         // height.
         Action::ToggleSingle,
+        Action::ToggleWrap,
         Action::ToggleSheet,
         Action::CloseSheet,
         // Mid-track, for the reason `DiffTo` below is: `ListTo(0)` resolves
@@ -758,14 +759,33 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                 .into_iter()
                 .map(|height| {
                     let mut app = App::new();
-                    // Off file zero, or the pinned arm is dead for `Top`.
-                    app.apply(Action::File(2), &mut frame, full)
-                        .expect("seed a file");
-                    app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
-                        .expect("seed");
-                    if pinned {
-                        app.apply(Action::ToggleSingle, &mut frame, full)
-                            .expect("pin");
+                    if action == Action::ToggleWrap {
+                        // Wrap's height matters only at the edge where a
+                        // position can sit past the new total. Seed one row
+                        // above the bottom so `height` changes the clamp.
+                        if pinned {
+                            app.apply(Action::ToggleSingle, &mut frame, full)
+                                .expect("pin");
+                            app.apply(Action::Scroll(10_000), &mut frame, full)
+                                .expect("seed at bottom of pinned file");
+                            app.apply(Action::Scroll(-1), &mut frame, full)
+                                .expect("move one above bottom");
+                        } else {
+                            app.apply(Action::Scroll(10_000), &mut frame, full)
+                                .expect("seed at bottom");
+                            app.apply(Action::Scroll(-1), &mut frame, full)
+                                .expect("move one above bottom");
+                        }
+                    } else {
+                        // Off file zero, or the pinned arm is dead for `Top`.
+                        app.apply(Action::File(2), &mut frame, full)
+                            .expect("seed a file");
+                        app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
+                            .expect("seed");
+                        if pinned {
+                            app.apply(Action::ToggleSingle, &mut frame, full)
+                                .expect("pin");
+                        }
                     }
                     // Drawn once before the action, so `App::list_rows` is not
                     // zero and the list gestures are not no-ops.
@@ -795,6 +815,12 @@ fn only_the_action_that_reads_the_height_is_given_one() {
             );
         }
 
+        // `ToggleWrap` needs the height only to clamp a pinned file and a
+        // stale index at the edge. A middle position is valid under both
+        // heights, so it correctly does not move there.
+        if action == Action::ToggleWrap {
+            continue;
+        }
         assert!(
             !action.needs_height() || moved_anywhere,
             "{action:?} says it needs the height and lands in the same place \

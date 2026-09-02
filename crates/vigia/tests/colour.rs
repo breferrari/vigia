@@ -737,7 +737,7 @@ fn a_256color_entry_is_matched_anywhere_in_the_name() {
 }
 
 #[test]
-fn wt_session_is_read_only_on_windows() {
+fn wt_session_names_windows_terminal_wherever_it_is_read() {
     // `WT_SESSION` is Windows Terminal naming itself, and that terminal
     // exports the variable into WSL where this binary is a Linux one. Reading
     // it only on Windows left WSL at `Ansi256` (no row wash) on a terminal
