@@ -89,7 +89,10 @@ impl Region {
 
     /// `row` pulled into this region, for a drag that has left it.
     fn clamped_row(self, row: u16) -> u16 {
-        row.clamp(self.top, self.top.saturating_add(self.rows.saturating_sub(1)))
+        row.clamp(
+            self.top,
+            self.top.saturating_add(self.rows.saturating_sub(1)),
+        )
     }
 
     /// How far down this bar's track `row` sits, as a fraction over

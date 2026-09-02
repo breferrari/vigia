@@ -20,54 +20,76 @@ fn scaled(at: u32, count: usize) -> usize {
     ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
 }
 
+/// The row a continuation belongs to: the [`Row::Line`] it continues, or the
+/// first collected piece where that head was scrolled off the top of the pane.
+fn head_of(rows: &[Row], at: usize) -> usize {
+    if !matches!(rows[at], Row::Wrap { .. }) {
+        return at;
+    }
+    let mut head = at;
+    while head > 0 && matches!(rows[head - 1], Row::Wrap { .. }) {
+        head -= 1;
+    }
+    match head.checked_sub(1) {
+        Some(above) if matches!(rows[above], Row::Line { .. }) => above,
+        _ => head,
+    }
+}
+
+/// One logical line, joined back from the disjoint pieces wrapping cut it into.
+///
+/// `View::collect` slices a wrapped line at its break points, so the head row
+/// carries only as far as the first break and each continuation carries the next
+/// slice. Sending the head alone truncates at a column, which is the one thing
+/// this copy exists not to do.
+fn line_at(rows: &[Row], head: usize) -> String {
+    let mut text = match &rows[head] {
+        Row::Line { text, .. } | Row::Wrap { text, .. } => text.clone(),
+        // The path and not the drawn label, which elides: the same semantic copy
+        // the caret fallback makes.
+        Row::File(entry) => return entry.path.clone(),
+        Row::Hunk {
+            old_start,
+            old_lines,
+            new_start,
+            new_lines,
+        } => return format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@"),
+        Row::Note(note) => return (*note).to_owned(),
+        Row::Gap => return String::new(),
+    };
+    for row in &rows[head + 1..] {
+        let Row::Wrap { text: tail, .. } = row else {
+            break;
+        };
+        text.push_str(tail);
+    }
+    text
+}
+
 /// The text of the rows `span` covers, both ends inclusive, or `None` where it
-/// covers nothing.
+/// covers none of them.
 ///
 /// The row model's strings rather than the drawn cells, which is the whole of
-/// `SPEC.md` §11.2 B20: a line the painter clipped arrives whole. A wrapped line
-/// is several rows and one line, so a continuation resolves to the row it
-/// continues, which may sit above `span` where a reader selected only the tail.
+/// `SPEC.md` §11.2 B20: a line the painter clipped arrives whole. A span whose
+/// start is past the collected rows selects nothing, so a drag on the blank below
+/// a short diff falls back to the caret rather than taking its last row.
 fn selected_text(rows: &[Row], span: (usize, usize)) -> Option<String> {
     let (from, to) = span;
     let last = rows.len().checked_sub(1)?;
-    let (from, to) = (from.min(last), to.min(last));
+    if from > last {
+        return None;
+    }
     let mut out: Vec<String> = Vec::new();
     let mut emitted: Option<usize> = None;
-    for row in from..=to {
-        let at = match rows[row] {
-            Row::Wrap { .. } => {
-                match rows[..row]
-                    .iter()
-                    .rposition(|above| matches!(above, Row::Line { .. }))
-                {
-                    Some(line) => line,
-                    // A tail whose head was never collected: the tail is still
-                    // the honest answer, so take the row as it stands.
-                    None => row,
-                }
-            }
-            _ => row,
-        };
-        // Consecutive by construction, since every continuation of one line
-        // resolves to the same row.
-        if emitted == Some(at) {
+    for at in from..=to.min(last) {
+        let head = head_of(rows, at);
+        // Consecutive by construction, since every piece of one line resolves to
+        // the same row.
+        if emitted == Some(head) {
             continue;
         }
-        emitted = Some(at);
-        out.push(match &rows[at] {
-            Row::Line { text, .. } | Row::Wrap { text, .. } => text.clone(),
-            // The path and not the drawn label, which elides: the same semantic
-            // copy the caret fallback makes.
-            Row::File(entry) => entry.path.clone(),
-            Row::Hunk {
-                old_start,
-                old_lines,
-                new_start,
-                new_lines,
-            } => format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@"),
-            Row::Note(note) => (*note).to_owned(),
-            Row::Gap => String::new(),
-        });
+        emitted = Some(head);
+        out.push(line_at(rows, head));
     }
     (!out.is_empty()).then(|| out.join("\n"))
 }
@@ -94,8 +116,8 @@ impl Yanked {
         }
     }
 
-    /// Selected rows, which are named by how many there were: the text itself can
-    /// be a screenful and the footer has one line.
+    /// Selected rows, named by how many there were: the text can be a screenful
+    /// and the footer has one line.
     fn rows(text: String) -> Self {
         let rows = text.split('\n').count();
         Self {

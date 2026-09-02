@@ -3530,7 +3530,10 @@ impl Painter<'_> {
                 }
             }
             // After the row and at its own wash's width: `set_style` patches.
-            if self.selected.is_some_and(|(top, bottom)| y >= top && y <= bottom) {
+            if self
+                .selected
+                .is_some_and(|(top, bottom)| y >= top && y <= bottom)
+            {
                 let over = Rect {
                     y,
                     height: 1,

@@ -467,9 +467,10 @@ impl Theme {
             // Unset, and that is a ruling rather than a gap.
             added_bar: Style::new().bg(Color::Rgb(0x3f, 0xb9, 0x50)),
             removed_bar: Style::new().bg(Color::Rgb(0xf8, 0x51, 0x49)),
-            // Off the green-red axis on purpose: a selected removal must not read
-            // as an addition. Blue is what neither wash uses.
-            selection: Style::new().bg(Color::Rgb(0x2c, 0x3b, 0x52)),
+            // The row washes' own luminance in a hue neither uses, so a selected
+            // removal cannot read as an addition and the ink it covers is no
+            // worse off than the diff already leaves it.
+            selection: Style::new().bg(Color::Rgb(0x2c, 0x36, 0x4e)),
             note: rgb(0xd2, 0xa8, 0xff),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
