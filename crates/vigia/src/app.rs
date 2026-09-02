@@ -359,8 +359,74 @@ impl App {
             // No jump and no clamp here, which is the arm doing the least of the four
             // and is deliberate.
             Action::ToggleSingle => self.single = !self.single,
-            // The bar's scale does not move.
-            Action::ToggleWrap => self.wrap = !self.wrap,
+            Action::ToggleWrap => {
+                self.wrap = !self.wrap;
+                // The bar's scale does move with wrap: a wrapped long line
+                // spends several display rows where an unwrapped one spends one
+                // clipped row, so the total the scrollbar is scaled to changes and
+                // the raw row index must be clamped into the new total. Full
+                // display total needs the pane width, which this call does not
+                // have; the next `View::collect` (which does) will carry the same
+                // content under the caret for the general case. Here we clamp the
+                // logical position that `View` sees without width, which fixes the
+                // pinned-file and past-the-end cases and makes the bar's next
+                // scale the one the pane now has.
+                let files = frame.files().len();
+                if files == 0 {
+                    self.position = Position::default();
+                } else if let Some(file) = self.pinned_file(frame) {
+                    let total = crate::view::span_in(frame, file).unwrap_or(0);
+                    if total == 0 {
+                        self.position.row = 0;
+                    } else if self.position.row + height > total {
+                        self.position.row = total.saturating_sub(height);
+                    }
+                } else {
+                    let total = crate::view::diff_rows(frame).unwrap_or(0);
+                    if total == 0 {
+                        self.position = Position::default();
+                    } else {
+                        let mut above = 0usize;
+                        for idx in 0..self.position.file.min(files) {
+                            above = above
+                                .saturating_add(crate::view::block_rows(frame, idx).unwrap_or(0));
+                        }
+                        above = above.saturating_add(self.position.row);
+                        if above + height > total {
+                            // Move to the last screenful (logical). The display
+                            // total is larger when wrapped, so this is a floor;
+                            // `View::collect` with width will tighten it further.
+                            let mut have = 0usize;
+                            let mut idx = files.saturating_sub(1);
+                            loop {
+                                let span = crate::view::block_rows(frame, idx).unwrap_or(0);
+                                have = have.saturating_add(span);
+                                if have >= height {
+                                    self.position.file = idx;
+                                    self.position.row = have - height;
+                                    break;
+                                }
+                                if idx == 0 {
+                                    self.position.file = 0;
+                                    self.position.row = 0;
+                                    break;
+                                }
+                                idx -= 1;
+                            }
+                        }
+                        if self.position.file >= files {
+                            self.position.file = files.saturating_sub(1);
+                            self.position.row = 0;
+                        } else {
+                            let span =
+                                crate::view::block_rows(frame, self.position.file).unwrap_or(0);
+                            if self.position.row >= span && span > 0 {
+                                self.position.row = span.saturating_sub(1);
+                            }
+                        }
+                    }
+                }
+            }
             Action::Yank => self.yanking = self.caret.clone(),
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {

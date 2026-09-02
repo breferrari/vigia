@@ -87,7 +87,7 @@ pub(crate) fn forward(tx: Sender<Wake>) -> io::Result<()> {
     })
 }
 
-/// The console control events this claims, by their documented WinAPI numbers.
+/// The console control events this claims, by their documented `WinAPI` numbers.
 #[cfg(windows)]
 const CAUGHT: [u32; 3] = [
     windows_sys::Win32::System::Console::CTRL_C_EVENT,
@@ -457,6 +457,9 @@ mod tests {
             // What the assert above establishes is the part that matters: for a kind
             // outside `CAUGHT`, `reply` returns before it touches `ASKED` or parks.
             assert_eq!(
+                // SAFETY: `on_ctrl` is safe here for a kind outside `CAUGHT`; see the
+                // comment above for why no state is touched and the handler returns
+                // immediately.
                 unsafe { on_ctrl(5) },
                 0,
                 "the handler answered TRUE to an event it does not claim"

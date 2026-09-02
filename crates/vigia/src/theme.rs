@@ -690,7 +690,8 @@ impl fmt::Display for ThemeError {
             ),
             Self::RepeatedBase { line } => write!(
                 f,
-                "line {line}: `base` is already set. One palette to start from, or                  the second silently discards the first"
+                "line {line}: `base` is already set. One palette to start from, or \
+                 the second silently discards the first"
             ),
             Self::LateBase { line } => write!(
                 f,

@@ -518,20 +518,20 @@ const GRADED_PANE: u16 = 140;
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
     heat[0] = HeatBucket {
-        added: 12,
-        removed: 0,
+        added: 12.0,
+        removed: 0.0,
     };
     heat[1] = HeatBucket {
-        added: 7,
-        removed: 0,
+        added: 7.0,
+        removed: 0.0,
     };
     heat[2] = HeatBucket {
-        added: 4,
-        removed: 0,
+        added: 4.0,
+        removed: 0.0,
     };
     heat[3] = HeatBucket {
-        added: 3,
-        removed: 0,
+        added: 3.0,
+        removed: 0.0,
     };
     View {
         landed: false,
@@ -1608,4 +1608,49 @@ fn the_detected_background_picks_the_showcase_and_never_outranks_a_word() {
         Theme::light().resolve(Depth::Truecolor),
         "detection outranked VIGIA_THEME"
     );
+}
+
+#[test]
+fn no_theme_error_carries_its_indentation_into_the_message() {
+    // A multi-line literal without its trailing `\` turns source indentation
+    // into 18 spaces mid-sentence, and Review cannot see it because the source
+    // looks correctly indented. This checks the whole class rather than the one
+    // instance, and every other literal in `theme.rs` was checked for the same
+    // shape when the gate landed.
+    let errors = [
+        ThemeError::UnknownKey {
+            line: 12,
+            key: "foo".to_owned(),
+        },
+        ThemeError::UnknownColour {
+            line: 12,
+            value: "bar".to_owned(),
+        },
+        ThemeError::UnknownModifier {
+            line: 12,
+            value: "baz".to_owned(),
+        },
+        ThemeError::MissingValue { line: 12 },
+        ThemeError::MissingSeparator {
+            line: 12,
+            text: "x".to_owned(),
+        },
+        ThemeError::UnknownBase {
+            line: 12,
+            name: "nope".to_owned(),
+        },
+        ThemeError::RepeatedBase { line: 12 },
+        ThemeError::LateBase { line: 12 },
+        ThemeError::Unreadable {
+            path: std::path::PathBuf::from("/tmp/missing"),
+            why: "no such file".to_owned(),
+        },
+    ];
+    for err in errors {
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("  "),
+            "ThemeError {err:?} renders with a double space: {msg:?}"
+        );
+    }
 }

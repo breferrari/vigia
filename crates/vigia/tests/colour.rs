@@ -738,26 +738,29 @@ fn a_256color_entry_is_matched_anywhere_in_the_name() {
 
 #[test]
 fn wt_session_is_read_only_on_windows() {
-    // Pinning what happens today rather than asserting it is right.
+    // `WT_SESSION` is Windows Terminal naming itself, and that terminal
+    // exports the variable into WSL where this binary is a Linux one. Reading
+    // it only on Windows left WSL at `Ansi256` (no row wash) on a terminal
+    // that draws 24-bit.
     assert_eq!(
         Depth::from_env(false, env(&[("WT_SESSION", "abc")])).expect("a rung"),
-        Depth::Ansi16,
-        "off Windows the session variable is not read, so the floor applies"
+        Depth::Truecolor,
+        "WT_SESSION names Windows Terminal wherever it is read"
     );
     assert_eq!(
         Depth::from_env(true, env(&[("WT_SESSION", "abc")])).expect("a rung"),
         Depth::Truecolor,
         "on Windows it is the terminal naming itself"
     );
-    // And the case a reader actually hits: WSL in Windows Terminal, whose TERM
-    // is what decides today.
+    // The WSL case that was `Ansi256` before the fix, because `TERM` is
+    // `xterm-256color` there.
     assert_eq!(
         Depth::from_env(
             false,
             env(&[("WT_SESSION", "abc"), ("TERM", "xterm-256color")])
         )
         .expect("a rung"),
-        Depth::Ansi256,
-        "WSL in Windows Terminal takes its rung from TERM"
+        Depth::Truecolor,
+        "WSL in Windows Terminal gets the rung its terminal actually draws"
     );
 }

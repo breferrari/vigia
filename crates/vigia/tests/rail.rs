@@ -93,9 +93,9 @@ fn entry(path: &str) -> FileEntry {
             let mut buckets = [HeatBucket::default(); HEAT_BUCKETS];
             for (at, bucket) in buckets.iter_mut().enumerate() {
                 if at % 2 == 0 {
-                    bucket.added = 3;
+                    bucket.added = 3.0;
                 } else {
-                    bucket.removed = 2;
+                    bucket.removed = 2.0;
                 }
             }
             buckets

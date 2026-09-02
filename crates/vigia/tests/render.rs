@@ -2033,8 +2033,8 @@ fn hostile_content_never_panics_at_any_pane_size() {
         recency: Recency::Pulse,
         newest: true,
         heat: [HeatBucket {
-            added: u16::MAX,
-            removed: u16::MAX,
+            added: u16::MAX as f32,
+            removed: u16::MAX as f32,
         }; HEAT_BUCKETS],
     };
     let view = View {
@@ -2918,7 +2918,10 @@ const WHOLE_STRIP_PANE: u16 = 140;
 fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
     let mut map = [HeatBucket::default(); HEAT_BUCKETS];
     for &(at, added, removed) in slices {
-        map[at] = HeatBucket { added, removed };
+        map[at] = HeatBucket {
+            added: added as f32,
+            removed: removed as f32,
+        };
     }
     map
 }
@@ -5246,13 +5249,20 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
 
 #[test]
 fn render_clips_to_the_buffer_rather_than_the_area() {
-    // `render`'s own contract is that any area is legal, and most writers here reach
-    // the cells through `Buffer::set_stringn` or `set_style`, which clip.
+    // `render`'s contract is that any area is legal. Most writers reach cells
+    // through `Buffer::set_stringn` or `set_style`, which clip, but the
+    // row-drawing and recolouring paths indexed the buffer positionally and
+    // panicked when `area` was taller than `buf` (#91); the x-axis was fixed
+    // on #77 and this gate now sweeps both axes.
     let theme = Theme::default();
     for (buffer, area) in [
         ((40u16, 10u16), (60u16, 10u16)),
         ((40, 10), (200, 10)),
         ((10, 6), (80, 6)),
+        ((40, 10), (40, 20)),
+        ((40, 10), (40, 40)),
+        ((80, 24), (80, 40)),
+        ((40, 10), (60, 20)),
     ] {
         for view in [
             one_file(),

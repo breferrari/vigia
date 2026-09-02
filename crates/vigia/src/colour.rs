@@ -110,7 +110,7 @@ impl Depth {
         {
             return Ok(depth);
         }
-        if windows && lookup("WT_SESSION").is_some() {
+        if lookup("WT_SESSION").is_some() {
             return Ok(Self::Truecolor);
         }
 

@@ -900,7 +900,7 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
     assert!(
         headings
             .iter()
-            .any(|heat| heat.iter().any(|bucket| bucket.total() > 0)),
+            .any(|heat| heat.iter().any(|bucket| bucket.total() > 0.0)),
         "every drawn heading has an empty heat strip, so the projection ran on a \
          reused diff and found nothing to place"
     );

@@ -682,20 +682,20 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
 /// A file changed at both ends and untouched through the middle.
 const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
     let mut heat = [HeatBucket {
-        added: 0,
-        removed: 0,
+        added: 0.0,
+        removed: 0.0,
     }; HEAT_BUCKETS];
     heat[0] = HeatBucket {
-        added: 9,
-        removed: 0,
+        added: 9.0,
+        removed: 0.0,
     };
     heat[1] = HeatBucket {
-        added: 3,
-        removed: 0,
+        added: 3.0,
+        removed: 0.0,
     };
     heat[HEAT_BUCKETS - 1] = HeatBucket {
-        added: 0,
-        removed: 6,
+        added: 0.0,
+        removed: 6.0,
     };
     heat
 };

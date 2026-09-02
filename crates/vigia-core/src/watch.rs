@@ -1,6 +1,6 @@
 //! The watch and coalesce engine: I1.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -58,6 +58,7 @@ impl Tick {
 #[derive(Debug, Default)]
 struct Burst {
     seen: HashSet<String>,
+    order: VecDeque<String>,
     newest: Option<String>,
     dropped: u32,
 }
@@ -67,16 +68,17 @@ impl Burst {
     fn push(&mut self, path: String) {
         if !self.seen.contains(&path) {
             if self.seen.len() >= HISTORY_PATHS {
-                // Displace something rather than refuse this one. Refusing would
-                // eventually refuse the newest path, and losing that is losing follow
-                // mode's answer at the exact moment it had one.
-                let victim = self.seen.iter().next().cloned();
-                if let Some(victim) = victim {
+                // Displace the oldest rather than an arbitrary one. `HashSet`
+                // iteration order is unspecified, so `iter().next()` is a
+                // different victim each run; follow mode depends on the newest
+                // surviving, so the oldest is the one to lose.
+                if let Some(victim) = self.order.pop_front() {
                     self.seen.remove(&victim);
                 }
                 self.dropped += 1;
             }
             self.seen.insert(path.clone());
+            self.order.push_back(path.clone());
         }
         self.newest = Some(path);
     }
@@ -84,10 +86,13 @@ impl Burst {
     /// The paths, with the newest moved to the end.
     fn finish(mut self) -> (Vec<String>, u32) {
         let Some(newest) = self.newest else {
-            return (self.seen.into_iter().collect(), self.dropped);
+            return (self.order.into_iter().collect(), self.dropped);
         };
         self.seen.remove(&newest);
-        let mut paths: Vec<String> = self.seen.into_iter().collect();
+        if let Some(pos) = self.order.iter().position(|p| p == &newest) {
+            self.order.remove(pos);
+        }
+        let mut paths: Vec<String> = self.order.into_iter().collect();
         paths.push(newest);
         (paths, self.dropped)
     }
@@ -726,6 +731,37 @@ mod tests {
 
             assert_eq!(paths.last().map(String::as_str), Some("f9999"));
             assert_eq!(paths.len(), HISTORY_PATHS, "and it did not exceed the cap");
+        }
+
+        #[test]
+        fn the_oldest_path_is_the_one_evicted_when_the_cap_is_exceeded() {
+            // `HashSet::iter().next()` is arbitrary, so the victim was whichever
+            // the hasher yielded first. The burst is a per-tick dedup and follow
+            // depends on the newest surviving, so the oldest insertion is the one
+            // to lose.
+            let mut burst = Burst::default();
+            for n in 0..HISTORY_PATHS + 1 {
+                burst.push(format!("f{n}"));
+            }
+            let (paths, dropped) = burst.finish();
+            assert_eq!(dropped, 1);
+            assert_eq!(paths.len(), HISTORY_PATHS);
+            assert!(
+                !paths.contains(&"f0".to_owned()),
+                "the oldest path was not evicted: {paths:?}"
+            );
+            assert!(paths.contains(&"f1".to_owned()));
+            assert_eq!(
+                paths.last().map(String::as_str),
+                Some(format!("f{}", HISTORY_PATHS).as_str())
+            );
+            // Deterministic: the same input yields the same victim and order.
+            let mut again = Burst::default();
+            for n in 0..HISTORY_PATHS + 1 {
+                again.push(format!("f{n}"));
+            }
+            let (second, _) = again.finish();
+            assert_eq!(paths, second, "eviction was not deterministic");
         }
     }
 }

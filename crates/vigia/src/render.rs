@@ -754,7 +754,7 @@ fn past(right: &mut Rect, width: usize) {
 
 /// Whether this file has any heat strip to draw at all.
 fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
-    buckets.iter().any(|bucket| bucket.total() > 0)
+    buckets.iter().any(|bucket| bucket.total() > 0.0)
 }
 
 /// Columns one half of the counts cell occupies, whatever that half says.
@@ -953,15 +953,22 @@ pub enum Band {
 
 impl Band {
     /// Which band `total` falls in, against the `busiest` the caller chose.
-    fn of(total: u32, busiest: u32) -> Self {
-        let (total, busiest) = (u64::from(total), u64::from(busiest));
-        if total * 3 >= busiest * 2 {
+    fn of(total: f32, busiest: f32) -> Self {
+        if busiest == 0.0 {
+            return Self::Low;
+        }
+        if total * 3.0 >= busiest * 2.0 {
             Self::Hot
-        } else if total * 3 >= busiest {
+        } else if total * 3.0 >= busiest {
             Self::Warm
         } else {
             Self::Low
         }
+    }
+
+    /// Integer variant, for sparkline and band scales that are counts.
+    fn of_count(total: u32, busiest: u32) -> Self {
+        Self::of(total as f32, busiest as f32)
     }
 }
 
@@ -971,26 +978,26 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
         return Vec::new();
     }
 
-    // Saturating, because a projection must not be able to kill the pane.
     let group = HEAT_BUCKETS / width;
     let summed: Vec<HeatBucket> = buckets
         .chunks(group)
         .map(|chunk| {
-            chunk
-                .iter()
-                .fold(HeatBucket::default(), |sum, bucket| HeatBucket {
-                    added: sum.added.saturating_add(bucket.added),
-                    removed: sum.removed.saturating_add(bucket.removed),
-                })
+            chunk.iter().fold(HeatBucket::default(), |sum, bucket| HeatBucket {
+                added: sum.added + bucket.added,
+                removed: sum.removed + bucket.removed,
+            })
         })
         .collect();
 
-    let busiest = summed.iter().map(|b| b.total()).max().unwrap_or(0);
+    let busiest = summed
+        .iter()
+        .map(|b| b.total())
+        .fold(0.0_f32, f32::max);
     summed
         .iter()
         .map(|bucket| {
             let band = Band::of(bucket.total(), busiest);
-            match (bucket.added > 0, bucket.removed > 0) {
+            match (bucket.added > 0.0, bucket.removed > 0.0) {
                 (false, false) => Heat::Cool,
                 (true, false) => Heat::Added(band),
                 (false, true) => Heat::Removed(band),
@@ -1089,7 +1096,7 @@ fn spark_of(
         let level = |count: u32| level_to(count, yardstick, glyphs.levels());
         // Against the same `scale` the heights are scaled from, which is `scale_of`'s
         // figure over every bucket on screen rather than over this file.
-        let band = Band::of(busiest, yardstick);
+        let band = Band::of_count(busiest, yardstick);
         // The ramp stop, from the same figure the heights and the band are
         // scaled from, quantised through the same rounding rule so one write
         // never lands on the ramp's floor colour.
@@ -1622,7 +1629,11 @@ pub fn render(
     glyphs: Glyphs,
     chrome: &Chrome,
 ) -> PaintStats {
-    if area.width == 0 || area.height == 0 {
+    // Clip to the buffer on both axes. The x-axis was fixed for the footer;
+    // the y-axis still indexed positionally and panicked when `area` was
+    // taller than `buf`.
+    let area = buf.area.intersection(area);
+    if area.is_empty() {
         return PaintStats::default();
     }
 
@@ -2845,7 +2856,7 @@ impl Painter<'_> {
             let (left, right) = (full(older), full(newer));
             // Against the same denominator the heights are scaled from, so
             // colour and shape say one thing at one scale.
-            let band = Band::of(older.max(newer), scale);
+            let band = Band::of_count(older.max(newer), scale);
             for row in 0..rows {
                 // Drawn bottom up, so `row` counts from the baseline and the
                 // buffer's `y` counts down from the top.

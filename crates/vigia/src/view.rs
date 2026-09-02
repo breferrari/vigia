@@ -6,7 +6,7 @@ use vigia_core::{
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FileEntry {
     /// Repository-relative path.
     pub path: String,
@@ -29,7 +29,7 @@ pub struct FileEntry {
 }
 
 /// One row of the pinned list's window.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListRow {
     /// A run's separator: `──  staged  2 ─────`.
     Group {
@@ -242,7 +242,7 @@ pub fn file_at(
 }
 
 /// What a row of the body is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Row {
     /// A changed file's heading, inside the diff stream.
     File(Box<FileEntry>),
@@ -337,38 +337,35 @@ impl Scale {
 }
 
 /// Changed lines falling in one slice of a file's length.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HeatBucket {
-    /// Lines added inside this slice.
-    pub added: u16,
+    /// Lines added inside this slice, weighted by overlap when a line spans
+    /// multiple slices (see `heat_of`).
+    pub added: f32,
     /// Lines removed from inside this slice.
-    pub removed: u16,
+    pub removed: f32,
 }
 
 impl HeatBucket {
     /// Changed lines of either kind.
-    pub fn total(self) -> u32 {
-        u32::from(self.added) + u32::from(self.removed)
+    pub fn total(self) -> f32 {
+        self.added + self.removed
     }
-}
-
-/// Where a working-tree line sits, as a bucket index.
-fn bucket_of(line: u32, lines: u32) -> Option<usize> {
-    if lines == 0 {
-        return None;
-    }
-    let zero_based = u64::from(line.saturating_sub(1));
-    let index = (zero_based * HEAT_BUCKETS as u64) / u64::from(lines);
-    Some((index as usize).min(HEAT_BUCKETS - 1))
 }
 
 /// Project a file's changed lines onto [`HEAT_BUCKETS`] slices of its length.
+///
+/// A line covers a span, not a point: line `l` of `L` covers `[(l-1)*B/L,
+/// l*B/L)` where `B` is `HEAT_BUCKETS`. When `B <= L` the span is one slice;
+/// when `B > L` a line spans multiple and its weight is overlap so a uniform
+/// short file draws one band.
 fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
     let mut buckets = [HeatBucket::default(); HEAT_BUCKETS];
     if diff.lines == 0 {
         return buckets;
     }
 
+    let lines = diff.lines as f64;
     for hunk in &diff.hunks {
         // The same walk `take_file` does below, and it has to be the same one:
         // both sides advance per line kind, and a copy that drifted would put
@@ -377,18 +374,48 @@ fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
         for line in &hunk.lines {
             match line.kind {
                 LineKind::Context => new += 1,
-                LineKind::Added => {
-                    if let Some(at) = bucket_of(new, diff.lines) {
-                        buckets[at].added = buckets[at].added.saturating_add(1);
+                LineKind::Added | LineKind::Removed => {
+                    // A removal past the last line is numbered one past the end.
+                    // It has no span inside the file, so it is clamped into the
+                    // last bucket rather than dropped.
+                    if new > diff.lines {
+                        let bucket = HEAT_BUCKETS - 1;
+                        match line.kind {
+                            LineKind::Added => buckets[bucket].added += 1.0,
+                            LineKind::Removed => buckets[bucket].removed += 1.0,
+                            LineKind::Context => {}
+                        }
+                        if line.kind == LineKind::Added {
+                            new += 1;
+                        }
+                        continue;
                     }
-                    new += 1;
-                }
-                // Deliberately does not advance `new`: a removed line
-                // occupies no working-tree row, so the next line after it sits
-                // at the same position.
-                LineKind::Removed => {
-                    if let Some(at) = bucket_of(new, diff.lines) {
-                        buckets[at].removed = buckets[at].removed.saturating_add(1);
+                    let start = (new as f64 - 1.0) / lines;
+                    let end = new as f64 / lines;
+                    // Buckets overlapped by this line, at most ceil(B/L)+1.
+                    let first = ((new as u64 - 1) * HEAT_BUCKETS as u64
+                        / diff.lines as u64) as usize;
+                    let last = ((new as u64 * HEAT_BUCKETS as u64
+                        + diff.lines as u64
+                        - 1)
+                        / diff.lines as u64) as usize;
+                    let last = last.min(HEAT_BUCKETS - 1);
+                    for bucket in first..=last {
+                        let b_start = bucket as f64 / HEAT_BUCKETS as f64;
+                        let b_end = (bucket + 1) as f64 / HEAT_BUCKETS as f64;
+                        let overlap = (end.min(b_end) - start.max(b_start)).max(0.0);
+                        if overlap > 0.0 {
+                            // Weight so a line's total across its span is 1.
+                            let weight = (overlap * lines) as f32;
+                            match line.kind {
+                                LineKind::Added => buckets[bucket].added += weight,
+                                LineKind::Removed => buckets[bucket].removed += weight,
+                                LineKind::Context => {}
+                            }
+                        }
+                    }
+                    if line.kind == LineKind::Added {
+                        new += 1;
                     }
                 }
             }
@@ -459,7 +486,7 @@ impl Default for Viewport {
 }
 
 /// A screenful of rows, plus what the chrome needs to describe it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct View {
     /// The rows to draw, top to bottom.
     pub rows: Vec<Row>,
@@ -1438,7 +1465,7 @@ mod tests {
         buckets
             .iter()
             .enumerate()
-            .filter(|(_, bucket)| bucket.total() > 0)
+            .filter(|(_, bucket)| bucket.total() > 1e-6)
             .map(|(at, _)| at)
             .collect()
     }
@@ -1457,8 +1484,8 @@ mod tests {
 
         let middle = HEAT_BUCKETS / 2;
         assert_eq!(touched(&map), vec![0, middle]);
-        assert_eq!(map[0].added, 1);
-        assert_eq!(map[middle].added, 2);
+        assert!((map[0].added - 1.0).abs() < 1e-6);
+        assert!((map[middle].added - 2.0).abs() < 1e-6);
     }
 
     /// The last line of the file is the last bucket and never one past it.
@@ -1477,7 +1504,7 @@ mod tests {
         let map = heat_of(&diff(10, vec![hunk(11, &[LineKind::Removed])]));
 
         assert_eq!(touched(&map), vec![HEAT_BUCKETS - 1]);
-        assert_eq!(map[HEAT_BUCKETS - 1].removed, 1);
+        assert!((map[HEAT_BUCKETS - 1].removed - 1.0).abs() < 1e-6);
     }
 
     /// Both kinds in one slice, which is the case `SPEC.md` §5.1 left unruled
@@ -1494,8 +1521,8 @@ mod tests {
             vec![0],
             "the two changes did not share a slice"
         );
-        assert_eq!(map[0].added, 1);
-        assert_eq!(map[0].removed, 1);
+        assert!((map[0].added - 1.0).abs() < 1e-6);
+        assert!((map[0].removed - 1.0).abs() < 1e-6);
     }
 
     /// A removed line occupies no working-tree row, so the line drawn after it
@@ -1503,8 +1530,9 @@ mod tests {
     /// after the first deletion in the file.
     #[test]
     fn a_removal_does_not_advance_the_working_tree_position() {
-        // Twelve lines, twelve buckets: one line each, so a drift of one row is
-        // a drift of one bucket and is visible.
+        // Twelve lines: with the span fix a line at position 1 covers
+        // HEAT_BUCKETS/12 slices, so a drift of one row is a drift of one
+        // slice and is visible. The removals and the addition stay together.
         let map = heat_of(&diff(
             12,
             vec![hunk(
@@ -1513,17 +1541,23 @@ mod tests {
             )],
         ));
 
+        let per = HEAT_BUCKETS / 12;
+        let expected: Vec<usize> = (0..per).collect();
         assert_eq!(
             touched(&map),
-            vec![0],
+            expected,
             "the addition drifted away from the removals above it"
         );
-        assert_eq!(map[0].removed, 2);
-        assert_eq!(map[0].added, 1);
+        for bucket in 0..per {
+            assert!((map[bucket].removed - 1.0).abs() < 1e-6);
+            assert!((map[bucket].added - 0.5).abs() < 1e-6);
+        }
     }
 
     /// Fewer lines than buckets. Every bucket still has to be reachable, or a
-    /// short file would draw all its change at the left edge.
+    /// short file would draw all its change at the left edge. With the span
+    /// fix a line covers its whole slice span, so three lines over
+    /// HEAT_BUCKETS cover all slices contiguously, not three spaced dots.
     #[test]
     fn a_file_shorter_than_the_bucket_count_still_projects() {
         let map = heat_of(&diff(
@@ -1535,10 +1569,20 @@ mod tests {
             ],
         ));
 
-        assert_eq!(
-            touched(&map),
-            vec![0, HEAT_BUCKETS / 3, 2 * HEAT_BUCKETS / 3]
-        );
+        let all: Vec<usize> = (0..HEAT_BUCKETS).collect();
+        assert_eq!(touched(&map), all);
+        // Each line spans HEAT_BUCKETS/3 slices, equally weighted.
+        let per_line = HEAT_BUCKETS / 3;
+        let weight = 1.0 / per_line as f32;
+        for bucket in &map {
+            assert!(
+                (bucket.added - weight).abs() < 1e-6,
+                "bucket {:?} weight not uniform: {} vs {}",
+                bucket,
+                bucket.added,
+                weight
+            );
+        }
     }
 
     /// A file with no working-tree side has nowhere to place anything. That is a
