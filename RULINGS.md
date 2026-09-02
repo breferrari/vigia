@@ -456,6 +456,8 @@ the absent line number is itself the signal, and spells the opposite state `-S` 
 - **`less`** wraps unless `-S`, and toggles the state at runtime.
 - **Neovim** keeps both axes and gives each its own motion, `gj` against `j`, and
 indents continuations with `'breakindent'`: *"Every wrapped line will continue visually indented… thus preserving horizontal blocks of text."*
+- **Every one of them wraps by default and this one does not**, which settled a
+default: `bat --wrap` is `auto`, `less` wraps unless told otherwise, `ov` wraps, `lazygit` ships `wrapLinesInStagingView: true`. Those get the whole terminal; this gets half of it beside an agent.
 
 **And the neighbour that had to build it says why it is cheaper here.** [dandavison/delta#657](https://github.com/dandavison/delta/issues/657) is the request that produced delta's wrapping, and its problem statement is that the pager is the wrong layer: *"delta uses one of many various pagers, usually some form of less, which supports line-wrapping, but this breaks lots of things (like delta's line numbers)"*. This tool owns its painter and its gutter, so the hard part delta built around does not exist here. The same thread calls the horizontal-scroll alternative *"tedious"* and says it *"disrupts the viewing experience"*, which is a second-hand data point for wrapping over the pan §11.1 named as the rejected alternative.
 
