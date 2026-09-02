@@ -1778,7 +1778,7 @@ const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 40,
+    height: 41,
 };
 
 /// I9 with the roomy rung drawn over the frame.
@@ -1786,7 +1786,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 37),
+        (68, 38),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,

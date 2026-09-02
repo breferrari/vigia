@@ -33,10 +33,10 @@ fn deep_scratch(name: &str) -> Scratch {
     scratch
 }
 
-/// What `y` hands the loop to send.
+/// The bytes `y` hands the loop to send.
 fn yanked(app: &mut App, frame: &mut Frame) -> Option<String> {
     app.apply(Action::Yank, frame, 24).expect("apply");
-    app.take_yank()
+    app.take_yank().map(|yank| yank.text)
 }
 
 /// Everything the pane actually draws at [`NARROW`], as text.

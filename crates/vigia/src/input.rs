@@ -87,6 +87,14 @@ impl Region {
         }
     }
 
+    /// `row` pulled into this region, for a drag that has left it.
+    fn clamped_row(self, row: u16) -> u16 {
+        row.clamp(
+            self.top,
+            self.top.saturating_add(self.rows.saturating_sub(1)),
+        )
+    }
+
     /// How far down this bar's track `row` sits, as a fraction over
     /// [`TRACK_SCALE`], or `None` when it is not on the track.
     fn along(self, row: u16) -> Option<u32> {
@@ -173,6 +181,14 @@ impl Regions {
         None
     }
 
+    /// Whether a press at `column`, `row` begins a selection: a row of the diff
+    /// itself, off its bar, and not under the sheet drawn over it.
+    fn selectable(self, column: u16, row: u16) -> bool {
+        // Its presence and not its box: a wash beside it would take `Esc` off the
+        // frontmost thing, which §11.1 gives to the sheet.
+        self.sheet.is_none() && self.diff.covers(column, row) && !self.diff.on_bar(column, row)
+    }
+
     /// The bar a press at `column`, `row` takes hold of, or `None` off them.
     pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
         // The sheet first, for [`Regions::step_at`]'s reason and in the same
@@ -213,8 +229,9 @@ impl Regions {
                 .then_some(Hovered::Track(Grabbed::Diff));
         }
         // A listed file, which is a surface a click acts on: it puts the diff at
-        // that file. The diff's own rows are deliberately absent, because
-        // nothing there is clickable and a mark would imply it is.
+        // that file. The diff's own rows are absent although a press there now
+        // begins a selection: a drag says where it is going as it goes, so a
+        // mark before it would be the second thing saying so.
         self.over_list(column, row).then_some(Hovered::Row(row))
     }
 }
@@ -230,6 +247,71 @@ pub struct Pointing {
     pub hovered: Option<Hovered>,
     /// Which bar the keys are scrolling, and which way.
     pub scrolling: Option<(Grabbed, isize)>,
+    /// The rows a drag has selected, when any are.
+    pub selected: Option<Selection>,
+}
+
+/// Rows of the diff a drag has selected, so `y` sends their text rather than the
+/// caret file's path. Screen rows and not row indices: the span is re-resolved
+/// against every frame, so no stored text can disagree with the wash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Selection {
+    /// The screen row the press landed on.
+    anchor: u16,
+    /// The screen row the drag has reached.
+    head: u16,
+}
+
+impl Selection {
+    fn at(row: u16) -> Self {
+        Self {
+            anchor: row,
+            head: row,
+        }
+    }
+
+    /// The rows it covers, topmost first and inclusive, so a drag up covers what
+    /// the same drag down would.
+    pub fn rows(self) -> (u16, u16) {
+        (self.anchor.min(self.head), self.anchor.max(self.head))
+    }
+
+    /// The same span as offsets from `top`, which the collected rows are indexed by.
+    pub fn offsets(self, top: u16) -> (usize, usize) {
+        let (from, to) = self.rows();
+        (
+            usize::from(from.saturating_sub(top)),
+            usize::from(to.saturating_sub(top)),
+        )
+    }
+}
+
+/// The selection after `event`, given the one before it. Nothing here ends one: a
+/// release leaves the wash standing and the loop clears it on any action but
+/// [`Action::Yank`], and a press off the diff is that rule reaching the one gesture
+/// with no action behind it.
+pub fn selection_after(
+    event: &Event,
+    regions: Regions,
+    was: Option<Selection>,
+) -> Option<Selection> {
+    let Event::Mouse(mouse) = event else {
+        // Focus clears no wash: this pane sits beside one a reader types into, and
+        // clicking there must not discard a selection they were about to send.
+        return was;
+    };
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => regions
+            .selectable(mouse.column, mouse.row)
+            .then(|| Selection::at(mouse.row)),
+        // Clamped, so a drag out of the region reaches its edge rather than the
+        // chrome above or below it.
+        MouseEventKind::Drag(MouseButton::Left) => was.map(|had| Selection {
+            head: regions.diff.clamped_row(mouse.row),
+            ..had
+        }),
+        _ => was,
+    }
 }
 
 /// What the pointer is resting on, when it is on something a click acts on.
@@ -255,8 +337,8 @@ pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Opt
     }
 }
 
-/// The mark after a paint, given the layout before it and the layout it drew.
-pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) -> Option<Hovered> {
+/// A screen-anchored mark after a paint: it survives only where nothing moved.
+pub fn repainted<T>(was: Option<T>, before: Regions, after: Regions) -> Option<T> {
     (before == after).then_some(was).flatten()
 }
 

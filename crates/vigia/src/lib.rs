@@ -22,14 +22,14 @@ mod terminal;
 pub mod theme;
 mod view;
 
-pub use app::App;
+pub use app::{App, Yanked};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
-    Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
-    patience, scroll_mark, settled,
+    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
+    repainted, scroll_mark, selection_after, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -190,6 +190,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         held: None,
         grabbed: None,
         hovered: None,
+        selected: None,
         scrolling: None,
         scrolling_until: None,
         notice_until: None,
@@ -283,7 +284,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // `Scroll` and `ScrollList` today, neither of which reads a height, so the
             // literal zero this replaced was right by accident rather than by rule.
             let height = shell.diff_rows_for(step, frame.files())?;
-            match shell.app.apply(step, &mut frame, height) {
+            match shell.apply(step, &mut frame, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
                 Err(e) => shell.app.warn(e.to_string()),
@@ -332,6 +333,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
+                    // Before the event is interpreted, for the hold's reason: a press
+                    // opening one is an action too, and the wash precedes its clearing.
+                    shell.selected = selection_after(&event, regions, shell.selected);
                     // A drag under way answers before the column is consulted, and that
                     // ordering is the fix.
                     if let Some(on) = shell.grabbed {
@@ -339,7 +343,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // The height, because a drag on the diff's bar is a
                             // `DiffTo` and `DiffTo` reads one.
                             let height = shell.diff_rows_for(drag, frame.files())?;
-                            match shell.app.apply(drag, &mut frame, height) {
+                            match shell.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
                                 Err(e) => {
@@ -380,7 +384,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // drain's doing rather than tidiness.
                     let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
-                    match shell.app.apply(action, &mut frame, height) {
+                    match shell.apply(action, &mut frame, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw
                         // below: leaving was asked for, and painting one more
@@ -535,6 +539,8 @@ struct Shell {
     grabbed: Option<Grabbed>,
     /// What the pointer is resting on, when it is on something a click acts on.
     hovered: Option<Hovered>,
+    /// The diff rows a drag has selected, in screen rows of the last paint.
+    selected: Option<Selection>,
     /// Which way the viewport is currently being moved, and until when.
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
@@ -583,6 +589,7 @@ impl Shell {
             pressed: self.pressed(),
             gripped: self.gripped(),
             hovered: self.hovered(),
+            selected: self.selected,
             scrolling: self.scrolling,
         }
     }
@@ -636,6 +643,32 @@ impl Shell {
         }
     }
 
+    /// Apply `action`, taking any selection with it: every action but the one that
+    /// sends it clears the wash, and the span lives here rather than on the app.
+    fn apply(
+        &mut self,
+        action: Action,
+        frame: &mut vigia_core::Frame,
+        height: usize,
+    ) -> vigia_core::Result<bool> {
+        // A rung of the ladder `Esc` already climbs, under the sheet, over quitting.
+        if action == Action::Escape && self.selected.is_some() {
+            self.deselect();
+            return Ok(true);
+        }
+        if action != Action::Yank {
+            self.deselect();
+        }
+        self.app.apply(action, frame, height)
+    }
+
+    /// Drop the wash and the lines it stood for together: clearing one and not the
+    /// other leaves `y` sending rows nothing on screen is claiming.
+    fn deselect(&mut self) {
+        self.selected = None;
+        self.app.select(None);
+    }
+
     /// Send a path the reader yanked, and say so for `NOTICE_LINGER`.
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
@@ -647,11 +680,12 @@ impl Shell {
             self.app.clear_flash();
             self.notice_until = None;
         }
-        if let Some(path) = self.app.take_yank() {
+        if let Some(yank) = self.app.take_yank() {
+            let said = yank.said;
             self.app
-                .flash(match self.session.send(&clipboard::copy(&path)) {
-                    Ok(()) => format!("sent {path} to the clipboard"),
-                    Err(e) => format!("could not send {path}: {e}"),
+                .flash(match self.session.send(&clipboard::copy(&yank.text)) {
+                    Ok(()) => format!("sent {said} to the clipboard"),
+                    Err(e) => format!("could not send {said}: {e}"),
                 });
             self.notice_until = Some(now + NOTICE_LINGER);
         }
@@ -730,18 +764,35 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
+        let area = self.area()?;
         let body = body_layout(
-            self.area()?,
+            area,
             &chrome,
             frame.files().len(),
             view::list_rows_wanted(frame.files()),
+        );
+        // Against this frame's own layout rather than the last paint's, so the rows
+        // the wash covers and the lines `y` would send are resolved on one screen.
+        self.app.select(
+            self.selected
+                .map(|had| had.offsets(body.areas(area).diff.y)),
         );
         match self
             .app
             .view(frame, &mut self.highlighter, &self.history, body)
         {
             Ok(view) => self.screen = view,
-            Err(e) => self.app.warn(e.to_string()),
+            // The lines go too: this frame could not re-resolve them, and keeping
+            // the last frame's would let `y` send rows the wash is no longer over.
+            Err(e) => {
+                self.app.warn(e.to_string());
+                self.app.select(None);
+            }
+        }
+        // A span the collect resolved to nothing is not a selection, whatever the
+        // pointer did: it draws nothing, and left standing it would take `Esc`.
+        if !self.app.holds_a_selection() {
+            self.deselect();
         }
 
         // On a frame with nothing to draw, where the work went.
@@ -773,12 +824,16 @@ impl Shell {
             // paint actually used: `Shell::area` reads it again and a resize between
             // the two would leave a pointer told about a screen nobody saw.
             painted = render::regions(area, &chrome, screen);
-            // A hover mark does not outlive a relayout, and it has to be retired here,
-            // between the layout and the paint that uses it.
-            chrome.hovered = hover_repainted(chrome.hovered, was, painted);
+            // A screen-anchored mark does not outlive a relayout, and both have to be
+            // retired here, between the layout and the paint that uses them.
+            chrome.hovered = repainted(chrome.hovered, was, painted);
+            chrome.selected = repainted(chrome.selected, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
         self.hovered = chrome.hovered;
+        if chrome.selected.is_none() {
+            self.deselect();
+        }
         self.regions = painted;
         Ok(())
     }
@@ -990,6 +1045,37 @@ mod tests {
         assert_eq!(batch.len(), 2, "the queued wake was lost with the sender");
     }
 
+    #[test]
+    fn the_wash_is_dropped_on_every_route_that_ends_it() {
+        // `Shell` is private and holds a terminal, so its rules are read here rather
+        // than driven. Each of these was a defect: a span the collect resolved to
+        // nothing took `Esc`, and a cleared span left `App`'s lines behind for `y`.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for rule in [
+            "if !self.app.holds_a_selection() {",
+            "if action == Action::Escape && self.selected.is_some() {",
+            "if action != Action::Yank {",
+            "self.app.select(None);",
+        ] {
+            assert!(
+                shipped.contains(rule),
+                "`{rule}` is gone, so a wash outlives something that ends it"
+            );
+        }
+        let collect = shipped
+            .find(".view(frame,")
+            .expect("`paint` no longer collects");
+        let retire = shipped
+            .find("if !self.app.holds_a_selection() {")
+            .expect("checked above");
+        assert!(
+            collect < retire,
+            "the wash is retired before the collect that decides whether it resolved \
+             to anything, so it is judged on the frame before this one"
+        );
+    }
+
     /// Two properties of `run` that no test can execute, because `run` owns a
     /// terminal, and that are load bearing enough to gate by reading the source.
     #[test]
@@ -1058,18 +1144,21 @@ mod tests {
         let layout = code
             .find("render::regions(area, &chrome, screen)")
             .expect("`draw` no longer computes the layout it is about to paint");
-        let retire = code
-            .find("hover_repainted(chrome.hovered")
-            .expect("`draw` no longer retires a hover mark the new layout invalidated");
         let paint = code
             .find("render(f.buffer_mut()")
             .expect("`draw` no longer paints");
-        assert!(
-            layout < retire && retire < paint,
-            "the hover mark is retired outside the window between the layout and \
-             the paint, so a relayout draws a mark against geometry it was never \
-             resolved against and nothing repaints to correct it"
-        );
+        // Both marks: either one outside the window is drawn against stale geometry.
+        for mark in ["chrome.hovered", "chrome.selected"] {
+            let retire = code
+                .find(&format!("repainted({mark}"))
+                .unwrap_or_else(|| panic!("`draw` no longer retires {mark}"));
+            assert!(
+                layout < retire && retire < paint,
+                "{mark} is retired outside the window between the layout and the \
+                 paint, so a relayout draws a mark against geometry it was never \
+                 resolved against and nothing repaints to correct it"
+            );
+        }
 
         // Every frame rolls the window before it paints, and `Shell::draw` is where
         // every frame passes.

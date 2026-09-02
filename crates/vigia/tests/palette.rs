@@ -37,6 +37,7 @@ fn chrome() -> Chrome {
         pressed: None,
         gripped: None,
         hovered: None,
+        selected: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         staged: None,
@@ -69,6 +70,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// A file, a hunk, and one line of each kind, in a known order.
 fn three_kinds() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -387,6 +389,10 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         removed_row: _,
         added_bar: _,
         removed_bar: _,
+        // Exempt for the reason the washes above it are, and one further: on this
+        // palette it carries no colour at all, only `REVERSED`, because a
+        // background has to assume one and this is the palette that cannot.
+        selection: _,
 
         // Exempt: syntax classes. Read, but never in grey: they carry hue, and
         // `a_ramp_that_survives_sixteen_colours_is_still_a_ramp` covers them.
@@ -534,6 +540,7 @@ fn graded_heat() -> View {
         removed: 0,
     };
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -1416,6 +1423,91 @@ fn rgb_of(style: ratatui::style::Style) -> (u8, u8, u8) {
 /// The floor a mark meant to be *seen but subordinate* has to clear.
 const TRACK_FLOOR: f64 = 2.0;
 
+/// §11.2 B20's wash stands in for the diff wash while it is up, so its floors are
+/// that wash's rather than a number from anywhere else.
+///
+/// **A background under a whole row and a one-cell mark on the pane are not the
+/// same problem**, and `TRACK_FLOOR` is the second: the shipped row washes sit at
+/// 1.27:1 to 1.57:1 against their panes, so a fixed floor drawn from a mark would
+/// fail the very elements it was meant to model. Relative is also what keeps this
+/// honest as those washes move.
+#[test]
+fn the_selection_wash_is_no_worse_than_the_diff_wash_it_stands_in_for() {
+    for (name, theme, pane) in palettes() {
+        let wash = channels_of(
+            theme
+                .selection
+                .bg
+                .expect("a truecolour palette washes its selection"),
+            "selection wash",
+        );
+        let rows = [
+            channels_of(theme.added_row.bg.expect("added wash"), "added wash"),
+            channels_of(theme.removed_row.bg.expect("removed wash"), "removed wash"),
+        ];
+
+        // Visible: at least as far from the pane as the quieter of the two.
+        let quietest = rows
+            .iter()
+            .map(|row| contrast(*row, pane))
+            .fold(f64::INFINITY, f64::min);
+        let seen = contrast(wash, pane);
+        assert!(
+            seen >= quietest,
+            "{name}'s selection is {seen:.2}:1 against the pane where the quieter \
+             diff wash is {quietest:.2}:1, so a reader can see a changed row and \
+             not the rows they selected"
+        );
+
+        // Readable: it costs a content row's ink no more than those washes do.
+        for (element, style) in [
+            ("context", theme.context),
+            ("gutter", theme.gutter),
+            ("comment", theme.comment),
+        ] {
+            let ink = rgb_of(style);
+            let floor = rows
+                .iter()
+                .map(|row| contrast(ink, *row))
+                .fold(f64::INFINITY, f64::min);
+            let ratio = contrast(ink, wash);
+            assert!(
+                ratio >= floor,
+                "{name}'s {element} is {ratio:.2}:1 on the selection wash and \
+                 {floor:.2}:1 on the diff wash beside it, so selecting a row \
+                 makes it harder to read than changing one does"
+            );
+        }
+
+        // And it is neither diff wash, or a selected removal reads as an addition.
+        for (element, other) in [
+            ("added_row", theme.added_row),
+            ("removed_row", theme.removed_row),
+        ] {
+            assert_ne!(
+                theme.selection.bg, other.bg,
+                "{name}'s selection is {element} exactly, so a selected row is \
+                 indistinguishable from an unselected one of that kind"
+            );
+        }
+    }
+
+    // `ansi` washes nothing, for the reason its row washes are unset: a background
+    // has to assume one. It reverses instead, which is right on any scheme.
+    assert!(
+        Theme::ansi().selection.bg.is_none(),
+        "the ansi palette took a background, which it has no way to be right about"
+    );
+    assert!(
+        Theme::ansi()
+            .selection
+            .add_modifier
+            .contains(ratatui::style::Modifier::REVERSED),
+        "the ansi palette neither colours nor reverses its selection, so a \
+         sixteen-colour terminal shows a reader nothing at all"
+    );
+}
+
 #[test]
 fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
     // Reported from use, and the numbers say why nothing was visible. The
@@ -1608,4 +1700,25 @@ fn the_detected_background_picks_the_showcase_and_never_outranks_a_word() {
         Theme::light().resolve(Depth::Truecolor),
         "detection outranked VIGIA_THEME"
     );
+}
+
+/// A depth that cannot carry a background must still show a selection. The diff
+/// washes degrade onto their bars; this one has none, so it reverses instead.
+#[test]
+fn the_selection_survives_every_colour_depth() {
+    for name in ["dark", "light", "ansi"] {
+        let palette = Theme::named(name).expect("a built-in palette");
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let selection = palette.resolve(depth).selection;
+            let seen = selection.bg.is_some()
+                || selection
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::REVERSED);
+            assert!(
+                seen,
+                "{name} at {depth:?} draws a selection with neither a background nor \
+                 a reversal, so a reader drags and sees nothing while `y` still sends"
+            );
+        }
+    }
 }

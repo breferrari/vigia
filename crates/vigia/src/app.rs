@@ -20,6 +20,40 @@ fn scaled(at: u32, count: usize) -> usize {
     ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
 }
 
+/// What `y` asked to send, and what the footer may call it. The two travel
+/// together because the choice between a selection and the caret file is made
+/// once, rather than re-derived by whatever is about to write the escape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Yanked {
+    /// The bytes for the clipboard.
+    pub text: String,
+    /// What the footer names them.
+    pub said: String,
+}
+
+impl Yanked {
+    /// A path, which names itself.
+    fn path(path: String) -> Self {
+        Self {
+            said: path.clone(),
+            text: path,
+        }
+    }
+
+    /// Selected lines, named by how many. **Lines and not rows**: a wrapped line
+    /// is several rows and one line, and the count names what was sent.
+    fn lines(lines: &[String]) -> Self {
+        Self {
+            said: if lines.len() == 1 {
+                "1 line".to_owned()
+            } else {
+                format!("{} lines", lines.len())
+            },
+            text: lines.join("\n"),
+        }
+    }
+}
+
 /// How far a shell has got through its opening two frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Paint {
@@ -42,8 +76,13 @@ pub struct App {
     /// by the next tick, nor bury a warning that has no expiry.
     flash: Option<String>,
     /// Asked for and not sent yet, then the caret's path on the frame last drawn.
-    yanking: Option<String>,
+    yanking: Option<Yanked>,
     caret: Option<String>,
+    /// Rows the drag has washed, as offsets into the collected rows.
+    selecting: Option<(usize, usize)>,
+    /// Their lines, resolved on the frame last drawn, so the wash and what `y`
+    /// sends cannot name different frames.
+    selected: Option<Vec<String>>,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
@@ -109,6 +148,8 @@ impl Default for App {
             flash: None,
             yanking: None,
             caret: None,
+            selecting: None,
+            selected: None,
             following: false,
             masthead: false,
             rail: false,
@@ -222,8 +263,24 @@ impl App {
         self.notice = Some(message.into());
     }
 
+    /// Which rows the next collect resolves, from the loop that holds the pointer.
+    pub fn select(&mut self, span: Option<(usize, usize)>) {
+        self.selecting = span;
+        if span.is_none() {
+            // The lines go with the span. A wash cleared between paints must not
+            // leave `y` sending rows the reader can no longer see, and the resolve
+            // below only runs on a frame that collects.
+            self.selected = None;
+        }
+    }
+
+    /// Whether the last collect resolved the span it was given to any lines.
+    pub fn holds_a_selection(&self) -> bool {
+        self.selected.is_some()
+    }
+
     /// Taken, so a yank is sent once.
-    pub fn take_yank(&mut self) -> Option<String> {
+    pub fn take_yank(&mut self) -> Option<Yanked> {
         self.yanking.take()
     }
 
@@ -251,9 +308,11 @@ impl App {
             gripped,
             hovered,
             scrolling,
+            selected,
         } = pointing;
         Chrome {
             pressed,
+            selected,
             // `Some` even at zero: that is the only acknowledgment pressing
             // `a` on a worktree with nothing staged can give.
             staged: self.staged.then_some(self.staged_files),
@@ -361,7 +420,17 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             // The bar's scale does not move.
             Action::ToggleWrap => self.wrap = !self.wrap,
-            Action::Yank => self.yanking = self.caret.clone(),
+            Action::Yank => {
+                let lines = self
+                    .selected
+                    .as_deref()
+                    .filter(|lines| lines.iter().any(|line| !line.is_empty()));
+                self.yanking = match (lines, &self.caret) {
+                    (Some(lines), _) => Some(Yanked::lines(lines)),
+                    (None, Some(path)) => Some(Yanked::path(path.clone())),
+                    (None, None) => None,
+                }
+            }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;
@@ -661,6 +730,9 @@ impl App {
         self.position = view.top;
         // By path: a tick rebuilds the list mid-batch and an index goes stale with it.
         self.caret = frame.files().get(view.top.file).map(|at| at.path.clone());
+        // Beside the caret because it is the same rule: what `y` would send is
+        // resolved from the frame that was drawn, never carried from the gesture.
+        self.selected = self.selecting.and_then(|span| view.lines_in(span));
         // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.
@@ -673,11 +745,7 @@ impl App {
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
         // What a page step is measured in, recorded where the frame is built.
-        self.shown = view
-            .rows
-            .iter()
-            .filter(|row| !matches!(row, crate::view::Row::Wrap { .. }))
-            .count();
+        self.shown = view.rows.iter().filter(|row| !row.is_wrap()).count();
         Ok(view)
     }
 
@@ -724,6 +792,7 @@ mod tests {
                 pressed: Some((79, 5)),
                 gripped: Some(Grabbed::Diff),
                 hovered: Some(Hovered::Button(79, 19)),
+                selected: None,
                 scrolling: Some((Grabbed::List, -1)),
             },
             0,

@@ -162,6 +162,7 @@ fn chrome() -> Chrome {
         pressed: None,
         gripped: None,
         hovered: None,
+        selected: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         // `None` because these views have a diff in them, and only the empty
@@ -243,6 +244,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     );
 
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -319,6 +321,7 @@ fn file(path: &str, added: u32, removed: u32) -> Row {
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
 fn one_file() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 3,
@@ -485,6 +488,7 @@ fn a_content_row_stands_its_sigil_off_the_line() {
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 0,
@@ -675,6 +679,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
 fn ragged_counts() -> View {
     let row = |path: &str, added: u32, removed: u32| Row::file(listed(path, added, removed));
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 3,
@@ -1561,6 +1566,7 @@ fn a_detached_head_names_no_branch_anywhere() {
 #[test]
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 3,
@@ -1623,6 +1629,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     // nothing. This is the truncated-to-useless shape I6 forbids, and it is the
     // one part of I6 the renderer decides on its own rather than by layout.
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -1652,6 +1659,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     // Git omits the count when a side covers exactly one line, and a reader calibrated
     // on `git diff` reads its absence as "one".
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -1874,6 +1882,7 @@ fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
 fn tabs_become_columns_and_control_characters_become_visible() {
     // Not cosmetic.
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -1909,6 +1918,7 @@ fn a_double_width_character_is_never_cut_in_half() {
     // Diffs carry whatever is in the files, and a CJK ideograph or an emoji occupies
     // two columns.
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -1965,6 +1975,7 @@ fn the_gutter_gives_way_before_the_text_does() {
     // than a readable column. Both sides are asserted, because a rule that only
     // ever fires one way is not a rule.
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -2038,6 +2049,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         }; HEAT_BUCKETS],
     };
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 2,
@@ -2424,6 +2436,7 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 /// The three rungs of the recency ladder on one screen, with churn behind them.
 fn glancing() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 3,
@@ -3009,6 +3022,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 /// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
 fn two_regions_at(current: usize, row: usize) -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 3,
@@ -3389,6 +3403,7 @@ fn a_one_row_region_with_somewhere_to_scroll_still_spends_no_column() {
 /// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
 fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         // A screenful is `shown`, which is what this fixture's name says and what the

@@ -145,6 +145,11 @@ palette! {
     added_bar,
     /// The same, on a removed line.
     removed_bar,
+    /// The wash over rows a drag has selected. It stands in for the diff wash
+    /// rather than layering over it, so the sigil column carries added against
+    /// removed while it is up, which is the degradation §5.1 already rules for a
+    /// palette that washes nothing.
+    selection,
 
     /// A stand-in for content there is no diff for: binary, conflict.
     note,
@@ -195,7 +200,15 @@ impl Theme {
 
     /// This palette, in colours `depth` can actually show.
     pub fn resolve(self, depth: Depth) -> Self {
-        self.map(|style| depth.resolve(style))
+        let mut out = self.map(|style| depth.resolve(style));
+        // A depth that cannot carry a background drops the selection's, and unlike
+        // the diff washes it has no bar to degrade onto: a reader would drag and see
+        // nothing while `y` went on sending. Reversing is what `ansi` already does
+        // for the same reason, and it needs no colour at all.
+        if out.selection.bg.is_none() {
+            out.selection = out.selection.add_modifier(Modifier::REVERSED);
+        }
+        out
     }
 
     /// The style a file heading is drawn in at `recency`.
@@ -379,6 +392,11 @@ impl Theme {
             // background and this palette assumes none.
             added_bar: Style::new().bg(Color::Green),
             removed_bar: Style::new().bg(Color::Red),
+            // Reversed rather than a background, for the reason the row washes
+            // above are unset here: a background has to assume one, and this
+            // palette is the one that cannot. Reversing swaps whatever the
+            // terminal's own scheme put there, so it is visible on both.
+            selection: Style::new().add_modifier(Modifier::REVERSED),
             note: fg(Color::Magenta),
             alert: fg(Color::Red).add_modifier(Modifier::BOLD),
             // The mockup's hues, mapped onto the sixteen names every terminal resolves.
@@ -457,6 +475,10 @@ impl Theme {
             // Unset, and that is a ruling rather than a gap.
             added_bar: Style::new().bg(Color::Rgb(0x3f, 0xb9, 0x50)),
             removed_bar: Style::new().bg(Color::Rgb(0xf8, 0x51, 0x49)),
+            // The row washes' own luminance in a hue neither uses, so a selected
+            // removal cannot read as an addition and the ink it covers is no
+            // worse off than the diff already leaves it.
+            selection: Style::new().bg(Color::Rgb(0x2c, 0x36, 0x4e)),
             note: rgb(0xd2, 0xa8, 0xff),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
@@ -530,6 +552,9 @@ impl Theme {
             // blank cell, so what it has to clear is the page behind it.
             added_bar: Style::new().bg(Color::Rgb(0x1a, 0x7f, 0x37)),
             removed_bar: Style::new().bg(Color::Rgb(0xcf, 0x22, 0x2e)),
+            // The dark palette's hue re-picked at light-background luminance, as
+            // every other pair here is.
+            selection: Style::new().bg(Color::Rgb(0xcf, 0xe0, 0xf7)),
             note: rgb(0x82, 0x50, 0xdf),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),
             keyword: rgb(0xcf, 0x22, 0x2e),
