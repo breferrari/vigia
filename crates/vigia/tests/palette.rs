@@ -37,6 +37,7 @@ fn chrome() -> Chrome {
         pressed: None,
         gripped: None,
         hovered: None,
+        selected: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         staged: None,
@@ -387,6 +388,10 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         removed_row: _,
         added_bar: _,
         removed_bar: _,
+        // Exempt for the reason the washes above it are, and one further: on this
+        // palette it carries no colour at all, only `REVERSED`, because a
+        // background has to assume one and this is the palette that cannot.
+        selection: _,
 
         // Exempt: syntax classes. Read, but never in grey: they carry hue, and
         // `a_ramp_that_survives_sixteen_colours_is_still_a_ramp` covers them.

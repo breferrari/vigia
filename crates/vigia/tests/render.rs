@@ -162,6 +162,7 @@ fn chrome() -> Chrome {
         pressed: None,
         gripped: None,
         hovered: None,
+        selected: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         // `None` because these views have a diff in them, and only the empty

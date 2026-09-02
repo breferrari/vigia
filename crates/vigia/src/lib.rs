@@ -28,8 +28,8 @@ pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
-    Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
-    patience, scroll_mark, settled,
+    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after,
+    hover_repainted, patience, scroll_mark, selection_after, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -190,6 +190,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         held: None,
         grabbed: None,
         hovered: None,
+        selected: None,
         scrolling: None,
         scrolling_until: None,
         notice_until: None,
@@ -283,7 +284,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // `Scroll` and `ScrollList` today, neither of which reads a height, so the
             // literal zero this replaced was right by accident rather than by rule.
             let height = shell.diff_rows_for(step, frame.files())?;
-            match shell.app.apply(step, &mut frame, height) {
+            match shell.apply(step, &mut frame, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
                 Err(e) => shell.app.warn(e.to_string()),
@@ -332,6 +333,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
+                    // Before the event is interpreted, for the hold's reason: a press
+                    // opening one is an action too, and the wash precedes its clearing.
+                    shell.selected = selection_after(&event, regions, shell.selected);
                     // A drag under way answers before the column is consulted, and that
                     // ordering is the fix.
                     if let Some(on) = shell.grabbed {
@@ -339,7 +343,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // The height, because a drag on the diff's bar is a
                             // `DiffTo` and `DiffTo` reads one.
                             let height = shell.diff_rows_for(drag, frame.files())?;
-                            match shell.app.apply(drag, &mut frame, height) {
+                            match shell.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
                                 Err(e) => {
@@ -380,7 +384,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // drain's doing rather than tidiness.
                     let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
-                    match shell.app.apply(action, &mut frame, height) {
+                    match shell.apply(action, &mut frame, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw
                         // below: leaving was asked for, and painting one more
@@ -535,6 +539,8 @@ struct Shell {
     grabbed: Option<Grabbed>,
     /// What the pointer is resting on, when it is on something a click acts on.
     hovered: Option<Hovered>,
+    /// The diff rows a drag has selected, in screen rows of the last paint.
+    selected: Option<Selection>,
     /// Which way the viewport is currently being moved, and until when.
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
@@ -583,6 +589,7 @@ impl Shell {
             pressed: self.pressed(),
             gripped: self.gripped(),
             hovered: self.hovered(),
+            selected: self.selected,
             scrolling: self.scrolling,
         }
     }
@@ -636,6 +643,25 @@ impl Shell {
         }
     }
 
+    /// Apply `action`, taking any selection with it: every action but the one that
+    /// sends it clears the wash, and the span lives here rather than on the app.
+    fn apply(
+        &mut self,
+        action: Action,
+        frame: &mut vigia_core::Frame,
+        height: usize,
+    ) -> vigia_core::Result<bool> {
+        // A rung of the ladder `Esc` already climbs, under the sheet, over quitting.
+        if action == Action::Escape && self.selected.is_some() {
+            self.selected = None;
+            return Ok(true);
+        }
+        if action != Action::Yank {
+            self.selected = None;
+        }
+        self.app.apply(action, frame, height)
+    }
+
     /// Send a path the reader yanked, and say so for `NOTICE_LINGER`.
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
@@ -647,11 +673,12 @@ impl Shell {
             self.app.clear_flash();
             self.notice_until = None;
         }
-        if let Some(path) = self.app.take_yank() {
+        if let Some(yank) = self.app.take_yank() {
+            let said = yank.said;
             self.app
-                .flash(match self.session.send(&clipboard::copy(&path)) {
-                    Ok(()) => format!("sent {path} to the clipboard"),
-                    Err(e) => format!("could not send {path}: {e}"),
+                .flash(match self.session.send(&clipboard::copy(&yank.text)) {
+                    Ok(()) => format!("sent {said} to the clipboard"),
+                    Err(e) => format!("could not send {said}: {e}"),
                 });
             self.notice_until = Some(now + NOTICE_LINGER);
         }
@@ -730,6 +757,10 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
+        // Against the last paint's regions, which is the screen the drag was aimed
+        // at. Anything that moves them is an action, and an action clears the wash.
+        self.app
+            .select(self.selected.map(|had| had.offsets(self.regions.diff.top)));
         let body = body_layout(
             self.area()?,
             &chrome,

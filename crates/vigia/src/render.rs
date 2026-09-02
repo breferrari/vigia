@@ -10,7 +10,7 @@ use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
 
 use crate::glyphs::Glyphs;
-use crate::input::{Grabbed, Hovered, Region, Regions, Sheet};
+use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Row, Scale, View};
 
@@ -426,6 +426,8 @@ pub struct Chrome {
     pub gripped: Option<Grabbed>,
     /// What the pointer is resting on, when it is on something a click acts on.
     pub hovered: Option<Hovered>,
+    /// The diff rows a drag has selected, when any are.
+    pub selected: Option<Selection>,
     /// Which bar is being scrolled and which way, when one is.
     pub scrolling: Option<(Grabbed, isize)>,
     /// Something the reader should see instead of the key hints.
@@ -1652,6 +1654,7 @@ pub fn render(
         pressed: chrome.pressed,
         gripped: chrome.gripped,
         hovered: chrome.hovered,
+        selected: chrome.selected.map(Selection::rows),
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
         covered: sheet.as_ref().map(|plan| plan.area),
@@ -1823,7 +1826,7 @@ const KEYBOARD: [Gesture; 16] = [
     // Last of `view`: the one key that spends something outside this program.
     Gesture {
         keys: ["y", "y"],
-        verb: ["copy this file's path", "copy the path"],
+        verb: ["copy rows or path", "copy rows/path"],
     },
     Gesture {
         keys: ["?  Esc", "?  Esc"],
@@ -1851,7 +1854,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 }
 
 /// The mouse half, which is the first gesture the height ladder drops.
-const MOUSE: [Gesture; 8] = [
+const MOUSE: [Gesture; 9] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -1871,6 +1874,10 @@ const MOUSE: [Gesture; 8] = [
     Gesture {
         keys: ["click a listed file", "click a file"],
         verb: ["jump the diff to it", "jump the diff to it"],
+    },
+    Gesture {
+        keys: ["drag the diff", "drag the diff"],
+        verb: ["select those rows", "select rows"],
     },
     // The tail is the three rows this table most easily omits, and `README.md`'s Mouse
     // table is the other place each is named; a gate holds the two against each other.
@@ -2449,6 +2456,8 @@ struct Painter<'a> {
     gripped: Option<Grabbed>,
     /// What the pointer is resting on, from [`Chrome::hovered`].
     hovered: Option<Hovered>,
+    /// The screen rows a drag has selected, top and bottom inclusive.
+    selected: Option<(u16, u16)>,
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(Grabbed, isize)>,
@@ -3520,6 +3529,16 @@ impl Painter<'_> {
                     );
                 }
             }
+            // After the row and at its own wash's width: `set_style` patches.
+            if self.selected.is_some_and(|(top, bottom)| y >= top && y <= bottom) {
+                let over = Rect {
+                    y,
+                    height: 1,
+                    width: washed,
+                    ..area
+                };
+                self.buf.set_style(over, self.theme.selection);
+            }
         }
     }
 
@@ -4204,6 +4223,7 @@ mod tests {
             buf: &mut buf,
             theme: &theme,
             glyphs: Glyphs::default(),
+            selected: None,
             gutter: 0,
             inset: 0,
             trailing: 0,

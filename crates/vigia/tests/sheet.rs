@@ -20,7 +20,7 @@ use support::{Scratch, materialise};
 const WIDE: u16 = 80;
 
 /// The pane height at which the sheet draws every gesture on one page.
-const WHOLE_TABLE: u16 = 30;
+const WHOLE_TABLE: u16 = 31;
 
 /// Keyboard gestures the sheet's table holds, as a reader counts them on screen.
 const KEYBOARD_ROWS: u16 = 16;
@@ -267,7 +267,7 @@ fn the_sheet_moves_no_content() {
 }
 
 /// A pane the roomy rung fits on: a room of 68 columns and a body of 31 rows.
-const ROOMY_PANE: Rect = Rect::new(0, 0, 120, 40);
+const ROOMY_PANE: Rect = Rect::new(0, 0, 120, 41);
 
 #[test]
 fn the_sheet_is_opaque() {
@@ -1842,12 +1842,12 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // The other axis, and the one no gate walked.
     let arrival;
     sweep!("sheet-roomy-height", |paint| {
-        arrival = arrival_height_of(&mut paint, "moving", 24..=40, 100);
+        arrival = arrival_height_of(&mut paint, "moving", 24..=41, 100);
     });
     assert_eq!(
         arrival,
-        Some(40),
-        "the roomy rung does not arrive at the pane height a body of thirty-seven \
+        Some(41),
+        "the roomy rung does not arrive at the pane height a body of thirty-eight \
          rows implies on this fixture"
     );
 }
@@ -1862,8 +1862,8 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
         let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
         assert_eq!(
             rows.len(),
-            37,
-            "the roomy rung is not thirty-seven rows tall:\n{sheet}"
+            38,
+            "the roomy rung is not thirty-eight rows tall:\n{sheet}"
         );
 
         // Interior rows only: the title bar and the bottom border are the frame's.
@@ -2235,7 +2235,7 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // The roomy rung, at the head of the ladder. A pane this tall takes
             // the nineteen-row sheet at (22, 10, 56, 19) without it, and the row
             // it loses to air it has spare.
-            (100, 40, (16, 1, 68, 37)),
+            (100, 41, (16, 1, 68, 38)),
             (120, 22, (8, 1, 104, 19)),
             // The tight two-column rung, five columns narrower for the shortened tight
             // mouse verbs and a row taller for each of `r`, `s` and `w`.
@@ -2736,7 +2736,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     let sheet = laid.sheet.expect("the roomy pane draws no sheet");
     assert_eq!(
         (sheet.width, sheet.height),
-        (68, 37),
+        (68, 38),
         "this gate is not looking at the roomy rung"
     );
 
