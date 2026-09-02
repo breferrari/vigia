@@ -653,13 +653,21 @@ impl Shell {
     ) -> vigia_core::Result<bool> {
         // A rung of the ladder `Esc` already climbs, under the sheet, over quitting.
         if action == Action::Escape && self.selected.is_some() {
-            self.selected = None;
+            self.deselect();
             return Ok(true);
         }
         if action != Action::Yank {
-            self.selected = None;
+            self.deselect();
         }
         self.app.apply(action, frame, height)
+    }
+
+    /// Drop the wash and the lines it stood for together: two fields on two sides,
+    /// so clearing one and not the other leaves `y` sending rows nothing on screen
+    /// is claiming.
+    fn deselect(&mut self) {
+        self.selected = None;
+        self.app.select(None);
     }
 
     /// Send a path the reader yanked, and say so for `NOTICE_LINGER`.
@@ -814,7 +822,9 @@ impl Shell {
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
         self.hovered = chrome.hovered;
-        self.selected = chrome.selected;
+        if chrome.selected.is_none() {
+            self.deselect();
+        }
         self.regions = painted;
         Ok(())
     }
@@ -1095,7 +1105,7 @@ mod tests {
             .find("render::regions(area, &chrome, screen)")
             .expect("`draw` no longer computes the layout it is about to paint");
         let retire = code
-            .find("repainted(chrome.hovered")
+            .find("repainted(chrome.selected")
             .expect("`draw` no longer retires a hover mark the new layout invalidated");
         let paint = code
             .find("render(f.buffer_mut()")

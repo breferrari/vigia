@@ -1788,7 +1788,6 @@ fn roomy_shape() -> Vec<RoomyRow> {
 
 #[test]
 fn the_roomy_rung_is_the_size_the_ruling_states() {
-    // `SPEC.md` §11.1 states 68 by 35, and Mock A drew 76 by 29.
     sweep!("sheet-roomy-size", |paint| {
         let at = ROOMY_PANE;
         let (buf, laid) = paint(at);
@@ -2238,7 +2237,7 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // The roomy rung, at the head of the ladder. A pane this tall takes
             // the nineteen-row sheet at (22, 10, 56, 19) without it, and the row
             // it loses to air it has spare.
-            (100, 42, (16, 1, 68, 38)),
+            (100, 41, (16, 1, 68, 38)),
             (120, 22, (8, 1, 104, 19)),
             // The tight two-column rung, five columns narrower for the shortened tight
             // mouse verbs and a row taller for each of `r`, `s` and `w`.

@@ -99,17 +99,30 @@ fn sent_on(
     app.take_yank().map(|yank| yank.text)
 }
 
+/// The width I6 is named for, and the width a deep path has to be shortened at.
+const NARROW: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 40,
+    height: 24,
+};
+
 /// Everything the pane draws, as text.
 fn drawn(app: &mut App, frame: &mut Frame) -> String {
+    drawn_on(app, frame, PANE)
+}
+
+/// The same, on a pane of a named size.
+fn drawn_on(app: &mut App, frame: &mut Frame, pane: Rect) -> String {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    let body = body_layout(PANE, &chrome, 1, 1);
+    let body = body_layout(pane, &chrome, 1, 1);
     let view = app
         .view(frame, &mut highlighter, &history, body)
         .expect("view");
     let theme = Theme::default();
-    let mut terminal = Terminal::new(TestBackend::new(PANE.width, PANE.height)).expect("terminal");
+    let mut terminal = Terminal::new(TestBackend::new(pane.width, pane.height)).expect("terminal");
     terminal
         .draw(|f| {
             let area = f.area();
@@ -255,6 +268,24 @@ fn a_wrapped_line_is_sent_once_and_whole() {
     materialise(&mut frame);
     let mut app = App::new();
 
+    // The precondition: wrapping really did split it, so `hits == 1` below cannot
+    // pass by the line never having been cut at all.
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut probe = App::new();
+    probe
+        .apply(Action::ToggleWrap, &mut frame, 24)
+        .expect("wrap");
+    let chrome = probe.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(PANE, &chrome, 1, 1);
+    let view = probe
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(vigia::Row::is_wrap),
+        "nothing wrapped, so this gate is not the case it is named for"
+    );
+
     let text = sent(&mut app, &mut frame, Some((0, 23)), true).expect("`y` sent nothing");
     let hits = text.matches(LONG).count();
     assert_eq!(
@@ -274,7 +305,17 @@ fn a_heading_row_sends_the_path_and_not_the_drawn_label() {
     materialise(&mut frame);
     let mut app = App::new();
 
-    let text = sent(&mut app, &mut frame, Some((0, 0)), false).expect("`y` sent nothing");
+    // The precondition: at this width the pane really did shorten the label, so
+    // a copy taken from the cells could not have reached the path.
+    let screen = drawn_on(&mut app, &mut frame, NARROW);
+    assert!(
+        screen.contains('…'),
+        "the pane drew {DEEP:?} whole at {} columns, so this gate is not the case it \
+         is named for:\n{screen}",
+        NARROW.width
+    );
+    let text =
+        sent_on(&mut app, &mut frame, Some((0, 0)), false, NARROW).expect("`y` sent nothing");
     assert_eq!(
         text, DEEP,
         "the heading row sent {text:?} rather than the path it stands for"
@@ -544,5 +585,98 @@ fn a_press_while_the_sheet_is_up_opens_nothing() {
         selection_after(&press(2, 12), regions, None).is_none(),
         "a press on the diff beside the sheet opened a wash, so `Esc` would clear it \
          instead of closing the sheet"
+    );
+}
+
+/// The footer names lines, not rows: a wrapped line is several rows and one line,
+/// and a count that said otherwise would disagree with what was sent.
+#[test]
+fn the_footer_counts_lines_and_not_rows() {
+    let scratch = scratch_with(
+        "select-said",
+        "src/long.rs",
+        &format!("fn f() {{\n    {LONG}\n}}\n"),
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    for (span, want) in [((2usize, 2usize), "1 line"), ((2, 4), "3 lines")] {
+        let mut app = App::new();
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        app.select(Some(span));
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+        let body = body_layout(PANE, &chrome, 1, 1);
+        app.view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+        app.apply(Action::Yank, &mut frame, 24).expect("yank");
+        let yank = app.take_yank().expect("`y` yanked nothing");
+        assert_eq!(
+            yank.said,
+            want,
+            "a span of {span:?} is named {:?} on the footer and sent {} lines",
+            yank.said,
+            yank.text.lines().count()
+        );
+    }
+}
+
+/// A wash cleared between paints takes its lines with it. Without that, `y` goes
+/// on sending rows nothing on screen is claiming, and after a tick that moved the
+/// region they are not even the rows the reader crossed.
+#[test]
+fn a_cleared_wash_sends_the_caret_path_again() {
+    let scratch = scratch_with("select-retired", DEEP, "one\ntwo\nthree\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    // Resolved, so the lines are in hand the way a standing wash leaves them.
+    assert!(
+        sent(&mut app, &mut frame, Some((2, 3)), false).is_some_and(|text| text != DEEP),
+        "the span resolved to nothing, so clearing it below proves nothing"
+    );
+    // Cleared with no collect after it, which is what a retired wash looks like.
+    app.select(None);
+    app.apply(Action::Yank, &mut frame, 24).expect("yank");
+    assert_eq!(
+        app.take_yank().map(|yank| yank.text).as_deref(),
+        Some(DEEP),
+        "`y` sent the cleared selection's lines rather than the caret file's path"
+    );
+}
+
+/// An empty payload is no payload. OSC 52 carrying nothing **clears** the reader's
+/// clipboard, which is the one thing B9's surviving ground refuses, and the footer
+/// would have said it sent something.
+#[test]
+fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
+    let scratch = scratch_with("select-blank", DEEP, "one\n\ntwo\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(PANE, &chrome, 1, 1);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    let blank = view
+        .rows
+        .iter()
+        .position(|row| matches!(row, vigia::Row::Line { text, .. } if text.is_empty()))
+        .expect("the fixture drew no empty line, so this gate is not its own case");
+
+    let text = sent(&mut app, &mut frame, Some((blank, blank)), false)
+        .expect("`y` sent nothing at all, where it owes the caret path");
+    assert_eq!(
+        text, DEEP,
+        "a selection with no text in it sent {text:?}; an empty OSC 52 write would \\
+         have wiped whatever the reader had on their clipboard"
     );
 }

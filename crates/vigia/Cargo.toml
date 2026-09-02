@@ -13,10 +13,10 @@ keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
 # `SPEC.md` section 9 counts twenty-three *files* here that read outside this
-# package: nineteen reach `vigia-core/tests/support` by `#[path]`, and five read
+# package: twenty reach `vigia-core/tests/support` by `#[path]`, and five read
 # repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
 # `sheet.rs` are in both groups, which is what makes the total twenty-three rather
-# than twenty-four. No destination is inside this directory, so a packaged copy
+# than twenty-five. No destination is inside this directory, so a packaged copy
 # carries a test suite that cannot compile.
 #
 # Excluding the tests is section 9's own resolution, and the direction is the

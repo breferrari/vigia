@@ -268,6 +268,12 @@ impl App {
     /// Which rows the next collect resolves, from the loop that holds the pointer.
     pub fn select(&mut self, span: Option<(usize, usize)>) {
         self.selecting = span;
+        if span.is_none() {
+            // The lines go with the span. A wash cleared between paints must not
+            // leave `y` sending rows the reader can no longer see, and the resolve
+            // below only runs on a frame that collects.
+            self.selected = None;
+        }
     }
 
     /// Taken, so a yank is sent once.
@@ -412,7 +418,11 @@ impl App {
             // The bar's scale does not move.
             Action::ToggleWrap => self.wrap = !self.wrap,
             Action::Yank => {
-                self.yanking = match (&self.selected, &self.caret) {
+                let lines = self
+                    .selected
+                    .as_deref()
+                    .filter(|lines| lines.iter().any(|line| !line.is_empty()));
+                self.yanking = match (lines, &self.caret) {
                     (Some(lines), _) => Some(Yanked::lines(lines)),
                     (None, Some(path)) => Some(Yanked::path(path.clone())),
                     (None, None) => None,
