@@ -7,7 +7,7 @@ use vigia_core::{Frame, Highlighter, History, Result, Samples};
 use crate::input::{Action, Pointing};
 use crate::memory;
 use crate::render::{Body, Chrome, Mode};
-use crate::view::{Position, Row, View, Viewport, rows_in};
+use crate::view::{Position, View, Viewport, rows_in};
 
 /// Completed frames the status bar's p99 is taken over.
 const FRAME_SAMPLES: usize = 128;
@@ -18,80 +18,6 @@ fn scaled(at: u32, count: usize) -> usize {
         return 0;
     }
     ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
-}
-
-/// The row a continuation belongs to: the [`Row::Line`] it continues, or the
-/// first collected piece where that head was scrolled off the top of the pane.
-fn head_of(rows: &[Row], at: usize) -> usize {
-    if !matches!(rows[at], Row::Wrap { .. }) {
-        return at;
-    }
-    let mut head = at;
-    while head > 0 && matches!(rows[head - 1], Row::Wrap { .. }) {
-        head -= 1;
-    }
-    match head.checked_sub(1) {
-        Some(above) if matches!(rows[above], Row::Line { .. }) => above,
-        _ => head,
-    }
-}
-
-/// One logical line, joined back from the disjoint pieces wrapping cut it into.
-///
-/// `View::collect` slices a wrapped line at its break points, so the head row
-/// carries only as far as the first break and each continuation carries the next
-/// slice. Sending the head alone truncates at a column, which is the one thing
-/// this copy exists not to do.
-fn line_at(rows: &[Row], head: usize) -> String {
-    let mut text = match &rows[head] {
-        Row::Line { text, .. } | Row::Wrap { text, .. } => text.clone(),
-        // The path and not the drawn label, which elides: the same semantic copy
-        // the caret fallback makes.
-        Row::File(entry) => return entry.path.clone(),
-        Row::Hunk {
-            old_start,
-            old_lines,
-            new_start,
-            new_lines,
-        } => return format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@"),
-        Row::Note(note) => return (*note).to_owned(),
-        Row::Gap => return String::new(),
-    };
-    for row in &rows[head + 1..] {
-        let Row::Wrap { text: tail, .. } = row else {
-            break;
-        };
-        text.push_str(tail);
-    }
-    text
-}
-
-/// The text of the rows `span` covers, both ends inclusive, or `None` where it
-/// covers none of them.
-///
-/// The row model's strings rather than the drawn cells, which is the whole of
-/// `SPEC.md` §11.2 B20: a line the painter clipped arrives whole. A span whose
-/// start is past the collected rows selects nothing, so a drag on the blank below
-/// a short diff falls back to the caret rather than taking its last row.
-fn selected_text(rows: &[Row], span: (usize, usize)) -> Option<String> {
-    let (from, to) = span;
-    let last = rows.len().checked_sub(1)?;
-    if from > last {
-        return None;
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut emitted: Option<usize> = None;
-    for at in from..=to.min(last) {
-        let head = head_of(rows, at);
-        // Consecutive by construction, since every piece of one line resolves to
-        // the same row.
-        if emitted == Some(head) {
-            continue;
-        }
-        emitted = Some(head);
-        out.push(line_at(rows, head));
-    }
-    (!out.is_empty()).then(|| out.join("\n"))
 }
 
 /// What `y` asked to send, and what the footer may call it.
@@ -116,17 +42,16 @@ impl Yanked {
         }
     }
 
-    /// Selected rows, named by how many there were: the text can be a screenful
-    /// and the footer has one line.
-    fn rows(text: String) -> Self {
-        let rows = text.split('\n').count();
+    /// Selected lines, named by how many. **Lines and not rows**: a wrapped line
+    /// is several rows and one line, and the count names what was sent.
+    fn lines(lines: &[String]) -> Self {
         Self {
-            said: if rows == 1 {
-                "1 row".to_owned()
+            said: if lines.len() == 1 {
+                "1 line".to_owned()
             } else {
-                format!("{rows} rows")
+                format!("{} lines", lines.len())
             },
-            text,
+            text: lines.join("\n"),
         }
     }
 }
@@ -157,9 +82,9 @@ pub struct App {
     caret: Option<String>,
     /// Rows the drag has washed, as offsets into the collected rows.
     selecting: Option<(usize, usize)>,
-    /// Their own text, resolved on the frame last drawn rather than kept from the
-    /// gesture: B20's rule about the wash, and why these are two fields.
-    selected: Option<String>,
+    /// Their lines, resolved on the frame last drawn, so the wash and what `y`
+    /// sends cannot name different frames.
+    selected: Option<Vec<String>>,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
@@ -340,8 +265,7 @@ impl App {
         self.notice = Some(message.into());
     }
 
-    /// Which rows the next collect resolves, from the loop that knows where the
-    /// pointer is.
+    /// Which rows the next collect resolves, from the loop that holds the pointer.
     pub fn select(&mut self, span: Option<(usize, usize)>) {
         self.selecting = span;
     }
@@ -487,11 +411,9 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             // The bar's scale does not move.
             Action::ToggleWrap => self.wrap = !self.wrap,
-            // The selection first, and the caret file only where none stands: a
-            // reader who has washed rows has already said what they mean.
             Action::Yank => {
                 self.yanking = match (&self.selected, &self.caret) {
-                    (Some(text), _) => Some(Yanked::rows(text.clone())),
+                    (Some(lines), _) => Some(Yanked::lines(lines)),
                     (None, Some(path)) => Some(Yanked::path(path.clone())),
                     (None, None) => None,
                 }
@@ -797,9 +719,7 @@ impl App {
         self.caret = frame.files().get(view.top.file).map(|at| at.path.clone());
         // Beside the caret because it is the same rule: what `y` would send is
         // resolved from the frame that was drawn, never carried from the gesture.
-        self.selected = self
-            .selecting
-            .and_then(|span| selected_text(&view.rows, span));
+        self.selected = self.selecting.and_then(|span| view.lines_in(span));
         // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.

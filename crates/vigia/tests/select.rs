@@ -9,9 +9,7 @@ mod support;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
+use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia::{
     Action, App, Glyphs, Pointing, Region, Regions, Theme, body_layout, render, selection_after,
@@ -76,6 +74,17 @@ fn sent(
     span: Option<(usize, usize)>,
     wrap: bool,
 ) -> Option<String> {
+    sent_on(app, frame, span, wrap, PANE)
+}
+
+/// The same, on a pane of a named size.
+fn sent_on(
+    app: &mut App,
+    frame: &mut Frame,
+    span: Option<(usize, usize)>,
+    wrap: bool,
+    pane: Rect,
+) -> Option<String> {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     if wrap {
@@ -83,7 +92,7 @@ fn sent(
     }
     app.select(span);
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    let body = body_layout(PANE, &chrome, 1, 1);
+    let body = body_layout(pane, &chrome, 1, 1);
     app.view(frame, &mut highlighter, &history, body)
         .expect("view");
     app.apply(Action::Yank, frame, 24).expect("yank");
@@ -194,26 +203,6 @@ fn a_press_off_the_diff_clears_the_selection() {
     assert!(
         selection_after(&press(10, 1), regions, Some(standing)).is_none(),
         "a press above the diff left the wash standing"
-    );
-}
-
-/// A window that lost focus has ended the gesture, exactly as it ends a hold.
-#[test]
-fn a_lost_focus_ends_it() {
-    let regions = regions_at(2, 20);
-    let standing = selection_after(&press(10, 5), regions, None).expect("opened");
-    assert!(
-        selection_after(&Event::FocusLost, regions, Some(standing)).is_none(),
-        "the wash survived the window losing focus"
-    );
-    assert_eq!(
-        selection_after(
-            &Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
-            regions,
-            Some(standing)
-        ),
-        Some(standing),
-        "a key changed the span here, where the loop is what clears it"
     );
 }
 
@@ -433,5 +422,127 @@ fn a_selection_moves_no_rect() {
         (plain.list.top, plain.list.rows),
         (laid.list.top, laid.list.rows),
         "the list region moved because a selection was standing"
+    );
+}
+
+/// A hunk header is sent in the spelling the pane draws, which drops the `,1` git
+/// drops. `@@ -258,1 +25,1 @@` is not a verbose header, it is a different one.
+#[test]
+fn a_hunk_row_sends_the_header_the_pane_draws() {
+    let scratch = scratch_with("select-hunk", "src/a.rs", "one\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    let screen = drawn(&mut app, &mut frame);
+    let drawn_header = screen
+        .lines()
+        .find_map(|line| {
+            line.split_whitespace()
+                .find(|word| word.starts_with("@@"))
+                .map(|_| line.trim().to_owned())
+        })
+        .expect("the pane drew no hunk header");
+    let text = sent(&mut app, &mut frame, Some((0, 23)), false).expect("`y` sent nothing");
+    let header = text
+        .lines()
+        .find(|line| line.starts_with("@@"))
+        .expect("no hunk header was sent");
+    assert!(
+        drawn_header.contains(header),
+        "the pane draws {drawn_header:?} and `y` sent {header:?}, so the copy spells \
+         the header a second way"
+    );
+}
+
+/// **The edge the first gate missed, and the one the ruling turns on.** A wrapped
+/// line at the foot of the pane loses its last pieces from the row model, because
+/// the walk emits only what fits. The copy carries them anyway.
+///
+/// The gate proves the loss before it asserts the recovery: without that it passes
+/// on a pane that drew the whole line, which is how it passed the first time.
+#[test]
+fn a_wrapped_line_at_the_foot_of_the_pane_is_still_sent_whole() {
+    // Nine, and the count is load bearing at both ends: fewer and every piece fits,
+    // more and the line is taller than the pane, where the walk extends its last
+    // piece to the end and loses nothing. The lossy window is only between.
+    let huge = [LONG; 9].join(" ");
+    let scratch = scratch_with(
+        "select-foot",
+        "src/long.rs",
+        &format!("let a = 1;\nlet b = 2;\n    {huge}\n"),
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    app.apply(Action::ToggleWrap, &mut frame, 24).expect("wrap");
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(PANE, &chrome, 1, 1);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    // The precondition. Every piece the walk emitted, joined: if that is already the
+    // whole line then nothing was dropped and the assertion below proves nothing.
+    let on_screen: usize = view
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            vigia::Row::Line { text, .. } | vigia::Row::Wrap { text, .. } => Some(text.len()),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        on_screen < huge.len(),
+        "the pane drew all {} bytes of the wrapped line, so the walk dropped nothing \
+         and this gate is not the case it is named for",
+        huge.len()
+    );
+
+    let lines = view
+        .lines_in((0, view.rows.len() - 1))
+        .expect("nothing resolved");
+    assert!(
+        lines.iter().any(|line| line.contains(&huge)),
+        "the line at the foot of the pane was sent cut at a column: the walk kept \
+         {on_screen} bytes of {} and the copy carried no more",
+        huge.len()
+    );
+}
+
+/// Losing focus is not one of the things B20 says clears a wash, and this pane is
+/// built to sit beside one a reader types into.
+#[test]
+fn losing_focus_does_not_clear_the_wash() {
+    let regions = regions_at(2, 20);
+    let standing = selection_after(&press(10, 5), regions, None).expect("opened");
+    assert_eq!(
+        selection_after(&Event::FocusLost, regions, Some(standing)),
+        Some(standing),
+        "clicking into the agent's pane threw away a selection the reader was about to send"
+    );
+}
+
+/// The sheet is drawn over the pane, so a press while it is up belongs to it. A
+/// wash opened beside it would take `Esc` off the frontmost thing.
+#[test]
+fn a_press_while_the_sheet_is_up_opens_nothing() {
+    let mut regions = regions_at(2, 20);
+    regions.sheet = Some(vigia::Sheet {
+        left: 30,
+        top: 4,
+        width: 20,
+        height: 10,
+        close: (48, 4),
+    });
+    assert!(
+        selection_after(&press(2, 12), regions, None).is_none(),
+        "a press on the diff beside the sheet opened a wash, so `Esc` would clear it \
+         instead of closing the sheet"
     );
 }

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use vigia::{
     Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, NOTICE_LINGER, Region, Regions,
     SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for,
-    drag_action, hover_after, hover_repainted, patience, scroll_mark, settled,
+    drag_action, hover_after, patience, repainted, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -1383,7 +1383,7 @@ fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
     let mark = Some(Hovered::Button(79, 5));
 
     // Same layout, same mark: a paint that changed nothing changes nothing.
-    assert_eq!(hover_repainted(mark, before, before), mark);
+    assert_eq!(repainted(mark, before, before), mark);
 
     // Any change at all retires it, and the rule deliberately does not try to tell one
     // button from another.
@@ -1400,7 +1400,7 @@ fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
         ("everything went away", Regions::default()),
     ] {
         assert_eq!(
-            hover_repainted(mark, before, after),
+            repainted(mark, before, after),
             None,
             "{name} and the mark survived, so it is a claim about a screen that \
              is no longer on show"
@@ -1409,8 +1409,8 @@ fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
 
     // Nothing is not something: a paint with no mark to carry stays empty
     // whatever the layout did.
-    assert_eq!(hover_repainted(None, before, grown), None);
-    assert_eq!(hover_repainted(None, before, before), None);
+    assert_eq!(repainted::<Hovered>(None, before, grown), None);
+    assert_eq!(repainted::<Hovered>(None, before, before), None);
 }
 
 #[test]

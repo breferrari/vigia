@@ -369,6 +369,7 @@ fn with_notice() -> Chrome {
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -440,6 +441,7 @@ fn every_row_kind() -> View {
 /// longer than any pane.
 fn awkward() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -475,6 +477,7 @@ fn awkward() -> View {
 
 fn empty() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 0,
@@ -498,6 +501,7 @@ fn empty() -> View {
 /// actually drawn can be counted.
 fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 0,
@@ -705,6 +709,7 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// it.
 fn glancing() -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 3,
@@ -2156,6 +2161,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -2291,6 +2297,7 @@ fn a_clipped_content_line_says_it_continues() {
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,
@@ -3290,6 +3297,7 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 /// sweep, over a diff tall enough that the region always draws a scrollbar.
 fn overlong(rows: usize) -> View {
     View {
+        whole: Vec::new(),
         landed: false,
         recorded: 0,
         list_span: 1,

@@ -3404,6 +3404,12 @@ impl Painter<'_> {
         // And the two are allowed to differ, which is the ruling rather than a gap.
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
+            let row_wash = Rect {
+                y,
+                height: 1,
+                width: washed,
+                ..area
+            };
             match row {
                 // Given the planning width rather than the region's, for
                 // [`Painter::list`]'s reason: the elements are placed from the
@@ -3477,12 +3483,7 @@ impl Painter<'_> {
                 } => {
                     // One row tall, explicitly.
                     self.line_row(
-                        Rect {
-                            y,
-                            height: 1,
-                            width: washed,
-                            ..area
-                        },
+                        row_wash,
                         Rect {
                             y,
                             height: 1,
@@ -3508,12 +3509,7 @@ impl Painter<'_> {
                     indent,
                 } => {
                     self.line_row(
-                        Rect {
-                            y,
-                            height: 1,
-                            width: washed,
-                            ..area
-                        },
+                        row_wash,
                         Rect {
                             y,
                             height: 1,
@@ -3534,13 +3530,7 @@ impl Painter<'_> {
                 .selected
                 .is_some_and(|(top, bottom)| y >= top && y <= bottom)
             {
-                let over = Rect {
-                    y,
-                    height: 1,
-                    width: washed,
-                    ..area
-                };
-                self.buf.set_style(over, self.theme.selection);
+                self.buf.set_style(row_wash, self.theme.selection);
             }
         }
     }
@@ -3963,7 +3953,7 @@ fn width_of(text: &str) -> usize {
 }
 
 /// One side of a hunk header, in git's own shorthand.
-fn span(start: u32, lines: u32) -> String {
+pub(crate) fn span(start: u32, lines: u32) -> String {
     if lines == 1 {
         format!("{start}")
     } else {

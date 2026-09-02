@@ -28,8 +28,8 @@ pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
-    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after,
-    hover_repainted, patience, scroll_mark, selection_after, settled,
+    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
+    repainted, scroll_mark, selection_after, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -757,15 +757,18 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
-        // Against the last paint's regions, which is the screen the drag was aimed
-        // at. Anything that moves them is an action, and an action clears the wash.
-        self.app
-            .select(self.selected.map(|had| had.offsets(self.regions.diff.top)));
+        let area = self.area()?;
         let body = body_layout(
-            self.area()?,
+            area,
             &chrome,
             frame.files().len(),
             view::list_rows_wanted(frame.files()),
+        );
+        // Against this frame's own layout rather than the last paint's, so the rows
+        // the wash covers and the lines `y` would send are resolved on one screen.
+        self.app.select(
+            self.selected
+                .map(|had| had.offsets(body.areas(area).diff.y)),
         );
         match self
             .app
@@ -804,12 +807,14 @@ impl Shell {
             // paint actually used: `Shell::area` reads it again and a resize between
             // the two would leave a pointer told about a screen nobody saw.
             painted = render::regions(area, &chrome, screen);
-            // A hover mark does not outlive a relayout, and it has to be retired here,
-            // between the layout and the paint that uses it.
-            chrome.hovered = hover_repainted(chrome.hovered, was, painted);
+            // A screen-anchored mark does not outlive a relayout, and both have to be
+            // retired here, between the layout and the paint that uses them.
+            chrome.hovered = repainted(chrome.hovered, was, painted);
+            chrome.selected = repainted(chrome.selected, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
         self.hovered = chrome.hovered;
+        self.selected = chrome.selected;
         self.regions = painted;
         Ok(())
     }
@@ -1090,7 +1095,7 @@ mod tests {
             .find("render::regions(area, &chrome, screen)")
             .expect("`draw` no longer computes the layout it is about to paint");
         let retire = code
-            .find("hover_repainted(chrome.hovered")
+            .find("repainted(chrome.hovered")
             .expect("`draw` no longer retires a hover mark the new layout invalidated");
         let paint = code
             .find("render(f.buffer_mut()")

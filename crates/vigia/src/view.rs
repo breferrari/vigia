@@ -297,6 +297,11 @@ pub enum Row {
 }
 
 impl Row {
+    /// Whether this row continues the line above rather than starting one.
+    pub fn is_wrap(&self) -> bool {
+        matches!(self, Self::Wrap { .. })
+    }
+
     /// A file heading row.
     pub fn file(entry: FileEntry) -> Self {
         Self::File(Box::new(entry))
@@ -461,6 +466,9 @@ impl Default for Viewport {
 /// A screenful of rows, plus what the chrome needs to describe it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
+    /// A wrapped line's whole text, by the row its first drawn piece sits on: the
+    /// walk emits only the pieces that fit, so the rows cannot say what it was.
+    pub whole: Vec<(usize, String)>,
     /// The rows to draw, top to bottom.
     pub rows: Vec<Row>,
     /// Digits reserved for line numbers on every content row, or zero for none.
@@ -799,6 +807,7 @@ impl View {
             // Bounded by the screen, not by the diff. The cap keeps a caller
             // asking for an absurd height from allocating for it up front.
             rows: Vec::with_capacity(height.min(64)),
+            whole: Vec::new(),
             list: Vec::with_capacity(list_rows.min(64)),
             // Resolved below, once the walk has said where the diff landed. Both
             // start where they were asked to, so a frame with no room to draw
@@ -1153,6 +1162,9 @@ impl View {
         // [`Self::top`] is not moved, and that is what makes the end of the
         // diff a place a reader can leave.
         let mut out: Vec<Row> = Vec::with_capacity(height);
+        // At most one line loses pieces at each end of the region, so this stays
+        // tiny however long the diff is.
+        let mut whole: Vec<(usize, String)> = Vec::new();
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
                 continue;
@@ -1182,6 +1194,9 @@ impl View {
                 continue;
             }
 
+            // The last moment the whole line exists: rebuilt from the kept pieces
+            // it is a line truncated at a column.
+            whole.push((out.len(), text.clone()));
             let indent = crate::render::indent_of(&text, content);
             // Rows of this line to pass over, which is the display offset above.
             let skip = if at == from { above } else { 0 };
@@ -1231,6 +1246,70 @@ impl View {
             }
         }
         self.rows = out;
+        self.whole = whole;
+    }
+
+    /// The logical lines the rows `span` covers, inclusive, or `None` where none.
+    /// The model's strings and not the cells: §11.2 B20, a clipped line arrives whole.
+    pub fn lines_in(&self, span: (usize, usize)) -> Option<Vec<String>> {
+        let (from, to) = span;
+        let last = self.rows.len().checked_sub(1)?;
+        if from > last {
+            return None;
+        }
+        let mut out: Vec<String> = Vec::new();
+        for at in from..=to.min(last) {
+            // Only the first row reaches back; later ones belong to heads taken here.
+            if at == from {
+                out.push(self.line_at(self.head_of(from)));
+            } else if !self.rows[at].is_wrap() {
+                out.push(self.line_at(at));
+            }
+        }
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// The row a continuation belongs to; none only above a scrolled head.
+    fn head_of(&self, at: usize) -> usize {
+        self.rows[..=at]
+            .iter()
+            .rposition(|row| !row.is_wrap())
+            .unwrap_or(0)
+    }
+
+    /// One logical line, joined back from the pieces wrapping cut it into.
+    fn line_at(&self, head: usize) -> String {
+        if let Some((_, whole)) = self.whole.iter().find(|(row, _)| *row == head) {
+            return whole.clone();
+        }
+        let mut text = match &self.rows[head] {
+            Row::Line { text, .. } | Row::Wrap { text, .. } => text.clone(),
+            // The path and not the drawn label, which elides.
+            Row::File(entry) => return entry.path.clone(),
+            Row::Hunk {
+                old_start,
+                old_lines,
+                new_start,
+                new_lines,
+            } => {
+                // The painter's own speller, which drops the `,1` git drops: spelled
+                // the other way it is a header naming a different line.
+                return format!(
+                    "@@ -{} +{} @@",
+                    crate::render::span(*old_start, *old_lines),
+                    crate::render::span(*new_start, *new_lines)
+                );
+            }
+            Row::Note(note) => return (*note).to_owned(),
+            Row::Gap => return String::new(),
+        };
+        for row in self.rows[head + 1..].iter().take_while(|row| row.is_wrap()) {
+            let Row::Wrap { text: tail, .. } = row else {
+                unreachable!("take_while kept only continuations")
+            };
+            text.push_str(tail);
+        }
+        text
     }
 
     /// Where the viewport starts so the diff's last row rests at the bottom.

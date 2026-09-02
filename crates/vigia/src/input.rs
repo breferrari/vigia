@@ -184,9 +184,9 @@ impl Regions {
     /// Whether a press at `column`, `row` begins a selection: a row of the diff
     /// itself, off its bar, and not under the sheet drawn over it.
     fn selectable(self, column: u16, row: u16) -> bool {
-        !self.sheet.is_some_and(|sheet| sheet.covers(column, row))
-            && self.diff.covers(column, row)
-            && !self.diff.on_bar(column, row)
+        // Its presence and not its box: a wash beside it would take `Esc` off the
+        // frontmost thing, which §11.1 gives to the sheet.
+        self.sheet.is_none() && self.diff.covers(column, row) && !self.diff.on_bar(column, row)
     }
 
     /// The bar a press at `column`, `row` takes hold of, or `None` off them.
@@ -252,9 +252,8 @@ pub struct Pointing {
 }
 
 /// Rows of the diff a drag has selected, so `y` sends their text rather than the
-/// caret file's path. Screen rows and not indices into the collected rows: the
-/// span is re-resolved against every frame, so there is no stored text for the
-/// wash to disagree with.
+/// caret file's path. Screen rows and not row indices: the span is re-resolved
+/// against every frame, so no stored text can disagree with the wash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
     /// The screen row the press landed on.
@@ -264,7 +263,6 @@ pub struct Selection {
 }
 
 impl Selection {
-    /// The one row a press landed on, before any drag.
     fn at(row: u16) -> Self {
         Self {
             anchor: row,
@@ -272,8 +270,8 @@ impl Selection {
         }
     }
 
-    /// The rows it covers, topmost first and both ends inclusive, so a drag
-    /// upward covers what the same drag downward would.
+    /// The rows it covers, topmost first and inclusive, so a drag up covers what
+    /// the same drag down would.
     pub fn rows(self) -> (u16, u16) {
         (self.anchor.min(self.head), self.anchor.max(self.head))
     }
@@ -288,23 +286,19 @@ impl Selection {
     }
 }
 
-/// The selection after `event`, given the one before it.
-///
-/// Nothing here ends one. A release leaves the wash standing, and the loop clears
-/// it on applying any action but [`Action::Yank`]; a press off the diff is the
-/// same rule reaching the one gesture that has no action behind it.
+/// The selection after `event`, given the one before it. Nothing here ends one: a
+/// release leaves the wash standing and the loop clears it on any action but
+/// [`Action::Yank`], and a press off the diff is that rule reaching the one gesture
+/// with no action behind it.
 pub fn selection_after(
     event: &Event,
     regions: Regions,
     was: Option<Selection>,
 ) -> Option<Selection> {
     let Event::Mouse(mouse) = event else {
-        // A window that lost focus has ended the gesture, exactly as it ends a hold.
-        return if matches!(event, Event::FocusLost) {
-            None
-        } else {
-            was
-        };
+        // Focus clears no wash: this pane sits beside one a reader types into, and
+        // clicking there must not discard a selection they were about to send.
+        return was;
     };
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => regions
@@ -343,8 +337,8 @@ pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Opt
     }
 }
 
-/// The mark after a paint, given the layout before it and the layout it drew.
-pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) -> Option<Hovered> {
+/// A screen-anchored mark after a paint: it survives only where nothing moved.
+pub fn repainted<T>(was: Option<T>, before: Regions, after: Regions) -> Option<T> {
     (before == after).then_some(was).flatten()
 }
 
