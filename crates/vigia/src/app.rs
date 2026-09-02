@@ -276,6 +276,11 @@ impl App {
         }
     }
 
+    /// Whether the last collect resolved the span it was given to any lines.
+    pub fn holds_a_selection(&self) -> bool {
+        self.selected.is_some()
+    }
+
     /// Taken, so a yank is sent once.
     pub fn take_yank(&mut self) -> Option<Yanked> {
         self.yanking.take()

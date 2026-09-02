@@ -1701,3 +1701,24 @@ fn the_detected_background_picks_the_showcase_and_never_outranks_a_word() {
         "detection outranked VIGIA_THEME"
     );
 }
+
+/// A depth that cannot carry a background must still show a selection. The diff
+/// washes degrade onto their bars; this one has none, so it reverses instead.
+#[test]
+fn the_selection_survives_every_colour_depth() {
+    for name in ["dark", "light", "ansi"] {
+        let palette = Theme::named(name).expect("a built-in palette");
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let selection = palette.resolve(depth).selection;
+            let seen = selection.bg.is_some()
+                || selection
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::REVERSED);
+            assert!(
+                seen,
+                "{name} at {depth:?} draws a selection with neither a background nor \
+                 a reversal, so a reader drags and sees nothing while `y` still sends"
+            );
+        }
+    }
+}

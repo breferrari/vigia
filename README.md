@@ -255,7 +255,7 @@ The blank above the band is the row the header keeps between itself and the list
 | click a track | send it there |
 | click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
-| drag the diff | select those rows |
+| drag the diff | select those rows; a click selects one, `Esc` clears |
 | click `✕` | close the sheet |
 | just point | it marks itself |
 | `Shift`+drag | select text, the terminal's own way |

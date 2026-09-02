@@ -1801,7 +1801,7 @@ fn the_roomy_rung_is_the_size_the_ruling_states() {
         assert_eq!(
             (sheet.width, sheet.height),
             (68u16, 38u16),
-            "the roomy rung is not the size SPEC.md §11.1 states:\n{drawn}"
+            "the roomy rung is not the size this gate holds it to:\n{drawn}"
         );
         assert_eq!(
             count,
@@ -1835,7 +1835,7 @@ fn the_roomy_rung_arrives_at_the_width_the_ruling_states() {
     assert_eq!(
         arrival,
         Some(70),
-        "the roomy rung does not arrive where SPEC.md §11.1 says it does"
+        "the roomy rung does not arrive at the width this gate holds it to"
     );
 }
 

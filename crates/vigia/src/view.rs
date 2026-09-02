@@ -1162,8 +1162,8 @@ impl View {
         // [`Self::top`] is not moved, and that is what makes the end of the
         // diff a place a reader can leave.
         let mut out: Vec<Row> = Vec::with_capacity(height);
-        // At most one line loses pieces at each end of the region, so this stays
-        // tiny however long the diff is.
+        // One entry per wrapped line on this screen, which is what bounds the scan
+        // `line_at` does over it.
         let mut whole: Vec<(usize, String)> = Vec::new();
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
@@ -1196,7 +1196,7 @@ impl View {
 
             // The last moment the whole line exists: rebuilt from the kept pieces
             // it is a line truncated at a column.
-            whole.push((out.len(), text.clone()));
+            let head = out.len();
             let indent = crate::render::indent_of(&text, content);
             // Rows of this line to pass over, which is the display offset above.
             let skip = if at == from { above } else { 0 };
@@ -1244,6 +1244,7 @@ impl View {
                 }
                 start = cut;
             }
+            whole.push((head, text));
         }
         self.rows = out;
         self.whole = whole;
@@ -1266,7 +1267,7 @@ impl View {
                 out.push(self.line_at(at));
             }
         }
-        (!out.is_empty()).then_some(out)
+        Some(out)
     }
 
     /// The row a continuation belongs to; none only above a scrolled head.
@@ -1303,10 +1304,10 @@ impl View {
             Row::Note(note) => return (*note).to_owned(),
             Row::Gap => return String::new(),
         };
-        for row in self.rows[head + 1..].iter().take_while(|row| row.is_wrap()) {
-            let Row::Wrap { text: tail, .. } = row else {
-                unreachable!("take_while kept only continuations")
-            };
+        for tail in self.rows[head + 1..].iter().map_while(|row| match row {
+            Row::Wrap { text, .. } => Some(text),
+            _ => None,
+        }) {
             text.push_str(tail);
         }
         text

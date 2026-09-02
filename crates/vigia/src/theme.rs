@@ -200,7 +200,15 @@ impl Theme {
 
     /// This palette, in colours `depth` can actually show.
     pub fn resolve(self, depth: Depth) -> Self {
-        self.map(|style| depth.resolve(style))
+        let mut out = self.map(|style| depth.resolve(style));
+        // A depth that cannot carry a background drops the selection's, and unlike
+        // the diff washes it has no bar to degrade onto: a reader would drag and see
+        // nothing while `y` went on sending. Reversing is what `ansi` already does
+        // for the same reason, and it needs no colour at all.
+        if out.selection.bg.is_none() {
+            out.selection = out.selection.add_modifier(Modifier::REVERSED);
+        }
+        out
     }
 
     /// The style a file heading is drawn in at `recency`.

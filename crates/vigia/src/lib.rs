@@ -22,7 +22,7 @@ mod terminal;
 pub mod theme;
 mod view;
 
-pub use app::App;
+pub use app::{App, Yanked};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
@@ -662,9 +662,8 @@ impl Shell {
         self.app.apply(action, frame, height)
     }
 
-    /// Drop the wash and the lines it stood for together: two fields on two sides,
-    /// so clearing one and not the other leaves `y` sending rows nothing on screen
-    /// is claiming.
+    /// Drop the wash and the lines it stood for together: clearing one and not the
+    /// other leaves `y` sending rows nothing on screen is claiming.
     fn deselect(&mut self) {
         self.selected = None;
         self.app.select(None);
@@ -783,7 +782,17 @@ impl Shell {
             .view(frame, &mut self.highlighter, &self.history, body)
         {
             Ok(view) => self.screen = view,
-            Err(e) => self.app.warn(e.to_string()),
+            // The lines go too: this frame could not re-resolve them, and keeping
+            // the last frame's would let `y` send rows the wash is no longer over.
+            Err(e) => {
+                self.app.warn(e.to_string());
+                self.app.select(None);
+            }
+        }
+        // A span the collect resolved to nothing is not a selection, whatever the
+        // pointer did: it draws nothing, and left standing it would take `Esc`.
+        if !self.app.holds_a_selection() {
+            self.deselect();
         }
 
         // On a frame with nothing to draw, where the work went.
@@ -1104,18 +1113,21 @@ mod tests {
         let layout = code
             .find("render::regions(area, &chrome, screen)")
             .expect("`draw` no longer computes the layout it is about to paint");
-        let retire = code
-            .find("repainted(chrome.selected")
-            .expect("`draw` no longer retires a hover mark the new layout invalidated");
         let paint = code
             .find("render(f.buffer_mut()")
             .expect("`draw` no longer paints");
-        assert!(
-            layout < retire && retire < paint,
-            "the hover mark is retired outside the window between the layout and \
-             the paint, so a relayout draws a mark against geometry it was never \
-             resolved against and nothing repaints to correct it"
-        );
+        // Both marks: either one outside the window is drawn against stale geometry.
+        for mark in ["chrome.hovered", "chrome.selected"] {
+            let retire = code
+                .find(&format!("repainted({mark}"))
+                .unwrap_or_else(|| panic!("`draw` no longer retires {mark}"));
+            assert!(
+                layout < retire && retire < paint,
+                "{mark} is retired outside the window between the layout and the \
+                 paint, so a relayout draws a mark against geometry it was never \
+                 resolved against and nothing repaints to correct it"
+            );
+        }
 
         // Every frame rolls the window before it paints, and `Shell::draw` is where
         // every frame passes.
