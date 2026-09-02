@@ -339,8 +339,8 @@ fn with_no_selection_y_still_sends_the_caret_path() {
     );
 }
 
-/// A span nothing was collected for sends nothing at all, rather than an empty
-/// string the reader would have to notice on the footer.
+/// A span past the collected rows falls back to the caret path, rather than an
+/// empty payload the reader would have to notice on the footer.
 #[test]
 fn a_span_past_the_collected_rows_sends_the_caret_path_instead() {
     let scratch = scratch_with("select-past", DEEP, "one\n");

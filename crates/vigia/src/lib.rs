@@ -1045,8 +1045,6 @@ mod tests {
         assert_eq!(batch.len(), 2, "the queued wake was lost with the sender");
     }
 
-    /// Two properties of `run` that no test can execute, because `run` owns a
-    /// terminal, and that are load bearing enough to gate by reading the source.
     #[test]
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
@@ -1078,6 +1076,8 @@ mod tests {
         );
     }
 
+    /// Two properties of `run` that no test can execute, because `run` owns a
+    /// terminal, and that are load bearing enough to gate by reading the source.
     #[test]
     fn the_signal_arming_covers_the_takeover_and_the_wake_ends_the_loop() {
         // Only what ships, so the strings below cannot match this test itself.

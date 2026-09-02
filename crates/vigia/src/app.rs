@@ -20,11 +20,9 @@ fn scaled(at: u32, count: usize) -> usize {
     ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
 }
 
-/// What `y` asked to send, and what the footer may call it.
-///
-/// The two travel together because the choice between a selection and the caret
-/// file is made once, where it is made, rather than re-derived by whatever is
-/// about to write the escape.
+/// What `y` asked to send, and what the footer may call it. The two travel
+/// together because the choice between a selection and the caret file is made
+/// once, rather than re-derived by whatever is about to write the escape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Yanked {
     /// The bytes for the clipboard.
@@ -747,11 +745,7 @@ impl App {
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
         // What a page step is measured in, recorded where the frame is built.
-        self.shown = view
-            .rows
-            .iter()
-            .filter(|row| !matches!(row, crate::view::Row::Wrap { .. }))
-            .count();
+        self.shown = view.rows.iter().filter(|row| !row.is_wrap()).count();
         Ok(view)
     }
 

@@ -1194,8 +1194,7 @@ impl View {
                 continue;
             }
 
-            // The last moment the whole line exists: rebuilt from the kept pieces
-            // it is a line truncated at a column.
+            // The last moment the whole line exists; the kept pieces are not it.
             let head = out.len();
             let indent = crate::render::indent_of(&text, content);
             // Rows of this line to pass over, which is the display offset above.
@@ -1250,8 +1249,8 @@ impl View {
         self.whole = whole;
     }
 
-    /// The logical lines the rows `span` covers, inclusive, or `None` where none.
-    /// The model's strings and not the cells: §11.2 B20, a clipped line arrives whole.
+    /// The lines the rows `span` covers, inclusive: §11.2 B20's own strings, so a
+    /// clipped line arrives whole.
     pub fn lines_in(&self, span: (usize, usize)) -> Option<Vec<String>> {
         let (from, to) = span;
         let last = self.rows.len().checked_sub(1)?;
@@ -1278,15 +1277,15 @@ impl View {
             .unwrap_or(0)
     }
 
-    /// One logical line, joined back from the pieces wrapping cut it into.
+    /// One logical line: the walk's record where wrapping cut it, the row otherwise.
     fn line_at(&self, head: usize) -> String {
         if let Some((_, whole)) = self.whole.iter().find(|(row, _)| *row == head) {
             return whole.clone();
         }
-        let mut text = match &self.rows[head] {
+        match &self.rows[head] {
             Row::Line { text, .. } | Row::Wrap { text, .. } => text.clone(),
             // The path and not the drawn label, which elides.
-            Row::File(entry) => return entry.path.clone(),
+            Row::File(entry) => entry.path.clone(),
             Row::Hunk {
                 old_start,
                 old_lines,
@@ -1295,22 +1294,15 @@ impl View {
             } => {
                 // The painter's own speller, which drops the `,1` git drops: spelled
                 // the other way it is a header naming a different line.
-                return format!(
+                format!(
                     "@@ -{} +{} @@",
                     crate::render::span(*old_start, *old_lines),
                     crate::render::span(*new_start, *new_lines)
-                );
+                )
             }
-            Row::Note(note) => return (*note).to_owned(),
-            Row::Gap => return String::new(),
-        };
-        for tail in self.rows[head + 1..].iter().map_while(|row| match row {
-            Row::Wrap { text, .. } => Some(text),
-            _ => None,
-        }) {
-            text.push_str(tail);
+            Row::Note(note) => (*note).to_owned(),
+            Row::Gap => String::new(),
         }
-        text
     }
 
     /// Where the viewport starts so the diff's last row rests at the bottom.
