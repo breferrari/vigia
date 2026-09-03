@@ -231,6 +231,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | research: price animation on an arriving change | [#365](https://github.com/breferrari/vigia/issues/365) |
 | ⬜ | watch.rs evicts an arbitrary path from a HashSet | [#368](https://github.com/breferrari/vigia/issues/368) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
+| ✅ | `cargo install vigia` fails: tinyvec 1.13.0 does not compile and a fresh resolve takes it | [#396](https://github.com/breferrari/vigia/issues/396) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
 | ✅ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
 | ✅ | The pointer's mark is the loudest weight in the list, and the file the diff is inside has none | [#193](https://github.com/breferrari/vigia/issues/193) |

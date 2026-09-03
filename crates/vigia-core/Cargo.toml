@@ -25,6 +25,8 @@ categories = ["development-tools"]
 
 [dependencies]
 gix.workspace = true
+# Declared for its version bound alone; see the workspace manifest.
+tinyvec.workspace = true
 notify.workspace = true
 syntect.workspace = true
 
