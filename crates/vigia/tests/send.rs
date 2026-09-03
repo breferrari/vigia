@@ -96,6 +96,33 @@ fn a_payload_with_no_text_in_it_never_reaches_the_clipboard() {
     );
 }
 
+/// One batch can carry two releases, and only one send leaves it. The last gesture
+/// decides, including when it decides on nothing: a drag over blank rows has to
+/// retire the one before it rather than let it through on the batch's single send.
+#[test]
+fn a_second_release_over_blank_rows_retires_the_first() {
+    let mut app = App::new();
+
+    app.send(&["one".to_owned(), "two".to_owned()]);
+    app.send(&[String::new()]);
+    assert_eq!(
+        app.take_sending(),
+        None,
+        "the blank release left the first gesture's lines queued, so the batch's one \
+         send spends the clipboard on a selection the reader had moved off"
+    );
+
+    // And a second gesture with text in it does replace the first, which is the half
+    // that already held and must go on holding.
+    app.send(&["one".to_owned()]);
+    app.send(&["two".to_owned()]);
+    assert_eq!(
+        app.take_sending().map(|sending| sending.text),
+        Some("two".to_owned()),
+        "the second gesture did not replace the first"
+    );
+}
+
 /// The payload is the frame's and not the gesture's. A tick rebuilds the file list
 /// from a fresh status walk, and `Frame::advance` between the paint and the button
 /// coming up is the ordinary case in a batch, not a corner: the agent in the other

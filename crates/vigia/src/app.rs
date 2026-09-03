@@ -264,12 +264,13 @@ impl App {
         self.resolved
     }
 
-    /// Queue `lines` for the clipboard. Rows with nothing on them are no payload: an
-    /// empty OSC 52 write clears the reader's clipboard rather than adding to it.
+    /// Queue `lines`, replacing rather than adding: one send leaves a batch, so a
+    /// release over blank rows retires the one before it. An empty write clears.
     pub fn send(&mut self, lines: &[String]) {
-        if lines.iter().any(|line| !line.is_empty()) {
-            self.sending = Some(Sending::lines(lines));
-        }
+        self.sending = lines
+            .iter()
+            .any(|line| !line.is_empty())
+            .then(|| Sending::lines(lines));
     }
 
     /// Taken, so what was asked for is sent once.
