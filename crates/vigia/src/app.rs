@@ -418,7 +418,7 @@ impl App {
             // No jump and no clamp here, which is the arm doing the least of the four
             // and is deliberate.
             Action::ToggleSingle => self.single = !self.single,
-            // The bar's scale does not move.
+            // The reflow changes what a screenful is; see [`Self::screenful`].
             Action::ToggleWrap => self.wrap = !self.wrap,
             Action::Yank => {
                 let lines = self
@@ -744,25 +744,26 @@ impl App {
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
-        // What a page step is measured in, recorded where the frame is built.
-        self.shown = view.rows.iter().filter(|row| !row.is_wrap()).count();
+        self.shown = view.shown();
         Ok(view)
     }
 
     /// Where a drag on the diff's bar lands, in rows of the diff.
     fn dragged_to(&self, at: u32, total: usize, height: usize) -> usize {
-        // Only the far end is special, and the rest of the track is the thumb's own
-        // arithmetic.
+        // Past the end, so the clamp answers and the wrapped bottom's trim runs. A
+        // travel lands on a file's first row, where the clamp stands aside for a jump.
         if self.wrap && at >= crate::input::TRACK_SCALE {
             return total;
         }
-        scaled(at, total.saturating_sub(height))
+        scaled(at, total.saturating_sub(self.screenful(height)))
     }
 
-    /// Rows of the diff one screenful holds, which is not `height` when
-    /// lines wrap.
+    /// Rows of the diff one screenful holds, which is not `height` when lines wrap,
+    /// and is what the bar's travel and a page step are both measured in. Read off
+    /// the last frame rather than [`Self::wrap`]: the loop paints once per batch, so
+    /// turning wrap off would otherwise grow the step under a screen that held less.
     fn screenful(&self, height: usize) -> usize {
-        if self.wrap && self.shown > 0 {
+        if self.shown > 0 {
             // Clamped by the pane this step is being taken in.
             self.shown.min(height)
         } else {

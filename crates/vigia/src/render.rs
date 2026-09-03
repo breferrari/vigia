@@ -1707,8 +1707,8 @@ pub fn render(
 
     if body.diff > 0 {
         let region = areas.diff;
-        // Counted in rows, which is what the call below passes: `rows_above` over
-        // `total_rows`, with the thumb spanning the screen's own height.
+        // Counted in rows of the diff, not of the terminal: the thumb spans the
+        // screenful the pane holds, which stops being its height when a line wraps.
         let full = region;
         // Zero is *nobody measured*, which is a hand-built [`Body`] in a test and not a
         // real pane: [`Body::split`] fills the field for every shape it returns, and a
@@ -1720,8 +1720,8 @@ pub fn render(
             body.diff_width,
             planning_width(full.width, area.width, 0)
         );
-        let (region, bar) =
-            painter.with_bar(region, diff_bars, body.diff as u64, view.total_rows as u64);
+        let screenful = view.shown() as u64;
+        let (region, bar) = painter.with_bar(region, diff_bars, screenful, view.total_rows as u64);
         // The wash spans the region's whole width, the bar's own column
         // included.
         painter.body(
@@ -1737,7 +1737,7 @@ pub fn render(
                 Grabbed::Diff,
                 bar,
                 view.rows_above as u64,
-                body.diff as u64,
+                screenful,
                 view.total_rows as u64,
             );
         }

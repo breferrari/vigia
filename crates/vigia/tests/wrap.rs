@@ -67,6 +67,32 @@ fn split(app: &App) -> Body {
     body_layout(PANE, &chrome_of(app), 1, 1)
 }
 
+/// One painted frame: the view it drew, the cells it drew into, and the chrome
+/// those were laid out against, which a caller needs to ask where a region is.
+fn painted(
+    pane: Rect,
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    history: &History,
+) -> (View, Buffer, vigia::Chrome) {
+    let chrome = chrome_of(app);
+    let laid = body_layout(pane, &chrome, 1, 1);
+    let view = app
+        .view(frame, highlighter, history, laid)
+        .expect("a view of the fixture");
+    let mut buf = Buffer::empty(pane);
+    render(
+        &mut buf,
+        pane,
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
+    (view, buf, chrome)
+}
+
 /// Every row of the diff region, as strings, with trailing blanks trimmed.
 fn drawn(
     app: &mut App,
@@ -74,20 +100,7 @@ fn drawn(
     highlighter: &mut Highlighter,
     history: &History,
 ) -> (View, Vec<String>) {
-    let chrome = chrome_of(app);
-    let laid = body_layout(PANE, &chrome, 1, 1);
-    let view = app
-        .view(frame, highlighter, history, laid)
-        .expect("a view of the fixture");
-    let mut buf = Buffer::empty(PANE);
-    render(
-        &mut buf,
-        PANE,
-        &view,
-        &Theme::default(),
-        Glyphs::default(),
-        &chrome,
-    );
+    let (view, buf, chrome) = painted(PANE, app, frame, highlighter, history);
     let laid_regions = regions(PANE, &chrome, &view);
     let rows = screen::rows_of(
         &buf,
@@ -516,8 +529,10 @@ fn the_bottom_of_the_diff_is_reachable_when_lines_wrap() {
 }
 
 #[test]
-fn w_toggles_wrapping_and_leaves_the_thumb_where_it_was() {
-    // B19's own claim about the scrollbar.
+fn w_toggles_wrapping_and_leaves_what_the_bar_counts_where_it_was() {
+    // B19's surviving claim about the scrollbar: what it *counts* does not move.
+    // The thumb's height does, because a screenful is fewer rows of the diff when
+    // they wrap, and that is the half of B19 the same ruling amended.
     let (scratch, mut highlighter, history) = open("shell-wrap-thumb");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -901,18 +916,6 @@ fn a_page_step_skips_no_line_when_lines_wrap() {
     let height = diff_height(PANE, &chrome_of(&app), 1, 1);
 
     let (_, first) = drawn(&mut app, &mut frame, &mut highlighter, &history);
-    // The line's own name, not the drawn row. A row carries the scrollbar's
-    // glyph in its last column and the thumb moves between the two frames, so
-    // comparing rows compares the bar and reports a skip that did not happen.
-    let named = |rows: &[String]| -> Vec<String> {
-        rows.iter()
-            .filter_map(|row| {
-                row.split_whitespace()
-                    .find(|word| word.starts_with("line_"))
-                    .map(str::to_owned)
-            })
-            .collect()
-    };
     let seen = named(&first);
     assert!(
         seen.len() > 2,
@@ -1031,7 +1034,16 @@ fn the_bar_is_drawn_from_the_travel_a_drag_is_resolved_against() {
     let history = History::new();
     let mut app = wrapped(&mut frame);
     let height = diff_height(PANE, &chrome_of(&app), 1, 1);
-    drawn(&mut app, &mut frame, &mut highlighter, &history);
+    // Kept, because the gesture below is resolved against the screenful this frame
+    // leaves behind rather than against the one it lands in.
+    let (before, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    let screenful = before.shown().min(height);
+    assert!(
+        screenful < height,
+        "the departing screen held {screenful} rows of the diff in a region of \
+         {height}, so the screenful and the region agree and a bar drawn from \
+         either would pass this"
+    );
 
     let middle = TRACK_SCALE / 2;
     app.apply(Action::DiffTo(middle), &mut frame, height)
@@ -1045,8 +1057,10 @@ fn the_bar_is_drawn_from_the_travel_a_drag_is_resolved_against() {
         "the frame measured no total, so there is no bar to be dragged"
     );
     // Where the thumb sits, in the same units the painter draws it in: rows above
-    // over the diff's own rows.
-    let travel = view.total_rows.saturating_sub(height);
+    // over the diff's own rows, the thumb spanning a screenful. `SPEC.md` §11.1
+    // rules the travel is the total less a screenful, which is the region's height
+    // only while nothing wraps.
+    let travel = view.total_rows.saturating_sub(screenful);
     let want = travel / 2;
     assert!(
         view.rows_above.abs_diff(want) <= 1,
@@ -1364,4 +1378,253 @@ fn the_two_row_counters_agree_on_the_same_screen() {
             );
         }
     }
+}
+
+/// The line names on the drawn rows, which is what a skip has to be counted in:
+/// a row carries the bar's glyph in its last column and the thumb moves between
+/// frames, so comparing whole rows compares the bar and reports a skip that did
+/// not happen.
+fn named(rows: &[String]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|row| {
+            row.split_whitespace()
+                .find(|word| word.starts_with("line_"))
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn no_diff_row_is_skipped_when_a_page_follows_the_toggle_in_one_batch() {
+    // The shell paints once per batch, not once per wake, so `w` and a page step
+    // arrive with no frame between them and the step is measured on the pane the
+    // reader is leaving. Both directions, because the two are not one case twice:
+    // turning wrap off *grows* the screenful under a screen that held less.
+    for (start_wrapped, step) in [
+        (true, Action::Page(1)),
+        (false, Action::Page(1)),
+        (true, Action::HalfPage(1)),
+        (false, Action::HalfPage(1)),
+    ] {
+        let scratch = tall("shell-wrap-batch-page", 60);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        materialise(&mut frame);
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        let mut app = App::new();
+        let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+        if start_wrapped {
+            app.apply(Action::ToggleWrap, &mut frame, height)
+                .expect("apply");
+        }
+
+        let (view, first) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+        let seen = named(&first);
+        let logical = view.rows.iter().filter(|row| !row.is_wrap()).count();
+        // Non-vacuity, and it is the whole of why this fixture wraps: where a
+        // screenful of the diff is the pane's own height in both modes there is no
+        // stale count for the step to be measured in, and the gate cannot fail.
+        if start_wrapped {
+            assert!(
+                logical < height,
+                "the wrapped screen held {logical} rows of the diff in a region of \
+                 {height}, so wrapping bought no difference and this gate proves \
+                 nothing"
+            );
+        }
+        assert!(
+            seen.len() > 2,
+            "the first screen drew {} content rows, too few to page over",
+            seen.len()
+        );
+
+        // Two intentions, one paint, which is what the loop does with a batch.
+        app.apply(Action::ToggleWrap, &mut frame, height)
+            .expect("apply");
+        app.apply(step, &mut frame, height).expect("apply");
+        let (after, second) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+        // The other direction's non-vacuity: here the wrapped screen is the one being
+        // arrived at, so it is the arriving frame that has to hold fewer of the
+        // diff's rows than the region or the toggle bought no difference.
+        if !start_wrapped {
+            let arriving = after.rows.iter().filter(|row| !row.is_wrap()).count();
+            assert!(
+                arriving < height,
+                "the arriving screen held {arriving} rows of the diff in a region of \
+                 {height}, so wrapping bought no difference and this direction \
+                 proves nothing"
+            );
+        }
+        let next = named(&second);
+        let landed = next.first().expect("the step drew no content");
+        assert!(
+            seen.contains(landed),
+            "starting {}, `w` and {step:?} in one batch opened on {landed:?} where \
+             the screen before it showed {seen:?}, so the step walked over lines \
+             nobody saw",
+            if start_wrapped {
+                "wrapped"
+            } else {
+                "unwrapped"
+            },
+        );
+    }
+}
+
+/// The diff's bar: the column it is drawn in, the rows of its track, and how many
+/// of those rows the thumb fills.
+fn thumb_of(
+    pane: Rect,
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    history: &History,
+) -> (View, usize, usize) {
+    let (view, buf, chrome) = painted(pane, app, frame, highlighter, history);
+    let diff = regions(pane, &chrome, &view).diff;
+    let column = diff.bar.expect("the diff drew no scrollbar to measure");
+    let (top, rows) = diff.track;
+    let filled = (top..top + rows)
+        .filter(|y| buf[(column, *y)].symbol() == "\u{2588}")
+        .count();
+    (view, filled, rows as usize)
+}
+
+#[test]
+fn the_bars_span_is_the_screenful_the_pane_holds_in_both_modes() {
+    // `SPEC.md` §11.1: a track maps onto travel, and the diff's travel is its total
+    // rows less *a screenful*. A screenful stopped being the region's height the day
+    // `w` shipped, and the thumb went on being drawn for the region.
+    for width in [80u16, 40] {
+        let pane = Rect::new(0, 0, width, 24);
+        let scratch = tall(&format!("shell-wrap-thumb-{width}"), 60);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        materialise(&mut frame);
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        let mut app = App::new();
+        let height = diff_height(pane, &chrome_of(&app), 1, 1);
+        app.apply(Action::ToggleWrap, &mut frame, height)
+            .expect("apply");
+
+        let (view, filled, track) =
+            thumb_of(pane, &mut app, &mut frame, &mut highlighter, &history);
+        let logical = view.rows.iter().filter(|row| !row.is_wrap()).count();
+
+        // The two candidate spans, and the gate is worthless where they agree.
+        let honest = (logical * track / view.total_rows).max(1).min(track);
+        let region = (height * track / view.total_rows).max(1).min(track);
+        assert_ne!(
+            honest, region,
+            "at {width} columns the screenful and the region give the same thumb, \
+             so this gate cannot tell them apart"
+        );
+        assert_eq!(
+            filled, honest,
+            "at {width} columns the pane holds {logical} of the diff's \
+             {} rows and drew a thumb {filled} rows of {track}, where the \
+             screenful gives {honest} and the region's own height gives {region}",
+            view.total_rows,
+        );
+    }
+}
+
+#[test]
+fn the_thumb_rests_at_the_track_end_at_the_wrapped_bottom() {
+    // The span and `rows_above` are one change: the span alone widens the travel
+    // while the position still names the stored top, which sits a screenful above
+    // the screen at a wrapped bottom, and the thumb then stops short of the end.
+    let scratch = tall("shell-wrap-thumb-bottom", 60);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+
+    app.apply(Action::Scroll(10_000), &mut frame, height)
+        .expect("apply");
+    let (view, buf, chrome) = painted(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    let diff = regions(PANE, &chrome, &view).diff;
+    let column = diff.bar.expect("the diff drew no scrollbar");
+    let (top, rows) = diff.track;
+    assert!(
+        rows > 2,
+        "the track is {rows} rows, too short to sit short of"
+    );
+    assert_eq!(
+        buf[(column, top + rows - 1)].symbol(),
+        "\u{2588}",
+        "the diff is scrolled to its end and the thumb is not on the last row of \
+         its track, so the bar says there is more below"
+    );
+}
+
+/// Short unwrapped lines first, heavily wrapped ones last, so a screenful at the
+/// top is far more rows of the diff than a screenful at the end. `tall` cannot
+/// show this: its lines are one width, so every screenful is the same size.
+fn lopsided(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    for f in 0..3 {
+        scratch.write(&format!("src/f{f}.rs"), "seed\n");
+    }
+    scratch.commit_all("base");
+    for f in 0..2 {
+        let mut body = String::new();
+        for n in 0..30 {
+            body.push_str(&format!("let s{f}_{n} = 1;\n"));
+        }
+        scratch.write(&format!("src/f{f}.rs"), body);
+    }
+    let mut body = String::new();
+    for n in 0..14 {
+        body.push_str(&format!("let long_{n} = \"{}\";\n", "z".repeat(200)));
+    }
+    body.push_str(&format!("let last = \"tail\"; // {TAIL}\n"));
+    scratch.write("src/f2.rs", body);
+    scratch
+}
+
+#[test]
+fn a_drag_to_the_end_of_the_bar_reaches_the_end_when_the_density_varies() {
+    // The far end of the track has to ask for a row *past* the end and let the walk
+    // clamp it. Resolving it against a travel instead lands inside the content, and
+    // a position on a file's first row is exactly where the bottom clamp stands
+    // aside so that a jump keeps its heading on the top row: the tail then falls off
+    // the bottom and the thumb stops short of its own track.
+    let scratch = lopsided("shell-wrap-lopsided-drag");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    // A frame at the top, which is what leaves a large screenful behind for the
+    // gesture to be resolved against.
+    let (top, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    let at_top = top.shown();
+
+    app.apply(Action::DiffTo(TRACK_SCALE), &mut frame, height)
+        .expect("apply");
+    let (view, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    // Non-vacuity: the two ends of this diff must hold different numbers of its
+    // rows, or a stale screenful cannot be told from a fresh one.
+    assert!(
+        at_top > view.shown(),
+        "the fixture holds {at_top} rows of the diff at the top and {} at the end, \
+         so its density does not vary and this gate proves nothing",
+        view.shown()
+    );
+    assert!(
+        rows.iter().any(|row| row.contains(TAIL)),
+        "a drag to the end of the bar left the last line of the diff off the \
+         screen:\n{}",
+        rows.join("\n")
+    );
 }

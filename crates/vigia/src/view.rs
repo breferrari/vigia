@@ -1006,23 +1006,30 @@ impl View {
                 && (anchored || single || (view.top.row > 0 && !view.landed))
                 && view.top != floor);
 
-        view.wrap_rows(width, wrap, height, at_bottom);
+        let trimmed = view.wrap_rows(width, wrap, height, at_bottom);
 
         // After the walk, because only the walk knows where the diff landed.
         view.take_list(frame, history, list_rows, list_follows, &drawn)?;
-        view.measure(frame, measured, single)?;
+        view.measure(frame, measured, single, trimmed)?;
 
         Ok(view)
     }
 
-    /// Total the diff's rows, and how many of them are above this screen.
-    fn measure(&mut self, frame: &mut Frame, wanted: bool, single: bool) -> Result<()> {
+    /// Total the diff's rows, and how many are above this screen, the bottom
+    /// clamp's `trimmed` rows counted in so this names the first row *drawn*.
+    fn measure(
+        &mut self,
+        frame: &mut Frame,
+        wanted: bool,
+        single: bool,
+        trimmed: usize,
+    ) -> Result<()> {
         if !wanted || self.files == 0 {
             return Ok(());
         }
         if single {
             self.total_rows = self.current_span;
-            self.rows_above = self.top.row.min(self.current_span);
+            self.rows_above = (self.top.row.min(self.current_span) + trimmed).min(self.total_rows);
             return Ok(());
         }
         self.total_rows = diff_rows(frame)?;
@@ -1034,7 +1041,9 @@ impl View {
         for index in 0..self.top.file.min(self.files) {
             above += block_rows(frame, index)?;
         }
-        self.rows_above = above + self.top.row.min(self.current_span);
+        // Clamped, because a position past the end would invert the bar's travel.
+        self.rows_above =
+            (above + self.top.row.min(self.current_span) + trimmed).min(self.total_rows);
         Ok(())
     }
 
@@ -1104,25 +1113,24 @@ impl View {
         self.rows
             .iter()
             .map(|row| match row {
-                // `breaks_of`, not `split_at`, and it was the second for one commit.
                 Row::Line { text, .. } => 1 + crate::render::breaks_of(text, content, height).len(),
                 _ => 1,
             })
             .sum()
     }
 
-    /// Turn logical rows into display rows, and record the gutter they were
-    /// measured against.
-    fn wrap_rows(&mut self, width: usize, wrap: bool, height: usize, at_bottom: bool) {
+    /// Turn logical rows into display rows, record the gutter, and answer the rows
+    /// the bottom clamp trimmed off the front: [`Self::top`] still names the first.
+    fn wrap_rows(&mut self, width: usize, wrap: bool, height: usize, at_bottom: bool) -> usize {
         // Only where a width was passed, so a caller that named none leaves
         // the decision where it has always been. See [`View::gutter`].
         self.gutter = (width > 0).then(|| crate::render::gutter_width(&self.rows, width));
         if !wrap || width == 0 || height == 0 || self.rows.is_empty() {
-            return;
+            return 0;
         }
         let content = crate::render::content_width(self.gutter.unwrap_or(0), width);
         if content == 0 {
-            return;
+            return 0;
         }
 
         // Where each collected row breaks, and how many rows of terminal it therefore
@@ -1142,7 +1150,7 @@ impl View {
 
         // Nothing on this screen wraps, so nothing below it has anything to do.
         if total == breaks.len() {
-            return;
+            return 0;
         }
 
         // The bottom clamp, in the units it now has to be in.
@@ -1247,6 +1255,14 @@ impl View {
         }
         self.rows = out;
         self.whole = whole;
+        from
+    }
+
+    /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed
+    /// bottom opens inside counted so this is the trim's exact complement.
+    pub fn shown(&self) -> usize {
+        let opens_inside = self.rows.first().is_some_and(Row::is_wrap);
+        self.rows.iter().filter(|row| !row.is_wrap()).count() + usize::from(opens_inside)
     }
 
     /// The lines the rows `span` covers, inclusive: §11.2 B20's own strings, so a
