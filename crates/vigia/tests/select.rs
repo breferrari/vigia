@@ -366,11 +366,22 @@ fn a_heading_row_sends_the_path_and_not_the_drawn_label() {
          is named for:\n{screen}",
         NARROW.width
     );
+    assert!(
+        !screen.contains(DEEP),
+        "the pane drew the whole path, so a copy taken from the cells would have \
+         reached it and this gate is answering a question nobody has:\n{screen}"
+    );
+
     let text = sent_on(&mut app, &mut frame, Some((0, 0)), false, NARROW)
         .expect("the release sent nothing");
     assert_eq!(
         text, DEEP,
         "the heading row sent {text:?} rather than the path it stands for"
+    );
+    assert!(
+        !text.contains('…'),
+        "the sent string carries the renderer's elision mark, so it is a reading of \
+         the screen rather than a path"
     );
 }
 
@@ -707,6 +718,52 @@ fn the_footer_counts_lines_and_not_rows() {
             sending.text.lines().count()
         );
     }
+}
+
+/// The count is the rows the drag covered, and it cannot be recovered from the
+/// payload. `Sending` carries it rather than deriving it because a span ending on a
+/// blank row joins to a string whose trailing newline `str::lines` does not count,
+/// so a derived count would under-report exactly the drag that ends on one.
+#[test]
+fn a_span_ending_on_a_blank_row_is_still_counted_whole() {
+    let scratch = scratch_with("select-trailing-blank", DEEP, "one\n\ntwo\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(PANE, &chrome, 1, 1);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    let blank = view
+        .rows
+        .iter()
+        .position(|row| matches!(row, vigia::Row::Line { text, .. } if text.is_empty()))
+        .expect("the fixture drew no empty line, so this gate is not its own case");
+    assert!(
+        blank > 0,
+        "the blank row is the first, so there is no row above it"
+    );
+
+    app.select(Some((blank - 1, blank)));
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    app.send_selection();
+    let sending = app.take_sending().expect("the release sent nothing");
+    assert_eq!(
+        sending.text.lines().count(),
+        1,
+        "the payload's own line count is not the case this gate is named for"
+    );
+    assert_eq!(
+        sending.said, "2 lines",
+        "the footer named {:?} for a two-row span ending on a blank line",
+        sending.said
+    );
 }
 
 /// A wash cleared between paints takes its lines with it. Without that, a release

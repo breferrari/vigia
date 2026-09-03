@@ -333,8 +333,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // The gesture ends on the clipboard, and it has to be read before
-                    // the line below retires the span it stood over.
+                    // The gesture ends on the clipboard.
                     shell.send_wash(&event);
                     // Before the event is interpreted, for the hold's reason: a press
                     // opening one is an action too, and the wash precedes its clearing.
@@ -666,14 +665,12 @@ impl Shell {
         self.app.select(None);
     }
 
-    /// End a drag on the clipboard: what the last painted frame washed is sent, and
-    /// the wash goes with the gesture that drew it.
+    /// End a drag on the clipboard: what the last painted frame washed is sent.
     ///
-    /// Called before [`selection_after`], which retires the span this reads. The
-    /// lines were resolved by that frame's own collect, so nothing is walked here and
-    /// the payload cannot disagree with what the reader was looking at.
+    /// The lines were resolved by that frame's own collect, so nothing is walked here
+    /// and the payload cannot disagree with what the reader was looking at.
     fn send_wash(&mut self, event: &Event) {
-        if input::ends_a_drag(event) && self.selected.is_some() {
+        if input::ends_a_drag(event) {
             self.app.send_selection();
         }
     }
@@ -1064,7 +1061,7 @@ mod tests {
         for rule in [
             "if !self.app.holds_a_selection() {",
             "shell.send_wash(&event);",
-            "if input::ends_a_drag(event) && self.selected.is_some() {",
+            "shell.selected = selection_after(",
             "self.app.select(None);",
         ] {
             assert!(
@@ -1072,19 +1069,6 @@ mod tests {
                 "`{rule}` is gone, so a wash outlives something that ends it"
             );
         }
-        // The gesture's own order, which no test can drive: the send reads the span
-        // that the line below it retires, so reversing the two sends nothing at all.
-        let sends = shipped
-            .find("shell.send_wash(&event);")
-            .expect("checked above");
-        let retires = shipped
-            .find("shell.selected = selection_after(")
-            .expect("the loop no longer tracks the span");
-        assert!(
-            sends < retires,
-            "the release retires the span before the send reads it, so the button \
-             coming up puts nothing on the clipboard"
-        );
         let collect = shipped
             .find(".view(frame,")
             .expect("`paint` no longer collects");

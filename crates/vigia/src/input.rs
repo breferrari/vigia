@@ -304,6 +304,9 @@ pub fn selection_after(
     regions: Regions,
     was: Option<Selection>,
 ) -> Option<Selection> {
+    if ends_a_drag(event) {
+        return None;
+    }
     let Event::Mouse(mouse) = event else {
         // Focus clears no wash: this pane sits beside one a reader types into, and
         // clicking there must not discard a selection they were about to send.
@@ -319,8 +322,6 @@ pub fn selection_after(
             head: regions.diff.clamped_row(mouse.row),
             ..had
         }),
-        // The gesture is over, so the wash is.
-        MouseEventKind::Up(MouseButton::Left) => None,
         _ => was,
     }
 }

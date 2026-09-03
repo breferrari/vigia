@@ -7,20 +7,17 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{App, Glyphs, Pointing, Theme, body_layout, render};
+use vigia::{App, Pointing, body_layout};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
 
-/// Deep enough that `render::elide_head` has to cut it at the width I6 names,
-/// and distinctive at both ends so a truncation at either is visible.
+/// Deep enough that a heading has to be elided at the width I6 names, so the path
+/// the release sends is one no cell holds.
 const DEEP: &str = "crates/vigia-core/src/very/deeply/nested/module/frame.rs";
 
-/// The width I6 is named for, and the width a drag over a heading has to reach a
-/// whole path at.
+/// The width I6 is named for.
 const NARROW: u16 = 40;
 
 /// A worktree holding one deeply nested file. The `Scratch` is returned rather
@@ -46,41 +43,6 @@ fn washed(app: &mut App, frame: &mut Frame, span: Option<(usize, usize)>) {
 fn released(app: &mut App) -> Option<String> {
     app.send_selection();
     app.take_sending().map(|sending| sending.text)
-}
-
-/// Everything the pane actually draws at [`NARROW`], as text.
-fn drawn(app: &mut App, frame: &mut Frame) -> String {
-    let mut highlighter = Highlighter::eager();
-    let history = History::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    let body = body_layout(Rect::new(0, 0, NARROW, 24), &chrome, 1, 1);
-    let view = app
-        .view(frame, &mut highlighter, &history, body)
-        .expect("view");
-    let theme = Theme::default();
-    let mut terminal = Terminal::new(TestBackend::new(NARROW, 24)).expect("terminal");
-    terminal
-        .draw(|f| {
-            let area = f.area();
-            render(
-                f.buffer_mut(),
-                area,
-                &view,
-                &theme,
-                Glyphs::default(),
-                &chrome,
-            );
-        })
-        .expect("draw");
-    let buffer = terminal.backend().buffer().clone();
-    (0..buffer.area.height)
-        .map(|y| {
-            (0..buffer.area.width)
-                .map(|x| buffer[(x, y)].symbol().to_owned())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Taken, so a repeated batch cannot spend the reader's clipboard twice.
@@ -156,43 +118,6 @@ fn a_write_between_the_paint_and_the_release_does_not_move_what_is_sent() {
         Some(DEEP),
         "the send followed the index rather than the frame that was painted, so the \
          reader copied a file they were not looking at"
-    );
-}
-
-/// A drag over a heading reaches the whole path at the width I6 is named for, which
-/// is the case the revoked `y` was built for and the reason removing it costs
-/// nothing. The cells cannot answer it: they hold what `render::elide_head` drew.
-#[test]
-fn a_drag_over_a_heading_reaches_the_whole_path_at_forty_columns() {
-    let scratch = deep_scratch("send-whole-path");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
-    let mut app = App::new();
-
-    let screen = drawn(&mut app, &mut frame);
-    assert!(
-        screen.contains('…'),
-        "nothing on a {NARROW}-column pane elided {DEEP:?}, so this proves nothing \
-         about the case the key was kept for:\n{screen}"
-    );
-    assert!(
-        !screen.contains(DEEP),
-        "the pane drew the whole path, so a copy taken from the cells would have \
-         reached it and this gate is answering a question nobody has:\n{screen}"
-    );
-
-    washed(&mut app, &mut frame, Some((0, 0)));
-    let sent = released(&mut app).expect("the release sent nothing at all");
-    assert_eq!(
-        sent, DEEP,
-        "the heading row sent {sent:?} rather than the path, so it is the drawn row \
-         by another route, which is the one thing this gesture must not be"
-    );
-    assert!(
-        !sent.contains('…'),
-        "the sent string carries the renderer's elision mark, so it is a reading of \
-         the screen rather than a path"
     );
 }
 
