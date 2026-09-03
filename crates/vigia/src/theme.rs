@@ -203,8 +203,8 @@ impl Theme {
         let mut out = self.map(|style| depth.resolve(style));
         // A depth that cannot carry a background drops the selection's, and unlike
         // the diff washes it has no bar to degrade onto: a reader would drag and see
-        // nothing while `y` went on sending. Reversing is what `ansi` already does
-        // for the same reason, and it needs no colour at all.
+        // nothing while the release went on sending. Reversing is what `ansi` already
+        // does for the same reason, and it needs no colour at all.
         if out.selection.bg.is_none() {
             out.selection = out.selection.add_modifier(Modifier::REVERSED);
         }

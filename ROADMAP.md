@@ -92,10 +92,6 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 
 The correction that mattered was not the count. **It is that this is not a rendering phase** (`SPEC.md` §5.2), and building the first child confirmed it: the diff was mostly `vigia-core`. The split follows what each element needs rather than what it looks like: history-backed (#38), whole-file-backed (#39), chrome (#40), self-measuring (#41).
 
-**The heat strip is in, and the expensive part of it did not exist.** [#39](https://github.com/breferrari/vigia/issues/39) was the whole-file-backed child, and `SPEC.md` §5.2 had it as the element that pulls hardest against I2a: locating change *within* a file needs the file's length, and measuring that per frame puts back the read I2a removed. §5.2 predicted a cache keyed on `(path, blob id)`.
-
-That is the third time the expensive-looking property turned out to be a by-product of work already being done: I5's follow target and I10's burst paths were the other two, both already resolved by the gitignore filter. §5.2 now says to look for the by-product before designing the cache.
-
 ## Phase 4 — the artifacts tell the truth
 
 Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
@@ -122,8 +118,6 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 **And one panic was a simplification's bill.** The heat strip used to be drawn through `set_stringn`, which clips; it was traded for a direct cell write to stop an allocation per cell, and the clipping went with it unremarked, so an area wider than its buffer aborted the whole paint on the one row carrying a strip. The rule and the scrollbar had the same trade made earlier and the same hole. All three take the clipping form now, which makes `render`'s own documented contract true on the width axis; the height axis is [#91](https://github.com/breferrari/vigia/issues/91).
 
 None of them was reachable by `take-next`'s pre-flight, which compares invariant tokens and issue metadata. **A picture is a specification that carries neither**, which is the same blind spot [#40](https://github.com/breferrari/vigia/issues/40) hit when it found B5 shipped while still marked `(proposed)`, and the reason this phase exists as its own thing rather than as polish inside another.
-
-The ordering question this row worried about resolved the other way from both options it names. `History` is free to rank by and was still rejected, because ranking the list by anything the stream is not ordered by decouples the caret from the scroll position and the region stops being a *map*. Status order is free too, and it is the only order under which the two regions describe the same place.
 
 ## Phase 6 — measured, not assumed
 
@@ -172,7 +166,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | The drag's wash outlives the gesture, and sending it needs a second key. **Reported from use** | [#386](https://github.com/breferrari/vigia/issues/386) |
+| ✅ | The drag's wash outlives the gesture, and sending it needs a second key. **Reported from use** | [#386](https://github.com/breferrari/vigia/issues/386) |
 | ✅ | A nested git repository in the work tree stops the pane from ever advancing again. **Reported from use** | [#378](https://github.com/breferrari/vigia/issues/378) |
 | ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
@@ -228,8 +222,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The columns left of the diff's scrollbar read as neither wash nor track | [#214](https://github.com/breferrari/vigia/issues/214) |
 | ✅ | The row wash has no left bar, and the reason it was refused expired with #119 | [#218](https://github.com/breferrari/vigia/issues/218) |
 | ✅ | decision: text cannot be selected or copied. **Ruled: rows in, lines out** | [#177](https://github.com/breferrari/vigia/issues/177) |
-| ✅ | Build B20: a drag selects rows, and `y` sends their real text | [#380](https://github.com/breferrari/vigia/issues/380) |
-| ✅ | Build B9: `y` copies the caret file's path | [#372](https://github.com/breferrari/vigia/issues/372) |
+| ✅ | Build B20: a drag selects rows, and `y` sends their real text. **The release sends them now** | [#380](https://github.com/breferrari/vigia/issues/380) |
+| ✅ | Build B9: `y` copies the caret file's path. **Revoked by [#386](https://github.com/breferrari/vigia/issues/386)** | [#372](https://github.com/breferrari/vigia/issues/372) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ✅ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
@@ -335,6 +329,9 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them | [#98](https://github.com/breferrari/vigia/issues/98) |
 | ⬜ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
+| ⬜ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
+| ⬜ | The clipboard write's failure branch is unreachable by any test | [#392](https://github.com/breferrari/vigia/issues/392) |
+| ⬜ | `sheet.rs` restates two dozen constants the table's own length implies | [#393](https://github.com/breferrari/vigia/issues/393) |
 | ⬜ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
 | ✅ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
 | ✅ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |

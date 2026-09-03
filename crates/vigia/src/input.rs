@@ -251,9 +251,9 @@ pub struct Pointing {
     pub selected: Option<Selection>,
 }
 
-/// Rows of the diff a drag has selected, so `y` sends their text rather than the
-/// caret file's path. Screen rows and not row indices: the span is re-resolved
-/// against every frame, so no stored text can disagree with the wash.
+/// Rows of the diff a drag is washing, which the button coming up sends. Screen
+/// rows and not row indices: the span is re-resolved against every frame, so no
+/// stored text can disagree with the wash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
     /// The screen row the press landed on.
@@ -286,21 +286,35 @@ impl Selection {
     }
 }
 
-/// The selection after `event`, given the one before it. Nothing here ends one: a
-/// release leaves the wash standing and the loop clears it on any action but
-/// [`Action::Yank`], and a press off the diff is that rule reaching the one gesture
-/// with no action behind it.
+/// Whether `event` is the button coming up, which is a drag ending and the moment
+/// what it washed reaches the clipboard.
+fn ends_a_drag(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left)
+    )
+}
+
+/// The selection after `event`, and the one `event` ended.
+///
+/// The second is handed back rather than left for a caller to read off its own
+/// field, which this call has already overwritten: the send and the retire would
+/// otherwise be two statements whose order decides whether anything is copied at
+/// all. Only the button coming up ends one, so only that returns a second span.
 pub fn selection_after(
     event: &Event,
     regions: Regions,
     was: Option<Selection>,
-) -> Option<Selection> {
+) -> (Option<Selection>, Option<Selection>) {
+    if ends_a_drag(event) {
+        return (None, was);
+    }
     let Event::Mouse(mouse) = event else {
         // Focus clears no wash: this pane sits beside one a reader types into, and
         // clicking there must not discard a selection they were about to send.
-        return was;
+        return (was, None);
     };
-    match mouse.kind {
+    let standing = match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => regions
             .selectable(mouse.column, mouse.row)
             .then(|| Selection::at(mouse.row)),
@@ -311,7 +325,8 @@ pub fn selection_after(
             ..had
         }),
         _ => was,
-    }
+    };
+    (standing, None)
 }
 
 /// What the pointer is resting on, when it is on something a click acts on.
@@ -409,7 +424,6 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::CloseSheet
         | Action::Escape
         | Action::Redraw
-        | Action::Yank
         | Action::Quit => return None,
     };
     (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
@@ -562,8 +576,6 @@ pub enum Action {
     ToggleSheet,
     /// Stop drawing the gestures sheet, whatever page it is on.
     CloseSheet,
-    /// Put the caret file's path on the clipboard. §11.2 B9.
-    Yank,
     /// Leave the frontmost thing: the gestures sheet if one is up, and the
     /// program if none is. `Esc`.
     Escape,
@@ -606,7 +618,6 @@ impl Action {
             | Self::CloseSheet
             | Self::Escape
             | Self::Redraw
-            | Self::Yank
             | Self::Quit => self,
         }
     }
@@ -647,7 +658,6 @@ impl Action {
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
             | Self::CloseSheet
-            | Self::Yank
             | Self::ScrollList(_) => false,
             // Dragging the list's bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the diff's
@@ -682,8 +692,7 @@ impl Action {
             | Self::ToggleStaged
             | Self::ToggleWrap
             | Self::ToggleSheet
-            | Self::CloseSheet
-            | Self::Yank => false,
+            | Self::CloseSheet => false,
         }
     }
 }
@@ -777,8 +786,6 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // `rtop` all open help on it, it was unbound here, and `h` is refused because
         // it is a vi motion everywhere else on a pane with no horizontal scroll.
         KeyCode::Char('?') => Some(Action::ToggleSheet),
-        // vi yanks on `y`, and `gitui` and `lazygit` both bind copy there.
-        KeyCode::Char('y') => Some(Action::Yank),
         _ => None,
     }
 }

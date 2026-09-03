@@ -1717,7 +1717,7 @@ fn the_selection_survives_every_colour_depth() {
             assert!(
                 seen,
                 "{name} at {depth:?} draws a selection with neither a background nor \
-                 a reversal, so a reader drags and sees nothing while `y` still sends"
+                 a reversal, so a reader drags and sees nothing while the release still sends"
             );
         }
     }

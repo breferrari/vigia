@@ -20,26 +20,16 @@ fn scaled(at: u32, count: usize) -> usize {
     ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
 }
 
-/// What `y` asked to send, and what the footer may call it. The two travel
-/// together because the choice between a selection and the caret file is made
-/// once, rather than re-derived by whatever is about to write the escape.
+/// The bytes a gesture asked to send, and what the footer calls them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Yanked {
+pub struct Sending {
     /// The bytes for the clipboard.
     pub text: String,
     /// What the footer names them.
     pub said: String,
 }
 
-impl Yanked {
-    /// A path, which names itself.
-    fn path(path: String) -> Self {
-        Self {
-            said: path.clone(),
-            text: path,
-        }
-    }
-
+impl Sending {
     /// Selected lines, named by how many. **Lines and not rows**: a wrapped line
     /// is several rows and one line, and the count names what was sent.
     fn lines(lines: &[String]) -> Self {
@@ -75,14 +65,12 @@ pub struct App {
     /// Shown over `notice` rather than into it: a confirmation must not be erased
     /// by the next tick, nor bury a warning that has no expiry.
     flash: Option<String>,
-    /// Asked for and not sent yet, then the caret's path on the frame last drawn.
-    yanking: Option<Yanked>,
-    caret: Option<String>,
+    /// Asked for and not sent yet.
+    sending: Option<Sending>,
     /// Rows the drag has washed, as offsets into the collected rows.
     selecting: Option<(usize, usize)>,
-    /// Their lines, resolved on the frame last drawn, so the wash and what `y`
-    /// sends cannot name different frames.
-    selected: Option<Vec<String>>,
+    /// Whether the last collect resolved that span; the release resolves its own.
+    resolved: bool,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
@@ -146,10 +134,9 @@ impl Default for App {
             position: Position::default(),
             notice: None,
             flash: None,
-            yanking: None,
-            caret: None,
+            sending: None,
             selecting: None,
-            selected: None,
+            resolved: false,
             following: false,
             masthead: false,
             rail: false,
@@ -267,21 +254,28 @@ impl App {
     pub fn select(&mut self, span: Option<(usize, usize)>) {
         self.selecting = span;
         if span.is_none() {
-            // The lines go with the span. A wash cleared between paints must not
-            // leave `y` sending rows the reader can no longer see, and the resolve
-            // below only runs on a frame that collects.
-            self.selected = None;
+            // The answer goes with the span: the resolve below only runs on a collect.
+            self.resolved = false;
         }
     }
 
     /// Whether the last collect resolved the span it was given to any lines.
     pub fn holds_a_selection(&self) -> bool {
-        self.selected.is_some()
+        self.resolved
     }
 
-    /// Taken, so a yank is sent once.
-    pub fn take_yank(&mut self) -> Option<Yanked> {
-        self.yanking.take()
+    /// Queue `lines`, replacing rather than adding: one send leaves a batch, so a
+    /// release over blank rows retires the one before it. An empty write clears.
+    pub fn send(&mut self, lines: &[String]) {
+        self.sending = lines
+            .iter()
+            .any(|line| !line.is_empty())
+            .then(|| Sending::lines(lines));
+    }
+
+    /// Taken, so what was asked for is sent once.
+    pub fn take_sending(&mut self) -> Option<Sending> {
+        self.sending.take()
     }
 
     /// Drop the current message, because the frame it described has passed.
@@ -420,17 +414,6 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             // The reflow changes what a screenful is; see [`Self::screenful`].
             Action::ToggleWrap => self.wrap = !self.wrap,
-            Action::Yank => {
-                let lines = self
-                    .selected
-                    .as_deref()
-                    .filter(|lines| lines.iter().any(|line| !line.is_empty()));
-                self.yanking = match (lines, &self.caret) {
-                    (Some(lines), _) => Some(Yanked::lines(lines)),
-                    (None, Some(path)) => Some(Yanked::path(path.clone())),
-                    (None, None) => None,
-                }
-            }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;
@@ -728,11 +711,8 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
-        // By path: a tick rebuilds the list mid-batch and an index goes stale with it.
-        self.caret = frame.files().get(view.top.file).map(|at| at.path.clone());
-        // Beside the caret because it is the same rule: what `y` would send is
-        // resolved from the frame that was drawn, never carried from the gesture.
-        self.selected = self.selecting.and_then(|span| view.lines_in(span));
+        // A span the walk had no rows for is not a selection, whatever the pointer did.
+        self.resolved = self.selecting.is_some_and(|span| view.resolves(span));
         // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.

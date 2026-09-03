@@ -149,7 +149,7 @@ It is scaled **across every tracked file**, not against the row's own maximum, a
 
 The dot marks the file named by the newest tick, and it lasts exactly one tick, so it **cuts rather than fades**. The path's own brightness is the same signal, slower: the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
 
-The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered when you move away, no row becomes special, and the next key means exactly what it would have meant.
+The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered when you move away, no row becomes special, and the next key means exactly what it would have meant. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone.
 
 The counters lend colour only where it says something: a `-0` stays grey, because a zero is not reporting a removal.
 
@@ -240,7 +240,6 @@ The blank above the band is the row the header keeps between itself and the list
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
 | `w` | wrap a long line onto the row below, or clip it |
-| `y` | copy the selected rows, or this file's path, to the clipboard |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 
@@ -255,7 +254,7 @@ The blank above the band is the row the header keeps between itself and the list
 | click a track | send it there |
 | click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
-| drag the diff | select those rows; a click selects one, `Esc` clears |
+| drag the diff | copy those rows: let go and they are sent |
 | click `✕` | close the sheet |
 | just point | it marks itself |
 | `Shift`+drag | select text, the terminal's own way |
@@ -275,7 +274,7 @@ The blank above the band is the row the header keeps between itself and the list
 
 **`Shift`+drag selects text because your terminal does it, not because `vigia` does.** The pane holds the mouse so the wheel and the scrollbars work, and every terminal keeps a modifier that hands selection back for as long as you hold it: `Shift` on xterm, GNOME Terminal, Konsole, Windows Terminal, kitty and WezTerm, and **`Option`** on iTerm2, checked by hand on Windows Terminal. You get the terminal's own highlight and the terminal's own clipboard, which means it works over SSH and inside tmux. What it copies is what is on screen, so a path the pane had to shorten is copied short.
 
-**`y` is for that case.** It copies the path of the file the caret is on, whole, whatever the pane had room to draw, and the footer says what it sent. Your terminal has to allow it: the escape it uses is off by default in a few of them, there is no reply to read, and so nothing can promise it arrived.
+**Dragging the diff is for that case.** It sends the rows rather than the cells, so a line the pane clipped arrives whole, a line `w` wrapped arrives as one line, and a file heading arrives as its path however short the pane drew it. Let go and it is sent, and the footer says what went. Your terminal has to allow it: the escape it uses is off by default in a few of them, there is no reply to read, and so nothing can promise it arrived.
 
 The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
 
@@ -500,6 +499,6 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask — `SPEC.md` is read before code.
+Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code.
 
 Five issues are labelled [`good first issue`](https://github.com/breferrari/vigia/labels/good%20first%20issue).

@@ -22,7 +22,7 @@ mod terminal;
 pub mod theme;
 mod view;
 
-pub use app::{App, Yanked};
+pub use app::{App, Sending};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
@@ -296,7 +296,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
-            shell.settle_yank(began);
+            shell.settle_send(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -316,7 +316,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // and `shell` drops on the way out to put the terminal back first.
                 Wake::InputLost => {
                     // The one exit by `return`, so the flush after the loop misses it.
-                    shell.settle_yank(Instant::now());
+                    shell.settle_send(Instant::now());
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
                 // The quit key's arm without the key, so `break` and not `return`:
@@ -335,7 +335,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.hovered = hover_after(&event, regions, shell.hovered);
                     // Before the event is interpreted, for the hold's reason: a press
                     // opening one is an action too, and the wash precedes its clearing.
-                    shell.selected = selection_after(&event, regions, shell.selected);
+                    let (standing, ended) = selection_after(&event, regions, shell.selected);
+                    shell.selected = standing;
+                    if let Some(span) = ended {
+                        shell.send_wash(span);
+                    }
                     // A drag under way answers before the column is consulted, and that
                     // ordering is the fix.
                     if let Some(on) = shell.grabbed {
@@ -433,7 +437,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         }
 
         // Before the paint: the notice it raises has to reach this frame.
-        shell.settle_yank(began);
+        shell.settle_send(began);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -454,9 +458,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         shell.app.record_frame(began.elapsed());
     }
 
-    // `y` then `q` copies and leaves, and every arm ending the loop does so before the
-    // batch reaches its send. `InputLost` returns, and carries its own.
-    shell.settle_yank(Instant::now());
+    // A release then `q` copies and leaves, and every arm ending the loop does so before
+    // the batch reaches its send. `InputLost` returns, and carries its own.
+    shell.settle_send(Instant::now());
 
     Ok(())
 }
@@ -491,7 +495,7 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
-/// How long the footer says what a yank sent. One-shot, so an idle pane owns no timer.
+/// How long the footer says what a gesture sent. One-shot, so an idle pane owns no timer.
 pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Wakes taken in one go, so one gesture costs one paint.
@@ -644,47 +648,63 @@ impl Shell {
         }
     }
 
-    /// Apply `action`, taking any selection with it: every action but the one that
-    /// sends it clears the wash, and the span lives here rather than on the app.
+    /// Apply `action`, taking any wash with it. A wash belongs to a gesture the
+    /// pointer is still performing, so anything else arriving ends it, and `Esc`
+    /// cancels that gesture rather than leaving. A resize is the exception: it is a
+    /// redraw and no state change, and [`repainted`] retires the mark if the regions
+    /// really moved.
     fn apply(
         &mut self,
         action: Action,
         frame: &mut vigia_core::Frame,
         height: usize,
     ) -> vigia_core::Result<bool> {
-        // A rung of the ladder `Esc` already climbs, under the sheet, over quitting.
+        // The rung `Esc` climbs over quitting, reachable only while the button is
+        // down. Without it a tap mid-drag ends the program.
         if action == Action::Escape && self.selected.is_some() {
             self.deselect();
             return Ok(true);
         }
-        if action != Action::Yank {
+        if action != Action::Redraw {
             self.deselect();
         }
         self.app.apply(action, frame, height)
     }
 
     /// Drop the wash and the lines it stood for together: clearing one and not the
-    /// other leaves `y` sending rows nothing on screen is claiming.
+    /// other leaves a send carrying rows nothing on screen is claiming.
     fn deselect(&mut self) {
         self.selected = None;
         self.app.select(None);
     }
 
-    /// Send a path the reader yanked, and say so for `NOTICE_LINGER`.
+    /// End a drag on the clipboard: `span` is what the last painted frame washed.
+    ///
+    /// Resolved here rather than read off `App`, whose own resolve runs only on a
+    /// frame that collects: the loop paints once per drained batch, so a press and its
+    /// release can share one and leave nothing collected in between. `Shell::regions`
+    /// is the layout those screen rows were read against.
+    fn send_wash(&mut self, span: Selection) {
+        if let Some(lines) = self.screen.lines_in(span.offsets(self.regions.diff.top)) {
+            self.app.send(&lines);
+        }
+    }
+
+    /// Write what a gesture asked for, and say so for `NOTICE_LINGER`.
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
     /// has no reply and several terminals ship it disabled.
     /// A failed write is reported rather than propagated: a draw that fails has taken
     /// the pane with it, but a copy is one a reader can go on watching without.
-    fn settle_yank(&mut self, now: Instant) {
+    fn settle_send(&mut self, now: Instant) {
         if input::settled(self.notice_until, now) {
             self.app.clear_flash();
             self.notice_until = None;
         }
-        if let Some(yank) = self.app.take_yank() {
-            let said = yank.said;
+        if let Some(sending) = self.app.take_sending() {
+            let said = sending.said;
             self.app
-                .flash(match self.session.send(&clipboard::copy(&yank.text)) {
+                .flash(match self.session.send(&clipboard::copy(&sending.text)) {
                     Ok(()) => format!("sent {said} to the clipboard"),
                     Err(e) => format!("could not send {said}: {e}"),
                 });
@@ -772,8 +792,8 @@ impl Shell {
             frame.files().len(),
             view::list_rows_wanted(frame.files()),
         );
-        // Against this frame's own layout rather than the last paint's, so the rows
-        // the wash covers and the lines `y` would send are resolved on one screen.
+        // Against this frame's own layout rather than the last paint's, so a wash is
+        // judged on the screen it is drawn over.
         self.app.select(
             self.selected
                 .map(|had| had.offsets(body.areas(area).diff.y)),
@@ -783,8 +803,8 @@ impl Shell {
             .view(frame, &mut self.highlighter, &self.history, body)
         {
             Ok(view) => self.screen = view,
-            // The lines go too: this frame could not re-resolve them, and keeping
-            // the last frame's would let `y` send rows the wash is no longer over.
+            // The wash goes too: this frame resolved nothing, and keeping the last
+            // frame's answer would leave one standing over rows it no longer covers.
             Err(e) => {
                 self.app.warn(e.to_string());
                 self.app.select(None);
@@ -1050,20 +1070,42 @@ mod tests {
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
         // than driven. Each of these was a defect: a span the collect resolved to
-        // nothing took `Esc`, and a cleared span left `App`'s lines behind for `y`.
+        // nothing took `Esc`, and a cleared span left its answer standing behind it.
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         for rule in [
             "if !self.app.holds_a_selection() {",
-            "if action == Action::Escape && self.selected.is_some() {",
-            "if action != Action::Yank {",
+            "let (standing, ended) = selection_after(",
+            "shell.send_wash(span);",
             "self.app.select(None);",
+            // Neither is reachable from a test, and both shipped once.
+            "if action == Action::Escape && self.selected.is_some() {",
+            "if action != Action::Redraw {",
+            "if chrome.selected.is_none() {",
+            "self.screen.lines_in(span.offsets(self.regions.diff.top))",
         ] {
             assert!(
                 shipped.contains(rule),
                 "`{rule}` is gone, so a wash outlives something that ends it"
             );
         }
+        // And the one route that must not end it. Every other arm that touches state
+        // deselects, so the tick arm reads like an omission and would survive being
+        // "tidied": an agent's write is what this pane exists to watch, and it may not
+        // cancel a selection the reader is still making.
+        let tick = shipped
+            .split("Wake::Tick(paths) => {")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost").next())
+            .expect("the loop no longer has a tick arm");
+        for gone in ["deselect()", "select(None)"] {
+            assert!(
+                !tick.contains(gone),
+                "the tick arm calls `{gone}`, so an agent's write cancels a drag the \
+                 reader is in the middle of"
+            );
+        }
+
         let collect = shipped
             .find(".view(frame,")
             .expect("`paint` no longer collects");
@@ -1075,6 +1117,20 @@ mod tests {
             "the wash is retired before the collect that decides whether it resolved \
              to anything, so it is judged on the frame before this one"
         );
+    }
+
+    /// The footer says **sent** rather than copied, because OSC 52 has no reply. Both
+    /// spellings live inside a method that owns a terminal, so they are read here.
+    #[test]
+    fn the_footer_says_sent_rather_than_copied() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for said in ["sent {said} to the clipboard", "could not send {said}: {e}"] {
+            assert!(
+                shipped.contains(said),
+                "`{said}` is gone, so the footer claims something OSC 52 cannot promise"
+            );
+        }
     }
 
     /// Two properties of `run` that no test can execute, because `run` owns a

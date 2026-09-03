@@ -2578,7 +2578,8 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
     }
 }
 
-/// `SPEC.md` §11.2 B8 and B9, and the mechanism is what is gated rather than
+/// `SPEC.md` §11.2 B8 and the clipboard write §11.1 carries, and the mechanism
+/// is what is gated rather than
 /// either affordance.
 #[test]
 fn a_drawn_path_carries_no_escape_sequence_of_its_own() {

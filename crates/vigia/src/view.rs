@@ -1270,6 +1270,12 @@ impl View {
         self.rows.iter().filter(|row| !row.is_wrap()).count() + usize::from(opens_inside)
     }
 
+    /// Whether `span` resolves to any line, which a standing wash asks every frame.
+    pub fn resolves(&self, span: (usize, usize)) -> bool {
+        let last = self.rows.len().checked_sub(1);
+        last.is_some_and(|last| span.0 <= last)
+    }
+
     /// The lines the rows `span` covers, inclusive: §11.2 B20's own strings, so a
     /// clipped line arrives whole.
     pub fn lines_in(&self, span: (usize, usize)) -> Option<Vec<String>> {
