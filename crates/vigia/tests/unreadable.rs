@@ -10,43 +10,10 @@ mod support;
 use vigia::{App, Body, Row, View, diff_rows};
 use vigia_core::{Frame, Highlighter, History};
 
-use support::Scratch;
-
-/// An object id no repository holds.
-const ABSENT_BLOB: &str = "0123456789012345678901234567890123456789";
-
-const KEPT: &str = "kept.txt";
+use support::{KEPT, Scratch};
 
 /// Tall enough that nothing is scrolled off, so the whole diff is asserted.
 const ALL_ROWS: usize = 500;
-
-/// A tree holding a nested checkout and one ordinary edit beside it.
-fn with_nested_repository(name: &str) -> Scratch {
-    let scratch = Scratch::new(name);
-    scratch.write(KEPT, "one\n");
-    scratch.commit_all("baseline");
-    scratch.write(KEPT, "one\ntwo\n");
-    scratch.git(&["init", "-q", "nested"]);
-    scratch.write("nested/inner.txt", "inner\n");
-    scratch
-}
-
-/// A tree where one path's left-hand side is a blob the object database does not
-/// hold. Built from git rather than from permissions, which are not portable.
-fn with_a_missing_blob(name: &str) -> Scratch {
-    let scratch = Scratch::new(name);
-    scratch.write("gone.txt", "one\n");
-    scratch.write(KEPT, "one\n");
-    scratch.commit_all("baseline");
-    scratch.write("gone.txt", "one\ntwo\n");
-    scratch.write(KEPT, "one\ntwo\n");
-    scratch.git(&[
-        "update-index",
-        "--cacheinfo",
-        &format!("100644,{ABSENT_BLOB},gone.txt"),
-    ]);
-    scratch
-}
 
 /// One frame, the way the shell builds one.
 fn collect(frame: &mut Frame, app: &mut App) -> View {
@@ -72,7 +39,7 @@ fn drawn(view: &View) -> Vec<String> {
 
 #[test]
 fn a_first_frame_over_a_nested_repository_is_not_empty() {
-    let scratch = with_nested_repository("shell-nested-first");
+    let scratch = Scratch::with_nested_repository("shell-nested-first");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -95,7 +62,7 @@ fn a_first_frame_over_a_nested_repository_is_not_empty() {
 
 #[test]
 fn a_nested_repository_does_not_stop_the_pane_from_advancing() {
-    let scratch = with_nested_repository("shell-nested-advance");
+    let scratch = Scratch::with_nested_repository("shell-nested-advance");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     let mut app = App::new();
@@ -121,7 +88,7 @@ fn a_nested_repository_does_not_stop_the_pane_from_advancing() {
 
 #[test]
 fn an_unreadable_file_draws_a_note_and_the_rest_of_the_diff() {
-    let scratch = with_a_missing_blob("shell-blob-note");
+    let scratch = Scratch::with_a_missing_blob("shell-blob-note");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -155,7 +122,7 @@ fn an_unreadable_file_draws_a_note_and_the_rest_of_the_diff() {
 
 #[test]
 fn the_height_and_the_drawn_rows_agree_over_an_unreadable_file() {
-    let scratch = with_a_missing_blob("shell-blob-height");
+    let scratch = Scratch::with_a_missing_blob("shell-blob-height");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");

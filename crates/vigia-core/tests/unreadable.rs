@@ -2,67 +2,22 @@
 
 mod support;
 
-use support::Scratch;
-use vigia_core::{Error, Frame};
+use support::{GONE, KEPT, Scratch, index_of};
+use vigia_core::Error;
 
-/// An object id no repository holds, so the index can name a blob that is not
-/// there.
-const ABSENT_BLOB: &str = "0123456789012345678901234567890123456789";
-
-const KEPT: &str = "kept.txt";
-
-/// Where a file sits in the frame, by path rather than by position.
-fn index_of(frame: &Frame, path: &str) -> usize {
-    frame
-        .files()
-        .iter()
-        .position(|change| change.path == path)
-        .unwrap_or_else(|| {
-            panic!(
-                "{path} is not in the frame; it holds {:?}",
-                frame.files().iter().map(|c| &c.path).collect::<Vec<_>>()
-            )
-        })
-}
-
-/// A tree holding a nested checkout and one ordinary edit beside it.
-///
-/// The nested repository is the reported shape: `git status` names the directory
-/// itself as a single untracked entry, with no trailing marker separating it
-/// from a file.
-fn with_nested_repository(name: &str) -> Scratch {
-    let scratch = Scratch::new(name);
-    scratch.write(KEPT, "one\n");
-    scratch.commit_all("baseline");
-    scratch.write(KEPT, "one\ntwo\n");
-    scratch.git(&["init", "-q", "nested"]);
-    scratch.write("nested/inner.txt", "inner\n");
-    scratch
-}
-
-/// A tree where one path's left-hand side is a blob the object database does not
-/// hold, which is a per-file failure that is not a directory.
-///
-/// Built from git rather than from permissions: a mode that denies a read is not
-/// portable, and this is.
-fn with_a_missing_blob(name: &str) -> Scratch {
-    let scratch = Scratch::new(name);
-    scratch.write("gone.txt", "one\n");
-    scratch.write(KEPT, "one\n");
-    scratch.commit_all("baseline");
-    scratch.write("gone.txt", "one\ntwo\n");
-    scratch.write(KEPT, "one\ntwo\n");
-    scratch.git(&[
-        "update-index",
-        "--cacheinfo",
-        &format!("100644,{ABSENT_BLOB},gone.txt"),
-    ]);
-    scratch
+/// How tall the shell draws a file, which is `vigia::view::rows_of`'s rule.
+/// Mirrored rather than imported: the shell is not a dependency of this crate.
+fn rows_of(_: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> usize {
+    if span.unreadable {
+        2
+    } else {
+        1 + span.hunks as usize + span.lines as usize
+    }
 }
 
 #[test]
 fn a_nested_repository_diffs_as_an_empty_addition() {
-    let scratch = with_nested_repository("core-nested-empty");
+    let scratch = Scratch::with_nested_repository("core-nested-empty");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -85,7 +40,7 @@ fn a_nested_repository_diffs_as_an_empty_addition() {
 
 #[test]
 fn a_nested_repository_leaves_every_other_file_diffable() {
-    let scratch = with_nested_repository("core-nested-others");
+    let scratch = Scratch::with_nested_repository("core-nested-others");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -110,12 +65,12 @@ fn a_nested_repository_leaves_every_other_file_diffable() {
 
 #[test]
 fn one_unreadable_entry_leaves_every_other_file_diffable() {
-    let scratch = with_a_missing_blob("core-blob-others");
+    let scratch = Scratch::with_a_missing_blob("core-blob-others");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
 
-    let failed = index_of(&frame, "gone.txt");
+    let failed = index_of(&frame, GONE);
     let (_, diff) = frame
         .diff(failed)
         .expect("a failure that names one path stays on that path");
@@ -124,7 +79,7 @@ fn one_unreadable_entry_leaves_every_other_file_diffable() {
         .clone()
         .expect("the row says why it has no lines");
     assert!(
-        !reason.contains("gone.txt"),
+        !reason.contains(GONE),
         "the heading above the note already carries the path: {reason}"
     );
     assert_eq!(
@@ -151,19 +106,15 @@ fn an_unreadable_row_is_re_read_rather_than_served_from_cache() {
     // blob, and a failure would be served from cache for the life of the
     // process. This is the only shape that can tell the guard from its absence.
     let scratch = Scratch::new("core-blob-retry");
-    scratch.write("gone.txt", "one\n");
+    scratch.write(GONE, "one\n");
     scratch.commit_all("baseline");
-    scratch.git(&[
-        "update-index",
-        "--cacheinfo",
-        &format!("100644,{ABSENT_BLOB},gone.txt"),
-    ]);
-    std::fs::remove_file(scratch.path_of("gone.txt")).expect("remove");
+    scratch.point_at_a_missing_blob(GONE);
+    std::fs::remove_file(scratch.path_of(GONE)).expect("remove");
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let failed = index_of(&frame, "gone.txt");
+    let failed = index_of(&frame, GONE);
     let (change, diff) = frame.diff(failed).expect("first diff");
     assert_eq!(
         change.kind,
@@ -180,7 +131,7 @@ fn an_unreadable_row_is_re_read_rather_than_served_from_cache() {
     // failure corrects itself with no staleness reasoning anywhere.
     let before = frame.stats().reused;
     frame.advance().expect("advance again");
-    let failed = index_of(&frame, "gone.txt");
+    let failed = index_of(&frame, GONE);
     frame.diff(failed).expect("second diff");
     assert_eq!(
         frame.stats().reused,
@@ -191,19 +142,58 @@ fn an_unreadable_row_is_re_read_rather_than_served_from_cache() {
 
 #[test]
 fn the_height_of_an_unreadable_file_matches_what_a_note_draws() {
-    let scratch = with_a_missing_blob("core-blob-height");
+    let scratch = Scratch::with_a_missing_blob("core-blob-height");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let failed = index_of(&frame, "gone.txt");
+    let failed = index_of(&frame, GONE);
 
     let span = frame
-        .rows_of(failed, |_, span| usize::from(span.unreadable))
+        .rows_of(failed, rows_of)
         .expect("a span is measured without reading anything");
     assert_eq!(
-        span, 1,
+        span, 2,
         "the height path has to know the row carries a note, or it counts a \
          file the screen draws two rows for as one"
+    );
+}
+
+#[test]
+fn a_files_height_recovers_when_the_file_does_and_no_diff_is_asked_for() {
+    let scratch = Scratch::with_a_missing_blob("core-blob-heals");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    // Reached through `diff` first, because that is the call that produces the
+    // contained failure. A failure kept anywhere the height walk trusts is served
+    // back to it forever: `fill_span`'s first branch takes a diff already in hand
+    // without asking whether it still describes the file.
+    let failed = index_of(&frame, GONE);
+    assert!(
+        frame.diff(failed).expect("diff").1.unreadable.is_some(),
+        "the fixture's blob is present after all, so nothing here fails"
+    );
+    let note = frame.rows_of(failed, rows_of).expect("height");
+    assert_eq!(note, 2, "an unreadable file draws a heading and a note");
+
+    // The index entry goes back to the blob HEAD holds, so the file reads again.
+    // Written directly rather than with `git reset`, which reads the entry it is
+    // replacing and so cannot replace one that names a blob nothing holds.
+    let real = scratch.git(&["rev-parse", &format!("HEAD:{GONE}")]);
+    scratch.git(&[
+        "update-index",
+        "--cacheinfo",
+        &format!("100644,{},{GONE}", real.trim()),
+    ]);
+    frame.advance().expect("advance");
+    let healed = index_of(&frame, GONE);
+    let rows = frame.rows_of(healed, rows_of).expect("height");
+    assert!(
+        rows > 2,
+        "the height stayed at the note after the file became readable, so a \
+         reader who never scrolls to it keeps a scrollbar scaled to a diff \
+         nobody draws"
     );
 }
 

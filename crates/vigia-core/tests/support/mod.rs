@@ -16,6 +16,17 @@ use vigia_core::{
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// An object id no repository holds, so an index entry can name a blob that is
+/// not there.
+pub const ABSENT_BLOB: &str = "0123456789012345678901234567890123456789";
+
+/// The readable file every unreadable-entry fixture keeps beside the broken one,
+/// so "one entry failed" and "every entry failed" are different assertions.
+pub const KEPT: &str = "kept.txt";
+
+/// The path those fixtures break.
+pub const GONE: &str = "gone.txt";
+
 /// Idle frames allowed while a fixture's writes settle.
 const SETTLE_FRAMES: usize = 8;
 
@@ -346,6 +357,20 @@ pub fn numbered_lines(count: usize) -> String {
     (1..=count).map(|i| format!("line {i}\n")).collect()
 }
 
+/// Where a file sits in the frame, by path rather than by position.
+pub fn index_of(frame: &Frame, path: &str) -> usize {
+    frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .unwrap_or_else(|| {
+            panic!(
+                "{path} is not a changed file; the frame holds {:?}",
+                frame.files().iter().map(|c| &c.path).collect::<Vec<_>>()
+            )
+        })
+}
+
 /// Advance one frame and fetch every diff in it.
 pub fn materialise(frame: &mut Frame) {
     frame.advance().expect("advance");
@@ -396,11 +421,7 @@ pub fn highlight_window(
     first: usize,
     hunks: usize,
 ) -> Drawn {
-    let index = frame
-        .files()
-        .iter()
-        .position(|change| change.path == path)
-        .unwrap_or_else(|| panic!("{path} is not a changed file"));
+    let index = index_of(frame, path);
 
     let mut pass = highlighter.pass();
     let (_, diff) = frame.diff(index).expect("diff");
@@ -620,6 +641,72 @@ impl Scratch {
             });
         }
         scratch
+    }
+
+    /// A repository holding a nested checkout, plus one ordinary edit beside it.
+    ///
+    /// `git status` reports the nested repository as a single untracked entry
+    /// naming the directory itself, with nothing to distinguish it from a file.
+    pub fn with_nested_repository(name: &str) -> Self {
+        let scratch = Self::new(name);
+        scratch.write(
+            KEPT, "one
+",
+        );
+        scratch.commit_all("baseline");
+        scratch.write(
+            KEPT, "one
+two
+",
+        );
+        scratch.git(&["init", "-q", "nested"]);
+        scratch.write(
+            "nested/inner.txt",
+            "inner
+",
+        );
+        scratch
+    }
+
+    /// A repository where one path's left-hand side is a blob the object
+    /// database does not hold, plus one ordinary edit beside it.
+    ///
+    /// This is a per-file failure that is **not** a directory, which is what
+    /// separates the two halves of the containment. Built from git rather than
+    /// from permissions, because a mode that denies a read is not portable and
+    /// this is.
+    pub fn with_a_missing_blob(name: &str) -> Self {
+        let scratch = Self::new(name);
+        scratch.write(
+            GONE, "one
+",
+        );
+        scratch.write(
+            KEPT, "one
+",
+        );
+        scratch.commit_all("baseline");
+        scratch.write(
+            GONE, "one
+two
+",
+        );
+        scratch.write(
+            KEPT, "one
+two
+",
+        );
+        scratch.point_at_a_missing_blob(GONE);
+        scratch
+    }
+
+    /// Point one index entry at [`ABSENT_BLOB`], leaving the worktree alone.
+    pub fn point_at_a_missing_blob(&self, rela: &str) {
+        self.git(&[
+            "update-index",
+            "--cacheinfo",
+            &format!("100644,{ABSENT_BLOB},{rela}"),
+        ]);
     }
 
     /// A repository of long lines mixing Japanese, emoji and Latin.

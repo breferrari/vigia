@@ -73,19 +73,21 @@ pub struct FileDiff {
 }
 
 impl FileDiff {
-    /// The diff of a file a side of which could not be read: no hunks, and the
-    /// reason standing where they would be.
-    pub(crate) fn failed(path: String, reason: String) -> Self {
+    /// A file with no hunks, and why it has none: `Some` where a side of it
+    /// could not be read, `None` for a state this crate deliberately reads
+    /// nothing for.
+    ///
+    /// Nothing was read either way, so there is no first line and nothing
+    /// should resolve a grammar from one.
+    pub(crate) fn without_hunks(path: String, unreadable: Option<String>) -> Self {
         Self {
             path,
             binary: false,
-            unreadable: Some(reason),
+            unreadable,
             hunks: Vec::new(),
             added: 0,
             removed: 0,
             lines: 0,
-            // Nothing was read, so there is no first line and nothing should
-            // resolve a grammar from one.
             first_line: None,
             bytes: 0,
         }

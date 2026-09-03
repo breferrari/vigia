@@ -179,6 +179,12 @@ impl Worktree {
     ///
     /// Either side cannot be read: the working-tree file is unreadable, or the index names an
     /// object the database does not hold.
+    ///
+    /// This is the primitive, and it is asked about one file, so it answers about
+    /// that file and reports the failure to the caller who asked. A monitor
+    /// serving a whole screen cannot: [`Frame::diff`](crate::Frame::diff) turns
+    /// the same failure into that file's own note, because one entry it cannot
+    /// read must not cost the entries beside it.
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
         self.diff_counted(change, &mut 0)
     }
@@ -186,19 +192,9 @@ impl Worktree {
     /// [`Worktree::diff`], reporting the type probes it spent.
     pub(crate) fn diff_counted(&self, change: &FileChange, probes: &mut u64) -> Result<FileDiff> {
         if !change.is_diffable() {
-            return Ok(FileDiff {
-                path: change.path.clone(),
-                binary: false,
-                unreadable: None,
-                hunks: Vec::new(),
-                added: 0,
-                removed: 0,
-                // A conflict and a type change are states rather than diffs, and this
-                // method deliberately reads nothing for them.
-                lines: 0,
-                first_line: None,
-                bytes: 0,
-            });
+            // A conflict and a type change are states rather than diffs, and this
+            // method deliberately reads nothing for them.
+            return Ok(FileDiff::without_hunks(change.path.clone(), None));
         }
 
         let (before, after) = self.sides(change, probes)?;
