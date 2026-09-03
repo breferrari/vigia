@@ -54,6 +54,14 @@ gix = { version = "0.87", default-features = false, features = [
     "max-performance-safe",
     "sha1",
 ] }
+# Not used here, and declared only to bound a version. `tinyvec 1.13.0` does not
+# compile at all: it imports `alloc::vec` as a module, which shadows the `vec!`
+# macro it then calls, and the crate is `alloc`-only so no feature avoids it.
+# `unicode-normalization` asks for `^1` under `gix-utils`, so a fresh resolve
+# takes the broken one and `cargo install vigia` fails while CI, which builds
+# through the committed lock, cannot see it. That is #349's shape exactly.
+# Lift this the moment a fixed release exists; the bound blocks 1.13.1 too.
+tinyvec = ">=1.12, <1.13"
 # Native filesystem events, which I1 requires instead of a timer. The
 # companion debouncer crate is deliberately not taken: coalesce policy lives in
 # vigia-core, which is the only place I1 is testable.
