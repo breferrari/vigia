@@ -130,7 +130,15 @@ fn an_unreadable_row_is_re_read_rather_than_served_from_cache() {
     let before = frame.stats().reused;
     frame.advance().expect("advance again");
     let failed = index_of(&frame, GONE);
-    frame.diff(failed).expect("second diff");
+    assert!(
+        frame
+            .diff(failed)
+            .expect("second diff")
+            .1
+            .unreadable
+            .is_some(),
+        "the second tick answered with something other than the failure"
+    );
     assert_eq!(
         frame.stats().reused,
         before,
@@ -257,14 +265,9 @@ fn a_fifo_in_the_worktree_does_not_hang_the_frame() {
     scratch.write(KEPT, "one\n");
     scratch.commit_all("baseline");
     scratch.write(KEPT, "one\ntwo\n");
-    let made = std::process::Command::new("mkfifo")
-        .arg(scratch.path_of("pipe"))
-        .status()
-        .is_ok_and(|status| status.success());
-    assert!(
-        made,
-        "mkfifo is not available, so this gate asserts nothing"
-    );
+    if !support::made_fifo(&scratch, "pipe") {
+        return;
+    }
 
     let root = scratch.root().to_path_buf();
     let (tx, rx) = mpsc::channel();

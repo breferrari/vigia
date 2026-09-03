@@ -286,12 +286,16 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 
 **The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask it of an item when something reaches for it, not on a schedule nobody keeps. An item that cannot answer yes is not waiting for a phase, it is declined, and closing it as such is a result rather than a loss. Five declines in a hundred and twenty-seven closed issues is not a shelf being filtered; it is a shelf being filled.
 
+**[#390](https://github.com/breferrari/vigia/issues/390) is deferred on a measurement nobody has taken.** Found by #378's audit, 2026-09-03, session. Half its fix is free and half is a `stat` per changed file per tick, on the one branch named *free, and no syscall*.
+
+
 **If a second shelf is ever created, its milestone description must begin `Shelf:`.** Until [#83](https://github.com/breferrari/vigia/issues/83) the never-next rule lived only in this paragraph, which is prose, and `take-next` step 1 is a query: it read the milestone list, saw three peers, and offered the shelf as the next phase. The marker is what a query can read, and this paragraph is where whoever creates the next one is standing, so it is stated here rather than only in the skill. Comparison 6 of that skill's pre-flight is the check that fires when the two disagree.
 
 | | Task | Issue |
 |---|---|---|
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
+| ⬜ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |

@@ -283,6 +283,24 @@ pub fn made_link(scratch: &Scratch, target: &str, link: &str) -> bool {
     false
 }
 
+/// Make a named pipe at `rela`, or report that this platform would not.
+///
+/// `false` is a skip and not a failure, the way [`made_link`] is: the entry
+/// class exists only on unix, and not every unix filesystem will hold one.
+#[cfg(unix)]
+pub fn made_fifo(scratch: &Scratch, rela: &str) -> bool {
+    let made = std::process::Command::new("mkfifo")
+        .arg(scratch.path_of(rela))
+        .status()
+        .is_ok_and(|status| status.success());
+    if !made {
+        eprintln!(
+            "note: this platform would not create the fifo {rela}, so the              blocking-read reading is unchecked here"
+        );
+    }
+    made
+}
+
 /// The other half of non-vacuity: git has to have stored a symlink.
 pub fn git_stored_a_symlink(scratch: &Scratch, link: &str) -> bool {
     let mode = scratch.index_mode(link);
