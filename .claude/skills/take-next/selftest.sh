@@ -1,39 +1,37 @@
 #!/usr/bin/env sh
 # Self-test for step 1's milestone selection and pre-flight comparison 6.
 #
-# Why this exists: the selection rule is a jq filter inside a markdown file, so
+# Why this exists: the selection rule is a jq filter inside a shell script, so
 # no cargo test can reach it, and the first two edits to it were verified by
 # hand into a GitHub comment. That verification died with the shell it ran in.
 # CLAUDE.md's rule is that an invariant without a failing test is a wish, and
 # this is the cheapest thing that makes it one.
 #
 # It is offline and hermetic: every case is a fixture, so it needs no network,
-# no `gh`, and no particular state of the tracker. Run it after any edit to the
-# query or to the three rules beside it.
+# no `gh`, and no particular state of the tracker. Run it after any edit to
+# next.sh, preflight.sh, or the rules beside them in SKILL.md.
 #
 #   sh .claude/skills/take-next/selftest.sh
 #
-# Requires `jq` only, which step 1 already requires.
+# Requires `jq` only, which next.sh already requires.
 
 set -u
 FAIL=0
-SKILL="$(dirname "$0")/SKILL.md"
-
-# The filter under test. It is duplicated from SKILL.md deliberately rather than
-# parsed out of it, because a parser that silently matches nothing would make
-# this whole file green against code it never ran. Instead the duplication is
-# asserted below, which fails loudly in both directions.
-SELECT='[ .[]
-    | select(.open_issues > 0)
-    | select((.description // "") | startswith("Shelf:") | not)
-    | { order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }
-  ] | sort_by(.order, .title) | .[0].title // empty'
+HERE="$(dirname "$0")"
+SKILL="$HERE/SKILL.md"
+NEXT="$HERE/next.sh"
+PRE="$HERE/preflight.sh"
+FIX="$(mktemp -d)"
+trap 'rm -rf "$FIX"' EXIT
 
 ok() { printf '  ok   %s\n' "$1"; }
 no() { printf '  FAIL %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; FAIL=$((FAIL + 1)); }
 
+# Every case drives next.sh through its fixture seam, so what is tested is what
+# a session runs rather than a copy of it.
 case_is() { # name, expected, json
-  actual=$(printf '%s' "$3" | jq -r "$SELECT" 2>&1 | tr -d '\r')
+  printf '%s' "$3" > "$FIX/ms.json"
+  actual=$(NEXT_MILESTONES_FILE="$FIX/ms.json" sh "$NEXT" 2>&1 | tr -d '\r' | sed -n 's/^milestone: //p')
   [ "$actual" = "$2" ] && ok "$1" || no "$1" "$2" "$actual"
 }
 
@@ -55,7 +53,7 @@ case_is "lowest eligible phase number wins" \
     {"title":"Phase 6 - measured","description":"","open_issues":4}]'
 
 # The bug: a milestone with no open issues must not be selected, which is the
-# case the paragraph above rule 1 has warned about since the first version.
+# case rule 1 has warned about since the first version.
 case_is "a milestone with no open issues is not selected" \
   "Phase 7 - distribution" \
   '[{"title":"Phase 6 - measured","description":"","open_issues":0},
@@ -115,6 +113,14 @@ case_is "a null description is handled" \
   "Phase 6 - measured" \
   '[{"title":"Phase 6 - measured","description":null,"open_issues":1}]'
 
+# --ranked shows the whole order the answer came from, shelf excluded.
+printf '%s' '[{"title":"Phase 7 - distribution","description":"","open_issues":1},
+  {"title":"Phase 5 - deferred","description":"Shelf: never next.","open_issues":28},
+  {"title":"Phase 6 - measured","description":"","open_issues":4}]' > "$FIX/ms.json"
+ranked=$(NEXT_MILESTONES_FILE="$FIX/ms.json" sh "$NEXT" --ranked 2>&1 | tr -d '\r' | paste -sd '|' -)
+[ "$ranked" = "Phase 6 - measured|Phase 7 - distribution" ] && ok "--ranked lists every eligible milestone in take order" \
+  || no "--ranked lists every eligible milestone in take order" "Phase 6 - measured|Phase 7 - distribution" "$ranked"
+
 echo "mutation (the check must be able to fail):"
 
 # Rule 1 claims the fallback is what stops a milestone vanishing, and that scan
@@ -143,10 +149,6 @@ echo "preflight (the board every comparison reads):"
 # cites an issue no fetch contains. The two are one section because they are the
 # same silence from opposite ends: one is the record arriving short, the other is
 # a row pointing outside whatever arrived.
-PRE="$(dirname "$0")/preflight.sh"
-FIX="$(mktemp -d)"
-trap 'rm -rf "$FIX"' EXIT
-
 cat > "$FIX/spec.md" <<'EOF'
 | **I1** | A thing holds | a budget | a gate |
 ## 10. Open
@@ -213,29 +215,21 @@ esac
 
 echo "drift:"
 
-# The filter above must be the filter SKILL.md tells a session to run. Checking
-# one distinctive line is enough to catch an edit to either side, and it is the
-# line carrying every property asserted above.
-NEEDLE='{ order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }'
-if grep -qF "$NEEDLE" "$SKILL" 2>/dev/null; then
-  ok "the tested filter is the one SKILL.md documents"
-else
-  no "the tested filter is the one SKILL.md documents" "found in SKILL.md" "not found"
-fi
-
 present() { # needle, file, name
   grep -qF "$1" "$2" 2>/dev/null && ok "$3" || no "$3" "$1" "absent"
 }
 
-# Comparison 6 says the shelf is identified by a description prefix, so the
-# marker string must appear in both places that depend on it.
-present 'startswith("Shelf:")' "$SKILL" "SKILL.md still identifies the shelf by prefix"
+# One filter, three callers. The skill sends a session to the script, the
+# pre-flight compares the script's answer against the roadmap, and the shelf is
+# identified by a description prefix in the one place that decides it.
+present 'sh .claude/skills/take-next/next.sh' "$SKILL" "SKILL.md sends a session to next.sh"
+present 'next.sh' "$PRE" "preflight.sh compares the roadmap against next.sh"
+present 'startswith("Shelf:")' "$NEXT" "next.sh identifies the shelf by prefix"
 
 # The limit is the one thing the cases above cannot check about themselves: they
 # run at a small override, so nothing there would notice the shipped default
-# dropping back under the board. Pinned in both places that carry it.
+# dropping back under the board.
 present 'PREFLIGHT_ISSUE_LIMIT:-1000' "$PRE" "preflight.sh still fetches to a limit of 1000"
-present 'gh issue list --state all --limit 1000' "$SKILL" "SKILL.md's hand-run fetch takes the same limit"
 
 echo
 if [ "$FAIL" -eq 0 ]; then
