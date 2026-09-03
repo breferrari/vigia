@@ -282,6 +282,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// The base fixture, and its worktree name is load bearing.
 fn chrome() -> Chrome {
     Chrome {
+        arriving: None,
         pressed: None,
         gripped: None,
         hovered: None,

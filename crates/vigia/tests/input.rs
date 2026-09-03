@@ -6,8 +6,8 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, NOTICE_LINGER, Region, Regions,
-    SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for,
+    ARRIVING, Action, App, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, NOTICE_LINGER, Region,
+    Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for,
     drag_action, hover_after, patience, repainted, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
@@ -2009,5 +2009,79 @@ fn a_asks_for_the_staged_run_and_no_other_key_does() {
         Some(Action::ToggleSingle),
         "the Alt fall-through is not uniform across the map, so B17's key is a \
          special case rather than an instance of what was already there"
+    );
+}
+
+#[test]
+fn a_fade_arms_the_loop_and_gives_it_back_when_it_expires() {
+    // I1's licence in three conditions, asserted structurally rather than observed:
+    // the fade may not start on its own, may not outlive what armed it, and must
+    // leave the idle path untimed *by construction*. The third is the one a test
+    // can hold, and it is the reason this is a fold in `patience` rather than a
+    // branch at the receive.
+    let now = Instant::now();
+    let fade = Duration::from_millis(250);
+
+    assert_eq!(
+        patience(Deadlines::default(), now),
+        None,
+        "nothing armed handed the loop a deadline"
+    );
+
+    let armed = patience(
+        Deadlines {
+            arriving: Some(now + fade),
+            ..Deadlines::default()
+        },
+        now,
+    )
+    .expect("a running fade did not arm the loop, so it would freeze part-way");
+    assert!(
+        armed <= fade,
+        "a fade asked the loop to sleep {armed:?}, past the frame it is waiting for"
+    );
+
+    // And it gives the clock back, which is the bound the whole licence rests on.
+    // Asserted through `App`, because that is where it lives: a deadline already
+    // due folds to a zero wait here, which is correct for every clock in the fold
+    // (wake now, act, stop offering it), so the bound has to be that the owner
+    // stops offering it rather than that the fold discards it.
+    let mut app = App::new();
+    assert_eq!(
+        app.arriving_until(now),
+        None,
+        "a shell that has seen no tick is already on a clock"
+    );
+
+    app.arrived(now);
+    assert_eq!(
+        app.arriving_until(now),
+        Some(now + ARRIVING),
+        "a tick did not arm the fade"
+    );
+    assert_eq!(
+        app.arriving_until(now + ARRIVING),
+        None,
+        "an expired fade is still offered to the loop, so the idle path is timed"
+    );
+    assert_eq!(
+        patience(
+            Deadlines {
+                arriving: app.arriving_until(now + ARRIVING),
+                ..Deadlines::default()
+            },
+            now + ARRIVING
+        ),
+        None,
+        "the loop is still on a clock after the fade, so it outlives what armed it"
+    );
+
+    // It cannot re-arm itself, which is I1's third condition: only another tick
+    // moves it, and a tick is a wake the filesystem caused.
+    let before = app.arriving_until(now);
+    assert_eq!(
+        app.arriving_until(now),
+        before,
+        "reading the fade moved it, so it can extend itself"
     );
 }

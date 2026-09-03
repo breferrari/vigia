@@ -159,6 +159,7 @@ fn text_rows(drawn: &ratatui::backend::TestBackend, width: u16, height: u16) -> 
 
 fn chrome() -> Chrome {
     Chrome {
+        arriving: None,
         pressed: None,
         gripped: None,
         hovered: None,
@@ -189,6 +190,7 @@ fn chrome() -> Chrome {
 /// The chrome of every frame after the first, on a platform that reads memory.
 fn diagnostics_chrome() -> Chrome {
     Chrome {
+        arriving: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -201,6 +203,7 @@ fn diagnostics_chrome() -> Chrome {
 /// The chrome of a worktree with nothing in it, which is what B3 specifies.
 fn empty_chrome() -> Chrome {
     Chrome {
+        arriving: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -214,6 +217,7 @@ fn empty_chrome() -> Chrome {
 /// The chrome a shell actually starts with.
 fn following_chrome() -> Chrome {
     Chrome {
+        arriving: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -5109,6 +5113,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
         (
             "a frame over a second",
             Chrome {
+                arriving: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -5120,6 +5125,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
         (
             "memory over a gigabyte",
             Chrome {
+                arriving: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,

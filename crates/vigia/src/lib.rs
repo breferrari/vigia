@@ -22,7 +22,7 @@ mod terminal;
 pub mod theme;
 mod view;
 
-pub use app::{App, Sending};
+pub use app::{ARRIVING, ARRIVING_STEPS, App, Sending};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
@@ -399,6 +399,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 Wake::Tick(paths) => {
                     shell.app.clear_notice();
+                    // Armed here rather than in `App::follow`, because a change arrives
+                    // whether or not the viewport moves to it.
+                    shell.app.arrived(began);
                     // A tick is the world changing, so a demand that could not be
                     // served a moment ago is worth offering again.
                     shell.written = true;
@@ -624,6 +627,7 @@ impl Shell {
                 linger: self.scrolling_until,
                 notice: self.notice_until,
                 ageing: self.history.ages_in(now),
+                arriving: self.app.arriving_until(now),
             },
             now,
         )
@@ -761,15 +765,20 @@ impl Shell {
     ) -> Result<(), Failure> {
         // The window is rolled here because this is where every frame passes.
         self.history.record_sized([], now);
-        self.paint(frame, worktree)?;
+        self.paint(frame, worktree, now)?;
         if self.app.owes_repaint() {
-            self.paint(frame, worktree)?;
+            self.paint(frame, worktree, now)?;
         }
         Ok(())
     }
 
     /// One collect and one paint, with no view of what it leaves owed.
-    fn paint(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+    fn paint(
+        &mut self,
+        frame: &mut vigia_core::Frame,
+        worktree: &Worktree,
+        now: Instant,
+    ) -> Result<(), Failure> {
         // Before the chrome, because the chrome carries it, and from the frame's own
         // file count so the read happens on exactly the frames that draw the answer.
         // That is the whole of I4 for this read.
@@ -778,13 +787,16 @@ impl Shell {
         // The chrome is built before the layout, not after, because the footer takes a
         // second line at narrow widths and `body_layout` has to know whether this frame
         // is one of those.
-        let chrome = self.app.chrome(
+        let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
             self.pointing(),
             self.elsewhere,
             &self.root,
         );
+        // Set here rather than in `App::chrome`, which holds no instant: a fade is a
+        // fact about the frame, like every other mark the shell supplies.
+        chrome.arriving = self.app.arriving_step(now);
         let area = self.area()?;
         let body = body_layout(
             area,
@@ -1265,7 +1277,7 @@ mod tests {
             "`Shell::draw` no longer rolls the window, so a frame can draw one that stopped moving",
         );
         let painted = drawer
-            .find("self.paint(frame, worktree)")
+            .find("self.paint(frame, worktree")
             .expect("`Shell::draw` no longer paints");
         assert!(
             rolled < painted,
