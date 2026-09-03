@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use ratatui::style::{Color, Modifier, Style};
 use vigia_core::{Class, Recency};
 
-use crate::app::ARRIVING_STEPS;
 use crate::colour::Depth;
 use crate::render::{Band, Heat};
 
@@ -219,27 +218,6 @@ impl Theme {
             Recency::Live => self.path_live,
             Recency::Cold => self.path_cold,
         }
-    }
-
-    /// The style a heading takes `step` of the way through an arriving change,
-    /// which is the pulse mark's own ink decaying into the rung the row settles on.
-    ///
-    /// Below truecolor there is no fourth intensity to spend, so the row snaps to
-    /// that rung exactly as it did before this existed.
-    pub fn arriving(&self, recency: Recency, step: u8) -> Style {
-        let settled = self.recency(recency);
-        let (Some(Color::Rgb(fr, fg, fb)), Some(Color::Rgb(tr, tg, tb))) =
-            (self.pulse.fg, settled.fg)
-        else {
-            return settled;
-        };
-        let steps = u16::from(ARRIVING_STEPS);
-        let taken = u16::from(step.min(ARRIVING_STEPS));
-        let mix = |from: u8, to: u8| {
-            let blend = (u16::from(from) * (steps - taken) + u16::from(to) * taken) / steps;
-            u8::try_from(blend).unwrap_or(to)
-        };
-        settled.fg(Color::Rgb(mix(fr, tr), mix(fg, tg), mix(fb, tb)))
     }
 
     /// The style one slice of a heat strip is drawn in.

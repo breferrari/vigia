@@ -1,6 +1,6 @@
 //! Everything the shell remembers between frames, and the arithmetic on it.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
@@ -55,17 +55,6 @@ enum Paint {
     Coloured,
 }
 
-/// How long a change is drawn arriving. Under `HISTORY_SAMPLE` deliberately, so a
-/// fade ends while the grid still says *Pulse* and §5.1's two clocks cannot part.
-pub const ARRIVING: Duration = Duration::from_millis(250);
-
-/// Steps the fade is quantised to, so a step a test reads is not a float.
-pub const ARRIVING_STEPS: u8 = 16;
-
-/// How often a running fade asks the loop for a frame of its own, which is the
-/// whole price of the effect. Bounded by [`ARRIVING`] and cannot re-arm itself.
-pub const ARRIVING_FRAME: Duration = Duration::from_millis(16);
-
 /// The shell's state.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -78,8 +67,6 @@ pub struct App {
     flash: Option<String>,
     /// Asked for and not sent yet.
     sending: Option<Sending>,
-    /// When the newest arrival's fade ends. Armed by a tick and by nothing else.
-    arriving: Option<Instant>,
     /// Rows the drag has washed, as offsets into the collected rows.
     selecting: Option<(usize, usize)>,
     /// Whether the last collect resolved that span; the release resolves its own.
@@ -148,7 +135,6 @@ impl Default for App {
             notice: None,
             flash: None,
             sending: None,
-            arriving: None,
             selecting: None,
             resolved: false,
             following: false,
@@ -319,7 +305,6 @@ impl App {
             selected,
         } = pointing;
         Chrome {
-            arriving: None,
             pressed,
             selected,
             // `Some` even at zero: that is the only acknowledgment pressing
@@ -751,31 +736,6 @@ impl App {
             return total;
         }
         scaled(at, total.saturating_sub(self.screenful(height)))
-    }
-
-    /// When the fade ends, `None` once over: answering `None` is what untimes the loop.
-    pub fn arriving_until(&self, now: Instant) -> Option<Instant> {
-        let end = self.arriving.filter(|until| *until > now)?;
-        // The next frame or the last: an end-only deadline leaves the middle undrawn.
-        Some(end.min(now + ARRIVING_FRAME))
-    }
-
-    /// How far through the fade this frame is, `None` when none is running.
-    pub fn arriving_step(&self, now: Instant) -> Option<u8> {
-        let end = self.arriving.filter(|until| *until > now)?;
-        let left = end.saturating_duration_since(now);
-        let gone = ARRIVING.saturating_sub(left);
-        let step = gone.as_millis() * u128::from(ARRIVING_STEPS) / ARRIVING.as_millis().max(1);
-        Some(
-            u8::try_from(step)
-                .unwrap_or(ARRIVING_STEPS)
-                .min(ARRIVING_STEPS),
-        )
-    }
-
-    /// Called from the tick the filesystem caused, so a fade cannot start on its own.
-    pub fn arrived(&mut self, now: Instant) {
-        self.arriving = Some(now + ARRIVING);
     }
 
     /// Rows of the diff one screenful holds, which is not `height` when lines wrap,

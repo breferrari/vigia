@@ -1,352 +1,189 @@
-//! `SPEC.md` §5.3: a change may be drawn arriving. What that costs and what it
-//! draws, reported rather than gated: the numbers here are the deliverable and
-//! the judgement they serve is the reader's.
+//! `SPEC.md` §5.3: a change may be drawn arriving, and §6's `tachyonfx` row.
+//!
+//! The gate this file exists for is the one the hand-rolled attempt did not have:
+//! that the cells actually change. That version passed every assertion written
+//! about it and drew nothing a reader could see, because every assertion was about
+//! the arithmetic and none was about the buffer.
 
-#[path = "../../vigia-core/tests/support/mod.rs"]
-mod support;
-
-use std::time::{Duration, Instant};
-
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
-use vigia::{
-    ARRIVING, ARRIVING_FRAME, ARRIVING_STEPS, Action, App, Chrome, Deadlines, Depth, Glyphs,
-    Pointing, Theme, patience,
-};
-use vigia_core::{HISTORY_SAMPLE, History, Recency};
+use tachyonfx::{Duration as FxDuration, EffectManager, Interpolation, fx};
+use vigia::{ARRIVING, ARRIVING_FRAME};
 
-/// The coalescer's own bound on how often a tick can arrive, from
-/// `vigia-core/src/watch.rs`. A fade re-armed by every tick is re-armed this often.
-const MAX_DELAY: Duration = Duration::from_millis(100);
+/// The pane every gate here draws on.
+const PANE: Rect = Rect::new(0, 0, 80, 24);
 
-#[test]
-fn a_fade_finishes_inside_the_pulse_it_decays_into() {
-    // The bound that keeps §5.1's two clocks from disagreeing about how long ago
-    // *now* was: `Recency::Pulse` is guaranteed a whole sample, so a fade shorter
-    // than one always ends while the grid still says *Pulse*. This is the reason
-    // `ARRIVING` is a constant under `HISTORY_SAMPLE` rather than a taste.
-    assert!(
-        ARRIVING < HISTORY_SAMPLE,
-        "a fade of {ARRIVING:?} outlives the {HISTORY_SAMPLE:?} the pulse rung is \
-         guaranteed, so the ink and the grid would disagree"
-    );
-}
-
-#[test]
-fn the_fade_is_drawn_and_lands_on_the_rung_it_decays_into() {
-    // The interpolation is between two inks the palette already has: the pulse
-    // mark's, which means *when*, and the rung the row settles on. On the truecolor
-    // palette, because that is the only depth with a fourth intensity to spend.
-    let theme = Theme::dark().resolve(Depth::Truecolor);
-    let settled = theme.recency(Recency::Pulse);
-    let first = theme.arriving(Recency::Pulse, 0);
-    let last = theme.arriving(Recency::Pulse, ARRIVING_STEPS);
-
-    // Non-vacuity first: a palette whose two endpoints match would make every
-    // assertion below trivially true.
-    assert_ne!(
-        first.fg, settled.fg,
-        "the fade's first step already draws the settled ink, so there is no fade \
-         here and nothing below this can fail"
-    );
-    assert_eq!(
-        last.fg, settled.fg,
-        "the fade does not land on the rung it decays into, so a row would keep a \
-         colour the ladder never gives it"
-    );
-    // And it moves monotonically between them rather than jumping about, which is
-    // what makes it read as one motion.
-    let reds: Vec<u8> = (0..=ARRIVING_STEPS)
-        .filter_map(|step| match theme.arriving(Recency::Pulse, step).fg {
-            Some(Color::Rgb(r, _, _)) => Some(r),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        reds.len(),
-        usize::from(ARRIVING_STEPS) + 1,
-        "some step of the fade is not truecolor, so the ramp has a hole in it"
-    );
-    let rising = reds.windows(2).all(|pair| pair[0] <= pair[1]);
-    let falling = reds.windows(2).all(|pair| pair[0] >= pair[1]);
-    assert!(
-        rising || falling,
-        "the fade's ramp is not monotone: {reds:?}"
-    );
-
-    println!("--- #365: the ramp the fade draws, truecolor palette");
-    println!("fade starts at                 {:?}", first.fg);
-    println!("settles on                     {:?}", settled.fg);
-    println!("ramp, red channel              {reds:?}");
-}
-
-#[test]
-fn a_fade_snaps_to_the_settled_rung_below_truecolor() {
-    // The documented degradation, asserted rather than assumed: sixteen colours
-    // have three intensities and the pulse rung already spends BOLD, so there is no
-    // fourth to lend a fade. Every rung, every step, on every depth that is not
-    // truecolor, because the early return is the whole of the behaviour there.
-    for depth in [Depth::None, Depth::Ansi16, Depth::Ansi256] {
-        for theme in [Theme::ansi(), Theme::dark(), Theme::light()] {
-            let theme = theme.resolve(depth);
-            for rung in [Recency::Pulse, Recency::Live, Recency::Cold] {
-                let settled = theme.recency(rung);
-                for step in 0..=ARRIVING_STEPS {
-                    assert_eq!(
-                        theme.arriving(rung, step),
-                        settled,
-                        "at {depth:?}, step {step} of {rung:?} drew an ink the ladder \
-                         never gives, so a depth with no fourth intensity is being \
-                         asked for one"
-                    );
-                }
-            }
-        }
-    }
-
-    // Non-vacuity: the same call on truecolor must move, or this passes because
-    // `arriving` does nothing anywhere rather than because it degrades.
-    let wide = Theme::dark().resolve(Depth::Truecolor);
-    assert_ne!(
-        wide.arriving(Recency::Pulse, 0),
-        wide.recency(Recency::Pulse),
-        "the fade does not move on truecolor either, so the assertions above hold \
-         for the wrong reason"
-    );
-}
-
-/// Wakes the loop is handed over one burst and its tail, counted by driving
-/// `patience` exactly as `run` does.
-fn wakes_for_one_burst(app: &App, from: Instant) -> usize {
-    let mut now = from;
-    let mut wakes = 0;
-    // Bounded so a fade that never expires fails this rather than hanging it.
-    while let Some(wait) = patience(
-        Deadlines {
-            arriving: app.arriving_until(now),
-            ..Deadlines::default()
-        },
-        now,
-    ) {
-        now += wait.max(Duration::from_nanos(1));
-        wakes += 1;
-        assert!(wakes < 10_000, "the fade never gave the clock back");
-    }
-    wakes
-}
-
-#[test]
-fn a_fade_costs_one_wake_per_burst_and_none_when_the_tree_is_quiet() {
-    // The claim the whole design rests on: the fade renders on the frames the
-    // writes were already causing, and asks for a clock only to finish the one
-    // whose arming tick turned out to be the last.
-    let now = Instant::now();
-
-    let quiet = App::new();
-    assert_eq!(
-        wakes_for_one_burst(&quiet, now),
-        0,
-        "a shell that has seen no tick is on a clock, so an idle pane is timed"
-    );
-
-    let mut app = App::new();
-    app.arrived(now);
-    let armed = wakes_for_one_burst(&app, now);
-    let want = ARRIVING.as_millis() / ARRIVING_FRAME.as_millis();
-    // The frames that fill the fade, plus the one that closes it.
-    assert!(
-        (armed as u128) <= want + 1,
-        "a fade asked the loop for {armed} wakes where {want} frames of \
-         {ARRIVING_FRAME:?} fill {ARRIVING:?}, so it is running past its own end"
-    );
-    assert!(
-        armed > 1,
-        "a fade asked for {armed} wake(s), so nothing draws its middle and a quiet \
-         tree sees a flash rather than a fade"
-    );
-
-    println!("--- what a fade costs");
-    println!("fade length                    {ARRIVING:?}");
-    println!("pulse rung guaranteed for      {HISTORY_SAMPLE:?}");
-    println!("frames it asks for per burst   {armed}, one every {ARRIVING_FRAME:?}");
-    println!(
-        "ticks under a writing agent    up to 1 every {MAX_DELAY:?}, so a fade is \
-         re-armed before it ends and the cadence is continuous while writing"
-    );
-    let per_second = 1000 / ARRIVING_FRAME.as_millis();
-    println!(
-        "cost while an agent writes     {per_second} frames a second, against the {} \
-         the loop draws from ticks alone",
-        1000 / MAX_DELAY.as_millis()
-    );
-    println!(
-        "cost on a quiet tree           {armed} frames once, then untimed: the fade \
-         cannot re-arm itself and nothing else is waking the loop"
-    );
-}
-
-#[test]
-fn the_cadence_is_what_buys_the_ramp_and_the_price_is_the_frames() {
-    // The trade, reported rather than judged, and §11.1 named its failure before
-    // this existed: *a fraction of it read on a quiet tree is a number that ages
-    // without being redrawn*. Without a cadence a fade renders only on the frames
-    // the writes happened to cause, which on a quiet tree is two, so a reader sees
-    // a flash. With one it renders its whole ramp and asks for the frames to do it.
-    let now = Instant::now();
-    let mut app = App::new();
-    app.arrived(now);
-
-    let sample = |every: Duration| {
-        let mut steps = Vec::new();
-        let mut at = now;
-        while at < now + ARRIVING {
-            if let Some(step) = app.arriving_step(at) {
-                steps.push(step);
-            }
-            at += every;
-        }
-        steps
-    };
-    let on_ticks = sample(MAX_DELAY);
-    let on_cadence = sample(ARRIVING_FRAME);
-
-    println!("--- the ramp, and what it costs to draw it");
-    println!("on ticks alone                 {on_ticks:?}");
-    println!(
-        "on the fade's own cadence \
-         {} steps of 0..={ARRIVING_STEPS}",
-        on_cadence.len()
-    );
-    println!(
-        "the ladder it has to beat      3 rungs (pulse, live, cold), which cost no \
-         clock at all"
-    );
-
-    assert!(
-        on_cadence.len() > on_ticks.len(),
-        "the cadence draws {} steps against the {} ticks alone give, so it is being \
-         paid for and buying nothing",
-        on_cadence.len(),
-        on_ticks.len()
-    );
-    // And it is a ramp rather than a jump: every step differs from the one before.
-    assert!(
-        on_cadence.windows(2).all(|pair| pair[0] <= pair[1]),
-        "the fade goes backwards: {on_cadence:?}"
-    );
-}
-
-#[test]
-fn a_change_arriving_draws_a_different_ink_from_one_that_has_settled() {
-    // Read out of a painted pane rather than from the arithmetic, because the
-    // first question is about what reaches the eye rather than what it costs.
-    let scratch = support::Scratch::new("arriving-ink");
-    scratch.write("src/a.rs", "seed\n");
-    scratch.commit_all("base");
-    scratch.write("src/a.rs", "changed\n");
-
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    support::materialise(&mut frame);
-    let mut highlighter = vigia_core::Highlighter::eager();
-    let mut history = History::new();
-    let now = Instant::now();
-    history.record_sized([("src/a.rs", Some(8u64))], now);
-
-    let pane = Rect::new(0, 0, 80, 24);
-    let mut app = App::new();
-    let base: Chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-
-    let row_of = |arriving: Option<u8>,
-                  app: &mut App,
-                  frame: &mut vigia_core::Frame,
-                  highlighter: &mut vigia_core::Highlighter| {
-        let mut chrome = base.clone();
-        chrome.arriving = arriving;
-        let laid = vigia::body_layout(pane, &chrome, 1, 1);
-        let view = app
-            .view(frame, highlighter, &history, laid)
-            .expect("a view of the fixture");
-        let mut buf = ratatui::buffer::Buffer::empty(pane);
-        vigia::render(
-            &mut buf,
-            pane,
-            &view,
-            &Theme::dark().resolve(Depth::Truecolor),
-            Glyphs::default(),
-            &chrome,
-        );
-        let regions = vigia::regions(pane, &chrome, &view);
-        // Every truecolor ink on the heading row, in the order drawn. Picking one
-        // cell is what made an earlier form of this read `Reset` and prove nothing.
-        let mut inks: Vec<Color> = Vec::new();
-        for x in 0..pane.width {
-            if let Some(Color::Rgb(r, g, b)) = buf[(x, regions.diff.top)].style().fg {
-                let ink = Color::Rgb(r, g, b);
-                if inks.last() != Some(&ink) {
-                    inks.push(ink);
-                }
-            }
-        }
-        inks
-    };
-
-    let settled = row_of(None, &mut app, &mut frame, &mut highlighter);
-    let steps = [0u8, 4, 8, 12, ARRIVING_STEPS];
-    let drawn: Vec<Vec<Color>> = steps
-        .iter()
-        .map(|step| row_of(Some(*step), &mut app, &mut frame, &mut highlighter))
-        .collect();
-
-    println!("--- #365: the heading's inks through one fade, truecolor palette");
-    println!("settled (no fade)              {settled:?}");
-    for (step, inks) in steps.iter().zip(&drawn) {
-        println!("step {step:>2} of {ARRIVING_STEPS}                   {inks:?}");
-    }
-
-    // Non-vacuity: the row has to be drawing truecolor at all, or every comparison
-    // below is between two empty lists.
-    assert!(
-        !settled.is_empty(),
-        "the heading drew no truecolor ink, so this readout cannot see a fade"
-    );
-    assert_ne!(
-        drawn[0], settled,
-        "the first step of the fade draws exactly the settled row, so nothing about \
-         an arriving change reaches the pane"
-    );
-    assert_eq!(
-        drawn.last().expect("a last step"),
-        &settled,
-        "the fade's last step does not match the settled row, so a reader would be \
-         left on an ink the ladder never gives"
-    );
-}
-
-#[test]
-fn nothing_but_a_tick_arms_the_fade() {
-    // I1's first condition, which no gate over the drawn pane can see: the fade is
-    // armed by `App::arrived` and `App::arrived` is called from the tick arm alone.
-    let now = Instant::now();
-    let mut app = App::new();
-    let scratch = support::Scratch::new("arriving-arming");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-
-    for action in [
-        Action::ToggleWrap,
-        Action::ToggleFollow,
-        Action::Scroll(1),
-        Action::Page(1),
-        Action::ToggleMasthead,
-        Action::Redraw,
-    ] {
-        app.apply(action, &mut frame, 20).expect("apply");
-        assert_eq!(
-            app.arriving_until(now),
-            None,
-            "{action:?} armed the fade, so an act the reader performed is being \
-             eased, which §5.3 still refuses"
+/// A buffer with text in it, standing in for what `render` leaves behind.
+fn drawn() -> Buffer {
+    let mut buf = Buffer::empty(PANE);
+    for row in 0..PANE.height {
+        buf.set_string(
+            0,
+            row,
+            "src/engine.rs  +42 -7",
+            ratatui::style::Style::default(),
         );
     }
+    buf
+}
+
+/// Every cell's symbol, so two buffers can be compared as what a reader sees.
+fn symbols(buf: &Buffer) -> Vec<String> {
+    (0..PANE.height)
+        .flat_map(|y| (0..PANE.width).map(move |x| (x, y)))
+        .map(|(x, y)| buf[(x, y)].symbol().to_owned())
+        .collect()
+}
+
+#[test]
+fn an_arriving_effect_changes_the_cells_it_covers() {
+    // The whole point. An effect that runs and leaves the buffer identical is the
+    // failure this file exists to catch, and it is not visible from the arithmetic.
+    let settled = drawn();
+    let mut buf = drawn();
+    let mut effects: EffectManager<String> = EffectManager::default();
+    effects.add_unique_effect(
+        "src/engine.rs".to_owned(),
+        fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut)),
+    );
+
+    // One frame in, which is where a reader's eye actually is.
+    effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+    assert_ne!(
+        symbols(&buf),
+        symbols(&settled),
+        "the effect ran and left every cell exactly as it found it, so nothing \
+         reaches the pane"
+    );
+}
+
+#[test]
+fn an_arriving_effect_settles_on_what_was_drawn_beneath_it() {
+    // It has to end where the ordinary render ends, or a row keeps a shape the
+    // renderer never gives it.
+    let settled = drawn();
+    let mut buf = drawn();
+    let mut effects: EffectManager<String> = EffectManager::default();
+    effects.add_unique_effect(
+        "src/engine.rs".to_owned(),
+        fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut)),
+    );
+
+    // One frame at a time, as the loop runs it: the widgets redraw the buffer and
+    // the effect works on what they left. A harness that skipped the redraw would
+    // accumulate the effect's own output and prove nothing about where it settles.
+    let mut spent = std::time::Duration::ZERO;
+    while spent < ARRIVING * 2 {
+        buf = drawn();
+        effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+        spent += ARRIVING_FRAME;
+    }
+
+    assert!(
+        !effects.is_running(),
+        "the effect is still running past twice its own length, so it would hold \
+         the clock for good"
+    );
+    assert_eq!(
+        symbols(&buf),
+        symbols(&settled),
+        "the effect finished on cells the renderer never drew"
+    );
+}
+
+#[test]
+fn a_finished_effect_stops_asking_for_frames() {
+    // I1's bound, on the object that owns it. `Shell::patience` folds exactly this
+    // answer, and `input.rs` pins the fold; what this pins is the answer itself.
+    let mut effects: EffectManager<String> = EffectManager::default();
+    assert!(
+        !effects.is_running(),
+        "an empty manager reports itself running, so a pane with no effect is timed"
+    );
+
+    effects.add_unique_effect(
+        "src/engine.rs".to_owned(),
+        fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut)),
+    );
+    assert!(
+        effects.is_running(),
+        "an armed effect does not report itself running"
+    );
+
+    let mut buf;
+    let mut spent = std::time::Duration::ZERO;
+    while spent < ARRIVING * 2 {
+        buf = drawn();
+        effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+        spent += ARRIVING_FRAME;
+    }
+    assert!(
+        !effects.is_running(),
+        "the effect never gives the clock back, so the idle path is timed for good"
+    );
+}
+
+#[test]
+fn a_second_write_to_one_file_replaces_its_effect_rather_than_stacking() {
+    // Keyed by path, because an agent saving the same file repeatedly is the
+    // ordinary workload rather than an edge, and effects that pile up on one row
+    // would each be drawing over the last.
+    let mut effects: EffectManager<String> = EffectManager::default();
+    let mut buf;
+    for _ in 0..8 {
+        effects.add_unique_effect(
+            "src/engine.rs".to_owned(),
+            fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut)),
+        );
+        buf = drawn();
+        effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+    }
+
+    // Eight arms, and the whole lot still ends inside one effect's length.
+    let mut spent = std::time::Duration::ZERO;
+    while spent < ARRIVING * 2 {
+        buf = drawn();
+        effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+        spent += ARRIVING_FRAME;
+    }
+    assert!(
+        !effects.is_running(),
+        "repeated writes to one file stacked their effects, so the last one to \
+         finish is holding the clock for all of them"
+    );
+}
+
+#[test]
+fn an_effect_is_bounded_by_the_pulse_rung_it_decays_into() {
+    // `Recency::Pulse` is guaranteed a whole sample, so an effect shorter than one
+    // always ends while the grid still says *Pulse* and the two cannot disagree
+    // about how long ago *now* was, which is what §5.1 refuses.
+    assert!(
+        ARRIVING < vigia_core::HISTORY_SAMPLE,
+        "an effect of {ARRIVING:?} outlives the {:?} the pulse rung is guaranteed",
+        vigia_core::HISTORY_SAMPLE
+    );
+    assert!(
+        ARRIVING_FRAME < ARRIVING,
+        "a frame of the effect is not shorter than the effect, so it draws once"
+    );
+}
+
+#[test]
+fn the_effect_reports_its_own_completion_rather_than_a_clock_we_keep() {
+    // Why the `App`-side mirror of this was deleted: the library already answers
+    // it, and two answers to one question is the shape that drifts.
+    let mut effect = fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut));
+    assert!(
+        !effect.done(),
+        "a fresh effect reports itself already finished"
+    );
+
+    let mut buf = drawn();
+    effect.process(FxDuration::from(ARRIVING), &mut buf, PANE);
+    assert!(
+        effect.done(),
+        "an effect run for its whole length does not report itself finished, so \
+         nothing would ever release the clock"
+    );
 }

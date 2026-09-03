@@ -36,7 +36,7 @@ which is what makes an admin's push legal at all. `bump.yml` does not check this
 ## 1. The artifact, not the checkout
 
 - [ ] `cargo package --list -p vigia` — no `.github/`, no `tests/`, and
-`README.md` present. SPEC.md §9 counts twenty-five test files that read outside the package, and `exclude = ["tests/**"]` is what keeps them out of the tarball. Gated by `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests`, re-checked here because that gate skips when the registry index is unreachable.
+`README.md` present. SPEC.md §9 counts twenty-four test files that read outside the package, and `exclude = ["tests/**"]` is what keeps them out of the tarball. Gated by `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests`, re-checked here because that gate skips when the registry index is unreachable.
 - [ ] Unpack the built `.crate` into a clean directory; `cargo build --release`
 there succeeds with no path leaking back into the checkout.
 - [ ] `dist plan` names all four targets (`x86_64-unknown-linux-musl`,

@@ -432,8 +432,6 @@ pub struct Chrome {
     pub scrolling: Option<(Grabbed, isize)>,
     /// Something the reader should see instead of the key hints.
     pub notice: Option<String>,
-    /// How far through its fade an arriving change is, when one is still arriving.
-    pub arriving: Option<u8>,
     /// Whether the viewport is moving itself to what just changed.
     pub following: bool,
     /// Whether the masthead is drawn at all, which `m` toggles.
@@ -1655,7 +1653,6 @@ pub fn render(
         paint: PaintStats::default(),
         pressed: chrome.pressed,
         gripped: chrome.gripped,
-        arriving: chrome.arriving,
         hovered: chrome.hovered,
         selected: chrome.selected.map(Selection::rows),
         scrolling: chrome.scrolling,
@@ -2452,8 +2449,6 @@ struct Painter<'a> {
     pressed: Option<(u16, u16)>,
     /// Which region's bar is being dragged, from [`Chrome::gripped`].
     gripped: Option<Grabbed>,
-    /// How far through its fade an arriving change is, from [`Chrome::arriving`].
-    arriving: Option<u8>,
     /// What the pointer is resting on, from [`Chrome::hovered`].
     hovered: Option<Hovered>,
     /// The screen rows a drag has selected, top and bottom inclusive.
@@ -3675,11 +3670,7 @@ impl Painter<'_> {
         let ink = if hoverable && self.hovered == Some(Hovered::Row(area.y)) {
             self.theme.path_hover
         } else {
-            match (heading.newest, self.arriving) {
-                // Only what the newest burst named is arriving; the rest is where it was.
-                (true, Some(step)) => self.theme.arriving(heading.recency, step),
-                _ => self.theme.recency(heading.recency),
-            }
+            self.theme.recency(heading.recency)
         };
         let ink = if current {
             ink.add_modifier(CURRENT_WEIGHT)
@@ -4217,7 +4208,6 @@ mod tests {
         );
 
         let mut painter = Painter {
-            arriving: None,
             buf: &mut buf,
             theme: &theme,
             glyphs: Glyphs::default(),

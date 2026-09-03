@@ -34,7 +34,6 @@ fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
 
 fn chrome() -> Chrome {
     Chrome {
-        arriving: None,
         pressed: None,
         gripped: None,
         hovered: None,
