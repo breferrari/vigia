@@ -40,8 +40,8 @@ fn painted(app: &mut App, frame: &mut Frame) -> View {
 
 /// The bytes the button coming up hands the loop to send, resolved the way
 /// `Shell::send_wash` resolves them: against the frame last painted.
-fn released(app: &mut App, view: &View, span: Option<(usize, usize)>) -> Option<String> {
-    if let Some(lines) = span.and_then(|span| view.lines_in(span)) {
+fn released(app: &mut App, view: &View, span: (usize, usize)) -> Option<String> {
+    if let Some(lines) = view.lines_in(span) {
         app.send(&lines);
     }
     app.take_sending().map(|sending| sending.text)
@@ -57,10 +57,7 @@ fn a_send_is_taken_once() {
     let mut app = App::new();
 
     let view = painted(&mut app, &mut frame);
-    assert_eq!(
-        released(&mut app, &view, Some((0, 0))).as_deref(),
-        Some(DEEP)
-    );
+    assert_eq!(released(&mut app, &view, (0, 0)).as_deref(), Some(DEEP));
     assert_eq!(
         app.take_sending(),
         None,
@@ -129,7 +126,7 @@ fn a_write_between_the_paint_and_the_release_does_not_move_what_is_sent() {
     );
 
     assert_eq!(
-        released(&mut app, &view, Some((0, 0))).as_deref(),
+        released(&mut app, &view, (0, 0)).as_deref(),
         Some(DEEP),
         "the send followed the index rather than the frame that was painted, so the \
          reader copied a file they were not looking at"

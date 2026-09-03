@@ -84,12 +84,7 @@ fn scratch_with(name: &str, file: &str, body: &str) -> Scratch {
 }
 
 /// Collect one view with `span` washed, and hand back what the release would send.
-fn sent(
-    app: &mut App,
-    frame: &mut Frame,
-    span: Option<(usize, usize)>,
-    wrap: bool,
-) -> Option<String> {
+fn sent(app: &mut App, frame: &mut Frame, span: (usize, usize), wrap: bool) -> Option<String> {
     sent_on(app, frame, span, wrap, PANE)
 }
 
@@ -97,7 +92,7 @@ fn sent(
 fn sent_on(
     app: &mut App,
     frame: &mut Frame,
-    span: Option<(usize, usize)>,
+    span: (usize, usize),
     wrap: bool,
     pane: Rect,
 ) -> Option<String> {
@@ -106,7 +101,7 @@ fn sent_on(
     if wrap {
         app.apply(Action::ToggleWrap, frame, 24).expect("wrap");
     }
-    app.select(span);
+    app.select(Some(span));
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let body = body_layout(pane, &chrome, 1, 1);
     let view = app
@@ -114,7 +109,7 @@ fn sent_on(
         .expect("view");
     // The shell's own path, and the reason it is not `App`'s: the release resolves
     // against the frame last painted rather than against what a collect left behind.
-    if let Some(lines) = span.and_then(|span| view.lines_in(span)) {
+    if let Some(lines) = view.lines_in(span) {
         app.send(&lines);
     }
     app.take_sending().map(|sending| sending.text)
@@ -405,10 +400,10 @@ fn the_sent_text_is_the_whole_line_where_the_pane_clipped_it() {
 
     // Every row of the collected screen, so whichever row the line landed on is in
     // the span. What is asserted is the payload, not where the drag started.
-    let text = sent(&mut app, &mut frame, Some((0, 23)), false).expect("`y` sent nothing");
+    let text = sent(&mut app, &mut frame, (0, 23), false).expect("the release sent nothing");
     assert!(
         text.contains(LONG),
-        "`y` sent {text:?}, which does not carry the tail the pane clipped, so it is \
+        "the release sent {text:?}, without the tail the pane clipped, so it is \
          a reading of the screen by another route"
     );
     assert!(
@@ -449,7 +444,7 @@ fn a_wrapped_line_is_sent_once_and_whole() {
         "nothing wrapped, so this gate is not the case it is named for"
     );
 
-    let text = sent(&mut app, &mut frame, Some((0, 23)), true).expect("`y` sent nothing");
+    let text = sent(&mut app, &mut frame, (0, 23), true).expect("the release sent nothing");
     let hits = text.matches(LONG).count();
     assert_eq!(
         hits, 1,
@@ -483,8 +478,8 @@ fn a_heading_row_sends_the_path_and_not_the_drawn_label() {
          reached it and this gate is answering a question nobody has:\n{screen}"
     );
 
-    let text = sent_on(&mut app, &mut frame, Some((0, 0)), false, NARROW)
-        .expect("the release sent nothing");
+    let text =
+        sent_on(&mut app, &mut frame, (0, 0), false, NARROW).expect("the release sent nothing");
     assert_eq!(
         text, DEEP,
         "the heading row sent {text:?} rather than the path it stands for"
@@ -508,7 +503,7 @@ fn a_span_past_the_collected_rows_sends_nothing() {
     let mut app = App::new();
 
     assert_eq!(
-        sent(&mut app, &mut frame, Some((900, 999)), false),
+        sent(&mut app, &mut frame, (900, 999), false),
         None,
         "a span past the end of the collected rows put something on the clipboard"
     );
@@ -677,14 +672,14 @@ fn a_hunk_row_sends_the_header_the_pane_draws() {
                 .map(|_| line.trim().to_owned())
         })
         .expect("the pane drew no hunk header");
-    let text = sent(&mut app, &mut frame, Some((0, 23)), false).expect("`y` sent nothing");
+    let text = sent(&mut app, &mut frame, (0, 23), false).expect("the release sent nothing");
     let header = text
         .lines()
         .find(|line| line.starts_with("@@"))
         .expect("no hunk header was sent");
     assert!(
         drawn_header.contains(header),
-        "the pane draws {drawn_header:?} and `y` sent {header:?}, so the copy spells \
+        "the pane draws {drawn_header:?} and the release sent {header:?}, so the copy spells \
          the header a second way"
     );
 }
@@ -906,7 +901,7 @@ fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
         .expect("the fixture drew no empty line, so this gate is not its own case");
 
     assert_eq!(
-        sent(&mut app, &mut frame, Some((blank, blank)), false),
+        sent(&mut app, &mut frame, (blank, blank), false),
         None,
         "a selection with no text in it reached the clipboard; an empty OSC 52 write \
          wipes whatever the reader had on theirs"

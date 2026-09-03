@@ -792,8 +792,8 @@ impl Shell {
             frame.files().len(),
             view::list_rows_wanted(frame.files()),
         );
-        // Against this frame's own layout rather than the last paint's, so the rows
-        // the wash covers and the lines a release sends are resolved on one screen.
+        // Against this frame's own layout rather than the last paint's, so a wash is
+        // judged on the screen it is drawn over.
         self.app.select(
             self.selected
                 .map(|had| had.offsets(body.areas(area).diff.y)),
@@ -803,8 +803,8 @@ impl Shell {
             .view(frame, &mut self.highlighter, &self.history, body)
         {
             Ok(view) => self.screen = view,
-            // The lines go too: this frame could not re-resolve them, and keeping
-            // the last frame's would send rows the wash is no longer over.
+            // The wash goes too: this frame resolved nothing, and keeping the last
+            // frame's answer would leave one standing over rows it no longer covers.
             Err(e) => {
                 self.app.warn(e.to_string());
                 self.app.select(None);
@@ -1070,7 +1070,7 @@ mod tests {
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
         // than driven. Each of these was a defect: a span the collect resolved to
-        // nothing took `Esc`, and a cleared span left `App`'s lines behind to send.
+        // nothing took `Esc`, and a cleared span left its answer standing behind it.
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         for rule in [
@@ -1089,6 +1089,23 @@ mod tests {
                 "`{rule}` is gone, so a wash outlives something that ends it"
             );
         }
+        // And the one route that must not end it. Every other arm that touches state
+        // deselects, so the tick arm reads like an omission and would survive being
+        // "tidied": an agent's write is what this pane exists to watch, and it may not
+        // cancel a selection the reader is still making.
+        let tick = shipped
+            .split("Wake::Tick(paths) => {")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost").next())
+            .expect("the loop no longer has a tick arm");
+        for gone in ["deselect()", "select(None)"] {
+            assert!(
+                !tick.contains(gone),
+                "the tick arm calls `{gone}`, so an agent's write cancels a drag the \
+                 reader is in the middle of"
+            );
+        }
+
         let collect = shipped
             .find(".view(frame,")
             .expect("`paint` no longer collects");
@@ -1100,6 +1117,20 @@ mod tests {
             "the wash is retired before the collect that decides whether it resolved \
              to anything, so it is judged on the frame before this one"
         );
+    }
+
+    /// The footer says **sent** rather than copied, because OSC 52 has no reply. Both
+    /// spellings live inside a method that owns a terminal, so they are read here.
+    #[test]
+    fn the_footer_says_sent_rather_than_copied() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for said in ["sent {said} to the clipboard", "could not send {said}: {e}"] {
+            assert!(
+                shipped.contains(said),
+                "`{said}` is gone, so the footer claims something OSC 52 cannot promise"
+            );
+        }
     }
 
     /// Two properties of `run` that no test can execute, because `run` owns a
