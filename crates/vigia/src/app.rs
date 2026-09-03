@@ -69,8 +69,7 @@ pub struct App {
     sending: Option<Sending>,
     /// Rows the drag has washed, as offsets into the collected rows.
     selecting: Option<(usize, usize)>,
-    /// Whether the last collect resolved that span to any lines. The lines are not
-    /// kept: the release resolves its own from the frame it ends on.
+    /// Whether the last collect resolved that span; the release resolves its own.
     resolved: bool,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
