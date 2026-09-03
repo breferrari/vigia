@@ -1335,6 +1335,94 @@ fn the_readme_states_the_grammar_count_the_dump_holds() {
     );
 }
 
+/// Drives the version raise against `manifest`, in a scratch directory of its
+/// own. Returns whether it passed and the manifest it left behind.
+#[cfg(unix)]
+fn raise_version(case: &str, next: &str, manifest: &str) -> (bool, String) {
+    let script = repo_root().join(".github/scripts/raise-version.sh");
+    let dir =
+        std::env::temp_dir().join(format!("vigia-raise-version-{}-{case}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    let path = dir.join("Cargo.toml");
+    std::fs::write(&path, manifest).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+
+    let passed = Command::new("sh")
+        .arg(&script)
+        .arg(next)
+        .arg(&path)
+        .output()
+        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()))
+        .status
+        .success();
+    let left = read(&path);
+    let _ = std::fs::remove_dir_all(&dir);
+    (passed, left)
+}
+
+/// The raise moves both version strings and counts only the lines it moved.
+#[cfg(unix)]
+#[test]
+fn the_version_raise_counts_the_lines_it_moved_and_nothing_else() {
+    // The shape that refused a correct release: the manifest also pins the
+    // release tool, and a minor landed on the tool's own number.
+    let pinned = "[workspace.package]\n\
+                  version = \"0.31.1\"\n\
+                  \n\
+                  [workspace.dependencies]\n\
+                  vigia-core = { path = \"crates/vigia-core\", version = \"0.31.1\" }\n\
+                  \n\
+                  [workspace.metadata.dist]\n\
+                  cargo-dist-version = \"0.32.0\"\n";
+    let (passed, left) = raise_version("pinned", "0.32.0", pinned);
+    assert!(
+        passed,
+        "a version equal to a pinned tool's is refused, and the release with it:\n{left}"
+    );
+    assert!(
+        left.contains("\nversion = \"0.32.0\"\n")
+            && left.contains("vigia-core = { path = \"crates/vigia-core\", version = \"0.32.0\" }")
+            && left.contains("cargo-dist-version = \"0.32.0\""),
+        "the raise moved the wrong lines:\n{left}"
+    );
+
+    // The real manifest, so the patterns are known to match the lines they
+    // claim to, and to touch nothing else in it.
+    let before = repo_file("Cargo.toml");
+    let (passed, after) = raise_version("real", "9.9.9", &before);
+    assert!(
+        passed,
+        "the raise refuses the repository's own manifest:\n{after}"
+    );
+    let moved: Vec<&str> = before
+        .lines()
+        .zip(after.lines())
+        .filter(|(was, is)| was != is)
+        .map(|(_, is)| is)
+        .collect();
+    assert_eq!(
+        moved,
+        [
+            "version = \"9.9.9\"",
+            "vigia-core = { path = \"crates/vigia-core\", version = \"9.9.9\" }",
+        ],
+        "the raise changed lines other than the two it is for"
+    );
+
+    // And the check still fails the case it exists for: a line the pattern does
+    // not match stays at the old number, and the raise says so instead of
+    // handing a half-moved manifest to the commit.
+    let unmoved = "[workspace.package]\n\
+                   version = \"0.31.1\"\n\
+                   \n\
+                   [workspace.dependencies]\n\
+                   vigia-core = { version = \"0.31.1\", path = \"crates/vigia-core\" }\n";
+    let (passed, left) = raise_version("unmoved", "0.32.0", unmoved);
+    assert!(
+        !passed,
+        "a dependency line the pattern cannot move passed the check:\n{left}"
+    );
+}
+
 /// Drives the judgement `ci complete` runs, with fabricated leg results.
 #[cfg(unix)]
 fn ci_complete(draft: &str, legs: &[&str]) -> bool {

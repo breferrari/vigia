@@ -344,27 +344,12 @@ jobs:
           echo "::notice::${{ inputs.bump }}: $current -> $next"
 
       # Both strings, in one step, because moving one and not the other is the
-      # failure this whole job is arranged around. The patterns are anchored to
-      # the start of a line and each matches exactly one line in the manifest.
+      # failure this whole job is arranged around. The edit and its check live
+      # in the script so a test can drive them against a manifest.
       - name: raise the version
         run: |
           set -euo pipefail
-          next='${{ steps.version.outputs.next }}'
-          sed -i -E "s|^version = \"[^\"]+\"|version = \"${next}\"|" Cargo.toml
-          sed -i -E "s|^(vigia-core = \{ path = \"crates/vigia-core\", version = )\"[^\"]+\"|\1\"${next}\"|" Cargo.toml
-
-          # Verify the edit rather than trusting the substitution, because a sed
-          # that matched nothing exits 0 and leaves the old version in place.
-          # `|| true`, because `grep -c` exits 1 when it counts nothing and
-          # `set -e` would then kill the step on the assignment, before the
-          # diagnostic below could say which line failed to move. Exactly the
-          # case the diagnostic exists for is the case it was unreachable in.
-          found=$(grep -cE "\"${next}\"" Cargo.toml || true)
-          if [ "${found:-0}" != "2" ]; then
-            echo "::error::expected both version strings at ${next}, found ${found}"
-            grep -nE '^version = |^vigia-core = ' Cargo.toml
-            exit 1
-          fi
+          sh .github/scripts/raise-version.sh '${{ steps.version.outputs.next }}'
           cargo update --workspace
 
       # The gate that makes the sed above safe, run before anything is pushed.
