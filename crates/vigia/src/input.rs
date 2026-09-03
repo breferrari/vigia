@@ -287,32 +287,34 @@ impl Selection {
 }
 
 /// Whether `event` is the button coming up, which is a drag ending and the moment
-/// what it washed reaches the clipboard. A free function because the shell owns a
-/// terminal and cannot be driven by a test, and this is the half that decides.
-pub fn ends_a_drag(event: &Event) -> bool {
+/// what it washed reaches the clipboard.
+fn ends_a_drag(event: &Event) -> bool {
     matches!(
         event,
         Event::Mouse(mouse) if mouse.kind == MouseEventKind::Up(MouseButton::Left)
     )
 }
 
-/// The selection after `event`, given the one before it. The button coming up ends
-/// one, which is the whole gesture: what the wash stood over reaches the clipboard
-/// in [`crate::Shell`], which runs before this and needs the span this retires.
+/// The selection after `event`, and the one `event` ended.
+///
+/// The second is handed back rather than left for a caller to read off its own
+/// field, which this call has already overwritten: the send and the retire would
+/// otherwise be two statements whose order decides whether anything is copied at
+/// all. Only the button coming up ends one, so only that returns a second span.
 pub fn selection_after(
     event: &Event,
     regions: Regions,
     was: Option<Selection>,
-) -> Option<Selection> {
+) -> (Option<Selection>, Option<Selection>) {
     if ends_a_drag(event) {
-        return None;
+        return (None, was);
     }
     let Event::Mouse(mouse) = event else {
         // Focus clears no wash: this pane sits beside one a reader types into, and
         // clicking there must not discard a selection they were about to send.
-        return was;
+        return (was, None);
     };
-    match mouse.kind {
+    let standing = match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => regions
             .selectable(mouse.column, mouse.row)
             .then(|| Selection::at(mouse.row)),
@@ -323,7 +325,8 @@ pub fn selection_after(
             ..had
         }),
         _ => was,
-    }
+    };
+    (standing, None)
 }
 
 /// What the pointer is resting on, when it is on something a click acts on.

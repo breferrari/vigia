@@ -69,9 +69,9 @@ pub struct App {
     sending: Option<Sending>,
     /// Rows the drag has washed, as offsets into the collected rows.
     selecting: Option<(usize, usize)>,
-    /// Their lines, resolved on the frame last drawn, so the wash and what the
-    /// release sends name one frame.
-    selected: Option<Vec<String>>,
+    /// Whether the last collect resolved that span to any lines. The lines are not
+    /// kept: the release resolves its own from the frame it ends on.
+    resolved: bool,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
@@ -137,7 +137,7 @@ impl Default for App {
             flash: None,
             sending: None,
             selecting: None,
-            selected: None,
+            resolved: false,
             following: false,
             masthead: false,
             rail: false,
@@ -255,14 +255,14 @@ impl App {
     pub fn select(&mut self, span: Option<(usize, usize)>) {
         self.selecting = span;
         if span.is_none() {
-            // The lines go with the span: the resolve below only runs on a collect.
-            self.selected = None;
+            // The answer goes with the span: the resolve below only runs on a collect.
+            self.resolved = false;
         }
     }
 
     /// Whether the last collect resolved the span it was given to any lines.
     pub fn holds_a_selection(&self) -> bool {
-        self.selected.is_some()
+        self.resolved
     }
 
     /// Queue `lines` for the clipboard. Rows with nothing on them are no payload: an
@@ -711,8 +711,11 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
-        // From the frame that was drawn, so the wash and the payload cannot disagree.
-        self.selected = self.selecting.and_then(|span| view.lines_in(span));
+        // A span the walk had no rows for is not a selection, whatever the pointer did.
+        self.resolved = self
+            .selecting
+            .and_then(|span| view.lines_in(span))
+            .is_some();
         // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.

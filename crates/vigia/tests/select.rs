@@ -13,7 +13,7 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Glyphs, Pointing, Region, Regions, Theme, body_layout, ends_a_drag, render,
+    Action, App, Glyphs, Pointing, Region, Regions, Selection, Theme, body_layout, render,
     selection_after,
 };
 use vigia_core::{Frame, Highlighter, History};
@@ -64,6 +64,16 @@ fn drag(column: u16, row: u16) -> Event {
 
 fn release(column: u16, row: u16) -> Event {
     at(MouseEventKind::Up(MouseButton::Left), column, row)
+}
+
+/// The span still standing after `event`.
+fn standing(event: &Event, regions: Regions, was: Option<Selection>) -> Option<Selection> {
+    selection_after(event, regions, was).0
+}
+
+/// The span `event` ended, which is the one the release sends.
+fn ended(event: &Event, regions: Regions, was: Option<Selection>) -> Option<Selection> {
+    selection_after(event, regions, was).1
 }
 
 /// A worktree holding `file`, written with `body`.
@@ -163,14 +173,14 @@ fn drawn_on(app: &mut App, frame: &mut Frame, pane: Rect) -> String {
 #[test]
 fn a_drag_selects_the_rows_it_crosses() {
     let regions = regions_at(2, 20);
-    let opened = selection_after(&press(10, 5), regions, None).expect("a press opened nothing");
+    let opened = standing(&press(10, 5), regions, None).expect("a press opened nothing");
     assert_eq!(
         opened.rows(),
         (5, 5),
         "a press selected more than its own row"
     );
 
-    let moved = selection_after(&drag(10, 9), regions, Some(opened)).expect("a drag ended it");
+    let moved = standing(&drag(10, 9), regions, Some(opened)).expect("a drag ended it");
     assert_eq!(
         moved.rows(),
         (5, 9),
@@ -183,16 +193,16 @@ fn a_drag_selects_the_rows_it_crosses() {
 #[test]
 fn a_drag_upward_selects_what_the_same_drag_downward_would() {
     let regions = regions_at(2, 20);
-    let down = selection_after(
+    let down = standing(
         &drag(10, 9),
         regions,
-        selection_after(&press(10, 5), regions, None),
+        standing(&press(10, 5), regions, None),
     )
     .expect("down");
-    let up = selection_after(
+    let up = standing(
         &drag(10, 5),
         regions,
-        selection_after(&press(10, 9), regions, None),
+        standing(&press(10, 9), regions, None),
     )
     .expect("up");
     assert_eq!(down.rows(), up.rows(), "the two directions do not agree");
@@ -203,14 +213,14 @@ fn a_drag_upward_selects_what_the_same_drag_downward_would() {
 #[test]
 fn a_drag_out_of_the_region_stops_at_its_edge() {
     let regions = regions_at(2, 20);
-    let opened = selection_after(&press(10, 5), regions, None).expect("opened");
-    let below = selection_after(&drag(10, 200), regions, Some(opened)).expect("dropped");
+    let opened = standing(&press(10, 5), regions, None).expect("opened");
+    let below = standing(&drag(10, 200), regions, Some(opened)).expect("dropped");
     assert_eq!(
         below.rows(),
         (5, 21),
         "the drag reached past the region's last row"
     );
-    let above = selection_after(&drag(10, 0), regions, Some(opened)).expect("dropped");
+    let above = standing(&drag(10, 0), regions, Some(opened)).expect("dropped");
     assert_eq!(
         above.rows(),
         (2, 5),
@@ -224,29 +234,32 @@ fn a_drag_out_of_the_region_stops_at_its_edge() {
 #[test]
 fn the_button_coming_up_ends_the_span() {
     let regions = regions_at(2, 20);
-    let opened = selection_after(&press(10, 5), regions, None).expect("opened");
-    let dragged = selection_after(&drag(10, 9), regions, Some(opened)).expect("dragged");
+    let opened = standing(&press(10, 5), regions, None).expect("opened");
+    let dragged = standing(&drag(10, 9), regions, Some(opened)).expect("dragged");
     assert_ne!(
         dragged.rows(),
         (5, 5),
         "the drag moved no head, so the release below is not ending a real span"
     );
     assert_eq!(
-        selection_after(&release(10, 9), regions, Some(dragged)),
+        standing(&release(10, 9), regions, Some(dragged)),
         None,
         "the wash outlived the button, so it stands over rows the reader has \
          finished with and a later key could send them again"
     );
 }
 
-/// One event ends a drag and nothing else does. The shell owns a terminal and no
-/// test can drive it, so this is the half of `Shell::send_wash` that is driveable:
-/// anything answering true here spends the reader's clipboard.
+/// One event ends a drag and nothing else does. Anything that comes back as ended
+/// is handed to `Shell::send_wash`, so anything answering here spends the reader's
+/// clipboard.
 #[test]
 fn only_the_button_coming_up_ends_a_drag() {
-    assert!(
-        ends_a_drag(&release(10, 5)),
-        "the release ends no drag, so nothing sends"
+    let regions = regions_at(2, 20);
+    let had = standing(&press(10, 5), regions, None).expect("opened");
+    assert_eq!(
+        ended(&release(10, 5), regions, Some(had)),
+        Some(had),
+        "the release ended no drag, so nothing is sent and the gesture cannot finish"
     );
     for event in [
         press(10, 5),
@@ -257,11 +270,37 @@ fn only_the_button_coming_up_ends_a_drag() {
         Event::FocusLost,
         Event::Resize(80, 24),
     ] {
-        assert!(
-            !ends_a_drag(&event),
-            "{event:?} ends a drag, so it sends whatever the wash was standing over"
+        assert_eq!(
+            ended(&event, regions, Some(had)),
+            None,
+            "{event:?} ended a drag, so it sends whatever the wash was standing over"
         );
     }
+}
+
+/// A span is screen rows and the resolver indexes collected ones, so the origin is
+/// the diff region's own first row. `Shell::send_wash` is the only place the two
+/// coordinate systems meet and no test can drive it, so the arithmetic is driven here.
+#[test]
+fn a_span_resolves_from_the_diff_regions_first_row() {
+    let regions = regions_at(2, 20);
+    let top = regions.diff.top;
+    let opened = standing(&press(10, top + 3), regions, None).expect("opened");
+    let span = standing(&drag(10, top + 5), regions, Some(opened)).expect("dragged");
+    assert_eq!(
+        span.offsets(top),
+        (3, 5),
+        "the span did not resolve to offsets from the diff region's first row, so the \
+         release would send rows the reader never crossed"
+    );
+    // A region that has moved below the span is a frame the wash no longer describes.
+    // It clamps to the first collected row rather than wrapping to the last, which is
+    // what `saturating_sub` is there for.
+    assert_eq!(
+        span.offsets(top + 9),
+        (0, 0),
+        "an origin below the span wrapped instead of clamping"
+    );
 }
 
 /// A press that is not on the diff takes the wash with it, which is the clearing
@@ -269,9 +308,9 @@ fn only_the_button_coming_up_ends_a_drag() {
 #[test]
 fn a_press_off_the_diff_clears_the_selection() {
     let regions = regions_at(2, 20);
-    let standing = selection_after(&press(10, 5), regions, None).expect("opened");
+    let opened = standing(&press(10, 5), regions, None).expect("opened");
     assert!(
-        selection_after(&press(10, 1), regions, Some(standing)).is_none(),
+        standing(&press(10, 1), regions, Some(opened)).is_none(),
         "a press above the diff left the wash standing"
     );
 }
@@ -463,8 +502,8 @@ fn the_wash_covers_the_selected_rows_and_no_others() {
 
     let (plain, laid) = washes(&mut app, &mut frame, None);
     let top = laid.diff.top;
-    let opened = selection_after(&press(2, top + 2), laid, None).expect("opened");
-    let span = selection_after(&drag(2, top + 4), laid, Some(opened)).expect("dragged");
+    let opened = standing(&press(2, top + 2), laid, None).expect("opened");
+    let span = standing(&drag(2, top + 4), laid, Some(opened)).expect("dragged");
     let (washed, _) = washes(&mut app, &mut frame, Some(span));
 
     let (from, to) = span.rows();
@@ -501,15 +540,15 @@ fn the_frame_after_the_release_draws_no_wash() {
 
     let (plain, laid) = washes(&mut app, &mut frame, None);
     let top = laid.diff.top;
-    let opened = selection_after(&press(2, top + 2), laid, None).expect("opened");
-    let span = selection_after(&drag(2, top + 4), laid, Some(opened)).expect("dragged");
+    let opened = standing(&press(2, top + 2), laid, None).expect("opened");
+    let span = standing(&drag(2, top + 4), laid, Some(opened)).expect("dragged");
     let (washed, _) = washes(&mut app, &mut frame, Some(span));
     assert_ne!(
         washed, plain,
         "the drag washed nothing, so the release below has nothing to clear"
     );
 
-    let after = selection_after(&release(2, top + 4), laid, Some(span));
+    let after = standing(&release(2, top + 4), laid, Some(span));
     let (drawn, _) = washes(&mut app, &mut frame, after);
     assert_eq!(
         drawn, plain,
@@ -528,7 +567,7 @@ fn a_selection_moves_no_rect() {
     let mut app = App::new();
 
     let (_, plain) = washes(&mut app, &mut frame, None);
-    let opened = selection_after(&press(2, plain.diff.top), plain, None).expect("opened");
+    let opened = standing(&press(2, plain.diff.top), plain, None).expect("opened");
     let (_, laid) = washes(&mut app, &mut frame, Some(opened));
     assert_eq!(
         (
@@ -647,10 +686,10 @@ fn a_wrapped_line_at_the_foot_of_the_pane_is_still_sent_whole() {
 #[test]
 fn losing_focus_does_not_clear_the_wash() {
     let regions = regions_at(2, 20);
-    let standing = selection_after(&press(10, 5), regions, None).expect("opened");
+    let opened = standing(&press(10, 5), regions, None).expect("opened");
     assert_eq!(
-        selection_after(&Event::FocusLost, regions, Some(standing)),
-        Some(standing),
+        standing(&Event::FocusLost, regions, Some(opened)),
+        Some(opened),
         "clicking into the agent's pane threw away a selection the reader was about to send"
     );
 }
@@ -668,7 +707,7 @@ fn a_press_while_the_sheet_is_up_opens_nothing() {
         close: (48, 4),
     });
     assert!(
-        selection_after(&press(2, 12), regions, None).is_none(),
+        standing(&press(2, 12), regions, None).is_none(),
         "a press on the diff beside the sheet opened a wash, so `Esc` would clear it \
          instead of closing the sheet"
     );
