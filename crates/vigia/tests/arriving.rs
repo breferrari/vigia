@@ -46,11 +46,13 @@ fn the_fade_is_drawn_and_lands_on_the_rung_it_decays_into() {
     // assertion below trivially true.
     assert_ne!(
         first.fg, settled.fg,
-        "the fade's first step already draws the settled ink, so there is no fade          here and nothing below this can fail"
+        "the fade's first step already draws the settled ink, so there is no fade \
+         here and nothing below this can fail"
     );
     assert_eq!(
         last.fg, settled.fg,
-        "the fade does not land on the rung it decays into, so a row would keep a          colour the ladder never gives it"
+        "the fade does not land on the rung it decays into, so a row would keep a \
+         colour the ladder never gives it"
     );
     // And it moves monotonically between them rather than jumping about, which is
     // what makes it read as one motion.
@@ -76,6 +78,41 @@ fn the_fade_is_drawn_and_lands_on_the_rung_it_decays_into() {
     println!("fade starts at                 {:?}", first.fg);
     println!("settles on                     {:?}", settled.fg);
     println!("ramp, red channel              {reds:?}");
+}
+
+#[test]
+fn a_fade_snaps_to_the_settled_rung_below_truecolor() {
+    // The documented degradation, asserted rather than assumed: sixteen colours
+    // have three intensities and the pulse rung already spends BOLD, so there is no
+    // fourth to lend a fade. Every rung, every step, on every depth that is not
+    // truecolor, because the early return is the whole of the behaviour there.
+    for depth in [Depth::None, Depth::Ansi16, Depth::Ansi256] {
+        for theme in [Theme::ansi(), Theme::dark(), Theme::light()] {
+            let theme = theme.resolve(depth);
+            for rung in [Recency::Pulse, Recency::Live, Recency::Cold] {
+                let settled = theme.recency(rung);
+                for step in 0..=ARRIVING_STEPS {
+                    assert_eq!(
+                        theme.arriving(rung, step),
+                        settled,
+                        "at {depth:?}, step {step} of {rung:?} drew an ink the ladder \
+                         never gives, so a depth with no fourth intensity is being \
+                         asked for one"
+                    );
+                }
+            }
+        }
+    }
+
+    // Non-vacuity: the same call on truecolor must move, or this passes because
+    // `arriving` does nothing anywhere rather than because it degrades.
+    let wide = Theme::dark().resolve(Depth::Truecolor);
+    assert_ne!(
+        wide.arriving(Recency::Pulse, 0),
+        wide.recency(Recency::Pulse),
+        "the fade does not move on truecolor either, so the assertions above hold \
+         for the wrong reason"
+    );
 }
 
 /// Wakes the loop is handed over one burst and its tail, counted by driving
@@ -176,7 +213,8 @@ fn the_cadence_is_what_buys_the_ramp_and_the_price_is_the_frames() {
     println!("--- the ramp, and what it costs to draw it");
     println!("on ticks alone                 {on_ticks:?}");
     println!(
-        "on the fade's own cadence      {} steps of 0..={ARRIVING_STEPS}",
+        "on the fade's own cadence \
+         {} steps of 0..={ARRIVING_STEPS}",
         on_cadence.len()
     );
     println!(
@@ -274,12 +312,14 @@ fn a_change_arriving_draws_a_different_ink_from_one_that_has_settled() {
     );
     assert_ne!(
         drawn[0], settled,
-        "the first step of the fade draws exactly the settled row, so nothing about          an arriving change reaches the pane"
+        "the first step of the fade draws exactly the settled row, so nothing about \
+         an arriving change reaches the pane"
     );
     assert_eq!(
         drawn.last().expect("a last step"),
         &settled,
-        "the fade's last step does not match the settled row, so a reader would be          left on an ink the ladder never gives"
+        "the fade's last step does not match the settled row, so a reader would be \
+         left on an ink the ladder never gives"
     );
 }
 
