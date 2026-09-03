@@ -265,17 +265,12 @@ impl Worktree {
                     return Self::link_target(&full, rela_path);
                 }
                 // A directory, a fifo, a socket or a device node: git tracks none
-                // of them, so there are no bytes to compare. Every entry the status
-                // walk can name as something other than a plain file arrives here,
-                // which is why nothing forgives one after the read instead.
-                //
-                // It has to stop the read rather than tidy up after it: opening a
-                // fifo with no writer blocks until it has one, on the thread the
-                // pane draws from, and a monitor that stops redrawing is the defect
-                // this guard belongs to. The error a directory returns could not be
-                // matched on anyway, being `IsADirectory` on unix and
-                // `PermissionDenied` on Windows, which is also what a file nobody
-                // may read returns.
+                // of them, so there are no bytes to compare. It has to stop the
+                // read rather than tidy up after one, because opening a fifo with
+                // no writer blocks until it has one, on the thread the pane draws
+                // from. The error a directory returns could not be matched on
+                // anyway, being `IsADirectory` on unix and `PermissionDenied` on
+                // Windows, which is also what a file nobody may read returns.
                 if !kind.is_file() {
                     return Ok(Vec::new());
                 }

@@ -502,16 +502,14 @@ impl<'w> Frame<'w> {
             // it does not: a file above the viewport is measured and never diffed,
             // so swallowing a whole-comparison failure here would put rows in the
             // total that nothing can draw when the reader scrolls to them.
-            Err(e) => {
-                e.of_one_file().ok_or(e)?;
-                (
-                    FileSpan {
-                        unreadable: true,
-                        ..FileSpan::default()
-                    },
-                    None,
-                )
-            }
+            Err(e) if e.of_one_file().is_none() => return Err(e),
+            Err(_) => (
+                FileSpan {
+                    unreadable: true,
+                    ..FileSpan::default()
+                },
+                None,
+            ),
         };
         let measured = Measured {
             taken,
