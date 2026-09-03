@@ -1,6 +1,6 @@
 //! The clipboard write, as the escape the terminal answers.
 //!
-//! `SPEC.md` §11.2 B9. `crossterm` ships this as `clipboard::CopyToClipboard`
+//! `SPEC.md` §11.1. `crossterm` ships this as `clipboard::CopyToClipboard`
 //! behind an `osc52` feature that is `dep:base64`, and `crossterm` is not a
 //! declared dependency of this workspace at all: it arrives as
 //! `ratatui::crossterm`. Taking the feature would mean declaring one crate in
@@ -94,8 +94,8 @@ mod tests {
     }
 
     /// Test-only, and the reason this file has no decoder: nothing in the shell
-    /// ever reads a clipboard back, which §11.2 B9 calls a privacy escalation
-    /// past the affordance.
+    /// ever reads a clipboard back, which §11.1 calls a privacy escalation past
+    /// the affordance.
     fn decode(text: &str) -> Vec<u8> {
         let bits: Vec<u32> = text
             .bytes()

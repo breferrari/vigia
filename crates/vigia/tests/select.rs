@@ -1,4 +1,5 @@
-//! `SPEC.md` §11.2 B20: what a drag over the diff selects, and what `y` then sends.
+//! `SPEC.md` §11.2 B20: what a drag over the diff washes, and what the button
+//! coming up sends.
 //!
 //! The ruling turns on one distinction: a cell holds what was *drawn*, and the
 //! copy is resolved against the row model instead. Everything here is either that
@@ -12,7 +13,8 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Glyphs, Pointing, Region, Regions, Theme, body_layout, render, selection_after,
+    Action, App, Glyphs, Pointing, Region, Regions, Theme, body_layout, ends_a_drag, render,
+    selection_after,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -60,6 +62,10 @@ fn drag(column: u16, row: u16) -> Event {
     at(MouseEventKind::Drag(MouseButton::Left), column, row)
 }
 
+fn release(column: u16, row: u16) -> Event {
+    at(MouseEventKind::Up(MouseButton::Left), column, row)
+}
+
 /// A worktree holding `file`, written with `body`.
 fn scratch_with(name: &str, file: &str, body: &str) -> Scratch {
     let scratch = Scratch::new(name);
@@ -67,7 +73,7 @@ fn scratch_with(name: &str, file: &str, body: &str) -> Scratch {
     scratch
 }
 
-/// Collect one view with `span` selected, and hand back what `y` would send.
+/// Collect one view with `span` washed, and hand back what the release would send.
 fn sent(
     app: &mut App,
     frame: &mut Frame,
@@ -95,8 +101,8 @@ fn sent_on(
     let body = body_layout(pane, &chrome, 1, 1);
     app.view(frame, &mut highlighter, &history, body)
         .expect("view");
-    app.apply(Action::Yank, frame, 24).expect("yank");
-    app.take_yank().map(|yank| yank.text)
+    app.send_selection();
+    app.take_sending().map(|sending| sending.text)
 }
 
 /// The width I6 is named for, and the width a deep path has to be shortened at.
@@ -207,6 +213,52 @@ fn a_drag_out_of_the_region_stops_at_its_edge() {
     );
 }
 
+/// The wash lasts exactly as long as the gesture: the button coming up retires the
+/// span, so nothing is left standing for a later key to send or for `Esc` to clear.
+/// What it stood over reached the clipboard before this ran, in `Shell::send_wash`.
+#[test]
+fn the_button_coming_up_ends_the_span() {
+    let regions = regions_at(2, 20);
+    let opened = selection_after(&press(10, 5), regions, None).expect("opened");
+    let dragged = selection_after(&drag(10, 9), regions, Some(opened)).expect("dragged");
+    assert_ne!(
+        dragged.rows(),
+        (5, 5),
+        "the drag moved no head, so the release below is not ending a real span"
+    );
+    assert_eq!(
+        selection_after(&release(10, 9), regions, Some(dragged)),
+        None,
+        "the wash outlived the button, so it stands over rows the reader has \
+         finished with and a later key could send them again"
+    );
+}
+
+/// One event ends a drag and nothing else does. The shell owns a terminal and no
+/// test can drive it, so this is the half of `Shell::send_wash` that is driveable:
+/// anything answering true here spends the reader's clipboard.
+#[test]
+fn only_the_button_coming_up_ends_a_drag() {
+    assert!(
+        ends_a_drag(&release(10, 5)),
+        "the release ends no drag, so nothing sends"
+    );
+    for event in [
+        press(10, 5),
+        drag(10, 5),
+        at(MouseEventKind::Up(MouseButton::Right), 10, 5),
+        at(MouseEventKind::Moved, 10, 5),
+        at(MouseEventKind::ScrollDown, 10, 5),
+        Event::FocusLost,
+        Event::Resize(80, 24),
+    ] {
+        assert!(
+            !ends_a_drag(&event),
+            "{event:?} ends a drag, so it sends whatever the wash was standing over"
+        );
+    }
+}
+
 /// A press that is not on the diff takes the wash with it, which is the clearing
 /// rule reaching the one gesture that has no action behind it.
 #[test]
@@ -314,35 +366,19 @@ fn a_heading_row_sends_the_path_and_not_the_drawn_label() {
          is named for:\n{screen}",
         NARROW.width
     );
-    let text =
-        sent_on(&mut app, &mut frame, Some((0, 0)), false, NARROW).expect("`y` sent nothing");
+    let text = sent_on(&mut app, &mut frame, Some((0, 0)), false, NARROW)
+        .expect("the release sent nothing");
     assert_eq!(
         text, DEEP,
         "the heading row sent {text:?} rather than the path it stands for"
     );
 }
 
-/// With nothing selected `y` is what B9 shipped, which is the half of this ruling
-/// that must not have moved.
+/// A span past the collected rows is not a selection, so the release that ends it
+/// sends nothing. There is no caret path to fall back to: the gesture that reaches
+/// a path is a drag over the heading, and this drag reached no row at all.
 #[test]
-fn with_no_selection_y_still_sends_the_caret_path() {
-    let scratch = scratch_with("select-fallback", DEEP, "one\n");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
-    let mut app = App::new();
-
-    assert_eq!(
-        sent(&mut app, &mut frame, None, false).as_deref(),
-        Some(DEEP),
-        "`y` with nothing selected stopped sending the caret file's path"
-    );
-}
-
-/// A span past the collected rows falls back to the caret path, rather than an
-/// empty payload the reader would have to notice on the footer.
-#[test]
-fn a_span_past_the_collected_rows_sends_the_caret_path_instead() {
+fn a_span_past_the_collected_rows_sends_nothing() {
     let scratch = scratch_with("select-past", DEEP, "one\n");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -350,9 +386,9 @@ fn a_span_past_the_collected_rows_sends_the_caret_path_instead() {
     let mut app = App::new();
 
     assert_eq!(
-        sent(&mut app, &mut frame, Some((900, 999)), false).as_deref(),
-        Some(DEEP),
-        "a span past the end of the collected rows did not fall back to the caret"
+        sent(&mut app, &mut frame, Some((900, 999)), false),
+        None,
+        "a span past the end of the collected rows put something on the clipboard"
     );
 }
 
@@ -430,6 +466,39 @@ fn the_wash_covers_the_selected_rows_and_no_others() {
             );
         }
     }
+}
+
+/// And the frame after the button comes up carries none of it. The send happens
+/// first, so a wash surviving here would be a second copy the reader could make of
+/// rows they have already sent.
+#[test]
+fn the_frame_after_the_release_draws_no_wash() {
+    let scratch = scratch_with(
+        "select-wash-gone",
+        "src/a.rs",
+        "one\ntwo\nthree\nfour\nfive\nsix\n",
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    let (plain, laid) = washes(&mut app, &mut frame, None);
+    let top = laid.diff.top;
+    let opened = selection_after(&press(2, top + 2), laid, None).expect("opened");
+    let span = selection_after(&drag(2, top + 4), laid, Some(opened)).expect("dragged");
+    let (washed, _) = washes(&mut app, &mut frame, Some(span));
+    assert_ne!(
+        washed, plain,
+        "the drag washed nothing, so the release below has nothing to clear"
+    );
+
+    let after = selection_after(&release(2, top + 4), laid, Some(span));
+    let (drawn, _) = washes(&mut app, &mut frame, after);
+    assert_eq!(
+        drawn, plain,
+        "a row is still washed on the frame after the button came up"
+    );
 }
 
 /// §11.1: a transient mark may not move content. The regions a frame lays out are
@@ -628,23 +697,23 @@ fn the_footer_counts_lines_and_not_rows() {
             "the wrapped span covers no continuation row, so it proves nothing about \
              rows against lines"
         );
-        app.apply(Action::Yank, &mut frame, 24).expect("yank");
-        let yank = app.take_yank().expect("`y` yanked nothing");
+        app.send_selection();
+        let sending = app.take_sending().expect("the release sent nothing");
         assert_eq!(
-            yank.said,
+            sending.said,
             want,
             "a span of {span:?} is named {:?} on the footer and sent {} lines",
-            yank.said,
-            yank.text.lines().count()
+            sending.said,
+            sending.text.lines().count()
         );
     }
 }
 
-/// A wash cleared between paints takes its lines with it. Without that, `y` goes
-/// on sending rows nothing on screen is claiming, and after a tick that moved the
-/// region they are not even the rows the reader crossed.
+/// A wash cleared between paints takes its lines with it. Without that, a release
+/// goes on sending rows nothing on screen is claiming, and after a tick that moved
+/// the region they are not even the rows the reader crossed.
 #[test]
-fn a_cleared_wash_sends_the_caret_path_again() {
+fn a_cleared_wash_sends_nothing() {
     let scratch = scratch_with("select-retired", DEEP, "one\ntwo\nthree\n");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -658,17 +727,17 @@ fn a_cleared_wash_sends_the_caret_path_again() {
     );
     // Cleared with no collect after it, which is what a retired wash looks like.
     app.select(None);
-    app.apply(Action::Yank, &mut frame, 24).expect("yank");
+    app.send_selection();
     assert_eq!(
-        app.take_yank().map(|yank| yank.text).as_deref(),
-        Some(DEEP),
-        "`y` sent the cleared selection's lines rather than the caret file's path"
+        app.take_sending(),
+        None,
+        "a release after the wash was cleared sent the lines it used to stand over"
     );
 }
 
 /// An empty payload is no payload. OSC 52 carrying nothing **clears** the reader's
-/// clipboard, which is the one thing B9's surviving ground refuses, and the footer
-/// would have said it sent something.
+/// clipboard, which is the one thing the surviving ownership ground refuses, and
+/// the footer would have said it sent something.
 #[test]
 fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
     let scratch = scratch_with("select-blank", DEEP, "one\n\ntwo\n");
@@ -690,12 +759,11 @@ fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
         .position(|row| matches!(row, vigia::Row::Line { text, .. } if text.is_empty()))
         .expect("the fixture drew no empty line, so this gate is not its own case");
 
-    let text = sent(&mut app, &mut frame, Some((blank, blank)), false)
-        .expect("`y` sent nothing at all, where it owes the caret path");
     assert_eq!(
-        text, DEEP,
-        "a selection with no text in it sent {text:?}; an empty OSC 52 write would \\
-         have wiped whatever the reader had on their clipboard"
+        sent(&mut app, &mut frame, Some((blank, blank)), false),
+        None,
+        "a selection with no text in it reached the clipboard; an empty OSC 52 write \
+         wipes whatever the reader had on theirs"
     );
 }
 

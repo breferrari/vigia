@@ -102,7 +102,7 @@ What follows groups the keys by surface. The docblocks in `crates/vigia/src/them
 | `removed_gutter` | the same, on a removed line |
 | `added_bar` | the sigil column's cell on an added line, the wash's stand-in below truecolour |
 | `removed_bar` | the same, on a removed line |
-| `selection` | the wash over rows a drag has selected; it stands in for the diff wash while it is up, and on `ansi` it reverses the row rather than colouring it |
+| `selection` | the wash over rows a drag is crossing; it stands in for the diff wash for as long as the button is down, and on `ansi` it reverses the row rather than colouring it |
 
 ### Syntax
 

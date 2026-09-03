@@ -305,28 +305,24 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     }
 }
 
-/// `SPEC.md` §11.2 B9, and it needs its own test rather than a line in the inert
-/// list above: an OSC 52 write draws nothing, so the whole rendering suite stays
-/// green whichever way the ruling goes and the keymap is where it is decidable.
+/// B9 is revoked and the drag is the copy, so this gate reverses: no key reaches
+/// the clipboard at all. It needs its own test rather than a line in the inert list
+/// above because an OSC 52 write draws nothing, so the whole rendering suite stays
+/// green whichever way the keymap goes and the keymap is where it is decidable.
 #[test]
-fn the_yank_key_is_bound_and_only_the_plain_one_is() {
-    assert_eq!(
-        action_for(&press(KeyCode::Char('y')), Regions::default()),
-        Some(Action::Yank),
-        "`y` is unbound, and §11.2 B9 rules that it copies the caret file's path"
-    );
-    // The neighbours stay unassigned. `Y` and `Ctrl-Y` would be a second and third
-    // way to spend the reader's clipboard, which is the one thing B9's surviving
-    // ground asks to be deliberate.
+fn no_key_reaches_the_clipboard() {
+    // All three spellings, because any one of them binding is a way to spend the
+    // reader's clipboard that no gesture asked for.
     for event in [
+        press(KeyCode::Char('y')),
         press(KeyCode::Char('Y')),
         with(KeyModifiers::CONTROL, KeyCode::Char('y')),
     ] {
         assert_eq!(
             action_for(&event, Regions::default()),
             None,
-            "{event:?} became an action, so there is more than one way to overwrite \
-             what the reader had on their clipboard"
+            "{event:?} became an action, so a key can still overwrite what the \
+             reader had on their clipboard"
         );
     }
 }
@@ -1219,9 +1215,6 @@ fn repeating_an_action_that_does_not_accumulate_leaves_it_alone() {
         Action::Top,
         Action::Bottom,
         Action::ToggleFollow,
-        // Held or tapped, a yank spends the clipboard once: `repeated` folding it
-        // would be a way to write the reader's clipboard by leaning on a key.
-        Action::Yank,
         Action::Redraw,
         Action::Quit,
         Action::ListRow(2),
@@ -1655,7 +1648,7 @@ fn nothing_armed_means_no_deadline_at_all() {
         ),
         Some(SCROLL_LINGER)
     );
-    // B9's clock, which is the one a `min` cannot distinguish from its neighbours:
+    // The send's clock, the one a `min` cannot distinguish from its neighbours:
     // a value put in the wrong slot still wins, so it is armed alone here and then
     // against a nearer one.
     assert_eq!(
@@ -1667,7 +1660,7 @@ fn nothing_armed_means_no_deadline_at_all() {
             now
         ),
         Some(NOTICE_LINGER),
-        "a yank's confirmation did not ask the loop to wake, so it sits on the          footer until the worktree next changes, which on a quiet tree is never"
+        "a send's confirmation did not ask the loop to wake, so it sits on the          footer until the worktree next changes, which on a quiet tree is never"
     );
     assert_eq!(
         patience(
