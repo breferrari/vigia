@@ -712,10 +712,7 @@ impl App {
         };
         self.position = view.top;
         // A span the walk had no rows for is not a selection, whatever the pointer did.
-        self.resolved = self
-            .selecting
-            .and_then(|span| view.lines_in(span))
-            .is_some();
+        self.resolved = self.selecting.is_some_and(|span| view.resolves(span));
         // Cleared only once it was served. A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.

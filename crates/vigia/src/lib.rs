@@ -1081,6 +1081,7 @@ mod tests {
             // Neither is reachable from a test, and both shipped once.
             "if action == Action::Escape && self.selected.is_some() {",
             "if action != Action::Redraw {",
+            "if chrome.selected.is_none() {",
             "self.screen.lines_in(span.offsets(self.regions.diff.top))",
         ] {
             assert!(

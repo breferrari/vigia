@@ -69,24 +69,33 @@ fn a_send_is_taken_once() {
     );
 }
 
-/// Nothing washed is nothing to send. An OSC 52 write carrying nothing clears the
-/// reader's clipboard, so a release that resolved to no lines must not reach it.
+/// Nothing to send is nothing sent. An OSC 52 write carrying nothing clears the
+/// reader's clipboard, so the guard is driven here rather than around: a helper that
+/// declines to call `App::send` proves only that `Option` short-circuits.
 #[test]
-fn a_release_with_nothing_washed_sends_nothing() {
-    let scratch = deep_scratch("send-empty");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
-    let mut app = App::new();
+fn a_payload_with_no_text_in_it_never_reaches_the_clipboard() {
+    for lines in [
+        vec![],
+        vec![String::new()],
+        vec![String::new(), String::new()],
+    ] {
+        let mut app = App::new();
+        app.send(&lines);
+        assert_eq!(
+            app.take_sending(),
+            None,
+            "{} blank line(s) armed a write, so the reader's clipboard is spent on \
+             nothing",
+            lines.len()
+        );
+    }
 
-    // Drawn first, so the frame really did collect and this is a release with no
-    // wash rather than a release before there was a screen.
-    let view = painted(&mut app, &mut frame);
-    assert_eq!(
-        released(&mut app, &view, None),
-        None,
-        "a release with nothing washed armed a write, so the reader's clipboard is \
-         spent on nothing"
+    // And the guard is not simply refusing everything.
+    let mut app = App::new();
+    app.send(&[String::new(), "one".to_owned()]);
+    assert!(
+        app.take_sending().is_some(),
+        "a payload with a line in it was refused, so the guard above proves nothing"
     );
 }
 

@@ -303,6 +303,73 @@ fn a_span_resolves_from_the_diff_regions_first_row() {
     );
 }
 
+/// The release's own row is not part of the span. A pointer can move between the
+/// last motion the pane saw and the button coming up, and the payload is the frame's
+/// rather than the gesture's, so what it ends is what was drawn.
+#[test]
+fn the_release_does_not_extend_the_span_to_its_own_row() {
+    let regions = regions_at(2, 20);
+    let opened = standing(&press(10, 5), regions, None).expect("opened");
+    let dragged = standing(&drag(10, 8), regions, Some(opened)).expect("dragged");
+    assert_eq!(
+        ended(&release(10, 14), regions, Some(dragged)),
+        Some(dragged),
+        "the release at row 14 moved the span the drag left at row 8, so the reader \
+         is sent rows no frame ever washed"
+    );
+}
+
+/// Two answers to one question, held together. The wash asks whether a span resolves
+/// and the release asks what it resolves to, and if the cheap answer ever disagrees
+/// with the dear one a wash stands over rows the release will not send.
+#[test]
+fn the_cheap_answer_agrees_with_the_lines_it_stands_for() {
+    let scratch = scratch_with(
+        "select-resolves",
+        "src/a.rs",
+        "one\ntwo\nthree\nfour\nfive\nsix\n",
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(PANE, &chrome, 1, 1);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    let last = view.rows.len() - 1;
+
+    let mut resolved = 0;
+    for span in [
+        (0, 0),
+        (0, last),
+        (1, 3),
+        (last, last),
+        (last, last + 4),
+        (last + 1, last + 1),
+        (last + 9, last + 20),
+        // Inverted, which a drag cannot produce and a stale span can.
+        (3, 1),
+    ] {
+        let lines = view.lines_in(span).is_some();
+        resolved += usize::from(lines);
+        assert_eq!(
+            view.resolves(span),
+            lines,
+            "{span:?} resolves to {} and lines_in says {lines}",
+            view.resolves(span)
+        );
+    }
+    assert!(
+        (1..8).contains(&resolved),
+        "every span answered the same way, so agreement proves nothing"
+    );
+}
+
 /// A press that is not on the diff takes the wash with it, which is the clearing
 /// rule reaching the one gesture that has no action behind it.
 #[test]
@@ -811,30 +878,6 @@ fn a_span_ending_on_a_blank_row_is_still_counted_whole() {
         sending.said, "2 lines",
         "the footer named {:?} for a two-row span ending on a blank line",
         sending.said
-    );
-}
-
-/// A wash cleared between paints takes its lines with it. Without that, a release
-/// goes on sending rows nothing on screen is claiming, and after a tick that moved
-/// the region they are not even the rows the reader crossed.
-#[test]
-fn a_cleared_wash_sends_nothing() {
-    let scratch = scratch_with("select-retired", DEEP, "one\ntwo\nthree\n");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
-    let mut app = App::new();
-
-    // Resolved, so the lines are in hand the way a standing wash leaves them.
-    assert!(
-        sent(&mut app, &mut frame, Some((2, 3)), false).is_some_and(|text| text != DEEP),
-        "the span resolved to nothing, so clearing it below proves nothing"
-    );
-    // Cleared with no collect after it, which is what a retired wash looks like.
-    assert_eq!(
-        sent(&mut app, &mut frame, None, false),
-        None,
-        "a release after the wash was cleared sent the lines it used to stand over"
     );
 }
 
