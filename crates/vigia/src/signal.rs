@@ -87,7 +87,7 @@ pub(crate) fn forward(tx: Sender<Wake>) -> io::Result<()> {
     })
 }
 
-/// The console control events this claims, by their documented WinAPI numbers.
+/// The console control events this claims, by their documented Win32 numbers.
 #[cfg(windows)]
 const CAUGHT: [u32; 3] = [
     windows_sys::Win32::System::Console::CTRL_C_EVENT,
@@ -456,9 +456,9 @@ mod tests {
             // a non-blocking `OnceLock::get` whose result this kind never looks at.
             // What the assert above establishes is the part that matters: for a kind
             // outside `CAUGHT`, `reply` returns before it touches `ASKED` or parks.
+            let answered = unsafe { on_ctrl(5) };
             assert_eq!(
-                unsafe { on_ctrl(5) },
-                0,
+                answered, 0,
                 "the handler answered TRUE to an event it does not claim"
             );
         }
