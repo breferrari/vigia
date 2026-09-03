@@ -55,13 +55,16 @@ enum Paint {
     Coloured,
 }
 
-/// How long a change is drawn arriving. Under `HISTORY_SAMPLE` deliberately: the
-/// pulse rung is guaranteed a whole sample, so a shorter fade ends while the grid
-/// still says *Pulse*, and §5.1's two clocks cannot disagree about when *now* was.
+/// How long a change is drawn arriving. Under `HISTORY_SAMPLE` deliberately, so a
+/// fade ends while the grid still says *Pulse* and §5.1's two clocks cannot part.
 pub const ARRIVING: Duration = Duration::from_millis(250);
 
 /// Steps the fade is quantised to, so a step a test reads is not a float.
 pub const ARRIVING_STEPS: u8 = 16;
+
+/// How often a running fade asks the loop for a frame of its own, which is the
+/// whole price of the effect. Bounded by [`ARRIVING`] and cannot re-arm itself.
+pub const ARRIVING_FRAME: Duration = Duration::from_millis(16);
 
 /// The shell's state.
 #[derive(Debug, Clone)]
@@ -316,7 +319,6 @@ impl App {
             selected,
         } = pointing;
         Chrome {
-            // Filled by `Shell::paint`, the only caller holding the frame's instant.
             arriving: None,
             pressed,
             selected,
@@ -753,13 +755,15 @@ impl App {
 
     /// When the fade ends, `None` once over: answering `None` is what untimes the loop.
     pub fn arriving_until(&self, now: Instant) -> Option<Instant> {
-        self.arriving.filter(|until| *until > now)
+        let end = self.arriving.filter(|until| *until > now)?;
+        // The next frame or the last: an end-only deadline leaves the middle undrawn.
+        Some(end.min(now + ARRIVING_FRAME))
     }
 
-    /// How far through the fade this frame is, or `None` when none is running.
+    /// How far through the fade this frame is, `None` when none is running.
     pub fn arriving_step(&self, now: Instant) -> Option<u8> {
-        let until = self.arriving_until(now)?;
-        let left = until.saturating_duration_since(now);
+        let end = self.arriving.filter(|until| *until > now)?;
+        let left = end.saturating_duration_since(now);
         let gone = ARRIVING.saturating_sub(left);
         let step = gone.as_millis() * u128::from(ARRIVING_STEPS) / ARRIVING.as_millis().max(1);
         Some(

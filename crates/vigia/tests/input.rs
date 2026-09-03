@@ -6,9 +6,9 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    ARRIVING, Action, App, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, NOTICE_LINGER, Region,
-    Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for,
-    drag_action, hover_after, patience, repainted, scroll_mark, settled,
+    ARRIVING, ARRIVING_FRAME, Action, App, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED,
+    NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
+    WHEEL_ROWS, action_for, drag_action, hover_after, patience, repainted, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -2054,10 +2054,20 @@ fn a_fade_arms_the_loop_and_gives_it_back_when_it_expires() {
     );
 
     app.arrived(now);
-    assert_eq!(
-        app.arriving_until(now),
-        Some(now + ARRIVING),
-        "a tick did not arm the fade"
+    let due = app
+        .arriving_until(now)
+        .expect("a tick did not arm the fade");
+    // The next frame of the fade, not its end: a deadline at the end alone leaves
+    // the middle undrawn on a tree nothing else is waking.
+    assert!(
+        due <= now + ARRIVING_FRAME && due > now,
+        "a running fade is due at {due:?}, which is not the next frame after {now:?}"
+    );
+    assert!(
+        due < now + ARRIVING,
+        "\
+         the fade asks for one wake at its end rather than a cadence, so nothing
+         draws its middle"
     );
     assert_eq!(
         app.arriving_until(now + ARRIVING),

@@ -22,7 +22,7 @@ mod terminal;
 pub mod theme;
 mod view;
 
-pub use app::{ARRIVING, ARRIVING_STEPS, App, Sending};
+pub use app::{ARRIVING, ARRIVING_FRAME, ARRIVING_STEPS, App, Sending};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};

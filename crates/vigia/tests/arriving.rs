@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    ARRIVING, ARRIVING_STEPS, Action, App, Chrome, Deadlines, Depth, Glyphs, Pointing, Theme,
-    patience,
+    ARRIVING, ARRIVING_FRAME, ARRIVING_STEPS, Action, App, Chrome, Deadlines, Depth, Glyphs,
+    Pointing, Theme, patience,
 };
 use vigia_core::{HISTORY_SAMPLE, History, Recency};
 
@@ -115,61 +115,86 @@ fn a_fade_costs_one_wake_per_burst_and_none_when_the_tree_is_quiet() {
     let mut app = App::new();
     app.arrived(now);
     let armed = wakes_for_one_burst(&app, now);
-    assert_eq!(
-        armed, 1,
-        "a fade asked the loop for {armed} wakes where the design is one closing \
-         frame, so it is driving a cadence of its own"
+    let want = ARRIVING.as_millis() / ARRIVING_FRAME.as_millis();
+    // The frames that fill the fade, plus the one that closes it.
+    assert!(
+        (armed as u128) <= want + 1,
+        "a fade asked the loop for {armed} wakes where {want} frames of \
+         {ARRIVING_FRAME:?} fill {ARRIVING:?}, so it is running past its own end"
+    );
+    assert!(
+        armed > 1,
+        "a fade asked for {armed} wake(s), so nothing draws its middle and a quiet \
+         tree sees a flash rather than a fade"
     );
 
-    println!("--- #365: what a fade costs");
+    println!("--- what a fade costs");
     println!("fade length                    {ARRIVING:?}");
     println!("pulse rung guaranteed for      {HISTORY_SAMPLE:?}");
-    println!("extra wakes per burst tail     {armed}");
+    println!("frames it asks for per burst   {armed}, one every {ARRIVING_FRAME:?}");
     println!(
         "ticks under a writing agent    up to 1 every {MAX_DELAY:?}, so a fade is \
-         re-armed before it ends"
+         re-armed before it ends and the cadence is continuous while writing"
     );
-    let per_tick = ARRIVING.as_millis() / MAX_DELAY.as_millis();
+    let per_second = 1000 / ARRIVING_FRAME.as_millis();
     println!(
-        "fade frames while writing      {per_tick} of the {} the loop already draws \
-         per fade length, so the extra cost is 0",
-        ARRIVING.as_millis() / MAX_DELAY.as_millis()
+        "cost while an agent writes     {per_second} frames a second, against the {} \
+         the loop draws from ticks alone",
+        1000 / MAX_DELAY.as_millis()
     );
     println!(
-        "a driven cadence would cost    {} extra wakes per fade at 16ms, and while \
-         writing that is sustained rather than per burst",
-        ARRIVING.as_millis() / 16
+        "cost on a quiet tree           {armed} frames once, then untimed: the fade \
+         cannot re-arm itself and nothing else is waking the loop"
     );
 }
 
 #[test]
-fn the_steps_a_reader_actually_sees_are_the_frames_the_writes_caused() {
-    // The null hypothesis: §5.1's ladder is three rungs, so a fade that
-    // only renders on ticks has to be worth more than three steps to beat it.
-    // This counts the steps rather than judging them, which is the reader's part.
+fn the_cadence_is_what_buys_the_ramp_and_the_price_is_the_frames() {
+    // The trade, reported rather than judged, and §11.1 named its failure before
+    // this existed: *a fraction of it read on a quiet tree is a number that ages
+    // without being redrawn*. Without a cadence a fade renders only on the frames
+    // the writes happened to cause, which on a quiet tree is two, so a reader sees
+    // a flash. With one it renders its whole ramp and asks for the frames to do it.
     let now = Instant::now();
     let mut app = App::new();
     app.arrived(now);
 
-    let mut steps = Vec::new();
-    let mut at = now;
-    while at < now + ARRIVING {
-        if let Some(step) = app.arriving_step(at) {
-            steps.push(step);
+    let sample = |every: Duration| {
+        let mut steps = Vec::new();
+        let mut at = now;
+        while at < now + ARRIVING {
+            if let Some(step) = app.arriving_step(at) {
+                steps.push(step);
+            }
+            at += every;
         }
-        at += MAX_DELAY;
-    }
+        steps
+    };
+    let on_ticks = sample(MAX_DELAY);
+    let on_cadence = sample(ARRIVING_FRAME);
 
-    println!("--- #365: the fade a reader sees while an agent writes");
-    println!("steps rendered                 {steps:?}");
-    println!("of a possible                  0..={ARRIVING_STEPS}");
+    println!("--- the ramp, and what it costs to draw it");
+    println!("on ticks alone                 {on_ticks:?}");
+    println!(
+        "on the fade's own cadence      {} steps of 0..={ARRIVING_STEPS}",
+        on_cadence.len()
+    );
     println!(
         "the ladder it has to beat      3 rungs (pulse, live, cold), which cost no \
          clock at all"
     );
+
     assert!(
-        !steps.is_empty(),
-        "no frame inside the fade drew a step, so nothing is animated at all"
+        on_cadence.len() > on_ticks.len(),
+        "the cadence draws {} steps against the {} ticks alone give, so it is being \
+         paid for and buying nothing",
+        on_cadence.len(),
+        on_ticks.len()
+    );
+    // And it is a ramp rather than a jump: every step differs from the one before.
+    assert!(
+        on_cadence.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the fade goes backwards: {on_cadence:?}"
     );
 }
 
