@@ -50,6 +50,7 @@ use std::time::Instant;
 
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
+use tachyonfx::{EffectManager, Interpolation, fx};
 use vigia_core::{Highlighter, History, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
@@ -175,6 +176,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
         // that draws something.
+        effects: EffectManager::default(),
+        painted: Instant::now(),
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws cold until
         // something writes to it.
@@ -399,6 +402,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 Wake::Tick(paths) => {
                     shell.app.clear_notice();
+                    // Armed here rather than in `App::follow`, because a change
+                    // arrives whether or not the viewport moves to it.
+                    for path in &paths {
+                        shell.effects.add_unique_effect(
+                            path.clone(),
+                            fx::coalesce((
+                                tachyonfx::Duration::from(ARRIVING),
+                                Interpolation::QuadOut,
+                            )),
+                        );
+                    }
                     // A tick is the world changing, so a demand that could not be
                     // served a moment ago is worth offering again.
                     shell.written = true;
@@ -492,6 +506,12 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
     }
 }
 
+/// How long a change is drawn arriving. Under `HISTORY_SAMPLE`; see `SPEC.md` §5.1.
+pub const ARRIVING: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// How often a running effect asks for a frame. The whole price of the effect.
+pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
+
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
@@ -517,6 +537,10 @@ fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
 struct Shell {
     session: Session,
     app: App,
+    /// Keyed by path, so a second write replaces an effect rather than stacking.
+    effects: EffectManager<String>,
+    /// When the previous frame painted: the elapsed time an effect is told about.
+    painted: Instant,
     /// The syntax classes of whatever is on screen, kept between frames.
     highlighter: Highlighter,
     /// What changed recently: the source for the sparkline, the recency gradient
@@ -624,6 +648,9 @@ impl Shell {
                 linger: self.scrolling_until,
                 notice: self.notice_until,
                 ageing: self.history.ages_in(now),
+                // The effect says when it is finished, so the clock is asked for a
+                // frame only while one is running and goes untimed the moment none is.
+                arriving: self.effects.is_running().then(|| now + ARRIVING_FRAME),
             },
             now,
         )
@@ -761,15 +788,20 @@ impl Shell {
     ) -> Result<(), Failure> {
         // The window is rolled here because this is where every frame passes.
         self.history.record_sized([], now);
-        self.paint(frame, worktree)?;
+        self.paint(frame, worktree, now)?;
         if self.app.owes_repaint() {
-            self.paint(frame, worktree)?;
+            self.paint(frame, worktree, now)?;
         }
         Ok(())
     }
 
     /// One collect and one paint, with no view of what it leaves owed.
-    fn paint(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+    fn paint(
+        &mut self,
+        frame: &mut vigia_core::Frame,
+        worktree: &Worktree,
+        now: Instant,
+    ) -> Result<(), Failure> {
         // Before the chrome, because the chrome carries it, and from the frame's own
         // file count so the read happens on exactly the frames that draw the answer.
         // That is the whole of I4 for this read.
@@ -837,6 +869,10 @@ impl Shell {
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
         let (theme, screen, glyphs) = (&self.theme, &self.screen, self.glyphs);
+        // Since the previous paint: an effect is told how much time passed, not what
+        // time it is. Taken before the draw so it and the frame agree on the interval.
+        let since = now.saturating_duration_since(self.painted);
+        let effects = &mut self.effects;
         let mut painted = Regions::default();
         let was = self.regions;
         self.session.screen().draw(|f| {
@@ -850,7 +886,18 @@ impl Shell {
             chrome.hovered = repainted(chrome.hovered, was, painted);
             chrome.selected = repainted(chrome.selected, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
+            // After the widgets, because an effect works on the cells they drew. The
+            // diff's own region only: a heading arriving is not a reason to disturb
+            // the header, the footer or the map.
+            let over = Rect::new(
+                painted.diff.left,
+                painted.diff.top,
+                painted.diff.width,
+                painted.diff.rows,
+            );
+            effects.process_effects(since.into(), f.buffer_mut(), over);
         })?;
+        self.painted = now;
         self.hovered = chrome.hovered;
         if chrome.selected.is_none() {
             self.deselect();
@@ -1265,7 +1312,7 @@ mod tests {
             "`Shell::draw` no longer rolls the window, so a frame can draw one that stopped moving",
         );
         let painted = drawer
-            .find("self.paint(frame, worktree)")
+            .find("self.paint(frame, worktree")
             .expect("`Shell::draw` no longer paints");
         assert!(
             rolled < painted,

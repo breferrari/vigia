@@ -33,6 +33,7 @@ exclude = ["tests/**"]
 
 [dependencies]
 ratatui.workspace = true
+tachyonfx.workspace = true
 vigia-core.workspace = true
 
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:

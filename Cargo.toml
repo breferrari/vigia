@@ -62,6 +62,13 @@ gix = { version = "0.87", default-features = false, features = [
 # through the committed lock, cannot see it. That is #349's shape exactly.
 # Lift this the moment a fixed release exists; the bound blocks 1.13.1 too.
 tinyvec = ">=1.12, <1.13"
+# Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
+# Under the `ratatui` organisation, and it schedules nothing: the host passes the
+# elapsed duration in, so I1's clock stays this program's. `default-features =
+# false` drops the DSL, and with it `anpa`. It adds `bon` and `micromath` and no
+# C toolchain; `compact_str` and `unicode-width` are already here beneath
+# ratatui-core, and `thiserror` beneath gix. See `SPEC.md` §6.
+tachyonfx = { version = "0.25", default-features = false, features = ["std"] }
 # Native filesystem events, which I1 requires instead of a timer. The
 # companion debouncer crate is deliberately not taken: coalesce policy lives in
 # vigia-core, which is the only place I1 is testable.

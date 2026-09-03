@@ -6,9 +6,9 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED, NOTICE_LINGER, Region, Regions,
-    SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for,
-    drag_action, hover_after, patience, repainted, scroll_mark, settled,
+    ARRIVING, ARRIVING_FRAME, Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED,
+    NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
+    WHEEL_ROWS, action_for, drag_action, hover_after, patience, repainted, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -2009,5 +2009,42 @@ fn a_asks_for_the_staged_run_and_no_other_key_does() {
         Some(Action::ToggleSingle),
         "the Alt fall-through is not uniform across the map, so B17's key is a \
          special case rather than an instance of what was already there"
+    );
+}
+
+#[test]
+fn an_effect_arms_the_loop_and_gives_the_clock_back_when_it_finishes() {
+    // I1 asserted on the fold rather than observed: nothing running leaves the wait
+    // untimed, and a running effect asks only as far as its next frame. The effect
+    // reports its own life now, so what this pins is that the answer reaches
+    // `patience` and that `None` there really does mean untimed.
+    let now = Instant::now();
+
+    assert_eq!(
+        patience(Deadlines::default(), now),
+        None,
+        "nothing running handed the loop a deadline, so an idle pane is timed"
+    );
+
+    let armed = patience(
+        Deadlines {
+            arriving: Some(now + ARRIVING_FRAME),
+            ..Deadlines::default()
+        },
+        now,
+    )
+    .expect("a running effect did not arm the loop, so it would freeze part-way");
+    assert!(
+        armed <= ARRIVING_FRAME,
+        "a running effect asked the loop to sleep {armed:?}, past the frame it is \
+         waiting for"
+    );
+
+    // And the whole effect is bounded by the pulse rung it decays into, so the ink
+    // and the sample grid cannot disagree about how long ago *now* was.
+    assert!(
+        ARRIVING < HISTORY_SAMPLE,
+        "an effect of {ARRIVING:?} outlives the {HISTORY_SAMPLE:?} the pulse rung \
+         is guaranteed"
     );
 }

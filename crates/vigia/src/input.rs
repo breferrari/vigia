@@ -446,6 +446,8 @@ pub struct Deadlines {
     pub notice: Option<Instant>,
     /// When the churn window next has to age.
     pub ageing: Option<Duration>,
+    /// When the fade on an arriving change is done, if one is still running.
+    pub arriving: Option<Instant>,
 }
 
 /// How long the loop may block before some clock here has to act.
@@ -457,6 +459,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.linger.map(since),
         due.notice.map(since),
         due.ageing,
+        due.arriving.map(since),
     ]
     .into_iter()
     .flatten()
