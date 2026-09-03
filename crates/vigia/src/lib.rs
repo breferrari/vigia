@@ -404,13 +404,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell
                         .history
                         .record_sized(sized(worktree.workdir(), &paths), began);
-                    // Only the status walk itself reaches here now, and a walk that
-                    // fails describes the whole tree rather than one path in it, so
-                    // the previous frame is still the best thing to draw and the
-                    // footer says why. What a *file* cannot supply is the file's own
-                    // note, which is `Error::of_one_file`: held as an error here, one
-                    // unreadable entry froze the pane for as long as it stayed
-                    // unreadable.
+                    // A walk that fails describes the whole tree rather than one
+                    // path in it, so the previous frame is still the best thing to
+                    // draw and the footer says why. One file's own failure never
+                    // reaches here: `Frame::diff` draws it instead.
                     match frame.advance() {
                         // Advance first, follow second, and the order is the whole of
                         // it: the path is looked up in the file list, and before the

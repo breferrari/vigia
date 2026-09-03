@@ -180,11 +180,9 @@ impl Worktree {
     /// Either side cannot be read: the working-tree file is unreadable, or the index names an
     /// object the database does not hold.
     ///
-    /// This is the primitive, and it is asked about one file, so it answers about
-    /// that file and reports the failure to the caller who asked. A monitor
-    /// serving a whole screen cannot: [`Frame::diff`](crate::Frame::diff) turns
-    /// the same failure into that file's own note, because one entry it cannot
-    /// read must not cost the entries beside it.
+    /// Asked about one file, so it reports that file's failure to the caller who
+    /// asked. [`Frame::diff`](crate::Frame::diff) draws the same failure instead,
+    /// because a frame serving a screen cannot lose the entries beside it.
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
         self.diff_counted(change, &mut 0)
     }
@@ -262,8 +260,25 @@ impl Worktree {
         // Counted, and that is what gives this branch a failing test.
         if change.maybe_symlink {
             *probes += 1;
-            if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
-                return Self::link_target(&full, rela_path);
+            if let Ok(kind) = std::fs::symlink_metadata(&full).map(|meta| meta.file_type()) {
+                if kind.is_symlink() {
+                    return Self::link_target(&full, rela_path);
+                }
+                // A directory, a fifo, a socket or a device node: git tracks none
+                // of them, so there are no bytes to compare. Every entry the status
+                // walk can name as something other than a plain file arrives here,
+                // which is why nothing forgives one after the read instead.
+                //
+                // It has to stop the read rather than tidy up after it: opening a
+                // fifo with no writer blocks until it has one, on the thread the
+                // pane draws from, and a monitor that stops redrawing is the defect
+                // this guard belongs to. The error a directory returns could not be
+                // matched on anyway, being `IsADirectory` on unix and
+                // `PermissionDenied` on Windows, which is also what a file nobody
+                // may read returns.
+                if !kind.is_file() {
+                    return Ok(Vec::new());
+                }
             }
         }
 
@@ -273,24 +288,7 @@ impl Worktree {
             // status named it and the moment we read it. That is ordinary, not
             // a failure: report it as empty and let the next frame correct us.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                // A nested repository is a directory, and status names it as one
-                // untracked entry with nothing to distinguish it from a file.
-                // Git stores no bytes for a directory, so empty is what it would
-                // compare.
-                //
-                // The type is asked rather than the error's kind, which is
-                // `IsADirectory` on unix and `PermissionDenied` on Windows:
-                // matching either forgives nothing on the other platform, and
-                // `PermissionDenied` is also what a file nobody may read
-                // returns. After the failed read rather than before it, so an
-                // ordinary file buys no syscall for a case it is not in.
-                *probes += 1;
-                if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir()) {
-                    return Ok(Vec::new());
-                }
-                return Err(Error::read(rela_path, source));
-            }
+            Err(source) => return Err(Error::read(rela_path, source)),
         };
 
         let mut filter = self.filter.borrow_mut();

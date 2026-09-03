@@ -100,11 +100,9 @@ fn one_unreadable_entry_leaves_every_other_file_diffable() {
 #[test]
 fn an_unreadable_row_is_re_read_rather_than_served_from_cache() {
     // A **removal**, deliberately, and not the modification the tests above use.
-    // A change with a working-tree side is refused reuse anyway, because the
-    // failed read took no fingerprint for one; a removal is computed from the
-    // left side alone, so reuse is granted outright on an unchanged kind and
-    // blob, and a failure would be served from cache for the life of the
-    // process. This is the only shape that can tell the guard from its absence.
+    // `reusable` grants reuse outright to a change with no working-tree side, on
+    // an unchanged kind and blob alone, so this is the shape where a failure put
+    // in the cache would be served back for the life of the process.
     let scratch = Scratch::new("core-blob-retry");
     scratch.write(GONE, "one\n");
     scratch.commit_all("baseline");
@@ -189,11 +187,106 @@ fn a_files_height_recovers_when_the_file_does_and_no_diff_is_asked_for() {
     frame.advance().expect("advance");
     let healed = index_of(&frame, GONE);
     let rows = frame.rows_of(healed, rows_of).expect("height");
+
+    // Against a frame that never saw the failure, rather than against a number:
+    // what this file is worth is the diff's business, and the claim here is only
+    // that carrying a failure through does not change it.
+    let mut fresh = worktree.frame();
+    fresh.advance().expect("advance");
+    let oracle = fresh
+        .rows_of(index_of(&fresh, GONE), rows_of)
+        .expect("height");
     assert!(
-        rows > 2,
+        oracle > 2,
+        "the oracle draws a note too, so this would pass on a frame that never \
+         recovered"
+    );
+    assert_eq!(
+        rows, oracle,
         "the height stayed at the note after the file became readable, so a \
          reader who never scrolls to it keeps a scrollbar scaled to a diff \
          nobody draws"
+    );
+}
+
+#[test]
+fn a_file_that_fails_after_it_diffed_does_not_keep_the_height_it_had() {
+    let scratch = Scratch::new("core-blob-then-fails");
+    scratch.write(GONE, "one\n");
+    scratch.commit_all("baseline");
+    scratch.write(GONE, "one\ntwo\n");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let index = index_of(&frame, GONE);
+    frame.diff(index).expect("the file reads on the first tick");
+    let whole = frame.rows_of(index, rows_of).expect("height");
+    assert!(
+        whole > 2,
+        "the fixture draws a note before it is broken, so nothing here is tested"
+    );
+
+    // `fill_span` takes a diff in hand without revalidating it, so a diff left in
+    // the cache by the tick that succeeded is a height nothing draws.
+    scratch.point_at_a_missing_blob(GONE);
+    frame.advance().expect("advance");
+    let index = index_of(&frame, GONE);
+    assert!(
+        frame.diff(index).expect("contained").1.unreadable.is_some(),
+        "the fixture stopped breaking the file this test is about"
+    );
+    let now = frame.rows_of(index, rows_of).expect("height");
+    assert_eq!(
+        now, 2,
+        "the height still describes the diff from before the file stopped \
+         reading, so the scrollbar is scaled to rows the pane does not draw"
+    );
+}
+
+/// A fifo is one of the four things `gix` calls untrackable, and the only class
+/// where reading the entry does not fail but blocks: `open` on a pipe with no
+/// writer waits for one, on the thread the pane draws from.
+#[cfg(unix)]
+#[test]
+fn a_fifo_in_the_worktree_does_not_hang_the_frame() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let scratch = Scratch::new("core-fifo");
+    scratch.write(KEPT, "one\n");
+    scratch.commit_all("baseline");
+    scratch.write(KEPT, "one\ntwo\n");
+    let made = std::process::Command::new("mkfifo")
+        .arg(scratch.path_of("pipe"))
+        .status()
+        .is_ok_and(|status| status.success());
+    assert!(
+        made,
+        "mkfifo is not available, so this gate asserts nothing"
+    );
+
+    let root = scratch.root().to_path_buf();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let worktree = vigia_core::Worktree::discover(&root).expect("discover");
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let drawn: Vec<bool> = (0..frame.files().len())
+            .map(|index| frame.diff(index).is_ok())
+            .collect();
+        let _ = tx.send(drawn);
+    });
+
+    // A bound rather than an assertion about speed: the failure this names is
+    // unbounded, so any bound tells it from a pass. Detached on purpose, since a
+    // thread parked in `open` never returns and the harness exits over it.
+    let drawn = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the frame is still inside a read of the pipe");
+    assert!(
+        drawn.iter().all(|ok| *ok),
+        "a fifo is an entry to skip, not a failed frame: {drawn:?}"
     );
 }
 
