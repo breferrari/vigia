@@ -1544,22 +1544,52 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
     );
 }
 
+/// The release raises the version through the script the gate above proves.
+#[test]
+fn the_bump_workflow_runs_the_script_the_gate_proves() {
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let step = step_block(&bump, "raise the version");
+    assert!(
+        step.contains("sh .github/scripts/raise-version.sh '${{ steps.version.outputs.next }}'"),
+        "bump.yml's raise step does not run raise-version.sh with the computed version, \
+         so the gate over the script proves nothing about the release: {step}"
+    );
+    // The gate that drives the script is Unix only, which is sound while the
+    // job that runs it stays on a Unix runner.
+    let runs_on = bump
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("runs-on:"))
+        .map(str::trim)
+        .expect("bump.yml declares a runner");
+    assert_eq!(
+        runs_on, "ubuntu-latest",
+        "the bump moved to {runs_on:?}, so the Unix-only gate over raise-version.sh \
+         no longer covers where it runs"
+    );
+}
+
 /// What each document is allowed to weigh, in bytes.
-const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
+///
+/// The two a session reads before anything else are in the table, because
+/// they sit in the same context window as the work: a rule stated three
+/// times in the skill costs the pass the room it needs to reason.
+const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 387259),
     ("REVOCATIONS.md", 4393),
     ("ROADMAP.md", 95473),
     ("RULINGS.md", 94676),
+    ("CLAUDE.md", 17304),
+    (".claude/skills/take-next/SKILL.md", 25813),
 ];
 
-/// What the four together are allowed to weigh.
+/// What the documents together are allowed to weigh.
 ///
 /// A ceiling may rise only while another falls by at least as much. The per-file
 /// checks cannot see that trade; this exists to.
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 581801;
+const WRITTEN_LAYER_TOTAL: usize = 624918;
 
 /// Each document weighs no more than its budget.
 #[test]

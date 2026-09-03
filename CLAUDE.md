@@ -35,7 +35,7 @@ ls ~/.cargo/registry/src/*/ratatui-core-*/src/buffer/          # the sources, ad
 cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="ratatui-core") | .manifest_path'
 ```
 
-**Never run `find /` on Windows.** Under Git Bash `/` is the MSYS root (`C:\Program Files\Git\`), so `~/.cargo` is not under it and no match is possible; and MSYS mounts the Windows registry as directories at `/proc/registry`, `/proc/registry32` and `/proc/registry64`, so the walk enumerates the hives twice through live Win32 calls and never terminates. Six of these, left orphaned by sessions that moved on, burned 26.8 CPU-hours over five hours on 2026-08-18. Bound any exploratory scan with `timeout`, and prefer Glob or Grep pointed at an explicit path.
+**Never run `find /` on Windows.** Under Git Bash `/` is the MSYS root, which mounts the Windows registry as directories under `/proc`, so the walk never terminates, and `~/.cargo` is not under it anyway. `.claude/scripts/scan-guard.mjs` refuses the call. Bound any exploratory scan with `timeout`, and prefer Glob or Grep pointed at an explicit path.
 
 `gix` was the least-precedented dependency here (`delta` uses `git2`/libgit2 instead, likely for age reasons), so Phase 1 proved it before anything was built on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and every Phase 1 budget holds with room. Evidence and the one constraint it came with are in `SPEC.md` §10.
 
@@ -93,7 +93,7 @@ Two tools, and picking the wrong one is the common mistake. **The test is whethe
 
 **`record_work`** files what happened **here** into the vault. Use it at the end of a real piece of work. Write it for a session that will not have your context and cannot re-read your diff, so fill every field you can: `summary`, `changes` (one line per file, what and why), `decisions` (especially where you rejected an alternative), `learned` (surprises and near-misses), `open` (unresolved threads nobody should assume are handled), `verification` (tests run and their result, failures stated honestly). `kind: "decision"` files it as a decision record; `informed_by` credits the notes you actually read.
 
-**If it is refused for tool-call markup, do NOT re-send the same shape** — it folds again. **Retry smaller in TOTAL SIZE, not merely in field count**: a call with fewer fields but a longer body has been refused where a wider, shorter one succeeded. Send the required fields with the prose trimmed, let that write land, then add the rest in a follow-up call. Two records that arrive beat one that never does. The same fold hits `remember`, so this is not a `record_work` quirk. **The mechanism is not settled** — do not repeat one. **The cost, so you choose it knowingly:** the fields you drop survive as prose in the body but stop being queryable as fields. Tracked as [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244).
+**If a write is refused for tool-call markup, retry once smaller in total size** (the required fields, prose trimmed), then file the note by hand under `projects/vigia/notes/` and comment on [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244). The same fold hits `remember`. Fields you drop survive as prose but stop being queryable.
 
 Rule of thumb: **a `gix` limitation that would bite any Rust project is a `remember`** — and note that it is `scope: "platform"` with `platforms: ["rust"]`, not `general`, which is exactly the call this section exists to get right. **"Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
 
@@ -101,42 +101,15 @@ Before finishing work that changed or clarified a decision here, write it down. 
 
 ## Bias to building
 
-**The budgets have room and this section exists because that stopped being obvious.** The frame budget is 16ms and the tool runs at **2.4ms p50, 3.1ms p99**, which is five times the headroom. Refusing a feature on cost, in a tool with that much slack, needs the slack quoted alongside the cost or it is not an argument.
+**The default is build, and a refusal needs a reason that survives being checked.** `SPEC.md` §0 carries the rules for citing the record, and every reader passes it: a ruling is its reason plus a date, a reason naming an absence expires fastest, an invariant's own words have to reach the case, a budget arrives with its current headroom, and a reason that collapses reopens the question. Four rows of Phase 8 spent a session each on a decline, and one was reopened because both of its reasons were false. The frame path runs at **2.4ms p50** against a 16ms budget, so a cost cited without that headroom is a mood, not a measurement.
 
-### A cost measured in isolation is not a budget
+Three rules that are this file's rather than the spec's:
 
-**Measure the whole, not the part, and measure it before the cost is allowed to restrict anything.** A component timed on its own answers a question nobody asked. What decides whether something is affordable is the thing it sits inside, measured with and without it, interleaved, with both numbers quoted.
+- **Measure the whole, not the part, and before the cost restricts anything.** Two fixtures, the same workload with and without the thing being priced, interleaved so a loaded machine moves both. A zero from a clock is a quantum until timed across enough repetitions to clear it: `GetThreadTimes` steps at 15.625ms on Windows and read a 2.60ms burst as nothing. A cap is a feature restriction and needs the same bar as a refusal; measured in situ, a sizing cap read 17.93ms against 18.43ms unsized and was deleted.
+- **What ships is what was asked for and nothing narrower.** A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here ([#272](https://github.com/breferrari/vigia/issues/272) imported `delta`'s wrap cap, and the reader had to say twice that he never asked for it). A limit nobody asked for is a refusal wearing a yes, and it is the harder kind to see.
+- **A session's own prior decision is a record of what was done, not permission withheld.** Name the reader's decisions; never cite a session's as a constraint on him.
 
-This rule exists because it was broken twice in one session, on the same 256-path burst, in opposite directions:
-
-- **Once on a wall clock.** 2.38ms p50 on a machine running four agents and a build. The feature was one edit from being capped at a quarter of its range on a number that was mostly contention.
-- **Once on a CPU clock that could not see it.** `GetThreadTimes` reports in 15.625ms steps on Windows, so the burst read **0ns** and that was taken as evidence the cost was off-CPU and therefore the host's. Timed across enough rounds to clear the quantum it is 2.60ms of genuine CPU, so the cap went back.
-
-Both readings were about the syscall alone. **Neither measured the frame the syscall sits in**, and that is the only number that decides anything. Measured properly, interleaved over thirty rounds of a hundred-file bulk rewrite, a frame costs **18.43ms sizing nothing, 17.39ms sizing sixty-four paths and 17.93ms sizing all 256**: the *unsized* run is the slowest of the three, because the status walk on the same wake has already stat'd every one of those files and the metadata is warm. The cost is unmeasurable in situ and the cap was deleted.
-
-So, before a number restricts a feature:
-
-- **A zero from a clock is a quantum until proven otherwise.** Time it across enough repetitions to clear the resolution, or you are reading the instrument rather than the code.
-- **Two fixtures, not one.** Same workload, with and without the thing being priced, interleaved so a loaded machine moves both. A single number has nothing to be compared against and will be compared against a budget instead.
-- **Quote the headroom and the whole**, not the component. "2.6ms against 16ms" is an argument about a syscall; "17.93ms against 18.43ms unsized" is an argument about the product.
-- **A cap is a feature restriction and needs the same bar as a refusal.** It draws a worse graph for the reader, permanently, on the strength of a number. Duplicated work that costs nothing measurable is an efficiency row to file, never a reason to ship less.
-
-**The tell is the shape of the work:** if the measurement's only possible use is to justify spending less, and the thing it protects has not been measured, the bias has already won.
-
-Four rows of Phase 8 spent a full session each and delivered a **decline**. One has since been reopened because *both* reasons it rested on were false: the first was an invariant whose budget could never have measured the case, and the second was an absence (*"the takeover does not enable focus reporting"*) that was one unwritten line rather than a fact about the world. Two other refusals in the same phase cited the same invariant and it did not reach either.
-
-So, when a reader asks for something:
-
-- **The default is build.** A refusal overrides the person whose product this is, so it needs a reason that survives being checked, not one that merely sounds sound.
-- **Before citing an invariant, quote the row's own words and show it reaches this case.** I1's budget is *0 wakeups while idle*; neither pointer motion nor a held button is idle. A budget cited without its current headroom is a mood, not a measurement.
-- **Check facts about the world against the world.** Read the dependency in `~/.cargo/registry`, and search the web. *"No API reports that"* is the claim most likely to be a year out of date, and it has been wrong here twice.
-- **A reason that collapses reopens the question.** It does not get replaced by a better reason for the same conclusion. That happened to [#123](https://github.com/breferrari/vigia/issues/123) and the decline outlived both of its bases.
-- **Reach a decline early or not at all.** The reason either holds under checking or it does not, and that is cheap. Hours spent after that point are spent justifying, and the tell is prose getting longer while the argument does not get stronger.
-- **Size the rigor to the surface, and do not escalate past it.** Look and feel is `/simplify` plus a screenshot; the audit loop is for the frame path and the invariants. `ROADMAP.md` has said so since Phase 8 opened and it was overridden anyway.
-- **A limit you were not asked for is a refusal wearing a yes.** Everything above covers *no*. It did not cover [#272](https://github.com/breferrari/vigia/issues/272): nobody declined to build wrapping, a session built it and imported `delta --wrap-max-lines`' default of two as a cap, and the reader had to say twice that he never asked for it. What ships is what was asked for and nothing narrower. A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here.
-- **Never cite a session's own prior decision as a constraint on the reader.** Evidence, yes. Decisions he made, yes, and naming them is a service. A ruling a session wrote is a record of what was done, not permission withheld.
-
-Refusals deserve more scrutiny than builds, not less, and an unrequested limit deserves the most of all: a refusal is at least visible, while a feature delivered narrower than it was asked for leaves nothing to see.
+Size the rigor to the surface: look and feel is `/simplify` plus a screenshot, and the audit loop is for the frame path and the invariants.
 
 ## Rulings say who made them
 
@@ -179,7 +152,7 @@ Pick the level from the diff. On `0.x` a new feature **and** a breaking public A
 
 ## House rules
 
-- **No agent-session artifacts in anything that lands in the repo.** No `claude.ai/code/session_*` URL, no `Claude-Session:` trailer, no local absolute path — not in commit messages, PR or issue bodies, or files. `Co-Authored-By:` is fine and wanted.
+- **No agent-session artifacts in anything that lands in the repo.** No `claude.ai/code/session_*` URL, no `Claude-Session:` trailer, no local absolute path — not in commit messages, PR or issue bodies, or files. `Co-Authored-By:` is fine and wanted. `.claude/scripts/leak-guard.mjs` refuses a `gh` publish or a `git commit` carrying one, and `sh .claude/scripts/selftest.sh` exercises every guard offline.
 - **No em-dashes** in anything published under Brenno's name: README prose, release notes, issue and PR bodies, commit messages. Use a period, a comma, a colon, or parentheses.
 - Probe capability by behaviour, never by asking. A single green run is not evidence when the defect is non-deterministic.
 - Verify the whole artifact, not just the property you were fixing.

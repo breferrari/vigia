@@ -332,7 +332,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ⬜ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
 | ✅ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
-| ⬜ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
+| ✅ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
 | ⬜ | `MIN_TICKS` restates `MIN_FRAMES`, and the queue it looks like it guards is unbounded | [#114](https://github.com/breferrari/vigia/issues/114) |
 | ⬜ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
 | ⬜ | 0.1.1: trusted publishing, so the crates.io token stops existing | [#141](https://github.com/breferrari/vigia/issues/141) |
@@ -365,7 +365,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The mutation harness is re-improvised every pass, and the same footgun has fired in four of them | [#299](https://github.com/breferrari/vigia/issues/299) |
 | ⬜ | A PR reached ready, mergeable and never checked, because the push and the ready raced | [#301](https://github.com/breferrari/vigia/issues/301) |
 | A draft PR shows a red `ci complete`, and a draft-era run can cancel the real one | #267, 2026-08-23 | Shelf, taken | Instrument work, and the same `cancel-in-progress` grouping #301 records from the other direction. Closed by [#274](https://github.com/breferrari/vigia/issues/274). |
-| ⬜ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
+| ✅ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
 | ✅ | The pre-flight read a truncated board and called it drift | [#369](https://github.com/breferrari/vigia/issues/369) |
 | ⬜ | The pre-flight's cheapest loop is its slowest | [#371](https://github.com/breferrari/vigia/issues/371) |
 | ⬜ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |

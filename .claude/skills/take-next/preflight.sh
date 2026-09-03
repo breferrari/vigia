@@ -155,7 +155,7 @@ sed -n '/^## 10\./,/^## 11\./p' "$tmp/spec.md" | grep -E '^- \[ \]' | cut -c1-16
 say "6. milestone drift — step 1's answer vs the roadmap's section order:"
 if [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
   gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" > "$tmp/ms.json"
-  step1=$(jq -r '[ .[] | select(.open_issues > 0) | select((.description // "") | startswith("Shelf:") | not) | { order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title } ] | sort_by(.order, .title) | .[0].title // empty' "$tmp/ms.json" | tr -d '\r')
+  step1=$(NEXT_MILESTONES_FILE="$tmp/ms.json" sh "$(dirname "$0")/next.sh" | sed -n 's/^milestone: //p' | tr -d '\r')
   grep -oE '^## Phase [0-9]+.*' "$tmp/roadmap.md" | sed 's/^## //' | tr -d '\r' > "$tmp/order.txt"
   jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/withwork.txt"
   jq -r '.[] | select(.open_issues > 0) | select((.description // "") | startswith("Shelf:")) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/shelved.txt"
