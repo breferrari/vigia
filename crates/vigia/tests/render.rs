@@ -3234,6 +3234,14 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     let region = laid.diff.top..laid.diff.top + laid.diff.rows;
     let rows = usize::from(region.end - region.start);
 
+    // A screen the walk could actually produce: a diff taller than the region fills
+    // it, and the thumb spans the rows of the diff on screen rather than the rows of
+    // the terminal, so a fixture drawing two of them would floor the thumb at one row
+    // whatever the total was.
+    let full: Vec<Row> = (0..rows)
+        .map(|i| line(LineKind::Context, 38 + i as u32, "fn coalesce(&mut self) {"))
+        .collect();
+
     // A thumb that halves when the diff doubles, which is the proportionality no
     // file-counting scheme can express.
     let mut lengths = Vec::new();
@@ -3241,6 +3249,7 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
         let view = View {
             total_rows: total,
             rows_above: 0,
+            rows: full.clone(),
             ..a_list_of(3, 3, 0)
         };
         let marks = thumb_rows(
@@ -3266,6 +3275,7 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
         let view = View {
             total_rows: total,
             rows_above: above,
+            rows: full.clone(),
             ..a_list_of(3, 3, 0)
         };
         let marks = thumb_rows(
@@ -4435,6 +4445,13 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         // The track, not the region.
         let track = stepped_track(region.clone());
         // The viewport actually on its last screenful, which this fixture never was.
+        // Its rows are filled to the region for the reason
+        // `the_diff_scrollbar_is_proportional_to_the_rows_it_shows` gives: a screenful
+        // is the rows of the diff on screen, so `rows_above` below only means *the
+        // last screenful* on a screen that holds one.
+        view.rows = (0..rows)
+            .map(|i| line(LineKind::Context, 38 + i as u32, "fn coalesce(&mut self) {"))
+            .collect();
         view.total_rows = span;
         view.rows_above = span.saturating_sub(rows);
         view.top = Position {
