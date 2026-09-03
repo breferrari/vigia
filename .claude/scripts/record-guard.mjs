@@ -37,7 +37,9 @@ const run = (cmd, args) => {
 
 const branch = run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
 if (!branch || branch === "main" || branch === "HEAD") process.exit(0);
-const issue = /(?:^|[^0-9])([0-9]{1,5})(?:[^0-9]|$)/.exec(branch)?.[1];
+// `issue-<n>-<slug>` is the convention and `<n>-<slug>` the older one. A number
+// anywhere else in a name, such as a date, is not an issue.
+const issue = /^(?:issue-)?([0-9]{1,5})(?:-|$)/.exec(branch)?.[1];
 if (!issue) process.exit(0);
 
 const state = process.env.RECORD_GUARD_STATE ?? run("gh", ["pr", "view", "--json", "state", "--jq", ".state"]);

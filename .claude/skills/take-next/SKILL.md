@@ -87,7 +87,7 @@ search   the decision you are about to touch
 recall   accumulated constraints; empty early, and empty is not evidence of none
 ```
 
-Consulting the vault is deliberate, not reflexive: know which of the three you are asking for. Strategic context loaded while writing a public commit message is how it leaks, and the commit guard checks for session artifacts only.
+Consulting the vault is deliberate, not reflexive: know which of the three you are asking for. Strategic context loaded while writing a public commit message is how it leaks, and the commit guard catches session artifacts (URLs, trailers, local paths), not strategy.
 
 ## 3. Plan it, in plan mode, before touching code
 

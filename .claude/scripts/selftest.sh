@@ -36,6 +36,9 @@ expect scan-guard.mjs 2 "find rooted at / is blocked" 'find / -name "*.rs"'
 expect scan-guard.mjs 2 "find with a flag before / is blocked" 'find -L / -name x'
 expect scan-guard.mjs 2 "find / after a separator is blocked" 'cd x && find / -type d'
 expect scan-guard.mjs 0 "a bounded find is allowed" 'timeout 10 find / -name x'
+expect scan-guard.mjs 0 "a timeout with flags is still a bound" 'timeout -k 5 10 find / -name x'
+expect scan-guard.mjs 2 "a timeout on an earlier command bounds nothing here" 'timeout 10 ls; find / -name x'
+expect scan-guard.mjs 2 "a timeout before a pipe bounds nothing after it" 'timeout 10 ls | find / -name x'
 expect scan-guard.mjs 0 "find under a real path is allowed" 'find /c/Dev/vigia -name "*.rs"'
 expect scan-guard.mjs 0 "find in the checkout is allowed" 'find . -name "*.rs"'
 expect scan-guard.mjs 0 "a / that is not a start path is allowed" 'ls / && grep -r foo /c/x'
@@ -79,6 +82,10 @@ printf 'Closed #420 instead.\n' > "$VAULT/projects/vigia/notes/2026-01-01-a-note
 stop s3 2 "a note naming a longer number does not"
 git -C "$REPO" checkout -q -b no-issue-here
 stop s4 0 "a branch with no issue number is left alone"
+git -C "$REPO" checkout -q -b release-2026-09-03
+stop s6 0 "a date in a branch name is not an issue"
+git -C "$REPO" checkout -q -b 42-thing
+stop s7 2 "the older <n>-<slug> branch shape still names its issue"
 git -C "$REPO" checkout -q -b issue-7-x
 jq -n --arg cwd "$REPOW" '{cwd: $cwd, session_id: "s5", stop_hook_active: true}' \
   | RECORD_GUARD_STATE=MERGED CLAUDE_PROJECT_DIR="$REPOW" VIGIL_VAULT="$VAULTW" TMP="$FIXW" TEMP="$FIXW" node "$HERE/record-guard.mjs" >/dev/null 2>&1

@@ -22,8 +22,11 @@ const rooted = /(?:^|[\s;&|(])find\s+(?:-[A-Z]\s+)*\/(?=\s|$)/;
 const m = rooted.exec(command);
 if (!m) process.exit(0);
 
-// A walk bounded by `timeout` is what CLAUDE.md asks for instead.
-if (/\btimeout\s+\S+\s*.$/.test(command.slice(0, m.index + 1))) process.exit(0);
+// A walk bounded by `timeout` is what CLAUDE.md asks for instead. The bound
+// has to sit on this command: a `timeout` in an earlier command of the same
+// line, past a `;` or a pipe, bounds nothing here.
+const simple = command.slice(0, m.index + 1).split(/\n|;|&&|\|\|?/).pop() ?? "";
+if (/(?:^|\s)timeout\s/.test(simple)) process.exit(0);
 
 console.error(
 	"BLOCKED: `find /` walks the MSYS root, which mounts the Windows registry under /proc and never terminates.\n" +

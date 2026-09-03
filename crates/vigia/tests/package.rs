@@ -1579,7 +1579,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("ROADMAP.md", 95473),
     ("RULINGS.md", 94676),
     ("CLAUDE.md", 17304),
-    (".claude/skills/take-next/SKILL.md", 25777),
+    (".claude/skills/take-next/SKILL.md", 25813),
 ];
 
 /// What the documents together are allowed to weigh.
@@ -1589,7 +1589,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 624882;
+const WRITTEN_LAYER_TOTAL: usize = 624918;
 
 /// Each document weighs no more than its budget.
 #[test]
