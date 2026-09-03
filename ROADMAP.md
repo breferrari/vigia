@@ -329,7 +329,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them | [#98](https://github.com/breferrari/vigia/issues/98) |
 | ⬜ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
-| ⬜ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
+| ✅ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
 | ⬜ | The clipboard write's failure branch is unreachable by any test | [#392](https://github.com/breferrari/vigia/issues/392) |
 | ⬜ | `sheet.rs` restates two dozen constants the table's own length implies | [#393](https://github.com/breferrari/vigia/issues/393) |
 | ⬜ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
