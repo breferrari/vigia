@@ -189,6 +189,7 @@ impl Worktree {
             return Ok(FileDiff {
                 path: change.path.clone(),
                 binary: false,
+                unreadable: None,
                 hunks: Vec::new(),
                 added: 0,
                 removed: 0,
@@ -276,7 +277,24 @@ impl Worktree {
             // status named it and the moment we read it. That is ordinary, not
             // a failure: report it as empty and let the next frame correct us.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => return Err(Error::read(rela_path, source)),
+            Err(source) => {
+                // A nested repository is a directory, and status names it as one
+                // untracked entry with nothing to distinguish it from a file.
+                // Git stores no bytes for a directory, so empty is what it would
+                // compare.
+                //
+                // The type is asked rather than the error's kind, which is
+                // `IsADirectory` on unix and `PermissionDenied` on Windows:
+                // matching either forgives nothing on the other platform, and
+                // `PermissionDenied` is also what a file nobody may read
+                // returns. After the failed read rather than before it, so an
+                // ordinary file buys no syscall for a case it is not in.
+                *probes += 1;
+                if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir()) {
+                    return Ok(Vec::new());
+                }
+                return Err(Error::read(rela_path, source));
+            }
         };
 
         let mut filter = self.filter.borrow_mut();

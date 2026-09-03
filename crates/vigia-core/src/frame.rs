@@ -481,8 +481,16 @@ impl<'w> Frame<'w> {
                 (span, Some(Taken::of(change, worktree)))
             }
             // A failed read describes nothing, so it is recorded with no evidence at
-            // all and [`Measured::taken`] carries why that matters.
-            Err(_) => (FileSpan::default(), None),
+            // all and [`Measured::taken`] carries why that matters. The flag is set
+            // by the rule [`Frame::diff`] uses, so this walk's height and the screen
+            // agree: a row that draws a note is two rows rather than one.
+            Err(e) => (
+                FileSpan {
+                    unreadable: e.of_one_file().is_some(),
+                    ..FileSpan::default()
+                },
+                None,
+            ),
         };
         let measured = Measured {
             taken,
@@ -501,7 +509,11 @@ impl<'w> Frame<'w> {
     ///
     /// # Errors
     ///
-    /// The file at `index` cannot be diffed, which is a read of either side.
+    /// The comparison fails in a way that is not one file's: [`Error::of_one_file`]
+    /// decides which, and a failure that names a single path becomes that file's
+    /// note instead.
+    ///
+    /// [`Error::of_one_file`]: crate::Error::of_one_file
     pub fn diff(&mut self, index: usize) -> Result<(&FileChange, &FileDiff)> {
         let change = &self.files[index];
         let path = self.worktree.workdir().join(&change.path);
@@ -512,10 +524,18 @@ impl<'w> Frame<'w> {
         let mut probed = false;
         let reuse = match self.cached.get(change) {
             None => false,
-            Some(cached) => reusable(&cached.taken, change, || {
-                probed = true;
-                fingerprint(&path)
-            }),
+            // A diff that failed is not evidence about the next tick, so the entry
+            // is re-read until it reads. Without this a failure on a side with no
+            // working-tree half, which `reusable` answers `true` for outright,
+            // would be served from cache for the life of the process. The `&&`
+            // short-circuits, so no `stat` is spent proving what will be re-read.
+            Some(cached) => {
+                cached.diff.unreadable.is_none()
+                    && reusable(&cached.taken, change, || {
+                        probed = true;
+                        fingerprint(&path)
+                    })
+            }
         };
         self.stats.probes += u64::from(probed);
 
@@ -537,15 +557,30 @@ impl<'w> Frame<'w> {
         let mut probes = 0;
         let computed = self.worktree.diff_counted(change, &mut probes);
         self.stats.probes += probes;
-        let diff = computed?;
-        let worktree = if change.reads_worktree() {
-            self.stats.probes += 1;
-            fingerprint(&path).map(|print| Observed {
-                print,
-                settled: settled(print.mtime, read_started),
-            })
-        } else {
-            None
+        let (diff, worktree) = match computed {
+            Ok(diff) => {
+                let worktree = if change.reads_worktree() {
+                    self.stats.probes += 1;
+                    fingerprint(&path).map(|print| Observed {
+                        print,
+                        settled: settled(print.mtime, read_started),
+                    })
+                } else {
+                    None
+                };
+                (diff, worktree)
+            }
+            // One path's own failure costs that path a note and nothing else. Held
+            // as an error it ended the whole comparison, which left the shell
+            // holding the previous frame for as long as the entry stayed
+            // unreadable, and a stale pane is indistinguishable from a quiet tree.
+            //
+            // No fingerprint is taken: nothing was read for one to describe, and
+            // the reuse test above already refuses this entry.
+            Err(e) => match e.of_one_file() {
+                Some(reason) => (FileDiff::failed(change.path.clone(), reason), None),
+                None => return Err(e),
+            },
         };
 
         self.stats.computed += 1;

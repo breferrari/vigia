@@ -38,6 +38,30 @@ pub enum Error {
 }
 
 impl Error {
+    /// What one file's own failure was, or `None` when the failure is not one
+    /// file's.
+    ///
+    /// The frame path contains the first, so an entry it cannot read costs that
+    /// entry and not the frame: a permanent failure would otherwise hold the
+    /// previous picture forever, and a stale pane is indistinguishable from a
+    /// quiet tree. The second is propagated, because a failure the whole
+    /// comparison shares leaves nothing to vouch for the rest of it.
+    ///
+    /// The reason carries no path. Its caller has one, and at the widths I6 is
+    /// named for a repeated path is what pushes the reason off the edge.
+    pub fn of_one_file(&self) -> Option<String> {
+        match self {
+            Error::Read { source, .. } => Some(source.to_string()),
+            Error::Filter { source, .. } => Some(format!("could not be normalised: {source}")),
+            Error::MissingBlob { .. } => Some("the index names a missing blob".to_owned()),
+            Error::Discover(_)
+            | Error::Bare
+            | Error::Status(_)
+            | Error::Watch(_)
+            | Error::FilterSetup(_) => None,
+        }
+    }
+
     /// A working-tree path could not be read.
     pub(crate) fn read(path: &str, source: std::io::Error) -> Self {
         Error::Read {
