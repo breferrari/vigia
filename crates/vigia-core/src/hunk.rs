@@ -51,6 +51,10 @@ pub struct FileDiff {
     pub path: String,
     /// True when either side sniffed as binary; `hunks` is then empty.
     pub binary: bool,
+    /// Why this file has no hunks, when the reason is that a side of it could
+    /// not be read. Empties `hunks` the same way `binary` does, and carries no
+    /// path: whatever draws it has one.
+    pub unreadable: Option<String>,
     /// Hunks in file order.
     pub hunks: Vec<Hunk>,
     /// Total added lines.
@@ -66,6 +70,28 @@ pub struct FileDiff {
     pub first_line: Option<String>,
     /// Bytes compared: index-side content plus worktree-side content.
     pub bytes: u64,
+}
+
+impl FileDiff {
+    /// A file with no hunks, and why it has none: `Some` where a side of it
+    /// could not be read, `None` for a state this crate deliberately reads
+    /// nothing for.
+    ///
+    /// Nothing was read either way, so there is no first line and nothing
+    /// should resolve a grammar from one.
+    pub(crate) fn without_hunks(path: String, unreadable: Option<String>) -> Self {
+        Self {
+            path,
+            binary: false,
+            unreadable,
+            hunks: Vec::new(),
+            added: 0,
+            removed: 0,
+            lines: 0,
+            first_line: None,
+            bytes: 0,
+        }
+    }
 }
 
 /// Whether `data` should be treated as binary.
@@ -96,6 +122,11 @@ pub struct FileSpan {
     pub lines: u32,
     /// True when either side sniffed as binary, so there are no hunks to draw.
     pub binary: bool,
+    /// True when the read this span would have been taken from failed, so the
+    /// screen draws a note where the hunks would be. Carried here and not only
+    /// on the diff because this walk decides how tall the file is, and a row
+    /// with a note under it is two rows rather than one.
+    pub unreadable: bool,
     /// Bytes compared to reach this answer.
     pub bytes: u64,
 }
@@ -107,6 +138,7 @@ impl From<&FileDiff> for FileSpan {
             hunks: diff.hunks.len() as u32,
             lines: diff.hunks.iter().map(|hunk| hunk.lines.len() as u32).sum(),
             binary: diff.binary,
+            unreadable: diff.unreadable.is_some(),
             bytes: 0,
         }
     }
@@ -156,6 +188,7 @@ pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
             hunks: 0,
             lines: 0,
             binary: true,
+            unreadable: false,
             bytes,
         };
     }
@@ -188,6 +221,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
         return FileDiff {
             path,
             binary: true,
+            unreadable: None,
             hunks: Vec::new(),
             added: 0,
             removed: 0,
@@ -284,6 +318,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
     FileDiff {
         path,
         binary: false,
+        unreadable: None,
         hunks,
         added,
         removed,

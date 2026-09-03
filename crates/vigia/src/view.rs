@@ -291,7 +291,7 @@ pub enum Row {
         indent: usize,
     },
     /// Why a file has no lines under it.
-    Note(&'static str),
+    Note(String),
     /// The blank row that closes a file's block.
     Gap,
 }
@@ -530,12 +530,14 @@ fn source_of(kind: &ChangeKind) -> Option<&str> {
 }
 
 /// The one-line stand-in for a file with no line-level diff, if it needs one.
-fn note_for(kind: &ChangeKind, diff: &FileDiff) -> Option<&'static str> {
+fn note_for<'a>(kind: &ChangeKind, diff: &'a FileDiff) -> Option<&'a str> {
     match kind {
         ChangeKind::Conflict => Some("unresolved conflict"),
         ChangeKind::TypeChange => Some("type changed"),
-        _ if diff.binary => Some("binary"),
-        _ => None,
+        _ => diff
+            .unreadable
+            .as_deref()
+            .or_else(|| diff.binary.then_some("binary")),
     }
 }
 
@@ -717,8 +719,11 @@ fn entry_of(kind: &ChangeKind, origin: Origin, diff: &FileDiff, history: &Histor
 /// How many rows a file occupies, from its span rather than from its diff.
 pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> usize {
     // A note is a heading and one line saying why, which is exactly what
-    // `note_for` produces for the same three cases.
-    if matches!(change.kind, ChangeKind::Conflict | ChangeKind::TypeChange) || span.binary {
+    // `note_for` produces for the same four cases.
+    if matches!(change.kind, ChangeKind::Conflict | ChangeKind::TypeChange)
+        || span.binary
+        || span.unreadable
+    {
         return 2;
     }
     1 + span.hunks as usize + span.lines as usize
@@ -1316,7 +1321,7 @@ impl View {
                     crate::render::span(*new_start, *new_lines)
                 )
             }
-            Row::Note(note) => (*note).to_owned(),
+            Row::Note(note) => note.clone(),
             Row::Gap => String::new(),
         }
     }
@@ -1390,7 +1395,7 @@ impl View {
         'block: {
             if let Some(note) = note_for(kind, diff) {
                 if n >= skip && self.rows.len() < height {
-                    self.rows.push(Row::Note(note));
+                    self.rows.push(Row::Note(note.to_owned()));
                 }
                 n += 1;
                 break 'block;
@@ -1502,6 +1507,7 @@ mod tests {
         FileDiff {
             path: "src/lib.rs".to_owned(),
             binary: false,
+            unreadable: None,
             hunks,
             added: 0,
             removed: 0,

@@ -173,7 +173,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | The drag's wash outlives the gesture, and sending it needs a second key. **Reported from use** | [#386](https://github.com/breferrari/vigia/issues/386) |
-| ⬜ | A nested git repository in the work tree stops the pane from ever advancing again. **Reported from use** | [#378](https://github.com/breferrari/vigia/issues/378) |
+| ✅ | A nested git repository in the work tree stops the pane from ever advancing again. **Reported from use** | [#378](https://github.com/breferrari/vigia/issues/378) |
 | ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
 | ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
@@ -260,7 +260,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
 
-**Ordering.** [#386](https://github.com/breferrari/vigia/issues/386) is the front of the phase, put there by the reader on 2026-09-03: the drag that washes rows is a gesture in daily use and it does not finish, so every copy costs a reach for the keyboard and leaves a wash standing behind it. [#378](https://github.com/breferrari/vigia/issues/378) is next after it. It is the only one that makes the pane silently wrong: a nested checkout is ordinary, one unreadable entry fails the whole walk, and the tick handler then holds the last good frame forever — a stale pane is indistinguishable from a quiet one, so the tool stops being a monitor while still looking like one. Principle 1 does not survive that. [#119](https://github.com/breferrari/vigia/issues/119) sat first before it, because it moves layout boundaries the other rows would otherwise re-derive twice. **After distribution on purpose**: the minimal real thing ships first — a crates.io name is claimed by publishing — and polish lands as visible post-release momentum, guided by [#72](https://github.com/breferrari/vigia/issues/72)'s real-use data instead of ahead of it.
+**Ordering.** [#386](https://github.com/breferrari/vigia/issues/386) is the front of the phase, put there by the reader on 2026-09-03: the drag that washes rows is a gesture in daily use and it does not finish, so every copy costs a reach for the keyboard and leaves a wash standing behind it. [#119](https://github.com/breferrari/vigia/issues/119) sat first before it, because it moves layout boundaries the other rows would otherwise re-derive twice. **After distribution on purpose**: the minimal real thing ships first — a crates.io name is claimed by publishing — and polish lands as visible post-release momentum, guided by [#72](https://github.com/breferrari/vigia/issues/72)'s real-use data instead of ahead of it.
 
 
 **A `decision` row is one whose feel improvement costs an invariant a sentence; one that costs nothing is an ordinary row.** The ruling lands in `SPEC.md` §11.2 and the build follows in the same pass unless it is genuinely too large for one — [#167](https://github.com/breferrari/vigia/issues/167) shipped a ruling with nothing on screen for four hours, and a reader pressed `?` and got nothing.
@@ -286,12 +286,16 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 
 **The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask it of an item when something reaches for it, not on a schedule nobody keeps. An item that cannot answer yes is not waiting for a phase, it is declined, and closing it as such is a result rather than a loss. Five declines in a hundred and twenty-seven closed issues is not a shelf being filtered; it is a shelf being filled.
 
+**[#390](https://github.com/breferrari/vigia/issues/390) is deferred on a measurement nobody has taken.** Found by #378's audit, 2026-09-03, session. Half its fix is free and half is a `stat` per changed file per tick, on the one branch named *free, and no syscall*.
+
+
 **If a second shelf is ever created, its milestone description must begin `Shelf:`.** Until [#83](https://github.com/breferrari/vigia/issues/83) the never-next rule lived only in this paragraph, which is prose, and `take-next` step 1 is a query: it read the milestone list, saw three peers, and offered the shelf as the next phase. The marker is what a query can read, and this paragraph is where whoever creates the next one is standing, so it is stated here rather than only in the skill. Comparison 6 of that skill's pre-flight is the check that fires when the two disagree.
 
 | | Task | Issue |
 |---|---|---|
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
+| ⬜ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |

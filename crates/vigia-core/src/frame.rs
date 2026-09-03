@@ -236,6 +236,13 @@ pub struct Frame<'w> {
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     attributes: HashMap<String, Option<Fingerprint>>,
+    /// The failure [`Frame::diff`] last contained, held only so it can be handed
+    /// back by reference.
+    ///
+    /// Deliberately not a cache. [`Frame::fill_span`] takes a diff in hand
+    /// without revalidating it, so anything reachable from there is read as
+    /// evidence, and a failed read is evidence about nothing.
+    failure: Option<FileDiff>,
     /// Whether the staged run is drawn beside the unstaged one.
     staged: bool,
     /// Where [`Self::files`]'s staged run begins, recorded by the walk that built
@@ -252,6 +259,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
+            failure: None,
             staged: false,
             staged_at: 0,
             stats: FrameStats::default(),
@@ -382,7 +390,7 @@ impl<'w> Frame<'w> {
     pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
         let mut total = 0usize;
         for index in 0..self.files.len() {
-            self.fill_span(index);
+            self.fill_span(index)?;
             let change = &self.files[index];
             total += rows_of(change, &self.span_of(change).span);
         }
@@ -399,7 +407,7 @@ impl<'w> Frame<'w> {
         index: usize,
         rows_of: impl Fn(&FileChange, &FileSpan) -> usize,
     ) -> Result<usize> {
-        self.fill_span(index);
+        self.fill_span(index)?;
         let change = &self.files[index];
         Ok(rows_of(change, &self.span_of(change).span))
     }
@@ -413,14 +421,19 @@ impl<'w> Frame<'w> {
     }
 
     /// Put a span for the file at `index` in the cache, if one is not there.
-    fn fill_span(&mut self, index: usize) {
+    ///
+    /// # Errors
+    ///
+    /// The measure fails in a way that is not one file's, which [`Frame::diff`]
+    /// propagates for the same reason.
+    fn fill_span(&mut self, index: usize) -> Result<()> {
         let change = &self.files[index];
         if self
             .spans
             .get(change)
             .is_some_and(|measured| measured.proven)
         {
-            return;
+            return Ok(());
         }
 
         // (1) A diff in hand. Free, and no syscall.
@@ -431,7 +444,7 @@ impl<'w> Frame<'w> {
                 proven: true,
             };
             self.spans.put(change, measured);
-            return;
+            return Ok(());
         }
 
         // (2) A span carried from an earlier tick, and the only thing standing
@@ -454,7 +467,7 @@ impl<'w> Frame<'w> {
         // syscalls taken rather than of call sites reached.
         self.stats.probes += u64::from(probed);
         if proved {
-            return;
+            return Ok(());
         }
 
         // (3) A read.
@@ -481,8 +494,22 @@ impl<'w> Frame<'w> {
                 (span, Some(Taken::of(change, worktree)))
             }
             // A failed read describes nothing, so it is recorded with no evidence at
-            // all and [`Measured::taken`] carries why that matters.
-            Err(_) => (FileSpan::default(), None),
+            // all and [`Measured::taken`] carries why that matters. The flag keeps
+            // this walk's height and the screen agreeing, because a row that draws
+            // a note is two rows rather than one.
+            //
+            // The same split [`Frame::diff`] makes, because this walk reaches files
+            // it does not: a file above the viewport is measured and never diffed,
+            // so swallowing a whole-comparison failure here would put rows in the
+            // total that nothing can draw when the reader scrolls to them.
+            Err(e) if e.of_one_file().is_none() => return Err(e),
+            Err(_) => (
+                FileSpan {
+                    unreadable: true,
+                    ..FileSpan::default()
+                },
+                None,
+            ),
         };
         let measured = Measured {
             taken,
@@ -490,6 +517,7 @@ impl<'w> Frame<'w> {
             proven: true,
         };
         self.spans.put(change, measured);
+        Ok(())
     }
 
     /// The change at `index` and its diff, computed now or reused from an
@@ -501,7 +529,11 @@ impl<'w> Frame<'w> {
     ///
     /// # Errors
     ///
-    /// The file at `index` cannot be diffed, which is a read of either side.
+    /// The comparison fails in a way that is not one file's: [`Error::of_one_file`]
+    /// decides which, and a failure that names a single path becomes that file's
+    /// note instead.
+    ///
+    /// [`Error::of_one_file`]: crate::Error::of_one_file
     pub fn diff(&mut self, index: usize) -> Result<(&FileChange, &FileDiff)> {
         let change = &self.files[index];
         let path = self.worktree.workdir().join(&change.path);
@@ -537,7 +569,27 @@ impl<'w> Frame<'w> {
         let mut probes = 0;
         let computed = self.worktree.diff_counted(change, &mut probes);
         self.stats.probes += probes;
-        let diff = computed?;
+        let diff = match computed {
+            Ok(diff) => diff,
+            // One path's own failure costs that path a note and nothing else: held
+            // as an error it would end the whole comparison, and a frame the shell
+            // keeps because the next one failed is a pane that looks quiet and is
+            // lying. A failure that is not one path's still ends it, because
+            // nothing is left to vouch for the rest of the comparison.
+            Err(e) => {
+                let reason = e.of_one_file().ok_or(e)?;
+                // Both caches drop this path. What they hold described a read that
+                // is no longer the answer, and `fill_span`'s first branch takes a
+                // diff in hand without revalidating it, so a diff left there is a
+                // height the screen does not draw.
+                self.cached.remove(change);
+                self.spans.remove(change);
+                let failure = self
+                    .failure
+                    .insert(FileDiff::without_hunks(change.path.clone(), Some(reason)));
+                return Ok((change, failure));
+            }
+        };
         let worktree = if change.reads_worktree() {
             self.stats.probes += 1;
             fingerprint(&path).map(|print| Observed {

@@ -11,10 +11,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 23;
+const ESCAPING_FILES: usize = 24;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-three";
+const ESCAPING_FILES_SPELLED: &str = "twenty-four";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1574,9 +1574,9 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 387259),
+    ("SPEC.md", 387276),
     ("REVOCATIONS.md", 4393),
-    ("ROADMAP.md", 95047),
+    ("ROADMAP.md", 95011),
     ("RULINGS.md", 94676),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -1589,7 +1589,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 624492;
+const WRITTEN_LAYER_TOTAL: usize = 624473;
 
 /// Each document weighs no more than its budget.
 #[test]

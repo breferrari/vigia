@@ -179,6 +179,10 @@ impl Worktree {
     ///
     /// Either side cannot be read: the working-tree file is unreadable, or the index names an
     /// object the database does not hold.
+    ///
+    /// Asked about one file, so it reports that file's failure to the caller who
+    /// asked. [`Frame::diff`](crate::Frame::diff) draws the same failure instead,
+    /// because a frame serving a screen cannot lose the entries beside it.
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
         self.diff_counted(change, &mut 0)
     }
@@ -186,18 +190,9 @@ impl Worktree {
     /// [`Worktree::diff`], reporting the type probes it spent.
     pub(crate) fn diff_counted(&self, change: &FileChange, probes: &mut u64) -> Result<FileDiff> {
         if !change.is_diffable() {
-            return Ok(FileDiff {
-                path: change.path.clone(),
-                binary: false,
-                hunks: Vec::new(),
-                added: 0,
-                removed: 0,
-                // A conflict and a type change are states rather than diffs, and this
-                // method deliberately reads nothing for them.
-                lines: 0,
-                first_line: None,
-                bytes: 0,
-            });
+            // A conflict and a type change are states rather than diffs, and this
+            // method deliberately reads nothing for them.
+            return Ok(FileDiff::without_hunks(change.path.clone(), None));
         }
 
         let (before, after) = self.sides(change, probes)?;
@@ -265,8 +260,20 @@ impl Worktree {
         // Counted, and that is what gives this branch a failing test.
         if change.maybe_symlink {
             *probes += 1;
-            if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
-                return Self::link_target(&full, rela_path);
+            if let Ok(kind) = std::fs::symlink_metadata(&full).map(|meta| meta.file_type()) {
+                if kind.is_symlink() {
+                    return Self::link_target(&full, rela_path);
+                }
+                // A directory, a fifo, a socket or a device node: git tracks none
+                // of them, so there are no bytes to compare. It has to stop the
+                // read rather than tidy up after one, because opening a fifo with
+                // no writer blocks until it has one, on the thread the pane draws
+                // from. The error a directory returns could not be matched on
+                // anyway, being `IsADirectory` on unix and `PermissionDenied` on
+                // Windows, which is also what a file nobody may read returns.
+                if !kind.is_file() {
+                    return Ok(Vec::new());
+                }
             }
         }
 

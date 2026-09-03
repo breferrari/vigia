@@ -1588,7 +1588,7 @@ fn a_file_with_no_line_diff_says_why() {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-            Row::Note("binary"),
+            Row::Note("binary".to_owned()),
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "src/merge.rs".to_owned(),
@@ -1600,7 +1600,7 @@ fn a_file_with_no_line_diff_says_why() {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-            Row::Note("unresolved conflict"),
+            Row::Note("unresolved conflict".to_owned()),
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia/src/shell.rs".to_owned(),

@@ -404,9 +404,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell
                         .history
                         .record_sized(sized(worktree.workdir(), &paths), began);
-                    // The core leaves the frame exactly as it was on failure, so the
-                    // previous diff is still valid to draw. Saying so on the footer
-                    // beats blanking a pane for a reason the reader cannot see.
+                    // A walk that fails describes the whole tree rather than one
+                    // path in it, so the previous frame is still the best thing to
+                    // draw and the footer says why. One file's own failure never
+                    // reaches here: `Frame::diff` draws it instead.
                     match frame.advance() {
                         // Advance first, follow second, and the order is the whole of
                         // it: the path is looked up in the file list, and before the

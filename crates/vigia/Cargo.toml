@@ -12,21 +12,21 @@ authors.workspace = true
 keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
-# `SPEC.md` section 9 counts twenty-three *files* here that read outside this
-# package: twenty reach `vigia-core/tests/support` by `#[path]`, and five read
+# `SPEC.md` section 9 counts twenty-four *files* here that read outside this
+# package: twenty-one reach `vigia-core/tests/support` by `#[path]`, and five read
 # repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
-# `sheet.rs` are in both groups, which is what makes the total twenty-three rather
-# than twenty-five. No destination is inside this directory, so a packaged copy
+# `sheet.rs` are in both groups, which is what makes the total twenty-four rather
+# than twenty-six. No destination is inside this directory, so a packaged copy
 # carries a test suite that cannot compile.
 #
 # Excluding the tests is section 9's own resolution, and the direction is the
 # point: it stops the *package* claiming a suite it cannot build, it does not
 # stop the repository testing itself. Every gate still runs in a checkout, which
-# is the only place they were ever meaningful, since eighteen of the twenty
+# is the only place they were ever meaningful, since nineteen of the twenty-one
 # reach fixtures a published crate has no business shipping and the last two
 # read this repository's own documents.
 #
-# `crates/vigia/tests/package.rs` is what keeps this honest. A twenty-first escape
+# `crates/vigia/tests/package.rs` is what keeps this honest. A twenty-second escape
 # added somewhere this pattern does not cover fails there, rather than at
 # somebody's `cargo install`.
 exclude = ["tests/**"]

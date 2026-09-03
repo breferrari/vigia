@@ -415,7 +415,7 @@ fn every_row_kind() -> View {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-            Row::Note("binary"),
+            Row::Note("binary".to_owned()),
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia/src/shell.rs".to_owned(),
@@ -2178,7 +2178,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
                 new_start: 258,
                 new_lines: 9,
             },
-            Row::Note("unresolved conflict"),
+            Row::Note("unresolved conflict".to_owned()),
         ],
         files: 1,
         top: Position::default(),
