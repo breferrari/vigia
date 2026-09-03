@@ -5,8 +5,10 @@ mod support;
 use support::{GONE, KEPT, Scratch, index_of};
 use vigia_core::Error;
 
-/// How tall the shell draws a file, which is `vigia::view::rows_of`'s rule.
-/// Mirrored rather than imported: the shell is not a dependency of this crate.
+/// How tall the shell draws a file, for the two cases these fixtures produce:
+/// a note is a heading and one line, anything else is a heading and its hunks.
+/// `vigia::view::rows_of` carries the whole rule, including the notes a conflict,
+/// a type change and a binary file draw, and is not importable from this crate.
 fn rows_of(_: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> usize {
     if span.unreadable {
         2

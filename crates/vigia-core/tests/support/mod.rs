@@ -295,7 +295,7 @@ pub fn made_fifo(scratch: &Scratch, rela: &str) -> bool {
         .is_ok_and(|status| status.success());
     if !made {
         eprintln!(
-            "note: this platform would not create the fifo {rela}, so the              blocking-read reading is unchecked here"
+            "note: no fifo could be made at {rela}, so whether reading one blocks is unchecked here"
         );
     }
     made
@@ -667,22 +667,11 @@ impl Scratch {
     /// naming the directory itself, with nothing to distinguish it from a file.
     pub fn with_nested_repository(name: &str) -> Self {
         let scratch = Self::new(name);
-        scratch.write(
-            KEPT, "one
-",
-        );
+        scratch.write(KEPT, "one\n");
         scratch.commit_all("baseline");
-        scratch.write(
-            KEPT, "one
-two
-",
-        );
+        scratch.write(KEPT, "one\ntwo\n");
         scratch.git(&["init", "-q", "nested"]);
-        scratch.write(
-            "nested/inner.txt",
-            "inner
-",
-        );
+        scratch.write("nested/inner.txt", "inner\n");
         scratch
     }
 
@@ -695,25 +684,11 @@ two
     /// this is.
     pub fn with_a_missing_blob(name: &str) -> Self {
         let scratch = Self::new(name);
-        scratch.write(
-            GONE, "one
-",
-        );
-        scratch.write(
-            KEPT, "one
-",
-        );
+        scratch.write(GONE, "one\n");
+        scratch.write(KEPT, "one\n");
         scratch.commit_all("baseline");
-        scratch.write(
-            GONE, "one
-two
-",
-        );
-        scratch.write(
-            KEPT, "one
-two
-",
-        );
+        scratch.write(GONE, "one\ntwo\n");
+        scratch.write(KEPT, "one\ntwo\n");
         scratch.point_at_a_missing_blob(GONE);
         scratch
     }
