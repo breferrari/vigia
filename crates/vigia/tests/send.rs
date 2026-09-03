@@ -8,7 +8,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{App, Pointing, body_layout};
+use vigia::{App, Pointing, View, body_layout};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -28,20 +28,22 @@ fn deep_scratch(name: &str) -> Scratch {
     scratch
 }
 
-/// Collect one frame with `span` washed, which is what a drag leaves standing.
-fn washed(app: &mut App, frame: &mut Frame, span: Option<(usize, usize)>) {
+/// Paint one frame, which is what the release then resolves its payload against.
+fn painted(app: &mut App, frame: &mut Frame) -> View {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    app.select(span);
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let body = body_layout(Rect::new(0, 0, NARROW, 24), &chrome, 1, 1);
     app.view(frame, &mut highlighter, &history, body)
-        .expect("view");
+        .expect("view")
 }
 
-/// The bytes the button coming up hands the loop to send.
-fn released(app: &mut App) -> Option<String> {
-    app.send_selection();
+/// The bytes the button coming up hands the loop to send, resolved the way
+/// `Shell::send_wash` resolves them: against the frame last painted.
+fn released(app: &mut App, view: &View, span: Option<(usize, usize)>) -> Option<String> {
+    if let Some(lines) = span.and_then(|span| view.lines_in(span)) {
+        app.send(&lines);
+    }
     app.take_sending().map(|sending| sending.text)
 }
 
@@ -54,8 +56,11 @@ fn a_send_is_taken_once() {
     materialise(&mut frame);
     let mut app = App::new();
 
-    washed(&mut app, &mut frame, Some((0, 0)));
-    assert_eq!(released(&mut app).as_deref(), Some(DEEP));
+    let view = painted(&mut app, &mut frame);
+    assert_eq!(
+        released(&mut app, &view, Some((0, 0))).as_deref(),
+        Some(DEEP)
+    );
     assert_eq!(
         app.take_sending(),
         None,
@@ -76,9 +81,9 @@ fn a_release_with_nothing_washed_sends_nothing() {
 
     // Drawn first, so the frame really did collect and this is a release with no
     // wash rather than a release before there was a screen.
-    washed(&mut app, &mut frame, None);
+    let view = painted(&mut app, &mut frame);
     assert_eq!(
-        released(&mut app),
+        released(&mut app, &view, None),
         None,
         "a release with nothing washed armed a write, so the reader's clipboard is \
          spent on nothing"
@@ -99,8 +104,9 @@ fn a_write_between_the_paint_and_the_release_does_not_move_what_is_sent() {
     materialise(&mut frame);
     let mut app = App::new();
 
-    // The lines are resolved on this paint, against a list holding one file.
-    washed(&mut app, &mut frame, Some((0, 0)));
+    // The frame the release resolves against is this one, drawn against a list
+    // holding one file.
+    let view = painted(&mut app, &mut frame);
     assert_eq!(frame.files().len(), 1, "the fixture is not one file");
 
     // Then the tree changes under it, exactly as a batch carrying a tick and a
@@ -114,7 +120,7 @@ fn a_write_between_the_paint_and_the_release_does_not_move_what_is_sent() {
     );
 
     assert_eq!(
-        released(&mut app).as_deref(),
+        released(&mut app, &view, Some((0, 0))).as_deref(),
         Some(DEEP),
         "the send followed the index rather than the frame that was painted, so the \
          reader copied a file they were not looking at"

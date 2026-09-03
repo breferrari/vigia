@@ -1660,7 +1660,7 @@ fn nothing_armed_means_no_deadline_at_all() {
             now
         ),
         Some(NOTICE_LINGER),
-        "a send's confirmation did not ask the loop to wake, so it sits on the          footer until the worktree next changes, which on a quiet tree is never"
+        "a send's confirmation did not ask the loop to wake, so it sits on the footer until the worktree next changes, which on a quiet tree is never"
     );
     assert_eq!(
         patience(

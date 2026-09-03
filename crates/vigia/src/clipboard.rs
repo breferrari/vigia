@@ -94,8 +94,8 @@ mod tests {
     }
 
     /// Test-only, and the reason this file has no decoder: nothing in the shell
-    /// ever reads a clipboard back, which §11.1 calls a privacy escalation past
-    /// the affordance.
+    /// ever reads a clipboard back, which would be a read of state the reader owns
+    /// rather than the write §11.1 licenses.
     fn decode(text: &str) -> Vec<u8> {
         let bits: Vec<u32> = text
             .bytes()

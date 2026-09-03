@@ -2152,10 +2152,11 @@ fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
     // 73, and neither 78 nor the 80 the ruling first named.
     let arrival;
     sweep!("sheet-arrival", |paint| {
-        // Twenty-two rows rather than twenty, B19's `w` and B9's `y` each having
-        // added one: the rung grows with the table, so a shorter pane takes it at no
-        // width at all and the probe returns `None` at every column of the sweep.
-        arrival = arrival_of(&mut paint, "keyboard", 70..=84, 22);
+        // The rung grows with the table, so a shorter pane takes it at no width at
+        // all and the probe returns `None` at every column of the sweep. This is the
+        // shortest that does, which is what makes the arrival width below the rung's
+        // rather than this pane's.
+        arrival = arrival_of(&mut paint, "keyboard", 70..=84, 21);
     });
     assert_eq!(
         arrival,
@@ -2260,11 +2261,10 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
     // the sheet's width and one placing the row.
     for (w, h, cols, label, spelling) in [
         (120u16, 23u16, [2usize, 26, 56, 77], 56usize, "wide"),
-        // Twenty-two rows rather than twenty, B19's `w` and B9's `y` each having
-        // added one: the rung grows with the table, so a shorter pane falls to the
-        // one-column rung and the `contains("keyboard")` guard above says which of
+        // The shortest pane that takes the rung at all: a row less falls to the
+        // one-column rung, and the `contains("keyboard")` guard above says which of
         // the two happened.
-        (80, 22, [2, 15, 35, 50], 35, "tight"),
+        (80, 21, [2, 15, 35, 50], 35, "tight"),
     ] {
         sweep!("sheet-columns", |paint| {
             let at = Rect::new(0, 0, w, h);

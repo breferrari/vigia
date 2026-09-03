@@ -265,14 +265,10 @@ impl App {
         self.selected.is_some()
     }
 
-    /// Queue the washed lines for the clipboard, which is what the button coming up
-    /// asks for. Blank rows are no payload: an empty OSC 52 write clears the reader's.
-    pub fn send_selection(&mut self) {
-        if let Some(lines) = self
-            .selected
-            .as_deref()
-            .filter(|lines| lines.iter().any(|line| !line.is_empty()))
-        {
+    /// Queue `lines` for the clipboard. Rows with nothing on them are no payload: an
+    /// empty OSC 52 write clears the reader's clipboard rather than adding to it.
+    pub fn send(&mut self, lines: &[String]) {
+        if lines.iter().any(|line| !line.is_empty()) {
             self.sending = Some(Sending::lines(lines));
         }
     }

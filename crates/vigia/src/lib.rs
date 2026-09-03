@@ -333,7 +333,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // The gesture ends on the clipboard.
                     shell.send_wash(&event);
                     // Before the event is interpreted, for the hold's reason: a press
                     // opening one is an action too, and the wash precedes its clearing.
@@ -647,13 +646,20 @@ impl Shell {
     }
 
     /// Apply `action`, taking any wash with it. A wash belongs to a gesture the
-    /// pointer is still performing, so anything else arriving ends it.
+    /// pointer is still performing, so anything else arriving ends it, and `Esc`
+    /// cancels that gesture rather than leaving.
     fn apply(
         &mut self,
         action: Action,
         frame: &mut vigia_core::Frame,
         height: usize,
     ) -> vigia_core::Result<bool> {
+        // A rung of the ladder `Esc` climbs, under the sheet and over quitting, and
+        // reachable only while the button is down. Without it a tap mid-drag quits.
+        if action == Action::Escape && self.selected.is_some() {
+            self.deselect();
+            return Ok(true);
+        }
         self.deselect();
         self.app.apply(action, frame, height)
     }
@@ -667,11 +673,18 @@ impl Shell {
 
     /// End a drag on the clipboard: what the last painted frame washed is sent.
     ///
-    /// The lines were resolved by that frame's own collect, so nothing is walked here
-    /// and the payload cannot disagree with what the reader was looking at.
+    /// Resolved here rather than read off `App`, whose own resolve runs only on a
+    /// frame that collects: the loop paints once per drained batch, so a press and its
+    /// release can share one and leave nothing collected in between. `Shell::regions`
+    /// is the layout those screen rows were read against.
     fn send_wash(&mut self, event: &Event) {
-        if input::ends_a_drag(event) {
-            self.app.send_selection();
+        if !input::ends_a_drag(event) {
+            return;
+        }
+        if let Some(span) = self.selected
+            && let Some(lines) = self.screen.lines_in(span.offsets(self.regions.diff.top))
+        {
+            self.app.send(&lines);
         }
     }
 
@@ -1063,6 +1076,10 @@ mod tests {
             "shell.send_wash(&event);",
             "shell.selected = selection_after(",
             "self.app.select(None);",
+            // A tap mid-drag quit the program once, and a release sharing a batch
+            // with its press sent nothing: neither is reachable from a test.
+            "if action == Action::Escape && self.selected.is_some() {",
+            "self.screen.lines_in(span.offsets(self.regions.diff.top))",
         ] {
             assert!(
                 shipped.contains(rule),

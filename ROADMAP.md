@@ -123,8 +123,6 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 
 None of them was reachable by `take-next`'s pre-flight, which compares invariant tokens and issue metadata. **A picture is a specification that carries neither**, which is the same blind spot [#40](https://github.com/breferrari/vigia/issues/40) hit when it found B5 shipped while still marked `(proposed)`, and the reason this phase exists as its own thing rather than as polish inside another.
 
-The ordering question this row worried about resolved the other way from both options it names. `History` is free to rank by and was still rejected, because ranking the list by anything the stream is not ordered by decouples the caret from the scroll position and the region stops being a *map*. Status order is free too, and it is the only order under which the two regions describe the same place.
-
 ## Phase 6 — measured, not assumed
 
 Milestone: [Phase 6](https://github.com/breferrari/vigia/milestone/6)
@@ -229,7 +227,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The row wash has no left bar, and the reason it was refused expired with #119 | [#218](https://github.com/breferrari/vigia/issues/218) |
 | ✅ | decision: text cannot be selected or copied. **Ruled: rows in, lines out** | [#177](https://github.com/breferrari/vigia/issues/177) |
 | ✅ | Build B20: a drag selects rows, and `y` sends their real text | [#380](https://github.com/breferrari/vigia/issues/380) |
-| ✅ | Build B9: `y` copies the caret file's path | [#372](https://github.com/breferrari/vigia/issues/372) |
+| ✅ | Build B9: `y` copies the caret file's path. **Revoked by [#386](https://github.com/breferrari/vigia/issues/386)** | [#372](https://github.com/breferrari/vigia/issues/372) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ✅ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |

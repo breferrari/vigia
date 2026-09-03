@@ -99,9 +99,14 @@ fn sent_on(
     app.select(span);
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let body = body_layout(pane, &chrome, 1, 1);
-    app.view(frame, &mut highlighter, &history, body)
+    let view = app
+        .view(frame, &mut highlighter, &history, body)
         .expect("view");
-    app.send_selection();
+    // The shell's own path, and the reason it is not `App`'s: the release resolves
+    // against the frame last painted rather than against what a collect left behind.
+    if let Some(lines) = span.and_then(|span| view.lines_in(span)) {
+        app.send(&lines);
+    }
     app.take_sending().map(|sending| sending.text)
 }
 
@@ -708,7 +713,8 @@ fn the_footer_counts_lines_and_not_rows() {
             "the wrapped span covers no continuation row, so it proves nothing about \
              rows against lines"
         );
-        app.send_selection();
+        let lines = view.lines_in(span).expect("the span resolved to nothing");
+        app.send(&lines);
         let sending = app.take_sending().expect("the release sent nothing");
         assert_eq!(
             sending.said,
@@ -749,10 +755,13 @@ fn a_span_ending_on_a_blank_row_is_still_counted_whole() {
         "the blank row is the first, so there is no row above it"
     );
 
-    app.select(Some((blank - 1, blank)));
-    app.view(&mut frame, &mut highlighter, &history, body)
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
-    app.send_selection();
+    let lines = view
+        .lines_in((blank - 1, blank))
+        .expect("the span resolved to nothing");
+    app.send(&lines);
     let sending = app.take_sending().expect("the release sent nothing");
     assert_eq!(
         sending.text.lines().count(),
@@ -783,10 +792,8 @@ fn a_cleared_wash_sends_nothing() {
         "the span resolved to nothing, so clearing it below proves nothing"
     );
     // Cleared with no collect after it, which is what a retired wash looks like.
-    app.select(None);
-    app.send_selection();
     assert_eq!(
-        app.take_sending(),
+        sent(&mut app, &mut frame, None, false),
         None,
         "a release after the wash was cleared sent the lines it used to stand over"
     );
