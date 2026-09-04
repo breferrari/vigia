@@ -688,9 +688,8 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
 
 #[test]
 fn what_a_bulk_rewrite_of_undrawn_files_costs() {
-    // Reports, and deliberately does not assert a wall clock. Everything
-    // structural here is asserted and exact; the clock is printed and left to
-    // `SPEC.md` §10, and that is the ruling rather than a gap.
+    // Everything here is asserted: the structural counts exactly, and the clock
+    // against I9, since a frame inside the margin is a stat per file and no read.
     let scratch = Scratch::large_diff("shell-i9-undrawn-bulk", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -841,8 +840,6 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         cost.probes / drove as u64,
     );
 
-    // Asserted rather than noted: with the read waiting for the margin, a frame here
-    // is a stat per file and nothing else, well inside the budget.
     holds_p99(
         &format!(
             "I9: a frame inside the settle margin over {FILES} files the screen does \

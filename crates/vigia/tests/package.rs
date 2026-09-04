@@ -1577,7 +1577,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 390510),
     ("REVOCATIONS.md", 6560),
     ("ROADMAP.md", 95359),
-    ("RULINGS.md", 95161),
+    ("RULINGS.md", 95198),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
