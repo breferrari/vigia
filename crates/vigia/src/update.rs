@@ -97,25 +97,17 @@ pub fn check(current: &str) -> Option<String> {
     newer(&published, current).then_some(published)
 }
 
-/// Where the newest published version is asked for.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-const ENDPOINT: &str = "https://crates.io/api/v1/crates/vigia";
-
-/// How long the request may run before its answer is about a pane nobody is
-/// still looking at.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// How much of the answer is read.
-///
-/// The endpoint returns 71KB at forty-four published versions, so this is an
-/// order above what it sends and far below a size a monitor would feel.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-const BODY_LIMIT: u64 = 1024 * 1024;
-
 /// Ask the registry, or answer nothing.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn fetch() -> Option<String> {
+    const ENDPOINT: &str = concat!("https://crates.io/api/v1/crates/", env!("CARGO_PKG_NAME"));
+    // Long enough for a cold handshake on a slow link, short enough that the
+    // answer is still about a pane somebody is looking at.
+    const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    // An order above the 71KB the endpoint sends at forty-four published
+    // versions, and far below a size a monitor would feel.
+    const BODY_LIMIT: u64 = 1024 * 1024;
+
     if !provider_runs_here() {
         return None;
     }
@@ -157,8 +149,10 @@ fn fetch() -> Option<String> {
 /// The provider asserts rather than degrades, the release profile aborts rather
 /// than unwinds, and the thread this runs on is the monitor's. So a machine
 /// below its floor, which its own source puts at roughly 2013, has to lose the
-/// check here rather than lose the pane there. The list is read from the
-/// provider's source, not guessed.
+/// check here rather than lose the pane there. The list is read from graviola
+/// 0.4.1's `verify_cpu_features`, not guessed, and `package.rs` fails when the
+/// lock file moves off that version so the reading is redone rather than
+/// assumed.
 #[cfg(target_arch = "x86_64")]
 pub fn provider_runs_here() -> bool {
     is_x86_feature_detected!("aes")

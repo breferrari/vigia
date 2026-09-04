@@ -39,6 +39,7 @@ pub use render::{
 };
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
+pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
     block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of,
@@ -316,6 +317,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
+            shell.settle_notice(began);
             shell.settle_send(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
@@ -470,7 +472,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             }
         }
 
-        // Before the paint: the notice it raises has to reach this frame.
+        // Before the paint: the notice either raises has to reach this frame.
+        shell.settle_notice(began);
         shell.settle_send(began);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
@@ -744,10 +747,6 @@ impl Shell {
     /// A failed write is reported rather than propagated: a draw that fails has taken
     /// the pane with it, but a copy is one a reader can go on watching without.
     fn settle_send(&mut self, now: Instant) {
-        if input::settled(self.notice_until, now) {
-            self.app.clear_flash();
-            self.notice_until = None;
-        }
         if let Some(sending) = self.app.take_sending() {
             let said = sending.said;
             let told = match self.session.send(&clipboard::copy(&sending.text)) {
@@ -758,7 +757,15 @@ impl Shell {
         }
     }
 
-    /// Put `message` over the footer until it ages out.
+    /// Take back the footer once the notice on it has had its time.
+    fn settle_notice(&mut self, now: Instant) {
+        if input::settled(self.notice_until, now) {
+            self.app.clear_flash();
+            self.notice_until = None;
+        }
+    }
+
+    /// Put `message` over the footer until [`Self::settle_notice`] takes it back.
     fn say(&mut self, message: String, now: Instant) {
         self.app.flash(message);
         self.notice_until = Some(now + NOTICE_LINGER);

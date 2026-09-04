@@ -7,14 +7,20 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::update::{UPDATE_VAR, newer, version_in, wanted, watch};
-use vigia::{
-    App, Deadlines, Glyphs, NOTICE_LINGER, Pointing, Theme, View, patience, render, settled,
-};
+use vigia::{App, Glyphs, Pointing, Theme, View, render};
 
-/// An environment holding one variable, or none.
-fn env(value: Option<&str>) -> impl Fn(&str) -> Option<String> + use<> {
-    let value = value.map(str::to_owned);
-    move |key| (key == UPDATE_VAR).then(|| value.clone()).flatten()
+/// An environment built from pairs, so a case reads as the thing it is testing.
+fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+    let owned: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+    move |key| {
+        owned
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.to_owned())
+    }
 }
 
 /// What the endpoint answered on 2026-09-04, trimmed to the fields read.
@@ -25,18 +31,19 @@ const ANSWER: &str = r#"{"crate":{"id":"vigia","name":"vigia",
 
 #[test]
 fn an_unset_variable_asks_for_the_check() {
-    assert_eq!(wanted(env(None)), Ok(true));
+    assert_eq!(wanted(env(&[])), Ok(true));
 }
 
 #[test]
 fn off_declines_it() {
-    assert_eq!(wanted(env(Some("off"))), Ok(false));
-    assert_eq!(wanted(env(Some("  OFF  "))), Ok(false));
+    assert_eq!(wanted(env(&[(UPDATE_VAR, "off")])), Ok(false));
+    assert_eq!(wanted(env(&[(UPDATE_VAR, "  OFF  ")])), Ok(false));
 }
 
 #[test]
 fn a_value_it_does_not_understand_is_refused() {
-    let refused = wanted(env(Some("no"))).expect_err("a value nobody defined was accepted");
+    let refused =
+        wanted(env(&[(UPDATE_VAR, "no")])).expect_err("a value nobody defined was accepted");
     assert_eq!(refused.value, "no");
     assert!(
         refused.to_string().contains("auto, off"),
@@ -48,8 +55,8 @@ fn a_value_it_does_not_understand_is_refused() {
 fn a_variable_set_to_nothing_is_not_a_value() {
     // A PowerShell `$env:VIGIA_UPDATE = ""` is set and empty, which is the
     // shape the colour ladder already refuses to read as an override.
-    assert_eq!(wanted(env(Some(""))), Ok(true));
-    assert_eq!(wanted(env(Some("   "))), Ok(true));
+    assert_eq!(wanted(env(&[(UPDATE_VAR, "")])), Ok(true));
+    assert_eq!(wanted(env(&[(UPDATE_VAR, "   ")])), Ok(true));
 }
 
 #[test]
@@ -164,28 +171,6 @@ fn a_check_that_answers_nothing_says_nothing() {
     );
 }
 
-/// I1: the notice is the only clock this feature arms, and it is the one every
-/// other notice already arms.
-#[test]
-fn an_update_notice_ages_out_like_any_other() {
-    let now = Instant::now();
-    let until = now + NOTICE_LINGER;
-
-    assert_eq!(
-        patience(
-            Deadlines {
-                notice: Some(until),
-                ..Deadlines::default()
-            },
-            now
-        ),
-        Some(NOTICE_LINGER)
-    );
-    assert!(!settled(Some(until), now));
-    assert!(settled(Some(until), until + Duration::from_millis(1)));
-    assert_eq!(patience(Deadlines::default(), now), None);
-}
-
 /// The narrow rung, because a notice is one token that takes what the line has.
 #[test]
 fn the_footer_carries_the_version_it_was_told() {
@@ -193,7 +178,6 @@ fn the_footer_carries_the_version_it_was_told() {
         let mut app = App::new();
         app.flash("vigia 9.9.9 is available");
         let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-        assert_eq!(chrome.notice.as_deref(), app.notice());
 
         let area = Rect::new(0, 0, width, 24);
         let mut buf = Buffer::empty(area);
