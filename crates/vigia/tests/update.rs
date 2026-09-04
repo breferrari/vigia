@@ -219,16 +219,27 @@ fn the_machine_running_this_can_run_the_provider() {
 /// A text scan is the only layer available here, so it is deliberately narrow:
 /// it says the three seams exist, not that they are correct. What it stops is
 /// the whole feature being deleted from the shell while its own suite passes.
+///
+/// Comment lines are dropped first, because commenting the block out is the
+/// cheapest way to delete it and a scan that reads them cannot tell the two
+/// apart. Found by doing exactly that and watching this pass.
 #[test]
 fn the_shell_still_arms_the_check() {
-    let shell = include_str!("../src/lib.rs");
+    let code: String = include_str!("../src/lib.rs")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
     assert!(
-        shell.len() > 1000 && shell.contains("pub fn run("),
+        code.len() > 1000 && code.contains("pub fn run("),
         "the shell was not read, so scanning it proves nothing"
     );
     for seam in ["update::wanted(", "update::watch(", "Wake::Update(version)"] {
         assert!(
-            shell.contains(seam),
+            code.contains(seam),
             "`{seam}` is gone from the shell, so nothing asks and nothing draws"
         );
     }
