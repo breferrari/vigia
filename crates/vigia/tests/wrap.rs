@@ -1564,6 +1564,85 @@ fn the_thumb_rests_at_the_track_end_at_the_wrapped_bottom() {
     );
 }
 
+/// Ten lines, three of them wide: a diff that fits the region unwrapped and does
+/// not once it wraps, which is the only screen where the region and the screenful
+/// give the bar different answers.
+fn fits(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    let base: String = (0..10).map(|n| format!("line {n}\n")).collect();
+    scratch.write("src/fits.rs", base);
+    scratch.commit_all("base");
+    let body: String = (0..10)
+        .map(|n| {
+            if n % 4 == 1 {
+                format!("let wide_{n} = \"{}\";\n", "w".repeat(150))
+            } else {
+                format!("line {n}\n")
+            }
+        })
+        .collect();
+    scratch.write("src/fits.rs", body);
+    scratch
+}
+
+#[test]
+fn the_pointer_is_told_about_the_bar_a_wrapped_diff_shorter_than_the_region_draws() {
+    // The pointer's map and the painter decide the bar from one span, or the
+    // reader sees a bar the pointer calls content. Under wrap the screenful is
+    // smaller than the region, and a diff that fits one and not the other is
+    // where two spans part.
+    let scratch = fits("shell-wrap-bar-map");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let last = PANE.width - 1;
+    let thumb_drawn = |buf: &Buffer, top: u16, rows: u16| {
+        (top..top + rows).any(|y| buf[(last, y)].symbol() == "\u{2588}")
+    };
+
+    let mut app = wrapped(&mut frame);
+    let (view, buf, chrome) = painted(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    let region = split(&app).diff;
+    assert!(
+        view.shown() < view.total_rows,
+        "the screen holds {} of {} rows, so nothing wraps and this gate proves nothing",
+        view.shown(),
+        view.total_rows
+    );
+    assert!(
+        view.total_rows <= region,
+        "the diff is {} rows against a region of {region}, so both spans say bar and \
+         this gate proves nothing",
+        view.total_rows
+    );
+    let diff = regions(PANE, &chrome, &view).diff;
+    assert!(
+        thumb_drawn(&buf, diff.top, diff.rows),
+        "the painter drew no thumb in column {last}"
+    );
+    assert_eq!(
+        diff.bar,
+        Some(last),
+        "the painter drew a bar in column {last} and the pointer is told there is none"
+    );
+
+    // The direction that does not move: unwrapped, the diff fits the screen, so
+    // neither the painter nor the map has a bar.
+    let mut app = App::new();
+    let (view, buf, chrome) = painted(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    let diff = regions(PANE, &chrome, &view).diff;
+    assert!(
+        !thumb_drawn(&buf, diff.top, diff.rows),
+        "unwrapped, the diff fits the region and a thumb was drawn"
+    );
+    assert_eq!(
+        diff.bar, None,
+        "unwrapped, the diff fits the region and the pointer is told of a bar"
+    );
+}
+
 /// Short unwrapped lines first, heavily wrapped ones last, so a screenful at the
 /// top is far more rows of the diff than a screenful at the end. `tall` cannot
 /// show this: its lines are one width, so every screenful is the same size.

@@ -1674,7 +1674,10 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let diff_bar = bar_for(
         diff_bars,
         areas.diff.height,
-        body.diff as u64,
+        // The screenful, which is what the painted thumb spans: from the region's
+        // height instead, a wrapped diff that fits the region and not the screen
+        // drew a bar the pointer was told was content.
+        view.shown() as u64,
         view.total_rows as u64,
     );
 
