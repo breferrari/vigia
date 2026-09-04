@@ -255,12 +255,16 @@ fn the_machine_running_this_can_run_the_provider() {
 /// it says the three seams exist, not that they are correct. What it stops is
 /// the whole feature being deleted from the shell while its own suite passes.
 ///
-/// Comment lines are dropped first, because commenting the block out is the
-/// cheapest way to delete it and a scan that reads them cannot tell the two
-/// apart. Found by doing exactly that and watching this pass.
+/// The shell's own test module is cut off first, and comment lines dropped
+/// after. Both are ways for the scan to find its own subject somewhere it does
+/// not run: `lib.rs` names one of these seams as data inside a gate of its own,
+/// and commenting the block out is the cheapest way to delete it.
 #[test]
 fn the_shell_still_arms_the_check() {
     let code: String = include_str!("../src/lib.rs")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("split")
         .lines()
         .filter(|line| !line.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
