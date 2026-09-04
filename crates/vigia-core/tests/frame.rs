@@ -535,7 +535,7 @@ fn a_diff_in_hand_keeps_its_height_inside_the_margin_at_one_stat_and_follows_the
     let again = delta(again, frame.stats());
     assert_eq!(
         again.measured, 0,
-        "the tick after the settled one read {} files again, so a stale diff in          hand is still being asked before the height just taken",
+        "the tick after the settled one read {} files again, so the height just taken is not what the next tick asks first",
         again.measured
     );
 }

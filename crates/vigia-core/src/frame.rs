@@ -460,9 +460,9 @@ impl<'w> Frame<'w> {
 
     /// How long until the earliest height kept waiting inside the settle margin
     /// settles, or `None` when none is waiting. No filesystem event marks a write
-    /// ending, so this is what a wake at that moment has to be armed from. Decided
-    /// by each tick's walk, so a diff taken between two ticks can leave it one wake
-    /// early, and a wake that finds nothing waiting costs a walk and no read.
+    /// ending, so a wake at that moment has nothing to be armed from but this.
+    /// Decided by each tick's walk, so a diff taken between two ticks can leave it
+    /// one wake early, and a wake that finds nothing waiting costs a walk and no read.
     pub fn settles_in(&self, now: SystemTime) -> Option<Duration> {
         self.settles_at
             .map(|at| at.duration_since(now).unwrap_or(Duration::ZERO))
@@ -532,27 +532,13 @@ impl<'w> Frame<'w> {
             fingerprint(&path)
         };
 
-        // (1) A diff in hand, or a span carried from an earlier tick. Either was true
-        // of the file when it was taken, and `advance` migrated both without asking
-        // whether the file moved, so this is where it is asked: one stat, and no
-        // read while the file is still being written.
-        let what = if let Some(cached) = self.cached.get(change) {
-            let what = verdict(&cached.taken, change, now, &mut fresh);
-            if what == Verdict::Remeasure {
-                // The read below is the answer now, and a diff its file has left
-                // behind would be asked first next tick and lose again, every tick,
-                // until something drew it. `diff` recomputes it when something does.
-                self.cached.remove(change);
-            } else {
-                let measured = Measured {
-                    taken: Some(cached.taken.clone()),
-                    span: FileSpan::from(&cached.diff),
-                    answered: true,
-                };
-                self.spans.put(change, measured);
-            }
-            what
-        } else if let Some(measured) = self.spans.get_mut(change)
+        // (1) A span carried from an earlier tick, or put beside the diff this tick
+        // took. It was true of the file when it was taken, and `advance` migrated it
+        // without asking whether the file moved, so this is where it is asked: one
+        // stat, and no read while the file is still being written. A diff in hand
+        // is never asked here: every fresh diff puts its span beside it, so a span
+        // is at least as fresh as any diff for the same path.
+        let what = if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
         {
             let what = verdict(taken, change, now, &mut fresh);
@@ -617,6 +603,11 @@ impl<'w> Frame<'w> {
                 None,
             ),
         };
+        // A diff in hand for a file that stopped reading is a height the screen does
+        // not draw, which is what `diff`'s own failure arm drops it for.
+        if taken.is_none() {
+            self.cached.remove(change);
+        }
         let measured = Measured {
             taken,
             span,

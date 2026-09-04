@@ -192,11 +192,12 @@ fn main() -> ExitCode {
                 );
             }
             println!(
-                "      {} files, {} diffs held, {} recomputed, {} reused, {} stats",
+                "      {} files, {} diffs held, {} recomputed, {} reused, {} waiting, {} stats",
                 frames.files,
                 frames.tracked,
                 frames.warm_stats.computed,
                 frames.warm_stats.reused,
+                frames.warm_stats.deferred,
                 frames.warm_stats.probes
             );
             if frames.warm_stats.computed > 0 {
