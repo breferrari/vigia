@@ -724,7 +724,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
 
     let mut in_margin = Samples::new(CYCLES * PER_CYCLE);
     let mut settled_frames = 0usize;
-    let mut measured_in_margin = 0u64;
+    let mut deferred_in_margin = 0u64;
     let before = frame.stats();
 
     for round in 1..=CYCLES {
@@ -742,7 +742,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
             );
         }
         for _ in 0..PER_CYCLE {
-            let was = frame.stats().measured;
+            let was = frame.stats().deferred;
             let cost = time(|| {
                 sample(&mut history, scratch.root(), EDITED_PATH);
                 shell_frame(
@@ -755,11 +755,12 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
                     screen,
                 );
             });
-            // Split on zero, not on `FILES`.
-            match frame.stats().measured - was {
+            // Split on zero, not on `FILES`: a frame inside the margin keeps every
+            // undrawn height waiting, and a settled one keeps none.
+            match frame.stats().deferred - was {
                 0 => settled_frames += 1,
                 n => {
-                    measured_in_margin += n;
+                    deferred_in_margin += n;
                     in_margin.push(cost);
                 }
             }
@@ -794,11 +795,11 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
 
     // And each of those frames re-measured nearly the whole changed set, not a handful
     // of it.
-    let per_frame = measured_in_margin / in_margin.len() as u64;
+    let per_frame = deferred_in_margin / in_margin.len() as u64;
     let floor = (FILES - touchable) as u64;
     assert!(
         per_frame >= floor,
-        "an in-margin frame re-measured {per_frame} files on average, under \
+        "an in-margin frame kept {per_frame} heights waiting on average, under \
          the {floor} a screen leaves undrawn, so these frames were only \
          part-way into the margin"
     );
@@ -830,11 +831,12 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     eprintln!(
         "note: a bulk rewrite of {FILES} undrawn files, inside the margin: \
          p50 {:?} p99 {p99:?} max {:?} over {} in-margin frames of {timed} \
-         timed ({settled_frames} settled), {} measured and {} stats per \
-         frame across all {drove} driven",
+         timed ({settled_frames} settled), {} waiting, {} measured and {} stats \
+         per frame across all {drove} driven",
         in_margin.percentile(0.50).expect("samples"),
         in_margin.max().expect("samples"),
         in_margin.len(),
+        cost.deferred / drove as u64,
         cost.measured / drove as u64,
         cost.probes / drove as u64,
     );

@@ -254,6 +254,37 @@ fn a_file_that_fails_after_it_diffed_does_not_keep_the_height_it_had() {
     );
 }
 
+#[test]
+fn a_file_that_stops_reading_loses_the_height_it_had_even_when_nothing_diffs_it() {
+    // The sequence the gate above does not drive: the file is never diffed again,
+    // so the height walk is the only thing that can notice the read now fails.
+    let scratch = Scratch::new("core-blob-then-fails-undrawn");
+    scratch.write(GONE, "one\n");
+    scratch.commit_all("baseline");
+    scratch.write(GONE, "one\ntwo\n");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let index = index_of(&frame, GONE);
+    frame.diff(index).expect("the file reads on the first tick");
+    let whole = frame.rows_of(index, rows_of).expect("height");
+    assert!(
+        whole > 2,
+        "the fixture draws a note before it is broken, so nothing here is tested"
+    );
+
+    scratch.point_at_a_missing_blob(GONE);
+    frame.advance().expect("advance");
+    let index = index_of(&frame, GONE);
+    let now = frame.rows_of(index, rows_of).expect("height");
+    assert_eq!(
+        now, 2,
+        "the height still describes the diff from before the blob went missing, \
+         and nothing drew the file to correct it"
+    );
+}
+
 /// A fifo is one of the four things `gix` calls untrackable, and the only class
 /// where reading the entry does not fail but blocks: `open` on a pipe with no
 /// writer waits for one, on the thread the pane draws from.

@@ -15,7 +15,7 @@ use vigia::{
 };
 use vigia_core::{Frame, Highlighter, History};
 
-use support::{Scratch, materialise};
+use support::{Scratch, materialise, settle_spans};
 
 /// The pane every gate here draws on.
 const PANE: Rect = Rect::new(0, 0, 80, 24);
@@ -1630,6 +1630,59 @@ fn the_pointer_is_told_about_the_bar_a_wrapped_diff_shorter_than_the_region_draw
     assert_eq!(
         diff.bar, None,
         "unwrapped, the diff fits the region and the pointer is told of a bar"
+    );
+}
+
+#[test]
+fn the_thumb_does_not_move_when_the_reader_scrolls_into_a_file_that_changed_off_screen() {
+    // The total is counted from the span cache, and a diff in hand was trusted by
+    // presence: a file edited below the window kept its old height until the walk
+    // diffed it, which is the frame the reader scrolled into it, so the thumb
+    // jumped there. The height now follows the file once it settles.
+    let scratch = lopsided("shell-wrap-offscreen-edit");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+    let (top, _, _) = thumb_of(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    let before = top.total_rows;
+
+    // The last file grows while the window sits on the first, and the frame is
+    // ticked once the write has settled, with nothing drawing the file.
+    let mut body = String::new();
+    for n in 0..60 {
+        body.push_str(&format!("let grown_{n} = {n};\n"));
+    }
+    scratch.write("src/f2.rs", body);
+    settle_spans(&mut frame);
+
+    let mut cold = worktree.frame();
+    cold.advance().expect("advance");
+    let truth = vigia::diff_rows(&mut cold).expect("height");
+    assert!(
+        truth > before,
+        "the last file grew and a memoryless frame still counts {before} rows"
+    );
+
+    let (at_top, thumb_at_top, _) =
+        thumb_of(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        at_top.total_rows, truth,
+        "with the window at the top the bar is scaled to {} rows where the diff is \
+         {truth}, so a file edited off screen kept its old height",
+        at_top.total_rows
+    );
+
+    app.apply(Action::Scroll(10_000), &mut frame, height)
+        .expect("apply");
+    let (_, thumb_at_end, _) = thumb_of(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        thumb_at_top, thumb_at_end,
+        "the thumb was {thumb_at_top} rows at the top and {thumb_at_end} once the \
+         reader scrolled into the edited file, so the total moved under the scroll"
     );
 }
 
