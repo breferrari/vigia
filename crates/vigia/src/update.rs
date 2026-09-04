@@ -6,6 +6,7 @@
 //! outcome between them, which is silence.
 
 use std::fmt;
+use std::io::Read;
 
 use crate::colour::override_of;
 
@@ -68,10 +69,19 @@ pub fn newer(remote: &str, local: &str) -> bool {
 /// construction, so a string semver would accept and this will not is a sign
 /// that something upstream changed rather than a shape to guess at.
 fn triple(version: &str) -> Option<(u64, u64, u64)> {
+    // `u64::from_str` accepts a leading `+` and leading zeros without limit, so
+    // parsing alone would let a version that is neither drawn verbatim on the
+    // footer, at any length the answer cares to send.
+    fn number(part: &str) -> Option<u64> {
+        let canonical =
+            part.bytes().all(|b| b.is_ascii_digit()) && (part == "0" || !part.starts_with('0'));
+        canonical.then(|| part.parse().ok()).flatten()
+    }
+
     let mut parts = version.split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = parts.next()?.parse::<u64>().ok()?;
-    let patch = parts.next()?.parse::<u64>().ok()?;
+    let major = number(parts.next()?)?;
+    let minor = number(parts.next()?)?;
+    let patch = number(parts.next()?)?;
     parts.next().is_none().then_some((major, minor, patch))
 }
 
@@ -105,7 +115,9 @@ fn fetch() -> Option<String> {
     // answer is still about a pane somebody is looking at.
     const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
     // An order above the 71KB the endpoint sends at forty-four published
-    // versions, and far below a size a monitor would feel.
+    // versions, and far below a size a monitor would feel. Counted after
+    // decoding: `ureq`'s own limit sits under the decompressor, so with `gzip`
+    // on it bounds the wire and not the allocation.
     const BODY_LIMIT: u64 = 1024 * 1024;
 
     if !provider_runs_here() {
@@ -124,18 +136,22 @@ fn fetch() -> Option<String> {
             ")"
         ))
         .timeout_global(Some(FETCH_TIMEOUT))
+        // Off by default, and this endpoint is fixed and always TLS: without it
+        // a redirect can carry the request to cleartext, which is the guarantee
+        // the whole provider argument was about.
+        .https_only(true)
         .build()
         .into();
 
-    agent
-        .get(ENDPOINT)
-        .call()
-        .ok()?
+    let mut response = agent.get(ENDPOINT).call().ok()?;
+    let mut body = String::new();
+    response
         .body_mut()
-        .with_config()
-        .limit(BODY_LIMIT)
-        .read_to_string()
-        .ok()
+        .as_reader()
+        .take(BODY_LIMIT)
+        .read_to_string(&mut body)
+        .ok()?;
+    Some(body)
 }
 
 /// Nothing to ask on an architecture the provider will not compile on.

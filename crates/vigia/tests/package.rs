@@ -1574,7 +1574,7 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 388600),
+    ("SPEC.md", 388320),
     ("REVOCATIONS.md", 6558),
     ("ROADMAP.md", 95434),
     ("RULINGS.md", 94676),
@@ -1611,7 +1611,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 
     assert_eq!(
         resolved, GRAVIOLA_MIRRORED,
-        "graviola moved to {resolved}. Re-read `verify_cpu_features` in          `low/x86_64/cpu.rs` and `low/aarch64/cpu.rs`, bring          `update.rs::provider_runs_here` into line with whatever it asserts on          now, then move this constant. A feature added there and missed here is          an abort on a reader's machine"
+        "graviola moved to {resolved}. Re-read `verify_cpu_features` in `low/x86_64/cpu.rs` and `low/aarch64/cpu.rs`, bring `update.rs::provider_runs_here` into line with whatever it asserts on now, then move this constant. A feature added there and missed here is an abort on a reader's machine"
     );
 
     // Comment markers stripped and whitespace collapsed, so the phrase is found
@@ -1624,7 +1624,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
         .join(" ");
     assert!(
         prose.contains(&format!("graviola {GRAVIOLA_MIRRORED}")),
-        "the guard no longer names the release its list came from, so the next          reader cannot tell which source to check it against"
+        "the guard no longer names the release its list came from, so the next reader cannot tell which source to check it against"
     );
 }
 
@@ -1635,7 +1635,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 628385;
+const WRITTEN_LAYER_TOTAL: usize = 628105;
 
 /// Each document weighs no more than its budget.
 #[test]

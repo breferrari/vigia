@@ -205,6 +205,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         scrolling: None,
         scrolling_until: None,
         notice_until: None,
+        announce: None,
         served: Vec::new(),
         written: false,
         warming: None,
@@ -319,6 +320,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             shell.settle_scroll(began);
             shell.settle_notice(began);
             shell.settle_send(began);
+            shell.settle_announcement(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -466,15 +468,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 // Deliberately nothing.
                 Wake::Warmed => {}
-                Wake::Update(version) => {
-                    shell.say(format!("vigia {version} is available"), began);
-                }
+                Wake::Update(version) => shell.announce = Some(version),
             }
         }
 
-        // Before the paint: the notice either raises has to reach this frame.
+        // Before the paint: a notice either of them raises has to reach this frame.
         shell.settle_notice(began);
         shell.settle_send(began);
+        shell.settle_announcement(began);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -599,6 +600,10 @@ struct Shell {
     scrolling_until: Option<Instant>,
     /// When the footer's transient message stops being true: a keypress makes no tick.
     notice_until: Option<Instant>,
+    /// A newer version the registry named, held until the footer has room for
+    /// it. It arrives once, so being written over before it paints would lose it
+    /// for the run.
+    announce: Option<String>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
@@ -754,6 +759,16 @@ impl Shell {
                 Err(e) => format!("could not send {said}: {e}"),
             };
             self.say(told, now);
+        }
+    }
+
+    /// Say what the registry named, on the first frame with a free footer.
+    fn settle_announcement(&mut self, now: Instant) {
+        if self.notice_until.is_some() {
+            return;
+        }
+        if let Some(version) = self.announce.take() {
+            self.say(format!("vigia {version} is available"), now);
         }
     }
 
@@ -1255,6 +1270,7 @@ mod tests {
             "theme::from_env(",
             "Glyphs::detect(",
             "config::from_env(",
+            "update::wanted(",
         ] {
             let at = code
                 .find(reader)
@@ -1429,6 +1445,24 @@ mod tests {
                  that clock is either armed somewhere else or has stopped: {sources}"
             );
         }
+        // A message and the deadline that takes it back are armed together or the
+        // footer keeps it forever, and the loop never wakes to find out. Mutating
+        // the deadline out of `say` passed the whole suite, because nothing can
+        // build a `Shell` to watch it happen.
+        let armed = code
+            .find("fn say(&mut self")
+            .expect("`Shell::say` is gone, so notices are armed somewhere this cannot see");
+        let body = &code[armed..armed + 220.min(code.len() - armed)];
+        for half in [
+            "self.app.flash(message)",
+            "self.notice_until = Some(now + NOTICE_LINGER)",
+        ] {
+            assert!(
+                body.contains(half),
+                "`{half}` is gone from `Shell::say`, so a notice is put on the                  footer without the clock that takes it off: {body}"
+            );
+        }
+
         assert!(
             code.contains("match shell.patience(Instant::now())"),
             "the loop no longer decides how long to wait through `Held::wait`, so \

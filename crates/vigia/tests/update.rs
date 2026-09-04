@@ -83,13 +83,48 @@ fn a_major_bump_is_newer() {
 
 #[test]
 fn a_version_that_is_not_a_triple_says_nothing() {
-    for odd in ["0.35", "0.35.0.1", "0.35.0-beta.1", "v0.35.0", "", "latest"] {
+    for odd in [
+        "0.35",
+        "0.35.0.1",
+        "0.35.0-beta.1",
+        "v0.35.0",
+        "",
+        "latest",
+        "1..3",
+        "0..0",
+        " 0.35.0",
+        "0.35.0 ",
+    ] {
         assert!(
             !newer(odd, "0.34.0"),
             "{odd:?} was read as a release when it is not one, so the footer \
              would name a version that does not exist"
         );
     }
+}
+
+/// What can reach the footer is exactly what `newer` accepts, so the accepted
+/// set is the whole of the answer's reach into the drawn pane.
+#[test]
+fn only_a_canonical_triple_can_reach_the_footer() {
+    // `u64::from_str` takes both of these, and either would be drawn verbatim:
+    // the second at whatever length the answer chose to send.
+    assert!(
+        !newer("+0.35.0", "0.34.0"),
+        "a signed component was accepted"
+    );
+    assert!(
+        !newer("0.0035.0", "0.34.0"),
+        "a padded component was accepted, and the padding has no length limit"
+    );
+    assert!(
+        !newer(&format!("0.{}35.0", "0".repeat(4096)), "0.34.0"),
+        "a four-kilobyte version was accepted"
+    );
+
+    // The bound that follows: three components, each at most twenty digits.
+    assert!(newer("18446744073709551615.0.0", "0.34.0"));
+    assert!(!newer("18446744073709551616.0.0", "0.34.0"));
 }
 
 #[test]
@@ -241,6 +276,34 @@ fn the_shell_still_arms_the_check() {
         assert!(
             code.contains(seam),
             "`{seam}` is gone from the shell, so nothing asks and nothing draws"
+        );
+    }
+}
+
+/// Two of `ureq`'s defaults are wrong for one fixed endpoint, and only a
+/// hostile network could show either being restored.
+///
+/// `https_only` off lets a redirect carry the request to cleartext, and the
+/// crate's own body cap sits under the decompressor, so with `gzip` on it
+/// bounds the wire rather than the allocation.
+#[test]
+fn the_agent_keeps_the_two_defaults_it_had_to_override() {
+    let code: String = include_str!("../src/update.rs")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    assert!(
+        code.contains("fn fetch()"),
+        "the module was not read, so scanning it proves nothing"
+    );
+    for override_ in [".https_only(true)", ".take(BODY_LIMIT)"] {
+        assert!(
+            code.contains(override_),
+            "`{override_}` is gone, so the request is back on a default that is              wrong for this endpoint"
         );
     }
 }

@@ -6,7 +6,7 @@
 
 *Portuguese: a watchman, the one who keeps watch. At sea, also a porthole.*
 
-[![crates.io](https://img.shields.io/crates/v/vigia?style=for-the-badge&logo=rust&color=39c5cf&labelColor=0d1117)](https://crates.io/crates/vigia) [![downloads](https://img.shields.io/crates/d/vigia?style=for-the-badge&color=3fb950&labelColor=0d1117)](https://crates.io/crates/vigia) [![ci](https://img.shields.io/github/actions/workflow/status/breferrari/vigia/ci.yml?branch=main&style=for-the-badge&label=ci&color=3fb950&labelColor=0d1117)](https://github.com/breferrari/vigia/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-e3b341?style=for-the-badge&labelColor=0d1117)](LICENSE) [![rust](https://img.shields.io/badge/rust-1.85+-f85149?style=for-the-badge&logo=rust&labelColor=0d1117)](https://www.rust-lang.org)
+[![crates.io](https://img.shields.io/crates/v/vigia?style=for-the-badge&logo=rust&color=39c5cf&labelColor=0d1117)](https://crates.io/crates/vigia) [![downloads](https://img.shields.io/crates/d/vigia?style=for-the-badge&color=3fb950&labelColor=0d1117)](https://crates.io/crates/vigia) [![ci](https://img.shields.io/github/actions/workflow/status/breferrari/vigia/ci.yml?branch=main&style=for-the-badge&label=ci&color=3fb950&labelColor=0d1117)](https://github.com/breferrari/vigia/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-e3b341?style=for-the-badge&labelColor=0d1117)](LICENSE) [![rust](https://img.shields.io/badge/rust-1.89+-f85149?style=for-the-badge&logo=rust&labelColor=0d1117)](https://www.rust-lang.org)
 
 **Your agent writes in one pane. `vigia` watches in the pane beside it.**
 
@@ -64,7 +64,7 @@ vigia --version          # or -V. It is the only option there is
 
 Every [release](https://github.com/breferrari/vigia/releases) carries archives directly, for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc.
 
-From source needs Rust 1.85 or newer:
+From source needs Rust 1.89 or newer:
 
 ```sh
 cargo install --git https://github.com/breferrari/vigia vigia
