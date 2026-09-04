@@ -388,7 +388,7 @@ fn a_tick_re_measures_only_what_changed() {
 
 #[test]
 fn a_tick_inside_the_settle_margin_stats_each_file_once() {
-    // The lazy fingerprint, held as a count.
+    // The lazy fingerprint, held as a count, and the read that waits for the margin.
     let scratch = Scratch::large_diff("shell-reads-margin", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -408,12 +408,17 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
     frame.height(vigia::rows_of).expect("height");
     let cost = delta(before, frame.stats());
 
-    // Non-vacuity: the tick has to have actually re-measured, or there was no
-    // stat to be lazy about.
+    // Non-vacuity: the tick has to be inside the margin, which is every height kept
+    // waiting and none read, or there was no stat to be lazy about.
     assert_eq!(
-        cost.measured, FILES as u64,
-        "the tick measured {} of {FILES} files, so it is not inside the margin \
-         and this gate is not looking at the window it names",
+        cost.deferred, FILES as u64,
+        "the tick kept {} of {FILES} heights waiting, so it is not inside the \
+         margin and this gate is not looking at the window it names",
+        cost.deferred
+    );
+    assert_eq!(
+        cost.measured, 0,
+        "the tick read {} files still being written, which the margin exists to prevent",
         cost.measured
     );
     assert!(
@@ -425,6 +430,13 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
          classified (`FileChange::maybe_symlink`, #15). This fixture is all \
          regular files, so the second should contribute nothing",
         cost.probes
+    );
+
+    // And the read comes once, when the files settle.
+    let re_read = settle_spans(&mut frame);
+    assert_eq!(
+        re_read, FILES as u64,
+        "the settled tick read {re_read} of {FILES} files"
     );
 }
 

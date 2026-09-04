@@ -24,6 +24,9 @@ pub struct FrameStats {
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     pub evicted: u64,
+    /// Heights kept from an earlier read because their file moved inside the
+    /// settle margin, each to be read again once it settles.
+    pub deferred: u64,
 }
 
 /// A working-tree fingerprint that costs no read: size and modification time.
@@ -169,8 +172,9 @@ struct Measured {
     /// produced it failed.
     taken: Option<Taken>,
     span: FileSpan,
-    /// Whether this span has been shown to describe the file on this tick.
-    proven: bool,
+    /// Whether this tick has asked about this span: proved it, or deliberately
+    /// kept it while its file is inside the settle margin.
+    answered: bool,
 }
 
 /// Fingerprint a working-tree file, or `None` when it cannot be.
@@ -182,30 +186,96 @@ fn fingerprint(path: &Path) -> Option<Fingerprint> {
     })
 }
 
-/// Whether something taken from a file still describes the working tree.
+/// What a change's own evidence says about an artefact taken under it, before a
+/// fingerprint is spent.
+enum Provenance {
+    /// The kind or a side moved: the artefact describes another comparison.
+    Moved,
+    /// Computed from the index side alone, so nothing on disk could have gone stale.
+    NoWorktree,
+    /// The working-tree side has to be asked, and this is what the read observed of
+    /// it, or `None` when it could not be fingerprinted then.
+    Worktree(Option<Observed>),
+}
+
+fn provenance(taken: &Taken, current: &FileChange) -> Provenance {
+    // A new blob on either side is a new diff even when the file on disk never
+    // moved, and a new kind is a different diff outright.
+    if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
+    {
+        return Provenance::Moved;
+    }
+    // A removal, a conflict and a type change are computed from the left side
+    // alone, so they have no working-tree side that could have gone stale.
+    if !current.reads_worktree() {
+        return Provenance::NoWorktree;
+    }
+    Provenance::Worktree(taken.worktree)
+}
+
+/// Whether a diff taken from a file still describes the working tree.
 fn reusable(
     taken: &Taken,
     current: &FileChange,
     fresh: impl FnOnce() -> Option<Fingerprint>,
 ) -> bool {
-    // A new blob on either side is a new diff even when the file on disk never
-    // moved, and a new kind is a different diff outright.
-    if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
-    {
-        return false;
+    match provenance(taken, current) {
+        Provenance::Moved => false,
+        Provenance::NoWorktree => true,
+        // Unfingerprintable then is not a failure, and it forbids reuse all the same:
+        // the alternative is drawing a diff we cannot vouch for.
+        Provenance::Worktree(None) => false,
+        // Unfingerprintable now forbids it the same way. An unsettled observation is
+        // refused before the stat, so that corner costs one syscall rather than two.
+        Provenance::Worktree(Some(observed)) => {
+            observed.settled && fresh().is_some_and(|fresh| observed.print == fresh)
+        }
     }
+}
 
-    // A removal, a conflict and a type change are computed from the left side
-    // alone, so they have no working-tree side that could have gone stale.
-    if !current.reads_worktree() {
-        return true;
+/// What a height taken earlier is worth now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// The file still says what it said, so the height stands.
+    Keep,
+    /// The file moved inside the settle margin, so the height stands until the
+    /// moment it settles, which is carried.
+    Wait(SystemTime),
+    /// The file moved and has settled, or nothing vouches for it: read it again.
+    Remeasure,
+}
+
+/// A diff is refused the moment its file moves, because drawing bytes nobody can
+/// vouch for is wrong; a height is a proportion, and one two seconds stale costs
+/// less than reading every file inside a burst.
+fn verdict(
+    taken: &Taken,
+    current: &FileChange,
+    now: SystemTime,
+    fresh: impl FnOnce() -> Option<Fingerprint>,
+) -> Verdict {
+    let observed = match provenance(taken, current) {
+        Provenance::Moved | Provenance::Worktree(None) => return Verdict::Remeasure,
+        Provenance::NoWorktree => return Verdict::Keep,
+        Provenance::Worktree(Some(observed)) => observed,
+    };
+    let Some(fresh) = fresh() else {
+        return Verdict::Remeasure;
+    };
+    // An unchanged print proves the bytes only if the read that took it began after
+    // the file's granule closed; taken earlier, it is read again once it settles.
+    if observed.print == fresh && observed.settled {
+        return Verdict::Keep;
     }
-
-    // Unfingerprintable then, or unfingerprintable now. Neither is a failure, and both
-    // forbid reuse: the alternative is drawing a diff we cannot vouch for.
-    match taken.worktree {
-        Some(observed) => observed.settled && fresh().is_some_and(|fresh| observed.print == fresh),
-        None => false,
+    // A modification time ahead of the clock never settles, so waiting on it would
+    // freeze the height for as long as the skew lasts; it is read, as a diff is.
+    if now.duration_since(fresh.mtime).is_err() {
+        return Verdict::Remeasure;
+    }
+    if settled(fresh.mtime, now) {
+        Verdict::Remeasure
+    } else {
+        Verdict::Wait(fresh.mtime.checked_add(SETTLE_MARGIN).unwrap_or(now))
     }
 }
 
@@ -239,8 +309,7 @@ pub struct Frame<'w> {
     /// The failure [`Frame::diff`] last contained, held only so it can be handed
     /// back by reference.
     ///
-    /// Deliberately not a cache. [`Frame::fill_span`] takes a diff in hand
-    /// without revalidating it, so anything reachable from there is read as
+    /// Deliberately not a cache: everything reachable from the caches is read as
     /// evidence, and a failed read is evidence about nothing.
     failure: Option<FileDiff>,
     /// Whether the staged run is drawn beside the unstaged one.
@@ -249,6 +318,9 @@ pub struct Frame<'w> {
     /// it rather than recovered by scanning. See [`Frame::staged_at`].
     staged_at: usize,
     stats: FrameStats,
+    /// The earliest moment a height kept waiting inside the settle margin settles,
+    /// for a wake at that moment rather than at the next event.
+    settles_at: Option<SystemTime>,
 }
 
 impl<'w> Frame<'w> {
@@ -263,6 +335,7 @@ impl<'w> Frame<'w> {
             staged: false,
             staged_at: 0,
             stats: FrameStats::default(),
+            settles_at: None,
         }
     }
 
@@ -319,6 +392,8 @@ impl<'w> Frame<'w> {
             self.spans.clear();
         }
         self.attributes = attributes;
+        // Every wait is decided again by the tick that follows it.
+        self.settles_at = None;
 
         // Both caches are migrated, and neither is dropped. Clearing a span here rests
         // on its being derived from content with no freshness check of its own.
@@ -332,9 +407,9 @@ impl<'w> Frame<'w> {
             // tick, which on the hundred-file gate is two hundred.
             self.cached.migrate(&mut previous, change, |_| {});
             self.spans.migrate(&mut previous_spans, change, |measured| {
-                // Carried, and no longer proved. What it described was true of
-                // the previous tick, and `fill_span` is where it is asked again.
-                measured.proven = false;
+                // Carried, and not yet asked. What it described was true of the
+                // previous tick, and `fill_span` is where it is asked again.
+                measured.answered = false;
             });
         }
         // Whatever is left is a path that stopped being changed.
@@ -360,6 +435,7 @@ impl<'w> Frame<'w> {
         self.stats.evicted += self.cached.len() as u64;
         self.cached.clear();
         self.spans.clear();
+        self.settles_at = None;
     }
 
     /// The changed files, in the order status reported them.
@@ -382,15 +458,28 @@ impl<'w> Frame<'w> {
         self.spans.len()
     }
 
+    /// How long until the earliest height kept waiting inside the settle margin
+    /// settles, or `None` when none is waiting. No filesystem event marks a write
+    /// ending, so a wake at that moment has nothing to be armed from but this.
+    /// Decided by each tick's walk, so a diff taken between two ticks can leave it
+    /// one wake early, and a wake that finds nothing waiting costs a walk and no read.
+    pub fn settles_in(&self, now: SystemTime) -> Option<Duration> {
+        self.settles_at
+            .map(|at| at.duration_since(now).unwrap_or(Duration::ZERO))
+    }
+
     /// How many rows the whole diff is, counting every changed file.
     ///
     /// # Errors
     ///
     /// A file's span cannot be measured, which is a read of either side.
     pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
+        // One clock for the walk, so two files written in the same instant fall on
+        // the same side of the margin.
+        let now = SystemTime::now();
         let mut total = 0usize;
         for index in 0..self.files.len() {
-            self.fill_span(index)?;
+            self.fill_span(index, now)?;
             let change = &self.files[index];
             total += rows_of(change, &self.span_of(change).span);
         }
@@ -407,7 +496,7 @@ impl<'w> Frame<'w> {
         index: usize,
         rows_of: impl Fn(&FileChange, &FileSpan) -> usize,
     ) -> Result<usize> {
-        self.fill_span(index)?;
+        self.fill_span(index, SystemTime::now())?;
         let change = &self.files[index];
         Ok(rows_of(change, &self.span_of(change).span))
     }
@@ -420,57 +509,60 @@ impl<'w> Frame<'w> {
             .expect("fill_span guarantees this, and both callers fill first")
     }
 
-    /// Put a span for the file at `index` in the cache, if one is not there.
+    /// Answer for the height of the file at `index` this tick: kept, kept while its
+    /// file settles, or read again.
     ///
     /// # Errors
     ///
     /// The measure fails in a way that is not one file's, which [`Frame::diff`]
     /// propagates for the same reason.
-    fn fill_span(&mut self, index: usize) -> Result<()> {
+    fn fill_span(&mut self, index: usize, now: SystemTime) -> Result<()> {
         let change = &self.files[index];
         if self
             .spans
             .get(change)
-            .is_some_and(|measured| measured.proven)
+            .is_some_and(|measured| measured.answered)
         {
             return Ok(());
         }
-
-        // (1) A diff in hand. Free, and no syscall.
-        if let Some(cached) = self.cached.get(change) {
-            let measured = Measured {
-                taken: Some(cached.taken.clone()),
-                span: FileSpan::from(&cached.diff),
-                proven: true,
-            };
-            self.spans.put(change, measured);
-            return Ok(());
-        }
-
-        // (2) A span carried from an earlier tick, and the only thing standing
-        // between this file and a whole-file read. `advance` migrated it without
-        // asking whether the file moved, so this is where it is asked.
         let path = self.worktree.workdir().join(&change.path);
         let mut probed = false;
-        let mut proved = false;
-        if let Some(measured) = self.spans.get_mut(change)
+        let mut fresh = || {
+            probed = true;
+            fingerprint(&path)
+        };
+
+        // (1) A span carried from an earlier tick, or put beside the diff this tick
+        // took. It was true of the file when it was taken, and `advance` migrated it
+        // without asking whether the file moved, so this is where it is asked: one
+        // stat, and no read while the file is still being written. A diff in hand
+        // is never asked here: every fresh diff puts its span beside it, so a span
+        // is at least as fresh as any diff for the same path.
+        let what = if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
-            && reusable(taken, change, || {
-                probed = true;
-                fingerprint(&path)
-            })
         {
-            measured.proven = true;
-            proved = true;
-        }
+            let what = verdict(taken, change, now, &mut fresh);
+            if what != Verdict::Remeasure {
+                measured.answered = true;
+            }
+            what
+        } else {
+            Verdict::Remeasure
+        };
         // Counted from whether the closure ran, so `probes` stays a count of
         // syscalls taken rather than of call sites reached.
         self.stats.probes += u64::from(probed);
-        if proved {
-            return Ok(());
+        match what {
+            Verdict::Remeasure => {}
+            Verdict::Keep => return Ok(()),
+            Verdict::Wait(until) => {
+                self.stats.deferred += 1;
+                self.settles_at = Some(self.settles_at.map_or(until, |at| at.min(until)));
+                return Ok(());
+            }
         }
 
-        // (3) A read.
+        // (2) A read.
         let read_started = SystemTime::now();
         // The read reports what it spent deciding *how* to read, and it is
         // folded into the same counter as the fingerprints. Added before the
@@ -514,7 +606,7 @@ impl<'w> Frame<'w> {
         let measured = Measured {
             taken,
             span,
-            proven: true,
+            answered: true,
         };
         self.spans.put(change, measured);
         Ok(())
@@ -553,6 +645,10 @@ impl<'w> Frame<'w> {
 
         if reuse {
             self.stats.reused += 1;
+            // Proved unchanged, and the height taken from this diff is proved with it.
+            if let Some(measured) = self.spans.get_mut(change) {
+                measured.answered = true;
+            }
             let diff = &self
                 .cached
                 .get(change)
@@ -579,8 +675,7 @@ impl<'w> Frame<'w> {
             Err(e) => {
                 let reason = e.of_one_file().ok_or(e)?;
                 // Both caches drop this path. What they hold described a read that
-                // is no longer the answer, and `fill_span`'s first branch takes a
-                // diff in hand without revalidating it, so a diff left there is a
+                // is no longer the answer, and a height nothing can vouch for is a
                 // height the screen does not draw.
                 self.cached.remove(change);
                 self.spans.remove(change);
@@ -602,15 +697,19 @@ impl<'w> Frame<'w> {
 
         self.stats.computed += 1;
         self.stats.bytes += diff.bytes;
-        // The height goes with the diff it was taken from.
-        self.spans.remove(change);
-        self.cached.put(
+        // The height goes with the diff it was taken from: this read proved both, and
+        // a walk that asked the file again would spend a second stat on every drawn
+        // file every tick.
+        let taken = Taken::of(change, worktree);
+        self.spans.put(
             change,
-            Cached {
-                taken: Taken::of(change, worktree),
-                diff,
+            Measured {
+                taken: Some(taken.clone()),
+                span: FileSpan::from(&diff),
+                answered: true,
             },
         );
+        self.cached.put(change, Cached { taken, diff });
         let diff = &self.cached.get(change).expect("just inserted").diff;
         Ok((change, diff))
     }
@@ -884,5 +983,103 @@ mod tests {
         let entry = taken(ChangeKind::Conflict, blob(1), None);
         let now = change(ChangeKind::Conflict, blob(1));
         assert!(reusable(&entry, &now, || None));
+    }
+
+    /// A fingerprint taken inside the granule it was stamped in: bytes it cannot
+    /// vouch for.
+    fn untrusted(len: u64, mtime: SystemTime) -> Option<Observed> {
+        Some(Observed {
+            print: print(len, mtime),
+            settled: false,
+        })
+    }
+
+    #[test]
+    fn a_height_whose_file_did_not_move_is_kept() {
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(1));
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(40, epoch(10)))),
+            Verdict::Keep
+        );
+    }
+
+    #[test]
+    fn a_height_whose_file_moved_inside_the_margin_waits_until_the_margin_ends() {
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(1));
+        // Written one second ago, so the margin closes one second from now.
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(41, epoch(99)))),
+            Verdict::Wait(epoch(101))
+        );
+    }
+
+    #[test]
+    fn a_modification_time_in_the_future_is_read_again_rather_than_waited_on() {
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(1));
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(41, epoch(200)))),
+            Verdict::Remeasure
+        );
+    }
+
+    #[test]
+    fn a_height_whose_file_moved_and_settled_is_read_again() {
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(1));
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(41, epoch(90)))),
+            Verdict::Remeasure
+        );
+    }
+
+    #[test]
+    fn a_height_taken_inside_the_granule_is_read_again_once_the_file_settles() {
+        let entry = taken(ChangeKind::Modified, blob(1), untrusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(1));
+        assert_eq!(
+            verdict(&entry, &now, epoch(11), || Some(print(40, epoch(10)))),
+            Verdict::Wait(epoch(12))
+        );
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(40, epoch(10)))),
+            Verdict::Remeasure
+        );
+    }
+
+    #[test]
+    fn a_height_is_read_again_when_an_index_side_moved_and_no_stat_is_spent() {
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(2));
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || panic!(
+                "a stat the ids already answered"
+            )),
+            Verdict::Remeasure
+        );
+    }
+
+    #[test]
+    fn a_removals_height_is_kept_with_no_fingerprint_at_all() {
+        let entry = taken(ChangeKind::Removed, blob(1), None);
+        let now = change(ChangeKind::Removed, blob(1));
+        assert_eq!(verdict(&entry, &now, epoch(100), || None), Verdict::Keep);
+    }
+
+    #[test]
+    fn a_height_nothing_can_fingerprint_is_read_again() {
+        let now = change(ChangeKind::Modified, blob(1));
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || None),
+            Verdict::Remeasure
+        );
+        let entry = taken(ChangeKind::Modified, blob(1), None);
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(40, epoch(10)))),
+            Verdict::Remeasure
+        );
     }
 }

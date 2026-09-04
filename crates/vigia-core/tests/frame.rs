@@ -2,7 +2,9 @@
 
 mod support;
 
-use support::{Scratch, committed_link, delta, materialise, settle, settle_spans};
+use std::time::{Duration, SystemTime};
+
+use support::{Scratch, committed_link, delta, index_of, materialise, settle, settle_spans};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
 /// Small enough to reason about every count, more than one so "all" and "the
@@ -318,7 +320,7 @@ fn total_height(frame: &mut Frame) -> usize {
 }
 
 #[test]
-fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
+fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
     let scratch = Scratch::large_diff("frame-span-edit", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -351,6 +353,17 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
         idle.measured
     );
     assert_eq!(unchanged, before, "an idle tick changed the diff's height");
+    assert_eq!(
+        idle.deferred, 0,
+        "an idle tick kept {} heights waiting, so an unchanged file is being treated \
+         as one still being written",
+        idle.deferred
+    );
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "an idle tick armed a settle deadline with nothing waiting"
+    );
 
     // And it proved them with a `stat` each, which nothing else asserts.
     assert_eq!(
@@ -360,32 +373,84 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
         idle.probes
     );
 
-    // Twice as many lines in a file the viewport never reached.
+    // Twice as many lines in a file the viewport never reached. Inside the margin
+    // the file is still being written, so the old height stands, marked as waiting,
+    // and nothing is read.
     scratch.rewrite_all(FILES, LINES * 2, 3);
-
+    let moved = frame.stats();
     frame.advance().expect("advance");
-    let after = total_height(&mut frame);
+    let inside = total_height(&mut frame);
+    let moved = delta(moved, frame.stats());
+    assert_eq!(
+        inside, before,
+        "the height moved inside the margin, so a file still being written was read"
+    );
+    assert_eq!(
+        moved.deferred, FILES as u64,
+        "the tick kept {} of {FILES} heights waiting, so the walk is not deferring \
+         the files that moved",
+        moved.deferred
+    );
+    assert_eq!(
+        moved.measured, 0,
+        "the tick read {} files inside the margin, which the margin exists to prevent",
+        moved.measured
+    );
+    let due = frame
+        .settles_in(SystemTime::now())
+        .expect("a tick that kept heights waiting armed no settle deadline");
+    assert!(
+        due <= Duration::from_secs(2),
+        "the settle deadline is {due:?} away, past the two-second margin the wait \
+         is measured against"
+    );
 
     // The oracle: a frame with no memory at all, over the same worktree.
     let mut cold = worktree.frame();
     cold.advance().expect("advance");
     let truth = total_height(&mut cold);
-
     assert!(
-        after > before,
-        "the diff doubled and the height stayed at {before}, so a span survived \
-         the content it was taken from"
+        truth > before,
+        "the diff doubled and a memoryless frame still counts {before}, so the \
+         fixture proves nothing"
     );
+
+    // Once the files settle, one tick reads each of them once and the height is
+    // the truth; the tick after reads nothing.
+    let re_read = settle_spans(&mut frame);
+    let after = total_height(&mut frame);
     assert_eq!(
         after, truth,
-        "the frame reports a {after}-row diff where a frame with no memory \
-         computes {truth}, so a carried span is being trusted past its file"
+        "the frame reports a {after}-row diff after the files settled where a \
+         frame with no memory computes {truth}, so a carried span is being \
+         trusted past its file"
+    );
+    assert_eq!(
+        re_read, FILES as u64,
+        "the settled tick read {re_read} of {FILES} files, so the wait did not \
+         end in one read each"
+    );
+    let again = frame.stats();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let again = delta(again, frame.stats());
+    assert_eq!(
+        again.measured, 0,
+        "the tick after the settled one read {} files again",
+        again.measured
+    );
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "every file settled and a settle deadline is still armed"
     );
 }
 
 #[test]
-fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
-    // The order of `fill_span`'s three sources, held structurally.
+fn a_height_taken_from_a_diff_waits_for_the_margin_like_a_carried_one() {
+    // A height that came from a diff earns no exemption: it is asked with a stat,
+    // waits while the file is still being written, and is read once when it
+    // settles, exactly as a carried one is.
     const REWRITTEN: usize = FILES;
     let scratch = Scratch::large_diff("frame-inhand", REWRITTEN, LINES);
     let worktree = scratch.worktree();
@@ -399,14 +464,20 @@ fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
         frame.tracked()
     );
 
-    // Every print moves, and no diff is recomputed: the frame is asked for the
-    // height and nothing else.
-    scratch.rewrite_all(REWRITTEN, LINES, 9);
+    let before_height = total_height(&mut frame);
+
+    // Every print moves and every diff doubles, and no diff is recomputed: the
+    // frame is asked for the height and nothing else.
+    scratch.rewrite_all(REWRITTEN, LINES * 2, 9);
 
     let before = frame.stats();
     frame.advance().expect("advance");
-    total_height(&mut frame);
+    let inside = total_height(&mut frame);
     let first = delta(before, frame.stats());
+    assert_eq!(
+        inside, before_height,
+        "the height moved inside the margin, so a file still being written was read"
+    );
 
     // And again, so a per-tick proof cannot be mistaken for a per-frame one.
     let before = frame.stats();
@@ -416,18 +487,163 @@ fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
 
     for (label, cost) in [("the tick after the rewrite", first), ("the next", second)] {
         assert_eq!(
-            cost.probes, 0,
-            "{label} took {} stat calls to total the height of {REWRITTEN} files \
-             the frame already holds diffs for, so the walk is proving what it \
-             could have read for free",
+            cost.probes, REWRITTEN as u64,
+            "{label} took {} stat calls over {REWRITTEN} files the frame holds diffs \
+             for, so a diff in hand is either trusted by presence or asked twice",
             cost.probes
         );
         assert_eq!(
             cost.measured, 0,
-            "{label} measured {} files that were already in hand",
+            "{label} read {} files that were still being written",
             cost.measured
         );
+        assert_eq!(
+            cost.deferred, REWRITTEN as u64,
+            "{label} kept {} of {REWRITTEN} heights waiting",
+            cost.deferred
+        );
     }
+
+    // The oracle: a frame with no memory at all, over the same worktree.
+    let mut cold = worktree.frame();
+    cold.advance().expect("advance");
+    let truth = total_height(&mut cold);
+    assert!(
+        truth > before_height,
+        "the diff doubled and a memoryless frame still counts {before_height}"
+    );
+
+    // And once they settle, each is read exactly once and the height is the truth.
+    let re_read = settle_spans(&mut frame);
+    assert_eq!(
+        re_read, REWRITTEN as u64,
+        "the settled tick read {re_read} of {REWRITTEN} files"
+    );
+    let after = total_height(&mut frame);
+    assert_eq!(
+        after, truth,
+        "the files settled and the frame still counts {after} where a frame with \
+         no memory computes {truth}, so a diff in hand is trusted past its file"
+    );
+
+    // And the tick after that reads nothing: the read replaced what the diff in
+    // hand said, and nothing is left to disagree with it.
+    let again = frame.stats();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let again = delta(again, frame.stats());
+    assert_eq!(
+        again.measured, 0,
+        "the tick after the settled one read {} files again, so the height just taken is not what the next tick asks first",
+        again.measured
+    );
+}
+
+#[test]
+fn a_file_the_tick_diffed_is_not_asked_again_by_the_height_walk() {
+    // The height goes with the diff it was taken from, proved by the same read, so
+    // the walk that follows spends its stats on the other files only.
+    let scratch = Scratch::large_diff("frame-diffed-once", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    scratch.edit_line("src/mod_0.rs", 3, "// edited");
+    frame.advance().expect("advance");
+    let index = index_of(&frame, "src/mod_0.rs");
+    let before = frame.stats();
+    frame.diff(index).expect("diff");
+    let diffed = delta(before, frame.stats());
+    assert_eq!(diffed.computed, 1, "the edited file was not recomputed");
+
+    let before = frame.stats();
+    total_height(&mut frame);
+    let walked = delta(before, frame.stats());
+    assert_eq!(
+        walked.probes,
+        (FILES - 1) as u64,
+        "the height walk took {} stat calls after the tick diffed one of {FILES} \
+         files, so the file just read is being asked again",
+        walked.probes
+    );
+}
+
+#[test]
+fn a_staged_files_height_is_kept_across_ticks_with_no_stat() {
+    // A staged change is two blobs and no file on disk, so nothing can go stale
+    // between ticks and the walk keeps its height without asking the filesystem.
+    let scratch = Scratch::new("frame-staged-height");
+    scratch.write(
+        "src/staged.rs",
+        "one
+",
+    );
+    scratch.commit_all("base");
+    scratch.write(
+        "src/staged.rs",
+        "one
+two
+three
+",
+    );
+    scratch.git(&["add", "-A"]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let first = total_height(&mut frame);
+    assert!(first > 0, "the staged change has no height to count");
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    let again = total_height(&mut frame);
+    let cost = delta(before, frame.stats());
+    assert_eq!(again, first, "a tick changed a staged file's height");
+    assert_eq!(
+        cost.measured, 0,
+        "a tick read a staged file again: {}",
+        cost.measured
+    );
+    assert_eq!(
+        cost.probes, 0,
+        "a tick took {} stat calls for a change that has no file on disk",
+        cost.probes
+    );
+}
+
+#[test]
+fn a_waiting_file_is_counted_once_a_tick_and_a_diff_of_it_reads_it_fresh() {
+    // The height walk and the screen keep separate caches of the same file, and a
+    // height kept waiting leaves the diff behind it stale. Asking the height twice
+    // in one tick counts one wait, and drawing the file recomputes its diff rather
+    // than serving the one the wait left behind.
+    let scratch = Scratch::large_diff("frame-wait-then-diff", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    scratch.rewrite_all(FILES, LINES * 2, 6);
+    frame.advance().expect("advance");
+    let before = frame.stats();
+    total_height(&mut frame);
+    frame
+        .rows_of(0, |_, span| span.lines as usize)
+        .expect("height");
+    let counted = delta(before, frame.stats());
+    assert_eq!(
+        counted.deferred, FILES as u64,
+        "asking the height twice in one tick kept {} heights waiting for {FILES} files",
+        counted.deferred
+    );
+
+    let before = frame.stats();
+    frame.diff(0).expect("diff");
+    let drawn = delta(before, frame.stats());
+    assert_eq!(
+        drawn.computed, 1,
+        "drawing a file whose height is waiting served the diff the wait left behind"
+    );
+    assert_eq!(drawn.reused, 0, "a diff of a file that moved was reused");
 }
 
 #[test]

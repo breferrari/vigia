@@ -464,10 +464,11 @@ impl Report {
             self.history.evicted_by_window
         );
         println!(
-            "soak: frame computed {}, reused {}, evicted {}, probes {}, {:.1} MiB read",
+            "soak: frame computed {}, reused {}, evicted {}, waiting {}, probes {}, {:.1} MiB read",
             self.frame.computed,
             self.frame.reused,
             self.frame.evicted,
+            self.frame.deferred,
             self.frame.probes,
             mb(self.frame.bytes)
         );

@@ -182,6 +182,8 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 > **What was taken instead is none of the three, and that is the finding.** The walk did not need to be faster; it needed to stop repeating itself, which is what I2a says about diffs and what nothing had yet said about heights. A cost measured once and then re-derived every tick reads as an expensive computation and is a missing cache.
 >
 > **What this does not fix**, so the boundary is a decision and not an oversight: the height of a file whose diff *is* in hand is still taken by presence rather than by proof, which is [#84](https://github.com/breferrari/vigia/issues/84). That branch is untouched, including the 20.71ms #84 records for proving it. [#101](https://github.com/breferrari/vigia/issues/101).
+>
+> **Fixed 2026-09-04 ([#412](https://github.com/breferrari/vigia/issues/412)), which falsifies the line above.** Every fresh diff now puts its height beside it and the walk asks only the span, with one stat; a print moved inside the settle margin keeps its height until the file settles and is read once then. Re-reading inside the margin was #84's 20.71ms breach of I9, so the in-margin re-measure above became a deferral, one stat per file per tick and one read when it settles, and that frame is asserted against I9.
 
 ## I2 — why it is two numbers
 

@@ -590,10 +590,11 @@ impl Report {
             100.0 * self.watch.filtered as f64 / self.watch.wakeups.max(1) as f64,
         ));
         out.push(format!(
-            "observe: frame computed {}, reused {}, measured {}, probes {}, {:.2} MiB compared",
+            "observe: frame computed {}, reused {}, measured {}, waiting {}, probes {}, {:.2} MiB compared",
             self.frame.computed,
             self.frame.reused,
             self.frame.measured,
+            self.frame.deferred,
             self.frame.probes,
             mib(self.frame.bytes),
         ));

@@ -161,12 +161,13 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 
 Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
-**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414). The two bar rows come first because a note's rows are display rows the bar does not count, and that seam has to hold before anything is drawn on it.
+**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414). The bar rows lead because a note's rows are display rows the bar does not count, and the total they sit under has to be right first.
 
 | | Task | Issue |
 |---|---|---|
 | ✅ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
-| ⬜ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
+| ✅ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
+| ⬜ | The height is recounted when a moved file settles, not at the next event | [#425](https://github.com/breferrari/vigia/issues/425) |
 | ⬜ | decision: a note on a diff line reaches the agent over MCP | [#414](https://github.com/breferrari/vigia/issues/414) |
 | ⬜ | A note anchors to a diff line and lives in a per-worktree store | [#415](https://github.com/breferrari/vigia/issues/415) |
 | ⬜ | The line number becomes the note icon under the pointer, and the note rows draw under the line | [#416](https://github.com/breferrari/vigia/issues/416) |
@@ -278,8 +279,6 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
 
-**A `decision` row is one whose feel improvement costs an invariant a sentence; one that costs nothing is an ordinary row.** The ruling lands in `SPEC.md` §11.2 and the build follows in the same pass unless it is genuinely too large for one — [#167](https://github.com/breferrari/vigia/issues/167) shipped a ruling with nothing on screen for four hours, and a reader pressed `?` and got nothing.
-
 
 **What is left open and is nobody's bug yet.** The rail is 70 columns until a 213-column pane, so a long path elides beside its cluster. That is the same elision every label on this pane already makes and it keeps the tail, which is what identifies the file; whether the rail should take a larger share so common paths draw whole is a look-and-feel question the pane will answer faster than an argument here will. The lever is one constant.
 
@@ -298,8 +297,6 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 
 **The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask it of an item when something reaches for it, not on a schedule nobody keeps. An item that cannot answer yes is not waiting for a phase, it is declined, and closing it as such is a result rather than a loss. Five declines in a hundred and twenty-seven closed issues is not a shelf being filtered; it is a shelf being filled.
 
-**[#390](https://github.com/breferrari/vigia/issues/390) is deferred on a measurement nobody has taken.** Found by #378's audit, 2026-09-03, session. Half its fix is free and half is a `stat` per changed file per tick, on the one branch named *free, and no syscall*.
-
 
 **If a second shelf is ever created, its milestone description must begin `Shelf:`.** Until [#83](https://github.com/breferrari/vigia/issues/83) the never-next rule lived only in this paragraph, which is prose, and `take-next` step 1 is a query: it read the milestone list, saw three peers, and offered the shelf as the next phase. The marker is what a query can read, and this paragraph is where whoever creates the next one is standing, so it is stated here rather than only in the skill. Comparison 6 of that skill's pre-flight is the check that fires when the two disagree.
 
@@ -307,7 +304,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 |---|---|---|
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
-| ⬜ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
+| ✅ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
 | ⬜ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
@@ -341,7 +338,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
 | ⬜ | The worktree name skips the control-character transformation content rows get | [#89](https://github.com/breferrari/vigia/issues/89) |
 | ⬜ | `render` promises any area is legal, and an area taller than its buffer panics | [#91](https://github.com/breferrari/vigia/issues/91) |
-| ⬜ | The diff's total height is taken from the cache by presence, not by validity | [#84](https://github.com/breferrari/vigia/issues/84) |
+| ✅ | The diff's total height is taken from the cache by presence, not by validity | [#84](https://github.com/breferrari/vigia/issues/84) |
 | ⬜ | `FrameStats::bytes` conflates bytes counted with bytes diffed | [#85](https://github.com/breferrari/vigia/issues/85) |
 | ⬜ | `Worktree::measure` has no test over a real repository | [#86](https://github.com/breferrari/vigia/issues/86) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
