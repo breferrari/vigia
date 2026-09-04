@@ -603,11 +603,6 @@ impl<'w> Frame<'w> {
                 None,
             ),
         };
-        // A diff in hand for a file that stopped reading is a height the screen does
-        // not draw, which is what `diff`'s own failure arm drops it for.
-        if taken.is_none() {
-            self.cached.remove(change);
-        }
         let measured = Measured {
             taken,
             span,
