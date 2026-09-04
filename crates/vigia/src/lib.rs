@@ -35,7 +35,7 @@ pub use input::{
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
-    diff_height, notice_area, regions, render,
+    diff_height, notice_area, regions, render, voice_style,
 };
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
@@ -206,7 +206,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         selected: None,
         scrolling: None,
         scrolling_until: None,
-        announce: None,
+        next: None,
         leaving: None,
         served: Vec::new(),
         written: false,
@@ -468,7 +468,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 // Deliberately nothing.
                 Wake::Warmed => {}
-                Wake::Update(version) => shell.announce = Some(version),
+                Wake::Update(version) => {
+                    shell.say(
+                        format!("vigia {version} is available"),
+                        Voice::Arrived,
+                        began,
+                    );
+                }
             }
         }
 
@@ -531,15 +537,14 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 /// How long a change is drawn arriving. Under `HISTORY_SAMPLE`; see `SPEC.md` §5.1.
 pub const ARRIVING: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// A receipt's arrival, shortest of the three.
-pub const SAID_ARRIVING: std::time::Duration = std::time::Duration::from_millis(320);
+/// A receipt's arrival.
+pub const SAID_ARRIVING: std::time::Duration = std::time::Duration::from_millis(550);
 
-/// How long an announcement takes. Its own rather than [`ARRIVING`], which is
-/// the diff's and is not read the same way.
-pub const NOTICE_ARRIVING: std::time::Duration = std::time::Duration::from_millis(420);
+/// An announcement's, its own rather than [`ARRIVING`], which is the diff's.
+pub const NOTICE_ARRIVING: std::time::Duration = std::time::Duration::from_millis(750);
 
 /// How long a warning takes to gather.
-pub const ALERT_ARRIVING: std::time::Duration = std::time::Duration::from_millis(360);
+pub const ALERT_ARRIVING: std::time::Duration = std::time::Duration::from_millis(450);
 
 /// How often a running effect asks for a frame. The whole price of the effect.
 pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
@@ -547,52 +552,61 @@ pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
-/// How long the footer says what a gesture sent. One-shot, so an idle pane owns no timer.
-pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_secs(3);
+/// The whole of a message's time on the footer, both transitions included.
+/// One-shot, so an idle pane owns no timer.
+///
+/// Long enough that the two ends are a real part of it rather than something to
+/// get through: at the slowest voice, 750ms in, three seconds settled, 750 out.
+pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_millis(4500);
 
-/// How each voice arrives: one mechanism, three patterns, all revealing the
-/// message's own characters, because §5 puts glyphs as what survives when colour
-/// does not. Which pattern means what is §11.1.
+/// How each voice arrives: the text crossfading into place, glyphs never moving,
+/// because revealing characters leaves the line unreadable while it runs. Which
+/// colour travels which way, and `None`'s meaning, are §11.1.
 #[doc(hidden)]
-pub fn arrival(voice: Voice) -> tachyonfx::Effect {
+pub fn arrival(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
+    let from = travels_from(voice, theme)?;
     let timer = (
         tachyonfx::Duration::from(duration_for(voice)),
-        Interpolation::QuadOut,
+        Interpolation::SineInOut,
     );
-    match voice {
-        Voice::Said => {
-            fx::coalesce(timer).with_pattern(SweepPattern::right_to_left(SWEEP_GRADIENT))
-        }
-        Voice::Arrived => fx::coalesce(timer),
-        Voice::Alert => fx::coalesce(timer)
-            .with_pattern(RadialPattern::center().with_transition_width(ALERT_SPREAD)),
-    }
+    let fade = fx::fade_from_fg(from, timer);
+    Some(match voice {
+        Voice::Said => fade.with_pattern(SweepPattern::right_to_left(TRAVEL)),
+        Voice::Arrived => fade,
+        Voice::Alert => fade.with_pattern(RadialPattern::center().with_transition_width(TRAVEL_IN)),
+    })
 }
 
-/// Cells the sweep's edge is soft over: a wipe rather than a bar.
-const SWEEP_GRADIENT: u16 = 10;
-
-/// Cells the alert's edge is soft over.
-const ALERT_SPREAD: f32 = 8.0;
-
-/// How each voice leaves: its arrival reversed, which is the **same** pattern
-/// with `dissolve`, not the mirrored one, since it removes in the order coalesce
-/// added. The message stays drawn throughout, or this lands on the hints.
+/// How each voice leaves: back to the hints' colour, by the road it came. The
+/// message stays drawn throughout, or this lands on the hints instead.
 #[doc(hidden)]
-pub fn departure(voice: Voice) -> tachyonfx::Effect {
+pub fn departure(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
+    let to = travels_from(voice, theme)?;
     let timer = (
         tachyonfx::Duration::from(duration_for(voice)),
-        Interpolation::QuadIn,
+        Interpolation::SineInOut,
     );
-    match voice {
-        Voice::Said => {
-            fx::dissolve(timer).with_pattern(SweepPattern::right_to_left(SWEEP_GRADIENT))
-        }
-        Voice::Arrived => fx::dissolve(timer),
-        Voice::Alert => fx::dissolve(timer)
-            .with_pattern(RadialPattern::center().with_transition_width(ALERT_SPREAD)),
-    }
+    let fade = fx::fade_to_fg(to, timer);
+    Some(match voice {
+        Voice::Said => fade.with_pattern(SweepPattern::right_to_left(TRAVEL)),
+        Voice::Arrived => fade,
+        Voice::Alert => fade.with_pattern(RadialPattern::center().with_transition_width(TRAVEL_IN)),
+    })
 }
+
+/// The colour a message travels from, and back to: the hints it replaces.
+/// `None` when the depth has flattened both ends together, since there is no
+/// gradient between a colour and itself.
+fn travels_from(voice: Voice, theme: &Theme) -> Option<ratatui::style::Color> {
+    let from = theme.chrome_dim.fg?;
+    (from != voice_style(voice, theme).fg?).then_some(from)
+}
+
+/// Columns the colour's leading edge is soft over as it crosses the message.
+const TRAVEL: u16 = 12;
+
+/// The same, for the warning that resolves from both ends at once.
+const TRAVEL_IN: f32 = 10.0;
 
 /// How long a voice takes, arriving or leaving. One table: copies drift.
 const fn duration_for(voice: Voice) -> std::time::Duration {
@@ -664,9 +678,9 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
-    /// A newer version the registry named, held until the footer has room. It
-    /// arrives once, so being written over before it paints would lose the run.
-    announce: Option<String>,
+    /// What replaces the message once it has finished leaving. One slot, not a
+    /// queue: a newer message supersedes one that has not started.
+    next: Option<(String, Voice)>,
     /// When a spent message has finished leaving. It is still drawn until then,
     /// because an outro over a line the hints have already taken back animates
     /// the wrong thing.
@@ -830,39 +844,29 @@ impl Shell {
                 Ok(()) => (format!("sent {said} to the clipboard"), Voice::Said),
                 Err(e) => (format!("could not send {said}: {e}"), Voice::Alert),
             };
-            self.say(told, now, voice);
+            self.say(told, voice, now);
         }
     }
 
-    /// Say what the registry named, on the first frame with a free footer.
-    fn settle_announcement(&mut self, now: Instant) {
-        if self.app.flash_until().is_some() {
-            return;
-        }
-        if let Some(version) = self.announce.take() {
-            self.say(format!("vigia {version} is available"), now, Voice::Arrived);
-        }
-    }
-
-    /// Take the footer through one frame: retire what is spent, write what a
-    /// gesture asked for, and say what the registry named if nothing else has
-    /// claimed the line. Stating that order once is what stops the two paths to
-    /// a paint disagreeing about it.
+    /// Take the footer through one frame: retire what is spent, start whatever
+    /// was waiting behind it, then write what a gesture asked for. Stating that
+    /// order once is what stops the two paths to a paint disagreeing about it.
     fn settle_footer(&mut self, now: Instant) {
         self.settle_leaving(now);
         self.settle_send(now);
-        self.settle_announcement(now);
     }
 
-    /// Retire a spent message, over the two frames it takes to go.
-    ///
-    /// Its time being up arms the departure; the message stays on the line and
-    /// keeps its colour until that has run, and only then is it taken.
+    /// Retire a spent message and start what replaces it, in the same frame so
+    /// there is no gap. The message stays drawn until its departure has run.
     fn settle_leaving(&mut self, now: Instant) {
         if let Some(gone) = self.leaving {
-            if now >= gone {
-                self.app.clear_flash();
-                self.leaving = None;
+            if now < gone {
+                return;
+            }
+            self.app.clear_flash();
+            self.leaving = None;
+            if let Some((message, voice)) = self.next.take() {
+                self.show(message, voice, now);
             }
             return;
         }
@@ -870,20 +874,49 @@ impl Shell {
             return;
         }
         if let Some(voice) = self.app.voice() {
-            self.notice_effects
-                .add_unique_effect(NOTICE_KEY.to_owned(), departure(voice));
-            self.leaving = Some(now + duration_for(voice));
+            self.begin_leaving(voice, now);
         }
     }
 
-    /// Put `message` over the footer until its time is up, in `voice`.
+    /// Say `message`, replacing what the line holds without cutting it off.
+    ///
+    /// One already leaving keeps going; one still settled is sent away early.
+    /// Either way `next` is what the line takes when that finishes, so a change
+    /// is one thing fading into another rather than a swap between frames.
+    fn say(&mut self, message: String, voice: Voice, now: Instant) {
+        if self.leaving.is_some() {
+            self.next = Some((message, voice));
+            return;
+        }
+        if let Some(showing) = self.app.voice() {
+            self.next = Some((message, voice));
+            self.begin_leaving(showing, now);
+            return;
+        }
+        self.show(message, voice, now);
+    }
+
+    /// Send what is on the line away, over the frames its voice takes.
+    fn begin_leaving(&mut self, voice: Voice, now: Instant) {
+        if let Some(effect) = departure(voice, &self.theme) {
+            self.notice_effects
+                .add_unique_effect(NOTICE_KEY.to_owned(), effect);
+        }
+        self.leaving = Some(now + duration_for(voice));
+    }
+
+    /// Put `message` on the footer now, in `voice`, and arm its arrival.
     ///
     /// The one place a notice is armed, so the one place its effect is.
-    fn say(&mut self, message: String, now: Instant, voice: Voice) {
+    fn show(&mut self, message: String, voice: Voice, now: Instant) {
         self.leaving = None;
-        self.app.flash(message, now + NOTICE_LINGER, voice);
-        self.notice_effects
-            .add_unique_effect(NOTICE_KEY.to_owned(), arrival(voice));
+        // The departure comes out of the linger, so it is the whole of the time.
+        let spent = now + NOTICE_LINGER.saturating_sub(duration_for(voice));
+        self.app.flash(message, spent, voice);
+        if let Some(effect) = arrival(voice, &self.theme) {
+            self.notice_effects
+                .add_unique_effect(NOTICE_KEY.to_owned(), effect);
+        }
     }
 
     /// The drawable area of the terminal right now.

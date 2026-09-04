@@ -930,17 +930,19 @@ The **hint bar is a list**, so when the footer cannot hold both halves on one li
 
 **The footer has three voices, and neither its colour nor its motion is invented.** *Ruled 2026-09-04, reader*, reported from the pane: every message on it was `alert` red, a clipboard receipt included, so the line said the same of a success and a failure. What a message **is** cannot be recovered from its text, and one call site produces two of them, so the voice travels from the producer.
 
-| Voice | What it is | Colour | Arrives | Leaves |
+| Voice | What it is | Colour | How the colour travels | Takes |
 |---|---|---|---|---|
-| Said | An act of the reader's, answering | `chrome` | its characters appear left to right, 320ms | the same, reversed |
-| Arrived | Unasked-for, nothing wrong | `note` | its characters appear out of scatter, 420ms | dissolves to scatter |
-| Alert | Something went wrong | `alert` | its characters appear from both ends, closing, 360ms | opens back out |
+| Said | An act of the reader's, answering | `chrome` | left to right, like something being written | 550ms |
+| Arrived | Unasked-for, nothing wrong | `note` | the whole line at once | 750ms |
+| Alert | Something went wrong | `alert` | from both ends, closing | 450ms |
 
 Three colours the palette already had: `note` is what this program spends on something that is not diff content, and an announcement is that.
 
-**Every motion is on the glyph channel, and that is a requirement rather than a taste.** §5 puts glyphs as what survives when colour does not, and an effect that interpolates colour writes styles *after* `Theme::resolve` has quantised the palette to the depth: at `Ansi16` it asks for colours the terminal cannot draw, and at `Depth::None` it shows `NO_COLOR` the one thing it was promised. Two of the three were built on colour and reported from the pane as barely visible, which is that defect from the other end. So they differ by **pattern** over one mechanism, at 14, 20 and 15 changed frames against 6, 12 and 11.
+**The transition is a crossfade, and the glyphs never move.** A status bar is static and its text is the only thing on it that changes, so what arrives is a *change of that text*, not an entrance. Revealing characters progressively was tried and reported from the pane: it leaves the line unreadable for as long as it runs, which is the one thing a message must never be. So the letters are there from the first frame and only the colour travels, eased at both ends, over a duration a reader can watch. Speed carries the urgency, as it does on a phone: the warning is quickest because it has to be read now, the announcement slowest because nobody asked for it.
 
-**A spent message is still drawn while it leaves**: cleared first, its departure lands on the hints underneath and animates them arriving instead.
+**Where the depth leaves both ends the same colour there is no transition at all**, and the message simply appears. That is the same answer a phone gives to reduced motion, and it is why the motion is not built on the glyph channel to survive: a transition nobody can see is better skipped than replaced by one that makes the text harder to read.
+
+**A message replaces the one before it without cutting it off.** The outgoing message runs its departure first and the new one begins when the line is free, so the change is always one thing fading into another. `NOTICE_LINGER` is 4.5 seconds and is the **whole** of a message's time on the line: the departure comes out of it rather than after it, so the slowest voice is 750ms in, three seconds settled, and 750ms out.
 
 **A newer published version is one footer notice, once, and nothing else.** *Ruled 2026-09-04, reader* ([#401](https://github.com/breferrari/vigia/issues/401)). One request at startup, on a thread, so first paint never waits on it, and one `NOTICE_LINGER` notice naming the version when crates.io answers with a higher one. Already current, offline, refused, slow, unparseable, and an architecture the TLS provider will not compile on are one outcome between them: **silence**, because a network problem is not the reader's problem and a monitor that nags is a monitor that gets closed. It arms no clock of its own, which is what keeps I1 whole: the check answers once and cannot repeat, and the deadline the notice sets is the one every notice already sets. `VIGIA_UPDATE=off` declines it, and a value this does not understand is refused before the terminal is taken rather than quietly ignored.
 

@@ -1237,6 +1237,18 @@ impl<'a> Footer<'a> {
     }
 }
 
+/// The style a message of `voice` settles in: three colours already in the
+/// palette, none invented. Shared with the transition, which fades toward
+/// exactly this. §11.1.
+#[must_use]
+pub fn voice_style(voice: Voice, theme: &Theme) -> Style {
+    match voice {
+        Voice::Said => theme.chrome,
+        Voice::Arrived => theme.note,
+        Voice::Alert => theme.alert,
+    }
+}
+
 /// The footer's right-hand token: the readouts and the position, as one string.
 /// One placement rather than two, and shared with [`notice_area`], whose answer
 /// is what this leaves.
@@ -2743,13 +2755,9 @@ impl Painter<'_> {
     fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome, footer: &Footer<'_>) {
         let right = footer_right(footer, chrome, view);
 
-        // Three colours already in the palette and none of them invented. §11.1.
-        let style = match footer.voice {
-            Some(Voice::Said) => self.theme.chrome,
-            Some(Voice::Arrived) => self.theme.note,
-            Some(Voice::Alert) => self.theme.alert,
-            None => self.theme.chrome_dim,
-        };
+        let style = footer.voice.map_or(self.theme.chrome_dim, |voice| {
+            voice_style(voice, self.theme)
+        });
         let bottom = Rect {
             y: area.y + area.height - 1,
             height: 1,

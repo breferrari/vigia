@@ -143,7 +143,10 @@ fn every_voice_changes_the_cells_it_covers_as_it_arrives() {
         let area = area_of(&app);
         let mut buf = settled.clone();
         let mut effects: EffectManager<String> = EffectManager::default();
-        effects.add_unique_effect("notice".to_owned(), arrival(voice));
+        effects.add_unique_effect(
+            "notice".to_owned(),
+            arrival(voice, &Theme::default()).expect("a palette with colour has a transition"),
+        );
         effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, area);
         assert_ne!(
             (symbols(&buf, area), styles(&buf, area)),
@@ -161,7 +164,10 @@ fn every_voice_arrives_differently() {
         let area = area_of(&app);
         let mut buf = settled.clone();
         let mut effects: EffectManager<String> = EffectManager::default();
-        effects.add_unique_effect("notice".to_owned(), arrival(voice));
+        effects.add_unique_effect(
+            "notice".to_owned(),
+            arrival(voice, &Theme::default()).expect("a palette with colour has a transition"),
+        );
         effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, area);
         seen.push((symbols(&buf, area), styles(&buf, area)));
     }
@@ -185,7 +191,10 @@ fn a_settled_arrival_is_what_the_renderer_drew() {
         let area = area_of(&app);
         let mut buf = settled.clone();
         let mut effects: EffectManager<String> = EffectManager::default();
-        effects.add_unique_effect("notice".to_owned(), arrival(voice));
+        effects.add_unique_effect(
+            "notice".to_owned(),
+            arrival(voice, &Theme::default()).expect("a palette with colour has a transition"),
+        );
         effects.process_effects(FxDuration::from(NOTICE_ARRIVING * 4), &mut buf, area);
         assert_eq!(
             (symbols(&buf, area), styles(&buf, area)),
@@ -278,16 +287,39 @@ fn a_long_message_stops_where_the_readouts_begin() {
     );
 }
 
-/// Every voice moves on the glyph channel, which is the one that survives when
-/// colour does not.
+/// The message is legible at every frame of its arrival.
 ///
-/// An effect that interpolates colour writes styles the theme was already
-/// resolved past, so at `Ansi16` it asks for colours the terminal cannot draw
-/// and at `Depth::None` it shows `NO_COLOR` the one thing it was promised it
-/// would not see. Two of these three were built that way and this is what
-/// caught it.
+/// A status bar's text is the only thing on it that changes, so the transition
+/// changes *that* and not whether it can be read: revealing characters
+/// progressively leaves the line scrambled while it runs, which is the one thing
+/// a message must never be. The motion is entirely in the colour.
 #[test]
-fn no_voice_needs_colour_to_be_seen() {
+fn a_message_is_readable_the_whole_way_in() {
+    for voice in VOICES {
+        let (settled, app) = drawn(voice);
+        let area = area_of(&app);
+        for step in [1u32, 4, 12, 30] {
+            let mut buf = settled.clone();
+            let mut effects: EffectManager<String> = EffectManager::default();
+            effects.add_unique_effect(
+                "notice".to_owned(),
+                arrival(voice, &Theme::default()).expect("a palette with colour has a transition"),
+            );
+            effects.process_effects(FxDuration::from(ARRIVING_FRAME * step), &mut buf, area);
+            assert_eq!(
+                symbols(&buf, area),
+                symbols(&settled, area),
+                "{voice:?} moved a glyph {step} frames in, so the message is not the message while it arrives"
+            );
+        }
+    }
+}
+
+/// Where colour cannot express the transition the message still arrives, whole
+/// and correct, which is the same answer a phone gives to reduced motion.
+#[test]
+fn a_depth_with_no_colour_still_gets_the_message() {
+    let mut skipped = 0;
     for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let theme = Theme::default().resolve(depth);
         for voice in VOICES {
@@ -309,23 +341,33 @@ fn no_voice_needs_colour_to_be_seen() {
             );
             let area = notice_area(PANE, &chrome, &View::default()).expect("an area");
 
+            let drawn: String = symbols(&settled, area).join("");
+            assert!(
+                drawn.contains("sent 3 lines"),
+                "{voice:?} at {depth:?} did not draw the message at all"
+            );
+
+            let Some(effect) = arrival(voice, &theme) else {
+                // No transition here, which is the whole of what this depth gets:
+                // the assertion above is that it still gets the message.
+                skipped += 1;
+                continue;
+            };
             let mut buf = settled.clone();
             let mut effects: EffectManager<String> = EffectManager::default();
-            effects.add_unique_effect("notice".to_owned(), arrival(voice));
-            effects.process_effects(FxDuration::from(ARRIVING_FRAME * 4), &mut buf, area);
-
-            assert_ne!(
-                symbols(&buf, area),
-                symbols(&settled, area),
-                "{voice:?} moved nothing at {depth:?}, so a reader there sees it appear whole"
-            );
+            effects.add_unique_effect("notice".to_owned(), effect);
+            effects.process_effects(FxDuration::from(NOTICE_ARRIVING * 4), &mut buf, area);
             assert_eq!(
-                styles(&buf, area),
-                styles(&settled, area),
-                "{voice:?} changed colour at {depth:?}, which the theme was already resolved past and which `NO_COLOR` was promised it would not see"
+                (symbols(&buf, area), styles(&buf, area)),
+                (symbols(&settled, area), styles(&settled, area)),
+                "{voice:?} at {depth:?} settled somewhere other than the drawn line"
             );
         }
     }
+    assert!(
+        skipped > 0,
+        "every depth had a transition, so the skipped branch this test exists for was never taken and proves nothing"
+    );
 }
 
 /// An effect that never reports itself finished pins the loop awake for the
@@ -338,7 +380,17 @@ fn no_voice_needs_colour_to_be_seen() {
 #[test]
 fn every_effect_finishes_and_stops_asking_for_frames() {
     for voice in VOICES {
-        for (what, effect) in [("arrival", arrival(voice)), ("departure", departure(voice))] {
+        for (what, effect) in [
+            (
+                "arrival",
+                arrival(voice, &Theme::default()).expect("a palette with colour has a transition"),
+            ),
+            (
+                "departure",
+                departure(voice, &Theme::default())
+                    .expect("a palette with colour has a transition"),
+            ),
+        ] {
             let (settled, app) = drawn(voice);
             let area = area_of(&app);
             let mut buf = settled.clone();
