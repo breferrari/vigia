@@ -166,6 +166,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
+| ✅ | The footer's transition is too quick to see, and unreadable while it runs. **Reported from use** | [#410](https://github.com/breferrari/vigia/issues/410) |
 | ✅ | The footer's motions are on the channel that degrades, and too short to see. **Reported from use** | [#408](https://github.com/breferrari/vigia/issues/408) |
 | ✅ | The footer says everything in one red, and no notice arrives. **Reported from use** | [#405](https://github.com/breferrari/vigia/issues/405) |
 | ✅ | Tell the reader when a newer version exists, checked once at startup. **Ruled by the author** | [#401](https://github.com/breferrari/vigia/issues/401) |
