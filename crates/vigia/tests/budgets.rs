@@ -887,7 +887,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let mut rewrites = 0;
     let mut rewritten_at = Instant::now();
     for at in 0..SAMPLED_FRAMES {
-        if at % REWRITE_EVERY == 0 || rewritten_at.elapsed() >= REWRITE_WITHIN {
+        if at.is_multiple_of(REWRITE_EVERY) || rewritten_at.elapsed() >= REWRITE_WITHIN {
             rewrites += 1;
             scratch.rewrite_all(FILES, LINES, rewrites);
             rewritten_at = Instant::now();
@@ -980,7 +980,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
             )
         },
         || {
-            if at % REWRITE_EVERY == 0 || rewritten_at.elapsed() >= REWRITE_WITHIN {
+            if at.is_multiple_of(REWRITE_EVERY) || rewritten_at.elapsed() >= REWRITE_WITHIN {
                 rewrites += 1;
                 scratch.rewrite_all(FILES, LINES, rewrites);
                 rewritten_at = Instant::now();
@@ -1126,7 +1126,7 @@ impl Motion {
         match self {
             Motion::Down => WHEEL_ROWS,
             Motion::Up => -WHEEL_ROWS,
-            Motion::Back if (at / LEG) % 2 == 0 => WHEEL_ROWS,
+            Motion::Back if (at / LEG).is_multiple_of(2) => WHEEL_ROWS,
             Motion::Back => -WHEEL_ROWS,
         }
     }

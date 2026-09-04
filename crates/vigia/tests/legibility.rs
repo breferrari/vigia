@@ -2375,7 +2375,7 @@ fn the_sparkline_draws_whole_rungs_and_never_a_count_between_two() {
                          {HISTORY_BUCKETS} the window holds: {row:?}"
                     );
                     assert!(
-                        buckets == 0 || HISTORY_BUCKETS % buckets == 0,
+                        buckets == 0 || HISTORY_BUCKETS.is_multiple_of(buckets),
                         "{name}: {buckets} buckets at {width} columns does not \
                          divide the {HISTORY_BUCKETS} the window holds, so one \
                          drawn bucket covers less time than the rest: {row:?}"

@@ -207,10 +207,10 @@ impl Regions {
     /// §11.2 B10 adopts.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
         // The sheet first, because it is drawn over everything.
-        if let Some(sheet) = self.sheet {
-            if sheet.covers(column, row) {
-                return ((column, row) == sheet.close).then_some(Hovered::Button(column, row));
-            }
+        if let Some(sheet) = self.sheet
+            && sheet.covers(column, row)
+        {
+            return ((column, row) == sheet.close).then_some(Hovered::Button(column, row));
         }
         // The bar's column first, for [`Regions::grab_at`]'s reason one
         // function up: the scrollbar is drawn *inside* whichever region owns
@@ -804,13 +804,13 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     // The sheet is checked before everything, because it is drawn over everything.
     // `SPEC.md` §11.2's B12: the close control dismisses, and any other event landing
     // on the sheet does nothing at all.
-    if let Some(sheet) = regions.sheet {
-        if sheet.covers(mouse.column, mouse.row) {
-            return matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-                .then_some(())
-                .filter(|()| (mouse.column, mouse.row) == sheet.close)
-                .map(|()| Action::CloseSheet);
-        }
+    if let Some(sheet) = regions.sheet
+        && sheet.covers(mouse.column, mouse.row)
+    {
+        return matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            .then_some(())
+            .filter(|()| (mouse.column, mouse.row) == sheet.close)
+            .map(|()| Action::CloseSheet);
     }
 
     // The bar is checked before the region it sits in. A press on the scrollbar column

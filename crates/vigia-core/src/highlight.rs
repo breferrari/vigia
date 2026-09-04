@@ -381,7 +381,7 @@ impl Entry {
             // A whole stride has been parsed, so freeze where it left off.
             let done = self.lines.len();
             if done > 0
-                && done % CHECKPOINT_STRIDE == 0
+                && done.is_multiple_of(CHECKPOINT_STRIDE)
                 && self.checkpoints.len() < done / CHECKPOINT_STRIDE
                 && let Parse::Ready(sides) = &self.parse
             {

@@ -198,10 +198,10 @@ fn octant_of(lookup: &impl Fn(&str) -> Option<String>, term: &str) -> Option<Gly
     }
     // VTE's own convention: a single number, 7802 for 0.78.2. Carried by every
     // VTE terminal (GNOME Terminal, Ptyxis, and the rest of that family).
-    if let Some(raw) = lookup("VTE_VERSION") {
-        if raw.trim().parse::<u32>().is_ok_and(|v| v >= 7800) {
-            return Some(Glyphs::Octant);
-        }
+    if let Some(raw) = lookup("VTE_VERSION")
+        && raw.trim().parse::<u32>().is_ok_and(|v| v >= 7800)
+    {
+        return Some(Glyphs::Octant);
     }
     None
 }

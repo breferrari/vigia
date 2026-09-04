@@ -1362,7 +1362,7 @@ fn a_projection_covers_the_same_span_in_every_column() {
     // divides it would pass against the shape this gate exists to refuse.
     for width in [46usize, 80, 109, 134] {
         assert!(
-            HISTORY_SAMPLES % width != 0,
+            !HISTORY_SAMPLES.is_multiple_of(width),
             "{width} divides the window, so it cannot tell an even projection \
              from an uneven one"
         );

@@ -16,14 +16,14 @@ const _: () = {
     let mut at = 0;
     while at < SPARK_GROUPS.len() {
         assert!(
-            HISTORY_BUCKETS % SPARK_GROUPS[at] == 0,
+            HISTORY_BUCKETS.is_multiple_of(SPARK_GROUPS[at]),
             "a sparkline grouping does not divide the source resolution, so a \
              drawn bucket would cover less time than its neighbours"
         );
         // Each grouping divides the next, which is stronger than ascending and is what
         // [`History::repeak`]'s ordering proof actually rests on.
         assert!(
-            at == 0 || SPARK_GROUPS[at] % SPARK_GROUPS[at - 1] == 0,
+            at == 0 || SPARK_GROUPS[at].is_multiple_of(SPARK_GROUPS[at - 1]),
             "a sparkline grouping does not divide into the next, so a coarser \
              rung is not a merge of a finer one and their figures need not come \
              out in order"
@@ -59,12 +59,14 @@ const SAMPLES_PER_BUCKET: usize = HISTORY_SAMPLES / HISTORY_BUCKETS;
 
 const _: () = {
     assert!(
-        HISTORY_SAMPLES % HISTORY_BUCKETS == 0,
+        HISTORY_SAMPLES.is_multiple_of(HISTORY_BUCKETS),
         "the samples do not divide into the source buckets, so a drawn column \
          would cover more time than its neighbours"
     );
     assert!(
-        HISTORY_WINDOW.as_nanos() % HISTORY_SAMPLES as u128 == 0,
+        HISTORY_WINDOW
+            .as_nanos()
+            .is_multiple_of(HISTORY_SAMPLES as u128),
         "the samples do not tile the window, so a write can land in no sample"
     );
 };
@@ -114,7 +116,9 @@ const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_n
 const LEVEL_REACH: usize = 3 * (HISTORY_LEVEL.as_nanos() / HISTORY_SAMPLE.as_nanos()) as usize;
 
 const _: () = assert!(
-    HISTORY_LEVEL.as_nanos() % HISTORY_SAMPLE.as_nanos() == 0,
+    HISTORY_LEVEL
+        .as_nanos()
+        .is_multiple_of(HISTORY_SAMPLE.as_nanos()),
     "the level's constant is not a whole number of samples, so LEVEL_REACH truncates away from the decay it is derived from"
 );
 
