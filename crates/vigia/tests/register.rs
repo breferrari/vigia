@@ -535,12 +535,19 @@ fn no_table_row_is_missing_a_cell() {
         // A width per table rather than per file: the documents carry several,
         // and a run of rows ends at the first line that is not one.
         let mut want: Option<usize> = None;
+        let mut fenced = false;
         for (n, line) in text.lines().enumerate() {
-            if !line.starts_with('|') {
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
                 want = None;
                 continue;
             }
-            let cells = line.matches('|').count();
+            if fenced || !line.starts_with('|') {
+                want = None;
+                continue;
+            }
+            // An escaped pipe is a character in a cell, not a cell boundary.
+            let cells = line.replace(r"\|", "").matches('|').count();
             match want {
                 None => want = Some(cells),
                 // The rule under the header, whose cells are dashes.

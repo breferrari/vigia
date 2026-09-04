@@ -593,7 +593,6 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
-    /// When the footer's transient message stops being true: a keypress makes no tick.
     /// A newer version the registry named, held until the footer has room. It
     /// arrives once, so being written over before it paints would lose the run.
     announce: Option<String>,
