@@ -53,6 +53,7 @@ use std::time::Instant;
 
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
+use tachyonfx::pattern::{RadialPattern, SweepPattern};
 use tachyonfx::{EffectManager, Interpolation, fx};
 use vigia_core::{Highlighter, History, WatchOptions, Worktree};
 
@@ -530,12 +531,15 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 /// How long a change is drawn arriving. Under `HISTORY_SAMPLE`; see `SPEC.md` §5.1.
 pub const ARRIVING: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// How long a receipt for the reader's own act takes to land. Shortest of the
-/// three: §5.3 gives an act one frame, and this is the least an arrival can be.
-pub const SAID_ARRIVING: std::time::Duration = std::time::Duration::from_millis(120);
+/// How long a receipt for the reader's own act takes. Shortest of the three.
+pub const SAID_ARRIVING: std::time::Duration = std::time::Duration::from_millis(320);
 
-/// How long a warning takes to settle into the red it keeps.
-pub const ALERT_ARRIVING: std::time::Duration = std::time::Duration::from_millis(180);
+/// How long an announcement takes. Its own rather than [`ARRIVING`], which is
+/// the diff's and is not read the same way.
+pub const NOTICE_ARRIVING: std::time::Duration = std::time::Duration::from_millis(420);
+
+/// How long a warning takes to gather.
+pub const ALERT_ARRIVING: std::time::Duration = std::time::Duration::from_millis(360);
 
 /// How often a running effect asks for a frame. The whole price of the effect.
 pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
@@ -546,76 +550,54 @@ pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(
 /// How long the footer says what a gesture sent. One-shot, so an idle pane owns no timer.
 pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// How each voice arrives. Which motion means what is `SPEC.md` §11.1; what is
-/// here is that a warning is the one that does not move, because it must not be
-/// harder to read while it arrives.
-fn arrival(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
+/// How each voice arrives: one mechanism, three patterns, all revealing the
+/// message's own characters. §5 puts the glyph channel as what survives when
+/// colour does not; which pattern means what is §11.1.
+#[doc(hidden)]
+pub fn arrival(voice: Voice) -> tachyonfx::Effect {
+    let timer = (
+        tachyonfx::Duration::from(duration_for(voice)),
+        Interpolation::QuadOut,
+    );
     match voice {
-        Voice::Said => fx::sweep_in(
-            tachyonfx::Motion::LeftToRight,
-            SWEEP_GRADIENT,
-            0,
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (
-                tachyonfx::Duration::from(duration_for(voice)),
-                Interpolation::QuadOut,
-            ),
-        ),
-        Voice::Arrived => {
-            fx::coalesce((tachyonfx::Duration::from(ARRIVING), Interpolation::QuadOut))
+        Voice::Said => {
+            fx::coalesce(timer).with_pattern(SweepPattern::right_to_left(SWEEP_GRADIENT))
         }
-        // Out of the hints it replaced, like the sweep above, but without
-        // moving: a warning must not be harder to read while it arrives. It
-        // fades *to* what was drawn, so it settles exactly there and stops,
-        // which a shift away and back does neither of.
-        Voice::Alert => fx::fade_from_fg(
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (
-                tachyonfx::Duration::from(duration_for(voice)),
-                Interpolation::QuadOut,
-            ),
-        ),
+        Voice::Arrived => fx::coalesce(timer),
+        Voice::Alert => fx::coalesce(timer)
+            .with_pattern(RadialPattern::center().with_transition_width(ALERT_SPREAD)),
     }
 }
 
 /// Cells the sweep's edge is soft over: a wipe rather than a bar.
-const SWEEP_GRADIENT: u16 = 8;
+const SWEEP_GRADIENT: u16 = 10;
 
-/// How each voice leaves: its arrival, reversed.
-///
-/// The message is still drawn while this runs, which is the whole reason it
-/// reads as leaving. Cleared first, the effect would land on the hints
-/// underneath and animate them arriving instead.
-fn departure(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
+/// Cells the alert's edge is soft over as it closes in.
+const ALERT_SPREAD: f32 = 8.0;
+
+/// How each voice leaves: its arrival, reversed. The message stays drawn while
+/// it runs, or the effect lands on the hints and animates those instead.
+#[doc(hidden)]
+pub fn departure(voice: Voice) -> tachyonfx::Effect {
+    let timer = (
+        tachyonfx::Duration::from(duration_for(voice)),
+        Interpolation::QuadIn,
+    );
     match voice {
-        Voice::Said => fx::sweep_out(
-            tachyonfx::Motion::LeftToRight,
-            SWEEP_GRADIENT,
-            0,
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (
-                tachyonfx::Duration::from(duration_for(voice)),
-                Interpolation::QuadIn,
-            ),
-        ),
-        Voice::Arrived => {
-            fx::dissolve((tachyonfx::Duration::from(ARRIVING), Interpolation::QuadIn))
+        Voice::Said => {
+            fx::dissolve(timer).with_pattern(SweepPattern::right_to_left(SWEEP_GRADIENT))
         }
-        Voice::Alert => fx::fade_to_fg(
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (
-                tachyonfx::Duration::from(duration_for(voice)),
-                Interpolation::QuadIn,
-            ),
-        ),
+        Voice::Arrived => fx::dissolve(timer),
+        Voice::Alert => fx::dissolve(timer)
+            .with_pattern(RadialPattern::center().with_transition_width(ALERT_SPREAD)),
     }
 }
 
-/// How long a voice takes, arriving or leaving. One table: three copies drift.
+/// How long a voice takes, arriving or leaving. One table: copies drift.
 const fn duration_for(voice: Voice) -> std::time::Duration {
     match voice {
         Voice::Said => SAID_ARRIVING,
-        Voice::Arrived => ARRIVING,
+        Voice::Arrived => NOTICE_ARRIVING,
         Voice::Alert => ALERT_ARRIVING,
     }
 }
@@ -644,8 +626,8 @@ struct Shell {
     app: App,
     /// Keyed by path, so a second write replaces an effect rather than stacking.
     effects: EffectManager<String>,
-    /// The footer's own, because the diff's are clipped to the diff and a second
-    /// pass over one manager would advance every effect in it twice per frame.
+    /// The footer's own: the diff's are clipped to the diff, and one manager
+    /// processed twice would advance every effect in it twice a frame.
     notice_effects: EffectManager<String>,
     /// When the previous frame painted: the elapsed time an effect is told about.
     painted: Instant,
@@ -889,7 +871,7 @@ impl Shell {
         }
         if let Some(voice) = self.app.voice() {
             self.notice_effects
-                .add_unique_effect(NOTICE_KEY.to_owned(), departure(voice, &self.theme));
+                .add_unique_effect(NOTICE_KEY.to_owned(), departure(voice));
             self.leaving = Some(now + duration_for(voice));
         }
     }
@@ -901,7 +883,7 @@ impl Shell {
         self.leaving = None;
         self.app.flash(message, now + NOTICE_LINGER, voice);
         self.notice_effects
-            .add_unique_effect(NOTICE_KEY.to_owned(), arrival(voice, &self.theme));
+            .add_unique_effect(NOTICE_KEY.to_owned(), arrival(voice));
     }
 
     /// The drawable area of the terminal right now.

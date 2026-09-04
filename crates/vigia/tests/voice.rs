@@ -10,10 +10,10 @@ use std::time::Instant;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use tachyonfx::{Duration as FxDuration, EffectManager, Interpolation, Motion, fx};
+use tachyonfx::{Duration as FxDuration, EffectManager};
 use vigia::{
-    ALERT_ARRIVING, ARRIVING, ARRIVING_FRAME, App, Glyphs, NOTICE_LINGER, Pointing, SAID_ARRIVING,
-    Theme, View, Voice, notice_area, render,
+    ARRIVING_FRAME, App, Depth, Glyphs, NOTICE_ARRIVING, NOTICE_LINGER, Pointing, Theme, View,
+    Voice, arrival, departure, notice_area, render,
 };
 
 /// An ordinary pane.
@@ -143,7 +143,7 @@ fn every_voice_changes_the_cells_it_covers_as_it_arrives() {
         let area = area_of(&app);
         let mut buf = settled.clone();
         let mut effects: EffectManager<String> = EffectManager::default();
-        effects.add_unique_effect("notice".to_owned(), arrival_of(voice));
+        effects.add_unique_effect("notice".to_owned(), arrival(voice));
         effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, area);
         assert_ne!(
             (symbols(&buf, area), styles(&buf, area)),
@@ -161,7 +161,7 @@ fn every_voice_arrives_differently() {
         let area = area_of(&app);
         let mut buf = settled.clone();
         let mut effects: EffectManager<String> = EffectManager::default();
-        effects.add_unique_effect("notice".to_owned(), arrival_of(voice));
+        effects.add_unique_effect("notice".to_owned(), arrival(voice));
         effects.process_effects(FxDuration::from(ARRIVING_FRAME), &mut buf, area);
         seen.push((symbols(&buf, area), styles(&buf, area)));
     }
@@ -185,8 +185,8 @@ fn a_settled_arrival_is_what_the_renderer_drew() {
         let area = area_of(&app);
         let mut buf = settled.clone();
         let mut effects: EffectManager<String> = EffectManager::default();
-        effects.add_unique_effect("notice".to_owned(), arrival_of(voice));
-        effects.process_effects(FxDuration::from(ARRIVING * 4), &mut buf, area);
+        effects.add_unique_effect("notice".to_owned(), arrival(voice));
+        effects.process_effects(FxDuration::from(NOTICE_ARRIVING * 4), &mut buf, area);
         assert_eq!(
             (symbols(&buf, area), styles(&buf, area)),
             (symbols(&settled, area), styles(&settled, area)),
@@ -278,6 +278,56 @@ fn a_long_message_stops_where_the_readouts_begin() {
     );
 }
 
+/// Every voice moves on the glyph channel, which is the one that survives when
+/// colour does not.
+///
+/// An effect that interpolates colour writes styles the theme was already
+/// resolved past, so at `Ansi16` it asks for colours the terminal cannot draw
+/// and at `Depth::None` it shows `NO_COLOR` the one thing it was promised it
+/// would not see. Two of these three were built that way and this is what
+/// caught it.
+#[test]
+fn no_voice_needs_colour_to_be_seen() {
+    for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
+        let theme = Theme::default().resolve(depth);
+        for voice in VOICES {
+            let mut app = App::new();
+            app.flash(
+                "sent 3 lines to the clipboard",
+                Instant::now() + NOTICE_LINGER,
+                voice,
+            );
+            let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+            let mut settled = Buffer::empty(PANE);
+            render(
+                &mut settled,
+                PANE,
+                &View::default(),
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
+            let area = notice_area(PANE, &chrome, &View::default()).expect("an area");
+
+            let mut buf = settled.clone();
+            let mut effects: EffectManager<String> = EffectManager::default();
+            effects.add_unique_effect("notice".to_owned(), arrival(voice));
+            effects.process_effects(FxDuration::from(ARRIVING_FRAME * 4), &mut buf, area);
+
+            assert_ne!(
+                symbols(&buf, area),
+                symbols(&settled, area),
+                "{voice:?} moved nothing at {depth:?}, so a reader there sees it appear whole"
+            );
+            assert_eq!(
+                styles(&buf, area),
+                styles(&settled, area),
+                "{voice:?} changed colour at {depth:?}, which the theme was already                  resolved past and which `NO_COLOR` was promised it would not see"
+            );
+        }
+    }
+}
+
 /// An effect that never reports itself finished pins the loop awake for the
 /// rest of the session, because `Shell::patience` asks for a frame while one is
 /// running. `ping_pong` was tried here and does exactly that: it repeats, so
@@ -288,10 +338,7 @@ fn a_long_message_stops_where_the_readouts_begin() {
 #[test]
 fn every_effect_finishes_and_stops_asking_for_frames() {
     for voice in VOICES {
-        for (what, effect) in [
-            ("arrival", arrival_of(voice)),
-            ("departure", departure_of(voice)),
-        ] {
+        for (what, effect) in [("arrival", arrival(voice)), ("departure", departure(voice))] {
             let (settled, app) = drawn(voice);
             let area = area_of(&app);
             let mut buf = settled.clone();
@@ -301,55 +348,11 @@ fn every_effect_finishes_and_stops_asking_for_frames() {
                 effects.is_running(),
                 "{voice:?}'s {what} was over before it began"
             );
-            effects.process_effects(FxDuration::from(ARRIVING * 4), &mut buf, area);
+            effects.process_effects(FxDuration::from(NOTICE_ARRIVING * 4), &mut buf, area);
             assert!(
                 !effects.is_running(),
                 "{voice:?}'s {what} still wants frames after four times its longest                  duration, so an idle pane never stops waking"
             );
         }
-    }
-}
-
-/// The departures, spelled here for `arrival_of`'s reason.
-fn departure_of(voice: Voice) -> tachyonfx::Effect {
-    let theme = Theme::default();
-    let dur = match voice {
-        Voice::Said => SAID_ARRIVING,
-        Voice::Arrived => ARRIVING,
-        Voice::Alert => ALERT_ARRIVING,
-    };
-    match voice {
-        Voice::Said => fx::sweep_out(
-            Motion::LeftToRight,
-            8,
-            0,
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (FxDuration::from(dur), Interpolation::QuadIn),
-        ),
-        Voice::Arrived => fx::dissolve((FxDuration::from(dur), Interpolation::QuadIn)),
-        Voice::Alert => fx::fade_to_fg(
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (FxDuration::from(dur), Interpolation::QuadIn),
-        ),
-    }
-}
-
-/// The arrivals, spelled here rather than reached for, so this suite fails when
-/// the shell's table changes rather than following it silently.
-fn arrival_of(voice: Voice) -> tachyonfx::Effect {
-    let theme = Theme::default();
-    match voice {
-        Voice::Said => fx::sweep_in(
-            Motion::LeftToRight,
-            8,
-            0,
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (FxDuration::from(SAID_ARRIVING), Interpolation::QuadOut),
-        ),
-        Voice::Arrived => fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut)),
-        Voice::Alert => fx::fade_from_fg(
-            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
-            (FxDuration::from(ALERT_ARRIVING), Interpolation::QuadOut),
-        ),
     }
 }
