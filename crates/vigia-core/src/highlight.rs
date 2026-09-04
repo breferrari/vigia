@@ -1125,7 +1125,10 @@ fn ruled<'s>(
 /// A hunk's content, hashed whole and at every stride boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Content {
-    /// Digest of the whole hunk, which is what decides reuse.
+    /// Digest of the whole hunk, which is what decides reuse. A hash rather
+    /// than a counter, because inside the settle margin the frame path
+    /// re-diffs a file nobody touched on every frame, and a counter would
+    /// re-highlight it.
     digest: u64,
     /// Digest of the first `(i + 1) * CHECKPOINT_STRIDE` lines, deepest last.
     marks: Vec<u64>,
