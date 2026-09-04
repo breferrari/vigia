@@ -761,7 +761,11 @@ impl Shell {
             input::Deadlines {
                 held: self.held,
                 linger: self.scrolling_until,
-                notice: self.app.flash_until().or(self.leaving),
+                // The departure's deadline outranks the message's own, which
+                // is spent by then: `patience` folds a past deadline to zero,
+                // so offering it would spin the loop flat out until the
+                // departure finished instead of asking for frames.
+                notice: self.leaving.or_else(|| self.app.flash_until()),
                 ageing: self.history.ages_in(now),
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
@@ -1558,7 +1562,7 @@ mod tests {
         for clock in [
             "held: self.held",
             "linger: self.scrolling_until",
-            "notice: self.app.flash_until()",
+            "notice: self.leaving.or_else(|| self.app.flash_until())",
             "ageing: self.history.ages_in",
         ] {
             assert!(
