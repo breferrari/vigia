@@ -531,35 +531,48 @@ fn no_table_row_is_missing_a_cell() {
         "no markdown was read, so this proves nothing"
     );
 
+    // An escaped pipe is a character in a cell, not a cell boundary.
+    fn cells(line: &str) -> usize {
+        line.replace(r"\|", "").matches('|').count()
+    }
+
+    // The rule under a header: pipes, dashes and alignment colons, and at least
+    // one dash. Without that last part a row whose cells are all empty reads as
+    // a rule, and a table with a hole in it goes unseen for looking like one.
+    fn is_rule(line: &str) -> bool {
+        line.starts_with('|')
+            && line.contains('-')
+            && line.trim_matches(['|', '-', ':', ' ']).is_empty()
+    }
+
     for (name, text) in &files {
-        // A width per table rather than per file: the documents carry several,
-        // and a run of rows ends at the first line that is not one.
+        let lines: Vec<&str> = text.lines().collect();
+        // A width per table rather than per file, since the documents carry
+        // several, and a table is only ever opened by a header with its rule
+        // under it. Anchoring on that rather than on the first row is what lets
+        // two tables sit against each other with no blank line between them.
         let mut want: Option<usize> = None;
         let mut fenced = false;
-        for (n, line) in text.lines().enumerate() {
+        let mut n = 0;
+        while n < lines.len() {
+            let line = lines[n];
             if line.trim_start().starts_with("```") {
                 fenced = !fenced;
                 want = None;
-                continue;
-            }
-            if fenced || !line.starts_with('|') {
+            } else if fenced || !line.starts_with('|') {
                 want = None;
-                continue;
+            } else if lines.get(n + 1).is_some_and(|next| is_rule(next)) {
+                want = Some(cells(line));
+                n += 1;
+            } else if want.is_some_and(|width| cells(line) != width) {
+                broken.push(format!(
+                    "  {name}:{} has {} cells, its table has {}",
+                    n + 1,
+                    cells(line),
+                    want.expect("checked")
+                ));
             }
-            // An escaped pipe is a character in a cell, not a cell boundary.
-            let cells = line.replace(r"\|", "").matches('|').count();
-            match want {
-                None => want = Some(cells),
-                // The rule under the header, whose cells are dashes.
-                Some(_) if line.trim_matches(['|', '-', ':', ' ']).is_empty() => {}
-                Some(width) if cells != width => {
-                    broken.push(format!(
-                        "  {name}:{} has {cells} cells, its table has {width}",
-                        n + 1
-                    ));
-                }
-                Some(_) => {}
-            }
+            n += 1;
         }
     }
 
