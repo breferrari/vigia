@@ -228,3 +228,46 @@ fn the_machine_running_this_can_run_the_provider() {
          false here is the guard naming something rather than the CPU lacking it"
     );
 }
+
+/// The wiring `run` holds, which no test can enter and every gate above would
+/// stay green without.
+///
+/// A text scan is the only layer available here, so it is deliberately narrow:
+/// it says the three seams exist, not that they are correct. What it stops is
+/// the whole feature being deleted from the shell while its own suite passes.
+#[test]
+fn the_shell_still_arms_the_check() {
+    let shell = include_str!("../src/lib.rs");
+    assert!(
+        shell.len() > 1000 && shell.contains("pub fn run("),
+        "the shell was not read, so scanning it proves nothing"
+    );
+    for seam in ["update::wanted(", "update::watch(", "Wake::Update(version)"] {
+        assert!(
+            shell.contains(seam),
+            "`{seam}` is gone from the shell, so nothing asks and nothing draws"
+        );
+    }
+}
+
+/// The half CI cannot hold: a real request, against the real registry.
+///
+/// Every other test here stops at the seam, because a gate that needs a network
+/// is a gate that fails on a train. Run it by hand after touching `fetch`, which
+/// is the only code in this module nothing else covers.
+#[test]
+#[ignore = "an instrument: it asks the real registry"]
+fn the_registry_answers_a_version_this_can_read() {
+    let began = Instant::now();
+    let answer = vigia::update::check("0.0.1");
+    println!("check(0.0.1) -> {answer:?} in {:?}", began.elapsed());
+    assert!(
+        answer.is_some(),
+        "no version came back, so either the registry moved or the answer stopped parsing"
+    );
+    assert_eq!(
+        vigia::update::check("999.0.0"),
+        None,
+        "a version above every published one was still called an update"
+    );
+}
