@@ -1576,7 +1576,7 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 391960),
     ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 93873),
+    ("ROADMAP.md", 93635),
     ("RULINGS.md", 95198),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
