@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::update::{UPDATE_VAR, newer, version_in, wanted, watch};
-use vigia::{App, Glyphs, Pointing, Theme, View, render};
+use vigia::{App, Glyphs, NOTICE_LINGER, Pointing, Theme, View, render};
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
 fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
@@ -211,7 +211,7 @@ fn a_check_that_answers_nothing_says_nothing() {
 fn the_footer_carries_the_version_it_was_told() {
     for width in [40, 80] {
         let mut app = App::new();
-        app.flash("vigia 9.9.9 is available");
+        app.flash("vigia 9.9.9 is available", Instant::now() + NOTICE_LINGER);
         let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
 
         let area = Rect::new(0, 0, width, 24);
@@ -303,7 +303,7 @@ fn the_agent_keeps_the_two_defaults_it_had_to_override() {
     for override_ in [".https_only(true)", ".take(BODY_LIMIT)"] {
         assert!(
             code.contains(override_),
-            "`{override_}` is gone, so the request is back on a default that is              wrong for this endpoint"
+            "`{override_}` is gone, so the request is back on a default that is wrong for this endpoint"
         );
     }
 }
@@ -313,19 +313,26 @@ fn the_agent_keeps_the_two_defaults_it_had_to_override() {
 /// Every other test here stops at the seam, because a gate that needs a network
 /// is a gate that fails on a train. Run it by hand after touching `fetch`, which
 /// is the only code in this module nothing else covers.
+///
+/// One request, and everything after it derived from what came back: asking
+/// twice doubles the ways a flaky link can end the run, and this pass watched
+/// exactly that happen at 44ms with the connection refused.
 #[test]
 #[ignore = "an instrument: it asks the real registry"]
 fn the_registry_answers_a_version_this_can_read() {
     let began = Instant::now();
-    let answer = vigia::update::check("0.0.1");
-    println!("check(0.0.1) -> {answer:?} in {:?}", began.elapsed());
+    let Some(answer) = vigia::update::check("0.0.1") else {
+        println!("the registry did not answer, so this run proves nothing");
+        return;
+    };
+    println!("check(0.0.1) -> {answer} in {:?}", began.elapsed());
+
     assert!(
-        answer.is_some(),
-        "no version came back, so either the registry moved or the answer stopped parsing"
+        newer(&answer, "0.0.1"),
+        "{answer:?} came back as an update over 0.0.1 and is not one"
     );
-    assert_eq!(
-        vigia::update::check("999.0.0"),
-        None,
-        "a version above every published one was still called an update"
+    assert!(
+        !newer(&answer, &answer),
+        "{answer:?} is an update over itself, so a current reader would be told to update"
     );
 }

@@ -517,6 +517,56 @@ fn markdown() -> Vec<(String, String)> {
 ///
 /// Structure is not prose and is never counted: YAML frontmatter, fenced code,
 /// tables, list items, headings, blockquotes and thematic breaks.
+/// Every row of a markdown table has the cells its header declared.
+///
+/// A row one cell short renders as a table with a hole in it, and nothing else
+/// here looks: the prose-width gate reads paragraphs, and a table row is not
+/// one. Two were found by hand in one pass, one of them written by that pass.
+#[test]
+fn no_table_row_is_missing_a_cell() {
+    let mut broken = Vec::new();
+    let files = markdown();
+    assert!(
+        !files.is_empty(),
+        "no markdown was read, so this proves nothing"
+    );
+
+    for (name, text) in &files {
+        // A width per table rather than per file: the documents carry several,
+        // and a run of rows ends at the first line that is not one.
+        let mut want: Option<usize> = None;
+        for (n, line) in text.lines().enumerate() {
+            if !line.starts_with('|') {
+                want = None;
+                continue;
+            }
+            let cells = line.matches('|').count();
+            match want {
+                None => want = Some(cells),
+                // The rule under the header, whose cells are dashes.
+                Some(_) if line.trim_matches(['|', '-', ':', ' ']).is_empty() => {}
+                Some(width) if cells != width => {
+                    broken.push(format!(
+                        "  {name}:{} has {cells} cells, its table has {width}",
+                        n + 1
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+
+    assert!(
+        broken.is_empty(),
+        "a table row does not match its header, so the document renders with a hole in it:
+{}",
+        broken.join(
+            "
+"
+        )
+    );
+}
+
 #[test]
 fn no_prose_paragraph_is_hard_wrapped() {
     let files = markdown();

@@ -48,8 +48,8 @@ Linux URL names the **musl** archive. The formula's `target_triple` helper says 
 
 - [ ] `cargo install --path <unpacked crate>` (or the dist artifact) on Windows,
 macOS, Linux: binary lands on PATH, and `vigia --version` prints the release version. That flag exists as of #12; SPEC.md §11 B6 records why a version query is not the kind of flag it forbids.
-- [ ] Binary size within the documented budget (SPEC.md §10 records 5.04 MiB
-with bundled grammars; a surprise here is a packaging change, not drift).
+- [ ] Binary size within the documented budget (SPEC.md §6 records 6,102,528 bytes
+carrying 217 syntaxes; a surprise here is a packaging change, not drift).
 - [ ] musl artifact: `ldd` reports no shared libraries. The static claim is
 enforced in CI and re-checked here because this is the artifact, not the build.
 

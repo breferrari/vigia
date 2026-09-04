@@ -204,7 +204,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         selected: None,
         scrolling: None,
         scrolling_until: None,
-        notice_until: None,
         announce: None,
         served: Vec::new(),
         written: false,
@@ -318,9 +317,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
-            shell.settle_notice(began);
-            shell.settle_send(began);
-            shell.settle_announcement(began);
+            shell.settle_footer(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -340,7 +337,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // and `shell` drops on the way out to put the terminal back first.
                 Wake::InputLost => {
                     // The one exit by `return`, so the flush after the loop misses it.
-                    shell.settle_send(Instant::now());
+                    shell.settle_footer(Instant::now());
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
                 // The quit key's arm without the key, so `break` and not `return`:
@@ -473,9 +470,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         }
 
         // Before the paint: a notice either of them raises has to reach this frame.
-        shell.settle_notice(began);
-        shell.settle_send(began);
-        shell.settle_announcement(began);
+        shell.settle_footer(began);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -498,7 +493,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     // A release then `q` copies and leaves, and every arm ending the loop does so before
     // the batch reaches its send. `InputLost` returns, and carries its own.
-    shell.settle_send(Instant::now());
+    shell.settle_footer(Instant::now());
 
     Ok(())
 }
@@ -599,10 +594,8 @@ struct Shell {
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
     /// When the footer's transient message stops being true: a keypress makes no tick.
-    notice_until: Option<Instant>,
-    /// A newer version the registry named, held until the footer has room for
-    /// it. It arrives once, so being written over before it paints would lose it
-    /// for the run.
+    /// A newer version the registry named, held until the footer has room. It
+    /// arrives once, so being written over before it paints would lose the run.
     announce: Option<String>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
@@ -674,7 +667,7 @@ impl Shell {
             input::Deadlines {
                 held: self.held,
                 linger: self.scrolling_until,
-                notice: self.notice_until,
+                notice: self.app.flash_until(),
                 ageing: self.history.ages_in(now),
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
@@ -764,7 +757,7 @@ impl Shell {
 
     /// Say what the registry named, on the first frame with a free footer.
     fn settle_announcement(&mut self, now: Instant) {
-        if self.notice_until.is_some() {
+        if self.app.flash_until().is_some() {
             return;
         }
         if let Some(version) = self.announce.take() {
@@ -772,18 +765,19 @@ impl Shell {
         }
     }
 
-    /// Take back the footer once the notice on it has had its time.
-    fn settle_notice(&mut self, now: Instant) {
-        if input::settled(self.notice_until, now) {
-            self.app.clear_flash();
-            self.notice_until = None;
-        }
+    /// Take the footer through one frame: retire what is spent, write what a
+    /// gesture asked for, and say what the registry named if nothing else has
+    /// claimed the line. Stating that order once is what stops the two paths to
+    /// a paint disagreeing about it.
+    fn settle_footer(&mut self, now: Instant) {
+        self.app.settle_flash(now);
+        self.settle_send(now);
+        self.settle_announcement(now);
     }
 
-    /// Put `message` over the footer until [`Self::settle_notice`] takes it back.
+    /// Put `message` over the footer until its time is up.
     fn say(&mut self, message: String, now: Instant) {
-        self.app.flash(message);
-        self.notice_until = Some(now + NOTICE_LINGER);
+        self.app.flash(message, now + NOTICE_LINGER);
     }
 
     /// The drawable area of the terminal right now.
@@ -1436,7 +1430,7 @@ mod tests {
         for clock in [
             "held: self.held",
             "linger: self.scrolling_until",
-            "notice: self.notice_until",
+            "notice: self.app.flash_until()",
             "ageing: self.history.ages_in",
         ] {
             assert!(
@@ -1445,22 +1439,25 @@ mod tests {
                  that clock is either armed somewhere else or has stopped: {sources}"
             );
         }
-        // A message and the deadline that takes it back are armed together or the
-        // footer keeps it forever, and the loop never wakes to find out. Mutating
-        // the deadline out of `say` passed the whole suite, because nothing can
-        // build a `Shell` to watch it happen.
-        let armed = code
-            .find("fn say(&mut self")
-            .expect("`Shell::say` is gone, so notices are armed somewhere this cannot see");
-        let body = &code[armed..armed + 220.min(code.len() - armed)];
-        for half in [
-            "self.app.flash(message)",
-            "self.notice_until = Some(now + NOTICE_LINGER)",
-        ] {
-            assert!(
-                body.contains(half),
-                "`{half}` is gone from `Shell::say`, so a notice is put on the                  footer without the clock that takes it off: {body}"
-            );
+        // Each path to a paint settles the footer on the way: an announcement
+        // never taken is one this run never says.
+        let paints: Vec<usize> = code
+            .match_indices("shell.draw(&mut frame, &worktree, began)?")
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(
+            paints.len(),
+            2,
+            "the loop no longer has exactly two paints, so this gate is checking a shape that moved"
+        );
+        let mut previous = 0;
+        for paint in paints {
+            let settled = code[previous..paint]
+                .rfind("shell.settle_footer(began)")
+                .map(|at| previous + at)
+                .expect("a paint with no `settle_footer` before it in the same arm");
+            assert!(settled < paint);
+            previous = paint;
         }
 
         assert!(

@@ -1062,7 +1062,7 @@ fn the_release_button_reaches_the_release() {
     // an `env:` entry also carries.
     assert!(
         preflight.contains(r#"-z "${HOMEBREW_TAP_TOKEN"#),
-        "the pre-flight does not check the tap token is set, and that is the          one that failed a release: {preflight}"
+        "the pre-flight does not check the tap token is set, and that is the one that failed a release: {preflight}"
     );
     // An actual write, not a report about one.
     assert_write_probe(preflight, "probe", "${tap}");
@@ -1575,7 +1575,7 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 388320),
-    ("REVOCATIONS.md", 6558),
+    ("REVOCATIONS.md", 6560),
     ("ROADMAP.md", 95434),
     ("RULINGS.md", 94676),
     ("CLAUDE.md", 17304),
@@ -1635,7 +1635,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 628105;
+const WRITTEN_LAYER_TOTAL: usize = 628107;
 
 /// Each document weighs no more than its budget.
 #[test]
@@ -1647,7 +1647,7 @@ fn the_written_layer_stays_under_its_budget() {
         let bytes = read(&root.join(name)).len();
         if bytes > ceiling {
             over.push(format!(
-                "  {name}: {bytes} bytes against a ceiling of {ceiling}"
+                " {name}: {bytes} bytes against a ceiling of {ceiling}"
             ));
         }
     }
