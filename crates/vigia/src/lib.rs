@@ -481,6 +481,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
         // Before the paint: a notice either of them raises has to reach this frame.
         shell.settle_footer(began);
+        // And the settle deadline, which can fall due under a drained batch too.
         shell.settle_heights(&mut frame);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
@@ -1618,7 +1619,6 @@ mod tests {
                 .map(|at| previous + at)
                 .expect("a paint with no `settle_footer` before it in the same arm");
             assert!(settled < paint);
-            // And the settle check, for the reason its docblock gives.
             let walked = code[previous..paint]
                 .rfind("shell.settle_heights(&mut frame)")
                 .map(|at| previous + at)

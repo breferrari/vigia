@@ -476,8 +476,8 @@ impl<'w> Frame<'w> {
 
     /// Re-read the changed set once the last height kept waiting has settled, so
     /// the walk asks it again and reads it once; nothing while the wait still runs
-    /// or none is armed. The loop asks on every turn without knowing which of its
-    /// clocks fired, so the decision lives here rather than at the call.
+    /// or none is armed. The loop asks before every paint without knowing which
+    /// of its clocks fired, so the decision lives here rather than at the call.
     ///
     /// # Errors
     ///
