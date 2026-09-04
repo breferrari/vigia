@@ -190,7 +190,7 @@ fn a_settled_arrival_is_what_the_renderer_drew() {
         assert_eq!(
             (symbols(&buf, area), styles(&buf, area)),
             (symbols(&settled, area), styles(&settled, area)),
-            "{voice:?} finished somewhere other than the drawn line. A voice whose              arrival is motionless settles only in style, so comparing glyphs              alone cannot see it land on the wrong colour"
+            "{voice:?} finished somewhere other than the drawn line. A voice whose arrival is motionless settles only in style, so comparing glyphs alone cannot see it land on the wrong colour"
         );
     }
 }
@@ -273,7 +273,7 @@ fn a_long_message_stops_where_the_readouts_begin() {
 
     assert!(
         area.x + area.width <= readouts,
-        "the area runs to column {} and the readouts start at {readouts}, so the          effect animates them rather than the message",
+        "the area runs to column {} and the readouts start at {readouts}, so the effect animates them rather than the message",
         area.x + area.width
     );
 }
@@ -322,7 +322,7 @@ fn no_voice_needs_colour_to_be_seen() {
             assert_eq!(
                 styles(&buf, area),
                 styles(&settled, area),
-                "{voice:?} changed colour at {depth:?}, which the theme was already                  resolved past and which `NO_COLOR` was promised it would not see"
+                "{voice:?} changed colour at {depth:?}, which the theme was already resolved past and which `NO_COLOR` was promised it would not see"
             );
         }
     }
@@ -351,7 +351,7 @@ fn every_effect_finishes_and_stops_asking_for_frames() {
             effects.process_effects(FxDuration::from(NOTICE_ARRIVING * 4), &mut buf, area);
             assert!(
                 !effects.is_running(),
-                "{voice:?}'s {what} still wants frames after four times its longest                  duration, so an idle pane never stops waking"
+                "{voice:?}'s {what} still wants frames after four times its longest duration, so an idle pane never stops waking"
             );
         }
     }

@@ -531,7 +531,7 @@ fn weigh(workdir: &Path, path: &str) -> Option<u64> {
 /// How long a change is drawn arriving. Under `HISTORY_SAMPLE`; see `SPEC.md` §5.1.
 pub const ARRIVING: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// How long a receipt for the reader's own act takes. Shortest of the three.
+/// A receipt's arrival, shortest of the three.
 pub const SAID_ARRIVING: std::time::Duration = std::time::Duration::from_millis(320);
 
 /// How long an announcement takes. Its own rather than [`ARRIVING`], which is
@@ -551,8 +551,8 @@ pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(
 pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How each voice arrives: one mechanism, three patterns, all revealing the
-/// message's own characters. §5 puts the glyph channel as what survives when
-/// colour does not; which pattern means what is §11.1.
+/// message's own characters, because §5 puts glyphs as what survives when colour
+/// does not. Which pattern means what is §11.1.
 #[doc(hidden)]
 pub fn arrival(voice: Voice) -> tachyonfx::Effect {
     let timer = (
@@ -572,11 +572,12 @@ pub fn arrival(voice: Voice) -> tachyonfx::Effect {
 /// Cells the sweep's edge is soft over: a wipe rather than a bar.
 const SWEEP_GRADIENT: u16 = 10;
 
-/// Cells the alert's edge is soft over as it closes in.
+/// Cells the alert's edge is soft over.
 const ALERT_SPREAD: f32 = 8.0;
 
-/// How each voice leaves: its arrival, reversed. The message stays drawn while
-/// it runs, or the effect lands on the hints and animates those instead.
+/// How each voice leaves: its arrival reversed, which is the **same** pattern
+/// with `dissolve`, not the mirrored one, since it removes in the order coalesce
+/// added. The message stays drawn throughout, or this lands on the hints.
 #[doc(hidden)]
 pub fn departure(voice: Voice) -> tachyonfx::Effect {
     let timer = (
@@ -602,7 +603,6 @@ const fn duration_for(voice: Voice) -> std::time::Duration {
     }
 }
 
-/// The one key the footer's manager needs, since one notice is on screen at a time.
 const NOTICE_KEY: &str = "notice";
 
 /// Wakes taken in one go, so one gesture costs one paint.
@@ -626,8 +626,8 @@ struct Shell {
     app: App,
     /// Keyed by path, so a second write replaces an effect rather than stacking.
     effects: EffectManager<String>,
-    /// The footer's own: the diff's are clipped to the diff, and one manager
-    /// processed twice would advance every effect in it twice a frame.
+    /// The footer's own: the diff's are clipped to it, and one manager processed
+    /// twice advances every effect in it twice a frame.
     notice_effects: EffectManager<String>,
     /// When the previous frame painted: the elapsed time an effect is told about.
     painted: Instant,
