@@ -343,8 +343,7 @@ pub enum Hovered {
 /// The mark after `event`, given the one before it.
 pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
     match event {
-        // A drag is not a hover, and it is the one mouse event that does not
-        // re-resolve.
+        // A drag is not a hover: it is the one mouse event that does not re-resolve.
         Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(_)) => None,
         Event::Mouse(mouse) => regions.hover_at(mouse.column, mouse.row),
         Event::FocusLost => None,
@@ -446,6 +445,8 @@ pub struct Deadlines {
     pub notice: Option<Instant>,
     /// When the churn window next has to age.
     pub ageing: Option<Duration>,
+    /// When the last height kept waiting inside the settle margin settles.
+    pub settling: Option<Duration>,
     /// When the fade on an arriving change is done, if one is still running.
     pub arriving: Option<Instant>,
 }
@@ -459,6 +460,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.linger.map(since),
         due.notice.map(since),
         due.ageing,
+        due.settling,
         due.arriving.map(since),
     ]
     .into_iter()

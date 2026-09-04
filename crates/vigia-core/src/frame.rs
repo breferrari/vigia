@@ -318,7 +318,7 @@ pub struct Frame<'w> {
     /// it rather than recovered by scanning. See [`Frame::staged_at`].
     staged_at: usize,
     stats: FrameStats,
-    /// The earliest moment a height kept waiting inside the settle margin settles,
+    /// The moment the last height kept waiting inside the settle margin settles,
     /// for a wake at that moment rather than at the next event.
     settles_at: Option<SystemTime>,
 }
@@ -345,6 +345,14 @@ impl<'w> Frame<'w> {
     ///
     /// The status walk fails.
     pub fn advance(&mut self) -> Result<()> {
+        // Every wait is decided again by the walk that follows it, and disarmed
+        // before the walk rather than after: the loop folds a spent deadline to a
+        // zero wait and advances on it, so a walk that failed and left the deadline
+        // armed would be walked again on the next zero wait, flat out, for as long
+        // as it kept failing. A clock that cannot do its work stops, and the next
+        // event brings the walk back.
+        self.settles_at = None;
+
         let mut files = Vec::with_capacity(self.files.len());
         for change in self.worktree.changes()? {
             files.push(change?);
@@ -360,8 +368,8 @@ impl<'w> Frame<'w> {
             }
         }
 
-        // Nothing above this line mutated anything, which is what makes a failed walk
-        // leave the previous frame intact.
+        // Nothing above this line mutated the frame's picture of the worktree, which
+        // is what makes a failed walk leave the previous frame intact.
 
         // The clean filter is rebuilt by the next read rather than kept for the life of
         // the process.
@@ -392,8 +400,6 @@ impl<'w> Frame<'w> {
             self.spans.clear();
         }
         self.attributes = attributes;
-        // Every wait is decided again by the tick that follows it.
-        self.settles_at = None;
 
         // Both caches are migrated, and neither is dropped. Clearing a span here rests
         // on its being derived from content with no freshness check of its own.
@@ -458,7 +464,7 @@ impl<'w> Frame<'w> {
         self.spans.len()
     }
 
-    /// How long until the earliest height kept waiting inside the settle margin
+    /// How long until the last height kept waiting inside the settle margin
     /// settles, or `None` when none is waiting. No filesystem event marks a write
     /// ending, so a wake at that moment has nothing to be armed from but this.
     /// Decided by each tick's walk, so a diff taken between two ticks can leave it
@@ -466,6 +472,21 @@ impl<'w> Frame<'w> {
     pub fn settles_in(&self, now: SystemTime) -> Option<Duration> {
         self.settles_at
             .map(|at| at.duration_since(now).unwrap_or(Duration::ZERO))
+    }
+
+    /// Re-read the changed set once the last height kept waiting has settled, so
+    /// the walk asks it again and reads it once; nothing while the wait still runs
+    /// or none is armed. The loop asks before every paint without knowing which
+    /// of its clocks fired, so the decision lives here rather than at the call.
+    ///
+    /// # Errors
+    ///
+    /// The status walk fails, as [`Frame::advance`]'s does.
+    pub fn advance_if_settled(&mut self, now: SystemTime) -> Result<()> {
+        if self.settles_at.is_some_and(|at| at <= now) {
+            self.advance()?;
+        }
+        Ok(())
     }
 
     /// How many rows the whole diff is, counting every changed file.
@@ -557,7 +578,11 @@ impl<'w> Frame<'w> {
             Verdict::Keep => return Ok(()),
             Verdict::Wait(until) => {
                 self.stats.deferred += 1;
-                self.settles_at = Some(self.settles_at.map_or(until, |at| at.min(until)));
+                // The last print to settle, so one wake serves the whole burst: on
+                // it every waiting file has settled and is read once. The first
+                // would fire once per settle instant, and a sweep whose prints
+                // spread over a hundred milliseconds would be a cascade of walks.
+                self.settles_at = Some(self.settles_at.map_or(until, |at| at.max(until)));
                 return Ok(());
             }
         }

@@ -36,12 +36,12 @@ use std::path::{Path, PathBuf};
 /// worth bounding are the ones that were furthest out when the ratchet landed.
 const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia-core/src/change.rs", 4705),
-    ("vigia/src/input.rs", 4387),
+    ("vigia/src/input.rs", 4371),
     ("vigia/src/app.rs", 4165),
     ("vigia-core/src/history.rs", 3350),
     ("vigia/src/render.rs", 3314),
     ("vigia/src/glyphs.rs", 3947),
-    ("vigia/src/lib.rs", 3575),
+    ("vigia/src/lib.rs", 3568),
     ("vigia/src/config.rs", 4000),
     ("vigia/src/view.rs", 2610),
 ];

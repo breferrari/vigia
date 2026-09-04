@@ -49,7 +49,7 @@ pub use view::{
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
@@ -278,13 +278,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // loop needs is the one buffer it keeps.
     let mut batch = Vec::with_capacity(DRAIN_CAP);
 
-    // Three clocks now, and `Shell::patience` is the seam that keeps every one of them
-    // honest.
+    // Every clock the loop owns is folded in `Shell::patience`.
     'awake: loop {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
         // still blocks rather than spinning.
-        let wake = match shell.patience(Instant::now()) {
+        let wake = match shell.patience(&frame, Instant::now()) {
             None => match rx.recv() {
                 Ok(wake) => Some(wake),
                 Err(_) => break 'awake,
@@ -321,6 +320,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             let began = Instant::now();
             shell.settle_scroll(began);
             shell.settle_footer(began);
+            // The margin's end after a print that moved, which no filesystem event marks.
+            shell.settle_heights(&mut frame);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -480,6 +481,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
         // Before the paint: a notice either of them raises has to reach this frame.
         shell.settle_footer(began);
+        // And the settle deadline, which can fall due under a drained batch too.
+        shell.settle_heights(&mut frame);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -748,7 +751,7 @@ impl Shell {
     }
 
     /// How long the loop may block before something here has to act.
-    fn patience(&self, now: Instant) -> Option<std::time::Duration> {
+    fn patience(&self, frame: &vigia_core::Frame, now: Instant) -> Option<std::time::Duration> {
         // Every deadline is folded here rather than at the receive, so `patience`
         // stays the one place that decides whether this program owns a timer.
         input::patience(
@@ -761,6 +764,9 @@ impl Shell {
                 // departure finished instead of asking for frames.
                 notice: self.leaving.or_else(|| self.app.flash_until()),
                 ageing: self.history.ages_in(now),
+                // The frame owns the instant its last waiting file settles, and is
+                // asked at decide time, as the window is.
+                settling: frame.settles_in(SystemTime::now()),
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
                 arriving: (self.effects.is_running() || self.notice_effects.is_running())
@@ -778,6 +784,15 @@ impl Shell {
         if let Some(mark) = input::scroll_mark(action, self.regions) {
             self.scrolling = Some(mark);
             self.scrolling_until = Some(now + SCROLL_LINGER);
+        }
+    }
+
+    /// Walk status once the frame's wait on a moved file has run out, so the
+    /// heights it kept are asked again. On every path to a paint, so a spent
+    /// deadline is consumed on the turn that finds it and not on a timeout.
+    fn settle_heights(&mut self, frame: &mut vigia_core::Frame) {
+        if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
+            self.app.warn(e.to_string());
         }
     }
 
@@ -1516,8 +1531,8 @@ mod tests {
              pulse of the burst that caused the frame"
         );
 
-        // And the ageing wake stays a paint rather than a tick: a status walk on
-        // that path is the difference `SPEC.md` §11.1 prices the amendment on.
+        // The timeout arm walks status only through the frame's own settle check: a
+        // walk on the ageing path is the difference `SPEC.md` §11.1 prices on.
         let arm = &code[code
             .find("let Some(wake) = wake else {")
             .expect("the loop no longer has a timeout arm")..];
@@ -1526,8 +1541,9 @@ mod tests {
             .expect("the timeout arm no longer continues")];
         assert!(
             !arm.contains("frame.advance("),
-            "the timeout arm walks status, so an ageing wake now costs a tick and \
-             the measurement I1's amendment was granted on no longer holds"
+            "the timeout arm walks status on every timeout, so an ageing wake now \
+             costs a tick and the measurement I1's amendment was granted on no \
+             longer holds"
         );
 
         // The arm draws, and that is a liveness gate rather than a tidiness one.
@@ -1565,9 +1581,9 @@ mod tests {
             "the loop reaches `recv_timeout` before it has decided whether \
              anything is held, so an idle monitor is being given a deadline"
         );
-        // Four clocks now, and one function that answers for all of them. A deadline
-        // asked separately would be another chance to leave one armed on an idle
-        // monitor, and the gate above can only see the branch, not what fed it.
+        // One function answers for every clock. A deadline asked separately would
+        // be another chance to leave one armed on an idle monitor, and the gate
+        // above can only see the branch, not what fed it.
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
@@ -1577,6 +1593,7 @@ mod tests {
             "linger: self.scrolling_until",
             "notice: self.leaving.or_else(|| self.app.flash_until())",
             "ageing: self.history.ages_in",
+            "settling: frame.settles_in(",
         ] {
             assert!(
                 sources.contains(clock),
@@ -1602,11 +1619,19 @@ mod tests {
                 .map(|at| previous + at)
                 .expect("a paint with no `settle_footer` before it in the same arm");
             assert!(settled < paint);
+            let walked = code[previous..paint]
+                .rfind("shell.settle_heights(&mut frame)")
+                .map(|at| previous + at)
+                .expect(
+                    "a paint with no `settle_heights` before it in the same arm, so a \
+                     settled height on that path waits for the next event",
+                );
+            assert!(walked < paint);
             previous = paint;
         }
 
         assert!(
-            code.contains("match shell.patience(Instant::now())"),
+            code.contains("match shell.patience(&frame, Instant::now())"),
             "the loop no longer decides how long to wait through `Held::wait`, so \
              the one function that can answer *is there a timer at all* is not the \
              one being asked"
