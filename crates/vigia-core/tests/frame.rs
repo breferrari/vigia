@@ -2,7 +2,7 @@
 
 mod support;
 
-use support::{Scratch, committed_link, delta, materialise, settle, settle_spans};
+use support::{Scratch, committed_link, delta, index_of, materialise, settle, settle_spans};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
 /// Small enough to reason about every count, more than one so "all" and "the
@@ -351,6 +351,12 @@ fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
         idle.measured
     );
     assert_eq!(unchanged, before, "an idle tick changed the diff's height");
+    assert_eq!(
+        idle.deferred, 0,
+        "an idle tick kept {} heights waiting, so an unchanged file is being treated \
+         as one still being written",
+        idle.deferred
+    );
 
     // And it proved them with a `stat` each, which nothing else asserts.
     assert_eq!(
@@ -520,6 +526,35 @@ fn an_edit_off_screen_keeps_the_old_height_inside_the_margin_and_recounts_it_onc
         after, truth,
         "the files settled and the frame still counts {after} where a frame with \
          no memory computes {truth}, so a diff in hand is trusted past its file"
+    );
+}
+
+#[test]
+fn a_file_the_tick_diffed_is_not_asked_again_by_the_height_walk() {
+    // The height goes with the diff it was taken from, proved by the same read, so
+    // the walk that follows spends its stats on the other files only.
+    let scratch = Scratch::large_diff("frame-diffed-once", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    scratch.edit_line("src/mod_0.rs", 3, "// edited");
+    frame.advance().expect("advance");
+    let index = index_of(&frame, "src/mod_0.rs");
+    let before = frame.stats();
+    frame.diff(index).expect("diff");
+    let diffed = delta(before, frame.stats());
+    assert_eq!(diffed.computed, 1, "the edited file was not recomputed");
+
+    let before = frame.stats();
+    total_height(&mut frame);
+    let walked = delta(before, frame.stats());
+    assert_eq!(
+        walked.probes,
+        (FILES - 1) as u64,
+        "the height walk took {} stat calls after the tick diffed one of {FILES} \
+         files, so the file just read is being asked again",
+        walked.probes
     );
 }
 
