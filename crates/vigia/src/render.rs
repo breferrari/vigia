@@ -291,6 +291,19 @@ const fn inset_of(pane: u16) -> u16 {
     margins_of(pane).0
 }
 
+/// The columns of `area` a glyph may use, given a pane's margins. Shared with
+/// [`Painter::text_area`]: two derivations of one inset come apart unseen.
+const fn text_within(area: Rect, margins: (u16, u16)) -> Rect {
+    Rect {
+        x: area.x.saturating_add(margins.0),
+        width: area
+            .width
+            .saturating_sub(margins.0)
+            .saturating_sub(margins.1),
+        ..area
+    }
+}
+
 /// The pane width from which the pinned list may become a left rail beside
 /// the diff rather than a strip above it. `SPEC.md` §11.2 B14.
 const RAIL_FROM: u16 = 134;
@@ -1234,22 +1247,18 @@ pub fn notice_area(area: Rect, chrome: &Chrome) -> Option<Rect> {
     if area.width == 0 || area.height == 0 {
         return None;
     }
-    let (inset, trailing) = margins_of(area.width);
-    let row = Rect {
-        y: area.y + area.height - 1,
-        height: 1,
-        ..area
-    };
-    let width = row
+    let text = text_within(
+        Rect {
+            y: area.y + area.height - 1,
+            height: 1,
+            ..area
+        },
+        margins_of(area.width),
+    );
+    let width = text
         .width
-        .saturating_sub(inset)
-        .saturating_sub(trailing)
         .min(u16::try_from(width_of(notice)).unwrap_or(u16::MAX));
-    (width > 0).then(|| Rect {
-        x: row.x.saturating_add(inset),
-        width,
-        ..row
-    })
+    (width > 0).then_some(Rect { width, ..text })
 }
 
 /// How the body divides between the regions `SPEC.md` §11.1 rules.
@@ -2503,14 +2512,7 @@ struct Painter<'a> {
 impl Painter<'_> {
     /// The columns of `area` a glyph may use.
     fn text_area(&self, area: Rect) -> Rect {
-        Rect {
-            x: area.x.saturating_add(self.inset),
-            width: area
-                .width
-                .saturating_sub(self.inset)
-                .saturating_sub(self.trailing),
-            ..area
-        }
+        text_within(area, (self.inset, self.trailing))
     }
 
     /// The same, for a rect a scrollbar may already have narrowed.

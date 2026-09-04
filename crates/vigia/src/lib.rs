@@ -557,7 +557,7 @@ fn arrival(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
             0,
             theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
             (
-                tachyonfx::Duration::from(SAID_ARRIVING),
+                tachyonfx::Duration::from(duration_for(voice)),
                 Interpolation::QuadOut,
             ),
         ),
@@ -570,7 +570,7 @@ fn arrival(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
         Voice::Alert => fx::ping_pong(fx::hsl_shift_fg(
             [0.0, 0.0, ALERT_LIGHTEN],
             (
-                tachyonfx::Duration::from(ALERT_ARRIVING / 2),
+                tachyonfx::Duration::from(duration_for(voice) / 2),
                 Interpolation::QuadOut,
             ),
         )),
@@ -596,7 +596,7 @@ fn departure(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
             0,
             theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
             (
-                tachyonfx::Duration::from(SAID_ARRIVING),
+                tachyonfx::Duration::from(duration_for(voice)),
                 Interpolation::QuadIn,
             ),
         ),
@@ -606,15 +606,15 @@ fn departure(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
         Voice::Alert => fx::fade_to_fg(
             theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
             (
-                tachyonfx::Duration::from(ALERT_ARRIVING),
+                tachyonfx::Duration::from(duration_for(voice)),
                 Interpolation::QuadIn,
             ),
         ),
     }
 }
 
-/// How long a spent message takes to leave, which is how long its departure runs.
-const fn leaving_for(voice: Voice) -> std::time::Duration {
+/// How long a voice takes, arriving or leaving. One table: three copies drift.
+const fn duration_for(voice: Voice) -> std::time::Duration {
     match voice {
         Voice::Said => SAID_ARRIVING,
         Voice::Arrived => ARRIVING,
@@ -892,7 +892,7 @@ impl Shell {
         if let Some(voice) = self.app.voice() {
             self.notice_effects
                 .add_unique_effect(NOTICE_KEY.to_owned(), departure(voice, &self.theme));
-            self.leaving = Some(now + leaving_for(voice));
+            self.leaving = Some(now + duration_for(voice));
         }
     }
 
