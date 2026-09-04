@@ -188,9 +188,9 @@ fn a_settled_arrival_is_what_the_renderer_drew() {
         effects.add_unique_effect("notice".to_owned(), arrival_of(voice));
         effects.process_effects(FxDuration::from(ARRIVING * 4), &mut buf, area);
         assert_eq!(
-            symbols(&buf, area),
-            symbols(&settled, area),
-            "{voice:?} finished somewhere other than the drawn line"
+            (symbols(&buf, area), styles(&buf, area)),
+            (symbols(&settled, area), styles(&settled, area)),
+            "{voice:?} finished somewhere other than the drawn line. A voice whose              arrival is motionless settles only in style, so comparing glyphs              alone cannot see it land on the wrong colour"
         );
     }
 }
@@ -237,6 +237,62 @@ fn a_pane_with_no_room_has_no_area() {
     }
 }
 
+/// An effect that never reports itself finished pins the loop awake for the
+/// rest of the session, because `Shell::patience` asks for a frame while one is
+/// running. `ping_pong` was tried here and does exactly that: it repeats, so
+/// `is_running` never goes false and an idle monitor wakes every 16ms forever.
+///
+/// I1's budget is zero wakeups on an idle pane, and nothing else here can see
+/// this: the pane looks right, and the cost is a fan.
+#[test]
+fn every_effect_finishes_and_stops_asking_for_frames() {
+    for voice in VOICES {
+        for (what, effect) in [
+            ("arrival", arrival_of(voice)),
+            ("departure", departure_of(voice)),
+        ] {
+            let (settled, app) = drawn(voice);
+            let area = area_of(&app);
+            let mut buf = settled.clone();
+            let mut effects: EffectManager<String> = EffectManager::default();
+            effects.add_unique_effect("notice".to_owned(), effect);
+            assert!(
+                effects.is_running(),
+                "{voice:?}'s {what} was over before it began"
+            );
+            effects.process_effects(FxDuration::from(ARRIVING * 4), &mut buf, area);
+            assert!(
+                !effects.is_running(),
+                "{voice:?}'s {what} still wants frames after four times its longest                  duration, so an idle pane never stops waking"
+            );
+        }
+    }
+}
+
+/// The departures, spelled here for `arrival_of`'s reason.
+fn departure_of(voice: Voice) -> tachyonfx::Effect {
+    let theme = Theme::default();
+    let dur = match voice {
+        Voice::Said => SAID_ARRIVING,
+        Voice::Arrived => ARRIVING,
+        Voice::Alert => ALERT_ARRIVING,
+    };
+    match voice {
+        Voice::Said => fx::sweep_out(
+            Motion::LeftToRight,
+            8,
+            0,
+            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
+            (FxDuration::from(dur), Interpolation::QuadIn),
+        ),
+        Voice::Arrived => fx::dissolve((FxDuration::from(dur), Interpolation::QuadIn)),
+        Voice::Alert => fx::fade_to_fg(
+            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
+            (FxDuration::from(dur), Interpolation::QuadIn),
+        ),
+    }
+}
+
 /// The arrivals, spelled here rather than reached for, so this suite fails when
 /// the shell's table changes rather than following it silently.
 fn arrival_of(voice: Voice) -> tachyonfx::Effect {
@@ -250,9 +306,9 @@ fn arrival_of(voice: Voice) -> tachyonfx::Effect {
             (FxDuration::from(SAID_ARRIVING), Interpolation::QuadOut),
         ),
         Voice::Arrived => fx::coalesce((FxDuration::from(ARRIVING), Interpolation::QuadOut)),
-        Voice::Alert => fx::ping_pong(fx::hsl_shift_fg(
-            [0.0, 0.0, 35.0],
-            (FxDuration::from(ALERT_ARRIVING / 2), Interpolation::QuadOut),
-        )),
+        Voice::Alert => fx::fade_from_fg(
+            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
+            (FxDuration::from(ALERT_ARRIVING), Interpolation::QuadOut),
+        ),
     }
 }

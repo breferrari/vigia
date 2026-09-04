@@ -564,21 +564,19 @@ fn arrival(voice: Voice, theme: &Theme) -> tachyonfx::Effect {
         Voice::Arrived => {
             fx::coalesce((tachyonfx::Duration::from(ARRIVING), Interpolation::QuadOut))
         }
-        // Lightened and back, inside its own hue. Fading in from another
-        // colour would slide a warning through a meaning it does not have,
-        // and the palette has no white to flash that is not a loan.
-        Voice::Alert => fx::ping_pong(fx::hsl_shift_fg(
-            [0.0, 0.0, ALERT_LIGHTEN],
+        // Out of the hints it replaced, like the sweep above, but without
+        // moving: a warning must not be harder to read while it arrives. It
+        // fades *to* what was drawn, so it settles exactly there and stops,
+        // which a shift away and back does neither of.
+        Voice::Alert => fx::fade_from_fg(
+            theme.chrome_dim.fg.unwrap_or(ratatui::style::Color::Reset),
             (
-                tachyonfx::Duration::from(duration_for(voice) / 2),
+                tachyonfx::Duration::from(duration_for(voice)),
                 Interpolation::QuadOut,
             ),
-        )),
+        ),
     }
 }
-
-/// How much lighter a warning goes before settling, in HSL lightness.
-const ALERT_LIGHTEN: f32 = 35.0;
 
 /// Cells the sweep's edge is soft over: a wipe rather than a bar.
 const SWEEP_GRADIENT: u16 = 8;
