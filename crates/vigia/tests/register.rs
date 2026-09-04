@@ -548,9 +548,10 @@ fn no_table_row_is_missing_a_cell() {
     for (name, text) in &files {
         let lines: Vec<&str> = text.lines().collect();
         // A width per table rather than per file, since the documents carry
-        // several, and a table is only ever opened by a header with its rule
-        // under it. Anchoring on that rather than on the first row is what lets
-        // two tables sit against each other with no blank line between them.
+        // several, and a table opens only on a header with its rule beneath it.
+        // Once open it stays open until a line that is not a row: a table ends
+        // at a blank line, so a rule-shaped row further down is a row like any
+        // other and must not be allowed to re-anchor the width.
         let mut want: Option<usize> = None;
         let mut fenced = false;
         let mut n = 0;
@@ -561,7 +562,7 @@ fn no_table_row_is_missing_a_cell() {
                 want = None;
             } else if fenced || !line.starts_with('|') {
                 want = None;
-            } else if lines.get(n + 1).is_some_and(|next| is_rule(next)) {
+            } else if want.is_none() && lines.get(n + 1).is_some_and(|next| is_rule(next)) {
                 want = Some(cells(line));
                 n += 1;
             } else if want.is_some_and(|width| cells(line) != width) {
