@@ -1,6 +1,6 @@
 //! Everything the shell remembers between frames, and the arithmetic on it.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
@@ -63,8 +63,9 @@ pub struct App {
     /// What the footer should say instead of the key hints.
     notice: Option<String>,
     /// Shown over `notice` rather than into it: a confirmation must not be erased
-    /// by the next tick, nor bury a warning that has no expiry.
-    flash: Option<String>,
+    /// by the next tick, nor bury a warning that has no expiry. The deadline
+    /// travels with the message because a flash armed without one never leaves.
+    flash: Option<(String, Instant)>,
     /// Asked for and not sent yet.
     sending: Option<Sending>,
     /// Rows the drag has washed, as offsets into the collected rows.
@@ -224,17 +225,27 @@ impl App {
 
     /// The message the footer is carrying, if any.
     pub fn notice(&self) -> Option<&str> {
-        self.flash.as_deref().or(self.notice.as_deref())
+        self.flash
+            .as_ref()
+            .map(|(message, _)| message.as_str())
+            .or(self.notice.as_deref())
     }
 
-    /// Show `message` until [`Self::clear_flash`], over what the footer holds.
-    pub fn flash(&mut self, message: impl Into<String>) {
-        self.flash = Some(message.into());
+    /// Show `message` over what the footer holds, until `until`.
+    pub fn flash(&mut self, message: impl Into<String>, until: Instant) {
+        self.flash = Some((message.into(), until));
     }
 
-    /// Stop showing it, revealing anything under it.
-    pub fn clear_flash(&mut self) {
-        self.flash = None;
+    /// When the message on the footer stops being owed the line, if there is one.
+    pub fn flash_until(&self) -> Option<Instant> {
+        self.flash.as_ref().map(|(_, until)| *until)
+    }
+
+    /// Stop showing it once its time is up, revealing anything under it.
+    pub fn settle_flash(&mut self, now: Instant) {
+        if crate::input::settled(self.flash_until(), now) {
+            self.flash = None;
+        }
     }
 
     /// Record that the watch has stopped, so the header stops claiming

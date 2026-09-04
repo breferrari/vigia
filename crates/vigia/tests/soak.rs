@@ -534,7 +534,7 @@ fn workload(
 
         // A file the viewport is not on, so the frame path has something to
         // revalidate rather than recompute.
-        if files > 1 && at % COLD_EVERY == 0 {
+        if files > 1 && at.is_multiple_of(COLD_EVERY) {
             let cold = 1 + (at / COLD_EVERY) % (files - 1);
             scratch.edit_line(
                 &format!("src/mod_{cold}.rs"),
@@ -544,7 +544,7 @@ fn workload(
         }
 
         // A new path appears, and one from a few rounds ago goes away.
-        if at % CREATE_EVERY == 0 {
+        if at.is_multiple_of(CREATE_EVERY) {
             scratch.write(
                 &format!("scratch/new_{made}.rs"),
                 generated(NEW_FILE_LINES, "new"),
@@ -558,10 +558,10 @@ fn workload(
         }
 
         // Two shapes, alternating, and each is here for a different bound.
-        if at % REVERT_EVERY == 0 && files > 1 {
+        if at.is_multiple_of(REVERT_EVERY) && files > 1 {
             let target = 1 + (at / REVERT_EVERY) % (files - 1);
             let path = format!("src/mod_{target}.rs");
-            if (at / REVERT_EVERY) % 2 == 0 {
+            if (at / REVERT_EVERY).is_multiple_of(2) {
                 scratch.write(&path, generated(lines, "before"));
             } else {
                 scratch.write(&path, sparse(lines, SPARSE_EVERY));
@@ -571,7 +571,7 @@ fn workload(
         // The bulk event: every file changes at once, so for the whole settle
         // margin nothing can be proved unchanged. `SPEC.md` §10 measured this
         // as the shell's worst case.
-        if at > 0 && at % BULK_EVERY == 0 {
+        if at > 0 && at.is_multiple_of(BULK_EVERY) {
             scratch.rewrite_all(files, lines, at / BULK_EVERY);
             scratch.write("src/mod_0.rs", sparse(lines, SPARSE_EVERY));
         }

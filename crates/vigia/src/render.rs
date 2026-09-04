@@ -80,7 +80,7 @@ const _: () = {
     let mut rung = 0;
     while rung < SPARK_RUNGS.len() {
         assert!(
-            SPARK_RUNGS[rung] == 0 || HISTORY_BUCKETS % SPARK_RUNGS[rung] == 0,
+            SPARK_RUNGS[rung] == 0 || HISTORY_BUCKETS.is_multiple_of(SPARK_RUNGS[rung]),
             "a sparkline rung does not divide the source resolution, so its \
              newest column would cover less time than the rest"
         );
@@ -157,7 +157,7 @@ const _: () = {
     let mut rung = 0;
     while rung < HEAT_RUNGS.len() {
         assert!(
-            HEAT_RUNGS[rung] == 0 || HEAT_BUCKETS % HEAT_RUNGS[rung] == 0,
+            HEAT_RUNGS[rung] == 0 || HEAT_BUCKETS.is_multiple_of(HEAT_RUNGS[rung]),
             "a heat rung does not divide the source resolution, so its last \
              slice would cover fewer lines than the rest"
         );
@@ -3867,10 +3867,11 @@ impl Painter<'_> {
         // §5.1's left bar, and it costs no column. The pane's leading cell is blank
         // margin that the wash above has already bled under, so setting its background
         // spends nothing that was carrying content.
-        if bar.bg.is_some() && self.inset > 0 {
-            if let Some(cell) = self.buf.cell_mut((area.x, area.y)) {
-                cell.set_style(bar);
-            }
+        if bar.bg.is_some()
+            && self.inset > 0
+            && let Some(cell) = self.buf.cell_mut((area.x, area.y))
+        {
+            cell.set_style(bar);
         }
 
         // The wash above took the whole row and the glyphs take the inset one, which is

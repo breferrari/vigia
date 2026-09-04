@@ -7,8 +7,10 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::time::{Duration, Instant};
+
 use ratatui::layout::Rect;
-use vigia::{App, Pointing, View, body_layout};
+use vigia::{App, NOTICE_LINGER, Pointing, View, body_layout};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -165,7 +167,10 @@ fn a_write_between_the_paint_and_the_release_does_not_move_what_is_sent() {
 #[test]
 fn a_write_does_not_erase_what_a_send_just_said() {
     let mut app = App::new();
-    app.flash("sent 3 lines to the clipboard");
+    app.flash(
+        "sent 3 lines to the clipboard",
+        Instant::now() + NOTICE_LINGER,
+    );
 
     // What `Wake::Tick` does on every write, and it must reach the lasting slot
     // rather than the reader's own confirmation.
@@ -183,11 +188,19 @@ fn a_write_does_not_erase_what_a_send_just_said() {
 #[test]
 fn a_lasting_warning_survives_underneath_a_send() {
     let mut app = App::new();
+    let now = Instant::now();
     app.warn("not watching: the watch stopped");
-    app.flash("sent 3 lines to the clipboard");
+    app.flash("sent 3 lines to the clipboard", now + NOTICE_LINGER);
     assert_eq!(app.notice(), Some("sent 3 lines to the clipboard"));
 
-    app.clear_flash();
+    app.settle_flash(now + NOTICE_LINGER - Duration::from_millis(1));
+    assert_eq!(
+        app.notice(),
+        Some("sent 3 lines to the clipboard"),
+        "the confirmation was taken off a millisecond early"
+    );
+
+    app.settle_flash(now + NOTICE_LINGER);
     assert_eq!(
         app.notice(),
         Some("not watching: the watch stopped"),
@@ -201,7 +214,10 @@ fn a_lasting_warning_survives_underneath_a_send() {
 #[test]
 fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
     let mut app = App::new();
-    app.flash("sent 3 lines to the clipboard");
+    app.flash(
+        "sent 3 lines to the clipboard",
+        Instant::now() + NOTICE_LINGER,
+    );
     assert_eq!(
         app.chrome("fixture", None, Pointing::default(), 0, "")
             .notice

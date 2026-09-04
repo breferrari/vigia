@@ -1062,7 +1062,7 @@ fn the_release_button_reaches_the_release() {
     // an `env:` entry also carries.
     assert!(
         preflight.contains(r#"-z "${HOMEBREW_TAP_TOKEN"#),
-        "the pre-flight does not check the tap token is set, and that is the          one that failed a release: {preflight}"
+        "the pre-flight does not check the tap token is set, and that is the one that failed a release: {preflight}"
     );
     // An actual write, not a report about one.
     assert_write_probe(preflight, "probe", "${tap}");
@@ -1574,13 +1574,59 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 388803),
-    ("REVOCATIONS.md", 6558),
-    ("ROADMAP.md", 94871),
+    ("SPEC.md", 388521),
+    ("REVOCATIONS.md", 6560),
+    ("ROADMAP.md", 95434),
     ("RULINGS.md", 94676),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
+
+/// The graviola release whose `verify_cpu_features` the shell's guard mirrors.
+///
+/// Bumping this means re-reading `low/x86_64/cpu.rs` and `low/aarch64/cpu.rs`
+/// in the new release and bringing `update.rs::provider_runs_here` into line.
+const GRAVIOLA_MIRRORED: &str = "0.4.1";
+
+/// The mirrored CPU-feature list is pinned to the release it was read from.
+///
+/// The guard exists because graviola asserts rather than degrades and this
+/// workspace aborts rather than unwinds, so a feature added upstream is a dead
+/// monitor on hardware nobody here can test. A caret range would take that
+/// silently, and no test of the guard's own behaviour can see it: the guard
+/// keeps answering, about the wrong list.
+#[test]
+fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
+    let lock = repo_file("Cargo.lock");
+    let resolved = lock
+        .split("[[package]]")
+        .find(|block| block.contains("name = \"graviola\""))
+        .and_then(|block| {
+            block
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("version = "))
+        })
+        .map(|version| version.trim_matches('"').to_owned())
+        .expect("Cargo.lock resolves graviola");
+
+    assert_eq!(
+        resolved, GRAVIOLA_MIRRORED,
+        "graviola moved to {resolved}. Re-read `verify_cpu_features` in `low/x86_64/cpu.rs` and `low/aarch64/cpu.rs`, bring `update.rs::provider_runs_here` into line with whatever it asserts on now, then move this constant. A feature added there and missed here is an abort on a reader's machine"
+    );
+
+    // Comment markers stripped and whitespace collapsed, so the phrase is found
+    // wherever the docblock happens to break its lines.
+    let guard = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/update.rs"));
+    let prose: String = guard
+        .lines()
+        .map(|line| line.trim().trim_start_matches('/').trim())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        prose.contains(&format!("graviola {GRAVIOLA_MIRRORED}")),
+        "the guard no longer names the release its list came from, so the next reader cannot tell which source to check it against"
+    );
+}
 
 /// What the documents together are allowed to weigh.
 ///
@@ -1589,7 +1635,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 628025;
+const WRITTEN_LAYER_TOTAL: usize = 628308;
 
 /// Each document weighs no more than its budget.
 #[test]
@@ -1601,7 +1647,7 @@ fn the_written_layer_stays_under_its_budget() {
         let bytes = read(&root.join(name)).len();
         if bytes > ceiling {
             over.push(format!(
-                "  {name}: {bytes} bytes against a ceiling of {ceiling}"
+                " {name}: {bytes} bytes against a ceiling of {ceiling}"
             ));
         }
     }

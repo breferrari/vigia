@@ -517,6 +517,77 @@ fn markdown() -> Vec<(String, String)> {
 ///
 /// Structure is not prose and is never counted: YAML frontmatter, fenced code,
 /// tables, list items, headings, blockquotes and thematic breaks.
+/// Every row of a markdown table has the cells its header declared.
+///
+/// A row one cell short renders as a table with a hole in it, and nothing else
+/// here looks: the prose-width gate reads paragraphs, and a table row is not
+/// one. Two were found by hand in one pass, one of them written by that pass.
+#[test]
+fn no_table_row_is_missing_a_cell() {
+    let mut broken = Vec::new();
+    let files = markdown();
+    assert!(
+        !files.is_empty(),
+        "no markdown was read, so this proves nothing"
+    );
+
+    // An escaped pipe is a character in a cell, not a cell boundary.
+    fn cells(line: &str) -> usize {
+        line.replace(r"\|", "").matches('|').count()
+    }
+
+    // The rule under a header: pipes, dashes and alignment colons, and at least
+    // one dash. Without that last part a row whose cells are all empty reads as
+    // a rule, and a table with a hole in it goes unseen for looking like one.
+    fn is_rule(line: &str) -> bool {
+        line.starts_with('|')
+            && line.contains('-')
+            && line.trim_matches(['|', '-', ':', ' ']).is_empty()
+    }
+
+    for (name, text) in &files {
+        let lines: Vec<&str> = text.lines().collect();
+        // A width per table rather than per file, since the documents carry
+        // several, and a table opens only on a header with its rule beneath it.
+        // Once open it stays open until a line that is not a row: a table ends
+        // at a blank line, so a rule-shaped row further down is a row like any
+        // other and must not be allowed to re-anchor the width.
+        let mut want: Option<usize> = None;
+        let mut fenced = false;
+        let mut n = 0;
+        while n < lines.len() {
+            let line = lines[n];
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+                want = None;
+            } else if fenced || !line.starts_with('|') {
+                want = None;
+            } else if want.is_none() && lines.get(n + 1).is_some_and(|next| is_rule(next)) {
+                want = Some(cells(line));
+                n += 1;
+            } else if want.is_some_and(|width| cells(line) != width) {
+                broken.push(format!(
+                    "  {name}:{} has {} cells, its table has {}",
+                    n + 1,
+                    cells(line),
+                    want.expect("checked")
+                ));
+            }
+            n += 1;
+        }
+    }
+
+    assert!(
+        broken.is_empty(),
+        "a table row does not match its header, so the document renders with a hole in it:
+{}",
+        broken.join(
+            "
+"
+        )
+    );
+}
+
 #[test]
 fn no_prose_paragraph_is_hard_wrapped() {
     let files = markdown();

@@ -33,8 +33,19 @@ exclude = ["tests/**"]
 
 [dependencies]
 ratatui.workspace = true
+serde_json.workspace = true
 tachyonfx.workspace = true
 vigia-core.workspace = true
+
+# The update check's TLS, and the one dependency here bounded by architecture
+# rather than by operating system. `graviola` is a `compile_error!` on anything
+# that is not x86_64 or aarch64, so declaring these unconditionally would stop
+# `cargo install vigia` compiling on armv7, i686 or riscv64 while every check in
+# this repository stayed green. `update.rs` answers nothing on those targets,
+# which is the same answer it gives a reader with no network.
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
+rustls-graviola.workspace = true
+ureq.workspace = true
 
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:
 # SPEC.md section 6 keeps the core free of anything the shell decides, and a

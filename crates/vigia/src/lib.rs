@@ -20,6 +20,8 @@ mod terminal;
 /// Public for [`memory`]'s reason: `tests/palette.rs` is an integration test and
 /// can only reach what the crate exports.
 pub mod theme;
+/// Public for [`theme`]'s reason, and it is where `VIGIA_UPDATE` is read.
+pub mod update;
 mod view;
 
 pub use app::{App, Sending};
@@ -37,6 +39,7 @@ pub use render::{
 };
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
+pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
     block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of,
@@ -70,6 +73,8 @@ enum Wake {
     Signalled,
     /// A warm finished, so a hunk that drew plain can draw in colour.
     Warmed,
+    /// A newer version exists, so the footer can name it.
+    Update(String),
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
@@ -156,6 +161,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
+    // Read here for that same reason, and acted on after the first paint.
+    let update = update::wanted(|key| std::env::var(key).ok())?;
+
     // The view defaults reach the frame before its first walk, not just the
     // shell. Three of the four keys only arrange rows the frame already holds;
     // `staged` decides what it *walks*, so it must be honoured here.
@@ -196,7 +204,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         selected: None,
         scrolling: None,
         scrolling_until: None,
-        notice_until: None,
+        announce: None,
         served: Vec::new(),
         written: false,
         warming: None,
@@ -242,6 +250,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell
         .highlighter
         .warm_repository(worktree.workdir().to_path_buf(), Some(warmed(&tx)));
+
+    if update {
+        let tx = tx.clone();
+        update::watch(
+            || update::check(VERSION),
+            move |version| {
+                let _ = tx.send(Wake::Update(version));
+            },
+        );
+    }
 
     // Demands the opening two frames raised, dispatched before the loop blocks.
     // Without this the screen keeps whatever the two paints managed until the
@@ -299,7 +317,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // the whole of the frame.
             let began = Instant::now();
             shell.settle_scroll(began);
-            shell.settle_send(began);
+            shell.settle_footer(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -447,11 +465,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 // Deliberately nothing.
                 Wake::Warmed => {}
+                Wake::Update(version) => shell.announce = Some(version),
             }
         }
 
-        // Before the paint: the notice it raises has to reach this frame.
-        shell.settle_send(began);
+        // Before the paint: a notice either of them raises has to reach this frame.
+        shell.settle_footer(began);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -574,8 +593,9 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
-    /// When the footer's transient message stops being true: a keypress makes no tick.
-    notice_until: Option<Instant>,
+    /// A newer version the registry named, held until the footer has room. It
+    /// arrives once, so being written over before it paints would lose the run.
+    announce: Option<String>,
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
@@ -646,7 +666,7 @@ impl Shell {
             input::Deadlines {
                 held: self.held,
                 linger: self.scrolling_until,
-                notice: self.notice_until,
+                notice: self.app.flash_until(),
                 ageing: self.history.ages_in(now),
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
@@ -724,19 +744,39 @@ impl Shell {
     /// A failed write is reported rather than propagated: a draw that fails has taken
     /// the pane with it, but a copy is one a reader can go on watching without.
     fn settle_send(&mut self, now: Instant) {
-        if input::settled(self.notice_until, now) {
-            self.app.clear_flash();
-            self.notice_until = None;
-        }
         if let Some(sending) = self.app.take_sending() {
             let said = sending.said;
-            self.app
-                .flash(match self.session.send(&clipboard::copy(&sending.text)) {
-                    Ok(()) => format!("sent {said} to the clipboard"),
-                    Err(e) => format!("could not send {said}: {e}"),
-                });
-            self.notice_until = Some(now + NOTICE_LINGER);
+            let told = match self.session.send(&clipboard::copy(&sending.text)) {
+                Ok(()) => format!("sent {said} to the clipboard"),
+                Err(e) => format!("could not send {said}: {e}"),
+            };
+            self.say(told, now);
         }
+    }
+
+    /// Say what the registry named, on the first frame with a free footer.
+    fn settle_announcement(&mut self, now: Instant) {
+        if self.app.flash_until().is_some() {
+            return;
+        }
+        if let Some(version) = self.announce.take() {
+            self.say(format!("vigia {version} is available"), now);
+        }
+    }
+
+    /// Take the footer through one frame: retire what is spent, write what a
+    /// gesture asked for, and say what the registry named if nothing else has
+    /// claimed the line. Stating that order once is what stops the two paths to
+    /// a paint disagreeing about it.
+    fn settle_footer(&mut self, now: Instant) {
+        self.app.settle_flash(now);
+        self.settle_send(now);
+        self.settle_announcement(now);
+    }
+
+    /// Put `message` over the footer until its time is up.
+    fn say(&mut self, message: String, now: Instant) {
+        self.app.flash(message, now + NOTICE_LINGER);
     }
 
     /// The drawable area of the terminal right now.
@@ -1223,6 +1263,7 @@ mod tests {
             "theme::from_env(",
             "Glyphs::detect(",
             "config::from_env(",
+            "update::wanted(",
         ] {
             let at = code
                 .find(reader)
@@ -1388,7 +1429,7 @@ mod tests {
         for clock in [
             "held: self.held",
             "linger: self.scrolling_until",
-            "notice: self.notice_until",
+            "notice: self.app.flash_until()",
             "ageing: self.history.ages_in",
         ] {
             assert!(
@@ -1397,6 +1438,27 @@ mod tests {
                  that clock is either armed somewhere else or has stopped: {sources}"
             );
         }
+        // Each path to a paint settles the footer on the way: an announcement
+        // never taken is one this run never says.
+        let paints: Vec<usize> = code
+            .match_indices("shell.draw(&mut frame, &worktree, began)?")
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(
+            paints.len(),
+            2,
+            "the loop no longer has exactly two paints, so this gate is checking a shape that moved"
+        );
+        let mut previous = 0;
+        for paint in paints {
+            let settled = code[previous..paint]
+                .rfind("shell.settle_footer(began)")
+                .map(|at| previous + at)
+                .expect("a paint with no `settle_footer` before it in the same arm");
+            assert!(settled < paint);
+            previous = paint;
+        }
+
         assert!(
             code.contains("match shell.patience(Instant::now())"),
             "the loop no longer decides how long to wait through `Held::wait`, so \
