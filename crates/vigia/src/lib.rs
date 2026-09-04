@@ -20,6 +20,8 @@ mod terminal;
 /// Public for [`memory`]'s reason: `tests/palette.rs` is an integration test and
 /// can only reach what the crate exports.
 pub mod theme;
+/// Public for [`theme`]'s reason, and it is where `VIGIA_UPDATE` is read.
+pub mod update;
 mod view;
 
 pub use app::{App, Sending};
@@ -70,6 +72,8 @@ enum Wake {
     Signalled,
     /// A warm finished, so a hunk that drew plain can draw in colour.
     Warmed,
+    /// A newer version exists, so the footer can name it.
+    Update(String),
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
@@ -155,6 +159,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // does not parse has to be reported on a terminal the reader can still read.
     // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
+
+    // Read here for that same reason, and acted on after the first paint.
+    let update = update::wanted(|key| std::env::var(key).ok())?;
 
     // The view defaults reach the frame before its first walk, not just the
     // shell. Three of the four keys only arrange rows the frame already holds;
@@ -242,6 +249,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell
         .highlighter
         .warm_repository(worktree.workdir().to_path_buf(), Some(warmed(&tx)));
+
+    if update {
+        let tx = tx.clone();
+        update::watch(
+            || update::check(VERSION),
+            move |version| {
+                let _ = tx.send(Wake::Update(version));
+            },
+        );
+    }
 
     // Demands the opening two frames raised, dispatched before the loop blocks.
     // Without this the screen keeps whatever the two paints managed until the
@@ -447,6 +464,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 // Deliberately nothing.
                 Wake::Warmed => {}
+                Wake::Update(version) => {
+                    shell.say(format!("vigia {version} is available"), began);
+                }
             }
         }
 
@@ -730,13 +750,18 @@ impl Shell {
         }
         if let Some(sending) = self.app.take_sending() {
             let said = sending.said;
-            self.app
-                .flash(match self.session.send(&clipboard::copy(&sending.text)) {
-                    Ok(()) => format!("sent {said} to the clipboard"),
-                    Err(e) => format!("could not send {said}: {e}"),
-                });
-            self.notice_until = Some(now + NOTICE_LINGER);
+            let told = match self.session.send(&clipboard::copy(&sending.text)) {
+                Ok(()) => format!("sent {said} to the clipboard"),
+                Err(e) => format!("could not send {said}: {e}"),
+            };
+            self.say(told, now);
         }
+    }
+
+    /// Put `message` over the footer until it ages out.
+    fn say(&mut self, message: String, now: Instant) {
+        self.app.flash(message);
+        self.notice_until = Some(now + NOTICE_LINGER);
     }
 
     /// The drawable area of the terminal right now.

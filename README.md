@@ -318,7 +318,7 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 
 ## 🎨 Make it yours
 
-Three independent settings decide how the pane is **drawn**, and most confusion here is any two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three have to allow a thing before it appears. A fourth decides what the pane **starts as**.
+Three independent settings decide how the pane is **drawn**, and most confusion here is any two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three have to allow a thing before it appears. A fourth decides what the pane **starts as**, and a fifth is not about drawing at all.
 
 | | First answer wins |
 |---|---|
@@ -326,6 +326,7 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
 | 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` |
+| 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off` declines it |
 
 ```sh
 VIGIA_THEME=ansi     # the fallback: the sixteen names, inherited from your scheme
@@ -335,6 +336,8 @@ VIGIA_THEME=~/themes/mine
 ```
 
 Nothing else is read. There is no flag for any of them, and no setting in one can change another.
+
+The update look is one request, once, and it never repeats. It costs the opening frame nothing, because it runs beside the pane rather than in front of it, and every way it can go wrong (no network, a slow answer, a reply that makes no sense) is the same as it having nothing to say: **silence**. If you would rather it did not ask at all, `VIGIA_UPDATE=off`.
 
 A theme file is usually about three lines. `base` picks a palette to start from and every line after it overrides one thing, so this keeps your terminal's own sixteen colours and adds the two backgrounds `ansi` declines to guess:
 

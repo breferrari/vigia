@@ -8,7 +8,10 @@ members = ["crates/vigia-core", "crates/vigia", "xtask"]
 # Independent versions would buy nothing and cost a second tag format.
 version = "0.34.0"
 edition = "2024"
-rust-version = "1.85"
+# 1.89 rather than 1.85 because `graviola` declares it, and no release of it
+# satisfies `rustls-graviola` 0.4 at anything lower. Nothing else here needs
+# it; leaving 1.85 written down would be a claim that does not build.
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/breferrari/vigia"
 # The same URL as `repository`, which is a duplicate and is kept deliberately.
@@ -94,6 +97,40 @@ syntect = { version = "5.3", default-features = false, features = [
     "dump-load",
     "regex-fancy",
 ] }
+# The startup update check, SPEC.md section 11.1. One request per process, and
+# the only one this program makes.
+#
+# `default-features = false` drops `ring`, which is `cc`: the crate's own
+# `rustls` feature turns it on, and `rustls`'s untouched default is `aws-lc-rs`,
+# which is `cmake`. `rustls-no-provider` leaves the choice open and
+# `rustls-graviola` below fills it, which is the only combination measured clean
+# on all four of SPEC.md section 9's targets.
+#
+# `rustls-webpki-roots` bundles the root store rather than reading the host's,
+# because a static musl binary cannot rely on one being there. A root that ages
+# out costs a check that answers nothing, which is what every other failure here
+# also costs.
+#
+# `gzip` adds no crate, because `flate2` and `miniz_oxide` are already in the
+# graph beneath syntect's `dump-load`, and it takes the transfer from 71,166
+# bytes to 10,002.
+ureq = { version = "3.4", default-features = false, features = [
+    "rustls-no-provider",
+    "rustls-webpki-roots",
+    "gzip",
+] }
+# The one pure-Rust rustls provider that is not alpha. Written by the author of
+# `rustls`, in the same repository as `graviola` itself.
+#
+# It only compiles on x86_64 and aarch64, and it asserts on CPU features that
+# `panic = "abort"` turns into a dead process rather than a failed request. Both
+# are handled where it is used: the dependency is target-conditional in
+# `crates/vigia`, and `update.rs` tests the same features before touching it.
+rustls-graviola = "0.4"
+# One field out of what crates.io answers. `serde` and `memchr` are already here
+# beneath syntect, so this costs `serde_json` and `zmij` and nothing else. No
+# derive, so no proc macro enters the build graph either.
+serde_json = "1"
 # Named by SPEC.md section 7 for I4, I7 and I9. Trimmed: plotters and rayon
 # only produce nicer local reports and cost CI compile time.
 criterion = { version = "0.8", default-features = false, features = [
