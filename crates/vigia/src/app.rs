@@ -55,6 +55,18 @@ enum Paint {
     Coloured,
 }
 
+/// What a message on the footer is: its colour and how it arrives and leaves.
+/// Carried rather than derived, since one call site produces two of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Voice {
+    /// An act of the reader's, answering.
+    Said,
+    /// Unasked-for, and nothing is wrong.
+    Arrived,
+    /// Something went wrong and the reader should know.
+    Alert,
+}
+
 /// The shell's state.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -63,9 +75,8 @@ pub struct App {
     /// What the footer should say instead of the key hints.
     notice: Option<String>,
     /// Shown over `notice` rather than into it: a confirmation must not be erased
-    /// by the next tick, nor bury a warning that has no expiry. The deadline
-    /// travels with the message because a flash armed without one never leaves.
-    flash: Option<(String, Instant)>,
+    /// by the next tick, nor bury a warning with no expiry. Deadline and voice ride along.
+    flash: Option<(String, Instant, Voice)>,
     /// Asked for and not sent yet.
     sending: Option<Sending>,
     /// Rows the drag has washed, as offsets into the collected rows.
@@ -227,25 +238,32 @@ impl App {
     pub fn notice(&self) -> Option<&str> {
         self.flash
             .as_ref()
-            .map(|(message, _)| message.as_str())
+            .map(|(message, _, _)| message.as_str())
             .or(self.notice.as_deref())
     }
 
+    /// The voice it is carrying that in.
+    pub fn voice(&self) -> Option<Voice> {
+        self.flash
+            .as_ref()
+            .map(|(_, _, voice)| *voice)
+            .or_else(|| self.notice.as_ref().map(|_| Voice::Alert))
+    }
+
     /// Show `message` over what the footer holds, until `until`.
-    pub fn flash(&mut self, message: impl Into<String>, until: Instant) {
-        self.flash = Some((message.into(), until));
+    pub fn flash(&mut self, message: impl Into<String>, until: Instant, voice: Voice) {
+        self.flash = Some((message.into(), until, voice));
     }
 
     /// When the message on the footer stops being owed the line, if there is one.
     pub fn flash_until(&self) -> Option<Instant> {
-        self.flash.as_ref().map(|(_, until)| *until)
+        self.flash.as_ref().map(|(_, until, _)| *until)
     }
 
-    /// Stop showing it once its time is up, revealing anything under it.
-    pub fn settle_flash(&mut self, now: Instant) {
-        if crate::input::settled(self.flash_until(), now) {
-            self.flash = None;
-        }
+    /// Stop showing it. The shell decides when, since a spent message is still
+    /// drawn while it leaves.
+    pub fn clear_flash(&mut self) {
+        self.flash = None;
     }
 
     /// Record that the watch has stopped, so the header stops claiming
@@ -329,6 +347,7 @@ impl App {
             branch: branch.map(str::to_owned),
             mode: self.mode,
             notice: self.notice().map(str::to_owned),
+            voice: self.voice(),
             following: self.following,
             masthead: self.masthead,
             rail: self.rail,

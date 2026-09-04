@@ -166,6 +166,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | The footer says everything in one red, and no notice arrives. **Reported from use** | [#405](https://github.com/breferrari/vigia/issues/405) |
 | ✅ | Tell the reader when a newer version exists, checked once at startup. **Ruled by the author** | [#401](https://github.com/breferrari/vigia/issues/401) |
 | ⬜ | Nothing checks a direct dependency is named in the documents that describe it | [#403](https://github.com/breferrari/vigia/issues/403) |
 | ✅ | The drag's wash outlives the gesture, and sending it needs a second key. **Reported from use** | [#386](https://github.com/breferrari/vigia/issues/386) |

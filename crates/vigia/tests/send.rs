@@ -10,7 +10,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
-use vigia::{App, NOTICE_LINGER, Pointing, View, body_layout};
+use vigia::{App, NOTICE_LINGER, Pointing, View, Voice, body_layout, settled};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -170,6 +170,7 @@ fn a_write_does_not_erase_what_a_send_just_said() {
     app.flash(
         "sent 3 lines to the clipboard",
         Instant::now() + NOTICE_LINGER,
+        Voice::Said,
     );
 
     // What `Wake::Tick` does on every write, and it must reach the lasting slot
@@ -190,17 +191,24 @@ fn a_lasting_warning_survives_underneath_a_send() {
     let mut app = App::new();
     let now = Instant::now();
     app.warn("not watching: the watch stopped");
-    app.flash("sent 3 lines to the clipboard", now + NOTICE_LINGER);
+    app.flash(
+        "sent 3 lines to the clipboard",
+        now + NOTICE_LINGER,
+        Voice::Said,
+    );
     assert_eq!(app.notice(), Some("sent 3 lines to the clipboard"));
 
-    app.settle_flash(now + NOTICE_LINGER - Duration::from_millis(1));
-    assert_eq!(
-        app.notice(),
-        Some("sent 3 lines to the clipboard"),
-        "the confirmation was taken off a millisecond early"
+    // The deadline is the shell's to act on now, because a spent message is
+    // still drawn while it leaves. What `App` owes is the deadline itself.
+    let until = app.flash_until().expect("a flash carries its own deadline");
+    assert_eq!(until, now + NOTICE_LINGER);
+    assert!(
+        !settled(Some(until), until - Duration::from_millis(1)),
+        "the confirmation was spent a millisecond early"
     );
+    assert!(settled(Some(until), until));
 
-    app.settle_flash(now + NOTICE_LINGER);
+    app.clear_flash();
     assert_eq!(
         app.notice(),
         Some("not watching: the watch stopped"),
@@ -217,6 +225,7 @@ fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
     app.flash(
         "sent 3 lines to the clipboard",
         Instant::now() + NOTICE_LINGER,
+        Voice::Said,
     );
     assert_eq!(
         app.chrome("fixture", None, Pointing::default(), 0, "")

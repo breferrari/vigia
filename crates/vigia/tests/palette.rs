@@ -45,6 +45,7 @@ fn chrome() -> Chrome {
         branch: None,
         mode: Mode::Watching,
         notice: None,
+        voice: None,
         following: false,
         masthead: true,
         rail: false,

@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
 
+use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
@@ -432,6 +433,8 @@ pub struct Chrome {
     pub scrolling: Option<(Grabbed, isize)>,
     /// Something the reader should see instead of the key hints.
     pub notice: Option<String>,
+    /// What that message is, which the string cannot say.
+    pub voice: Option<Voice>,
     /// Whether the viewport is moving itself to what just changed.
     pub following: bool,
     /// Whether the masthead is drawn at all, which `m` toggles.
@@ -1131,7 +1134,7 @@ struct Footer<'a> {
     /// The hints rung, or the notice.
     left: &'a str,
     /// Whether `left` is a notice, which is what decides its colour.
-    alert: bool,
+    voice: Option<Voice>,
     /// Whether a rule is drawn above the footer's text.
     rule: bool,
     /// The frame-time and memory cells, already narrowed to what is left after
@@ -1157,7 +1160,7 @@ impl<'a> Footer<'a> {
                 rows: 0,
                 reserved: 0,
                 left: "",
-                alert: false,
+                voice: None,
                 rule: false,
                 diagnostics: String::new(),
             };
@@ -1197,9 +1200,9 @@ impl<'a> Footer<'a> {
         // A notice is one token: it takes whatever room the line gives it and
         // marks the cut. The hints are a list, so they drop whole rungs instead.
         let hints = widest_fitting(&HINT_RUNGS, room);
-        let (left, alert) = match &chrome.notice {
-            Some(notice) => (notice.as_str(), true),
-            None => (hints, false),
+        let (left, voice) = match &chrome.notice {
+            Some(notice) => (notice.as_str(), chrome.voice),
+            None => (hints, None),
         };
 
         // Last, and out of what is left over, which is the whole design.
@@ -1214,11 +1217,39 @@ impl<'a> Footer<'a> {
             rows,
             reserved,
             left,
-            alert,
+            voice,
             rule,
             diagnostics,
         }
     }
+}
+
+/// The cells the footer's message occupies, when there is one.
+///
+/// Beside [`regions`] so an effect and the gate proving it visible address the
+/// same columns. Both footer rungs draw it on the pane's bottom row.
+#[must_use]
+pub fn notice_area(area: Rect, chrome: &Chrome) -> Option<Rect> {
+    let notice = chrome.notice.as_deref()?;
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let (inset, trailing) = margins_of(area.width);
+    let row = Rect {
+        y: area.y + area.height - 1,
+        height: 1,
+        ..area
+    };
+    let width = row
+        .width
+        .saturating_sub(inset)
+        .saturating_sub(trailing)
+        .min(u16::try_from(width_of(notice)).unwrap_or(u16::MAX));
+    (width > 0).then(|| Rect {
+        x: row.x.saturating_add(inset),
+        width,
+        ..row
+    })
 }
 
 /// How the body divides between the regions `SPEC.md` §11.1 rules.
@@ -2696,10 +2727,12 @@ impl Painter<'_> {
             (diagnostics, state) => format!("{diagnostics}{CELL_GAP}{state}"),
         };
 
-        let style = if footer.alert {
-            self.theme.alert
-        } else {
-            self.theme.chrome_dim
+        // Three colours already in the palette and none of them invented. §11.1.
+        let style = match footer.voice {
+            Some(Voice::Said) => self.theme.chrome,
+            Some(Voice::Arrived) => self.theme.note,
+            Some(Voice::Alert) => self.theme.alert,
+            None => self.theme.chrome_dim,
         };
         let bottom = Rect {
             y: area.y + area.height - 1,
