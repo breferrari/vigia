@@ -181,7 +181,7 @@ pub fn provider_runs_here() -> bool {
 
 /// Whether this CPU has everything the TLS provider asserts on.
 ///
-/// The x86_64 arm of this carries why it exists.
+/// The `x86_64` arm of this carries why it exists.
 #[cfg(target_arch = "aarch64")]
 pub fn provider_runs_here() -> bool {
     use std::arch::is_aarch64_feature_detected;
