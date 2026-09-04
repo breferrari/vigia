@@ -1674,7 +1674,8 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let diff_bar = bar_for(
         diff_bars,
         areas.diff.height,
-        body.diff as u64,
+        // The screenful the thumb is painted from; the region's height parts from it under wrap.
+        view.shown() as u64,
         view.total_rows as u64,
     );
 

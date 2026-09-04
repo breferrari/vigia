@@ -1126,22 +1126,26 @@ fn a_page_step_after_a_resize_is_bounded_by_the_pane_it_lands_in() {
     );
 }
 
-#[test]
-fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
-    // The band no other fixture in this file sits in: a diff whose *own* rows
-    // fit the pane and whose *display* rows do not. `tall()` overruns both and
-    // `fixture` overruns neither, which is why twenty-two gates missed this.
-    let scratch = Scratch::new("shell-wrap-short-band");
+/// The band `tall` and `fixture` both miss: a diff whose *own* rows fit the pane
+/// and whose *display* rows do not. Ten wrapped lines are thirteen of the diff's
+/// own rows against a body of eighteen, and twenty-three display rows.
+fn band(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
     scratch.write("src/band.rs", "seed\n");
     scratch.commit_all("base");
     let mut body = String::new();
-    // Ten wrapped lines: thirteen of the diff's own rows against a body of
-    // eighteen, and twenty-three display rows, which is the band.
     for n in 0..10 {
         body.push_str(&format!("let band_{n} = \"{}\";\n", "b".repeat(70)));
     }
     scratch.write("src/band.rs", body);
+    scratch
+}
 
+#[test]
+fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
+    // `tall()` overruns both the pane and the screen and `fixture` overruns
+    // neither, which is why twenty-two gates missed this band.
+    let scratch = band("shell-wrap-short-band");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
@@ -1484,11 +1488,18 @@ fn thumb_of(
     let (view, buf, chrome) = painted(pane, app, frame, highlighter, history);
     let diff = regions(pane, &chrome, &view).diff;
     let column = diff.bar.expect("the diff drew no scrollbar to measure");
-    let (top, rows) = diff.track;
-    let filled = (top..top + rows)
+    (
+        view,
+        filled(&buf, column, diff.track),
+        diff.track.1 as usize,
+    )
+}
+
+/// Rows of the track at `column` the thumb fills.
+fn filled(buf: &Buffer, column: u16, (top, rows): (u16, u16)) -> usize {
+    (top..top + rows)
         .filter(|y| buf[(column, *y)].symbol() == "\u{2588}")
-        .count();
-    (view, filled, rows as usize)
+        .count()
 }
 
 #[test]
@@ -1561,6 +1572,64 @@ fn the_thumb_rests_at_the_track_end_at_the_wrapped_bottom() {
         "\u{2588}",
         "the diff is scrolled to its end and the thumb is not on the last row of \
          its track, so the bar says there is more below"
+    );
+}
+
+#[test]
+fn the_pointer_is_told_about_the_bar_a_wrapped_diff_shorter_than_the_region_draws() {
+    // The pointer's map and the painter decide the bar from one span, or the
+    // reader sees a bar the pointer calls content. Under wrap the screenful is
+    // smaller than the region, and a diff that fits one and not the other is
+    // where two spans part.
+    let scratch = band("shell-wrap-bar-map");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    // Named on its own rather than read off the map, because the map's answer is
+    // what is under test.
+    let last = PANE.width - 1;
+
+    let mut app = wrapped(&mut frame);
+    let (view, buf, chrome) = painted(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    let region = split(&app).diff;
+    assert!(
+        view.shown() < view.total_rows,
+        "the screen holds {} of {} rows, so nothing wraps and this gate proves nothing",
+        view.shown(),
+        view.total_rows
+    );
+    assert!(
+        view.total_rows <= region,
+        "the diff is {} rows against a region of {region}, so both spans say bar and \
+         this gate proves nothing",
+        view.total_rows
+    );
+    let diff = regions(PANE, &chrome, &view).diff;
+    assert!(
+        filled(&buf, last, diff.track) > 0,
+        "the painter drew no thumb in column {last}"
+    );
+    assert_eq!(
+        diff.bar,
+        Some(last),
+        "the painter drew a bar in column {last} and the pointer is told there is none"
+    );
+
+    // The direction that does not move: unwrapped, the diff fits the screen, so
+    // neither the painter nor the map has a bar.
+    let mut app = App::new();
+    let (view, buf, chrome) = painted(PANE, &mut app, &mut frame, &mut highlighter, &history);
+    let diff = regions(PANE, &chrome, &view).diff;
+    assert_eq!(
+        filled(&buf, last, diff.track),
+        0,
+        "unwrapped, the diff fits the region and a thumb was drawn"
+    );
+    assert_eq!(
+        diff.bar, None,
+        "unwrapped, the diff fits the region and the pointer is told of a bar"
     );
 }
 
