@@ -337,7 +337,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // and `shell` drops on the way out to put the terminal back first.
                 Wake::InputLost => {
                     // The one exit by `return`, so the flush after the loop misses it.
-                    shell.settle_footer(Instant::now());
+                    shell.settle_send(Instant::now());
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
                 // The quit key's arm without the key, so `break` and not `return`:
@@ -493,7 +493,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     // A release then `q` copies and leaves, and every arm ending the loop does so before
     // the batch reaches its send. `InputLost` returns, and carries its own.
-    shell.settle_footer(Instant::now());
+    shell.settle_send(Instant::now());
 
     Ok(())
 }
