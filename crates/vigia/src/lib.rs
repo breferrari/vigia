@@ -552,12 +552,11 @@ pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
-/// How long the footer keeps a message, arrival and departure included. One-shot,
-/// so an idle pane owns no timer.
+/// The whole of a message's time on the footer, both transitions included.
+/// One-shot, so an idle pane owns no timer.
 ///
 /// Long enough that the two ends are a real part of it rather than something to
-/// get through: at the slowest voice that is a second in, two and a half
-/// settled, and a second out.
+/// get through: at the slowest voice, 750ms in, three seconds settled, 750 out.
 pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_millis(4500);
 
 /// How each voice arrives: the text crossfading into place, glyphs never moving,
@@ -911,7 +910,9 @@ impl Shell {
     /// The one place a notice is armed, so the one place its effect is.
     fn show(&mut self, message: String, voice: Voice, now: Instant) {
         self.leaving = None;
-        self.app.flash(message, now + NOTICE_LINGER, voice);
+        // The departure comes out of the linger, so it is the whole of the time.
+        let spent = now + NOTICE_LINGER.saturating_sub(duration_for(voice));
+        self.app.flash(message, spent, voice);
         if let Some(effect) = arrival(voice, &self.theme) {
             self.notice_effects
                 .add_unique_effect(NOTICE_KEY.to_owned(), effect);

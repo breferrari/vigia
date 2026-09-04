@@ -309,7 +309,7 @@ fn a_message_is_readable_the_whole_way_in() {
             assert_eq!(
                 symbols(&buf, area),
                 symbols(&settled, area),
-                "{voice:?} moved a glyph {step} frames in, so the message is not the                  message while it arrives"
+                "{voice:?} moved a glyph {step} frames in, so the message is not the message while it arrives"
             );
         }
     }
@@ -319,6 +319,7 @@ fn a_message_is_readable_the_whole_way_in() {
 /// and correct, which is the same answer a phone gives to reduced motion.
 #[test]
 fn a_depth_with_no_colour_still_gets_the_message() {
+    let mut skipped = 0;
     for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let theme = Theme::default().resolve(depth);
         for voice in VOICES {
@@ -340,11 +341,20 @@ fn a_depth_with_no_colour_still_gets_the_message() {
             );
             let area = notice_area(PANE, &chrome, &View::default()).expect("an area");
 
-            let mut buf = settled.clone();
-            let mut effects: EffectManager<String> = EffectManager::default();
+            let drawn: String = symbols(&settled, area).join("");
+            assert!(
+                drawn.contains("sent 3 lines"),
+                "{voice:?} at {depth:?} did not draw the message at all"
+            );
+
             let Some(effect) = arrival(voice, &theme) else {
+                // No transition here, which is the whole of what this depth gets:
+                // the assertion above is that it still gets the message.
+                skipped += 1;
                 continue;
             };
+            let mut buf = settled.clone();
+            let mut effects: EffectManager<String> = EffectManager::default();
             effects.add_unique_effect("notice".to_owned(), effect);
             effects.process_effects(FxDuration::from(NOTICE_ARRIVING * 4), &mut buf, area);
             assert_eq!(
@@ -354,6 +364,10 @@ fn a_depth_with_no_colour_still_gets_the_message() {
             );
         }
     }
+    assert!(
+        skipped > 0,
+        "every depth had a transition, so the skipped branch this test exists for was never taken and proves nothing"
+    );
 }
 
 /// An effect that never reports itself finished pins the loop awake for the
