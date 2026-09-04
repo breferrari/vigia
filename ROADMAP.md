@@ -166,7 +166,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Tell the reader when a newer version exists, checked once at startup. **Ruled by the author** | [#401](https://github.com/breferrari/vigia/issues/401) |
+| ✅ | Tell the reader when a newer version exists, checked once at startup. **Ruled by the author** | [#401](https://github.com/breferrari/vigia/issues/401) |
 | ⬜ | Nothing checks a direct dependency is named in the documents that describe it | [#403](https://github.com/breferrari/vigia/issues/403) |
 | ✅ | The drag's wash outlives the gesture, and sending it needs a second key. **Reported from use** | [#386](https://github.com/breferrari/vigia/issues/386) |
 | ✅ | A nested git repository in the work tree stops the pane from ever advancing again. **Reported from use** | [#378](https://github.com/breferrari/vigia/issues/378) |
@@ -293,6 +293,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
 | ⬜ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
+| ⬜ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
@@ -365,7 +366,8 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | A two-face bump with no xtask rerun leaves the committed dump stale and every gate green | [#268](https://github.com/breferrari/vigia/issues/268) |
 | ✅ | holds_p99_rounds excused a uniform breach as a host stall | [#269](https://github.com/breferrari/vigia/issues/269) |
 | ⬜ | The host-versus-work attribution needs a resolution floor, because the CPU clock is coarser than the budget it defends | [#270](https://github.com/breferrari/vigia/issues/270) |
-| ⬜ | A commit can describe a gate it deleted, and the suite stays green because a missing gate is what no gate can see | [#289](https://github.com/breferrari/vigia/issues/289) |
+| ⬜ | The `tinyvec` bound blocks the fix that would lift it ([#397](https://github.com/breferrari/vigia/issues/397)) | #396, 2026-09-03 | Shelf | `<1.13` excludes 1.13.1 and everything after it, so this repository is pinned to the version before the fix and cannot take the correction. There is nothing to do until upstream yanks 1.13.0 or ships a compiling release, and the row exists so a temporary pin does not become permanent by silence. |
+| A commit can describe a gate it deleted, and the suite stays green because a missing gate is what no gate can see | [#289](https://github.com/breferrari/vigia/issues/289) |
 | ✅ | `take-next` step 8 names a recurrence and prescribes a workaround, with no point at which the recurrence becomes a bug | [#290](https://github.com/breferrari/vigia/issues/290) |
 | ⬜ | The mutation harness is re-improvised every pass, and the same footgun has fired in four of them | [#299](https://github.com/breferrari/vigia/issues/299) |
 | ⬜ | A PR reached ready, mergeable and never checked, because the push and the ready raced | [#301](https://github.com/breferrari/vigia/issues/301) |
