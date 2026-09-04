@@ -161,7 +161,7 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 
 Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
-**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414).
+**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414). The bar rows lead because a note's rows are display rows the bar does not count, and the total they sit under has to be right first.
 
 | | Task | Issue |
 |---|---|---|
@@ -296,8 +296,6 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 **A shelf item comes off it when daily use asks for it, and the asking is the whole test.** That sentence used to live here, was deleted at some point, and survives only as a quotation in two pull-forward rows below, which is a rule that exists solely as its own citation. Restated because a filter nobody can read is not one, and because the sixty-odd rows under it are what happens when the entry trigger fires on every audit and the exit trigger fires on a judgement nobody is scheduled to make.
 
 **The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask it of an item when something reaches for it, not on a schedule nobody keeps. An item that cannot answer yes is not waiting for a phase, it is declined, and closing it as such is a result rather than a loss. Five declines in a hundred and twenty-seven closed issues is not a shelf being filtered; it is a shelf being filled.
-
-**[#390](https://github.com/breferrari/vigia/issues/390) is deferred on a measurement nobody has taken.** Found by #378's audit, 2026-09-03, session. Half its fix is free and half is a `stat` per changed file per tick, on the one branch named *free, and no syscall*.
 
 
 **If a second shelf is ever created, its milestone description must begin `Shelf:`.** Until [#83](https://github.com/breferrari/vigia/issues/83) the never-next rule lived only in this paragraph, which is prose, and `take-next` step 1 is a query: it read the milestone list, saw three peers, and offered the shelf as the next phase. The marker is what a query can read, and this paragraph is where whoever creates the next one is standing, so it is stated here rather than only in the skill. Comparison 6 of that skill's pre-flight is the check that fires when the two disagree.

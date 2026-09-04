@@ -526,6 +526,18 @@ fn a_diff_in_hand_keeps_its_height_inside_the_margin_at_one_stat_and_follows_the
         "the files settled and the frame still counts {after} where a frame with \
          no memory computes {truth}, so a diff in hand is trusted past its file"
     );
+
+    // And the tick after that reads nothing: the read replaced what the diff in
+    // hand said, and nothing is left to disagree with it.
+    let again = frame.stats();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let again = delta(again, frame.stats());
+    assert_eq!(
+        again.measured, 0,
+        "the tick after the settled one read {} files again, so a stale diff in          hand is still being asked before the height just taken",
+        again.measured
+    );
 }
 
 #[test]
@@ -554,6 +566,49 @@ fn a_file_the_tick_diffed_is_not_asked_again_by_the_height_walk() {
         "the height walk took {} stat calls after the tick diffed one of {FILES} \
          files, so the file just read is being asked again",
         walked.probes
+    );
+}
+
+#[test]
+fn a_staged_files_height_is_kept_across_ticks_with_no_stat() {
+    // A staged change is two blobs and no file on disk, so nothing can go stale
+    // between ticks and the walk keeps its height without asking the filesystem.
+    let scratch = Scratch::new("frame-staged-height");
+    scratch.write(
+        "src/staged.rs",
+        "one
+",
+    );
+    scratch.commit_all("base");
+    scratch.write(
+        "src/staged.rs",
+        "one
+two
+three
+",
+    );
+    scratch.git(&["add", "-A"]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let first = total_height(&mut frame);
+    assert!(first > 0, "the staged change has no height to count");
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    let again = total_height(&mut frame);
+    let cost = delta(before, frame.stats());
+    assert_eq!(again, first, "a tick changed a staged file's height");
+    assert_eq!(
+        cost.measured, 0,
+        "a tick read a staged file again: {}",
+        cost.measured
+    );
+    assert_eq!(
+        cost.probes, 0,
+        "a tick took {} stat calls for a change that has no file on disk",
+        cost.probes
     );
 }
 

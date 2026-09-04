@@ -267,6 +267,11 @@ fn verdict(
     if observed.print == fresh && observed.settled {
         return Verdict::Keep;
     }
+    // A modification time ahead of the clock never settles, so waiting on it would
+    // freeze the height for as long as the skew lasts; it is read, as a diff is.
+    if now.duration_since(fresh.mtime).is_err() {
+        return Verdict::Remeasure;
+    }
     if settled(fresh.mtime, now) {
         Verdict::Remeasure
     } else {
@@ -430,6 +435,7 @@ impl<'w> Frame<'w> {
         self.stats.evicted += self.cached.len() as u64;
         self.cached.clear();
         self.spans.clear();
+        self.settles_at = None;
     }
 
     /// The changed files, in the order status reported them.
@@ -454,7 +460,9 @@ impl<'w> Frame<'w> {
 
     /// How long until the earliest height kept waiting inside the settle margin
     /// settles, or `None` when none is waiting. No filesystem event marks a write
-    /// ending, so this is what a wake at that moment has to be armed from.
+    /// ending, so this is what a wake at that moment has to be armed from. Decided
+    /// by each tick's walk, so a diff taken between two ticks can leave it one wake
+    /// early, and a wake that finds nothing waiting costs a walk and no read.
     pub fn settles_in(&self, now: SystemTime) -> Option<Duration> {
         self.settles_at
             .map(|at| at.duration_since(now).unwrap_or(Duration::ZERO))
@@ -501,7 +509,8 @@ impl<'w> Frame<'w> {
             .expect("fill_span guarantees this, and both callers fill first")
     }
 
-    /// Put a span for the file at `index` in the cache, if one is not there.
+    /// Answer for the height of the file at `index` this tick: kept, kept while its
+    /// file settles, or read again.
     ///
     /// # Errors
     ///
@@ -529,7 +538,12 @@ impl<'w> Frame<'w> {
         // read while the file is still being written.
         let what = if let Some(cached) = self.cached.get(change) {
             let what = verdict(&cached.taken, change, now, &mut fresh);
-            if what != Verdict::Remeasure {
+            if what == Verdict::Remeasure {
+                // The read below is the answer now, and a diff its file has left
+                // behind would be asked first next tick and lose again, every tick,
+                // until something drew it. `diff` recomputes it when something does.
+                self.cached.remove(change);
+            } else {
                 let measured = Measured {
                     taken: Some(cached.taken.clone()),
                     span: FileSpan::from(&cached.diff),
@@ -675,8 +689,7 @@ impl<'w> Frame<'w> {
             Err(e) => {
                 let reason = e.of_one_file().ok_or(e)?;
                 // Both caches drop this path. What they hold described a read that
-                // is no longer the answer, and `fill_span`'s first branch takes a
-                // diff in hand without revalidating it, so a diff left there is a
+                // is no longer the answer, and a height nothing can vouch for is a
                 // height the screen does not draw.
                 self.cached.remove(change);
                 self.spans.remove(change);
@@ -1013,6 +1026,16 @@ mod tests {
         assert_eq!(
             verdict(&entry, &now, epoch(100), || Some(print(41, epoch(99)))),
             Verdict::Wait(epoch(101))
+        );
+    }
+
+    #[test]
+    fn a_modification_time_in_the_future_is_read_again_rather_than_waited_on() {
+        let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
+        let now = change(ChangeKind::Modified, blob(1));
+        assert_eq!(
+            verdict(&entry, &now, epoch(100), || Some(print(41, epoch(200)))),
+            Verdict::Remeasure
         );
     }
 
