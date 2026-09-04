@@ -165,7 +165,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
+| ✅ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
 | ⬜ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
 | ⬜ | decision: a note on a diff line reaches the agent over MCP | [#414](https://github.com/breferrari/vigia/issues/414) |
 | ⬜ | A note anchors to a diff line and lives in a per-worktree store | [#415](https://github.com/breferrari/vigia/issues/415) |
