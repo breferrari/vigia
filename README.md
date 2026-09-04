@@ -446,6 +446,7 @@ Same shape as the theme file: one key per line, `#` for a comment, and a key it 
 | [gix](https://github.com/GitoxideLabs/gitoxide) | Pure Rust git. Diffs in process, no subprocess per change |
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what "no polling timer" requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
+| [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a change can be seen arriving. It schedules nothing, which is what keeps "no polling timer" this program's own rule to keep |
 | [two-face](https://codeberg.org/CosmicHarper/two-face) | The grammars: [bat](https://github.com/sharkdp/bat)'s curated set, packaged for `syntect`. It builds the dump the binary carries and is itself absent from every shipped graph |
 
 Everything is pure Rust on purpose: a genuinely static Linux binary needs no cross toolchain, and macOS and Windows are plain tier-1 targets.

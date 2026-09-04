@@ -228,7 +228,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
 | ✅ | Turning wrap off measures a page step in the pane's height, so it walks over unseen lines. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
-| ⬜ | research: price animation on an arriving change | [#365](https://github.com/breferrari/vigia/issues/365) |
+| ✅ | a change arriving coalesces into place | [#365](https://github.com/breferrari/vigia/issues/365) |
 | ⬜ | watch.rs evicts an arbitrary path from a HashSet | [#368](https://github.com/breferrari/vigia/issues/368) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | `cargo install vigia` fails: tinyvec 1.13.0 does not compile and a fresh resolve takes it | [#396](https://github.com/breferrari/vigia/issues/396) |
