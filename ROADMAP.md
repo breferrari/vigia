@@ -167,6 +167,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | Tell the reader when a newer version exists, checked once at startup. **Ruled by the author** | [#401](https://github.com/breferrari/vigia/issues/401) |
+| ⬜ | Nothing checks a direct dependency is named in the documents that describe it | [#403](https://github.com/breferrari/vigia/issues/403) |
 | ✅ | The drag's wash outlives the gesture, and sending it needs a second key. **Reported from use** | [#386](https://github.com/breferrari/vigia/issues/386) |
 | ✅ | A nested git repository in the work tree stops the pane from ever advancing again. **Reported from use** | [#378](https://github.com/breferrari/vigia/issues/378) |
 | ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
