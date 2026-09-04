@@ -2,6 +2,8 @@
 
 mod support;
 
+use std::time::{Duration, SystemTime};
+
 use support::{Scratch, committed_link, delta, index_of, materialise, settle, settle_spans};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
@@ -357,6 +359,11 @@ fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
          as one still being written",
         idle.deferred
     );
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "an idle tick armed a settle deadline with nothing waiting"
+    );
 
     // And it proved them with a `stat` each, which nothing else asserts.
     assert_eq!(
@@ -388,6 +395,14 @@ fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
         moved.measured, 0,
         "the tick read {} files inside the margin, which is #84's breach",
         moved.measured
+    );
+    let due = frame
+        .settles_in(SystemTime::now())
+        .expect("a tick that kept heights waiting armed no settle deadline");
+    assert!(
+        due <= Duration::from_secs(2),
+        "the settle deadline is {due:?} away, past the two-second margin the wait \
+         is measured against"
     );
 
     // The oracle: a frame with no memory at all, over the same worktree.
@@ -424,13 +439,19 @@ fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
         "the tick after the settled one read {} files again",
         again.measured
     );
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "every file settled and a settle deadline is still armed"
+    );
 }
 
 #[test]
-fn a_height_taken_from_a_diff_in_hand_costs_one_stat_and_no_read_inside_the_margin() {
-    // The order of `fill_span`'s sources, held structurally: a diff in hand is
-    // asked whether its file moved, with a stat, and never re-read while the file
-    // is still being written.
+fn a_diff_in_hand_keeps_its_height_inside_the_margin_at_one_stat_and_follows_the_file_once_it_settles()
+ {
+    // The reader's symptom, at the frame: a diff in hand is asked whether its file
+    // moved, with a stat, never re-read while the file is still being written, and
+    // read once when it settles, so the height follows the file.
     const REWRITTEN: usize = FILES;
     let scratch = Scratch::large_diff("frame-inhand", REWRITTEN, LINES);
     let worktree = scratch.worktree();
@@ -444,14 +465,20 @@ fn a_height_taken_from_a_diff_in_hand_costs_one_stat_and_no_read_inside_the_marg
         frame.tracked()
     );
 
-    // Every print moves, and no diff is recomputed: the frame is asked for the
-    // height and nothing else.
-    scratch.rewrite_all(REWRITTEN, LINES, 9);
+    let before_height = total_height(&mut frame);
+
+    // Every print moves and every diff doubles, and no diff is recomputed: the
+    // frame is asked for the height and nothing else.
+    scratch.rewrite_all(REWRITTEN, LINES * 2, 9);
 
     let before = frame.stats();
     frame.advance().expect("advance");
-    total_height(&mut frame);
+    let inside = total_height(&mut frame);
     let first = delta(before, frame.stats());
+    assert_eq!(
+        inside, before_height,
+        "the height moved inside the margin, so a file still being written was read"
+    );
 
     // And again, so a per-tick proof cannot be mistaken for a per-frame one.
     let before = frame.stats();
@@ -478,49 +505,21 @@ fn a_height_taken_from_a_diff_in_hand_costs_one_stat_and_no_read_inside_the_marg
         );
     }
 
-    // And once they settle, each is read exactly once.
+    // The oracle: a frame with no memory at all, over the same worktree.
+    let mut cold = worktree.frame();
+    cold.advance().expect("advance");
+    let truth = total_height(&mut cold);
+    assert!(
+        truth > before_height,
+        "the diff doubled and a memoryless frame still counts {before_height}"
+    );
+
+    // And once they settle, each is read exactly once and the height is the truth.
     let re_read = settle_spans(&mut frame);
     assert_eq!(
         re_read, REWRITTEN as u64,
         "the settled tick read {re_read} of {REWRITTEN} files"
     );
-}
-
-#[test]
-fn an_edit_off_screen_keeps_the_old_height_inside_the_margin_and_recounts_it_once_it_settles() {
-    // The reader's symptom: a file the walk once diffed and the agent then edited
-    // kept its old height until the reader scrolled into it. The height waits only
-    // while the file is inside its margin, then follows the file.
-    let scratch = Scratch::large_diff("frame-offscreen", FILES, LINES);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    settle(&mut frame);
-    let before = total_height(&mut frame);
-    assert_eq!(
-        frame.tracked(),
-        FILES,
-        "settle left {} diffs for {FILES} files, so no height here comes from a \
-         diff in hand",
-        frame.tracked()
-    );
-
-    scratch.rewrite_all(FILES, LINES * 2, 5);
-    frame.advance().expect("advance");
-    let inside = total_height(&mut frame);
-    assert_eq!(
-        inside, before,
-        "the height moved inside the margin, so a file still being written was read"
-    );
-
-    let mut cold = worktree.frame();
-    cold.advance().expect("advance");
-    let truth = total_height(&mut cold);
-    assert!(
-        truth > before,
-        "the diff doubled and a memoryless frame still counts {before}"
-    );
-
-    settle_spans(&mut frame);
     let after = total_height(&mut frame);
     assert_eq!(
         after, truth,

@@ -186,30 +186,50 @@ fn fingerprint(path: &Path) -> Option<Fingerprint> {
     })
 }
 
-/// Whether something taken from a file still describes the working tree.
+/// What a change's own evidence says about an artefact taken under it, before a
+/// fingerprint is spent.
+enum Provenance {
+    /// The kind or a side moved: the artefact describes another comparison.
+    Moved,
+    /// Computed from the index side alone, so nothing on disk could have gone stale.
+    NoWorktree,
+    /// The working-tree side has to be asked, and this is what the read observed of
+    /// it, or `None` when it could not be fingerprinted then.
+    Worktree(Option<Observed>),
+}
+
+fn provenance(taken: &Taken, current: &FileChange) -> Provenance {
+    // A new blob on either side is a new diff even when the file on disk never
+    // moved, and a new kind is a different diff outright.
+    if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
+    {
+        return Provenance::Moved;
+    }
+    // A removal, a conflict and a type change are computed from the left side
+    // alone, so they have no working-tree side that could have gone stale.
+    if !current.reads_worktree() {
+        return Provenance::NoWorktree;
+    }
+    Provenance::Worktree(taken.worktree)
+}
+
+/// Whether a diff taken from a file still describes the working tree.
 fn reusable(
     taken: &Taken,
     current: &FileChange,
     fresh: impl FnOnce() -> Option<Fingerprint>,
 ) -> bool {
-    // A new blob on either side is a new diff even when the file on disk never
-    // moved, and a new kind is a different diff outright.
-    if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
-    {
-        return false;
-    }
-
-    // A removal, a conflict and a type change are computed from the left side
-    // alone, so they have no working-tree side that could have gone stale.
-    if !current.reads_worktree() {
-        return true;
-    }
-
-    // Unfingerprintable then, or unfingerprintable now. Neither is a failure, and both
-    // forbid reuse: the alternative is drawing a diff we cannot vouch for.
-    match taken.worktree {
-        Some(observed) => observed.settled && fresh().is_some_and(|fresh| observed.print == fresh),
-        None => false,
+    match provenance(taken, current) {
+        Provenance::Moved => false,
+        Provenance::NoWorktree => true,
+        // Unfingerprintable then, or unfingerprintable now. Neither is a failure, and
+        // both forbid reuse: the alternative is drawing a diff we cannot vouch for. An
+        // unsettled observation is refused before the stat, so that corner costs one
+        // syscall rather than two.
+        Provenance::Worktree(None) => false,
+        Provenance::Worktree(Some(observed)) => {
+            observed.settled && fresh().is_some_and(|fresh| observed.print == fresh)
+        }
     }
 }
 
@@ -225,25 +245,19 @@ enum Verdict {
     Remeasure,
 }
 
-/// Whether a height taken from a file still describes it, and if not, whether the
-/// file is still being written. A diff is refused the moment its file moves, because
-/// drawing bytes nobody can vouch for is wrong; a height is a proportion, and a
-/// proportion two seconds stale costs less than a read of every file inside a burst.
+/// A diff is refused the moment its file moves, because drawing bytes nobody can
+/// vouch for is wrong; a height is a proportion, and one two seconds stale costs
+/// less than reading every file inside a burst.
 fn verdict(
     taken: &Taken,
     current: &FileChange,
     now: SystemTime,
     fresh: impl FnOnce() -> Option<Fingerprint>,
 ) -> Verdict {
-    if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
-    {
-        return Verdict::Remeasure;
-    }
-    if !current.reads_worktree() {
-        return Verdict::Keep;
-    }
-    let Some(observed) = taken.worktree else {
-        return Verdict::Remeasure;
+    let observed = match provenance(taken, current) {
+        Provenance::Moved | Provenance::Worktree(None) => return Verdict::Remeasure,
+        Provenance::NoWorktree => return Verdict::Keep,
+        Provenance::Worktree(Some(observed)) => observed,
     };
     let Some(fresh) = fresh() else {
         return Verdict::Remeasure;
@@ -452,9 +466,12 @@ impl<'w> Frame<'w> {
     ///
     /// A file's span cannot be measured, which is a read of either side.
     pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
+        // One clock for the walk, so two files written in the same instant fall on
+        // the same side of the margin.
+        let now = SystemTime::now();
         let mut total = 0usize;
         for index in 0..self.files.len() {
-            self.fill_span(index)?;
+            self.fill_span(index, now)?;
             let change = &self.files[index];
             total += rows_of(change, &self.span_of(change).span);
         }
@@ -471,7 +488,7 @@ impl<'w> Frame<'w> {
         index: usize,
         rows_of: impl Fn(&FileChange, &FileSpan) -> usize,
     ) -> Result<usize> {
-        self.fill_span(index)?;
+        self.fill_span(index, SystemTime::now())?;
         let change = &self.files[index];
         Ok(rows_of(change, &self.span_of(change).span))
     }
@@ -490,7 +507,7 @@ impl<'w> Frame<'w> {
     ///
     /// The measure fails in a way that is not one file's, which [`Frame::diff`]
     /// propagates for the same reason.
-    fn fill_span(&mut self, index: usize) -> Result<()> {
+    fn fill_span(&mut self, index: usize, now: SystemTime) -> Result<()> {
         let change = &self.files[index];
         if self
             .spans
@@ -500,42 +517,47 @@ impl<'w> Frame<'w> {
             return Ok(());
         }
         let path = self.worktree.workdir().join(&change.path);
+        let mut probed = false;
+        let mut fresh = || {
+            probed = true;
+            fingerprint(&path)
+        };
 
         // (1) A diff in hand, or a span carried from an earlier tick. Either was true
         // of the file when it was taken, and `advance` migrated both without asking
         // whether the file moved, so this is where it is asked: one stat, and no
         // read while the file is still being written.
-        let held = match self.cached.get(change) {
-            Some(cached) => Some((cached.taken.clone(), FileSpan::from(&cached.diff))),
-            None => self.spans.get(change).and_then(|measured| {
-                measured
-                    .taken
-                    .as_ref()
-                    .map(|taken| (taken.clone(), measured.span))
-            }),
+        let what = if let Some(cached) = self.cached.get(change) {
+            let what = verdict(&cached.taken, change, now, &mut fresh);
+            if what != Verdict::Remeasure {
+                let measured = Measured {
+                    taken: Some(cached.taken.clone()),
+                    span: FileSpan::from(&cached.diff),
+                    answered: true,
+                };
+                self.spans.put(change, measured);
+            }
+            what
+        } else if let Some(measured) = self.spans.get_mut(change)
+            && let Some(taken) = measured.taken.as_ref()
+        {
+            let what = verdict(taken, change, now, &mut fresh);
+            if what != Verdict::Remeasure {
+                measured.answered = true;
+            }
+            what
+        } else {
+            Verdict::Remeasure
         };
-        if let Some((taken, span)) = held {
-            let mut probed = false;
-            let what = verdict(&taken, change, SystemTime::now(), || {
-                probed = true;
-                fingerprint(&path)
-            });
-            // Counted from whether the closure ran, so `probes` stays a count of
-            // syscalls taken rather than of call sites reached.
-            self.stats.probes += u64::from(probed);
-            if let Verdict::Wait(until) = what {
+        // Counted from whether the closure ran, so `probes` stays a count of
+        // syscalls taken rather than of call sites reached.
+        self.stats.probes += u64::from(probed);
+        match what {
+            Verdict::Remeasure => {}
+            Verdict::Keep => return Ok(()),
+            Verdict::Wait(until) => {
                 self.stats.deferred += 1;
                 self.settles_at = Some(self.settles_at.map_or(until, |at| at.min(until)));
-            }
-            if what != Verdict::Remeasure {
-                self.spans.put(
-                    change,
-                    Measured {
-                        taken: Some(taken),
-                        span,
-                        answered: true,
-                    },
-                );
                 return Ok(());
             }
         }
@@ -676,8 +698,9 @@ impl<'w> Frame<'w> {
 
         self.stats.computed += 1;
         self.stats.bytes += diff.bytes;
-        // The height goes with the diff it was taken from, proved by the same read,
-        // so the walk never asks the file a second time this tick.
+        // The height goes with the diff it was taken from: this read proved both, and
+        // a walk that asked the file again would spend a second stat on every drawn
+        // file every tick.
         let taken = Taken::of(change, worktree);
         self.spans.put(
             change,

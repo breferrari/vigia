@@ -845,7 +845,8 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     // with 94 files read a frame, 7.9ms with none, on the day the wait landed.
     holds_p99(
         &format!(
-            "I9: a frame inside the settle margin over {FILES} files the screen does              not draw, every height waiting"
+            "I9: a frame inside the settle margin over {FILES} files the screen does \
+             not draw, every height waiting"
         ),
         budget(I9_FRAME),
         &in_margin,
