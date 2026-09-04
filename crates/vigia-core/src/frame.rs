@@ -222,11 +222,11 @@ fn reusable(
     match provenance(taken, current) {
         Provenance::Moved => false,
         Provenance::NoWorktree => true,
-        // Unfingerprintable then, or unfingerprintable now. Neither is a failure, and
-        // both forbid reuse: the alternative is drawing a diff we cannot vouch for. An
-        // unsettled observation is refused before the stat, so that corner costs one
-        // syscall rather than two.
+        // Unfingerprintable then is not a failure, and it forbids reuse all the same:
+        // the alternative is drawing a diff we cannot vouch for.
         Provenance::Worktree(None) => false,
+        // Unfingerprintable now forbids it the same way. An unsettled observation is
+        // refused before the stat, so that corner costs one syscall rather than two.
         Provenance::Worktree(Some(observed)) => {
             observed.settled && fresh().is_some_and(|fresh| observed.print == fresh)
         }
