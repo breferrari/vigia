@@ -743,7 +743,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         }
         for _ in 0..PER_CYCLE {
             let was = frame.stats().deferred;
-            let cost = time(|| {
+            let (cost, _) = time_cpu(|| {
                 sample(&mut history, scratch.root(), EDITED_PATH);
                 shell_frame(
                     &mut frame,
@@ -839,6 +839,39 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         cost.deferred / drove as u64,
         cost.measured / drove as u64,
         cost.probes / drove as u64,
+    );
+
+    // Asserted rather than noted since the read waits for the margin: 22.2ms p99
+    // with 94 files read a frame, 7.9ms with none, on the day the wait landed.
+    holds_p99(
+        &format!(
+            "I9: a frame inside the settle margin over {FILES} files the screen does              not draw, every height waiting"
+        ),
+        budget(I9_FRAME),
+        &in_margin,
+        || {
+            format!(
+                "({} waiting, {} measured, {} stats per frame)",
+                cost.deferred / drove as u64,
+                cost.measured / drove as u64,
+                cost.probes / drove as u64
+            )
+        },
+        || {
+            scratch.rewrite_all(FILES, LINES, CYCLES + 1);
+            sample(&mut history, scratch.root(), EDITED_PATH);
+            time_cpu(|| {
+                shell_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
+            })
+        },
     );
 }
 
