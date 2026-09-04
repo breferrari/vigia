@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
 
+use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
@@ -290,6 +291,19 @@ const fn inset_of(pane: u16) -> u16 {
     margins_of(pane).0
 }
 
+/// The columns of `area` a glyph may use, given a pane's margins. Shared with
+/// [`Painter::text_area`]: two derivations of one inset come apart unseen.
+const fn text_within(area: Rect, margins: (u16, u16)) -> Rect {
+    Rect {
+        x: area.x.saturating_add(margins.0),
+        width: area
+            .width
+            .saturating_sub(margins.0)
+            .saturating_sub(margins.1),
+        ..area
+    }
+}
+
 /// The pane width from which the pinned list may become a left rail beside
 /// the diff rather than a strip above it. `SPEC.md` §11.2 B14.
 const RAIL_FROM: u16 = 134;
@@ -432,6 +446,8 @@ pub struct Chrome {
     pub scrolling: Option<(Grabbed, isize)>,
     /// Something the reader should see instead of the key hints.
     pub notice: Option<String>,
+    /// What that message is, which the string cannot say.
+    pub voice: Option<Voice>,
     /// Whether the viewport is moving itself to what just changed.
     pub following: bool,
     /// Whether the masthead is drawn at all, which `m` toggles.
@@ -1131,7 +1147,7 @@ struct Footer<'a> {
     /// The hints rung, or the notice.
     left: &'a str,
     /// Whether `left` is a notice, which is what decides its colour.
-    alert: bool,
+    voice: Option<Voice>,
     /// Whether a rule is drawn above the footer's text.
     rule: bool,
     /// The frame-time and memory cells, already narrowed to what is left after
@@ -1157,7 +1173,7 @@ impl<'a> Footer<'a> {
                 rows: 0,
                 reserved: 0,
                 left: "",
-                alert: false,
+                voice: None,
                 rule: false,
                 diagnostics: String::new(),
             };
@@ -1197,9 +1213,9 @@ impl<'a> Footer<'a> {
         // A notice is one token: it takes whatever room the line gives it and
         // marks the cut. The hints are a list, so they drop whole rungs instead.
         let hints = widest_fitting(&HINT_RUNGS, room);
-        let (left, alert) = match &chrome.notice {
-            Some(notice) => (notice.as_str(), true),
-            None => (hints, false),
+        let (left, voice) = match &chrome.notice {
+            Some(notice) => (notice.as_str(), chrome.voice),
+            None => (hints, None),
         };
 
         // Last, and out of what is left over, which is the whole design.
@@ -1214,11 +1230,59 @@ impl<'a> Footer<'a> {
             rows,
             reserved,
             left,
-            alert,
+            voice,
             rule,
             diagnostics,
         }
     }
+}
+
+/// The footer's right-hand token: the readouts and the position, as one string.
+/// One placement rather than two, and shared with [`notice_area`], whose answer
+/// is what this leaves.
+fn footer_right(footer: &Footer<'_>, chrome: &Chrome, view: &View) -> String {
+    let position = position_of(view.top.file, view.files);
+    // Clamped to what was reserved, not to the width.
+    let rungs = state_rungs(chrome.following, &position);
+    let state = widest_fitting(&rungs, footer.reserved);
+    match (footer.diagnostics.as_str(), state) {
+        ("", state) => state.to_owned(),
+        (diagnostics, "") => diagnostics.to_owned(),
+        (diagnostics, state) => format!("{diagnostics}{CELL_GAP}{state}"),
+    }
+}
+
+/// The cells the footer's message occupies, when there is one.
+///
+/// Beside [`regions`] so an effect and the gate proving it visible address the
+/// same columns. Both footer rungs draw it on the pane's bottom row.
+#[must_use]
+pub fn notice_area(area: Rect, chrome: &Chrome, view: &View) -> Option<Rect> {
+    let notice = chrome.notice.as_deref()?;
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let footer = Footer::plan(area, chrome, view.files);
+    let text = text_within(
+        Rect {
+            y: area.y + area.height - 1,
+            height: 1,
+            ..area
+        },
+        margins_of(area.width),
+    );
+    // At the one-row rung the readouts share this line, and the message is cut
+    // to what they leave. An effect over the whole width would animate them.
+    let taken = if footer.rows == 2 {
+        0
+    } else {
+        width_of(&footer_right(&footer, chrome, view)) + CELL_GAP.len()
+    };
+    let width = text
+        .width
+        .saturating_sub(u16::try_from(taken).unwrap_or(u16::MAX))
+        .min(u16::try_from(width_of(notice)).unwrap_or(u16::MAX));
+    (width > 0).then_some(Rect { width, ..text })
 }
 
 /// How the body divides between the regions `SPEC.md` §11.1 rules.
@@ -2472,14 +2536,7 @@ struct Painter<'a> {
 impl Painter<'_> {
     /// The columns of `area` a glyph may use.
     fn text_area(&self, area: Rect) -> Rect {
-        Rect {
-            x: area.x.saturating_add(self.inset),
-            width: area
-                .width
-                .saturating_sub(self.inset)
-                .saturating_sub(self.trailing),
-            ..area
-        }
+        text_within(area, (self.inset, self.trailing))
     }
 
     /// The same, for a rect a scrollbar may already have narrowed.
@@ -2684,22 +2741,14 @@ impl Painter<'_> {
 
     /// The footer, on the bottom one or two rows of `area`.
     fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome, footer: &Footer<'_>) {
-        let position = position_of(view.top.file, view.files);
-        // Clamped to what was reserved, not to the width.
-        let rungs = state_rungs(chrome.following, &position);
-        let state = widest_fitting(&rungs, footer.reserved);
-        // One string rather than two placements, because `status_line` puts a single
-        // right-hand token and lets the left lose characters to it.
-        let right = match (footer.diagnostics.as_str(), state) {
-            ("", state) => state.to_owned(),
-            (diagnostics, "") => diagnostics.to_owned(),
-            (diagnostics, state) => format!("{diagnostics}{CELL_GAP}{state}"),
-        };
+        let right = footer_right(footer, chrome, view);
 
-        let style = if footer.alert {
-            self.theme.alert
-        } else {
-            self.theme.chrome_dim
+        // Three colours already in the palette and none of them invented. §11.1.
+        let style = match footer.voice {
+            Some(Voice::Said) => self.theme.chrome,
+            Some(Voice::Arrived) => self.theme.note,
+            Some(Voice::Alert) => self.theme.alert,
+            None => self.theme.chrome_dim,
         };
         let bottom = Rect {
             y: area.y + area.height - 1,

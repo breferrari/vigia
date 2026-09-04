@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::update::{UPDATE_VAR, newer, version_in, wanted, watch};
-use vigia::{App, Glyphs, NOTICE_LINGER, Pointing, Theme, View, render};
+use vigia::{App, Glyphs, NOTICE_LINGER, Pointing, Theme, View, Voice, render};
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
 fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
@@ -211,7 +211,11 @@ fn a_check_that_answers_nothing_says_nothing() {
 fn the_footer_carries_the_version_it_was_told() {
     for width in [40, 80] {
         let mut app = App::new();
-        app.flash("vigia 9.9.9 is available", Instant::now() + NOTICE_LINGER);
+        app.flash(
+            "vigia 9.9.9 is available",
+            Instant::now() + NOTICE_LINGER,
+            Voice::Arrived,
+        );
         let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
 
         let area = Rect::new(0, 0, width, 24);

@@ -151,7 +151,8 @@ palette! {
     /// palette that washes nothing.
     selection,
 
-    /// A stand-in for content there is no diff for: binary, conflict.
+    /// Something that is not diff content: a binary file, a conflict, and the
+    /// footer's word when it has news rather than a problem.
     note,
     /// Something went wrong and the reader should know.
     alert,
