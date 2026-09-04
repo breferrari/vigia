@@ -841,8 +841,8 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         cost.probes / drove as u64,
     );
 
-    // Asserted rather than noted since the read waits for the margin: 22.2ms p99
-    // with 94 files read a frame, 7.9ms with none, on the day the wait landed.
+    // Asserted rather than noted: with the read waiting for the margin, a frame here
+    // is a stat per file and nothing else, well inside the budget.
     holds_p99(
         &format!(
             "I9: a frame inside the settle margin over {FILES} files the screen does \

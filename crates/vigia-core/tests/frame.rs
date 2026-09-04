@@ -393,7 +393,7 @@ fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
     );
     assert_eq!(
         moved.measured, 0,
-        "the tick read {} files inside the margin, which is #84's breach",
+        "the tick read {} files inside the margin, which the margin exists to prevent",
         moved.measured
     );
     let due = frame
@@ -447,11 +447,10 @@ fn a_carried_span_survives_an_edit_only_until_the_file_settles() {
 }
 
 #[test]
-fn a_diff_in_hand_keeps_its_height_inside_the_margin_at_one_stat_and_follows_the_file_once_it_settles()
- {
-    // The reader's symptom, at the frame: a diff in hand is asked whether its file
-    // moved, with a stat, never re-read while the file is still being written, and
-    // read once when it settles, so the height follows the file.
+fn a_height_taken_from_a_diff_waits_for_the_margin_like_a_carried_one() {
+    // A height that came from a diff earns no exemption: it is asked with a stat,
+    // waits while the file is still being written, and is read once when it
+    // settles, exactly as a carried one is.
     const REWRITTEN: usize = FILES;
     let scratch = Scratch::large_diff("frame-inhand", REWRITTEN, LINES);
     let worktree = scratch.worktree();
@@ -610,6 +609,41 @@ three
         "a tick took {} stat calls for a change that has no file on disk",
         cost.probes
     );
+}
+
+#[test]
+fn a_waiting_file_is_counted_once_a_tick_and_a_diff_of_it_reads_it_fresh() {
+    // The height walk and the screen keep separate caches of the same file, and a
+    // height kept waiting leaves the diff behind it stale. Asking the height twice
+    // in one tick counts one wait, and drawing the file recomputes its diff rather
+    // than serving the one the wait left behind.
+    let scratch = Scratch::large_diff("frame-wait-then-diff", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    scratch.rewrite_all(FILES, LINES * 2, 6);
+    frame.advance().expect("advance");
+    let before = frame.stats();
+    total_height(&mut frame);
+    frame
+        .rows_of(0, |_, span| span.lines as usize)
+        .expect("height");
+    let counted = delta(before, frame.stats());
+    assert_eq!(
+        counted.deferred, FILES as u64,
+        "asking the height twice in one tick kept {} heights waiting for {FILES} files",
+        counted.deferred
+    );
+
+    let before = frame.stats();
+    frame.diff(0).expect("diff");
+    let drawn = delta(before, frame.stats());
+    assert_eq!(
+        drawn.computed, 1,
+        "drawing a file whose height is waiting served the diff the wait left behind"
+    );
+    assert_eq!(drawn.reused, 0, "a diff of a file that moved was reused");
 }
 
 #[test]

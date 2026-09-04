@@ -418,7 +418,7 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
     );
     assert_eq!(
         cost.measured, 0,
-        "the tick read {} files still being written, which is #84's breach",
+        "the tick read {} files still being written, which the margin exists to prevent",
         cost.measured
     );
     assert!(
