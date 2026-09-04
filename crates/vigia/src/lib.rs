@@ -320,13 +320,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             let began = Instant::now();
             shell.settle_scroll(began);
             shell.settle_footer(began);
-            // The margin's end after a print that moved, which no filesystem event
-            // marks: the walk asks every waiting file again and reads it once, the
-            // way the tick that never came would have. No path list, so nothing is
-            // followed and nothing is drawn arriving.
-            if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
-                shell.app.warn(e.to_string());
-            }
+            // The margin's end after a print that moved, which no filesystem event marks.
+            shell.settle_heights(&mut frame);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
@@ -486,6 +481,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
         // Before the paint: a notice either of them raises has to reach this frame.
         shell.settle_footer(began);
+        shell.settle_heights(&mut frame);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -787,6 +783,15 @@ impl Shell {
         if let Some(mark) = input::scroll_mark(action, self.regions) {
             self.scrolling = Some(mark);
             self.scrolling_until = Some(now + SCROLL_LINGER);
+        }
+    }
+
+    /// Walk status once the frame's wait on a moved file has run out, so the
+    /// heights it kept are asked again. On every path to a paint, so a spent
+    /// deadline is consumed on the turn that finds it and not on a timeout.
+    fn settle_heights(&mut self, frame: &mut vigia_core::Frame) {
+        if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
+            self.app.warn(e.to_string());
         }
     }
 
@@ -1539,20 +1544,11 @@ mod tests {
              costs a tick and the measurement I1's amendment was granted on no \
              longer holds"
         );
-        let settled = arm.find("frame.advance_if_settled(").expect(
-            "the timeout arm no longer advances on the settle wake, so the total \
-             stays where it was until the next event",
-        );
 
         // The arm draws, and that is a liveness gate rather than a tidiness one.
         let drew = arm.find("shell.draw(").expect(
             "the timeout arm no longer draws, so the ageing deadline never \
              advances and the loop spins on a zero timeout",
-        );
-        assert!(
-            settled < drew,
-            "the timeout arm paints before it advances, so the settle wake draws \
-             the stale total it exists to replace"
         );
 
         // And the frame it draws is one the bar counts. Without this, deleting
@@ -1622,6 +1618,15 @@ mod tests {
                 .map(|at| previous + at)
                 .expect("a paint with no `settle_footer` before it in the same arm");
             assert!(settled < paint);
+            // And the settle check, for the reason its docblock gives.
+            let walked = code[previous..paint]
+                .rfind("shell.settle_heights(&mut frame)")
+                .map(|at| previous + at)
+                .expect(
+                    "a paint with no `settle_heights` before it in the same arm, so a \
+                     settled height on that path waits for the next event",
+                );
+            assert!(walked < paint);
             previous = paint;
         }
 

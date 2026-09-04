@@ -724,8 +724,9 @@ impl Scratch {
         }
     }
 
-    /// Overwrite the index with garbage of a plausible length, so the next status
-    /// walk fails while the directory still reads as a repository.
+    /// Overwrite the index with garbage long enough to read as a corrupt index
+    /// rather than a truncated one, so the next status walk fails while the
+    /// directory still reads as a repository. The length is not incidental.
     pub fn corrupt_index(&self) {
         std::fs::write(self.path_of(".git/index"), vec![0xABu8; 128]).expect("corrupt the index");
     }

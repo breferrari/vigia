@@ -996,15 +996,15 @@ fn a_failed_advance_disarms_the_settle_deadline() {
     scratch.rewrite_all(FILES, LINES * 2, 3);
     frame.advance().expect("advance");
     total_height(&mut frame);
-    assert!(
-        frame.settles_in(SystemTime::now()).is_some(),
+    let asked = SystemTime::now();
+    let due = frame.settles_in(asked).expect(
         "a rewrite inside the margin armed no settle deadline, so there is nothing \
-         here for a failed walk to leave armed"
+         here for a failed walk to leave armed",
     );
 
     scratch.corrupt_index();
     frame
-        .advance()
+        .advance_if_settled(asked + due)
         .expect_err("a corrupt index was walked without complaint");
     assert_eq!(
         frame.settles_in(SystemTime::now()),
