@@ -30,7 +30,7 @@ pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
-    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, due, hover_after, patience,
+    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
     repainted, scroll_mark, selection_after, settled,
 };
 pub use render::{
@@ -278,8 +278,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // loop needs is the one buffer it keeps.
     let mut batch = Vec::with_capacity(DRAIN_CAP);
 
-    // Every clock the loop owns is folded in `Shell::patience`, which is the seam
-    // that keeps each of them honest.
+    // Every clock the loop owns is folded in `Shell::patience`.
     'awake: loop {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
@@ -324,12 +323,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // The margin's end after a print that moved, which no filesystem event
             // marks: the walk asks every waiting file again and reads it once, the
             // way the tick that never came would have. No path list, so nothing is
-            // followed and nothing is drawn arriving. On any other timeout this is
-            // false and the frame is a paint, which is what the ageing clock was
-            // priced on.
-            if input::due(frame.settles_in(SystemTime::now()))
-                && let Err(e) = frame.advance()
-            {
+            // followed and nothing is drawn arriving.
+            if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
                 shell.app.warn(e.to_string());
             }
             shell.app.sample_memory();
@@ -1530,33 +1525,23 @@ mod tests {
              pulse of the burst that caused the frame"
         );
 
-        // The timeout arm walks status on exactly one wake, the settle deadline's,
-        // and on no other: a status walk on the ageing path is the difference
-        // `SPEC.md` §11.1 prices that amendment on.
+        // The timeout arm walks status only through the frame's own settle check: a
+        // walk on the ageing path is the difference `SPEC.md` §11.1 prices on.
         let arm = &code[code
             .find("let Some(wake) = wake else {")
             .expect("the loop no longer has a timeout arm")..];
         let arm = &arm[..arm
             .find("continue;")
             .expect("the timeout arm no longer continues")];
-        assert_eq!(
-            arm.matches("frame.advance(").count(),
-            1,
-            "the timeout arm walks status somewhere other than the settle wake, so \
-             an ageing wake now costs a tick and the measurement I1's amendment \
-             was granted on no longer holds"
-        );
-        let guarded = arm.find("if input::due(frame.settles_in(").expect(
-            "the timeout arm no longer asks whether the settle deadline is due, so \
-             every timeout walks status or none does",
-        );
-        let advanced = arm
-            .find("frame.advance(")
-            .expect("the timeout arm no longer advances on the settle wake");
         assert!(
-            guarded < advanced,
-            "the timeout arm advances before it asks whether the settle deadline \
-             is due, so the guard is not what the walk is behind"
+            !arm.contains("frame.advance("),
+            "the timeout arm walks status on every timeout, so an ageing wake now \
+             costs a tick and the measurement I1's amendment was granted on no \
+             longer holds"
+        );
+        let settled = arm.find("frame.advance_if_settled(").expect(
+            "the timeout arm no longer advances on the settle wake, so the total \
+             stays where it was until the next event",
         );
 
         // The arm draws, and that is a liveness gate rather than a tidiness one.
@@ -1565,7 +1550,7 @@ mod tests {
              advances and the loop spins on a zero timeout",
         );
         assert!(
-            advanced < drew,
+            settled < drew,
             "the timeout arm paints before it advances, so the settle wake draws \
              the stale total it exists to replace"
         );

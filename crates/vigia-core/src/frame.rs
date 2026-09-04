@@ -474,6 +474,21 @@ impl<'w> Frame<'w> {
             .map(|at| at.duration_since(now).unwrap_or(Duration::ZERO))
     }
 
+    /// Re-read the changed set once the last height kept waiting has settled, so
+    /// the walk asks it again and reads it once; nothing while the wait still runs
+    /// or none is armed. The loop asks on every timeout without knowing which of
+    /// its clocks fired, so the decision lives here rather than at the call.
+    ///
+    /// # Errors
+    ///
+    /// The status walk fails, as [`Frame::advance`]'s does.
+    pub fn advance_if_settled(&mut self, now: SystemTime) -> Result<()> {
+        if self.settles_at.is_some_and(|at| at <= now) {
+            self.advance()?;
+        }
+        Ok(())
+    }
+
     /// How many rows the whole diff is, counting every changed file.
     ///
     /// # Errors

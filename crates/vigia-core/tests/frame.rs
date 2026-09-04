@@ -917,8 +917,7 @@ fn a_failed_advance_leaves_the_frame_intact() {
     let files = frame.files().to_vec();
     let tracked = frame.tracked();
 
-    // Garbage of a plausible length, and the length is not incidental.
-    std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 128]).expect("corrupt the index");
+    scratch.corrupt_index();
 
     let error = frame
         .advance()
@@ -950,12 +949,6 @@ fn a_failed_advance_leaves_the_frame_intact() {
 
 #[test]
 fn the_settle_deadline_is_the_last_moved_print_plus_the_margin() {
-    // One wake per burst, at the margin's end after the last print that moved:
-    // on that wake every waiting file has settled and is read once. A deadline
-    // at the first print instead fires once per settle instant, and a sweep
-    // whose prints spread over a hundred milliseconds becomes a cascade of
-    // status walks two seconds later, each reading the files that settled
-    // since the last.
     let scratch = Scratch::large_diff("frame-settle-last", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -995,11 +988,6 @@ fn the_settle_deadline_is_the_last_moved_print_plus_the_margin() {
 
 #[test]
 fn a_failed_advance_disarms_the_settle_deadline() {
-    // The loop folds a spent deadline to a zero wait and advances on it. A walk
-    // that fails and leaves the deadline armed is advanced again on the next
-    // zero wait, and again, flat out, for as long as the walk keeps failing. A
-    // clock that cannot do its work stops, and the next event brings the walk
-    // back.
     let scratch = Scratch::large_diff("frame-failure-settle", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1014,7 +1002,7 @@ fn a_failed_advance_disarms_the_settle_deadline() {
          here for a failed walk to leave armed"
     );
 
-    std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 128]).expect("corrupt the index");
+    scratch.corrupt_index();
     frame
         .advance()
         .expect_err("a corrupt index was walked without complaint");
@@ -1023,6 +1011,41 @@ fn a_failed_advance_disarms_the_settle_deadline() {
         None,
         "a failed walk left the settle deadline armed, so the loop that folds it \
          to a zero wait advances, fails and folds it again without ever blocking"
+    );
+}
+
+#[test]
+fn an_advance_on_the_settle_wake_walks_only_once_the_wait_has_run_out() {
+    let scratch = Scratch::large_diff("frame-settle-wake", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle_spans(&mut frame);
+
+    scratch.rewrite_all(FILES, LINES * 2, 3);
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let asked = SystemTime::now();
+    let due = frame
+        .settles_in(asked)
+        .expect("a rewrite inside the margin armed no settle deadline");
+
+    // Asked while the wait still runs, which is every timeout some other clock
+    // caused: nothing is walked and the deadline stands where it was.
+    frame.advance_if_settled(asked).expect("advance");
+    assert_eq!(
+        frame.settles_in(asked),
+        Some(due),
+        "a timeout before the wait ran out walked status, so every clock the \
+         loop owns now costs a tick"
+    );
+
+    // Asked at the deadline: the walk runs and the wait is decided again by it.
+    frame.advance_if_settled(asked + due).expect("advance");
+    assert_eq!(
+        frame.settles_in(asked),
+        None,
+        "the wait ran out and nothing walked, so the total stays where it was \
+         until the next event"
     );
 }
 

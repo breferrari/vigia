@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 use ratatui::layout::Rect;
 use vigia::{
     Action, App, Body, Deadlines, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Pointing, Position, Row,
-    body_layout, diff_rows, due, patience,
+    body_layout, diff_rows, patience,
 };
 use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency};
 
@@ -435,15 +435,12 @@ fn a_settled_worktree_and_nothing_held_means_no_timer_at_all() {
          measured against"
     );
 
-    // The wake, and what the timeout arm does on it: the deadline is due, the
-    // frame advances with no path list, and the walk reads the file once.
+    // The wake, and what the timeout arm does on it: the frame advances with no
+    // path list because its wait has run out, and the walk reads the file once.
     std::thread::sleep(armed + Duration::from_millis(100));
-    assert!(
-        due(frame.settles_in(SystemTime::now())),
-        "the deadline the loop slept for is not due when it wakes, so the arm \
-         paints and asks again"
-    );
-    frame.advance().expect("advance");
+    frame
+        .advance_if_settled(SystemTime::now())
+        .expect("advance");
     let after = diff_rows(&mut frame).expect("height");
     let mut cold = worktree.frame();
     cold.advance().expect("advance");

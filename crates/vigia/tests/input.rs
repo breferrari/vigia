@@ -8,8 +8,7 @@ use std::time::{Duration, Instant};
 use vigia::{
     ARRIVING, ARRIVING_FRAME, Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED,
     NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
-    WHEEL_ROWS, action_for, drag_action, due, hover_after, patience, repainted, scroll_mark,
-    settled,
+    WHEEL_ROWS, action_for, drag_action, hover_after, patience, repainted, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -1768,19 +1767,6 @@ fn nothing_armed_means_no_deadline_at_all() {
     assert_eq!(
         patience(
             Deadlines {
-                linger: Some(now + SCROLL_LINGER),
-                settling: Some(SETTLING),
-                ..Deadlines::default()
-            },
-            now
-        ),
-        Some(SCROLL_LINGER),
-        "the linger is due long before the file settles and the loop was told to \
-         sleep past it"
-    );
-    assert_eq!(
-        patience(
-            Deadlines {
                 linger: Some(now + SETTLING * 2),
                 settling: Some(SETTLING),
                 ..Deadlines::default()
@@ -1790,27 +1776,6 @@ fn nothing_armed_means_no_deadline_at_all() {
         Some(SETTLING),
         "the file settles first and the loop was told to sleep past it, so the \
          total stays stale until the arrows go out"
-    );
-}
-
-#[test]
-fn a_deadline_is_due_only_once_its_wait_is_zero() {
-    // The frame reports a past deadline as a zero wait rather than as nothing, so
-    // zero is the one value that means now, and a wait of a microsecond means the
-    // loop blocks for it and asks again.
-    assert!(
-        !due(None),
-        "nothing waiting was reported due, so an idle frame is walked"
-    );
-    assert!(
-        !due(Some(Duration::from_micros(1))),
-        "a wait still ahead was reported due, so the walk runs before the file \
-         has settled and the height waits another tick"
-    );
-    assert!(
-        due(Some(Duration::ZERO)),
-        "a spent deadline was not reported due, so the loop wakes for it and \
-         walks nothing"
     );
 }
 

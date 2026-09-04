@@ -343,8 +343,7 @@ pub enum Hovered {
 /// The mark after `event`, given the one before it.
 pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
     match event {
-        // A drag is not a hover, and it is the one mouse event that does not
-        // re-resolve.
+        // A drag is not a hover: it is the one mouse event that does not re-resolve.
         Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(_)) => None,
         Event::Mouse(mouse) => regions.hover_at(mouse.column, mouse.row),
         Event::FocusLost => None,
@@ -450,11 +449,6 @@ pub struct Deadlines {
     pub settling: Option<Duration>,
     /// When the fade on an arriving change is done, if one is still running.
     pub arriving: Option<Instant>,
-}
-
-/// Whether a wait has run out. The frame reports a spent deadline as a zero wait, never as nothing.
-pub fn due(wait: Option<Duration>) -> bool {
-    wait.is_some_and(|wait| wait.is_zero())
 }
 
 /// How long the loop may block before some clock here has to act.
