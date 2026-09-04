@@ -7,7 +7,7 @@ mod support;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Theme, View, Viewport,
+    Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Row, Theme, View, Viewport,
     body_layout, regions, render,
 };
 use vigia_core::{Highlighter, History, Origin};
@@ -102,8 +102,10 @@ fn each_region_reports_its_own_bar_column() {
 
     // Non-vacuity from the other side: a screen with nothing to scroll reports no
     // bar at all, so the two assertions above are about a drawn bar rather than
-    // about a field that is always `Some`.
+    // about a field that is always `Some`. The one row it claims is drawn, because
+    // a bar is decided from the rows on screen against the total.
     let bare = View {
+        rows: vec![Row::Gap],
         total_rows: 1,
         ..View::default()
     };
