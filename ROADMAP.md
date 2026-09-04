@@ -24,8 +24,7 @@ Not "later". Never. Listed so the debate does not have to recur.
 
 - **Staging, committing, rebasing.** Reviewer-class, and each would cost an invariant. Use a git client.
 - **Branch and commit browsing.** Same.
-- **Annotations and comment threads.** Reviewer-class by definition.
-- **AI features of any kind.** The tool watches files. It does not summarise, explain or judge them.
+- **AI features of any kind.** The tool watches files, and it carries the reader's own words to the agent beside it. It never calls a model, and it does not summarise, explain or judge what it watches.
 - **Remote operations.** No fetch, no push, no network.
 - **A GUI.** Terminal only.
 
@@ -158,6 +157,25 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 
 **The release itself has a smoke checklist, [`RELEASE-SMOKE.md`](RELEASE-SMOKE.md)**, run against the built artifact before the tag that triggers the publish — because a sibling project shipped two consecutive CI-green patches that broke the flagship install on day one, and a crates.io publish is permanent in a way theirs was not.
 
+## Phase 7.5 — notes to the agent
+
+Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
+
+**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414). The two bar rows come first because a note's rows are display rows the bar does not count, and that seam has to hold before anything is drawn on it.
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
+| ⬜ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
+| ⬜ | decision: a note on a diff line reaches the agent over MCP | [#414](https://github.com/breferrari/vigia/issues/414) |
+| ⬜ | A note anchors to a diff line and lives in a per-worktree store | [#415](https://github.com/breferrari/vigia/issues/415) |
+| ⬜ | The line number becomes the note icon under the pointer, and the note rows draw under the line | [#416](https://github.com/breferrari/vigia/issues/416) |
+| ⬜ | `vigia mcp` serves the notes to the agent over stdio | [#417](https://github.com/breferrari/vigia/issues/417) |
+| ⬜ | The pane wakes when the agent writes to the store | [#418](https://github.com/breferrari/vigia/issues/418) |
+| ⬜ | A bordered box under the line takes the note | [#419](https://github.com/breferrari/vigia/issues/419) |
+| ⬜ | Enter posts the note into the running session's socket | [#420](https://github.com/breferrari/vigia/issues/420) |
+| ⬜ | The README, the sheet and the spec carry the note | [#421](https://github.com/breferrari/vigia/issues/421) |
+
 ## Phase 8 — look and feel
 
 Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
@@ -260,13 +278,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
 
-**Ordering.** [#386](https://github.com/breferrari/vigia/issues/386) is the front of the phase, put there by the reader on 2026-09-03: the drag that washes rows is a gesture in daily use and it does not finish, so every copy costs a reach for the keyboard and leaves a wash standing behind it. [#119](https://github.com/breferrari/vigia/issues/119) sat first before it, because it moves layout boundaries the other rows would otherwise re-derive twice. **After distribution on purpose**: the minimal real thing ships first — a crates.io name is claimed by publishing — and polish lands as visible post-release momentum, guided by [#72](https://github.com/breferrari/vigia/issues/72)'s real-use data instead of ahead of it.
-
-
 **A `decision` row is one whose feel improvement costs an invariant a sentence; one that costs nothing is an ordinary row.** The ruling lands in `SPEC.md` §11.2 and the build follows in the same pass unless it is genuinely too large for one — [#167](https://github.com/breferrari/vigia/issues/167) shipped a ruling with nothing on screen for four hours, and a reader pressed `?` and got nothing.
-
-
-**Four rows of this phase turned on a premise that did not survive being checked, and B10 did it twice.** Worth stating once as a pattern rather than five times as a coincidence: **a `decision` issue's own framing is a dated claim like any other**, and in B10's case the false premise was the spec's own sentence as well as the issue's. The count is rows and not failures, because the row is what gets taken. The lesson B10 was first read for was too small — *the sentence has to be true when it is written* — and the sentence that replaced it was written one paragraph later and checked no harder. **The larger rule is that a conclusion which outlives the reason it was given is the thing to be suspicious of.** §5.3 carries it.
 
 
 **What is left open and is nobody's bug yet.** The rail is 70 columns until a 213-column pane, so a long path elides beside its cluster. That is the same elision every label on this pane already makes and it keeps the tail, which is what identifies the file; whether the rail should take a larger share so common paths draw whole is a look-and-feel question the pane will answer faster than an argument here will. The lever is one constant.
@@ -493,7 +505,6 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | `take-next`'s undefined milestone sort ([#83](https://github.com/breferrari/vigia/issues/83)) | Out of the Phase 5 shelf, 2026-08-04 | Taken ahead of its shelf on the same grounds as [#51](https://github.com/breferrari/vigia/issues/51) above, one step earlier in the pass: #51 blocked the top of Phase 6, and this blocked **reaching** Phase 6 at all. Phase 6 is next by this file's own ordering, and step 1 returned the shelf instead. The half worth keeping is not that it was wrong but **what catches a silent wrong answer, and what does not**. The [#66](https://github.com/breferrari/vigia/issues/66) session recorded step 1 returning the wrong phase as an open thread and shipped Phase 4 work regardless; the pass that fixed it was handed the shelf outright. Both were caught by a human reading roadmap prose the query cannot see, and neither by anything automatic, which is why the fix is not only a better sort: pre-flight comparison 6 now checks step 1's answer against `ROADMAP.md`'s section order, so the marker being edited off, a phase renumbered, or a milestone renamed off `Phase <n>` each become a finding instead of a silent skip. Correct by construction and correct by evidence are different claims, and §10 already draws that line for I3 |
 | Support every modern language ([#235](https://github.com/breferrari/vigia/issues/235)) | Out of the Shelf, 2026-08-19 | Shelved 2026-08-18 with the rest of [#161](https://github.com/breferrari/vigia/issues/161)'s findings and pulled forward the next day, on the evidence this repository ranks above every other kind: **the primary user is daily-driving the tool and this is what he hits.** That is the [#45](https://github.com/breferrari/vigia/issues/45) grade of finding rather than the audit grade, and the shelf's own filter is *only if daily use asks for them*. Daily use asked. **Re-verified live 2026-08-19** rather than taken on the issue's word: `highlight.rs:591` still loads `SyntaxSet::load_defaults_newlines`, `syntect` is still pinned at 5.3.0, and `syntax_for` still resolves by extension and then by whole file name with no override in between. So the 75-syntax Sublime Text 3 snapshot stands: TypeScript, TOML, Kotlin, Swift, Dart and about twenty more draw as plain text, `Cargo.toml` is unhighlighted in a tool written in Rust whose own front-page picture puts `Cargo.toml` in the file list, and two extensions resolve to the **wrong** language rather than to none. **It splits in two and the split is the point.** The mis-mappings (`.h` to Objective-C, `.sass` to Ruby Haml) are confident wrong colour, need no dependency and no spec change, and ship first. The missing set is a dependency (`two-face 0.5.2+bat-0.26.1` bundles bat's grammars as `syntect` dumps) and therefore a `SPEC.md` §6 proposal *before* it is built, per `CLAUDE.md`'s rule, gated on three numbers rather than on taste: no `cc` anywhere in the graph, I7's 50ms first paint against a set load that is 318µs today, and the binary size four release archives have to carry. **Shipped 2026-08-19 as one PR rather than the predicted two**, and the `.h` row went the other way: the ruling keeps Objective-C, with `bat`'s opposite call recorded beside it in `SPEC.md` §6's table |
 | The bump cannot move a protected `main` ([#143](https://github.com/breferrari/vigia/issues/143)) | Out of the Shelf, 2026-08-11 | Release infrastructure, so the Shelf is where it belongs by the rule that instrument findings wait for a product pass to be blocked by one. This is that rule firing rather than an exception to it: the release button's first real run could not move `main` at all, so nothing shippable could ship until it was fixed. Taken mid-pass, ahead of Phase 8's [#121](https://github.com/breferrari/vigia/issues/121), which is untouched and still next |
-| `take-next` says a draft shows no checks ([#293](https://github.com/breferrari/vigia/issues/293)) | Shelved 2026-08-24 | Found during [#285](https://github.com/breferrari/vigia/issues/285) by the session seeing red on its own draft and stopping to diagnose it. The skill's step 7 warns that *"a draft shows no checks, and no checks is not green"*, describing an **empty** check list; on this repository a draft shows a **failing** one, because `ci.yml`'s `ci complete` job carries `if: always()` and no draft guard on purpose and its `needs` are all skipped. Both halves of the box are wrong here: the list is not empty, and the surface does not look settled, it looks broken. **It is a Shelf row rather than a phase row because no product pass is blocked by it**, which is that rule firing rather than an exception: the check is correct, and what it costs is minutes of diagnosis per session plus a slow training of readers to ignore red on the one surface where red matters. The work is to decide which of the two is wrong and change **that** one, rather than patching the prose to match today's workflow and leaving them free to drift again. The likely answer is the skill, since `ci.yml` already argues its own side in a comment; whichever way it goes they should end up naming each other, because the whole failure is a skill describing a workflow it does not read |
 
 ---
 

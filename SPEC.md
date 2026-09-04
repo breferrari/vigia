@@ -80,7 +80,7 @@ A regression past any budget **fails the build.**
 
 **In:** working-tree diff (unstaged by default), event-driven refresh, follow mode, scroll (keyboard + mouse wheel), syntax highlighting, per-file churn visualisation, a pinned file list above the diff (§11.1), responsive layout, theming.
 
-**Out of v1, deliberately:** staging, committing, rebasing, branch or commit browsing, annotations, comment threading, AI features, remote operations. Each is reviewer-class and each would cost an invariant.
+**Out of v1, deliberately:** staging, committing, rebasing, branch or commit browsing, AI features, remote operations. Each is reviewer-class and each would cost an invariant.
 
 **Deferred, not rejected:** multi-worktree view (several agent sessions at once — the strongest differentiator after glanceability, and the most btop-shaped); Jujutsu and Sapling support.
 
