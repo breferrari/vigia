@@ -1064,7 +1064,7 @@ impl Shell {
             effects.process_effects(since.into(), f.buffer_mut(), over);
             // Separate from the pass above, which is clipped to the diff: a
             // notice effect in that manager would be clipped away unseen.
-            if let Some(notice) = render::notice_area(area, &chrome) {
+            if let Some(notice) = render::notice_area(area, &chrome, screen) {
                 notice_effects.process_effects(since.into(), f.buffer_mut(), notice);
             }
         })?;

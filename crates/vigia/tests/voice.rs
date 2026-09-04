@@ -66,7 +66,7 @@ fn styles(buf: &Buffer, area: Rect) -> Vec<Style> {
 /// The area the footer's message occupies on this pane.
 fn area_of(app: &App) -> Rect {
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    notice_area(PANE, &chrome).expect("a message on the footer has an area")
+    notice_area(PANE, &chrome, &View::default()).expect("a message on the footer has an area")
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn the_area_is_the_bottom_row_and_only_the_message() {
 fn a_pane_with_no_message_has_no_area() {
     let app = App::new();
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    assert_eq!(notice_area(PANE, &chrome), None);
+    assert_eq!(notice_area(PANE, &chrome, &View::default()), None);
 }
 
 #[test]
@@ -230,11 +230,52 @@ fn a_pane_with_no_room_has_no_area() {
         Rect::new(0, 0, 0, 0),
     ] {
         assert_eq!(
-            notice_area(empty, &chrome),
+            notice_area(empty, &chrome, &View::default()),
             None,
             "a {empty:?} pane was given an area to draw an effect over"
         );
     }
+}
+
+/// The readouts share the bottom row at the one-row rung, and a long message is
+/// cut to what they leave. An area taken from the full width would run the
+/// effect over the position and the frame time instead of the message.
+#[test]
+fn a_long_message_stops_where_the_readouts_begin() {
+    let mut app = App::new();
+    app.flash(
+        "could not send 12 lines: the terminal refused the write, and this is far too long",
+        Instant::now() + NOTICE_LINGER,
+        Voice::Alert,
+    );
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let area = notice_area(PANE, &chrome, &View::default()).expect("an area");
+
+    let mut buf = Buffer::empty(PANE);
+    render(
+        &mut buf,
+        PANE,
+        &View::default(),
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
+    let row: String = (0..PANE.width)
+        .map(|x| buf[(x, PANE.height - 1)].symbol())
+        .collect();
+
+    // The right-hand token this row actually drew, located rather than assumed:
+    // the message is cut to make room for it and the effect must stop there.
+    let readouts = row
+        .find("follow")
+        .expect("the footer draws its position on the bottom row");
+    let readouts = u16::try_from(readouts).expect("a column fits in u16");
+
+    assert!(
+        area.x + area.width <= readouts,
+        "the area runs to column {} and the readouts start at {readouts}, so the          effect animates them rather than the message",
+        area.x + area.width
+    );
 }
 
 /// An effect that never reports itself finished pins the loop awake for the

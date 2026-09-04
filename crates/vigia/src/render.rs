@@ -1237,16 +1237,32 @@ impl<'a> Footer<'a> {
     }
 }
 
+/// The footer's right-hand token: the readouts and the position, as one string.
+/// One placement rather than two, and shared with [`notice_area`], whose answer
+/// is what this leaves.
+fn footer_right(footer: &Footer<'_>, chrome: &Chrome, view: &View) -> String {
+    let position = position_of(view.top.file, view.files);
+    // Clamped to what was reserved, not to the width.
+    let rungs = state_rungs(chrome.following, &position);
+    let state = widest_fitting(&rungs, footer.reserved);
+    match (footer.diagnostics.as_str(), state) {
+        ("", state) => state.to_owned(),
+        (diagnostics, "") => diagnostics.to_owned(),
+        (diagnostics, state) => format!("{diagnostics}{CELL_GAP}{state}"),
+    }
+}
+
 /// The cells the footer's message occupies, when there is one.
 ///
 /// Beside [`regions`] so an effect and the gate proving it visible address the
 /// same columns. Both footer rungs draw it on the pane's bottom row.
 #[must_use]
-pub fn notice_area(area: Rect, chrome: &Chrome) -> Option<Rect> {
+pub fn notice_area(area: Rect, chrome: &Chrome, view: &View) -> Option<Rect> {
     let notice = chrome.notice.as_deref()?;
     if area.width == 0 || area.height == 0 {
         return None;
     }
+    let footer = Footer::plan(area, chrome, view.files);
     let text = text_within(
         Rect {
             y: area.y + area.height - 1,
@@ -1255,8 +1271,16 @@ pub fn notice_area(area: Rect, chrome: &Chrome) -> Option<Rect> {
         },
         margins_of(area.width),
     );
+    // At the one-row rung the readouts share this line, and the message is cut
+    // to what they leave. An effect over the whole width would animate them.
+    let taken = if footer.rows == 2 {
+        0
+    } else {
+        width_of(&footer_right(&footer, chrome, view)) + CELL_GAP.len()
+    };
     let width = text
         .width
+        .saturating_sub(u16::try_from(taken).unwrap_or(u16::MAX))
         .min(u16::try_from(width_of(notice)).unwrap_or(u16::MAX));
     (width > 0).then_some(Rect { width, ..text })
 }
@@ -2717,17 +2741,7 @@ impl Painter<'_> {
 
     /// The footer, on the bottom one or two rows of `area`.
     fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome, footer: &Footer<'_>) {
-        let position = position_of(view.top.file, view.files);
-        // Clamped to what was reserved, not to the width.
-        let rungs = state_rungs(chrome.following, &position);
-        let state = widest_fitting(&rungs, footer.reserved);
-        // One string rather than two placements, because `status_line` puts a single
-        // right-hand token and lets the left lose characters to it.
-        let right = match (footer.diagnostics.as_str(), state) {
-            ("", state) => state.to_owned(),
-            (diagnostics, "") => diagnostics.to_owned(),
-            (diagnostics, state) => format!("{diagnostics}{CELL_GAP}{state}"),
-        };
+        let right = footer_right(footer, chrome, view);
 
         // Three colours already in the palette and none of them invented. §11.1.
         let style = match footer.voice {
