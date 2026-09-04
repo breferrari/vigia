@@ -446,8 +446,15 @@ pub struct Deadlines {
     pub notice: Option<Instant>,
     /// When the churn window next has to age.
     pub ageing: Option<Duration>,
+    /// When the last height kept waiting inside the settle margin settles.
+    pub settling: Option<Duration>,
     /// When the fade on an arriving change is done, if one is still running.
     pub arriving: Option<Instant>,
+}
+
+/// Whether a wait has run out. The frame reports a spent deadline as a zero wait, never as nothing.
+pub fn due(wait: Option<Duration>) -> bool {
+    wait.is_some_and(|wait| wait.is_zero())
 }
 
 /// How long the loop may block before some clock here has to act.
@@ -459,6 +466,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.linger.map(since),
         due.notice.map(since),
         due.ageing,
+        due.settling,
         due.arriving.map(since),
     ]
     .into_iter()

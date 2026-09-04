@@ -3,13 +3,14 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Pointing, Position, Row, body_layout,
+    Action, App, Body, Deadlines, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Pointing, Position, Row,
+    body_layout, diff_rows, due, patience,
 };
-use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
+use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency};
 
 use support::{Scratch, delta, materialise, settle, settle_spans};
 
@@ -383,6 +384,87 @@ fn a_tick_re_measures_only_what_changed() {
          changed. {} bytes were read",
         cost.measured,
         cost.bytes
+    );
+}
+
+#[test]
+fn a_settled_worktree_and_nothing_held_means_no_timer_at_all() {
+    // The invariant the settle clock is allowed under, asserted on the value the
+    // loop's wait is given rather than on a behaviour observed around it, the way
+    // the ageing clock's gate in `input.rs` is. Here rather than beside it because
+    // this one drives a real worktree.
+    let scratch = Scratch::large_diff("shell-settle-wake", 4, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle_spans(&mut frame);
+    frame.advance().expect("advance");
+    let before = diff_rows(&mut frame).expect("height");
+    let settling = |frame: &Frame| {
+        patience(
+            Deadlines {
+                settling: frame.settles_in(SystemTime::now()),
+                ..Deadlines::default()
+            },
+            Instant::now(),
+        )
+    };
+    assert_eq!(
+        settling(&frame),
+        None,
+        "a settled worktree and nothing held handed the loop a deadline, which is \
+         a timer on an idle monitor"
+    );
+
+    // A file grows off screen, and the tick that reports it finds the file inside
+    // the margin: the old height stands and the loop is asked to wake when the
+    // file settles.
+    scratch.write("src/mod_3.rs", "fn grown() {}\n".repeat(80));
+    frame.advance().expect("advance");
+    assert_eq!(
+        diff_rows(&mut frame).expect("height"),
+        before,
+        "the height moved inside the margin, so a file still being written was read"
+    );
+    let armed = settling(&frame).expect(
+        "a print that moved inside the margin did not arm the loop, so the total \
+         stays stale until the next event",
+    );
+    assert!(
+        armed <= Duration::from_secs(2),
+        "the loop was asked to sleep {armed:?}, past the margin the wait is \
+         measured against"
+    );
+
+    // The wake, and what the timeout arm does on it: the deadline is due, the
+    // frame advances with no path list, and the walk reads the file once.
+    std::thread::sleep(armed + Duration::from_millis(100));
+    assert!(
+        due(frame.settles_in(SystemTime::now())),
+        "the deadline the loop slept for is not due when it wakes, so the arm \
+         paints and asks again"
+    );
+    frame.advance().expect("advance");
+    let after = diff_rows(&mut frame).expect("height");
+    let mut cold = worktree.frame();
+    cold.advance().expect("advance");
+    let truth = diff_rows(&mut cold).expect("height");
+    assert!(
+        truth > before,
+        "the file grew and a memoryless frame still counts {before} rows, so this \
+         fixture proves nothing"
+    );
+    assert_eq!(
+        after, truth,
+        "the wake at the margin's end counted {after} rows where a frame with no \
+         memory counts {truth}, so the recount waited for the next event"
+    );
+
+    // And it stops again, which is the bound the licence rests on.
+    assert_eq!(
+        settling(&frame),
+        None,
+        "every file settled and the loop is still on a clock, so it outlives the \
+         thing that armed it"
     );
 }
 

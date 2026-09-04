@@ -948,6 +948,84 @@ fn a_failed_advance_leaves_the_frame_intact() {
     );
 }
 
+#[test]
+fn the_settle_deadline_is_the_last_moved_print_plus_the_margin() {
+    // One wake per burst, at the margin's end after the last print that moved:
+    // on that wake every waiting file has settled and is read once. A deadline
+    // at the first print instead fires once per settle instant, and a sweep
+    // whose prints spread over a hundred milliseconds becomes a cascade of
+    // status walks two seconds later, each reading the files that settled
+    // since the last.
+    let scratch = Scratch::large_diff("frame-settle-last", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle_spans(&mut frame);
+
+    scratch.write(FIRST, "fn first() {}\n".repeat(LINES * 2));
+    std::thread::sleep(Duration::from_millis(100));
+    scratch.write(SECOND, "fn second() {}\n".repeat(LINES * 2));
+    let modified = |rela: &str| {
+        std::fs::symlink_metadata(scratch.path_of(rela))
+            .and_then(|meta| meta.modified())
+            .expect("the fixture's modification time")
+    };
+    let (earlier, later) = (modified(FIRST), modified(SECOND));
+    assert!(
+        earlier < later,
+        "the two prints share a modification time, so this fixture cannot tell \
+         the last print from the first"
+    );
+
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let asked = SystemTime::now();
+    let due = frame
+        .settles_in(asked)
+        .expect("two files moved inside the margin and no settle deadline is armed");
+    // A wait is the print's modification time plus the margin, so the instant
+    // is exact rather than approximate; the margin is `SPEC.md` §6's two seconds.
+    assert_eq!(
+        asked + due,
+        later + Duration::from_secs(2),
+        "the settle deadline is {due:?} away, which is the first moved print's \
+         margin rather than the last's, so the wake lands while the later file \
+         is still inside it"
+    );
+}
+
+#[test]
+fn a_failed_advance_disarms_the_settle_deadline() {
+    // The loop folds a spent deadline to a zero wait and advances on it. A walk
+    // that fails and leaves the deadline armed is advanced again on the next
+    // zero wait, and again, flat out, for as long as the walk keeps failing. A
+    // clock that cannot do its work stops, and the next event brings the walk
+    // back.
+    let scratch = Scratch::large_diff("frame-failure-settle", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle_spans(&mut frame);
+
+    scratch.rewrite_all(FILES, LINES * 2, 3);
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    assert!(
+        frame.settles_in(SystemTime::now()).is_some(),
+        "a rewrite inside the margin armed no settle deadline, so there is nothing \
+         here for a failed walk to leave armed"
+    );
+
+    std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 128]).expect("corrupt the index");
+    frame
+        .advance()
+        .expect_err("a corrupt index was walked without complaint");
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "a failed walk left the settle deadline armed, so the loop that folds it \
+         to a zero wait advances, fails and folds it again without ever blocking"
+    );
+}
+
 /// The cache-key gate for `FileDiff::lines`.
 #[test]
 fn a_same_length_edit_that_changes_the_line_count_is_not_reused() {

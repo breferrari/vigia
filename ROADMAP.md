@@ -151,23 +151,19 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 | ✅ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
 | ✅ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
 
-**[#12](https://github.com/breferrari/vigia/issues/12) is done: v0.1.0 shipped 2026-08-09.** [`vigia 0.1.0`](https://crates.io/crates/vigia) and `vigia-core 0.1.0` are on crates.io, neither yanked, so both names are claimed permanently, which is what this row was always about. The [GitHub release](https://github.com/breferrari/vigia/releases/tag/v0.1.0) carries four target archives, both install scripts and their checksums. `cargo install vigia` was verified cold on a machine with no path override: it resolved `vigia-core` from the registry and the installed binary reports `vigia 0.1.0`. **One channel is short.** The Homebrew push was denied 403 because the tap token can read and not write, so `brew install breferrari/tap/vigia` does not work yet; [#137](https://github.com/breferrari/vigia/issues/137) carries the diagnosis and the one-job re-run that fixes it. That failure landed on the reversible side of an ordering chosen for it: crates.io runs last, after everything that can be deleted and redone.
-
 **[#24](https://github.com/breferrari/vigia/issues/24) was here because the filter includes what the binary does in those hands.** A pane closing sends the signal nobody at the keyboard typed, a tool that lives in panes will be killed that way routinely, and a first-run user whose terminal comes back wrecked does not file an issue, they uninstall. **Landed 2026-08-08, and taken symmetrically**: the single-task version was Unix-only, [#16](https://github.com/breferrari/vigia/issues/16) had already rejected a guarantee that means different things on different tier-1 targets, and what made the uniform answer affordable was a measurement rather than a principle — neither half adds a crate to any graph, because `signal-hook` is already in both Unix graphs through crossterm and the Windows half is a feature of a crate `vigia` already declares. The other two shelf entries that read like release blockers by title were re-examined 2026-08-05 and stay shelved on their own recorded triage: [#91](https://github.com/breferrari/vigia/issues/91)'s panic is unreachable from the binary (an API-contract gap), and [#63](https://github.com/breferrari/vigia/issues/63)'s hole is real in the buffer and unreachable on the screen.
-
-**The release itself has a smoke checklist, [`RELEASE-SMOKE.md`](RELEASE-SMOKE.md)**, run against the built artifact before the tag that triggers the publish — because a sibling project shipped two consecutive CI-green patches that broke the flagship install on day one, and a crates.io publish is permanent in a way theirs was not.
 
 ## Phase 7.5 — notes to the agent
 
 Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
-**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414). The bar rows lead because a note's rows are display rows the bar does not count, and the total they sit under has to be right first.
+**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414).
 
 | | Task | Issue |
 |---|---|---|
 | ✅ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
 | ✅ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
-| ⬜ | The height is recounted when a moved file settles, not at the next event | [#425](https://github.com/breferrari/vigia/issues/425) |
+| ✅ | The height is recounted when a moved file settles, not at the next event | [#425](https://github.com/breferrari/vigia/issues/425) |
 | ⬜ | decision: a note on a diff line reaches the agent over MCP | [#414](https://github.com/breferrari/vigia/issues/414) |
 | ⬜ | A note anchors to a diff line and lives in a per-worktree store | [#415](https://github.com/breferrari/vigia/issues/415) |
 | ⬜ | The line number becomes the note icon under the pointer, and the note rows draw under the line | [#416](https://github.com/breferrari/vigia/issues/416) |

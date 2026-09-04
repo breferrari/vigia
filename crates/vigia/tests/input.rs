@@ -8,9 +8,13 @@ use std::time::{Duration, Instant};
 use vigia::{
     ARRIVING, ARRIVING_FRAME, Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED,
     NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
-    WHEEL_ROWS, action_for, drag_action, hover_after, patience, repainted, scroll_mark, settled,
+    WHEEL_ROWS, action_for, drag_action, due, hover_after, patience, repainted, scroll_mark,
+    settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
+
+/// A settle deadline as the frame reports one: however much of the margin is left.
+const SETTLING: Duration = Duration::from_millis(1_800);
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -1687,6 +1691,18 @@ fn nothing_armed_means_no_deadline_at_all() {
         "a window with something in it did not ask the loop to wake, so the graph \
          freezes where it is"
     );
+    assert_eq!(
+        patience(
+            Deadlines {
+                settling: Some(SETTLING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(SETTLING),
+        "a print that moved inside the margin did not ask the loop to wake, so the \
+         bar stays scaled to the old total until the next event"
+    );
 
     // The nearest of them, whichever it is, because the loop has to wake for
     // the first thing due. Taking the wrong one lets the others run late.
@@ -1745,6 +1761,56 @@ fn nothing_armed_means_no_deadline_at_all() {
         Some(HISTORY_SAMPLE),
         "the next sample is due first and the loop was told to sleep past it, so \
          the window ages a beat late"
+    );
+
+    // And the settle clock, slower still: nothing else the loop owns waits two
+    // seconds, so a fold that dropped it would read as a quiet tree.
+    assert_eq!(
+        patience(
+            Deadlines {
+                linger: Some(now + SCROLL_LINGER),
+                settling: Some(SETTLING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(SCROLL_LINGER),
+        "the linger is due long before the file settles and the loop was told to \
+         sleep past it"
+    );
+    assert_eq!(
+        patience(
+            Deadlines {
+                linger: Some(now + SETTLING * 2),
+                settling: Some(SETTLING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(SETTLING),
+        "the file settles first and the loop was told to sleep past it, so the \
+         total stays stale until the arrows go out"
+    );
+}
+
+#[test]
+fn a_deadline_is_due_only_once_its_wait_is_zero() {
+    // The frame reports a past deadline as a zero wait rather than as nothing, so
+    // zero is the one value that means now, and a wait of a microsecond means the
+    // loop blocks for it and asks again.
+    assert!(
+        !due(None),
+        "nothing waiting was reported due, so an idle frame is walked"
+    );
+    assert!(
+        !due(Some(Duration::from_micros(1))),
+        "a wait still ahead was reported due, so the walk runs before the file \
+         has settled and the height waits another tick"
+    );
+    assert!(
+        due(Some(Duration::ZERO)),
+        "a spent deadline was not reported due, so the loop wakes for it and \
+         walks nothing"
     );
 }
 
