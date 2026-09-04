@@ -69,9 +69,9 @@ pub fn newer(remote: &str, local: &str) -> bool {
 /// construction, so a string semver would accept and this will not is a sign
 /// that something upstream changed rather than a shape to guess at.
 fn triple(version: &str) -> Option<(u64, u64, u64)> {
-    // `u64::from_str` accepts a leading `+` and leading zeros without limit, so
-    // parsing alone would let a version that is neither drawn verbatim on the
-    // footer, at any length the answer cares to send.
+    // `u64::from_str` accepts a leading `+`, and leading zeros without limit, so
+    // parsing alone would draw either of those on the footer verbatim, at
+    // whatever length the answer chose to send.
     fn number(part: &str) -> Option<u64> {
         let canonical =
             part.bytes().all(|b| b.is_ascii_digit()) && (part == "0" || !part.starts_with('0'));
