@@ -932,11 +932,15 @@ The **hint bar is a list**, so when the footer cannot hold both halves on one li
 
 | Voice | What it is | Colour | Arrives | Leaves |
 |---|---|---|---|---|
-| Said | An act of the reader's, answering | `chrome` | swept left to right out of the hints it replaced, 120ms | swept back out |
-| Arrived | Unasked-for, nothing wrong | `note` | coalesces, 250ms | dissolves |
-| Alert | Something went wrong | `alert` | lightened and back inside its own hue, 180ms | fades to the hints' colour |
+| Said | An act of the reader's, answering | `chrome` | its characters appear left to right, 320ms | the same, reversed |
+| Arrived | Unasked-for, nothing wrong | `note` | its characters appear out of scatter, 420ms | dissolves to scatter |
+| Alert | Something went wrong | `alert` | its characters appear from both ends, closing, 360ms | opens back out |
 
-Three colours the palette already had: `note` is what this program spends on something that is not diff content, and an announcement is that. A warning is the arrival that does not move, because it must not be harder to read while arriving, and it lightens within its own hue rather than fading in from another, which would slide it through a meaning it does not have. **A spent message is still drawn while it leaves**: cleared first, its departure lands on the hints underneath and animates them arriving instead.
+Three colours the palette already had: `note` is what this program spends on something that is not diff content, and an announcement is that.
+
+**Every motion is on the glyph channel, and that is a requirement rather than a taste.** §5 puts glyphs as what survives when colour does not, and an effect that interpolates colour writes styles *after* `Theme::resolve` has quantised the palette to the depth: at `Ansi16` it asks for colours the terminal cannot draw, and at `Depth::None` it shows `NO_COLOR` the one thing it was promised. Two of the three were built on colour and reported from the pane as barely visible, which is that defect from the other end. So they differ by **pattern** over one mechanism, at 14, 20 and 15 changed frames against 6, 12 and 11.
+
+**A spent message is still drawn while it leaves**: cleared first, its departure lands on the hints underneath and animates them arriving instead.
 
 **A newer published version is one footer notice, once, and nothing else.** *Ruled 2026-09-04, reader* ([#401](https://github.com/breferrari/vigia/issues/401)). One request at startup, on a thread, so first paint never waits on it, and one `NOTICE_LINGER` notice naming the version when crates.io answers with a higher one. Already current, offline, refused, slow, unparseable, and an architecture the TLS provider will not compile on are one outcome between them: **silence**, because a network problem is not the reader's problem and a monitor that nags is a monitor that gets closed. It arms no clock of its own, which is what keeps I1 whole: the check answers once and cannot repeat, and the deadline the notice sets is the one every notice already sets. `VIGIA_UPDATE=off` declines it, and a value this does not understand is refused before the terminal is taken rather than quietly ignored.
 
