@@ -12,7 +12,7 @@ use vigia::{
 };
 use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency};
 
-use support::{Scratch, delta, materialise, settle, settle_spans};
+use support::{Scratch, arm_settle, delta, materialise, settle, settle_spans};
 
 /// The wide fixture: enough files that reading all of them is unmistakable.
 const FILES: usize = 100;
@@ -415,14 +415,15 @@ fn a_settled_worktree_and_nothing_held_means_no_timer_at_all() {
          a timer on an idle monitor"
     );
 
-    // A file grows off screen, and the tick that reports it finds the file inside
-    // the margin: the old height stands and the loop is asked to wake when the
-    // file settles.
-    scratch.write("src/mod_3.rs", "fn grown() {}\n".repeat(80));
-    frame.advance().expect("advance");
+    // The files grow off screen, and the tick that reports it finds them inside
+    // the margin: the old height stands and the loop is asked to wake when they
+    // settle.
+    let mut inside = 0;
+    arm_settle(&scratch, &mut frame, 4, 80, |frame| {
+        inside = diff_rows(frame).expect("height");
+    });
     assert_eq!(
-        diff_rows(&mut frame).expect("height"),
-        before,
+        inside, before,
         "the height moved inside the margin, so a file still being written was read"
     );
     let armed = settling(&frame).expect(
@@ -447,7 +448,7 @@ fn a_settled_worktree_and_nothing_held_means_no_timer_at_all() {
     let truth = diff_rows(&mut cold).expect("height");
     assert!(
         truth > before,
-        "the file grew and a memoryless frame still counts {before} rows, so this \
+        "the files grew and a memoryless frame still counts {before} rows, so this \
          fixture proves nothing"
     );
     assert_eq!(

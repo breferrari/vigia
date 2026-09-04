@@ -4,7 +4,9 @@ mod support;
 
 use std::time::{Duration, SystemTime};
 
-use support::{Scratch, committed_link, delta, index_of, materialise, settle, settle_spans};
+use support::{
+    Scratch, arm_settle, committed_link, delta, index_of, materialise, settle, settle_spans,
+};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
 /// Small enough to reason about every count, more than one so "all" and "the
@@ -954,9 +956,32 @@ fn the_settle_deadline_is_the_last_moved_print_plus_the_margin() {
     let mut frame = worktree.frame();
     settle_spans(&mut frame);
 
-    scratch.write(FIRST, "fn first() {}\n".repeat(LINES * 2));
-    std::thread::sleep(Duration::from_millis(100));
-    scratch.write(SECOND, "fn second() {}\n".repeat(LINES * 2));
+    // Two writes a tenth of a second apart, walked inside the margin. A loaded
+    // runner can walk later than that, and a burst walked late proves nothing, so
+    // it is made again, three times before giving up.
+    let mut armed = None;
+    for round in 0..3 {
+        scratch.write(
+            FIRST,
+            format!("fn first() {{ {round} }}\n").repeat(LINES * 2),
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        scratch.write(
+            SECOND,
+            format!("fn second() {{ {round} }}\n").repeat(LINES * 2),
+        );
+        frame.advance().expect("advance");
+        total_height(&mut frame);
+        let asked = SystemTime::now();
+        if let Some(due) = frame.settles_in(asked) {
+            armed = Some((asked, due));
+            break;
+        }
+    }
+    let (asked, due) = armed.expect(
+        "three bursts each landed the walk after the margin closed, so this runner \
+         cannot show a settle deadline at all",
+    );
     let modified = |rela: &str| {
         std::fs::symlink_metadata(scratch.path_of(rela))
             .and_then(|meta| meta.modified())
@@ -968,13 +993,6 @@ fn the_settle_deadline_is_the_last_moved_print_plus_the_margin() {
         "the two prints share a modification time, so this fixture cannot tell \
          the last print from the first"
     );
-
-    frame.advance().expect("advance");
-    total_height(&mut frame);
-    let asked = SystemTime::now();
-    let due = frame
-        .settles_in(asked)
-        .expect("two files moved inside the margin and no settle deadline is armed");
     // A wait is the print's modification time plus the margin, so the instant
     // is exact rather than approximate; the margin is `SPEC.md` §6's two seconds.
     assert_eq!(
@@ -993,14 +1011,9 @@ fn a_failed_advance_disarms_the_settle_deadline() {
     let mut frame = worktree.frame();
     settle_spans(&mut frame);
 
-    scratch.rewrite_all(FILES, LINES * 2, 3);
-    frame.advance().expect("advance");
-    total_height(&mut frame);
-    let asked = SystemTime::now();
-    let due = frame.settles_in(asked).expect(
-        "a rewrite inside the margin armed no settle deadline, so there is nothing \
-         here for a failed walk to leave armed",
-    );
+    let (asked, due) = arm_settle(&scratch, &mut frame, FILES, LINES * 2, |frame| {
+        total_height(frame);
+    });
 
     scratch.corrupt_index();
     frame
@@ -1021,13 +1034,9 @@ fn an_advance_on_the_settle_wake_walks_only_once_the_wait_has_run_out() {
     let mut frame = worktree.frame();
     settle_spans(&mut frame);
 
-    scratch.rewrite_all(FILES, LINES * 2, 3);
-    frame.advance().expect("advance");
-    total_height(&mut frame);
-    let asked = SystemTime::now();
-    let due = frame
-        .settles_in(asked)
-        .expect("a rewrite inside the margin armed no settle deadline");
+    let (asked, due) = arm_settle(&scratch, &mut frame, FILES, LINES * 2, |frame| {
+        total_height(frame);
+    });
 
     // Asked while the wait still runs, which is every timeout some other clock
     // caused: nothing is walked and the deadline stands where it was.
@@ -1046,6 +1055,45 @@ fn an_advance_on_the_settle_wake_walks_only_once_the_wait_has_run_out() {
         None,
         "the wait ran out and nothing walked, so the total stays where it was \
          until the next event"
+    );
+}
+
+#[test]
+fn a_staged_toggle_disarms_the_settle_deadline_and_the_next_walk_reads() {
+    let scratch = Scratch::large_diff("frame-settle-staged", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle_spans(&mut frame);
+
+    let mut stale = 0;
+    arm_settle(&scratch, &mut frame, FILES, LINES * 2, |frame| {
+        stale = total_height(frame);
+    });
+
+    // The toggle drops every cache, so nothing is left waiting, and the walk after
+    // it reads rather than keeping a height the toggle threw away.
+    frame.show_staged(true);
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "a staged toggle dropped the spans and kept their deadline, so the loop \
+         wakes for heights that no longer exist"
+    );
+    frame.advance().expect("advance");
+    let read = total_height(&mut frame);
+    let mut cold = worktree.frame();
+    cold.show_staged(true);
+    cold.advance().expect("advance");
+    let truth = total_height(&mut cold);
+    assert!(
+        truth > stale,
+        "the diff doubled and a memoryless frame still counts {stale}, so this \
+         fixture proves nothing"
+    );
+    assert_eq!(
+        read, truth,
+        "the walk after the toggle counted {read} rows where a frame with no memory \
+         counts {truth}, so a height the toggle dropped was kept"
     );
 }
 

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use vigia_core::{
     CONTEXT, Class, FileChange, Frame, FrameStats, HighlightStats, Highlighter, Samples, Worktree,
@@ -410,6 +410,33 @@ pub fn settle(frame: &mut Frame) {
     panic!(
         "the frame was still re-reading after {SETTLE_FRAMES} idle frames, \
          so nothing is ever being reused"
+    );
+}
+
+/// Rewrite every file and tick the frame while the writes are inside the settle
+/// margin, so `walk` leaves their heights waiting and a settle deadline armed, and
+/// return when it was asked and how far off it is. A loaded runner can take longer
+/// than the margin to walk status; a burst whose walk landed late proves nothing
+/// and is made again, three times before giving up.
+pub fn arm_settle(
+    scratch: &Scratch,
+    frame: &mut Frame,
+    files: usize,
+    lines: usize,
+    mut walk: impl FnMut(&mut Frame),
+) -> (SystemTime, Duration) {
+    for round in 0..3 {
+        scratch.rewrite_all(files, lines, 3 + round);
+        frame.advance().expect("advance");
+        walk(frame);
+        let asked = SystemTime::now();
+        if let Some(due) = frame.settles_in(asked) {
+            return (asked, due);
+        }
+    }
+    panic!(
+        "three bursts each landed the walk after the margin closed, so this runner \
+         cannot arm a settle deadline at all"
     );
 }
 
