@@ -785,25 +785,45 @@ fn reading_the_resource_is_the_default_listing_and_another_uri_is_not_found() {
     assert_eq!(missing["error"]["data"]["uri"], "vigia://elsewhere");
 }
 
+/// Make the store refuse a write to `open-1`, and hand back the undo. A
+/// read-only directory refuses the temporary on Unix; a read-only note refuses
+/// the rename over it on Windows.
 #[cfg(unix)]
+fn deny_writes(rig: &Rig) -> Box<dyn FnOnce()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = rig.store.dir().to_path_buf();
+    let was = fs::metadata(&dir).expect("metadata").permissions();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("make it read-only");
+    Box::new(move || fs::set_permissions(&dir, was).expect("restore"))
+}
+
+#[cfg(windows)]
+fn deny_writes(rig: &Rig) -> Box<dyn FnOnce()> {
+    let file = rig.store.dir().join("open-1.note");
+    let was = fs::metadata(&file).expect("metadata").permissions();
+    let mut perms = was.clone();
+    perms.set_readonly(true);
+    fs::set_permissions(&file, perms).expect("make it read-only");
+    Box::new(move || fs::set_permissions(&file, was).expect("restore"))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn deny_writes(_: &Rig) -> Box<dyn FnOnce()> {
+    Box::new(|| {})
+}
+
 #[test]
 fn an_unwritable_store_is_reported_by_resolve_and_by_the_listing() {
-    use std::os::unix::fs::PermissionsExt as _;
-
     let rig = Rig::new("mcp-unwritable");
     rig.store
         .put(&note("open-1", 5, EDITED, "one"))
         .expect("put");
-    let dir = rig.store.dir().to_path_buf();
-    let writable = fs::metadata(&dir).expect("metadata").permissions();
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).expect("make it read-only");
-    let restore = || fs::set_permissions(&dir, writable.clone()).expect("restore");
-    if fs::write(dir.join("probe.tmp"), "").is_ok() {
-        let _ = fs::remove_file(dir.join("probe.tmp"));
+    let restore = deny_writes(&rig);
+    // Probed by behaviour: a user the platform does not refuse (root, say)
+    // has nothing here to assert.
+    if rig.store.put(&note("open-1", 5, EDITED, "one")).is_ok() {
         restore();
-        println!(
-            "skipped: this user writes into a read-only directory, so nothing here can refuse"
-        );
+        println!("skipped: this user still writes here, so nothing can refuse");
         return;
     }
 
@@ -1056,4 +1076,111 @@ fn a_change_to_the_store_reaches_the_client_as_list_changed() {
 
     let (status, stderr, _) = client.finish();
     assert!(status.success(), "{status}: {stderr}");
+}
+
+#[test]
+fn a_config_file_that_does_not_parse_leaves_the_server_on_the_unstaged_diff() {
+    let rig = Rig::new("mcp-config");
+    let config = rig.root.path().join(".config").join("vigia");
+    fs::create_dir_all(&config).expect("make the config directory");
+    fs::write(config.join("config"), "staged\n").expect("write a line with no separator");
+    rig.store
+        .put(&note("open-1", 5, EDITED, "one"))
+        .expect("put");
+    let mut server = rig.server();
+    let notice = server
+        .notice()
+        .expect("a config file that does not parse is noticed");
+    assert!(notice.contains("unstaged"), "{notice}");
+    assert!(server.refusal().is_none(), "the server is up");
+    let document = document(&mut server, false);
+    assert_eq!(note_named(&document, "open-1")["placement"], "at");
+}
+
+#[test]
+fn a_note_on_a_line_only_the_staged_diff_holds_is_placed_against_it() {
+    // Line 3 changed and staged, line 10 changed in the working tree alone, so
+    // the path is in both runs: the unstaged diff holds lines 7 to 12 and the
+    // staged one lines 1 to 6.
+    let rig = Rig::new("mcp-staged");
+    rig.scratch.edit_line(PATH, 2, "staged three");
+    rig.scratch.git(&["add", PATH]);
+    rig.scratch.edit_line(PATH, 9, "unstaged ten");
+    rig.store
+        .put(&pinned("staged-1", PATH, Side::New, 3, "staged three"))
+        .expect("put");
+
+    let mut server = rig.server();
+    let listed = document(&mut server, false);
+    let without = note_named(&listed, "staged-1");
+    assert_eq!(
+        without["placement"], "gone",
+        "the staged run is not walked by default"
+    );
+
+    let config = rig.root.path().join(".config").join("vigia");
+    fs::create_dir_all(&config).expect("make the config directory");
+    fs::write(config.join("config"), "staged = on\n").expect("write the view default");
+    let mut server = rig.server();
+    let again = document(&mut server, false);
+    let with = note_named(&again, "staged-1");
+    assert_eq!(with["placement"], "at", "{with}");
+    assert_eq!(with["current_line"], 3);
+    assert_eq!(with["current_text"], "staged three");
+}
+
+#[test]
+fn a_note_on_a_binary_file_and_an_old_side_note_outside_every_hunk_carry_no_context() {
+    let scratch = Scratch::new("mcp-binary");
+    let bytes: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
+    scratch.write("blob.bin", &bytes);
+    scratch.write("src/long.rs", numbered_lines(40));
+    scratch.commit_all("baseline");
+    let changed: Vec<u8> = (0..=255u8).rev().cycle().take(4096).collect();
+    scratch.write("blob.bin", &changed);
+    scratch.edit_line("src/long.rs", 29, "thirty, edited");
+    let root = TempDir::new("mcp-state");
+    let store = Store::open(&state_of(root.path()), scratch.root()).expect("open the store");
+    store
+        .put(&pinned("bin-1", "blob.bin", Side::New, 1, "x"))
+        .expect("put");
+    store
+        .put(&pinned("old-far", "src/long.rs", Side::Old, 5, "line 5"))
+        .expect("put");
+
+    let mut server = Server::open(Some(scratch.root()), env_at(root.path()));
+    let document = document(&mut server, false);
+    let binary = note_named(&document, "bin-1");
+    assert_eq!(binary["placement"], "gone", "a binary file has no rows");
+    assert_eq!(binary["adrift"], false, "but it is in the diff");
+    assert_eq!(binary["context"], json!([]), "and no text to read around");
+    let far = note_named(&document, "old-far");
+    assert_eq!(far["placement"], "gone");
+    assert_eq!(
+        far["context"],
+        json!([]),
+        "the index side holds nothing within three lines of a line no hunk reaches"
+    );
+}
+
+#[test]
+fn an_invalid_utf8_line_and_a_batch_are_answered_and_the_server_goes_on() {
+    let rig = Rig::new("mcp-bytes");
+    let mut client = Client::spawn(Some(rig.scratch.root()), rig.root.path(), None);
+    client.request(1, "initialize", init_params("2025-06-18"));
+    client
+        .stdin
+        .write_all(&[b'{', 0xFF, 0xFE, b'}', b'\n'])
+        .expect("write bytes");
+    client.stdin.flush().expect("flush");
+    let refused = client.message();
+    assert_eq!(refused["error"]["code"], -32700, "{refused}");
+    assert!(refused["id"].is_null());
+    client.send(r#"[{"jsonrpc":"2.0","id":2,"method":"ping"}]"#);
+    let batch = client.message();
+    assert_eq!(batch["error"]["code"], -32600, "{batch}");
+    assert_eq!(client.request(3, "ping", json!({}))["result"], json!({}));
+    let (status, stderr, _) = client.finish();
+    assert!(status.success(), "{status}: {stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
 }

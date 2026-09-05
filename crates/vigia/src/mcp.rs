@@ -135,6 +135,15 @@ impl Server {
                 ));
             }
         };
+        // A batch is an array, and this revision of the protocol has none.
+        if !message.is_object() {
+            return Some(error_line(
+                Value::Null,
+                INVALID_REQUEST,
+                "invalid request: not a single message",
+                None,
+            ));
+        }
         // A response answers a request, and this server sends none.
         if message.get("result").is_some() || message.get("error").is_some() {
             return None;
@@ -197,7 +206,12 @@ impl Server {
             }
             ("resolve", Ok(site)) => site.resolve(&args),
             ("reply", Ok(site)) => site.reply(&args),
-            (other, _) => return Err((INVALID_PARAMS, format!("unknown tool: {other}"))),
+            (other, _) => {
+                return Err((
+                    INVALID_PARAMS,
+                    format!("unknown tool: {other}; the tools are notes, resolve and reply"),
+                ));
+            }
         })
     }
 
@@ -274,9 +288,15 @@ impl Site {
             }
             if note.status == Status::Open {
                 note.status = Status::Seen;
-                if let Err(e) = self.store.put(note) {
-                    note.status = Status::Open;
-                    warnings.push(format!("could not mark {} seen: {e}", note.id));
+                match self.store.rewrite(note) {
+                    Ok(true) => {}
+                    // Withdrawn by the reader since the listing read it, so it is
+                    // not a note any more.
+                    Ok(false) => continue,
+                    Err(e) => {
+                        note.status = Status::Open;
+                        warnings.push(format!("could not mark {} seen: {e}", note.id));
+                    }
                 }
             }
             notes.push(self.describe(&mut frame, note));
@@ -339,23 +359,35 @@ impl Site {
 
     /// Where the note's line is in the diff `frame` holds, by the pane's own
     /// rules: the file is looked for under every path it answers to, and a
-    /// file under none of them leaves the note adrift.
+    /// file under none of them leaves the note adrift. A path in both runs is
+    /// two entries, and the anchor carries no run, so the note is placed
+    /// against the run its line resolves best in, the unstaged one first.
     fn place(&self, frame: &mut Frame, note: &Note) -> Placed {
-        let found = frame
-            .files()
-            .iter()
-            .position(|change| change.paths().any(|path| path == note.path));
-        let Some(index) = found else {
+        let indices: Vec<usize> = (0..frame.files().len())
+            .filter(|&index| frame.files()[index].paths().any(|path| path == note.path))
+            .collect();
+        if indices.is_empty() {
             let context = match note.side {
                 Side::New => self.around(&note.path, note.line),
                 Side::Old => Vec::new(),
             };
             return Placed::adrift(context);
-        };
-        let Ok((change, diff)) = frame.diff(index) else {
-            return Placed::adrift(Vec::new());
-        };
-        let current_path = change.path.clone();
+        }
+        let mut best: Option<Placed> = None;
+        for index in indices {
+            let Ok((change, diff)) = frame.diff(index) else {
+                continue;
+            };
+            let placed = self.placed_in(change.path.clone(), diff, note);
+            if best.as_ref().is_none_or(|held| placed.rank() > held.rank()) {
+                best = Some(placed);
+            }
+        }
+        best.unwrap_or_else(|| Placed::adrift(Vec::new()))
+    }
+
+    /// The note placed against one file's diff, listed under `current_path`.
+    fn placed_in(&self, current_path: String, diff: &FileDiff, note: &Note) -> Placed {
         let rows = diff.rows_on(note.side);
         let placement = resolve(note, &rows);
         let current_line = match placement {
@@ -449,10 +481,14 @@ impl Site {
             Err(e) => return failed(&e.to_string()),
         };
         let said = change(&mut note);
-        match self.store.put(&note) {
-            Ok(()) => answer(
+        match self.store.rewrite(&note) {
+            Ok(true) => answer(
                 said,
                 json!({ "id": id, "found": true, "status": note.status.name() }),
+            ),
+            Ok(false) => answer(
+                format!("no such note: {id}"),
+                json!({ "id": id, "found": false }),
             ),
             Err(e) => failed(&format!("the store refused the write: {e}")),
         }
@@ -489,6 +525,16 @@ impl Placed {
             context,
         }
     }
+
+    /// How well the line was found, for choosing between two runs of one path.
+    fn rank(&self) -> u8 {
+        match self.placement {
+            Some(Placement::At(_)) => 3,
+            Some(Placement::Moved(_)) => 2,
+            Some(Placement::Changed) => 1,
+            Some(Placement::Gone) | None => 0,
+        }
+    }
 }
 
 fn initialize(params: &Value) -> Value {
@@ -513,8 +559,9 @@ fn tools() -> Value {
             "description": "List the reader's notes pinned to lines of the diff in the vigia \
                             pane: open ones by default, resolved ones too with all. Each carries \
                             its id, its anchor, the body, where the line is now and the lines \
-                            around it. Listing marks each note seen; act on the code, then resolve \
-                            by id with one line saying what you did.",
+                            around it. Listing marks each note seen and, unless all is set, \
+                            removes the resolved ones; act on the code, then resolve by id with \
+                            one line saying what you did.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -564,7 +611,7 @@ fn resource() -> Value {
         "name": "notes",
         "title": "Notes pinned in the vigia pane",
         "description": "The reader's open notes on lines of the diff, placed against the diff as \
-                        it is now. Reading marks them seen.",
+                        it is now. Reading marks them seen and removes the resolved ones.",
         "mimeType": "application/json",
     })
 }
@@ -642,6 +689,16 @@ pub fn serve() -> ExitCode {
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(line) => line,
+            // A line that is not UTF-8 is not a message, and the protocol says
+            // what to answer; the bytes are consumed, so the next line still reads.
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                let refused =
+                    error_line(Value::Null, PARSE_ERROR, &format!("parse error: {e}"), None);
+                if emit(&out, &refused).is_err() {
+                    return ExitCode::SUCCESS;
+                }
+                continue;
+            }
             Err(e) => {
                 eprintln!("vigia mcp: could not read stdin: {e}");
                 return ExitCode::FAILURE;

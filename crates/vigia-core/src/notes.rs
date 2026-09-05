@@ -293,7 +293,27 @@ impl Store {
     /// be created; the file cannot be written or moved into place, in which
     /// case the temporary is removed on the way out.
     pub fn put(&self, note: &Note) -> Result<()> {
+        self.write(note, false).map(|_| ())
+    }
+
+    /// Write `note` over the file it already has, and only while that file is
+    /// still there: a note the reader withdrew between the read and this write
+    /// stays withdrawn, and `false` says so. The check sits right before the
+    /// rename, which is as close as two processes with no lock between them
+    /// can get.
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::put`].
+    pub fn rewrite(&self, note: &Note) -> Result<bool> {
+        self.write(note, true)
+    }
+
+    fn write(&self, note: &Note, only_present: bool) -> Result<bool> {
         let done = self.path_of(&note.id)?;
+        if only_present && !done.is_file() {
+            return Ok(false);
+        }
         fs::create_dir_all(&self.dir).map_err(|source| Error::store(&self.dir, source))?;
         let tmp = self.dir.join(format!(
             "{}.{:x}-{:x}.tmp",
@@ -302,10 +322,15 @@ impl Store {
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         fs::write(&tmp, encode(note)).map_err(|source| Error::store(&tmp, source))?;
+        if only_present && !done.is_file() {
+            let _ = fs::remove_file(&tmp);
+            return Ok(false);
+        }
         fs::rename(&tmp, &done).map_err(|source| {
             let _ = fs::remove_file(&tmp);
             Error::store(&done, source)
-        })
+        })?;
+        Ok(true)
     }
 
     /// Delete the note `id`. A note already gone is not an error: two panes on

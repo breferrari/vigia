@@ -782,3 +782,40 @@ fn a_note_is_read_by_id_and_an_id_the_store_would_not_name_is_none() {
         .expect_err("a file cut short is not a note");
     assert!(matches!(err, Error::Store { .. }), "{err:?}");
 }
+
+/// The server reads a note, changes it and writes it back; the reader can
+/// withdraw it in between, and the write must not bring it back.
+#[test]
+fn a_rewrite_refuses_a_note_that_was_withdrawn() {
+    let (_scratch, _root, store) = store("notes-rewrite-withdrawn");
+    let mut written = note("r-1", 5, "x", "first");
+    assert!(
+        !store
+            .rewrite(&written)
+            .expect("a rewrite of nothing is not an error"),
+        "nothing to rewrite before the first put"
+    );
+    assert!(!store.dir().exists(), "and nothing was made for it");
+
+    store.put(&written).expect("put");
+    written.body = "second".to_owned();
+    assert!(
+        store.rewrite(&written).expect("rewrite"),
+        "the file is there"
+    );
+    assert_eq!(
+        store.get("r-1").expect("get").map(|n| n.body),
+        Some("second".to_owned())
+    );
+
+    store.remove("r-1").expect("the reader withdraws it");
+    written.body = "third".to_owned();
+    assert!(
+        !store.rewrite(&written).expect("rewrite"),
+        "withdrawn between the read and the write"
+    );
+    assert!(
+        files_in(store.dir()).is_empty(),
+        "no file came back, and no temporary stayed"
+    );
+}
