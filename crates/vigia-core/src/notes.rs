@@ -59,9 +59,8 @@ pub enum Status {
 /// One note, pinned to a line of the diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
-    /// Unique across processes and restarts, and the file's name: ASCII
-    /// letters, digits and dashes only, which is what [`Store`] refuses to
-    /// write or remove without.
+    /// Unique across processes and restarts, and the file's name, so
+    /// [`Store`] refuses one it could not name a file after.
     pub id: String,
     /// Repository-relative path of the file the line is in.
     pub path: String,
@@ -150,19 +149,26 @@ pub fn key(workdir: &Path) -> Result<String> {
     Ok(id.to_hex().to_string())
 }
 
-/// Whether `id` can be a file name inside the store and nothing else: on
-/// Windows a device name is a device whatever extension follows it, so those
-/// are refused on every platform and the store stays one rule.
+/// Whether `id` can be a file name inside the store and nothing else:
+/// lowercase ASCII letters, digits and dashes, so a filesystem that folds case
+/// cannot give one file two names; and not a Windows device name, which is a
+/// device whatever extension follows it, refused on every platform so the
+/// store stays one rule.
 fn is_id(id: &str) -> bool {
-    let plain = !id.is_empty()
+    !id.is_empty()
         && id.len() <= ID_MAX
-        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !is_device(id)
+}
+
+fn is_device(id: &str) -> bool {
     let upper = id.to_ascii_uppercase();
-    let device = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (upper.len() == 4
             && (upper.starts_with("COM") || upper.starts_with("LPT"))
-            && matches!(upper.as_bytes()[3], b'1'..=b'9'));
-    plain && !device
+            && matches!(upper.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// The notes of one worktree, on disk.
@@ -271,15 +277,26 @@ impl Store {
         for entry in entries {
             let entry = entry.map_err(|source| Error::store(&self.dir, source))?;
             let name = entry.file_name();
-            if Path::new(&name).extension().and_then(|ext| ext.to_str()) != Some(NOTE_EXT) {
+            let file = Path::new(&name);
+            if file.extension().and_then(|ext| ext.to_str()) != Some(NOTE_EXT) {
                 continue;
             }
             let path = entry.path();
+            // A name the store would not write is not read either: on Windows a
+            // device name opens the device.
+            let Some(stem) = file
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|stem| is_id(stem))
+            else {
+                listing
+                    .skipped
+                    .push((path, "is not named by a note id".to_owned()));
+                continue;
+            };
             match fs::read(&path) {
                 Ok(bytes) => match decode(&bytes) {
-                    Ok(note) if Path::new(&name).file_stem() == Some(note.id.as_ref()) => {
-                        listing.notes.push(note);
-                    }
+                    Ok(note) if note.id == stem => listing.notes.push(note),
                     Ok(note) => {
                         let why = format!("names itself {:?}, which is not its file name", note.id);
                         listing.skipped.push((path, why));
@@ -465,7 +482,8 @@ struct Cursor<'a> {
 }
 
 impl Cursor<'_> {
-    /// The next line without its newline. A file that ends mid-line was torn.
+    /// The next line without its newline. A file that ends first, at a line's
+    /// end or inside one, was cut short.
     fn line(&mut self) -> std::result::Result<&str, String> {
         let rest = &self.bytes[self.at..];
         let end = rest.iter().position(|&b| b == b'\n').ok_or_else(|| {

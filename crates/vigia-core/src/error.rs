@@ -97,7 +97,7 @@ impl Error {
         }
     }
 
-    /// The store failed at `path`.
+    /// The store could not be used at `path`.
     pub(crate) fn store(path: &std::path::Path, source: std::io::Error) -> Self {
         Error::Store {
             path: path.to_owned(),

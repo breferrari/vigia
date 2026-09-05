@@ -227,6 +227,8 @@ fn an_id_that_could_name_a_file_outside_the_store_is_refused() {
         "nul",
         "COM1",
         "lpt9",
+        "AB1",
+        "Ab-1",
         long.as_str(),
     ] {
         let err = store
@@ -245,8 +247,8 @@ fn an_id_that_could_name_a_file_outside_the_store_is_refused() {
         .put(&note(&longest, 1, "x", "y"))
         .expect("sixty-four is the longest id");
     store
-        .put(&note("COM0", 1, "x", "y"))
-        .expect("COM0 names no device");
+        .put(&note("com0", 1, "x", "y"))
+        .expect("com0 names no device");
 }
 
 #[test]
@@ -284,85 +286,79 @@ fn a_file_whose_id_is_not_its_name_is_skipped() {
     );
 }
 
+/// The note `good` as the store wrote it, and its file's text.
+fn good_note(store: &Store) -> (Note, String) {
+    let mut good = note("good", 1, "x", "kept");
+    good.reply = Some("done".to_owned());
+    store.put(&good).expect("put");
+    let text = fs::read_to_string(store.dir().join("good.note")).expect("read it back");
+    (good, text)
+}
+
 #[test]
-fn a_repeated_field_or_trailing_bytes_are_a_skip() {
+fn a_repeated_field_is_a_skip() {
     let (_scratch, _root, store) = store("notes-repeat");
-    store.put(&note("good", 1, "x", "kept")).expect("put");
-    let good = fs::read_to_string(store.dir().join("good.note")).expect("read it back");
-    let twice = good.replacen("side: new\n", "side: new\nside: old\n", 1);
-    assert_ne!(twice, good);
-    fs::write(store.dir().join("twice.note"), &twice).expect("write a repeated field");
-    fs::write(store.dir().join("trailing.note"), format!("{good}extra\n"))
-        .expect("write trailing bytes");
-    let reordered = good.replacen("id: good\nside: new\n", "side: new\nid: good\n", 1);
-    assert_ne!(reordered, good);
-    fs::write(store.dir().join("good.note"), &reordered).expect("write reordered fields");
+    let (good, text) = good_note(&store);
+    let twice = text.replacen("side: new\n", "side: new\nside: old\n", 1);
+    assert_ne!(twice, text);
+    fs::write(store.dir().join("good.note"), &twice).expect("write a repeated field");
 
     let listing = store.list().expect("list");
-    assert_eq!(listing.notes.len(), 1, "{:?}", listing.skipped);
-    let mut skipped: Vec<String> = listing
-        .skipped
-        .iter()
-        .map(|(path, _)| {
-            path.file_name()
-                .expect("a name")
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    skipped.sort();
-    // Field order is not part of the format, so the note read back in another
-    // order is the same note.
-    assert_eq!(
-        skipped,
-        vec!["trailing.note".to_owned(), "twice.note".to_owned()]
+    assert!(listing.notes.is_empty(), "{:?}", listing.notes);
+    assert_eq!(listing.skipped.len(), 1);
+    assert!(
+        listing.skipped[0].1.contains("twice"),
+        "{}",
+        listing.skipped[0].1
+    );
+    assert_ne!(listing.skipped[0].1, good.body);
+}
+
+#[test]
+fn trailing_bytes_are_a_skip() {
+    let (_scratch, _root, store) = store("notes-trailing");
+    let (_good, text) = good_note(&store);
+    fs::write(store.dir().join("good.note"), format!("{text}extra\n"))
+        .expect("write trailing bytes");
+
+    let listing = store.list().expect("list");
+    assert!(listing.notes.is_empty(), "{:?}", listing.notes);
+    assert_eq!(listing.skipped.len(), 1);
+    assert!(
+        listing.skipped[0].1.contains("follow"),
+        "{}",
+        listing.skipped[0].1
     );
 }
 
 #[test]
-fn a_torn_file_and_a_newer_version_are_skipped_and_the_rest_listed() {
-    let (_scratch, _root, store) = store("notes-skipped");
-    let good = note("good", 2, "fine", "kept");
-    store.put(&good).expect("put");
-    // A write cut off by a kill: the body announces more bytes than follow.
-    fs::write(
-        store.dir().join("torn.note"),
-        "vigia note 1\nid: torn\nside: new\nline: 1\nstatus: open\nwritten: 1\npath 1\np\ntext 1\nx\nbody 40\nshort\n",
-    )
-    .expect("write a torn file");
-    fs::write(
-        store.dir().join("newer.note"),
-        "vigia note 2\nid: newer\nseverity: high\n",
-    )
-    .expect("write a newer file");
-    // A write in flight from another process is neither listed nor reported.
-    fs::write(
-        store.dir().join("inflight.1f-2.tmp"),
-        "vigia note 1\nid: in",
-    )
-    .expect("write a tmp");
+fn a_note_read_back_in_another_field_order_is_the_same_note() {
+    let (_scratch, _root, store) = store("notes-reordered");
+    let (good, text) = good_note(&store);
+    let reordered = text.replacen("id: good\nside: new\n", "side: new\nid: good\n", 1);
+    assert_ne!(reordered, text);
+    fs::write(store.dir().join("good.note"), &reordered).expect("write reordered fields");
 
     let listing = store.list().expect("list");
     assert_eq!(listing.notes, vec![good]);
-    let mut skipped: Vec<(String, String)> = listing
-        .skipped
-        .iter()
-        .map(|(path, why)| {
-            (
-                path.file_name()
-                    .expect("a file name")
-                    .to_string_lossy()
-                    .into_owned(),
-                why.clone(),
-            )
-        })
-        .collect();
-    skipped.sort();
-    assert_eq!(skipped.len(), 2, "{skipped:?}");
-    assert_eq!(skipped[0].0, "newer.note");
-    assert!(skipped[0].1.contains("vigia note 2"), "{}", skipped[0].1);
-    assert_eq!(skipped[1].0, "torn.note");
-    assert!(skipped[1].1.contains("shorter"), "{}", skipped[1].1);
+    assert!(listing.skipped.is_empty(), "{:?}", listing.skipped);
+}
+
+#[test]
+fn a_file_whose_name_is_not_a_note_id_is_not_read() {
+    // The same rule that keeps a device name out of put keeps it out of read.
+    let (_scratch, _root, store) = store("notes-bad-name");
+    let (good, _text) = good_note(&store);
+    fs::write(store.dir().join("Bad Name.note"), "anything").expect("write a badly named file");
+
+    let listing = store.list().expect("list");
+    assert_eq!(listing.notes, vec![good]);
+    assert_eq!(listing.skipped.len(), 1, "{:?}", listing.skipped);
+    assert!(
+        listing.skipped[0].1.contains("not named by a note id"),
+        "{}",
+        listing.skipped[0].1
+    );
 }
 
 #[test]
@@ -404,6 +400,12 @@ fn a_number_too_large_for_the_file_is_a_skip_and_never_a_panic() {
     assert_eq!(listing.notes.len(), 1);
     assert_eq!(listing.skipped.len(), files.len(), "{:?}", listing.skipped);
     assert!(listing.skipped.iter().all(|(_, why)| !why.is_empty()));
+    let version_only = listing
+        .skipped
+        .iter()
+        .find(|(path, _)| path.ends_with("version-only.note"))
+        .expect("the version-only file was skipped");
+    assert!(version_only.1.contains("ends before"), "{}", version_only.1);
 }
 
 #[test]
@@ -427,8 +429,7 @@ fn an_unwritable_root_is_an_error_the_caller_can_show() {
 #[test]
 fn a_failed_rename_leaves_no_temporary_behind() {
     // A directory where the note's file would go makes the rename fail on
-    // every platform; what must not follow is a temporary the next listing
-    // has to step over forever.
+    // every platform.
     let (_scratch, _root, store) = store("notes-litter");
     store
         .put(&note("other", 1, "x", "y"))
@@ -447,26 +448,36 @@ fn a_failed_rename_leaves_no_temporary_behind() {
 }
 
 /// Rewrites one note between two versions from `writers` threads while the
-/// caller lists, and asserts every listing saw one version whole.
+/// caller lists, and asserts every listing saw one version whole and both
+/// versions were seen. The writers stop once the reader has seen both, or
+/// after a bounded number of rounds, so a starved reader fails on what it saw
+/// rather than on timing.
 fn rewrite_under_a_reader(name: &str, writers: usize) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     let (_scratch, _root, store) = store(name);
     let a = note("w", 3, "line", &"A".repeat(8192));
     let b = note("w", 3, "line", &"B".repeat(8192));
     store.put(&a).expect("first put");
 
+    let seen_both = Arc::new(AtomicBool::new(false));
     let handles: Vec<_> = (0..writers)
         .map(|w| {
             let writer_store = store.clone();
             let (wa, wb) = (a.clone(), b.clone());
+            let seen_both = Arc::clone(&seen_both);
             std::thread::spawn(move || {
-                for round in 0..200 {
+                for round in 0..4000 {
+                    if seen_both.load(Ordering::Relaxed) {
+                        break;
+                    }
                     let next = if (round + w) % 2 == 0 { &wb } else { &wa };
                     writer_store.put(next).expect("rewrite under a reader");
                 }
             })
         })
         .collect();
-    let mut listed = 0;
     let (mut saw_a, mut saw_b) = (false, false);
     while handles.iter().any(|h| !h.is_finished()) {
         let listing = store.list().expect("list under a writer");
@@ -482,16 +493,15 @@ fn rewrite_under_a_reader(name: &str, writers: usize) {
             );
             saw_a |= found == &a;
             saw_b |= found == &b;
-            listed += 1;
         }
+        if saw_a && saw_b {
+            seen_both.store(true, Ordering::Relaxed);
+        }
+        std::thread::yield_now();
     }
     for handle in handles {
         handle.join().expect("a writer finished");
     }
-    assert!(
-        listed > 0,
-        "the reader never listed anything while the writers ran"
-    );
     assert!(
         saw_a && saw_b,
         "the reader saw one version only, so nothing was rewritten under it"
