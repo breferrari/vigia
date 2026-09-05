@@ -6,8 +6,6 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
-use std::time::{Duration, UNIX_EPOCH};
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -20,9 +18,9 @@ use vigia::{
     body_layout, count_cell, hover_after, press_at, regions, render, repainted, selection_after,
     toggle,
 };
-use vigia_core::{ChangeKind, Frame, Highlighter, History, Note, Side, Status, Store, key};
+use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
-use support::{Scratch, TempDir};
+use support::{Scratch, TempDir, files_in, note, numbered_lines};
 
 const PANE: Rect = Rect::new(0, 0, 80, 24);
 const NARROW: Rect = Rect::new(0, 0, 40, 24);
@@ -35,49 +33,13 @@ const EDITED: &str = "    margin.checked_mul(2).unwrap_or(margin)";
 const BODY: &str =
     "checked_mul on a Duration cannot overflow here; use saturating_mul and drop the unwrap_or.";
 
-fn numbered(lines: usize) -> String {
-    (1..=lines).map(|n| format!("line {n}\n")).collect()
-}
-
 /// One committed file whose fifth line changed, which is the mockup's shape.
 fn fixture(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
-    scratch.write(PATH, numbered(12));
+    scratch.write(PATH, numbered_lines(12));
     scratch.commit_all("baseline");
     scratch.edit_line(PATH, 4, EDITED);
     scratch
-}
-
-/// A note as the store holds it, on `line` of [`PATH`]'s working-tree side.
-fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
-    Note {
-        id: id.to_owned(),
-        path: PATH.to_owned(),
-        side: Side::New,
-        line,
-        text: text.to_owned(),
-        body: body.to_owned(),
-        status: Status::Open,
-        reply: None,
-        written: UNIX_EPOCH + Duration::from_secs(1_800_000_000),
-    }
-}
-
-fn files_in(dir: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
-        .map(|entry| {
-            entry
-                .expect("a directory entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    names.sort();
-    names
 }
 
 fn at(kind: MouseEventKind, column: u16, row: u16) -> Event {
@@ -624,7 +586,6 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
         "{}",
         painted.text(y + 3)
     );
-    assert_eq!(painted.view.notes.placed, 1);
     assert!(painted.footer().contains("1 note"), "{}", painted.footer());
 }
 
@@ -673,7 +634,7 @@ fn a_moved_line_keeps_its_note_and_the_store_is_not_rewritten() {
     let bytes = fs::read(&file).expect("the note file");
 
     // A line inserted above pushes the noted line down to 6.
-    let mut lines: Vec<String> = numbered(12).lines().map(str::to_owned).collect();
+    let mut lines: Vec<String> = numbered_lines(12).lines().map(str::to_owned).collect();
     lines[4] = EDITED.to_owned();
     lines.insert(1, "inserted".to_owned());
     scratch.write(PATH, lines.join("\n") + "\n");
@@ -774,17 +735,14 @@ fn a_line_gone_from_the_diff_draws_its_note_under_the_heading() {
         painted.view.notes.marked.is_empty(),
         "a gone note marked a line"
     );
-    assert_eq!(
-        (painted.view.notes.placed, painted.view.notes.adrift),
-        (1, 0)
-    );
+    assert_eq!(painted.view.notes.adrift, 0);
 }
 
 #[test]
 fn a_file_out_of_the_diff_leaves_its_note_adrift_and_the_footer_counts_it() {
     let scratch = Scratch::new("notes-adrift");
-    scratch.write(PATH, numbered(12));
-    scratch.write("src/other.rs", numbered(12));
+    scratch.write(PATH, numbered_lines(12));
+    scratch.write("src/other.rs", numbered_lines(12));
     scratch.commit_all("baseline");
     scratch.edit_line(PATH, 4, EDITED);
     scratch.edit_line("src/other.rs", 2, "other changed");
@@ -799,7 +757,7 @@ fn a_file_out_of_the_diff_leaves_its_note_adrift_and_the_footer_counts_it() {
     rig.reload();
 
     let both = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!((both.view.notes.placed, both.view.notes.adrift), (2, 0));
+    assert_eq!(both.view.notes.adrift, 0);
     assert!(both.footer().contains("2 notes"), "{}", both.footer());
     assert!(!both.footer().contains("adrift"), "{}", both.footer());
 
@@ -807,7 +765,7 @@ fn a_file_out_of_the_diff_leaves_its_note_adrift_and_the_footer_counts_it() {
     scratch.git(&["checkout", "--", "src/other.rs"]);
     frame.advance().expect("advance after the revert");
     let adrift = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!((adrift.view.notes.placed, adrift.view.notes.adrift), (1, 1));
+    assert_eq!(adrift.view.notes.adrift, 1);
     assert!(
         adrift.footer().contains("2 notes · 1 adrift"),
         "{}",
@@ -822,7 +780,7 @@ fn a_file_out_of_the_diff_leaves_its_note_adrift_and_the_footer_counts_it() {
     scratch.edit_line("src/other.rs", 2, "other changed");
     frame.advance().expect("advance after the edit");
     let back = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!((back.view.notes.placed, back.view.notes.adrift), (2, 0));
+    assert_eq!(back.view.notes.adrift, 0);
     let y = back.row_of("other changed");
     assert!(back.notes_under(y)[0].starts_with("two"));
 
@@ -834,7 +792,7 @@ fn a_file_out_of_the_diff_leaves_its_note_adrift_and_the_footer_counts_it() {
 #[test]
 fn a_renamed_file_carries_its_note_to_the_new_path() {
     let scratch = Scratch::new("notes-renamed");
-    scratch.write("old/name.rs", numbered(30));
+    scratch.write("old/name.rs", numbered_lines(30));
     scratch.commit_all("baseline");
     scratch.git(&["mv", "old/name.rs", "new-name.rs"]);
     // `git mv` stages the move; the pane watches the worktree, so it is unstaged
@@ -856,10 +814,7 @@ fn a_renamed_file_carries_its_note_to_the_new_path() {
     rig.reload();
 
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!(
-        (painted.view.notes.placed, painted.view.notes.adrift),
-        (1, 0)
-    );
+    assert_eq!(painted.view.notes.adrift, 0);
     let y = painted.row_of(EDITED);
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 1, "{under:?}");
@@ -961,7 +916,7 @@ fn c_hides_the_rows_and_keeps_the_mark() {
 fn note_rows_are_display_rows_the_bar_does_not_count() {
     // Many hunks, so the diff is taller than the pane and the bar draws.
     let scratch = Scratch::new("notes-thumb");
-    scratch.write(PATH, numbered(200));
+    scratch.write(PATH, numbered_lines(200));
     scratch.commit_all("baseline");
     for line in (4..200).step_by(10) {
         scratch.edit_line(PATH, line, &format!("changed {}", line + 1));
@@ -1139,7 +1094,7 @@ fn a_pane_with_no_notes_draws_todays_frame() {
 #[test]
 fn a_continuation_row_anchors_to_its_head_line() {
     let scratch = Scratch::new("notes-continuation");
-    scratch.write(PATH, numbered(12));
+    scratch.write(PATH, numbered_lines(12));
     scratch.commit_all("baseline");
     let long = format!("    {}", "a long line that wraps ".repeat(8));
     scratch.edit_line(PATH, 4, long.trim_end());
@@ -1196,7 +1151,7 @@ fn a_continuation_row_anchors_to_its_head_line() {
 #[test]
 fn the_bottom_clamp_counts_note_rows() {
     let scratch = Scratch::new("notes-bottom");
-    scratch.write(PATH, numbered(60));
+    scratch.write(PATH, numbered_lines(60));
     scratch.commit_all("baseline");
     for line in (4..60).step_by(10) {
         scratch.edit_line(PATH, line, &format!("changed {}", line + 1));

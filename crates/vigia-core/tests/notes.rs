@@ -4,43 +4,13 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir};
+use support::{Scratch, TempDir, files_in, note};
 use vigia_core::{
     Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
     key, resolve,
 };
-
-fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
-    Note {
-        id: id.to_owned(),
-        path: "src/watch.rs".to_owned(),
-        side: Side::New,
-        line,
-        text: text.to_owned(),
-        body: body.to_owned(),
-        status: Status::Open,
-        reply: None,
-        written: UNIX_EPOCH + Duration::from_secs(1_800_000_000),
-    }
-}
-
-fn files_in(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .expect("read the store directory")
-        .map(|entry| {
-            entry
-                .expect("a directory entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    names.sort();
-    names
-}
 
 /// A store on a fresh state root for a fresh repository.
 fn store(name: &str) -> (Scratch, TempDir, Store) {

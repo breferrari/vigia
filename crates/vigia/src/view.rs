@@ -364,8 +364,6 @@ pub struct Noted {
     /// The first row of each file's rows on this screen and that file's path,
     /// so a row can be traced to the file it is in without a heading on screen.
     pub segments: Vec<(usize, String)>,
-    /// Notes whose file is in the diff, drawn or not.
-    pub placed: usize,
     /// Notes whose file is not in the diff, drawn nowhere and counted in the
     /// footer.
     pub adrift: usize,
@@ -539,26 +537,15 @@ fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
     }
 
     for hunk in &diff.hunks {
-        // The working-tree side of the advance `Hunk::numbered` makes, and it
-        // has to agree with it: a copy that drifted would put the strip's marks
-        // somewhere the gutter disagrees with.
-        let mut new = hunk.new_start.max(1);
-        for line in &hunk.lines {
+        for (_, new, line) in hunk.positions() {
+            let Some(at) = bucket_of(new, diff.lines) else {
+                continue;
+            };
             match line.kind {
-                LineKind::Context => new += 1,
-                LineKind::Added => {
-                    if let Some(at) = bucket_of(new, diff.lines) {
-                        buckets[at].added = buckets[at].added.saturating_add(1);
-                    }
-                    new += 1;
-                }
-                // Deliberately does not advance `new`: a removed line
-                // occupies no working-tree row, so the next line after it sits
-                // at the same position.
+                LineKind::Context => {}
+                LineKind::Added => buckets[at].added = buckets[at].added.saturating_add(1),
                 LineKind::Removed => {
-                    if let Some(at) = bucket_of(new, diff.lines) {
-                        buckets[at].removed = buckets[at].removed.saturating_add(1);
-                    }
+                    buckets[at].removed = buckets[at].removed.saturating_add(1);
                 }
             }
         }
@@ -1044,7 +1031,6 @@ impl View {
                 .iter()
                 .filter(|note| !present.contains(note.path.as_str()))
                 .count();
-            view.notes.placed = notes.len() - view.notes.adrift;
         }
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.

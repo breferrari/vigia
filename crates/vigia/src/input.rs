@@ -52,8 +52,7 @@ impl Region {
 
     /// Whether `column`, `row` is a cell of this region's gutter.
     fn on_gutter(self, column: u16, row: u16) -> bool {
-        let (left, columns) = self.gutter;
-        self.contains(row) && columns > 0 && column >= left && column < left.saturating_add(columns)
+        self.contains(row) && Self::within(column, self.gutter)
     }
 
     /// Whether `row` falls inside this region.

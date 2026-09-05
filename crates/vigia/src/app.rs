@@ -6,6 +6,7 @@ use vigia_core::{Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
+use crate::notes::NoteCount;
 use crate::render::{Body, Chrome, Mode};
 use crate::view::{Position, View, Viewport, rows_in};
 
@@ -103,8 +104,8 @@ pub struct App {
     notes: Vec<Note>,
     /// Whether the note rows are drawn under their lines (`c`); the marks stay.
     notes_shown: bool,
-    /// Notes the last collect counted, and how many of them were adrift.
-    note_count: (usize, usize),
+    /// The notes as the footer counts them, from the last collect.
+    note_count: NoteCount,
     /// Logical rows the last frame drew, which a page step is measured in.
     /// Stepping by the display height instead walks over unwrapped content.
     shown: usize,
@@ -163,7 +164,7 @@ impl Default for App {
             wrap: false,
             notes: Vec::new(),
             notes_shown: true,
-            note_count: (0, 0),
+            note_count: NoteCount::default(),
             shown: 0,
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
@@ -753,7 +754,10 @@ impl App {
             &self.notes,
             self.notes_shown,
         )?;
-        self.note_count = (view.notes.placed + view.notes.adrift, view.notes.adrift);
+        self.note_count = NoteCount {
+            total: self.notes.len(),
+            adrift: view.notes.adrift,
+        };
         // Advanced here rather than by the caller, because this is the call
         // that *is* a frame: a shell that painted without coming through here
         // has not drawn a screen.

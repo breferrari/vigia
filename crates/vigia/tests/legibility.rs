@@ -308,7 +308,7 @@ fn chrome() -> Chrome {
         // the chrome it measured before the status readouts existed.
         frame: None,
         memory: None,
-        notes: (0, 0),
+        notes: Default::default(),
     }
 }
 
@@ -320,7 +320,7 @@ fn diagnostics() -> Chrome {
         scrolling: None,
         frame: Some(Duration::from_millis(999)),
         memory: Some(999 * 1024 * 1024),
-        notes: (0, 0),
+        notes: Default::default(),
         ..following()
     }
 }

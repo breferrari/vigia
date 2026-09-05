@@ -184,7 +184,7 @@ fn chrome() -> Chrome {
         // The first paint's chrome: no frame has completed, so there is no p99 to draw.
         frame: None,
         memory: None,
-        notes: (0, 0),
+        notes: Default::default(),
     }
 }
 
@@ -196,7 +196,7 @@ fn diagnostics_chrome() -> Chrome {
         scrolling: None,
         frame: Some(Duration::from_micros(800)),
         memory: Some(19 * 1024 * 1024),
-        notes: (0, 0),
+        notes: Default::default(),
         ..following_chrome()
     }
 }
@@ -1815,7 +1815,7 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
         gripped: None,
         scrolling: None,
         memory: Some(bytes),
-        notes: (0, 0),
+        notes: Default::default(),
         ..diagnostics_chrome()
     }));
 
@@ -1847,7 +1847,7 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
         gripped: None,
         scrolling: None,
         memory: None,
-        notes: (0, 0),
+        notes: Default::default(),
         ..diagnostics_chrome()
     };
     assert!(
@@ -1869,7 +1869,7 @@ fn the_first_paint_draws_no_readouts_at_all() {
         scrolling: None,
         frame: None,
         memory: Some(19 * 1024 * 1024),
-        notes: (0, 0),
+        notes: Default::default(),
         ..following_chrome()
     };
     let backend = screen(80, 6, &view, &first);
@@ -5144,7 +5144,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
                 gripped: None,
                 scrolling: None,
                 memory: Some(2 * 1024 * 1024 * 1024),
-                notes: (0, 0),
+                notes: Default::default(),
                 ..diagnostics_chrome()
             },
             ">1GiB",

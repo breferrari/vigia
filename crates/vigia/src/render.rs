@@ -12,7 +12,7 @@ use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
-use crate::notes::count_cell;
+use crate::notes::{NoteCount, count_cell};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View};
 
@@ -453,9 +453,8 @@ pub struct Chrome {
     pub selected: Option<Selection>,
     /// Which bar is being scrolled and which way, when one is.
     pub scrolling: Option<(Grabbed, isize)>,
-    /// How many notes the reader has, and how many of them are adrift, which
-    /// the footer counts beside the position.
-    pub notes: (usize, usize),
+    /// The notes the footer counts beside the position.
+    pub notes: NoteCount,
     /// Something the reader should see instead of the key hints.
     pub notice: Option<String>,
     /// What that message is, which the string cannot say.
@@ -495,20 +494,26 @@ fn position_of(file: usize, files: usize) -> String {
     }
 }
 
-/// The state's ladder, widest rung first.
-fn state_rungs(following: bool, position: &str, notes: (usize, usize)) -> Vec<String> {
-    let mut rungs = Vec::with_capacity(4);
-    // The notes count is the first fact a narrowing footer gives up: the position
-    // and the follow marker are about where the reader is, and the count is about
-    // what they left behind.
-    let counted = count_cell(notes.0, notes.1);
+/// The state's ladder, widest rung first: the notes count before the position
+/// and the follow marker, and the first fact a narrowing footer gives up, since
+/// the other two are about where the reader is and the count is about what they
+/// left behind.
+fn state_rungs(following: bool, position: &str, notes: NoteCount) -> Vec<String> {
+    let mut rungs = position_rungs(following, position);
+    let counted = count_cell(notes.total, notes.adrift);
     if !counted.is_empty() {
-        let state = state_rungs(following, position, (0, 0));
-        match state.first().map(String::as_str) {
-            Some("") | None => rungs.push(counted),
-            Some(widest) => rungs.push(format!("{counted}{CELL_GAP}{widest}")),
-        }
+        let widest = match rungs.first().map(String::as_str) {
+            Some("") | None => counted,
+            Some(widest) => format!("{counted}{CELL_GAP}{widest}"),
+        };
+        rungs.insert(0, widest);
     }
+    rungs
+}
+
+/// The position's own ladder, widest rung first and an empty rung last.
+fn position_rungs(following: bool, position: &str) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(3);
     match (following, position.is_empty()) {
         // `follow ▶ ` with nothing after it would read as a truncation rather
         // than a state, so a clean worktree gets the marker on its own.
@@ -1212,7 +1217,7 @@ impl<'a> Footer<'a> {
         // count that bought a second line would leave the body a row shorter than
         // the rows collected for it.
         let bare = width_of(widest_fitting(
-            &state_rungs(chrome.following, &widest, (0, 0)),
+            &position_rungs(chrome.following, &widest),
             width,
         ));
         let reserved = width_of(widest_fitting(
@@ -3532,12 +3537,17 @@ impl Painter<'_> {
             _ => None,
         };
         // The rows carrying a note's mark, and whether the note is the anchor alone.
-        let mut marks: Vec<Option<bool>> = vec![None; shown];
-        for mark in &view.notes.marked {
-            if let Some(slot) = marks.get_mut(mark.row) {
-                *slot = Some(slot.unwrap_or(true) && mark.bare);
+        // Built only for a screen that has one, so a pane with no notes allocates
+        // nothing for them.
+        let marks: Option<Vec<Option<bool>>> = (!view.notes.marked.is_empty()).then(|| {
+            let mut marks = vec![None; shown];
+            for mark in &view.notes.marked {
+                if let Some(slot) = marks.get_mut(mark.row) {
+                    *slot = Some(slot.unwrap_or(true) && mark.bare);
+                }
             }
-        }
+            marks
+        });
 
         // And the two are allowed to differ, which is the ruling rather than a gap.
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
@@ -3551,7 +3561,7 @@ impl Painter<'_> {
             let mark = if hovered == Some(offset) {
                 Mark::Icon
             } else {
-                match marks[offset] {
+                match marks.as_ref().and_then(|marks| marks[offset]) {
                     Some(true) => Mark::Icon,
                     Some(false) => Mark::Number,
                     None => Mark::None,
@@ -4027,11 +4037,16 @@ impl Painter<'_> {
         // `None` is a continuation, and it changes exactly two cells: the sigil becomes
         // [`WRAPPED`] and the gutter goes blank.
         let sigil = if number.is_some() { sigil } else { WRAPPED };
-        // Without a gutter the sigil's cell is the whole target, so the mark that
-        // would have taken the number takes the sigil instead.
-        let (sigil, sigil_style) = match mark {
-            Mark::Icon if self.gutter == 0 => (NOTE_ICON, self.theme.bar_hover),
-            Mark::Number if self.gutter == 0 => (sigil, self.theme.bar_hover),
+        // The mark's ink is the pointer's, on the number cell where there is a
+        // gutter and on the sigil's cell where there is none, since the sigil's
+        // cell is then the whole target.
+        let marked = match mark {
+            Mark::None => None,
+            Mark::Icon | Mark::Number => Some(self.theme.bar_hover),
+        };
+        let (sigil, sigil_style) = match (mark, marked) {
+            (Mark::Icon, Some(ink)) if self.gutter == 0 => (NOTE_ICON, ink),
+            (_, Some(ink)) if self.gutter == 0 => (sigil, ink),
             _ => (sigil, diff),
         };
 
@@ -4082,12 +4097,9 @@ impl Painter<'_> {
             };
             // `patch` on an unset style is the identity, so the context row
             // and the palettes that draw no tone need no arm of their own.
-            let ink = match mark {
-                Mark::None => self.theme.gutter.patch(tone),
-                Mark::Icon | Mark::Number => {
-                    self.theme.gutter.patch(tone).patch(self.theme.bar_hover)
-                }
-            };
+            let ink = marked
+                .into_iter()
+                .fold(self.theme.gutter.patch(tone), Style::patch);
             x = self.put(x, area.y, &numbered, room, ink);
             room = room.saturating_sub(gutter + 1);
         }

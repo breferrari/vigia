@@ -47,28 +47,36 @@ pub struct Hunk {
 }
 
 impl Hunk {
-    /// Each line with the number the gutter shows for it: the index side for a
-    /// removal, the working tree for everything else. Every line advances the
-    /// side it exists on and context advances both, and that is the one rule the
-    /// walk that draws a line and the resolver that finds it again have to share.
-    pub fn numbered(&self) -> impl Iterator<Item = (u32, &Line)> {
+    /// Each line with both sides' positions as it is reached: the index line it
+    /// sits on, or the one a removal displaces, and the working-tree line it sits
+    /// on, or the one that follows a removal, which occupies no working-tree row.
+    /// Every line advances the side it exists on and context advances both. The
+    /// one walk the gutter, the resolver and the heat strip all read, so none can
+    /// drift from the others.
+    pub fn positions(&self) -> impl Iterator<Item = (u32, u32, &Line)> {
         let mut old = self.old_start;
         let mut new = self.new_start;
         self.lines.iter().map(move |line| {
-            let number = match line.kind {
-                LineKind::Removed => {
-                    old += 1;
-                    old - 1
-                }
-                LineKind::Added => {
-                    new += 1;
-                    new - 1
-                }
+            let at = (old, new, line);
+            match line.kind {
+                LineKind::Removed => old += 1,
+                LineKind::Added => new += 1,
                 LineKind::Context => {
                     old += 1;
                     new += 1;
-                    new - 1
                 }
+            }
+            at
+        })
+    }
+
+    /// Each line with the number the gutter shows for it: the index side for a
+    /// removal, the working tree for everything else.
+    pub fn numbered(&self) -> impl Iterator<Item = (u32, &Line)> {
+        self.positions().map(|(old, new, line)| {
+            let number = match line.kind {
+                LineKind::Removed => old,
+                LineKind::Added | LineKind::Context => new,
             };
             (number, line)
         })

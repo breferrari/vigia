@@ -81,6 +81,16 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
     Some(store.put(&note).map(|()| Toggled::Written(note.id)))
 }
 
+/// How many notes the reader has and how many of them are adrift, which the
+/// footer counts beside the position.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoteCount {
+    /// Every note the store listed.
+    pub total: usize,
+    /// Those whose file is not in the diff, drawn nowhere.
+    pub adrift: usize,
+}
+
 /// The footer's count of the notes: nothing without any, then `1 note`,
 /// `2 notes`, and `2 notes · 1 adrift` once a file has left the diff.
 #[must_use]

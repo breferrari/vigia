@@ -55,7 +55,7 @@ fn chrome() -> Chrome {
         root: String::new(),
         frame: None,
         memory: None,
-        notes: (0, 0),
+        notes: Default::default(),
     }
 }
 

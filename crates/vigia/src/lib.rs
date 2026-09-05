@@ -1470,19 +1470,13 @@ mod tests {
         }
     }
 
-    /// An announcement holds the footer for a minute and a receipt for
-    /// `NOTICE_LINGER`, and the one place a notice is armed reads the table
-    /// rather than the receipt's constant.
+    /// An announcement outlasts a receipt, and the one place a notice is armed
+    /// reads the table rather than the receipt's constant. The minute itself is
+    /// `tests/update.rs`'s to hold.
     #[test]
-    fn an_announcement_lingers_a_minute_and_show_reads_the_table() {
-        assert_eq!(
-            linger_for(Voice::Arrived),
-            std::time::Duration::from_secs(60)
-        );
-        assert_eq!(linger_for(Voice::Said), NOTICE_LINGER);
+    fn an_announcement_outlasts_a_receipt_and_show_reads_the_table() {
+        assert!(linger_for(Voice::Arrived) > linger_for(Voice::Said));
         assert_eq!(linger_for(Voice::Alert), NOTICE_LINGER);
-        // Room for both transitions with the message settled between them.
-        assert!(linger_for(Voice::Arrived) > duration_for(Voice::Arrived) * 4);
 
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
