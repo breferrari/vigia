@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use vigia_core::{
-    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Note,
-    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
+    ChangeKind, FileChange, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
+    Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -474,15 +474,6 @@ impl Pin {
             }
         }
         rows
-    }
-}
-
-/// The word a note draws for where it stands.
-fn status_word(status: Status) -> &'static str {
-    match status {
-        Status::Open => "open",
-        Status::Seen => "seen",
-        Status::Resolved => "resolved",
     }
 }
 
@@ -1027,13 +1018,7 @@ impl View {
         if !by_path.is_empty() {
             // Whether a note's file is in the diff at all is a fact about the changed set
             // rather than the screen, so it is answered here for every note, drawn or not.
-            let present: HashSet<&str> = frame
-                .files()
-                .iter()
-                .flat_map(|change| {
-                    std::iter::once(change.path.as_str()).chain(change.kind.source())
-                })
-                .collect();
+            let present: HashSet<&str> = frame.files().iter().flat_map(FileChange::paths).collect();
             view.notes.adrift = notes
                 .iter()
                 .filter(|note| !present.contains(note.path.as_str()))
@@ -1133,11 +1118,9 @@ impl View {
                 // not that it consumed it.
                 let before = view.rows.len();
                 let asked = skip.min(span);
-                // By the path the diff lists the file under and by the one it was
-                // renamed from, so a note follows a rename to its new path.
                 let mut file_notes: Vec<&Note> = Vec::new();
                 if !by_path.is_empty() {
-                    for path in std::iter::once(change.path.as_str()).chain(change.kind.source()) {
+                    for path in change.paths() {
                         if let Some(found) = by_path.get(path) {
                             file_notes.extend(found.iter().copied());
                         }
@@ -1870,7 +1853,7 @@ fn pin(
         };
         let (row, word, faded, marks) = match resolve(note, rows) {
             Placement::At(number) | Placement::Moved(number) => {
-                (row_of(number), status_word(note.status), false, true)
+                (row_of(number), note.status.name(), false, true)
             }
             Placement::Changed => (row_of(note.line), "changed", true, true),
             Placement::Gone => (heading, "gone", false, false),

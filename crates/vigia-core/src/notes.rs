@@ -57,6 +57,15 @@ impl Side {
             LineKind::Added | LineKind::Context => Self::New,
         }
     }
+
+    /// The word the file and the agent both read.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Old => "old",
+            Self::New => "new",
+        }
+    }
 }
 
 /// Where a note stands on the ladder the agent climbs.
@@ -69,6 +78,18 @@ pub enum Status {
     /// Resolved by the agent with a line of its own; the pane draws the
     /// departure and the server prunes the file.
     Resolved,
+}
+
+impl Status {
+    /// The word the file, the pane and the agent all read.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Seen => "seen",
+            Self::Resolved => "resolved",
+        }
+    }
 }
 
 /// One note, pinned to a line of the diff.
@@ -303,6 +324,35 @@ impl Store {
         }
     }
 
+    /// The note `id`, or `None` when the store holds none: the file is not
+    /// there, or the id is one the store would never name a file after.
+    ///
+    /// # Errors
+    ///
+    /// The file exists and cannot be read, or reads as something other than a
+    /// note of this version.
+    pub fn get(&self, id: &str) -> Result<Option<Note>> {
+        let Ok(path) = self.path_of(id) else {
+            return Ok(None);
+        };
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(Error::store(&path, source)),
+        };
+        decode(&bytes)
+            .ok()
+            .filter(|note| note.id == id)
+            .map(Some)
+            .ok_or_else(|| {
+                let why = io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "is not a note this version reads",
+                );
+                Error::store(&path, why)
+            })
+    }
+
     /// Every note in the store. A store that does not exist yet lists nothing.
     ///
     /// # Errors
@@ -426,9 +476,9 @@ fn encode(note: &Note) -> String {
     // Writing to a String cannot fail, so the results are discarded.
     let _ = writeln!(out, "{VERSION_LINE}");
     let _ = writeln!(out, "id: {}", note.id);
-    let _ = writeln!(out, "side: {}", side_name(note.side));
+    let _ = writeln!(out, "side: {}", note.side.name());
     let _ = writeln!(out, "line: {}", note.line);
-    let _ = writeln!(out, "status: {}", status_name(note.status));
+    let _ = writeln!(out, "status: {}", note.status.name());
     let _ = writeln!(out, "written: {secs}");
     let mut block = |name: &str, text: &str| {
         let _ = writeln!(out, "{name} {}", text.len());
@@ -442,21 +492,6 @@ fn encode(note: &Note) -> String {
         block("reply", reply);
     }
     out
-}
-
-fn side_name(side: Side) -> &'static str {
-    match side {
-        Side::Old => "old",
-        Side::New => "new",
-    }
-}
-
-fn status_name(status: Status) -> &'static str {
-    match status {
-        Status::Open => "open",
-        Status::Seen => "seen",
-        Status::Resolved => "resolved",
-    }
 }
 
 /// Parse one file, or say in a sentence why it cannot be trusted. Nothing in

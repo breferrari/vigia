@@ -16,12 +16,13 @@ use std::time::UNIX_EPOCH;
 
 use serde_json::{Value, json};
 use vigia_core::{
-    CONTEXT, Frame, LineKind, Note, Placement, Side, Status, Store, StoreWatch, Worktree, resolve,
+    CONTEXT, FileDiff, Frame, Hunk, LineKind, Note, Placement, Side, Status, Store, StoreWatch,
+    Worktree, resolve,
 };
 
-use crate::VERSION;
-use crate::config;
-use crate::state::state_root;
+use crate::config::{self, Config};
+use crate::state;
+use crate::{VERSION, arm_frame};
 
 /// The handshake revisions this server speaks, oldest first. The shapes it
 /// sends are the same in every one of them.
@@ -60,12 +61,12 @@ pub struct Server {
     initialised: bool,
 }
 
-/// What a server needs to answer: the worktree, its store, and whether the
-/// staged run counts as the diff, which is the config's view default.
+/// What a server needs to answer: the worktree, its store, and the view
+/// defaults that decide what the frame walks.
 struct Site {
     worktree: Worktree,
     store: Store,
-    staged: bool,
+    config: Config,
 }
 
 /// A JSON-RPC failure: the code and its message.
@@ -78,12 +79,15 @@ impl Server {
     #[must_use]
     pub fn open(project: Option<&Path>, env: impl Fn(&str) -> Option<String>) -> Self {
         let project = project.map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        let (staged, notice) = match config::from_env(&env) {
-            Ok(config) => (config.staged, None),
-            Err(e) => (false, Some(format!("{e}; reading the unstaged diff alone"))),
+        let (config, notice) = match config::from_env(&env) {
+            Ok(config) => (config, None),
+            Err(e) => (
+                Config::default(),
+                Some(format!("{e}; reading the unstaged diff alone")),
+            ),
         };
         Self {
-            site: Site::open(&project, env, staged),
+            site: Site::open(&project, env, config),
             notice,
             initialised: false,
         }
@@ -180,23 +184,20 @@ impl Server {
             .and_then(Value::as_str)
             .ok_or_else(|| (INVALID_PARAMS, "tools/call needs a tool name".to_owned()))?;
         let args = params.get("arguments").cloned().unwrap_or(Value::Null);
-        if !["notes", "resolve", "reply"].contains(&name) {
-            return Err((INVALID_PARAMS, format!("unknown tool: {name}")));
-        }
-        let site = match &self.site {
-            Ok(site) => site,
-            Err(why) => return Ok(failed(why)),
-        };
-        Ok(match name {
-            "notes" => {
+        // A tool this server does not have is a protocol error whatever the
+        // site; a tool it has answers the site's sentence when there is none.
+        Ok(match (name, &self.site) {
+            ("notes" | "resolve" | "reply", Err(why)) => failed(why),
+            ("notes", Ok(site)) => {
                 let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
                 match site.listing(all) {
                     Ok(document) => answer(pretty(&document), document),
                     Err(why) => failed(&why),
                 }
             }
-            "resolve" => site.resolve(&args),
-            _ => site.reply(&args),
+            ("resolve", Ok(site)) => site.resolve(&args),
+            ("reply", Ok(site)) => site.reply(&args),
+            (other, _) => return Err((INVALID_PARAMS, format!("unknown tool: {other}"))),
         })
     }
 
@@ -224,28 +225,25 @@ impl Site {
     fn open(
         project: &Path,
         env: impl Fn(&str) -> Option<String>,
-        staged: bool,
+        config: Config,
     ) -> Result<Self, String> {
-        let variables = if cfg!(windows) {
-            "LOCALAPPDATA"
-        } else {
-            "HOME or XDG_STATE_HOME"
-        };
-        let root = state_root(cfg!(windows), env)
-            .ok_or_else(|| format!("no home to keep a note in: set {variables}"))?;
+        let worktree = Worktree::discover(project)
+            .map_err(|e| format!("{} is not inside a git worktree: {e}", project.display()))?;
+        let store = state::store_for(worktree.workdir(), env)
+            .ok_or_else(state::no_home)?
+            .map_err(|e| e.to_string())?;
         // The reader's state root, one directory per user, is made here so the
         // first note ever written on this machine can be announced: a watch
         // needs a directory on disk, and the store's own directory is still the
         // pane's first write. A root that cannot be made fails the first write
         // instead, which is reported there.
-        let _ = fs::create_dir_all(&root);
-        let worktree = Worktree::discover(project)
-            .map_err(|e| format!("{} is not inside a git worktree: {e}", project.display()))?;
-        let store = Store::open(&root, worktree.workdir()).map_err(|e| e.to_string())?;
+        if let Some(root) = store.dir().parent() {
+            let _ = fs::create_dir_all(root);
+        }
         Ok(Self {
             worktree,
             store,
-            staged,
+            config,
         })
     }
 
@@ -255,7 +253,7 @@ impl Site {
     fn listing(&self, all: bool) -> Result<Value, String> {
         let mut listing = self.store.list().map_err(|e| e.to_string())?;
         let mut frame = self.worktree.frame();
-        frame.show_staged(self.staged);
+        arm_frame(&mut frame, self.config);
         frame
             .advance()
             .map_err(|e| format!("could not read the diff: {e}"))?;
@@ -301,6 +299,13 @@ impl Site {
     /// is now, and the lines around it.
     fn describe(&self, frame: &mut Frame, note: &Note) -> Value {
         let placed = self.place(frame, note);
+        let (placement, line_changed) = match placed.placement {
+            Some(Placement::At(_)) => ("at", false),
+            Some(Placement::Moved(_)) => ("moved", false),
+            Some(Placement::Changed) => ("changed", true),
+            Some(Placement::Gone) => ("gone", false),
+            None => ("adrift", false),
+        };
         let written = note
             .written
             .duration_since(UNIX_EPOCH)
@@ -314,21 +319,17 @@ impl Site {
         json!({
             "id": note.id,
             "path": note.path,
-            "side": match note.side { Side::Old => "old", Side::New => "new" },
+            "side": note.side.name(),
             "line": note.line,
             "text": note.text,
             "body": note.body,
-            "status": match note.status {
-                Status::Open => "open",
-                Status::Seen => "seen",
-                Status::Resolved => "resolved",
-            },
+            "status": note.status.name(),
             "reply": note.reply,
             "written": written,
-            "placement": placed.placement,
-            "resolves": placed.resolves,
-            "line_changed": placed.placement == "changed",
-            "adrift": placed.placement == "adrift",
+            "placement": placement,
+            "resolves": placed.current_line.is_some(),
+            "line_changed": line_changed,
+            "adrift": placed.placement.is_none(),
             "current_line": placed.current_line,
             "current_text": placed.current_text,
             "current_path": placed.current_path,
@@ -337,13 +338,13 @@ impl Site {
     }
 
     /// Where the note's line is in the diff `frame` holds, by the pane's own
-    /// rules: the file is looked for under its path or under the path a rename
-    /// or a copy left behind, and a file in neither place leaves the note
-    /// adrift.
+    /// rules: the file is looked for under every path it answers to, and a
+    /// file under none of them leaves the note adrift.
     fn place(&self, frame: &mut Frame, note: &Note) -> Placed {
-        let found = frame.files().iter().position(|change| {
-            change.path == note.path || change.kind.source() == Some(note.path.as_str())
-        });
+        let found = frame
+            .files()
+            .iter()
+            .position(|change| change.paths().any(|path| path == note.path));
         let Some(index) = found else {
             let context = match note.side {
                 Side::New => self.around(&note.path, note.line),
@@ -356,11 +357,11 @@ impl Site {
         };
         let current_path = change.path.clone();
         let rows = diff.rows_on(note.side);
-        let (placement, current_line) = match resolve(note, &rows) {
-            Placement::At(number) => ("at", Some(number)),
-            Placement::Moved(number) => ("moved", Some(number)),
-            Placement::Changed => ("changed", Some(note.line)),
-            Placement::Gone => ("gone", None),
+        let placement = resolve(note, &rows);
+        let current_line = match placement {
+            Placement::At(number) | Placement::Moved(number) => Some(number),
+            Placement::Changed => Some(note.line),
+            Placement::Gone => None,
         };
         let current_text = current_line.and_then(|number| {
             rows.iter()
@@ -373,11 +374,10 @@ impl Site {
         let centre = current_line.unwrap_or(note.line);
         let context = match note.side {
             Side::New => self.around(&current_path, centre),
-            Side::Old => Self::around_old(diff, centre),
+            Side::Old => around_old(diff, centre),
         };
         Placed {
-            placement,
-            resolves: current_line.is_some(),
+            placement: Some(placement),
             current_line,
             current_text,
             current_path: Some(current_path),
@@ -395,20 +395,9 @@ impl Site {
         let last = centre.saturating_add(CONTEXT);
         text.lines()
             .enumerate()
-            .map(|(at, line)| (u32::try_from(at + 1).unwrap_or(u32::MAX), line.to_owned()))
+            .map(|(at, line)| (u32::try_from(at + 1).unwrap_or(u32::MAX), line))
             .filter(|(number, _)| (first..=last).contains(number))
-            .collect()
-    }
-
-    /// The index-side lines the diff holds within [`CONTEXT`] of `centre`.
-    fn around_old(diff: &vigia_core::FileDiff, centre: u32) -> Vec<(u32, String)> {
-        diff.hunks
-            .iter()
-            .flat_map(vigia_core::Hunk::positions)
-            .filter(|(old, _, line)| {
-                line.kind != LineKind::Added && old.abs_diff(centre) <= CONTEXT
-            })
-            .map(|(old, _, line)| (old, line.text.clone()))
+            .map(|(number, line)| (number, line.to_owned()))
             .collect()
     }
 
@@ -449,35 +438,41 @@ impl Site {
     /// note, which is not an error: the reader may have withdrawn it, or a
     /// listing pruned it.
     fn rewrite(&self, id: &str, change: impl FnOnce(&mut Note) -> String) -> Value {
-        let listing = match self.store.list() {
-            Ok(listing) => listing,
+        let mut note = match self.store.get(id) {
+            Ok(Some(note)) => note,
+            Ok(None) => {
+                return answer(
+                    format!("no such note: {id}"),
+                    json!({ "id": id, "found": false }),
+                );
+            }
             Err(e) => return failed(&e.to_string()),
-        };
-        let Some(mut note) = listing.notes.into_iter().find(|note| note.id == id) else {
-            return answer(
-                format!("no such note: {id}"),
-                json!({ "id": id, "found": false }),
-            );
         };
         let said = change(&mut note);
         match self.store.put(&note) {
             Ok(()) => answer(
                 said,
-                json!({ "id": id, "found": true, "status": match note.status {
-                    Status::Open => "open",
-                    Status::Seen => "seen",
-                    Status::Resolved => "resolved",
-                } }),
+                json!({ "id": id, "found": true, "status": note.status.name() }),
             ),
             Err(e) => failed(&format!("the store refused the write: {e}")),
         }
     }
 }
 
-/// Where a note's line is now, as the agent is told.
+/// The index-side lines the diff holds within [`CONTEXT`] of `centre`.
+fn around_old(diff: &FileDiff, centre: u32) -> Vec<(u32, String)> {
+    diff.hunks
+        .iter()
+        .flat_map(Hunk::positions)
+        .filter(|(old, _, line)| line.kind != LineKind::Added && old.abs_diff(centre) <= CONTEXT)
+        .map(|(old, _, line)| (old, line.text.clone()))
+        .collect()
+}
+
+/// Where a note's line is now, as the agent is told. `None` for the placement
+/// is a file the diff does not hold, which is adrift.
 struct Placed {
-    placement: &'static str,
-    resolves: bool,
+    placement: Option<Placement>,
     current_line: Option<u32>,
     current_text: Option<String>,
     current_path: Option<String>,
@@ -487,8 +482,7 @@ struct Placed {
 impl Placed {
     fn adrift(context: Vec<(u32, String)>) -> Self {
         Self {
-            placement: "adrift",
-            resolves: false,
+            placement: None,
             current_line: None,
             current_text: None,
             current_path: None,

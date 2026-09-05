@@ -748,3 +748,37 @@ fn a_store_whose_root_is_not_there_yet_has_nothing_to_watch() {
         "and none was made for it"
     );
 }
+
+/// The server answers a resolve by id, so one note is read without listing
+/// the store; an id the store would never name a file after is simply not
+/// there, and a file that is not a note is an error the caller can show.
+#[test]
+fn a_note_is_read_by_id_and_an_id_the_store_would_not_name_is_none() {
+    let (_scratch, _root, store) = store("notes-get");
+    assert_eq!(
+        store.get("g-1").expect("an absent store holds nothing"),
+        None
+    );
+    store.put(&note("g-1", 5, "x", "first")).expect("put");
+    assert_eq!(
+        store.get("g-1").expect("get").map(|note| note.body),
+        Some("first".to_owned())
+    );
+    assert_eq!(store.get("never").expect("absent is not an error"), None);
+    for bad in ["../g-1", "CON", "G-1", ""] {
+        assert_eq!(
+            store.get(bad).expect("an id the store would not name"),
+            None,
+            "{bad:?}"
+        );
+    }
+    fs::write(
+        store.dir().join("torn-1.note"),
+        "vigia note 1\nid: torn-1\n",
+    )
+    .expect("write");
+    let err = store
+        .get("torn-1")
+        .expect_err("a file cut short is not a note");
+    assert!(matches!(err, Error::Store { .. }), "{err:?}");
+}

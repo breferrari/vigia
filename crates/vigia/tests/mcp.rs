@@ -25,13 +25,6 @@ const OTHER: &str = "src/other.rs";
 /// The mockup's own line, edited into the fixture as its fifth.
 const EDITED: &str = "    margin.checked_mul(2).unwrap_or(margin)";
 
-/// The watched file after its fifth line changed.
-fn edited() -> String {
-    let mut lines: Vec<String> = (1..=12).map(|i| format!("line {i}")).collect();
-    lines[4] = EDITED.to_owned();
-    lines.join("\n") + "\n"
-}
-
 /// Two committed files; the first has its fifth line changed and the second
 /// is untouched, so a note on it is adrift.
 fn fixture(name: &str) -> Scratch {
@@ -39,7 +32,7 @@ fn fixture(name: &str) -> Scratch {
     scratch.write(PATH, numbered_lines(12));
     scratch.write(OTHER, numbered_lines(9));
     scratch.commit_all("baseline");
-    scratch.write(PATH, edited());
+    scratch.edit_line(PATH, 4, EDITED);
     scratch
 }
 
@@ -291,7 +284,8 @@ fn notes_carries_the_placement_resolves_line_changed_and_adrift() {
     let rig = Rig::new("mcp-placement");
     // Every note below was written against the edited file, then a line was
     // inserted at the top, which moves every number by one.
-    rig.scratch.write(PATH, format!("inserted\n{}", edited()));
+    let edited = fs::read_to_string(rig.scratch.path_of(PATH)).expect("read the fixture");
+    rig.scratch.write(PATH, format!("inserted\n{edited}"));
     for note in [
         pinned("at-1", PATH, Side::New, 6, EDITED),
         pinned("moved-1", PATH, Side::New, 5, EDITED),
