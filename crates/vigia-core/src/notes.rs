@@ -297,10 +297,11 @@ impl Store {
     }
 
     /// Write `note` over the file it already has, and only while that file is
-    /// still there: a note the reader withdrew between the read and this write
-    /// stays withdrawn, and `false` says so. The check sits right before the
-    /// rename, which is as close as two processes with no lock between them
-    /// can get.
+    /// still there, so a note the reader withdrew between the read and this
+    /// write is not brought back; `false` says it was gone. The check sits
+    /// right before the rename and no closer: two processes with no lock
+    /// between them leave the rename itself as the window a withdrawal can
+    /// still slip into.
     ///
     /// # Errors
     ///
@@ -450,7 +451,18 @@ impl Store {
         } else {
             return Ok(None);
         };
-        let dirs = roots_of(&self.dir);
+        let mut dirs = roots_of(&self.dir);
+        // The directory may not exist yet, so its resolved spelling has to come
+        // from the root above it, which does: on macOS the temporary root is a
+        // symlink and every event carries the resolved path.
+        if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name())
+            && let Ok(resolved) = parent.canonicalize()
+        {
+            let spelled = resolved.join(name);
+            if !dirs.contains(&spelled) {
+                dirs.push(spelled);
+            }
+        }
         let mut backend = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             let Ok(event) = res else {
                 return;

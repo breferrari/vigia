@@ -732,9 +732,12 @@ fn arm(server: &Server, out: &Arc<Mutex<io::Stdout>>) -> Armed {
     let Some(store) = server.store() else {
         return Armed::Failed;
     };
-    let (tx, rx) = mpsc::channel::<()>();
+    // One slot: an event that arrives while an announcement is pending is that
+    // announcement, so a burst is one line and a client that stops reading
+    // holds one unit, not a queue of them.
+    let (tx, rx) = mpsc::sync_channel::<()>(1);
     let watch = match store.watch(move || {
-        let _ = tx.send(());
+        let _ = tx.try_send(());
     }) {
         Ok(Some(watch)) => watch,
         Ok(None) => return Armed::NotYet,
@@ -746,9 +749,6 @@ fn arm(server: &Server, out: &Arc<Mutex<io::Stdout>>) -> Armed {
     let out = Arc::clone(out);
     std::thread::spawn(move || {
         while rx.recv().is_ok() {
-            // A burst of events, one per file a listing rewrote, is one
-            // announcement: the client re-lists once either way.
-            while rx.try_recv().is_ok() {}
             if emit(&out, LIST_CHANGED).is_err() {
                 break;
             }

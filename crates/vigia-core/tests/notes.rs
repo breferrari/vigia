@@ -819,3 +819,33 @@ fn a_rewrite_refuses_a_note_that_was_withdrawn() {
         "no file came back, and no temporary stayed"
     );
 }
+
+/// A state root reached through a symlink, which is every macOS temporary
+/// directory: events carry the resolved path, and the store's own directory
+/// is not there yet to resolve when the watch arms.
+#[cfg(unix)]
+#[test]
+fn a_store_watched_through_a_symlinked_root_still_reports_writes() {
+    let scratch = Scratch::new("notes-watch-symlink");
+    let real = TempDir::new("state-real");
+    let holder = TempDir::new("state-link");
+    let link = holder.path().join("link");
+    std::os::unix::fs::symlink(real.path(), &link).expect("make a symlink to the root");
+    let through_link = Store::open(&link, scratch.root()).expect("open through the link");
+    let direct = Store::open(real.path(), scratch.root()).expect("open directly");
+    assert!(!through_link.dir().exists());
+
+    let (tx, rx) = mpsc::channel();
+    let watch = through_link
+        .watch(move || {
+            let _ = tx.send(());
+        })
+        .expect("arm on the root through the link")
+        .expect("the root exists");
+    direct
+        .put(&note("s-1", 5, "x", "first"))
+        .expect("put by the resolved path");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("a write under the resolved spelling was reported");
+    drop(watch);
+}
