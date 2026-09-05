@@ -184,6 +184,7 @@ fn chrome() -> Chrome {
         // The first paint's chrome: no frame has completed, so there is no p99 to draw.
         frame: None,
         memory: None,
+        notes: Default::default(),
     }
 }
 
@@ -195,6 +196,7 @@ fn diagnostics_chrome() -> Chrome {
         scrolling: None,
         frame: Some(Duration::from_micros(800)),
         memory: Some(19 * 1024 * 1024),
+        notes: Default::default(),
         ..following_chrome()
     }
 }
@@ -277,6 +279,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -363,6 +366,7 @@ fn one_file() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -506,6 +510,7 @@ fn nothing_changed() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -701,6 +706,7 @@ fn ragged_counts() -> View {
         scale: Scale::spread(12),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -1589,7 +1595,7 @@ fn a_file_with_no_line_diff_says_why() {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-            Row::Note("binary".to_owned()),
+            Row::Reason("binary".to_owned()),
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "src/merge.rs".to_owned(),
@@ -1601,7 +1607,7 @@ fn a_file_with_no_line_diff_says_why() {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-            Row::Note("unresolved conflict".to_owned()),
+            Row::Reason("unresolved conflict".to_owned()),
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia/src/shell.rs".to_owned(),
@@ -1620,6 +1626,7 @@ fn a_file_with_no_line_diff_says_why() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
 }
@@ -1651,6 +1658,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
 }
@@ -1687,6 +1695,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
     assert!(
@@ -1806,6 +1815,7 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
         gripped: None,
         scrolling: None,
         memory: Some(bytes),
+        notes: Default::default(),
         ..diagnostics_chrome()
     }));
 
@@ -1837,6 +1847,7 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
         gripped: None,
         scrolling: None,
         memory: None,
+        notes: Default::default(),
         ..diagnostics_chrome()
     };
     assert!(
@@ -1858,6 +1869,7 @@ fn the_first_paint_draws_no_readouts_at_all() {
         scrolling: None,
         frame: None,
         memory: Some(19 * 1024 * 1024),
+        notes: Default::default(),
         ..following_chrome()
     };
     let backend = screen(80, 6, &view, &first);
@@ -1904,6 +1916,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
     let rendered = format!("{backend}");
@@ -1940,6 +1953,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
 
     for width in 6..48u16 {
@@ -1993,6 +2007,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
 
     let wide = format!("{}", screen(40, 3, &view, &chrome()));
@@ -2067,6 +2082,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         scale: Scale::flat(u32::MAX),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
 
     // Every heat and sparkline rung is reached inside this range, which is what makes
@@ -2495,6 +2511,7 @@ fn glancing() -> View {
         scale: Scale::spread(12),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -3056,6 +3073,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -3441,6 +3459,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -5125,6 +5144,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
                 gripped: None,
                 scrolling: None,
                 memory: Some(2 * 1024 * 1024 * 1024),
+                notes: Default::default(),
                 ..diagnostics_chrome()
             },
             ">1GiB",

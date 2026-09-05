@@ -31,6 +31,9 @@ pub struct Region {
     pub track: (u16, u16),
     /// The column this region's bar is drawn in, when it has one.
     pub bar: Option<u16>,
+    /// The first column of the gutter a content row draws before its text and how
+    /// many columns that is; none on a region that draws no content rows.
+    pub gutter: (u16, u16),
 }
 
 impl Region {
@@ -43,7 +46,13 @@ impl Region {
             width,
             track: (top, rows),
             bar,
+            gutter: (0, 0),
         }
+    }
+
+    /// Whether `column`, `row` is a cell of this region's gutter.
+    fn on_gutter(self, column: u16, row: u16) -> bool {
+        self.contains(row) && Self::within(column, self.gutter)
     }
 
     /// Whether `row` falls inside this region.
@@ -203,6 +212,15 @@ impl Regions {
         (self.diff.bar == Some(column) && self.diff.along(row).is_some()).then_some(Grabbed::Diff)
     }
 
+    /// The screen row a pointer at `column`, `row` rests on when it is on the
+    /// diff's gutter, B21's target. Which rows are content rows is the screen's to say.
+    pub fn gutter_at(self, column: u16, row: u16) -> Option<u16> {
+        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+            return None;
+        }
+        self.diff.on_gutter(column, row).then_some(row)
+    }
+
     /// What a pointer at `column`, `row` is over, for the mark `SPEC.md`
     /// §11.2 B10 adopts.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
@@ -228,10 +246,13 @@ impl Regions {
             return (on_diff_bar && self.diff.along(row).is_some())
                 .then_some(Hovered::Track(Grabbed::Diff));
         }
-        // A listed file, which is a surface a click acts on: it puts the diff at
-        // that file. The diff's own rows are absent although a press there now
-        // begins a selection: a drag says where it is going as it goes, so a
-        // mark before it would be the second thing saying so.
+        // A content row's gutter, where a click writes a note, then a listed file,
+        // which a click sends the diff to. The diff's content columns stay absent
+        // although a press there begins a selection: a drag says where it is going
+        // as it goes, so a mark before it would be the second thing saying so.
+        if let Some(row) = self.gutter_at(column, row) {
+            return Some(Hovered::Gutter(row));
+        }
         self.over_list(column, row).then_some(Hovered::Row(row))
     }
 }
@@ -338,6 +359,8 @@ pub enum Hovered {
     Track(Grabbed),
     /// A listed file, by the screen row it is drawn on.
     Row(u16),
+    /// The diff's gutter, by the screen row; drawn only where that row is a line.
+    Gutter(u16),
 }
 
 /// The mark after `event`, given the one before it.
@@ -419,6 +442,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleSingle
         | Action::ToggleStaged
         | Action::ToggleWrap
+        | Action::ToggleNotes
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::Escape
@@ -577,6 +601,8 @@ pub enum Action {
     ToggleStaged,
     /// Wrap a content line too wide for the pane onto the row below, or clip it.
     ToggleWrap,
+    /// Draw the rows of the reader's notes under their lines, or only the marks.
+    ToggleNotes,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ToggleSheet,
     /// Stop drawing the gestures sheet, whatever page it is on.
@@ -619,6 +645,7 @@ impl Action {
             | Self::ToggleSingle
             | Self::ToggleStaged
             | Self::ToggleWrap
+            | Self::ToggleNotes
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Escape
@@ -659,6 +686,8 @@ impl Action {
             | Self::ToggleSingle
             | Self::ToggleStaged
             | Self::ToggleWrap
+            // Display rows too, so hiding them moves nothing the bar counts.
+            | Self::ToggleNotes
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
@@ -696,6 +725,7 @@ impl Action {
             | Self::ToggleSingle
             | Self::ToggleStaged
             | Self::ToggleWrap
+            | Self::ToggleNotes
             | Self::ToggleSheet
             | Self::CloseSheet => false,
         }
@@ -787,6 +817,8 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // to a character-based wrap toggle, `bat` spells the opposite state `-S` /
         // `--chop-long-lines`, and `less` toggles the same state with `-S`.
         KeyCode::Char('w') => Some(Action::ToggleWrap),
+        // `c` for the comments the notes are, free below `Ctrl`, in `w`'s family. B21.
+        KeyCode::Char('c') => Some(Action::ToggleNotes),
         // `?` and nothing else, which is `SPEC.md` §11.2's B12: `btop`, `bottom` and
         // `rtop` all open help on it, it was unbound here, and `h` is refused because
         // it is a vi motion everywhere else on a pane with no horizontal scroll.

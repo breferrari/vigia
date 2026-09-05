@@ -4,40 +4,13 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir};
-use vigia_core::{Error, NEAR, Note, Placement, Side, Status, Store, Worktree, key, resolve};
-
-fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
-    Note {
-        id: id.to_owned(),
-        path: "src/watch.rs".to_owned(),
-        side: Side::New,
-        line,
-        text: text.to_owned(),
-        body: body.to_owned(),
-        status: Status::Open,
-        reply: None,
-        written: UNIX_EPOCH + Duration::from_secs(1_800_000_000),
-    }
-}
-
-fn files_in(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .expect("read the store directory")
-        .map(|entry| {
-            entry
-                .expect("a directory entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    names.sort();
-    names
-}
+use support::{Scratch, TempDir, files_in, note};
+use vigia_core::{
+    Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
+    key, resolve,
+};
 
 /// A store on a fresh state root for a fresh repository.
 fn store(name: &str) -> (Scratch, TempDir, Store) {
@@ -611,6 +584,64 @@ fn a_line_is_found_where_it_was_then_by_its_text_nearby_then_judged_changed_or_g
     assert_eq!(
         resolve(&blank, &[(8, "x"), (9, ""), (10, "")]),
         Placement::At(9)
+    );
+}
+
+#[test]
+fn rows_on_numbers_each_side_the_way_the_gutter_does() {
+    // The resolver takes the rows a side holds, numbered as the pane numbers
+    // them: a removal by the index, everything else by the working tree, and a
+    // context line on the working-tree side. A drift here is a note found one
+    // row off from the line it was pinned to.
+    let line = |kind, text: &str| Line {
+        kind,
+        text: text.to_owned(),
+        emph: Vec::new(),
+    };
+    let diff = FileDiff {
+        path: "src/watch.rs".to_owned(),
+        binary: false,
+        unreadable: None,
+        hunks: vec![
+            Hunk {
+                old_start: 10,
+                old_lines: 3,
+                new_start: 12,
+                new_lines: 3,
+                lines: vec![
+                    line(LineKind::Context, "a"),
+                    line(LineKind::Removed, "b"),
+                    line(LineKind::Added, "c"),
+                    line(LineKind::Context, "d"),
+                ],
+            },
+            Hunk {
+                old_start: 40,
+                old_lines: 1,
+                new_start: 42,
+                new_lines: 1,
+                lines: vec![line(LineKind::Context, "e")],
+            },
+        ],
+        added: 1,
+        removed: 1,
+        lines: 60,
+        first_line: None,
+        bytes: 0,
+    };
+
+    assert_eq!(
+        diff.rows_on(Side::New),
+        vec![(12, "a"), (13, "c"), (14, "d"), (42, "e")]
+    );
+    assert_eq!(diff.rows_on(Side::Old), vec![(11, "b")]);
+    // The two sides together are every line, once each.
+    assert_eq!(
+        diff.rows_on(Side::New).len() + diff.rows_on(Side::Old).len(),
+        diff.hunks
+            .iter()
+            .map(|hunk| hunk.lines.len())
+            .sum::<usize>()
     );
 }
 

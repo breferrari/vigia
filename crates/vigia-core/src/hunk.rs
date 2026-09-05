@@ -1,5 +1,7 @@
 use gix::diff::blob::{Algorithm, InternedInput, diff_with_slider_heuristics};
 
+use crate::notes::Side;
+
 /// Lines of unchanged context kept on each side of a change.
 pub const CONTEXT: u32 = 3;
 
@@ -44,6 +46,43 @@ pub struct Hunk {
     pub lines: Vec<Line>,
 }
 
+impl Hunk {
+    /// Each line with both sides' positions as it is reached: the index line it
+    /// sits on, or the one a removal displaces, and the working-tree line it sits
+    /// on, or the one that follows a removal, which occupies no working-tree row.
+    /// Every line advances the side it exists on and context advances both. The
+    /// one walk the gutter, the resolver and the heat strip all read, so none can
+    /// drift from the others.
+    pub fn positions(&self) -> impl Iterator<Item = (u32, u32, &Line)> {
+        let mut old = self.old_start;
+        let mut new = self.new_start;
+        self.lines.iter().map(move |line| {
+            let at = (old, new, line);
+            match line.kind {
+                LineKind::Removed => old += 1,
+                LineKind::Added => new += 1,
+                LineKind::Context => {
+                    old += 1;
+                    new += 1;
+                }
+            }
+            at
+        })
+    }
+
+    /// Each line with the number the gutter shows for it: the index side for a
+    /// removal, the working tree for everything else.
+    pub fn numbered(&self) -> impl Iterator<Item = (u32, &Line)> {
+        self.positions().map(|(old, new, line)| {
+            let number = match line.kind {
+                LineKind::Removed => old,
+                LineKind::Added | LineKind::Context => new,
+            };
+            (number, line)
+        })
+    }
+}
+
 /// The line-level diff for one file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiff {
@@ -73,6 +112,18 @@ pub struct FileDiff {
 }
 
 impl FileDiff {
+    /// Every line on `side`, as `(number, text)`, which is what
+    /// [`crate::resolve`] takes.
+    #[must_use]
+    pub fn rows_on(&self, side: Side) -> Vec<(u32, &str)> {
+        self.hunks
+            .iter()
+            .flat_map(Hunk::numbered)
+            .filter(|(_, line)| Side::of(line.kind) == side)
+            .map(|(number, line)| (number, line.text.as_str()))
+            .collect()
+    }
+
     /// A file with no hunks, and why it has none: `Some` where a side of it
     /// could not be read, `None` for a state this crate deliberately reads
     /// nothing for.

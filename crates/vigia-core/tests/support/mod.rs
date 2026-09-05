@@ -11,7 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use vigia_core::{
-    CONTEXT, Class, FileChange, Frame, FrameStats, HighlightStats, Highlighter, Samples, Worktree,
+    CONTEXT, Class, FileChange, Frame, FrameStats, HighlightStats, Highlighter, Note, Samples,
+    Side, Status, Worktree,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -373,6 +374,40 @@ pub fn changes_sorted(worktree: &Worktree) -> Vec<FileChange> {
 /// `count` lines of `line N`, newline terminated.
 pub fn numbered_lines(count: usize) -> String {
     (1..=count).map(|i| format!("line {i}\n")).collect()
+}
+
+/// A note as the store holds it, pinned to `line` of `src/watch.rs` on the
+/// working-tree side, open and unanswered, written at one fixed second.
+pub fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
+    Note {
+        id: id.to_owned(),
+        path: "src/watch.rs".to_owned(),
+        side: Side::New,
+        line,
+        text: text.to_owned(),
+        body: body.to_owned(),
+        status: Status::Open,
+        reply: None,
+        written: SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000),
+    }
+}
+
+/// The names in `dir`, sorted, and none when it does not exist yet.
+pub fn files_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .map(|entry| {
+            entry
+                .expect("a directory entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    names
 }
 
 /// Where a file sits in the frame, by path rather than by position.

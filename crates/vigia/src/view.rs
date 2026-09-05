@@ -1,8 +1,10 @@
 //! One screenful, and nothing more than one screenful.
 
+use std::collections::{HashMap, HashSet};
+
 use vigia_core::{
-    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Origin,
-    Pass, Recency, Result, SPARK_GROUPS, Span,
+    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Note,
+    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -291,9 +293,35 @@ pub enum Row {
         indent: usize,
     },
     /// Why a file has no lines under it.
-    Note(String),
+    Reason(String),
+    /// One display row of a reader's note, under the line it is pinned to or
+    /// under the file's heading once that line is gone (`SPEC.md` §11.2 B21).
+    /// A display row the bar does not count, exactly as [`Row::Wrap`] is.
+    Note {
+        /// What stands at the content origin.
+        lead: NoteLead,
+        /// This row's piece of the body or of the reply, already broken at the
+        /// content width less the lead.
+        text: String,
+        /// The word at the right edge, on the note's last body row.
+        word: Option<&'static str>,
+        /// Whether the whole row takes the dim weight, which is a note whose
+        /// line was edited under it.
+        faded: bool,
+    },
     /// The blank row that closes a file's block.
     Gap,
+}
+
+/// What a note row draws at the content origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteLead {
+    /// The bar down the reader's own rows.
+    Bar,
+    /// The arrow on the first row of the agent's line.
+    Reply,
+    /// Nothing, under a continued arrow.
+    Blank,
 }
 
 impl Row {
@@ -302,9 +330,159 @@ impl Row {
         matches!(self, Self::Wrap { .. })
     }
 
+    /// Whether this is a display row the bar does not count: a continuation or
+    /// a note row, both belonging to the line above them.
+    pub fn is_display(&self) -> bool {
+        matches!(self, Self::Wrap { .. } | Self::Note { .. })
+    }
+
     /// A file heading row.
     pub fn file(entry: FileEntry) -> Self {
         Self::File(Box::new(entry))
+    }
+}
+
+/// Where a note is pinned: what a press read off the row it landed on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Anchor {
+    /// Repository-relative path of the file the line is in.
+    pub path: String,
+    /// Which side the line is numbered on.
+    pub side: Side,
+    /// Its number on that side.
+    pub line: u32,
+    /// Its whole text, which is what finds it again after an edit above moves
+    /// the number.
+    pub text: String,
+}
+
+/// A display row that carries a note's mark, and whose note it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Marked {
+    /// Index into [`View::rows`].
+    pub row: usize,
+    /// The note's id, which is what a click on the row withdraws.
+    pub id: String,
+    /// Whether the note has no body, so the row draws the icon rather than
+    /// its number in the icon's ink: nothing else on screen says it is marked.
+    pub bare: bool,
+}
+
+/// What this screen knows about the reader's notes beyond the rows themselves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Noted {
+    /// Every row carrying a mark, in row order.
+    pub marked: Vec<Marked>,
+    /// The first row of each file's rows on this screen and that file's path,
+    /// so a row can be traced to the file it is in without a heading on screen.
+    pub segments: Vec<(usize, String)>,
+    /// Notes whose file is not in the diff, drawn nowhere and counted in the
+    /// footer.
+    pub adrift: usize,
+}
+
+/// Columns a note row spends before its text: the lead and its gap.
+const NOTE_LEAD: usize = 2;
+
+/// A note the walk placed on a logical row, before the display pass draws it.
+#[derive(Debug, Clone)]
+struct Pin {
+    /// Index into the logical rows.
+    row: usize,
+    id: String,
+    body: String,
+    reply: Option<String>,
+    /// The word on the last body row.
+    word: &'static str,
+    /// Whether the note's line was edited under it, which dims its rows.
+    faded: bool,
+    /// Whether `row` is the note's own line, which carries the mark, rather than
+    /// the file's heading.
+    marks: bool,
+    /// Whether the agent has resolved it, so its reply alone is drawn, or its
+    /// body where the agent left no reply.
+    resolved: bool,
+}
+
+/// `text` in rows of at most `room` columns, broken the way prose breaks: at the
+/// last blank that fits, and inside a word only when the word alone is wider
+/// than the row. The blank a row breaks on is drawn on neither row. Empty text
+/// is one empty row, so a note with no body still has a row for its word.
+fn prose_rows(text: &str, room: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut rest = text;
+    while room > 0 && crate::render::width_of(rest) > room {
+        let Some(cut) = crate::render::split_at(rest, room) else {
+            break;
+        };
+        let at = if rest[cut..].starts_with(' ') {
+            cut
+        } else {
+            match rest[..cut].rfind(' ') {
+                Some(space) if space > 0 => space,
+                _ => cut,
+            }
+        };
+        rows.push(rest[..at].to_owned());
+        rest = rest[at..].trim_start_matches(' ');
+    }
+    rows.push(rest.to_owned());
+    rows
+}
+
+impl Pin {
+    /// The display rows this note takes under a content width of `content`.
+    fn rows(&self, content: usize) -> Vec<Row> {
+        let room = content.saturating_sub(NOTE_LEAD);
+        let pieces = |text: &str| prose_rows(text, room);
+        let mut rows = Vec::new();
+        if !self.resolved || self.reply.is_none() {
+            let mut body = pieces(&self.body);
+            // The word takes a row of its own when the last piece leaves it no room
+            // and a row can hold it, with a blank between them where the piece has
+            // width: the reader's words are never cut to fit a status, and a blank
+            // row buys nothing where no row holds the word.
+            let last = body
+                .last()
+                .map_or(0, |piece| crate::render::width_of(piece));
+            let gap = usize::from(last > 0);
+            if self.word.len() <= room && last + gap + self.word.len() > room {
+                body.push(String::new());
+            }
+            let count = body.len();
+            for (at, text) in body.into_iter().enumerate() {
+                rows.push(Row::Note {
+                    lead: NoteLead::Bar,
+                    text,
+                    word: (at + 1 == count).then_some(self.word),
+                    faded: self.faded,
+                });
+            }
+        }
+        if let Some(reply) = &self.reply {
+            for (at, text) in pieces(reply).into_iter().enumerate() {
+                rows.push(Row::Note {
+                    lead: if at == 0 {
+                        NoteLead::Reply
+                    } else {
+                        NoteLead::Blank
+                    },
+                    text,
+                    word: None,
+                    faded: self.faded,
+                });
+            }
+        }
+        rows
+    }
+}
+
+/// The word a note draws for where it stands.
+fn status_word(status: Status) -> &'static str {
+    match status {
+        Status::Open => "open",
+        Status::Seen => "seen",
+        Status::Resolved => "resolved",
     }
 }
 
@@ -375,26 +553,15 @@ fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
     }
 
     for hunk in &diff.hunks {
-        // The same walk `take_file` does below, and it has to be the same one:
-        // both sides advance per line kind, and a copy that drifted would put
-        // the strip's marks somewhere the gutter disagrees with.
-        let mut new = hunk.new_start.max(1);
-        for line in &hunk.lines {
+        for (_, new, line) in hunk.positions() {
+            let Some(at) = bucket_of(new, diff.lines) else {
+                continue;
+            };
             match line.kind {
-                LineKind::Context => new += 1,
-                LineKind::Added => {
-                    if let Some(at) = bucket_of(new, diff.lines) {
-                        buckets[at].added = buckets[at].added.saturating_add(1);
-                    }
-                    new += 1;
-                }
-                // Deliberately does not advance `new`: a removed line
-                // occupies no working-tree row, so the next line after it sits
-                // at the same position.
+                LineKind::Context => {}
+                LineKind::Added => buckets[at].added = buckets[at].added.saturating_add(1),
                 LineKind::Removed => {
-                    if let Some(at) = bucket_of(new, diff.lines) {
-                        buckets[at].removed = buckets[at].removed.saturating_add(1);
-                    }
+                    buckets[at].removed = buckets[at].removed.saturating_add(1);
                 }
             }
         }
@@ -505,6 +672,8 @@ pub struct View {
     pub scale: Scale,
     /// The whole worktree's churn over the window, oldest sample first.
     pub worktree_churn: vigia_core::Churn,
+    /// The reader's notes, as this screen placed them.
+    pub notes: Noted,
 }
 
 /// The letter shown for a kind of change.
@@ -699,6 +868,9 @@ struct Changed<'f> {
     closes: bool,
     /// Whether the pane has a pinned list at all.
     listed: bool,
+    /// The reader's notes on this file, by its path and by the path it was
+    /// renamed from.
+    notes: Vec<&'f Note>,
 }
 
 /// Everything a row about this file needs, for either region.
@@ -780,6 +952,23 @@ impl View {
         history: &History,
         viewport: Viewport,
     ) -> Result<Self> {
+        Self::collect_noted(frame, highlighter, history, viewport, &[], true)
+    }
+
+    /// [`View::collect`] with the reader's notes placed under the lines they are
+    /// pinned to, as rows when `rows` is set and as marks alone otherwise.
+    ///
+    /// # Errors
+    ///
+    /// A file the window reaches cannot be read or measured.
+    pub fn collect_noted(
+        frame: &mut Frame,
+        highlighter: &mut Highlighter,
+        history: &History,
+        viewport: Viewport,
+        notes: &[Note],
+        rows: bool,
+    ) -> Result<Self> {
         let Viewport {
             position,
             anchored,
@@ -834,7 +1023,31 @@ impl View {
             recorded: 0,
             scale: Scale(history.scales()),
             worktree_churn: history.worktree_churn(),
+            notes: Noted::default(),
         };
+        // Keyed by path, so a file the walk draws costs one probe for its notes
+        // and a file with none costs nothing more. Empty when there are no notes,
+        // and every branch below reads that emptiness first.
+        let mut by_path: HashMap<&str, Vec<&Note>> = HashMap::new();
+        for note in notes {
+            by_path.entry(note.path.as_str()).or_default().push(note);
+        }
+        if !by_path.is_empty() {
+            // Whether a note's file is in the diff at all is a fact about the
+            // changed set rather than about the screen, so it is answered here
+            // for every note, drawn or not.
+            let present: HashSet<&str> = frame
+                .files()
+                .iter()
+                .flat_map(|change| {
+                    std::iter::once(change.path.as_str()).chain(source_of(&change.kind))
+                })
+                .collect();
+            view.notes.adrift = notes
+                .iter()
+                .filter(|note| !present.contains(note.path.as_str()))
+                .count();
+        }
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.
             view.top.row = 0;
@@ -847,10 +1060,7 @@ impl View {
             return Ok(view);
         }
 
-        // Entries the body built, so the list can reuse rather than re-diff.
-        // Bounded by the viewport: one per file the walk reaches, which is one
-        // per heading that fits plus the file the viewport is sitting inside.
-        let mut drawn: Vec<(usize, FileEntry)> = Vec::new();
+        let mut walked = Walked::default();
 
         // The one bound the pin costs, and every use of it below reads this rather than
         // `files`.
@@ -932,6 +1142,17 @@ impl View {
                 // not that it consumed it.
                 let before = view.rows.len();
                 let asked = skip.min(span);
+                // By the path the diff lists the file under and by the one it was
+                // renamed from, so a note follows a rename to its new path.
+                let mut file_notes: Vec<&Note> = Vec::new();
+                if !by_path.is_empty() {
+                    for path in std::iter::once(change.path.as_str()).chain(source_of(&change.kind))
+                    {
+                        if let Some(found) = by_path.get(path) {
+                            file_notes.extend(found.iter().copied());
+                        }
+                    }
+                }
                 view.take_file(
                     Changed {
                         kind: &change.kind,
@@ -940,6 +1161,7 @@ impl View {
                         index,
                         closes: gap_rows(index, stop) > 0,
                         listed: list_rows > 0,
+                        notes: file_notes,
                     },
                     // The pass is taken whatever this frame does with it, so the sweep
                     // in its `Drop` still runs and the cache stays bounded the way I3
@@ -948,7 +1170,7 @@ impl View {
                     history,
                     skip,
                     height,
-                    &mut drawn,
+                    &mut walked,
                 );
                 consumed = view.rows.len() - before == span - asked;
                 skip = 0;
@@ -964,7 +1186,7 @@ impl View {
                 // After the cheap terms, so an ordinary follow frame never pays for it:
                 // this walks every collected row and the three conditions above are
                 // field reads.
-                && view.display_rows(width, wrap, height) < height
+                && view.display_rows(width, wrap, height, &walked.pins, rows) < height
                 && view.top
                     != Position {
                         file: first,
@@ -978,7 +1200,10 @@ impl View {
             // Cleared, unlike the overshoot path, and this is the one line where the
             // two differ.
             view.rows.clear();
-            // `drawn` is deliberately kept.
+            // And what indexes into them.
+            walked.pins.clear();
+            view.notes.segments.clear();
+            // `walked.drawn` is deliberately kept.
 
             // And the parses go with them. Clearing the rows discards what was drawn;
             // it does not discard what drawing *cost*, because a hunk's parse lives in
@@ -1011,13 +1236,53 @@ impl View {
                 && (anchored || single || (view.top.row > 0 && !view.landed))
                 && view.top != floor);
 
-        let trimmed = view.wrap_rows(width, wrap, height, at_bottom);
+        let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked.pins, rows);
 
         // After the walk, because only the walk knows where the diff landed.
-        view.take_list(frame, history, list_rows, list_follows, &drawn)?;
+        view.take_list(frame, history, list_rows, list_follows, &walked.drawn)?;
         view.measure(frame, measured, single, trimmed)?;
 
         Ok(view)
+    }
+
+    /// What a note written from row `offset` would pin to: the line's own row, or
+    /// the head of a continuation. `None` off a content row, which is a heading,
+    /// a hunk header, a note row and the blank rows.
+    pub fn anchor_at(&self, offset: usize) -> Option<Anchor> {
+        if offset >= self.rows.len() || matches!(self.rows[offset], Row::Note { .. }) {
+            return None;
+        }
+        let head = self.head_of(offset);
+        let Row::Line { kind, number, .. } = &self.rows[head] else {
+            return None;
+        };
+        let path = self
+            .notes
+            .segments
+            .iter()
+            .rev()
+            .find(|(at, _)| *at <= head)
+            .map(|(_, path)| path.clone())?;
+        Some(Anchor {
+            path,
+            side: Side::of(*kind),
+            line: *number,
+            text: self.line_at(head),
+        })
+    }
+
+    /// The notes marked on the line row `offset` is on, by id.
+    pub fn marked_at(&self, offset: usize) -> Vec<&str> {
+        if offset >= self.rows.len() {
+            return Vec::new();
+        }
+        let head = self.head_of(offset);
+        self.notes
+            .marked
+            .iter()
+            .filter(|mark| mark.row == head)
+            .map(|mark| mark.id.as_str())
+            .collect()
     }
 
     /// Total the diff's rows, and how many are above this screen, the bottom
@@ -1106,37 +1371,66 @@ impl View {
     }
 
     /// How many rows of the terminal the rows this walk has collected would take.
-    fn display_rows(&self, width: usize, wrap: bool, height: usize) -> usize {
-        if !wrap || width == 0 {
-            return self.rows.len();
+    fn display_rows(
+        &self,
+        width: usize,
+        wrap: bool,
+        height: usize,
+        pins: &[Pin],
+        drawn: bool,
+    ) -> usize {
+        let content = if width == 0 {
+            0
+        } else {
+            let gutter = crate::render::gutter_width(&self.rows, width);
+            crate::render::content_width(gutter, width)
+        };
+        let under: usize = if drawn {
+            pins.iter().map(|pin| pin.rows(content).len()).sum()
+        } else {
+            0
+        };
+        if !wrap || content == 0 {
+            return self.rows.len() + under;
         }
-        let gutter = crate::render::gutter_width(&self.rows, width);
-        let content = crate::render::content_width(gutter, width);
-        if content == 0 {
-            return self.rows.len();
-        }
-        self.rows
-            .iter()
-            .map(|row| match row {
-                Row::Line { text, .. } => 1 + crate::render::breaks_of(text, content, height).len(),
-                _ => 1,
-            })
-            .sum()
+        under
+            + self
+                .rows
+                .iter()
+                .map(|row| match row {
+                    Row::Line { text, .. } => {
+                        1 + crate::render::breaks_of(text, content, height).len()
+                    }
+                    _ => 1,
+                })
+                .sum::<usize>()
     }
 
     /// Turn logical rows into display rows, record the gutter, and answer the rows
     /// the bottom clamp trimmed off the front: [`Self::top`] still names the first.
-    fn wrap_rows(&mut self, width: usize, wrap: bool, height: usize, at_bottom: bool) -> usize {
+    /// The display rows are a line's continuations and, when `drawn`, the rows of
+    /// the notes pinned under it, and both are counted in the same unit.
+    fn wrap_rows(
+        &mut self,
+        width: usize,
+        wrap: bool,
+        height: usize,
+        at_bottom: bool,
+        pins: &[Pin],
+        drawn: bool,
+    ) -> usize {
         // Only where a width was passed, so a caller that named none leaves
         // the decision where it has always been. See [`View::gutter`].
         self.gutter = (width > 0).then(|| crate::render::gutter_width(&self.rows, width));
-        if !wrap || width == 0 || height == 0 || self.rows.is_empty() {
+        if height == 0 || self.rows.is_empty() {
             return 0;
         }
-        let content = crate::render::content_width(self.gutter.unwrap_or(0), width);
-        if content == 0 {
-            return 0;
-        }
+        let content = if width == 0 {
+            0
+        } else {
+            crate::render::content_width(self.gutter.unwrap_or(0), width)
+        };
+        let wrapping = wrap && content > 0;
 
         // Where each collected row breaks, and how many rows of terminal it therefore
         // takes.
@@ -1144,17 +1438,35 @@ impl View {
             .rows
             .iter()
             .map(|row| match row {
-                Row::Line { text, .. } => {
+                Row::Line { text, .. } if wrapping => {
                     crate::render::breaks_of(text, content, height.saturating_add(1))
                 }
                 _ => Vec::new(),
             })
             .collect();
-        let cost = |at: usize| breaks[at].len() + 1;
+        // The note rows under each logical row, built once so the clamp and the
+        // emit below agree on their count.
+        let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
+        if drawn {
+            for pin in pins {
+                under[pin.row].extend(pin.rows(content));
+            }
+        }
+        let cost = |at: usize| breaks[at].len() + 1 + under[at].len();
         let total: usize = (0..breaks.len()).map(cost).sum();
 
-        // Nothing on this screen wraps, so nothing below it has anything to do.
+        // Nothing on this screen wraps and nothing sits under a row, so the rows
+        // are the display rows and every index already names one.
         if total == breaks.len() {
+            self.notes.marked = pins
+                .iter()
+                .filter(|pin| pin.marks)
+                .map(|pin| Marked {
+                    row: pin.row,
+                    id: pin.id.clone(),
+                    bare: pin.body.is_empty(),
+                })
+                .collect();
             return 0;
         }
 
@@ -1178,6 +1490,9 @@ impl View {
         // One entry per wrapped line on this screen, which is what bounds the scan
         // `line_at` does over it.
         let mut whole: Vec<(usize, String)> = Vec::new();
+        // The display row each logical row's own first piece landed on, so the
+        // marks and the segments can be carried across the split.
+        let mut landed: Vec<Option<usize>> = vec![None; breaks.len()];
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
                 continue;
@@ -1185,89 +1500,123 @@ impl View {
             if out.len() >= height {
                 break;
             }
-            let Row::Line {
-                kind,
-                number,
-                text,
-                spans,
-                emph,
-            } = row
-            else {
-                out.push(row);
-                continue;
-            };
-            if breaks[at].is_empty() {
-                out.push(Row::Line {
+            // Display rows of this logical row to pass over, which is the display
+            // offset above: its own pieces first, then the note rows under it.
+            let mut skip = if at == from { above } else { 0 };
+            let head = out.len();
+            match row {
+                Row::Line {
                     kind,
                     number,
                     text,
                     spans,
                     emph,
-                });
-                continue;
+                } if !breaks[at].is_empty() => {
+                    // The last moment the whole line exists; the kept pieces are not it.
+                    let indent = crate::render::indent_of(&text, content);
+                    // A line taller than the pane is the one case a mark is still honest.
+                    let taller_than_pane = breaks[at].len() + 1 > height;
+                    let mut start = 0usize;
+                    let cuts: Vec<usize> = breaks[at]
+                        .iter()
+                        .copied()
+                        .chain(std::iter::once(text.len()))
+                        .collect();
+                    for (piece, cut) in cuts.iter().copied().enumerate() {
+                        if out.len() >= height {
+                            break;
+                        }
+                        if skip > 0 {
+                            skip -= 1;
+                            start = cut;
+                            continue;
+                        }
+                        let last = out.len() + 1 == height && piece + 1 < cuts.len();
+                        let cut = if last && taller_than_pane {
+                            text.len()
+                        } else {
+                            cut
+                        };
+                        let kept = spans_in(&spans, start, cut);
+                        let kept_emph = emph_in(&emph, start, cut);
+                        let slice = text[start..cut].to_owned();
+                        if piece == 0 {
+                            landed[at] = Some(out.len());
+                            out.push(Row::Line {
+                                kind,
+                                number,
+                                text: slice,
+                                spans: kept,
+                                emph: kept_emph,
+                            });
+                        } else {
+                            out.push(Row::Wrap {
+                                kind,
+                                text: slice,
+                                spans: kept,
+                                emph: kept_emph,
+                                indent,
+                            });
+                        }
+                        start = cut;
+                    }
+                    whole.push((head, text));
+                }
+                row => {
+                    if skip > 0 {
+                        skip -= 1;
+                    } else {
+                        landed[at] = Some(out.len());
+                        out.push(row);
+                    }
+                }
             }
-
-            // The last moment the whole line exists; the kept pieces are not it.
-            let head = out.len();
-            let indent = crate::render::indent_of(&text, content);
-            // Rows of this line to pass over, which is the display offset above.
-            let skip = if at == from { above } else { 0 };
-            // A line taller than the pane is the one case a mark is still honest.
-            let taller_than_pane = breaks[at].len() + 1 > height;
-            let mut start = 0usize;
-            let cuts: Vec<usize> = breaks[at]
-                .iter()
-                .copied()
-                .chain(std::iter::once(text.len()))
-                .collect();
-            for (piece, cut) in cuts.iter().copied().enumerate() {
+            for note_row in std::mem::take(&mut under[at]) {
                 if out.len() >= height {
                     break;
                 }
-                if piece < skip {
-                    start = cut;
+                if skip > 0 {
+                    skip -= 1;
                     continue;
                 }
-                let last = out.len() + 1 == height && piece + 1 < cuts.len();
-                let cut = if last && taller_than_pane {
-                    text.len()
-                } else {
-                    cut
-                };
-                let kept = spans_in(&spans, start, cut);
-                let kept_emph = emph_in(&emph, start, cut);
-                let slice = text[start..cut].to_owned();
-                if piece == 0 {
-                    out.push(Row::Line {
-                        kind,
-                        number,
-                        text: slice,
-                        spans: kept,
-                        emph: kept_emph,
-                    });
-                } else {
-                    out.push(Row::Wrap {
-                        kind,
-                        text: slice,
-                        spans: kept,
-                        emph: kept_emph,
-                        indent,
-                    });
-                }
-                start = cut;
+                out.push(note_row);
             }
-            whole.push((head, text));
         }
         self.rows = out;
         self.whole = whole;
+        self.notes.marked = pins
+            .iter()
+            .filter(|pin| pin.marks)
+            .filter_map(|pin| {
+                landed[pin.row].map(|row| Marked {
+                    row,
+                    id: pin.id.clone(),
+                    bare: pin.body.is_empty(),
+                })
+            })
+            .collect();
+        // A segment names the first row of its file still on screen, which after
+        // the trim may be a later row than the one the walk recorded.
+        let segments = std::mem::take(&mut self.notes.segments);
+        self.notes.segments = segments
+            .iter()
+            .enumerate()
+            .filter_map(|(at, (first, path))| {
+                let end = segments.get(at + 1).map_or(landed.len(), |(next, _)| *next);
+                landed[*first..end]
+                    .iter()
+                    .find_map(|row| *row)
+                    .map(|row| (row, path.clone()))
+            })
+            .collect();
         from
     }
 
     /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed
     /// bottom opens inside counted so this is the trim's exact complement.
     pub fn shown(&self) -> usize {
-        let opens_inside = self.rows.first().is_some_and(Row::is_wrap);
-        self.rows.iter().filter(|row| !row.is_wrap()).count() + usize::from(opens_inside)
+        let opens_inside = self.rows.first().is_some_and(Row::is_display);
+        self.rows.iter().filter(|row| !row.is_display()).count() + usize::from(opens_inside)
     }
 
     /// Whether `span` resolves to any line, which a standing wash asks every frame.
@@ -1289,18 +1638,18 @@ impl View {
             // Only the first row reaches back; later ones belong to heads taken here.
             if at == from {
                 out.push(self.line_at(self.head_of(from)));
-            } else if !self.rows[at].is_wrap() {
+            } else if !self.rows[at].is_display() {
                 out.push(self.line_at(at));
             }
         }
         Some(out)
     }
 
-    /// The row a continuation belongs to; none only above a scrolled head.
-    fn head_of(&self, at: usize) -> usize {
+    /// The row a display row belongs to; none only above a scrolled head.
+    pub(crate) fn head_of(&self, at: usize) -> usize {
         self.rows[..=at]
             .iter()
-            .rposition(|row| !row.is_wrap())
+            .rposition(|row| !row.is_display())
             .unwrap_or(0)
     }
 
@@ -1327,7 +1676,8 @@ impl View {
                     crate::render::span(*new_start, *new_lines)
                 )
             }
-            Row::Note(note) => note.clone(),
+            Row::Reason(reason) => reason.clone(),
+            Row::Note { text, .. } => text.clone(),
             Row::Gap => String::new(),
         }
     }
@@ -1372,8 +1722,9 @@ impl View {
         history: &History,
         skip: usize,
         height: usize,
-        drawn: &mut Vec<(usize, FileEntry)>,
+        walked: &mut Walked,
     ) {
+        let Walked { drawn, pins } = walked;
         let Changed {
             kind,
             origin,
@@ -1381,14 +1732,22 @@ impl View {
             index,
             closes,
             listed,
+            notes,
         } = file;
         let mut n = 0usize;
+        let first = self.rows.len();
+        // Where each content row landed, on its side and by its number, so a note
+        // resolved against the file can be pinned to the row that draws its line.
+        // Filled only for a file that carries notes.
+        let mut placed: Vec<(Side, u32, usize)> = Vec::new();
+        let mut heading: Option<usize> = None;
 
         // Built for the row when the heading fits, and recorded when it does not and a
         // list exists to read the record.
         if n >= skip {
             let entry = entry_of(kind, origin, diff, history);
             drawn.push((index, entry.clone()));
+            heading = Some(self.rows.len());
             self.rows.push(Row::file(entry));
         } else if listed {
             self.recorded += 1;
@@ -1399,9 +1758,9 @@ impl View {
 
         // A labelled block so the block's closing gap has one push site.
         'block: {
-            if let Some(note) = note_for(kind, diff) {
+            if let Some(reason) = note_for(kind, diff) {
                 if n >= skip && self.rows.len() < height {
-                    self.rows.push(Row::Note(note.to_owned()));
+                    self.rows.push(Row::Reason(reason.to_owned()));
                 }
                 n += 1;
                 break 'block;
@@ -1432,29 +1791,14 @@ impl View {
                 n += 1;
 
                 // The core carries line numbers per hunk rather than per line,
-                // so both sides are counted forward from the header. Every line
-                // advances the side it exists on; context advances both.
-                let mut old = hunk.old_start;
-                let mut new = hunk.new_start;
-                for (within, line) in hunk.lines.iter().enumerate() {
-                    let number = match line.kind {
-                        LineKind::Removed => {
-                            old += 1;
-                            old - 1
-                        }
-                        LineKind::Added => {
-                            new += 1;
-                            new - 1
-                        }
-                        LineKind::Context => {
-                            old += 1;
-                            new += 1;
-                            new - 1
-                        }
-                    };
+                // and counts both sides forward from the header in `numbered`.
+                for (within, (number, line)) in hunk.numbered().enumerate() {
                     if n >= skip {
                         if self.rows.len() >= height {
                             break 'block;
+                        }
+                        if !notes.is_empty() {
+                            placed.push((Side::of(line.kind), number, self.rows.len()));
                         }
                         self.rows.push(Row::Line {
                             kind: line.kind,
@@ -1488,6 +1832,74 @@ impl View {
         if closes && n >= skip && self.rows.len() < height {
             self.rows.push(Row::Gap);
         }
+
+        if self.rows.len() > first {
+            self.notes.segments.push((first, diff.path.clone()));
+        }
+        if !notes.is_empty() {
+            pin(pins, &notes, diff, heading, &placed);
+        }
+    }
+}
+
+/// What the walk carries beside the rows.
+#[derive(Default)]
+struct Walked {
+    /// Entries the body built, so the list can reuse rather than re-diff.
+    /// Bounded by the viewport: one per file the walk reaches, which is one
+    /// per heading that fits plus the file the viewport is sitting inside.
+    drawn: Vec<(usize, FileEntry)>,
+    /// Notes placed on logical rows, for the display pass to draw.
+    pins: Vec<Pin>,
+}
+
+/// Place each of a file's notes on the logical row that draws its line, or on
+/// the heading once the line is gone. Resolved against the whole diff in hand
+/// rather than the rows on screen, because a line one row under the fold is not
+/// gone, and the diff of a drawn file costs no read the frame did not already
+/// make.
+fn pin(
+    pins: &mut Vec<Pin>,
+    notes: &[&Note],
+    diff: &FileDiff,
+    heading: Option<usize>,
+    placed: &[(Side, u32, usize)],
+) {
+    let mut on_new: Option<Vec<(u32, &str)>> = None;
+    let mut on_old: Option<Vec<(u32, &str)>> = None;
+    for note in notes {
+        let rows = match note.side {
+            Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
+            Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
+        };
+        let row_of = |number: u32| {
+            placed
+                .iter()
+                .find(|(side, at, _)| *side == note.side && *at == number)
+                .map(|(_, _, row)| *row)
+        };
+        let (row, word, faded, marks) = match resolve(note, rows) {
+            Placement::At(number) | Placement::Moved(number) => {
+                (row_of(number), status_word(note.status), false, true)
+            }
+            Placement::Changed => (row_of(note.line), "changed", true, true),
+            Placement::Gone => (heading, "gone", false, false),
+        };
+        // Off screen this frame, which is not a state: the row it belongs on is
+        // not drawn, so neither is it.
+        let Some(row) = row else {
+            continue;
+        };
+        pins.push(Pin {
+            row,
+            id: note.id.clone(),
+            body: note.body.clone(),
+            reply: note.reply.clone(),
+            word,
+            faded,
+            marks,
+            resolved: note.status == Status::Resolved,
+        });
     }
 }
 

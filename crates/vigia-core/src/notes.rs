@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::{Error, Result};
+use crate::hunk::LineKind;
 
 /// The first line of every note file. A file whose first line differs was
 /// written by a `vigia` this one does not know, and is skipped rather than
@@ -42,6 +43,17 @@ pub enum Side {
     Old,
     /// The worktree side: an added or context line, numbered by the file.
     New,
+}
+
+impl Side {
+    /// The side a line of `kind` is numbered on.
+    #[must_use]
+    pub fn of(kind: LineKind) -> Self {
+        match kind {
+            LineKind::Removed => Self::Old,
+            LineKind::Added | LineKind::Context => Self::New,
+        }
+    }
 }
 
 /// Where a note stands on the ladder the agent climbs.

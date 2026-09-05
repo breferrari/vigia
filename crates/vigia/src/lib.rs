@@ -14,6 +14,7 @@ mod glyphs;
 pub mod icons;
 mod input;
 pub mod memory;
+mod notes;
 mod render;
 mod signal;
 mod state;
@@ -34,18 +35,19 @@ pub use input::{
     Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
     repainted, scroll_mark, selection_after, settled,
 };
+pub use notes::{Toggled, press_at, toggle};
 pub use render::{
-    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
-    diff_height, notice_area, regions, render, voice_style,
+    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCount, PaintStats,
+    body_layout, count_cell, diff_height, notice_area, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
-    block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of,
-    span_in,
+    Anchor, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked, NoteLead, Noted, Position, Row,
+    Scale, Slot, View, Viewport, block_rows, diff_rows, file_at, last_top, list_plan,
+    list_rows_wanted, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -57,7 +59,7 @@ use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::pattern::{RadialPattern, SweepPattern};
 use tachyonfx::{EffectManager, Interpolation, fx};
-use vigia_core::{Highlighter, History, WatchOptions, Worktree};
+use vigia_core::{Highlighter, History, Store, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
@@ -167,6 +169,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Read here for that same reason, and acted on after the first paint.
     let update = update::wanted(|key| std::env::var(key).ok())?;
 
+    // Where the reader's notes live, resolved once with the rest of the
+    // environment. `None` with no home to keep them under, which the first click
+    // says rather than the launch: a pane with no notes is still a pane.
+    let store = state_root(cfg!(windows), |key| std::env::var(key).ok())
+        .map(|root| Store::open(&root, worktree.workdir()))
+        .transpose()?;
+
     // The view defaults reach the frame before its first walk, not just the
     // shell. Three of the four keys only arrange rows the frame already holds;
     // `staged` decides what it *walks*, so it must be honoured here.
@@ -213,6 +222,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         served: Vec::new(),
         written: false,
         warming: None,
+        store,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -223,6 +233,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             "not catching an external stop, so a kill may not restore the terminal: {e}"
         ));
     }
+
+    // The notes a pane before this one left, so the first frame draws them.
+    shell.reload_notes(Instant::now());
 
     // For a screen with rows on it, so a clean worktree spawns nothing.
     // Starting a monitor on a tree nobody has touched is an ordinary way to
@@ -360,6 +373,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
+                    // A press on a content row's gutter is a note and never a
+                    // selection, which is B20 and B21 sharing no cell: it goes to the
+                    // store here and the wash below never sees it.
+                    if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
+                        shell.toggle_note(offset, Instant::now());
+                        continue;
+                    }
                     // Before the event is interpreted, for the hold's reason: a press
                     // opening one is an action too, and the wash precedes its clearing.
                     let (standing, ended) = selection_after(&event, regions, shell.selected);
@@ -557,12 +577,27 @@ pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
-/// The whole of a message's time on the footer, both transitions included.
-/// One-shot, so an idle pane owns no timer.
+/// The whole of a receipt's or a warning's time on the footer, both transitions
+/// included. One-shot, so an idle pane owns no timer.
 ///
 /// Long enough that the two ends are a real part of it rather than something to
 /// get through: at the slowest voice, 750ms in, three seconds settled, 750 out.
 pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_millis(4500);
+
+/// The whole of an announcement's time on the footer. A receipt answers a gesture
+/// the reader just made and finds them looking; an announcement arrives while
+/// they are looking at the other pane, and [`NOTICE_LINGER`] was gone before it
+/// was read.
+pub const ARRIVED_LINGER: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long a message in `voice` holds the footer, both transitions included.
+#[must_use]
+pub fn linger_for(voice: Voice) -> std::time::Duration {
+    match voice {
+        Voice::Said | Voice::Alert => NOTICE_LINGER,
+        Voice::Arrived => ARRIVED_LINGER,
+    }
+}
 
 /// How each voice arrives: the text crossfading into place, glyphs never moving,
 /// because revealing characters leaves the line unreadable while it runs. Which
@@ -697,6 +732,9 @@ struct Shell {
     written: bool,
     /// The warm this shell last asked for, if any.
     warming: Option<std::thread::JoinHandle<vigia_core::WarmReport>>,
+    /// The reader's notes on this worktree, or `None` when the environment names
+    /// no directory to keep them in.
+    store: Option<Store>,
 }
 
 impl Shell {
@@ -848,7 +886,62 @@ impl Shell {
         }
     }
 
-    /// Write what a gesture asked for, and say so for `NOTICE_LINGER`.
+    /// Write the anchor a press asked for, or withdraw the note already there,
+    /// and read the store back so the next frame draws what it holds. A failed
+    /// write is a footer alert rather than the end of the pane, which is B7's
+    /// rule for a monitor's own writes, and the store is read back after a
+    /// failure too, since a withdrawal that failed partway still removed some.
+    fn toggle_note(&mut self, offset: usize, now: Instant) {
+        let Some(store) = &self.store else {
+            let variables = if cfg!(windows) {
+                "LOCALAPPDATA"
+            } else {
+                "HOME or XDG_STATE_HOME"
+            };
+            self.say(
+                format!("no home to keep a note in: set {variables}"),
+                Voice::Alert,
+                now,
+            );
+            return;
+        };
+        match notes::toggle(store, &self.screen, offset) {
+            None => return,
+            Some(Ok(_)) => {}
+            Some(Err(e)) => self.say(format!("could not write the note: {e}"), Voice::Alert, now),
+        }
+        self.reload_notes(now);
+    }
+
+    /// Read the store and hand the notes to the next collect. A file the store
+    /// cannot read is skipped and said once, here, rather than on every frame.
+    fn reload_notes(&mut self, now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        match store.list() {
+            Ok(listing) => {
+                if let Some((path, why)) = listing.skipped.first() {
+                    let name = path.file_name().map_or_else(
+                        || path.display().to_string(),
+                        |name| name.to_string_lossy().into_owned(),
+                    );
+                    let more = listing.skipped.len() - 1;
+                    let told = if more == 0 {
+                        format!("skipped the note file {name}: {why}")
+                    } else {
+                        format!("skipped the note file {name} and {more} more: {why}")
+                    };
+                    self.say(told, Voice::Alert, now);
+                }
+                self.app.set_notes(listing.notes);
+            }
+            Err(e) => self.say(format!("could not read the notes: {e}"), Voice::Alert, now),
+        }
+    }
+
+    /// Write what a gesture asked for, and say so for `NOTICE_LINGER`, which is
+    /// what a receipt gets.
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
     /// has no reply and several terminals ship it disabled.
@@ -928,7 +1021,7 @@ impl Shell {
     fn show(&mut self, message: String, voice: Voice, now: Instant) {
         self.leaving = None;
         // The departure comes out of the linger, so it is the whole of the time.
-        let spent = now + NOTICE_LINGER.saturating_sub(duration_for(voice));
+        let spent = now + linger_for(voice).saturating_sub(duration_for(voice));
         self.app.flash(message, spent, voice);
         if let Some(effect) = arrival(voice, &self.theme) {
             self.notice_effects
@@ -1052,9 +1145,10 @@ impl Shell {
             0
         };
 
-        // Rebuilt so a notice raised by the collect above reaches this frame rather
-        // than the next one. Safe to differ from the chrome the height came from: a
-        // notice cannot change how many rows the footer takes, by construction.
+        // Rebuilt so a notice raised by the collect above, and the notes it
+        // counted, reach this frame rather than the next one. Safe to differ from
+        // the chrome the height came from: neither can change how many rows the
+        // footer takes, by construction.
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
@@ -1381,6 +1475,71 @@ mod tests {
                 "`{said}` is gone, so the footer claims something OSC 52 cannot promise"
             );
         }
+    }
+
+    /// A press on a content row's gutter goes to the store before the wash can
+    /// see it, and the store is read back whatever the write answered. Both live
+    /// inside methods that own a terminal, so they are read here.
+    #[test]
+    fn a_gutter_press_reaches_the_store_before_the_wash_and_is_read_back() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let press = shipped
+            .find("notes::press_at(&shell.screen, regions, &event)")
+            .expect("the input arm no longer routes a gutter press to the store");
+        let wash = shipped
+            .find("selection_after(&event, regions, shell.selected)")
+            .expect("the input arm no longer opens a wash");
+        assert!(
+            press < wash,
+            "the wash is consulted before the gutter press, so a press that writes \
+             a note also begins a selection"
+        );
+        let toggle = shipped
+            .split("fn toggle_note(&mut self, offset: usize, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`toggle_note` is gone");
+        let outcomes = toggle
+            .split("match notes::toggle(")
+            .nth(1)
+            .expect("`toggle_note` no longer asks the store");
+        // After the arm that reports a failure, so it runs on every outcome that
+        // reached the store rather than inside the one that succeeded.
+        let failed = outcomes
+            .find("Some(Err(")
+            .expect("`toggle_note` no longer has a failure arm");
+        let read_back = outcomes
+            .find("self.reload_notes(now)")
+            .expect("`toggle_note` no longer reads the store back");
+        assert!(
+            read_back > failed,
+            "the store is read back inside one arm rather than after every outcome, \
+             so a withdrawal that failed partway leaves the screen showing notes the \
+             store no longer holds"
+        );
+    }
+
+    /// An announcement outlasts a receipt, and the one place a notice is armed
+    /// reads the table rather than the receipt's constant. The minute itself is
+    /// `tests/update.rs`'s to hold.
+    #[test]
+    fn an_announcement_outlasts_a_receipt_and_show_reads_the_table() {
+        assert!(linger_for(Voice::Arrived) > linger_for(Voice::Said));
+        assert_eq!(linger_for(Voice::Alert), NOTICE_LINGER);
+
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let show = shipped
+            .split("fn show(&mut self, message: String, voice: Voice, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`show` is gone");
+        assert!(
+            show.contains("linger_for(voice)"),
+            "`show` no longer asks how long this voice lingers, so every message \
+             gets the receipt's four and a half seconds"
+        );
     }
 
     /// Two properties of `run` that no test can execute, because `run` owns a

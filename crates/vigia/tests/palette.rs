@@ -55,6 +55,7 @@ fn chrome() -> Chrome {
         root: String::new(),
         frame: None,
         memory: None,
+        notes: Default::default(),
     }
 }
 
@@ -111,6 +112,7 @@ fn three_kinds() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -568,6 +570,7 @@ fn graded_heat() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -671,6 +674,7 @@ fn climbing() -> View {
         scale: Scale::spread(12),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
         ..View::default()
     }
 }

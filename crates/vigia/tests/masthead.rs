@@ -210,6 +210,7 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
         files: 1,
         gutter: None,
         worktree_churn: Churn(series),
+        notes: Default::default(),
         ..View::default()
     }
 }

@@ -29,8 +29,10 @@ fn drawn(view: &View) -> Vec<String> {
         .iter()
         .map(|row| match row {
             Row::File(entry) => entry.path.clone(),
-            Row::Line { text, .. } | Row::Wrap { text, .. } => text.clone(),
-            Row::Note(note) => note.clone(),
+            Row::Line { text, .. } | Row::Wrap { text, .. } | Row::Note { text, .. } => {
+                text.clone()
+            }
+            Row::Reason(note) => note.clone(),
             Row::Hunk { .. } => "@@".to_owned(),
             Row::Gap => String::new(),
         })
@@ -98,7 +100,7 @@ fn an_unreadable_file_draws_a_note_and_the_rest_of_the_diff() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            Row::Note(note) => Some(note),
+            Row::Reason(note) => Some(note),
             _ => None,
         })
         .collect();

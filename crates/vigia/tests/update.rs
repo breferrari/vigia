@@ -7,7 +7,23 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::update::{UPDATE_VAR, newer, version_in, wanted, watch};
-use vigia::{App, Glyphs, NOTICE_LINGER, Pointing, Theme, View, Voice, render};
+use vigia::{
+    ARRIVED_LINGER, App, Glyphs, NOTICE_ARRIVING, NOTICE_LINGER, Pointing, Theme, View, Voice,
+    linger_for, render,
+};
+
+/// The notice is unasked for, so it stays long enough to be seen by a reader whose
+/// eyes are on the other pane: a minute, where a receipt answers a gesture and
+/// four and a half seconds finds them looking.
+#[test]
+fn the_notice_stays_a_minute() {
+    assert_eq!(ARRIVED_LINGER, Duration::from_secs(60));
+    assert_eq!(linger_for(Voice::Arrived), ARRIVED_LINGER);
+    assert_ne!(linger_for(Voice::Arrived), linger_for(Voice::Said));
+    // The whole of the time, both transitions included, with most of it settled.
+    assert!(ARRIVED_LINGER > NOTICE_LINGER);
+    assert!(ARRIVED_LINGER - NOTICE_ARRIVING * 2 >= Duration::from_secs(58));
+}
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
 fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
