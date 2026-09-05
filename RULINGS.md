@@ -237,6 +237,8 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 **One citation is weaker than it looks and is stated at its real strength.** tmux issue 4909 reports terminal-level focus-out being absorbed rather than relayed with several panes and `focus-events on`. It was reported against 3.4 and the reporter said it reproduced on master; it was **closed for want of requested logs, never diagnosed and never reproduced by a maintainer**. So it is a report and not evidence, and it is kept only because a reader following the link would otherwise find a closed issue and quietly downgrade the whole survey.
 
+**The decline's first clause was false too.** DEC Locator's DECEFR reports a pointer leaving a filter rectangle, which is a mouse protocol reporting a pointer leaving. It is out of reach, since `crossterm` exposes no DEC Locator and a second mouse mechanism inside I8's takeover is not on offer, but an absolute about the outside world was asserted and never checked, and a quantifier is where the next one will hide.
+
 **What that changed in the ruling, stated so nobody re-derives it as an objection.** It did not restore the decline: inside the pane `?1003h` reports at cell granularity and retires the mark without any of this. It bounded the residual to one case (the pointer leaves the pane with the window still focused, on an idle tree) and made that case *ordinary* for one common setup rather than exotic, which is what forced the constraint the ruling turns on: the mark must be quiet enough that a stale one costs nothing. A survey that had come back clean would have produced a weaker ruling.
 
 ## B10 — what the mark is drawn in, and the contradiction it shipped with
@@ -471,4 +473,22 @@ The objection that ends it is that the dependency is **circular**. `render::gutt
 
 **So the split is made and one unit is given one owner.** A **logical row** is a row of the diff's model; a **display row** is a row of the terminal. The bar, every jump, every clamp and every counting twin stay logical. Display rows exist inside the viewport only. That is the shape the design record already names: when one quantity splits into two, every site that treats them as interchangeable becomes a defect at once, so the quantity gets one owner rather than a spelling at each site.
 
+**The split reached five sites, four outside the walk**: `App`'s pinned `G`, its drag and its page steps subtracted a display height from a logical span, `view::landing_of` could judge a change visible below the fold, and the walk's own `short` read a display-full pane as short. Each measures in display rows now. The bar's far end stays out: it asks for a row past the end and lets the walk clamp, since the end of the diff is the walk's to place.
+
 **What the split made visible immediately** is that `View::last_screenful` and the overshoot branch in `View::collect` both compare a **logical** span against the **display** height, which is exactly the units bug that shape predicts. With wrapping off the two numbers are equal and nothing can see it; with wrapping on the top lands too far back and the last rows of the diff fall off the bottom, so the end of the diff becomes unreachable by the gesture that exists to reach it. `crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap` is what fails when it comes back, and `the_wrapped_bottom_survives_the_frame_after_the_gesture` beside it is what fails when the clamp holds for one frame and not for the next: the first draft of the fix fired on the frame the gesture produced and on no frame after it, so the end of the diff was visible until anything repainted.
+
+---
+
+## B21 — the alternatives refused on measurement, and the facts the ruling corrected
+
+`SPEC.md` §11.2 B21 is the ruling. This is the trail, read and measured on 2026-09-05.
+
+**`rmcp` 3.2.0 costs 28 crates, not a dozen.** `cargo tree` on `default-features = false, features = ["server", "transport-io"]` resolves 49 crates, 28 of them absent from this lock file, `tokio` and `futures` and `schemars` among them and a `syn` 3 beside the `syn` 2 already here. Pure Rust on that feature set, with no `aws-lc-rs` and no `ring`. Hand-rolled over `serde_json` costs nothing the lock file does not hold. The switch reopens when elicitation or channels come to matter.
+
+**`ratatui-textarea` 0.9.2 costs one crate.** The same command on the `crossterm` feature alone resolves `ratatui-core`, `ratatui-crossterm`, `ratatui-widgets`, `unicode-segmentation` and `unicode-width`, every one already in the lock. The `tui-widgets` workspace was read and none of it taken: `tui-scrollview` renders the whole content into a buffer of its full size every frame, which is the shape I4 forbids; `tui-popup` floats where the ask is inline; `tui-prompts` is one line.
+
+**Channels and `claude -p --resume` are not taken.** A channel server needs `--channels` on every session and a full-screen warning for a server outside Anthropic's list while the preview lasts, so the server is built one capability away from it. `claude -p --resume <id>` interleaves two writers into one transcript and costs a `claude` process per note.
+
+**Three facts in the issue were corrected against the documentation.** Messaging is on from v2.1.224 on macOS and Linux and v2.1.234 on native Windows, not 234 and 243. Delivery into an idle interactive session is documented, so only the payload after the auth line is left for #420's probe. Own-child verification is by process evidence on Linux, process evidence or the token on macOS, and the token alone on Windows, which the pane, not being a child, meets only through the token.
+
+**`.git` was refused on the writes gate and on the linked-worktree split**: a linked worktree's git dir is not its common dir, so one store per worktree under `.git` is two places, and *left byte for byte as it was found* is worth more than the convenience.
