@@ -188,10 +188,6 @@ impl Rig {
         let done = toggle(&self.store, &painted.view, offset)
             .expect("a note press resolved to no anchor")
             .expect("the store refused the write");
-        if let Toggled::Withdrawn(ids) = &done {
-            let changes = self.ledger.withdraw(ids, self.clock);
-            self.effects.arm(changes, &self.theme, self.clock);
-        }
         self.reload();
         Some(done)
     }
@@ -550,10 +546,7 @@ fn a_second_press_on_a_noted_line_withdraws_it() {
     );
 
     // The second press withdraws it rather than adding a second: one open note per line.
-    assert!(matches!(
-        rig.click(&marked, left + 1, y),
-        Some(Toggled::Withdrawn(ids)) if ids.len() == 1
-    ));
+    assert_eq!(rig.click(&marked, left + 1, y), Some(Toggled::Withdrawn(1)));
     assert!(
         files_in(rig.store.dir()).is_empty(),
         "the file was not removed"
@@ -1500,10 +1493,7 @@ fn two_notes_on_one_line_draw_both_and_one_press_withdraws_both() {
         2
     );
 
-    assert!(matches!(
-        rig.click(&painted, left, y),
-        Some(Toggled::Withdrawn(ids)) if ids.len() == 2
-    ));
+    assert_eq!(rig.click(&painted, left, y), Some(Toggled::Withdrawn(2)));
     assert!(files_in(rig.store.dir()).is_empty());
 }
 
@@ -1775,10 +1765,7 @@ fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
     assert_eq!(rows.len(), 2, "{rows:?}");
 
     // The click deletes the file on the spot, and the rows leave over `LEAVING`.
-    assert!(matches!(
-        rig.click(&noted, left + 1, y),
-        Some(Toggled::Withdrawn(ids)) if ids == ["n1"]
-    ));
+    assert_eq!(rig.click(&noted, left + 1, y), Some(Toggled::Withdrawn(1)));
     assert!(
         files_in(rig.store.dir()).is_empty(),
         "the file outlived the click"
@@ -1949,10 +1936,7 @@ fn a_listing_cannot_bring_back_a_note_already_departing() {
     rig.reload();
     let noted = rig.paint(&mut frame, PANE, Pointing::default());
     let rows = noted.notes_under(y);
-    assert!(matches!(
-        rig.click(&noted, left + 1, y),
-        Some(Toggled::Withdrawn(_))
-    ));
+    assert_eq!(rig.click(&noted, left + 1, y), Some(Toggled::Withdrawn(1)));
 
     // The agent's resolve lands after the withdrawal began: the store holds the
     // file again, and the pane keeps drawing the departure it started.
@@ -2028,8 +2012,17 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
         .put(&left_as("n1", BODY, Status::Seen, Some(REPLY)))
         .expect("put");
     rig.reload();
-    for pane in [PANE, NARROW] {
+    // The third pane is short enough that the bar is drawn, so the bar clause
+    // below is exercised rather than skipped.
+    let short = Rect::new(0, 0, 80, 16);
+    for pane in [PANE, NARROW, short] {
         let painted = rig.paint(&mut frame, pane, Pointing::default());
+        if pane == short {
+            assert!(
+                painted.laid.diff.bar.is_some(),
+                "the short pane drew no bar, so nothing here checks the rows stop short of one"
+            );
+        }
         // A needle the forty-column pane does not cut.
         let y = painted.row_of("margin.checked_mul");
         let (_, _, origin) = painted.gutter();

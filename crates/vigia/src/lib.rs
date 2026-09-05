@@ -950,10 +950,8 @@ impl Shell {
                     self.watch_store(tx, now);
                 }
             }
-            Some(Ok(Toggled::Withdrawn(ids))) => {
-                let changes = self.ledger.withdraw(&ids, now);
-                self.note_effects.arm(changes, &self.theme, now);
-            }
+            // The read-back below finds the file gone and starts its departure.
+            Some(Ok(Toggled::Withdrawn(_))) => {}
             Some(Err(e)) => self.say(format!("could not write the note: {e}"), Voice::Alert, now),
         }
         self.reload_notes(now);

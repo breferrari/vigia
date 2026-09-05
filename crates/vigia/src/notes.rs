@@ -51,8 +51,8 @@ pub fn press_at(view: &View, regions: Regions, event: &Event) -> Option<usize> {
 pub enum Toggled {
     /// A note with an empty body was written, under this id.
     Written(String),
-    /// These notes on the line were withdrawn.
-    Withdrawn(Vec<String>),
+    /// This many notes on the line were withdrawn.
+    Withdrawn(usize),
 }
 
 /// Act on a press at row `offset` of `view`: `None` off a content row; on an
@@ -72,9 +72,7 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
                 return Some(Err(e));
             }
         }
-        return Some(Ok(Toggled::Withdrawn(
-            marked.into_iter().map(str::to_owned).collect(),
-        )));
+        return Some(Ok(Toggled::Withdrawn(marked.len())));
     }
     let note = Note {
         id: Store::new_id(),
@@ -122,8 +120,9 @@ pub enum Change {
     Replied(String),
     /// The agent resolved it: it departs with the agent's line.
     Resolved(String),
-    /// It is leaving without the agent's line: the reader withdrew it, another
-    /// pane did, or the server pruned it before this pane saw it resolved.
+    /// It is leaving without the agent's line: its file is gone from the store,
+    /// by the reader's press here, another pane's, or the server's prune before
+    /// this pane saw it resolved.
     Left(String),
 }
 
@@ -181,8 +180,8 @@ impl Ledger {
             }
             listed.push(note);
         }
-        // Gone from the store without this pane's press: pruned by the server,
-        // withdrawn by another pane, or resolved and pruned inside one wake.
+        // Gone from the store, whichever hand removed it: the reader's press here
+        // reads back the same way as another pane's or the server's prune.
         for gone in previous {
             if listed.iter().any(|note| note.id == gone.id) || self.is_departing(&gone.id) {
                 continue;
@@ -195,26 +194,6 @@ impl Ledger {
         }
         self.listed = listed;
         changes
-    }
-
-    /// The reader withdrew `ids`: each departs without the agent's line. An id
-    /// not listed, already leaving among them, is left as it is.
-    pub fn withdraw(&mut self, ids: &[String], now: Instant) -> Vec<Change> {
-        let (leaving, staying): (Vec<Note>, Vec<Note>) = std::mem::take(&mut self.listed)
-            .into_iter()
-            .partition(|note| ids.contains(&note.id));
-        self.listed = staying;
-        leaving
-            .into_iter()
-            .map(|note| {
-                let id = note.id.clone();
-                self.departing.push(Departing {
-                    note,
-                    ends: now + LEAVING,
-                });
-                Change::Left(id)
-            })
-            .collect()
     }
 
     /// Drop every departure that has ended, remembering a resolved one until the
