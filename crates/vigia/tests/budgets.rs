@@ -1851,8 +1851,9 @@ const NOTED_PANE: Rect = Rect {
     height: 160,
 };
 
-/// I9 with fifty notes on screen (`SPEC.md` §11.2 B21), measured whole: the same
-/// frame with and without them, interleaved.
+/// I9 with fifty notes on screen (`SPEC.md` §11.2 B21), measured whole and on
+/// I9's own steady state: one line rewritten before every frame, the same frame
+/// with and without the notes, interleaved so a loaded machine moves both arms.
 #[test]
 fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
@@ -1866,15 +1867,16 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
     settle(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
-    let history = History::new();
+    let mut history = History::new();
     let screen = layout_of(&app, NOTED_PANE, FILES);
     let theme = Theme::default();
     let mut buf = Buffer::empty(NOTED_PANE);
 
     // The fixture's hunk is every removed line then every added one, so the
-    // working-tree side starts a file's length down. The viewport is put there,
-    // where the rewrite below moves every line under its note each round and
-    // fifty notes resolve down the whole ladder to `changed`, the dearest placement.
+    // working-tree side starts a file's length down, and the viewport is put
+    // there. Half the notes carry their line's text and resolve where they are;
+    // the other half carry text no line has, so each is looked for down the
+    // whole ladder and lands on `changed`, which is the dearest placement.
     app.apply(
         Action::Scroll(isize::try_from(LINES + 2).expect("a sane depth")),
         &mut frame,
@@ -1892,7 +1894,11 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
                 path: diff.path.clone(),
                 side: Side::New,
                 line: *line,
-                text: (*text).to_owned(),
+                text: if i % 2 == 0 {
+                    (*text).to_owned()
+                } else {
+                    "a line the file no longer holds".to_owned()
+                },
                 body: "the reader's words, one row each".to_owned(),
                 status: Status::Open,
                 reply: None,
@@ -1906,34 +1912,47 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
         "the first file's diff has fewer than fifty lines"
     );
 
-    let (mut noted, mut bare) = (Samples::new(SAMPLED_BURSTS), Samples::new(SAMPLED_BURSTS));
-    for round in 1..=SAMPLED_BURSTS {
+    // "Under continuous edits", as I9's own gate takes it: one line of the file
+    // the viewport is inside is rewritten before every frame, so each frame
+    // revalidates ninety-nine files and re-diffs one.
+    let mut edits = 0usize;
+    let mut next_frame = |frame: &mut Frame,
+                          app: &mut App,
+                          highlighter: &mut Highlighter,
+                          history: &mut History,
+                          with: bool| {
+        scratch.edit_line(
+            EDITED_PATH,
+            0,
+            &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
+        );
+        edits += 1;
+        app.set_notes(if with { notes.clone() } else { Vec::new() });
+        time_cpu(|| {
+            sample(history, scratch.root(), EDITED_PATH);
+            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
+        })
+    };
+
+    for _ in 0..WARMUP_FRAMES {
         for with in [true, false] {
-            scratch.rewrite_all(FILES, LINES, round);
-            app.set_notes(if with { notes.clone() } else { Vec::new() });
-            let (wall, _) = time_cpu(|| {
-                shell_frame(
-                    &mut frame,
-                    &mut app,
-                    &mut highlighter,
-                    &history,
-                    &mut buf,
-                    &theme,
-                    screen,
-                );
-            });
-            if round > SAMPLED_BURSTS / 4 {
-                if with {
-                    noted.push(wall)
-                } else {
-                    bare.push(wall)
-                }
+            next_frame(&mut frame, &mut app, &mut highlighter, &mut history, with);
+        }
+    }
+    let (mut noted, mut bare) = (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
+    for _ in 0..SAMPLED_FRAMES {
+        for with in [true, false] {
+            let (wall, _) = next_frame(&mut frame, &mut app, &mut highlighter, &mut history, with);
+            if with {
+                noted.push(wall);
+            } else {
+                bare.push(wall);
             }
         }
     }
 
-    // Non-vacuity: the noted arm drew fifty notes on the screen it timed, every
-    // one of them down the ladder.
+    // Non-vacuity: the noted arm drew fifty notes on the screen it timed, half
+    // where they were and half down the ladder.
     app.set_notes(notes.clone());
     let view = app
         .view(&mut frame, &mut highlighter, &history, screen)
@@ -1951,19 +1970,22 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
         view.notes.marked.len()
     );
     assert!(drawn >= 50, "the timed screen drew {drawn} note rows");
+    let placed = |word: &str| {
+        view.rows
+            .iter()
+            .filter(|row| matches!(row, Row::Note { word: Some(w), .. } if *w == word))
+            .count()
+    };
     assert!(
-        view.rows.iter().any(|row| matches!(
-            row,
-            Row::Note {
-                word: Some("changed"),
-                ..
-            }
-        )),
-        "no note resolved to `changed`, so the ladder's dearest placement was not timed"
+        placed("open") >= 24 && placed("changed") >= 25,
+        "{} notes stood where they were and {} down the ladder, so one placement \
+         was not timed",
+        placed("open"),
+        placed("changed")
     );
 
-    let with = noted.percentile(0.5).expect("a sampled round");
-    let without = bare.percentile(0.5).expect("a sampled round");
+    let with = noted.percentile(0.5).expect("a sampled frame");
+    let without = bare.percentile(0.5).expect("a sampled frame");
     println!(
         "fifty notes: frame p50 {with:?} with them, {without:?} without, over {FILES} files \
          and {LINES} lines on an {}x{} pane",
@@ -1974,20 +1996,7 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
         budget(I9_FRAME),
         &noted,
         || format!("({without:?} p50 without the notes)"),
-        || {
-            app.set_notes(notes.clone());
-            time_cpu(|| {
-                shell_frame(
-                    &mut frame,
-                    &mut app,
-                    &mut highlighter,
-                    &history,
-                    &mut buf,
-                    &theme,
-                    screen,
-                );
-            })
-        },
+        || next_frame(&mut frame, &mut app, &mut highlighter, &mut history, true),
     );
 }
 
