@@ -35,7 +35,7 @@ const CONTINUES: &str = "›";
 const WRAPPED: char = '↳';
 
 /// What the gutter draws under the pointer, and on a line carrying a note with
-/// no body. `SPEC.md` §5.1 records `»` as its CP437 stand-in.
+/// no body. `SPEC.md` §10 records `»` as its CP437 stand-in.
 const NOTE_ICON: char = '✎';
 
 /// The bar down the left of a note's rows. `▌` is the recorded stand-in.

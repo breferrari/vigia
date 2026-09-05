@@ -439,12 +439,14 @@ impl Pin {
             let mut body = pieces(&self.body);
             // The word takes a row of its own when the last piece leaves it no
             // room, with a blank between them: the reader's words are never cut
-            // to fit a status. An empty piece needs no blank.
+            // to fit a status, and only where a row of its own can hold the word,
+            // since a blank row buys nothing where it cannot. An empty piece needs
+            // no blank.
             let last = body
                 .last()
                 .map_or(0, |piece| crate::render::width_of(piece));
             let gap = usize::from(last > 0);
-            if room > 0 && last + gap + self.word.len() > room {
+            if self.word.len() <= room && last + gap + self.word.len() > room {
                 body.push(String::new());
             }
             let count = body.len();

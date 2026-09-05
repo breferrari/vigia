@@ -1442,6 +1442,18 @@ fn a_note_rows_lead_never_overwrites_its_word() {
     let mut drawn = 0;
     for width in 6..=20u16 {
         let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 24), Pointing::default());
+        // An empty body is one row at every width: the word alone, never a blank
+        // row bought for a gap the body does not have.
+        let note_rows = painted
+            .view
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::Note { .. }))
+            .count();
+        assert!(
+            note_rows <= 1,
+            "at {width} columns an empty body took {note_rows} rows"
+        );
         for (offset, row) in painted.view.rows.iter().enumerate() {
             let Row::Note {
                 word: Some(word), ..
@@ -1464,5 +1476,58 @@ fn a_note_rows_lead_never_overwrites_its_word() {
     assert!(
         drawn > 0,
         "no width drew the word, so nothing here was checked"
+    );
+}
+
+#[test]
+fn the_word_takes_a_row_of_its_own_when_the_body_leaves_it_none() {
+    // A body that fills its last row to the column would push the word off the
+    // edge, or the word would cut the body; neither happens, the word moves down.
+    let scratch = fixture("notes-word-row");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (_, _, origin) = plain.gutter();
+    // The room a note's text has: the row's text columns less the lead. Measured
+    // off a painted note rather than derived, so the fixture follows the layout.
+    rig.store.put(&note("probe", 5, EDITED, "x")).expect("put");
+    rig.reload();
+    let probe = rig.paint(&mut frame, PANE, Pointing::default());
+    let right = probe.text(y + 1).trim_end().chars().count();
+    let room = right - usize::from(origin) - 2;
+    rig.store.remove("probe").expect("remove");
+
+    // Exactly the room, so the word cannot share the row.
+    let full = "y".repeat(room);
+    rig.store.put(&note("n1", 5, EDITED, &full)).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert_eq!(
+        under[0].trim_end(),
+        full,
+        "the body was cut or wrapped early"
+    );
+    assert_eq!(
+        under[1].trim(),
+        "open",
+        "the word did not take a row of its own"
+    );
+
+    // One column short, and the word shares the row again, a blank between them.
+    let short = "y".repeat(room - 5);
+    rig.store.put(&note("n1", 5, EDITED, &short)).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with(&short) && under[0].trim_end().ends_with(" open"),
+        "{:?}",
+        under[0]
     );
 }
