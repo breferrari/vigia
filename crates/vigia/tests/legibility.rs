@@ -410,12 +410,14 @@ fn every_row_kind() -> View {
             line(LineKind::Added, 260, "        for change in self.walk() {"),
             // B21's rows under the line above: the reader's note and the agent's line.
             Row::Note {
+                note: 0,
                 lead: NoteLead::Bar,
                 text: "walk() re-reads the index on every frame; cache it".to_owned(),
                 word: Some("open"),
                 faded: false,
             },
             Row::Note {
+                note: 0,
                 lead: NoteLead::Reply,
                 text: "cached it in advance(), invalidated on tick".to_owned(),
                 word: None,

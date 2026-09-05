@@ -760,6 +760,7 @@ impl Bar {
             bar: self.drawn().then(|| bar_column(at)),
             // `regions` fills the diff's from the rows it laid out.
             gutter: (0, 0),
+            text: 0,
         }
     }
 }
@@ -1720,24 +1721,39 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     );
 
     // The gutter's columns, from the same width and inset `Painter::body` lays the
-    // rows out against, so the pointer's target and the drawn number are one span.
-    let gutter = if body.diff > 0 && view.files > 0 {
+    // rows out against, so the pointer's target and the drawn number are one span;
+    // and the columns a row's glyphs run to, from the same narrowing `with_bar` and
+    // `region_text` apply, so an effect over a note's rows stops where its text does.
+    let (gutter, text) = if body.diff > 0 && view.files > 0 {
         let inner = planning_width(areas.diff.width, area.width, 0);
         let digits = view
             .gutter
             .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
+        let (inset, trailing) = margins_of(area.width);
+        let left = areas.diff.x.saturating_add(inset);
+        let narrowed = if diff_bar.drawn() {
+            areas.diff.width.saturating_sub(BAR_WIDTH as u16)
+        } else {
+            areas.diff.width
+        };
+        let stop = areas
+            .diff
+            .x
+            .saturating_add(narrowed)
+            .min(area.right().saturating_sub(trailing));
         (
-            areas.diff.x.saturating_add(margins_of(area.width).0),
-            u16::try_from(line_origin(digits)).unwrap_or(u16::MAX),
+            (left, u16::try_from(line_origin(digits)).unwrap_or(u16::MAX)),
+            stop.saturating_sub(left),
         )
     } else {
-        (0, 0)
+        ((0, 0), 0)
     };
 
     Regions {
         list: list_bar.region(areas.list),
         diff: Region {
             gutter,
+            text,
             ..diff_bar.region(areas.diff)
         },
         // From the same plan the painter draws, which is what keeps the pointer and the
@@ -1748,6 +1764,82 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
             .and_then(|page| sheet_plan(area, footer.height(), margins_of(area.width), page))
             .map(|plan| plan.target()),
     }
+}
+
+/// The cells one note's rows took on a painted screen, for an effect to run over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteCells {
+    /// Whose rows these are.
+    pub id: String,
+    /// Every row of the note, from its lead to where its text may run.
+    pub rows: Rect,
+    /// The status word's own cells, on the last body row.
+    pub word: Option<Rect>,
+    /// The agent's line, on the rows that draw it.
+    pub reply: Option<Rect>,
+}
+
+impl NoteCells {
+    /// The cells `target` names, when this frame drew them.
+    #[must_use]
+    pub fn of(&self, target: crate::notes::Target) -> Option<Rect> {
+        match target {
+            crate::notes::Target::Rows => Some(self.rows),
+            crate::notes::Target::Word => self.word,
+            crate::notes::Target::Reply => self.reply,
+        }
+    }
+}
+
+/// Where each note's rows were drawn, from the layout `laid` the pointer was
+/// told about and the rows `view` holds. A note's rows are one run, so each
+/// appears once; a screen with no note rows answers nothing. The word sits
+/// where `Painter::put_right` puts it, at the far end of the row's text.
+#[must_use]
+pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
+    let diff = laid.diff;
+    let (left, columns) = diff.gutter;
+    let x = left.saturating_add(columns);
+    let width = diff.text.saturating_sub(columns);
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut out: Vec<NoteCells> = Vec::new();
+    for (offset, row) in view.rows.iter().enumerate().take(usize::from(diff.rows)) {
+        let Row::Note {
+            note, lead, word, ..
+        } = row
+        else {
+            continue;
+        };
+        let Some(id) = view.notes.ids.get(*note) else {
+            continue;
+        };
+        let line = Rect::new(x, diff.top.saturating_add(offset as u16), width, 1);
+        let cells = match out.last_mut() {
+            Some(last) if last.id == *id => last,
+            _ => {
+                out.push(NoteCells {
+                    id: id.clone(),
+                    rows: line,
+                    word: None,
+                    reply: None,
+                });
+                out.last_mut().expect("just pushed")
+            }
+        };
+        cells.rows = cells.rows.union(line);
+        if let Some(word) = word {
+            let took = width_of(word) as u16;
+            if took <= width {
+                cells.word = Some(Rect::new(x + width - took, line.y, took, 1));
+            }
+        }
+        if matches!(lead, NoteLead::Reply | NoteLead::Blank) {
+            cells.reply = Some(cells.reply.map_or(line, |reply| reply.union(line)));
+        }
+    }
+    out
 }
 
 /// Draw a whole screen: one header line, the body, and one or two footer lines.
@@ -3633,6 +3725,7 @@ impl Painter<'_> {
                     text,
                     word,
                     faded,
+                    ..
                 } => {
                     self.note_row(
                         Rect {

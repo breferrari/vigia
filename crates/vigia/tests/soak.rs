@@ -16,7 +16,7 @@ use vigia::{
 };
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
-    RETAINED_HUNKS, WatchOptions, Worktree,
+    RETAINED_HUNKS, Store, WatchOptions, Worktree,
 };
 
 use support::{Scratch, generated};
@@ -332,6 +332,10 @@ struct Report {
     frame: FrameStats,
     highlight: HighlightStats,
     history: HistoryStats,
+    /// Whether the notes store's watch was armed for the window.
+    store_armed: bool,
+    /// Times that watch woke, over a window in which nothing wrote to the store.
+    store_wakes: u64,
 }
 
 impl Report {
@@ -381,14 +385,15 @@ impl Report {
         let mb = mib;
         println!(
             "soak: window {:?}, {} samples, {} frames ({} full), {} ticks, \
-             {} write rounds, {} files created",
+             {} write rounds, {} files created, {} store wakes",
             self.window,
             self.samples.len(),
             self.frames,
             self.full_frames,
             self.ticks,
             self.rounds,
-            self.created
+            self.created,
+            self.store_wakes
         );
         match drift(&self.series()) {
             Some(drift) => {
@@ -642,9 +647,22 @@ const RESIZE_EVERY: u64 = 97;
 const NAME: &str = "soak";
 
 /// Run the soak and report what it did.
-fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration) -> Report {
+fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: &Path) -> Report {
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let root = scratch.root().to_path_buf();
+
+    // The store's watch, which the loop arms beside the tree's, on a state root
+    // of its own that nothing here writes to: I1's claim that it costs nothing
+    // while idle is counted over the window rather than assumed.
+    let store = Store::open(state, scratch.root()).expect("open the store");
+    let store_wakes = std::sync::Arc::new(AtomicU64::new(0));
+    let counted = std::sync::Arc::clone(&store_wakes);
+    let store_watch = store
+        .watch(move || {
+            counted.fetch_add(1, Ordering::Relaxed);
+        })
+        .expect("arm the store watch");
+    let store_armed = store_watch.is_some();
 
     // The product's own shape: the watcher owns its repository on its own thread,
     // because `gix::Repository` is `Send` and not `Sync`, and it is detached because
@@ -665,12 +683,16 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration) -> Repo
     let rounds = AtomicU64::new(0);
     let created = AtomicU64::new(0);
 
-    std::thread::scope(|scope| {
+    let mut report = std::thread::scope(|scope| {
         scope.spawn(|| workload(scratch, files, lines, &stop, &rounds, &created));
         let report = drive(scratch, files, window, &rx, &rounds, &created);
         stop.store(true, Ordering::Relaxed);
         report
-    })
+    });
+    drop(store_watch);
+    report.store_armed = store_armed;
+    report.store_wakes = store_wakes.load(Ordering::Relaxed);
+    report
 }
 
 /// The frame loop: everything `vigia::run` does between waking and drawing.
@@ -843,6 +865,8 @@ fn drive(
         frame: frame.stats(),
         highlight: highlighter.stats(),
         history: history.stats(),
+        store_armed: false,
+        store_wakes: 0,
     }
 }
 
@@ -854,6 +878,17 @@ const MIN_ROUNDS: u64 = 50;
 impl Report {
     /// Every claim I3 makes that this process can see.
     fn gate(&self) {
+        assert!(
+            self.store_armed,
+            "the store watch never armed, so the count below is a watch that \
+             listened to nothing"
+        );
+        assert_eq!(
+            self.store_wakes, 0,
+            "I1: the store watch woke {} times over {:?} in which nothing wrote \
+             to the store, which is a wake with no event behind it",
+            self.store_wakes, self.window
+        );
         assert!(
             self.frames >= MIN_FRAMES && self.ticks >= MIN_TICKS,
             "I3: {} frames from {} ticks over {:?}, under the {MIN_FRAMES} and \
@@ -1243,7 +1278,16 @@ fn soak_child() {
         listing(&private)
     );
 
-    let report = soak(&scratch, files, lines, window);
+    // Beside the worktree and outside the private temp, so neither the tree's
+    // watch nor the retained-temp gate sees the state root the store's watch
+    // is armed on.
+    let state = worktree
+        .parent()
+        .expect("the worktree sits under the soak's root")
+        .join("state");
+    std::fs::create_dir_all(&state).expect("create the state root");
+
+    let report = soak(&scratch, files, lines, window, &state);
     report.print();
     report.gate();
 }

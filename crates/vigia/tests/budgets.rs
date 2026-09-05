@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout,
-    render,
+    ARRIVING_FRAME, Action, App, Body, Change, Glyphs, NoteEffects, PaintStats, Pointing, Row,
+    Theme, View, WHEEL_ROWS, body_layout, note_cells, regions, render,
 };
 use vigia_core::{
     CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
@@ -1997,6 +1997,223 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
         &noted,
         || format!("({without:?} p50 without the notes)"),
         || next_frame(&mut frame, &mut app, &mut highlighter, &mut history, true),
+    );
+}
+
+/// I9 with fifty notes departing at once: every note's rows drawn and a
+/// resolve's departure run over each of them, which is the dearest thing
+/// `SPEC.md` §11.2 B21 lets a frame do with the notes. Interleaved with the same
+/// fifty standing still, so a loaded machine moves both arms.
+#[test]
+fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("notes-departing", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+    let screen = layout_of(&app, NOTED_PANE, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(NOTED_PANE);
+
+    app.apply(
+        Action::Scroll(isize::try_from(LINES + 2).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll to the working-tree side");
+    // Fifty resolved notes, each with the agent's line, which is what a
+    // departing note draws while it goes.
+    let notes: Vec<Note> = {
+        let (_, diff) = frame.diff(0).expect("diff");
+        diff.rows_on(Side::New)
+            .iter()
+            .take(50)
+            .enumerate()
+            .map(|(i, (line, text))| Note {
+                id: format!("d{i}"),
+                path: diff.path.clone(),
+                side: Side::New,
+                line: *line,
+                text: (*text).to_owned(),
+                body: "the reader's words, one row each".to_owned(),
+                status: Status::Resolved,
+                reply: Some("swapped for saturating_mul; the unwrap_or went with it".to_owned()),
+                written: std::time::SystemTime::now(),
+            })
+            .collect()
+    };
+    assert_eq!(
+        notes.len(),
+        50,
+        "the first file's diff has fewer than fifty lines"
+    );
+    app.set_notes(notes.clone());
+    let departures = || {
+        notes
+            .iter()
+            .map(|note| Change::Resolved(note.id.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    let mut effects = NoteEffects::default();
+    let mut edits = 0usize;
+    // Cells rather than plain counters, because the sampler outlives the reader
+    // and the probe at the end draws into its own buffer.
+    let running = std::cell::Cell::new(0usize);
+    let mut next_frame = |frame: &mut Frame,
+                          app: &mut App,
+                          highlighter: &mut Highlighter,
+                          history: &mut History,
+                          effects: &mut NoteEffects,
+                          with: bool| {
+        scratch.edit_line(
+            EDITED_PATH,
+            0,
+            &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
+        );
+        edits += 1;
+        // Re-armed the moment a departure has run its length, so every departing
+        // frame timed below has fifty effects live on it.
+        if with {
+            effects.settle(Instant::now());
+            if !effects.is_running() {
+                effects.arm(departures(), &theme, Instant::now());
+            }
+            running.set(running.get() + usize::from(effects.is_running()));
+        }
+        time_cpu(|| {
+            sample(history, scratch.root(), EDITED_PATH);
+            let began = Instant::now();
+            frame.advance().expect("advance");
+            app.sample_memory();
+            let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+            let view = app.view(frame, highlighter, history, screen).expect("view");
+            render(
+                &mut buf,
+                NOTED_PANE,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
+            if with {
+                let laid = regions(NOTED_PANE, &chrome, &view);
+                effects.draw(ARRIVING_FRAME, &mut buf, &note_cells(&laid, &view));
+            }
+            app.record_frame(began.elapsed());
+        })
+    };
+
+    for _ in 0..WARMUP_FRAMES {
+        for with in [true, false] {
+            next_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &mut history,
+                &mut effects,
+                with,
+            );
+        }
+    }
+    running.set(0);
+    let (mut departing, mut still) = (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
+    for _ in 0..SAMPLED_FRAMES {
+        for with in [true, false] {
+            let (wall, _) = next_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &mut history,
+                &mut effects,
+                with,
+            );
+            if with {
+                departing.push(wall);
+            } else {
+                still.push(wall);
+            }
+        }
+    }
+
+    // Non-vacuity, three ways: the effects were live on every departing frame
+    // timed, the fifty notes were on the screen, and the effects change cells.
+    assert_eq!(
+        running.get(),
+        SAMPLED_FRAMES,
+        "effects were live on {} of {SAMPLED_FRAMES} departing frames, so the arm \
+         this gate is named for was timed without its departures",
+        running.get()
+    );
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert_eq!(
+        view.notes.marked.len(),
+        50,
+        "{} lines carry a mark on the timed screen, not the fifty this gate is \
+         named for",
+        view.notes.marked.len()
+    );
+    let laid = regions(NOTED_PANE, &chrome, &view);
+    let cells = note_cells(&laid, &view);
+    assert_eq!(
+        cells.len(),
+        50,
+        "{} notes have cells on the timed screen, not fifty, so the effects had \
+         fewer rows to run over than this gate claims",
+        cells.len()
+    );
+    let mut probe = Buffer::empty(NOTED_PANE);
+    render(
+        &mut probe,
+        NOTED_PANE,
+        &view,
+        &theme,
+        Glyphs::default(),
+        &chrome,
+    );
+    let drawn = probe.clone();
+    let mut fresh = NoteEffects::default();
+    fresh.arm(departures(), &theme, Instant::now());
+    fresh.draw(ARRIVING_FRAME, &mut probe, &cells);
+    assert_ne!(
+        probe, drawn,
+        "fifty departures one frame in left every cell as the renderer drew it, \
+         so this gate timed effects nobody can see"
+    );
+
+    let with = departing.percentile(0.5).expect("a sampled frame");
+    let without = still.percentile(0.5).expect("a sampled frame");
+    println!(
+        "fifty notes departing: frame p50 {with:?} with the departures running, \
+         {without:?} with the notes still, over {FILES} files and {LINES} lines on \
+         an {}x{} pane",
+        NOTED_PANE.width, NOTED_PANE.height
+    );
+    holds_p99(
+        "I9: a frame with fifty notes departing",
+        budget(I9_FRAME),
+        &departing,
+        || format!("({without:?} p50 with the notes still)"),
+        || {
+            next_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &mut history,
+                &mut effects,
+                true,
+            )
+        },
     );
 }
 
