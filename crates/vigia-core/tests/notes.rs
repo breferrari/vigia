@@ -424,6 +424,28 @@ fn an_unwritable_root_is_an_error_the_caller_can_show() {
     assert!(!store.dir().exists());
 }
 
+#[test]
+fn a_failed_rename_leaves_no_temporary_behind() {
+    // A directory where the note's file would go makes the rename fail on
+    // every platform; what must not follow is a temporary the next listing
+    // has to step over forever.
+    let (_scratch, _root, store) = store("notes-litter");
+    store
+        .put(&note("other", 1, "x", "y"))
+        .expect("put creates the directory");
+    fs::create_dir(store.dir().join("blocked.note")).expect("a directory in the way");
+
+    let err = store
+        .put(&note("blocked", 1, "x", "y"))
+        .expect_err("a rename onto a directory fails");
+    assert!(matches!(err, Error::Store { .. }), "{err:?}");
+    assert_eq!(
+        files_in(store.dir()),
+        vec!["blocked.note".to_owned(), "other.note".to_owned()],
+        "a temporary was left behind"
+    );
+}
+
 /// Rewrites one note between two versions from `writers` threads while the
 /// caller lists, and asserts every listing saw one version whole.
 fn rewrite_under_a_reader(name: &str, writers: usize) {
