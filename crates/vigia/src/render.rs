@@ -1796,18 +1796,6 @@ pub struct NoteCells {
     pub reply: Option<Rect>,
 }
 
-impl NoteCells {
-    /// The cells `target` names, when this frame drew them.
-    #[must_use]
-    pub fn of(&self, target: crate::notes::Target) -> Option<Rect> {
-        match target {
-            crate::notes::Target::Rows => Some(self.rows),
-            crate::notes::Target::Word => self.word,
-            crate::notes::Target::Reply => self.reply,
-        }
-    }
-}
-
 /// Where each note's rows were drawn, from the layout `laid` the pointer was
 /// told about and the rows `view` holds. A note's rows are one run, so each
 /// appears once; a screen with no note rows answers nothing. The word sits

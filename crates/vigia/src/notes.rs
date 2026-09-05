@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
+use ratatui::layout::Rect;
 use tachyonfx::{Effect, Interpolation, fx};
 use vigia_core::{Note, Result, Status, Store};
 
@@ -295,6 +296,18 @@ pub enum Target {
     Word,
     /// The agent's line alone.
     Reply,
+}
+
+impl NoteCells {
+    /// The cells `target` names, when this frame drew them.
+    #[must_use]
+    pub fn of(&self, target: Target) -> Option<Rect> {
+        match target {
+            Target::Rows => Some(self.rows),
+            Target::Word => self.word,
+            Target::Reply => self.reply,
+        }
+    }
 }
 
 /// An effect over one note's cells, found by id on every frame that draws it.
