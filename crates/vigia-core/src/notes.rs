@@ -13,8 +13,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use notify::{EventKind, RecursiveMode, Watcher as _};
+
 use crate::error::{Error, Result};
 use crate::hunk::LineKind;
+use crate::watch::roots_of;
 
 /// The first line of every note file. A file whose first line differs was
 /// written by a `vigia` this one does not know, and is skipped rather than
@@ -203,6 +206,18 @@ pub struct Store {
     dir: PathBuf,
 }
 
+/// An armed watch over a store's files, alive for as long as it is held.
+pub struct StoreWatch {
+    _backend: notify::RecommendedWatcher,
+}
+
+/// Whether an event at `path` is about the store at `dir`: the directory
+/// itself appearing, or a note file inside it. A temporary in flight is not,
+/// so one write is one event rather than two.
+fn concerns(dir: &Path, path: &Path) -> bool {
+    path == dir || (path.starts_with(dir) && path.extension().is_some_and(|ext| ext == NOTE_EXT))
+}
+
 /// What a listing found: every note that read whole, and every file that did
 /// not, with why.
 #[derive(Debug, Default)]
@@ -338,6 +353,49 @@ impl Store {
             .notes
             .sort_by(|a, b| a.written.cmp(&b.written).then_with(|| a.id.cmp(&b.id)));
         Ok(listing)
+    }
+
+    /// Call `changed` from the platform's watch thread whenever a note file
+    /// under this store is written, moved in or removed, or the store's own
+    /// directory appears. The watch arms on the directory when it exists, on
+    /// the state root above it when only that does, and on nothing when neither
+    /// is there yet, which is `Ok(None)`: the caller asks again once something
+    /// has written. A directory that does not exist cannot be watched, and
+    /// creating one for the watch would give a reader who never writes a note a
+    /// directory per project.
+    ///
+    /// # Errors
+    ///
+    /// The platform's watcher cannot be created or cannot watch the directory.
+    pub fn watch(&self, changed: impl Fn() + Send + 'static) -> Result<Option<StoreWatch>> {
+        let (target, mode) = if self.dir.is_dir() {
+            (self.dir.clone(), RecursiveMode::NonRecursive)
+        } else if let Some(root) = self.dir.parent().filter(|root| root.is_dir()) {
+            (root.to_path_buf(), RecursiveMode::Recursive)
+        } else {
+            return Ok(None);
+        };
+        let dirs = roots_of(&self.dir);
+        let mut backend = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            let Ok(event) = res else {
+                return;
+            };
+            if matches!(event.kind, EventKind::Access(_)) {
+                return;
+            }
+            if event
+                .paths
+                .iter()
+                .any(|path| dirs.iter().any(|dir| concerns(dir, path)))
+            {
+                changed();
+            }
+        })
+        .map_err(|e| Error::Watch(Box::new(e)))?;
+        backend
+            .watch(&target, mode)
+            .map_err(|e| Error::Watch(Box::new(e)))?;
+        Ok(Some(StoreWatch { _backend: backend }))
     }
 
     /// The file of `id`, or the error a caller can show when `id` could name

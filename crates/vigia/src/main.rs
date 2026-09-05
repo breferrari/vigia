@@ -23,6 +23,9 @@ fn main() -> ExitCode {
             println!("vigia {VERSION}");
             ExitCode::SUCCESS
         }
+        // A server rather than a pane: no terminal is taken and there is no
+        // frame it can change, which is what keeps it outside B6's count.
+        Request::Mcp => vigia::mcp::serve(),
         Request::NoSuchOption => {
             eprintln!("vigia: no such option. {USAGE}");
             ExitCode::FAILURE
@@ -50,5 +53,6 @@ fn main() -> ExitCode {
 }
 
 /// The one-line surface description both refusals end with.
-const USAGE: &str = "It takes one optional path, and --version (or -V) is the \
-                     only option. `vigia .` watches this tree.";
+const USAGE: &str = "It takes one optional path, or the word mcp, and --version \
+                     (or -V) is the only option. `vigia .` watches this tree; \
+                     `vigia mcp` serves its notes to the agent.";

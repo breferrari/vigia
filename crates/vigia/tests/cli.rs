@@ -228,3 +228,35 @@ fn the_refusal_names_every_spelling_the_classifier_accepts() {
         );
     }
 }
+
+/// `SPEC.md` §11.2 B6 as amended by B21: the surface's second word, and only
+/// the bare word.
+#[test]
+fn mcp_is_the_second_word_and_a_path_spelled_like_it_is_still_a_path() {
+    assert_eq!(request("mcp"), Request::Mcp);
+    for arg in ["./mcp", "mcp/", "MCP", "mcp.rs", "src/mcp"] {
+        assert_eq!(
+            request(arg),
+            Request::Watch,
+            "{arg:?} is a path, not the server"
+        );
+    }
+    for args in [
+        vec!["mcp", "."],
+        vec!["mcp", "register"],
+        vec![".", "mcp"],
+        vec!["mcp", "--version"],
+    ] {
+        assert_eq!(
+            request_all(&args),
+            Request::TooManyArguments,
+            "{args:?} is more than one argument and must be refused"
+        );
+    }
+
+    let (_, _, usage) = run_binary(&["--frobnicate"]);
+    assert!(
+        usage.contains("mcp"),
+        "the refusal accepts mcp and does not mention it: {usage:?}"
+    );
+}

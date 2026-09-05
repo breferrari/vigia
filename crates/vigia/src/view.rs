@@ -690,14 +690,6 @@ fn letter(kind: &ChangeKind) -> char {
     }
 }
 
-/// The path content moved from, for the kinds that have one.
-fn source_of(kind: &ChangeKind) -> Option<&str> {
-    match kind {
-        ChangeKind::Renamed { from } | ChangeKind::Copied { from } => Some(from),
-        _ => None,
-    }
-}
-
 /// The one-line stand-in for a file with no line-level diff, if it needs one.
 fn note_for<'a>(kind: &ChangeKind, diff: &'a FileDiff) -> Option<&'a str> {
     match kind {
@@ -878,7 +870,7 @@ fn entry_of(kind: &ChangeKind, origin: Origin, diff: &FileDiff, history: &Histor
     FileEntry {
         path: diff.path.clone(),
         origin,
-        from: source_of(kind).map(str::to_owned),
+        from: kind.source().map(str::to_owned),
         kind: letter(kind),
         churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
         spark: history.level(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
@@ -1033,14 +1025,13 @@ impl View {
             by_path.entry(note.path.as_str()).or_default().push(note);
         }
         if !by_path.is_empty() {
-            // Whether a note's file is in the diff at all is a fact about the
-            // changed set rather than about the screen, so it is answered here
-            // for every note, drawn or not.
+            // Whether a note's file is in the diff at all is a fact about the changed set
+            // rather than the screen, so it is answered here for every note, drawn or not.
             let present: HashSet<&str> = frame
                 .files()
                 .iter()
                 .flat_map(|change| {
-                    std::iter::once(change.path.as_str()).chain(source_of(&change.kind))
+                    std::iter::once(change.path.as_str()).chain(change.kind.source())
                 })
                 .collect();
             view.notes.adrift = notes
@@ -1146,8 +1137,7 @@ impl View {
                 // renamed from, so a note follows a rename to its new path.
                 let mut file_notes: Vec<&Note> = Vec::new();
                 if !by_path.is_empty() {
-                    for path in std::iter::once(change.path.as_str()).chain(source_of(&change.kind))
-                    {
+                    for path in std::iter::once(change.path.as_str()).chain(change.kind.source()) {
                         if let Some(found) = by_path.get(path) {
                             file_notes.extend(found.iter().copied());
                         }

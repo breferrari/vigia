@@ -336,8 +336,8 @@ impl<'repo> Watcher<'repo> {
     }
 }
 
-/// Every spelling of the worktree root that an event path might carry.
-fn roots_of(workdir: &Path) -> Vec<PathBuf> {
+/// Every spelling of a watched root that an event path might carry.
+pub(crate) fn roots_of(workdir: &Path) -> Vec<PathBuf> {
     let mut roots = vec![workdir.to_path_buf()];
     for spelling in [std::path::absolute(workdir), workdir.canonicalize()]
         .into_iter()

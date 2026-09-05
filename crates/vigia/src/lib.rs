@@ -13,6 +13,9 @@ mod glyphs;
 /// integration test and must measure through the same reader the shell uses.
 pub mod icons;
 mod input;
+/// The agent's side of `SPEC.md` §11.2 B21: `vigia mcp`, the stdio server
+/// over the notes store. Public because the suite drives it as the loop does.
+pub mod mcp;
 pub mod memory;
 mod notes;
 mod render;
@@ -106,6 +109,8 @@ pub enum Request {
     Watch,
     /// Print the version and exit successfully.
     Version,
+    /// Serve the notes store to the agent over stdio, `SPEC.md` §11.2 B21.
+    Mcp,
     /// An argument beginning with `-` that is not a version query.
     NoSuchOption,
     /// More than one argument, when the surface is exactly one.
@@ -125,6 +130,10 @@ pub fn request_for(args: &[OsString]) -> Request {
 fn request_for_one(arg: &OsStr) -> Request {
     if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
         return Request::Version;
+    }
+    // The bare word and nothing else: `./mcp` is still a directory to watch.
+    if arg == OsStr::new("mcp") {
+        return Request::Mcp;
     }
     // The first byte rather than a decoded character: both encodings behind
     // `OsStr` are self-synchronising at ASCII, so a leading `b'-'` cannot be the

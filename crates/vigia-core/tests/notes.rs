@@ -4,9 +4,10 @@
 mod support;
 
 use std::fs;
+use std::sync::mpsc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir, files_in, note};
+use support::{Scratch, TempDir, budget, files_in, note};
 use vigia_core::{
     Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
     key, resolve,
@@ -688,5 +689,62 @@ fn two_spellings_of_one_path_and_a_junction_derive_one_key() {
     assert_eq!(
         key(root).expect("key"),
         key(&link).expect("key through the junction")
+    );
+}
+
+/// B21: the store is an event source for both processes. Armed on the state
+/// root while the store's directory is not there yet, then on the directory.
+#[test]
+fn a_write_from_another_handle_wakes_the_store_watch() {
+    let (scratch, root, store) = store("notes-watch");
+    let other = Store::open(root.path(), scratch.root()).expect("a second handle");
+    assert!(
+        !store.dir().exists(),
+        "the directory appears on the first put"
+    );
+
+    let (tx, rx) = mpsc::channel();
+    let watch = store
+        .watch(move || {
+            let _ = tx.send(());
+        })
+        .expect("arm on the root")
+        .expect("the root exists, so there is something to watch");
+    other.put(&note("w-1", 5, "x", "first")).expect("put");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("the first write, which also created the directory, was reported");
+    drop(watch);
+
+    let (tx, rx) = mpsc::channel();
+    let watch = store
+        .watch(move || {
+            let _ = tx.send(());
+        })
+        .expect("arm on the directory")
+        .expect("the directory exists now");
+    other
+        .put(&note("w-1", 5, "x", "rewritten"))
+        .expect("rewrite");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("a rewrite was reported");
+    while rx.try_recv().is_ok() {}
+    other.remove("w-1").expect("remove");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("a removal was reported");
+    drop(watch);
+}
+
+#[test]
+fn a_store_whose_root_is_not_there_yet_has_nothing_to_watch() {
+    let scratch = Scratch::new("notes-watch-nothing");
+    let holder = TempDir::new("state");
+    let store = Store::open(&holder.path().join("never-made"), scratch.root()).expect("open");
+    let armed = store
+        .watch(|| {})
+        .expect("nothing to watch is not an error");
+    assert!(armed.is_none(), "there is no directory on disk to arm on");
+    assert!(
+        !holder.path().join("never-made").exists(),
+        "and none was made for it"
     );
 }

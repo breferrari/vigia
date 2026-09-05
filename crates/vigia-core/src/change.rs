@@ -72,6 +72,17 @@ pub struct FileChange {
     pub(crate) maybe_symlink: bool,
 }
 
+impl ChangeKind {
+    /// The path the content moved or was copied from, for the kinds that have
+    /// one, which is where a note pinned under the old path is looked for.
+    pub fn source(&self) -> Option<&str> {
+        match self {
+            Self::Renamed { from } | Self::Copied { from } => Some(from),
+            _ => None,
+        }
+    }
+}
+
 impl FileChange {
     /// Whether this change can have hunks at all.
     pub fn is_diffable(&self) -> bool {
