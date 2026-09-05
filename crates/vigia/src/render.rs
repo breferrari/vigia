@@ -12,7 +12,6 @@ use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
-use crate::notes::{NoteCount, count_cell};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View};
 
@@ -398,7 +397,7 @@ const FOLLOWING: &str = "follow ▶";
 const FOLLOW_MARK: char = '▶';
 
 /// What joins two facts drawn on one line.
-pub(crate) const FACT_SEPARATOR: &str = " · ";
+const FACT_SEPARATOR: &str = " · ";
 
 /// What the body says when there is no diff at all.
 const NOTHING_CHANGED: &str = "no unstaged changes";
@@ -3527,9 +3526,7 @@ impl Painter<'_> {
                 let offset = usize::from(y - area.y);
                 view.rows.get(offset).and_then(|row| match row {
                     Row::Line { .. } => Some(offset),
-                    Row::Wrap { .. } => view.rows[..offset]
-                        .iter()
-                        .rposition(|row| !row.is_display())
+                    Row::Wrap { .. } => Some(view.head_of(offset))
                         .filter(|head| matches!(view.rows[*head], Row::Line { .. })),
                     _ => None,
                 })
@@ -3559,11 +3556,11 @@ impl Painter<'_> {
                 ..area
             };
             let mark = if hovered == Some(offset) {
-                Mark::Icon
+                Mark::Hover
             } else {
                 match marks.as_ref().and_then(|marks| marks[offset]) {
-                    Some(true) => Mark::Icon,
-                    Some(false) => Mark::Number,
+                    Some(true) => Mark::Bare,
+                    Some(false) => Mark::Noted,
                     None => Mark::None,
                 }
             };
@@ -4037,16 +4034,12 @@ impl Painter<'_> {
         // `None` is a continuation, and it changes exactly two cells: the sigil becomes
         // [`WRAPPED`] and the gutter goes blank.
         let sigil = if number.is_some() { sigil } else { WRAPPED };
-        // The mark's ink is the pointer's, on the number cell where there is a
-        // gutter and on the sigil's cell where there is none, since the sigil's
-        // cell is then the whole target.
-        let marked = match mark {
-            Mark::None => None,
-            Mark::Icon | Mark::Number => Some(self.theme.bar_hover),
-        };
-        let (sigil, sigil_style) = match (mark, marked) {
-            (Mark::Icon, Some(ink)) if self.gutter == 0 => (NOTE_ICON, ink),
-            (_, Some(ink)) if self.gutter == 0 => (sigil, ink),
+        // The mark takes the number cell where there is a gutter, and the sigil's
+        // cell where there is none: the sigil and its gap are then the whole
+        // target, and the sigil is the cell of the two that draws something.
+        let marked = mark.ink(self.theme);
+        let (sigil, sigil_style) = match marked {
+            Some(ink) if self.gutter == 0 => (if mark.is_icon() { NOTE_ICON } else { sigil }, ink),
             _ => (sigil, diff),
         };
 
@@ -4082,10 +4075,10 @@ impl Painter<'_> {
             // the pointer, and on a line whose note is the anchor alone, the number
             // becomes the icon; on a line with a note under it the number keeps the
             // icon's ink, so the anchored line can be found from across the pane.
-            let numbered = match (number, mark) {
-                (Some(_), Mark::Icon) => format!("{NOTE_ICON:>gutter$} "),
-                (Some(number), _) => format!("{number:>gutter$} "),
-                (None, _) => " ".repeat(gutter + 1),
+            let numbered = match number {
+                Some(_) if mark.is_icon() => format!("{NOTE_ICON:>gutter$} "),
+                Some(number) => format!("{number:>gutter$} "),
+                None => " ".repeat(gutter + 1),
             };
             // crush's two-tone gutter (`SPEC.md` §11.2 B18): on a changed row the
             // number cells take a tone one step off the wash, so the gutter reads as a
@@ -4174,7 +4167,8 @@ impl Painter<'_> {
             NoteLead::Reply => (WRAPPED, ink),
             NoteLead::Blank => (' ', ink),
         };
-        // The word first, at the right edge, so the text is bounded by what it leaves.
+        // The word first, at the right edge, so the lead and the text are both
+        // bounded by what it leaves.
         let taken = match word {
             Some(word) => self.put_right(
                 Rect {
@@ -4187,15 +4181,10 @@ impl Painter<'_> {
             ),
             None => 0,
         };
-        let next = self.put(x, glyphs.y, &format!("{glyph} "), room, glyph_ink);
+        let left = room.saturating_sub(taken);
+        let next = self.put(x, glyphs.y, &format!("{glyph} "), left, glyph_ink);
         let spent = usize::from(next - x);
-        self.put_marked(
-            next,
-            glyphs.y,
-            text,
-            room.saturating_sub(spent).saturating_sub(taken),
-            ink,
-        );
+        self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), ink);
     }
 }
 
@@ -4204,11 +4193,57 @@ impl Painter<'_> {
 enum Mark {
     /// The number as it always was.
     None,
-    /// The icon, in the pointer's ink: the pointer rests here, or the note under
-    /// this line is the anchor alone.
-    Icon,
-    /// The number, in the icon's ink: a note with a body sits under this line.
-    Number,
+    /// The icon in the pointer's ink: the pointer rests here.
+    Hover,
+    /// The icon in the note's ink: the note under this line is the anchor alone,
+    /// so nothing else on screen would say the line is marked.
+    Bare,
+    /// The number in the note's ink: a note with a body sits under this line.
+    Noted,
+}
+
+impl Mark {
+    /// Whether the icon stands where the number would.
+    fn is_icon(self) -> bool {
+        matches!(self, Self::Hover | Self::Bare)
+    }
+
+    /// The ink over the gutter's own, or none. A note's ink is the pointer's
+    /// colour made bold: bold is what survives a palette with no colour, and it
+    /// is what keeps the persisted mark brighter than the pointer resting on it.
+    fn ink(self, theme: &Theme) -> Option<Style> {
+        match self {
+            Self::None => None,
+            Self::Hover => Some(theme.bar_hover),
+            Self::Bare | Self::Noted => Some(theme.bar_hover.add_modifier(Modifier::BOLD)),
+        }
+    }
+}
+
+/// How many notes the reader has and how many of them are adrift, which the
+/// footer counts beside the position.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoteCount {
+    /// Every note the store listed.
+    pub total: usize,
+    /// Those whose file is not in the diff, drawn nowhere.
+    pub adrift: usize,
+}
+
+/// The footer's count of the notes: nothing without any, then `1 note`,
+/// `2 notes`, and `2 notes · 1 adrift` once a file has left the diff.
+#[must_use]
+pub fn count_cell(notes: usize, adrift: usize) -> String {
+    let counted = match notes {
+        0 => return String::new(),
+        1 => "1 note".to_owned(),
+        n => format!("{n} notes"),
+    };
+    if adrift == 0 {
+        counted
+    } else {
+        format!("{counted}{FACT_SEPARATOR}{adrift} adrift")
+    }
 }
 
 pub(crate) fn width_of(text: &str) -> usize {

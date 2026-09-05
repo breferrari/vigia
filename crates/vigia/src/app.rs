@@ -6,8 +6,7 @@ use vigia_core::{Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
-use crate::notes::NoteCount;
-use crate::render::{Body, Chrome, Mode};
+use crate::render::{Body, Chrome, Mode, NoteCount};
 use crate::view::{Position, View, Viewport, rows_in};
 
 /// Completed frames the status bar's p99 is taken over.

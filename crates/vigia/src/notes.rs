@@ -1,10 +1,10 @@
-//! What one click on a content row's gutter does to the store, and what the
-//! footer says about the notes (`SPEC.md` §11.2 B21).
+//! What one press on a content row's gutter does to the store (`SPEC.md` §11.2
+//! B21).
 
 use std::time::SystemTime;
 
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
-use vigia_core::{Note, Result, Side, Status, Store};
+use vigia_core::{Note, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::view::View;
@@ -26,21 +26,7 @@ pub fn press_at(view: &View, regions: Regions, event: &Event) -> Option<usize> {
     view.anchor_at(offset).map(|_| offset)
 }
 
-/// Where a note is pinned: what a click read off the row it landed on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Anchor {
-    /// Repository-relative path of the file the line is in.
-    pub path: String,
-    /// Which side the line is numbered on.
-    pub side: Side,
-    /// Its number on that side.
-    pub line: u32,
-    /// Its whole text, which is what finds it again after an edit above moves
-    /// the number.
-    pub text: String,
-}
-
-/// What a click on a content row's gutter did.
+/// What a press on a content row's gutter did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Toggled {
     /// A note with an empty body was written, under this id.
@@ -49,13 +35,14 @@ pub enum Toggled {
     Withdrawn(usize),
 }
 
-/// Act on a click at row `offset` of `view`: `None` off a content row; on an
+/// Act on a press at row `offset` of `view`: `None` off a content row; on an
 /// unmarked line, write the anchor alone; on a marked one, withdraw every note
 /// pinned there, which is how one line holds one open note.
 ///
 /// # Errors
 ///
-/// The store could not write or remove the file.
+/// The store could not write or remove a file. A removal that fails partway
+/// leaves the earlier ones done, so the caller reads the store back either way.
 pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggled>> {
     let anchor = view.anchor_at(offset)?;
     let marked = view.marked_at(offset);
@@ -79,30 +66,4 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
         written: SystemTime::now(),
     };
     Some(store.put(&note).map(|()| Toggled::Written(note.id)))
-}
-
-/// How many notes the reader has and how many of them are adrift, which the
-/// footer counts beside the position.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct NoteCount {
-    /// Every note the store listed.
-    pub total: usize,
-    /// Those whose file is not in the diff, drawn nowhere.
-    pub adrift: usize,
-}
-
-/// The footer's count of the notes: nothing without any, then `1 note`,
-/// `2 notes`, and `2 notes · 1 adrift` once a file has left the diff.
-#[must_use]
-pub fn count_cell(notes: usize, adrift: usize) -> String {
-    let counted = match notes {
-        0 => return String::new(),
-        1 => "1 note".to_owned(),
-        n => format!("{n} notes"),
-    };
-    if adrift == 0 {
-        counted
-    } else {
-        format!("{counted}{}{adrift} adrift", crate::render::FACT_SEPARATOR)
-    }
 }

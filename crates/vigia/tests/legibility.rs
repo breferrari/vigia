@@ -9,9 +9,9 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow, Mode,
-    NoteLead, Position, Regions, Row, Scale, Theme, View, body_layout, diff_height, regions,
-    render,
+    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow, Marked,
+    Mode, NoteLead, Noted, Position, Regions, Row, Scale, Theme, View, body_layout, diff_height,
+    regions, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
@@ -451,7 +451,16 @@ fn every_row_kind() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
-        notes: Default::default(),
+        // The added line carries the note's mark, so every sweep draws a marked
+        // number beside the note rows.
+        notes: Noted {
+            marked: vec![Marked {
+                row: 4,
+                id: "n1".to_owned(),
+                bare: false,
+            }],
+            ..Default::default()
+        },
     }
 }
 

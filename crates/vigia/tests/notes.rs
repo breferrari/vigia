@@ -14,9 +14,9 @@ use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, Mo
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
-    Action, App, Glyphs, Hovered, Pointing, Region, Regions, Row, Theme, Toggled, View, Viewport,
-    body_layout, count_cell, hover_after, press_at, regions, render, repainted, selection_after,
-    toggle,
+    Action, App, Glyphs, Hovered, NoteCount, Pointing, Region, Regions, Row, Theme, Toggled, View,
+    Viewport, body_layout, count_cell, hover_after, press_at, regions, render, repainted,
+    selection_after, toggle,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -1190,5 +1190,279 @@ fn the_bottom_clamp_counts_note_rows() {
         painted.text(last).contains("line 58"),
         "the diff's last line is not on the last screenful: {:?}",
         painted.text(last)
+    );
+}
+
+#[test]
+fn the_notes_count_never_buys_the_footer_a_second_line() {
+    // The count moves on a collect, after the layout was taken, so a count that
+    // grew the footer would leave the body a row shorter than the rows collected
+    // for it. Every width, against a count wide enough to matter.
+    let app = App::new();
+    let without = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let mut with = without.clone();
+    with.notes = NoteCount {
+        total: 12,
+        adrift: 3,
+    };
+    let mut counted_somewhere = false;
+    for width in 20..=120u16 {
+        let pane = Rect::new(0, 0, width, 24);
+        assert_eq!(
+            body_layout(pane, &with, 3, 3),
+            body_layout(pane, &without, 3, 3),
+            "the notes count changed the layout at {width} columns"
+        );
+        let mut buf = ratatui::buffer::Buffer::empty(pane);
+        render(
+            &mut buf,
+            pane,
+            &View::default(),
+            &Theme::default(),
+            Glyphs::default(),
+            &with,
+        );
+        let footer: String = (0..width)
+            .map(|x| buf[(x, 23)].symbol())
+            .collect::<String>();
+        counted_somewhere |= footer.contains("12 notes · 3 adrift");
+    }
+    assert!(
+        counted_somewhere,
+        "no width drew the count, so the layouts above agree about nothing"
+    );
+}
+
+#[test]
+fn below_the_gutters_floor_the_sigil_takes_the_mark() {
+    // Twenty-seven columns: one digit and the sigil leave twenty-three for text,
+    // under the floor that keeps line numbers, so the sigil and its gap are the
+    // whole target and the sigil's cell is the one that draws.
+    let scratch = fixture("notes-floor");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let floor = Rect::new(0, 0, 27, 24);
+    let plain = rig.paint(&mut frame, floor, Pointing::default());
+    let y = plain.row_of("checked_mul");
+    let (left, columns, _) = plain.gutter();
+    assert!(
+        plain.view.gutter == Some(0),
+        "the fixture kept its line numbers at {} columns, so this is not the floor",
+        floor.width
+    );
+    assert_eq!(
+        columns, 2,
+        "the target below the floor is the sigil and its gap"
+    );
+    assert_eq!(plain.cell(left, y).symbol(), "+");
+    for x in left..left + columns {
+        assert_eq!(plain.laid.hover_at(x, y), Some(Hovered::Gutter(y)));
+    }
+    assert_eq!(plain.laid.hover_at(left + columns, y), None);
+
+    let hovering = rig.paint(
+        &mut frame,
+        floor,
+        Pointing {
+            hovered: Some(Hovered::Gutter(y)),
+            ..Pointing::default()
+        },
+    );
+    assert_eq!(hovering.cell(left, y).symbol(), "✎", "{}", hovering.text(y));
+    let past_the_sigil = |painted: &Painted| painted.text(y).chars().skip(1).collect::<String>();
+    assert_eq!(
+        past_the_sigil(&hovering),
+        past_the_sigil(&plain),
+        "the mark reached past the sigil's cell"
+    );
+
+    // A note with a body keeps the sigil and marks it; the anchor alone takes the icon.
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, floor, Pointing::default());
+    assert_eq!(noted.cell(left, y).symbol(), "+");
+    assert!(
+        noted
+            .cell(left, y)
+            .style()
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    rig.store.remove("n1").expect("remove");
+    rig.store.put(&note("n2", 5, EDITED, "")).expect("put");
+    rig.reload();
+    let bare = rig.paint(&mut frame, floor, Pointing::default());
+    assert_eq!(bare.cell(left, y).symbol(), "✎");
+    assert!(
+        bare.cell(left, y)
+            .style()
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+}
+
+#[test]
+fn a_persisted_mark_is_bold_where_the_pointers_is_not() {
+    // On a palette whose pointer colour carries no modifier, the mark that stays
+    // has to hold under `NO_COLOR` and read brighter than a pointer resting on the
+    // line, and bold is both.
+    let scratch = fixture("notes-bold");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.theme = Theme::dark();
+    assert!(
+        !rig.theme.bar_hover.add_modifier.contains(Modifier::BOLD),
+        "the dark palette's pointer is bold, so this compares nothing"
+    );
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    let hovering = rig.paint(
+        &mut frame,
+        PANE,
+        Pointing {
+            hovered: Some(Hovered::Gutter(y)),
+            ..Pointing::default()
+        },
+    );
+    let icon = (left..origin)
+        .find(|x| hovering.cell(*x, y).symbol() == "✎")
+        .expect("the icon");
+    assert!(
+        !hovering
+            .cell(icon, y)
+            .style()
+            .add_modifier
+            .contains(Modifier::BOLD),
+        "the pointer's mark is bold, so it is as loud as a note"
+    );
+
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(noted.cell(icon, y).symbol(), "5");
+    assert!(
+        noted
+            .cell(icon, y)
+            .style()
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    assert_eq!(noted.fg(icon, y), rig.theme.bar_hover.fg);
+    // And the noted number differs from a plain one by more than colour, which is
+    // what a palette with no colour is left with.
+    assert_ne!(
+        noted.cell(icon, y).style().add_modifier,
+        plain.cell(icon, y).style().add_modifier
+    );
+}
+
+#[test]
+fn a_note_whose_line_is_off_screen_draws_nothing_and_stays_counted() {
+    let scratch = Scratch::new("notes-off-screen");
+    scratch.write(PATH, numbered_lines(200));
+    scratch.commit_all("baseline");
+    for line in (4..200).step_by(10) {
+        scratch.edit_line(PATH, line, &format!("changed {}", line + 1));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 195, "changed 195", "far below"))
+        .expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert!(
+        !painted.rows().iter().any(|row| row.contains("far below")),
+        "a note whose line is below the fold was drawn"
+    );
+    assert!(painted.view.notes.marked.is_empty());
+    assert_eq!(
+        painted.view.notes.adrift, 0,
+        "an off-screen line is not adrift"
+    );
+    assert!(painted.footer().contains("1 note"), "{}", painted.footer());
+}
+
+#[test]
+fn two_notes_on_one_line_draw_both_and_one_press_withdraws_both() {
+    // Two panes on one worktree can each write the same line before either sees
+    // the other's note. The line then carries both, and the reader's press
+    // withdraws both, which is how it holds one open note again.
+    let scratch = fixture("notes-two-on-one");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "")).expect("put");
+    rig.store
+        .put(&note("n2", 5, EDITED, "second"))
+        .expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let (left, _, origin) = painted.gutter();
+
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert!(under[0].trim_end().ends_with("open") && under[1].starts_with("second"));
+    // One of the two has a body, so the line keeps its number rather than the icon.
+    assert!((left..origin).any(|x| painted.cell(x, y).symbol() == "5"));
+    assert_eq!(
+        painted
+            .view
+            .marked_at(usize::from(y - painted.laid.diff.top))
+            .len(),
+        2
+    );
+
+    assert_eq!(rig.click(&painted, left, y), Some(Toggled::Withdrawn(2)));
+    assert!(files_in(rig.store.dir()).is_empty());
+}
+
+#[test]
+fn a_note_rows_lead_never_overwrites_its_word() {
+    // The word is drawn first at the right edge and the lead is bounded by what
+    // it leaves, so a pane too narrow for both drops the lead and never the
+    // reader's status.
+    let scratch = fixture("notes-narrow-word");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "")).expect("put");
+    rig.reload();
+    let mut drawn = 0;
+    for width in 6..=20u16 {
+        let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 24), Pointing::default());
+        for (offset, row) in painted.view.rows.iter().enumerate() {
+            let Row::Note {
+                word: Some(word), ..
+            } = row
+            else {
+                continue;
+            };
+            let text = painted.text(painted.laid.diff.top + offset as u16);
+            let trimmed = text.trim_end();
+            if trimmed.ends_with(word) {
+                drawn += 1;
+            } else {
+                assert!(
+                    !trimmed.contains(&word[1..]),
+                    "at {width} columns the lead overwrote the word: {text:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        drawn > 0,
+        "no width drew the word, so nothing here was checked"
     );
 }

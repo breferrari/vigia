@@ -35,19 +35,19 @@ pub use input::{
     Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
     repainted, scroll_mark, selection_after, settled,
 };
-pub use notes::{Anchor, Toggled, count_cell, press_at, toggle};
+pub use notes::{Toggled, press_at, toggle};
 pub use render::{
-    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
-    diff_height, notice_area, regions, render, voice_style,
+    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCount, PaintStats,
+    body_layout, count_cell, diff_height, notice_area, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked, NoteLead, Noted, Position, Row, Scale,
-    Slot, View, Viewport, block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted,
-    rows_in, rows_of, span_in,
+    Anchor, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked, NoteLead, Noted, Position, Row,
+    Scale, Slot, View, Viewport, block_rows, diff_rows, file_at, last_top, list_plan,
+    list_rows_wanted, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -886,24 +886,31 @@ impl Shell {
         }
     }
 
-    /// Write the anchor a click asked for, or withdraw the note already there,
+    /// Write the anchor a press asked for, or withdraw the note already there,
     /// and read the store back so the next frame draws what it holds. A failed
     /// write is a footer alert rather than the end of the pane, which is B7's
-    /// rule for a monitor's own writes.
+    /// rule for a monitor's own writes, and the store is read back after a
+    /// failure too, since a withdrawal that failed partway still removed some.
     fn toggle_note(&mut self, offset: usize, now: Instant) {
         let Some(store) = &self.store else {
+            let variables = if cfg!(windows) {
+                "LOCALAPPDATA"
+            } else {
+                "HOME or XDG_STATE_HOME"
+            };
             self.say(
-                "no home to keep a note in: set HOME or XDG_STATE_HOME".to_owned(),
+                format!("no home to keep a note in: set {variables}"),
                 Voice::Alert,
                 now,
             );
             return;
         };
         match notes::toggle(store, &self.screen, offset) {
-            None => {}
-            Some(Ok(_)) => self.reload_notes(now),
+            None => return,
+            Some(Ok(_)) => {}
             Some(Err(e)) => self.say(format!("could not write the note: {e}"), Voice::Alert, now),
         }
+        self.reload_notes(now);
     }
 
     /// Read the store and hand the notes to the next collect. A file the store
@@ -1468,6 +1475,49 @@ mod tests {
                 "`{said}` is gone, so the footer claims something OSC 52 cannot promise"
             );
         }
+    }
+
+    /// A press on a content row's gutter goes to the store before the wash can
+    /// see it, and the store is read back whatever the write answered. Both live
+    /// inside methods that own a terminal, so they are read here.
+    #[test]
+    fn a_gutter_press_reaches_the_store_before_the_wash_and_is_read_back() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let press = shipped
+            .find("notes::press_at(&shell.screen, regions, &event)")
+            .expect("the input arm no longer routes a gutter press to the store");
+        let wash = shipped
+            .find("selection_after(&event, regions, shell.selected)")
+            .expect("the input arm no longer opens a wash");
+        assert!(
+            press < wash,
+            "the wash is consulted before the gutter press, so a press that writes \
+             a note also begins a selection"
+        );
+        let toggle = shipped
+            .split("fn toggle_note(&mut self, offset: usize, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`toggle_note` is gone");
+        let outcomes = toggle
+            .split("match notes::toggle(")
+            .nth(1)
+            .expect("`toggle_note` no longer asks the store");
+        // After the arm that reports a failure, so it runs on every outcome that
+        // reached the store rather than inside the one that succeeded.
+        let failed = outcomes
+            .find("Some(Err(")
+            .expect("`toggle_note` no longer has a failure arm");
+        let read_back = outcomes
+            .find("self.reload_notes(now)")
+            .expect("`toggle_note` no longer reads the store back");
+        assert!(
+            read_back > failed,
+            "the store is read back inside one arm rather than after every outcome, \
+             so a withdrawal that failed partway leaves the screen showing notes the \
+             store no longer holds"
+        );
     }
 
     /// An announcement outlasts a receipt, and the one place a notice is armed

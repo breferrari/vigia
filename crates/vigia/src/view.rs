@@ -7,8 +7,6 @@ use vigia_core::{
     Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
 };
 
-use crate::notes::Anchor;
-
 /// One changed file, as everything a row about it needs to be drawn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileEntry {
@@ -344,6 +342,20 @@ impl Row {
     }
 }
 
+/// Where a note is pinned: what a press read off the row it landed on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Anchor {
+    /// Repository-relative path of the file the line is in.
+    pub path: String,
+    /// Which side the line is numbered on.
+    pub side: Side,
+    /// Its number on that side.
+    pub line: u32,
+    /// Its whole text, which is what finds it again after an edit above moves
+    /// the number.
+    pub text: String,
+}
+
 /// A display row that carries a note's mark, and whose note it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marked {
@@ -426,11 +438,13 @@ impl Pin {
         if !self.resolved {
             let mut body = pieces(&self.body);
             // The word takes a row of its own when the last piece leaves it no
-            // room: the reader's words are never cut to fit a status.
+            // room, with a blank between them: the reader's words are never cut
+            // to fit a status. An empty piece needs no blank.
             let last = body
                 .last()
                 .map_or(0, |piece| crate::render::width_of(piece));
-            if room > 0 && last + 1 + self.word.len() > room {
+            let gap = usize::from(last > 0);
+            if room > 0 && last + gap + self.word.len() > room {
                 body.push(String::new());
             }
             let count = body.len();
@@ -1630,7 +1644,7 @@ impl View {
     }
 
     /// The row a display row belongs to; none only above a scrolled head.
-    fn head_of(&self, at: usize) -> usize {
+    pub(crate) fn head_of(&self, at: usize) -> usize {
         self.rows[..=at]
             .iter()
             .rposition(|row| !row.is_display())
