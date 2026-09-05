@@ -577,12 +577,27 @@ pub const ARRIVING_FRAME: std::time::Duration = std::time::Duration::from_millis
 /// How long the direction arrows stay lit after the last scroll.
 pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
-/// The whole of a message's time on the footer, both transitions included.
-/// One-shot, so an idle pane owns no timer.
+/// The whole of a receipt's or a warning's time on the footer, both transitions
+/// included. One-shot, so an idle pane owns no timer.
 ///
 /// Long enough that the two ends are a real part of it rather than something to
 /// get through: at the slowest voice, 750ms in, three seconds settled, 750 out.
 pub const NOTICE_LINGER: std::time::Duration = std::time::Duration::from_millis(4500);
+
+/// The whole of an announcement's time on the footer. A receipt answers a gesture
+/// the reader just made and finds them looking; an announcement arrives while
+/// they are looking at the other pane, and [`NOTICE_LINGER`] was gone before it
+/// was read.
+pub const ARRIVED_LINGER: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long a message in `voice` holds the footer, both transitions included.
+#[must_use]
+pub fn linger_for(voice: Voice) -> std::time::Duration {
+    match voice {
+        Voice::Said | Voice::Alert => NOTICE_LINGER,
+        Voice::Arrived => ARRIVED_LINGER,
+    }
+}
 
 /// How each voice arrives: the text crossfading into place, glyphs never moving,
 /// because revealing characters leaves the line unreadable while it runs. Which
@@ -918,7 +933,8 @@ impl Shell {
         }
     }
 
-    /// Write what a gesture asked for, and say so for `NOTICE_LINGER`.
+    /// Write what a gesture asked for, and say so for `NOTICE_LINGER`, which is
+    /// what a receipt gets.
     ///
     /// It says **sent** rather than copied, which is honest and not modest: OSC 52
     /// has no reply and several terminals ship it disabled.
@@ -998,7 +1014,7 @@ impl Shell {
     fn show(&mut self, message: String, voice: Voice, now: Instant) {
         self.leaving = None;
         // The departure comes out of the linger, so it is the whole of the time.
-        let spent = now + NOTICE_LINGER.saturating_sub(duration_for(voice));
+        let spent = now + linger_for(voice).saturating_sub(duration_for(voice));
         self.app.flash(message, spent, voice);
         if let Some(effect) = arrival(voice, &self.theme) {
             self.notice_effects
@@ -1452,6 +1468,34 @@ mod tests {
                 "`{said}` is gone, so the footer claims something OSC 52 cannot promise"
             );
         }
+    }
+
+    /// An announcement holds the footer for a minute and a receipt for
+    /// `NOTICE_LINGER`, and the one place a notice is armed reads the table
+    /// rather than the receipt's constant.
+    #[test]
+    fn an_announcement_lingers_a_minute_and_show_reads_the_table() {
+        assert_eq!(
+            linger_for(Voice::Arrived),
+            std::time::Duration::from_secs(60)
+        );
+        assert_eq!(linger_for(Voice::Said), NOTICE_LINGER);
+        assert_eq!(linger_for(Voice::Alert), NOTICE_LINGER);
+        // Room for both transitions with the message settled between them.
+        assert!(linger_for(Voice::Arrived) > duration_for(Voice::Arrived) * 4);
+
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let show = shipped
+            .split("fn show(&mut self, message: String, voice: Voice, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`show` is gone");
+        assert!(
+            show.contains("linger_for(voice)"),
+            "`show` no longer asks how long this voice lingers, so every message \
+             gets the receipt's four and a half seconds"
+        );
     }
 
     /// Two properties of `run` that no test can execute, because `run` owns a
