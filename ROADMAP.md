@@ -167,7 +167,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 | ✅ | The height is recounted when a moved file settles, not at the next event | [#425](https://github.com/breferrari/vigia/issues/425) |
 | ✅ | decision: a note on a diff line reaches the agent over MCP | [#414](https://github.com/breferrari/vigia/issues/414) |
 | ✅ | A note anchors to a diff line and lives in a per-worktree store | [#415](https://github.com/breferrari/vigia/issues/415) |
-| ⬜ | The line number becomes the note icon under the pointer, and the note rows draw under the line | [#416](https://github.com/breferrari/vigia/issues/416) |
+| ✅ | The line number becomes the note icon under the pointer, and the note rows draw under the line | [#416](https://github.com/breferrari/vigia/issues/416) |
 | ⬜ | `vigia mcp` serves the notes to the agent over stdio | [#417](https://github.com/breferrari/vigia/issues/417) |
 | ⬜ | The pane wakes when the agent writes to the store | [#418](https://github.com/breferrari/vigia/issues/418) |
 | ⬜ | A bordered box under the line takes the note | [#419](https://github.com/breferrari/vigia/issues/419) |
