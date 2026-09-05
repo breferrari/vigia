@@ -999,6 +999,29 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
 }
 
 #[test]
+fn a_resolved_note_without_a_reply_draws_its_body_and_the_word() {
+    // The store's reply block is optional, so a note can be resolved with no
+    // line to draw alone; its body stays under the mark with the word resolved,
+    // because a marked line with nothing under it reads as hidden rows.
+    let scratch = fixture("notes-resolved-bare");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut resolved = note("n1", 5, EDITED, "short");
+    resolved.status = Status::Resolved;
+    rig.store.put(&resolved).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("short"), "{:?}", under[0]);
+    assert!(under[0].trim_end().ends_with("resolved"), "{:?}", under[0]);
+    assert!(painted.text(y + 2).contains("line 6"));
+}
+
+#[test]
 fn an_unwritable_store_refuses_the_note_and_the_pane_paints_on() {
     let scratch = fixture("notes-unwritable");
     let worktree = scratch.worktree();

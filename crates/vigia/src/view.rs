@@ -399,7 +399,8 @@ struct Pin {
     /// Whether `row` is the note's own line, which carries the mark, rather than
     /// the file's heading.
     marks: bool,
-    /// Whether the agent has resolved it, so its reply alone is drawn.
+    /// Whether the agent has resolved it, so its reply alone is drawn, or its
+    /// body where the agent left no reply.
     resolved: bool,
 }
 
@@ -435,13 +436,12 @@ impl Pin {
         let room = content.saturating_sub(NOTE_LEAD);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
-        if !self.resolved {
+        if !self.resolved || self.reply.is_none() {
             let mut body = pieces(&self.body);
-            // The word takes a row of its own when the last piece leaves it no
-            // room, with a blank between them: the reader's words are never cut
-            // to fit a status, and only where a row of its own can hold the word,
-            // since a blank row buys nothing where it cannot. An empty piece needs
-            // no blank.
+            // The word takes a row of its own when the last piece leaves it no room
+            // and a row can hold it, with a blank between them where the piece has
+            // width: the reader's words are never cut to fit a status, and a blank
+            // row buys nothing where no row holds the word.
             let last = body
                 .last()
                 .map_or(0, |piece| crate::render::width_of(piece));
