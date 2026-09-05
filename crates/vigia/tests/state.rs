@@ -1,6 +1,6 @@
 //! `SPEC.md` §11.2 B21: where the notes store lives.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vigia::state_root;
 
@@ -61,7 +61,11 @@ fn the_state_root_follows_xdg_then_home_and_localappdata_on_windows() {
                 ("HOME", "/h")
             ])
         ),
-        Some(PathBuf::from("C:\\Users\\r\\AppData\\Local\\vigia\\state"))
+        Some(
+            Path::new("C:\\Users\\r\\AppData\\Local")
+                .join("vigia")
+                .join("state")
+        )
     );
     assert_eq!(state_root(true, env(&[("HOME", "/h")])), None);
     assert_eq!(state_root(true, env(&[("LOCALAPPDATA", " ")])), None);
