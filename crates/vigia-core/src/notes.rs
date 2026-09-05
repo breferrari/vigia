@@ -150,11 +150,19 @@ pub fn key(workdir: &Path) -> Result<String> {
     Ok(id.to_hex().to_string())
 }
 
-/// Whether `id` can be a file name inside the store and nothing else.
+/// Whether `id` can be a file name inside the store and nothing else: on
+/// Windows a device name is a device whatever extension follows it, so those
+/// are refused on every platform and the store stays one rule.
 fn is_id(id: &str) -> bool {
-    !id.is_empty()
+    let plain = !id.is_empty()
         && id.len() <= ID_MAX
-        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    let upper = id.to_ascii_uppercase();
+    let device = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && matches!(upper.as_bytes()[3], b'1'..=b'9'));
+    plain && !device
 }
 
 /// The notes of one worktree, on disk.
@@ -269,7 +277,13 @@ impl Store {
             let path = entry.path();
             match fs::read(&path) {
                 Ok(bytes) => match decode(&bytes) {
-                    Ok(note) => listing.notes.push(note),
+                    Ok(note) if Path::new(&name).file_stem() == Some(note.id.as_ref()) => {
+                        listing.notes.push(note);
+                    }
+                    Ok(note) => {
+                        let why = format!("names itself {:?}, which is not its file name", note.id);
+                        listing.skipped.push((path, why));
+                    }
                     Err(why) => listing.skipped.push((path, why)),
                 },
                 // Withdrawn between the directory read and the file read.
@@ -368,10 +382,21 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
         let (name, value) = header
             .split_once(": ")
             .ok_or_else(|| format!("header line {header:?} is not a field"))?;
+        let twice = |taken: bool| {
+            if taken {
+                Err(format!("the {name} field appears twice"))
+            } else {
+                Ok(())
+            }
+        };
         match name {
-            "id" if is_id(value) => id = Some(value.to_owned()),
+            "id" if is_id(value) => {
+                twice(id.is_some())?;
+                id = Some(value.to_owned());
+            }
             "id" => return Err(format!("id {value:?} is not a note id")),
             "side" => {
+                twice(side.is_some())?;
                 side = Some(match value {
                     "old" => Side::Old,
                     "new" => Side::New,
@@ -379,6 +404,7 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
                 });
             }
             "line" => {
+                twice(line.is_some())?;
                 line = Some(
                     value
                         .parse::<u32>()
@@ -386,6 +412,7 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
                 );
             }
             "status" => {
+                twice(status.is_some())?;
                 status = Some(match value {
                     "open" => Status::Open,
                     "seen" => Status::Seen,
@@ -394,6 +421,7 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
                 });
             }
             "written" => {
+                twice(written.is_some())?;
                 let secs = value
                     .parse::<u64>()
                     .map_err(|_| format!("written {value:?} is not a number"))?;
@@ -440,10 +468,13 @@ impl Cursor<'_> {
     /// The next line without its newline. A file that ends mid-line was torn.
     fn line(&mut self) -> std::result::Result<&str, String> {
         let rest = &self.bytes[self.at..];
-        let end = rest
-            .iter()
-            .position(|&b| b == b'\n')
-            .ok_or_else(|| "the file ends in the middle of a line".to_owned())?;
+        let end = rest.iter().position(|&b| b == b'\n').ok_or_else(|| {
+            if rest.is_empty() {
+                "the file ends before its last field".to_owned()
+            } else {
+                "the file ends in the middle of a line".to_owned()
+            }
+        })?;
         let line = std::str::from_utf8(&rest[..end])
             .map_err(|_| "a header line is not UTF-8".to_owned())?;
         self.at += end + 1;

@@ -130,7 +130,11 @@ impl fmt::Display for Error {
                 write!(f, "could not normalise {path} the way git would: {source}")
             }
             Error::Store { path, source } => {
-                write!(f, "the notes store failed at {}: {source}", path.display())
+                write!(
+                    f,
+                    "could not use the notes store at {}: {source}",
+                    path.display()
+                )
             }
             Error::Canonicalise { path, source } => {
                 write!(f, "could not canonicalise {}: {source}", path.display())

@@ -211,9 +211,24 @@ fn removing_a_note_twice_is_not_an_error() {
 
 #[test]
 fn an_id_that_could_name_a_file_outside_the_store_is_refused() {
-    // The server will hand the store ids an agent typed.
+    // An id here may be one an agent typed, handed through the server.
     let (_scratch, _root, store) = store("notes-id");
-    for bad in ["../../evil", "a/b", "a\\b", "", ".", "..", "a b", "a\0b"] {
+    let long = "x".repeat(65);
+    for bad in [
+        "../../evil",
+        "a/b",
+        "a\\b",
+        "",
+        ".",
+        "..",
+        "a b",
+        "a\0b",
+        "CON",
+        "nul",
+        "COM1",
+        "lpt9",
+        long.as_str(),
+    ] {
         let err = store
             .put(&note(bad, 1, "x", "y"))
             .expect_err("an id that is not a note id");
@@ -225,6 +240,83 @@ fn an_id_that_could_name_a_file_outside_the_store_is_refused() {
     store
         .put(&note("ok-1", 1, "x", "y"))
         .expect("a plain id is fine");
+    let longest = "y".repeat(64);
+    store
+        .put(&note(&longest, 1, "x", "y"))
+        .expect("sixty-four is the longest id");
+    store
+        .put(&note("COM0", 1, "x", "y"))
+        .expect("COM0 names no device");
+}
+
+#[test]
+fn a_minted_id_is_one_the_store_accepts() {
+    let (_scratch, _root, store) = store("notes-minted");
+    let first = Store::new_id();
+    let second = Store::new_id();
+    assert_ne!(first, second, "two ids minted in a row must differ");
+    store
+        .put(&note(&first, 1, "x", "y"))
+        .expect("a minted id is a note id");
+    store
+        .put(&note(&second, 2, "x", "y"))
+        .expect("and so is the next");
+    assert_eq!(store.list().expect("list").notes.len(), 2);
+}
+
+#[test]
+fn a_file_whose_id_is_not_its_name_is_skipped() {
+    // A rogue file naming another note's id would point a later removal at
+    // the wrong file and survive every listing itself.
+    let (_scratch, _root, store) = store("notes-rogue");
+    let real = note("real", 1, "x", "kept");
+    store.put(&real).expect("put");
+    let encoded = fs::read(store.dir().join("real.note")).expect("read the note back");
+    fs::write(store.dir().join("rogue.note"), &encoded).expect("write a rogue copy");
+
+    let listing = store.list().expect("list");
+    assert_eq!(listing.notes, vec![real]);
+    assert_eq!(listing.skipped.len(), 1, "{:?}", listing.skipped);
+    assert!(
+        listing.skipped[0].1.contains("not its file name"),
+        "{}",
+        listing.skipped[0].1
+    );
+}
+
+#[test]
+fn a_repeated_field_or_trailing_bytes_are_a_skip() {
+    let (_scratch, _root, store) = store("notes-repeat");
+    store.put(&note("good", 1, "x", "kept")).expect("put");
+    let good = fs::read_to_string(store.dir().join("good.note")).expect("read it back");
+    let twice = good.replacen("side: new\n", "side: new\nside: old\n", 1);
+    assert_ne!(twice, good);
+    fs::write(store.dir().join("twice.note"), &twice).expect("write a repeated field");
+    fs::write(store.dir().join("trailing.note"), format!("{good}extra\n"))
+        .expect("write trailing bytes");
+    let reordered = good.replacen("id: good\nside: new\n", "side: new\nid: good\n", 1);
+    assert_ne!(reordered, good);
+    fs::write(store.dir().join("good.note"), &reordered).expect("write reordered fields");
+
+    let listing = store.list().expect("list");
+    assert_eq!(listing.notes.len(), 1, "{:?}", listing.skipped);
+    let mut skipped: Vec<String> = listing
+        .skipped
+        .iter()
+        .map(|(path, _)| {
+            path.file_name()
+                .expect("a name")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    skipped.sort();
+    // Field order is not part of the format, so the note read back in another
+    // order is the same note.
+    assert_eq!(
+        skipped,
+        vec!["trailing.note".to_owned(), "twice.note".to_owned()]
+    );
 }
 
 #[test]
@@ -353,6 +445,7 @@ fn rewrite_under_a_reader(name: &str, writers: usize) {
         })
         .collect();
     let mut listed = 0;
+    let (mut saw_a, mut saw_b) = (false, false);
     while handles.iter().any(|h| !h.is_finished()) {
         let listing = store.list().expect("list under a writer");
         assert!(
@@ -365,6 +458,8 @@ fn rewrite_under_a_reader(name: &str, writers: usize) {
                 found == &a || found == &b,
                 "a listing saw a note that is neither version whole"
             );
+            saw_a |= found == &a;
+            saw_b |= found == &b;
             listed += 1;
         }
     }
@@ -374,6 +469,10 @@ fn rewrite_under_a_reader(name: &str, writers: usize) {
     assert!(
         listed > 0,
         "the reader never listed anything while the writers ran"
+    );
+    assert!(
+        saw_a && saw_b,
+        "the reader saw one version only, so nothing was rewritten under it"
     );
     assert_eq!(
         files_in(store.dir()),

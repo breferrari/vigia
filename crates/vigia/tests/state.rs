@@ -58,4 +58,5 @@ fn the_state_root_follows_xdg_then_home_and_localappdata_on_windows() {
         Some(PathBuf::from("C:\\Users\\r\\AppData\\Local\\vigia\\state"))
     );
     assert_eq!(state_root(true, env(&[("HOME", "/h")])), None);
+    assert_eq!(state_root(true, env(&[("LOCALAPPDATA", " ")])), None);
 }
