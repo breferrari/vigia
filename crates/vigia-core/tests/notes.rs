@@ -4,9 +4,10 @@
 mod support;
 
 use std::fs;
+use std::sync::mpsc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir, files_in, note};
+use support::{Scratch, TempDir, budget, files_in, note};
 use vigia_core::{
     Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
     key, resolve,
@@ -689,4 +690,162 @@ fn two_spellings_of_one_path_and_a_junction_derive_one_key() {
         key(root).expect("key"),
         key(&link).expect("key through the junction")
     );
+}
+
+/// B21: the store is an event source for both processes. Armed on the state
+/// root while the store's directory is not there yet, then on the directory.
+#[test]
+fn a_write_from_another_handle_wakes_the_store_watch() {
+    let (scratch, root, store) = store("notes-watch");
+    let other = Store::open(root.path(), scratch.root()).expect("a second handle");
+    assert!(
+        !store.dir().exists(),
+        "the directory appears on the first put"
+    );
+
+    let (tx, rx) = mpsc::channel();
+    let watch = store
+        .watch(move || {
+            let _ = tx.send(());
+        })
+        .expect("arm on the root")
+        .expect("the root exists, so there is something to watch");
+    other.put(&note("w-1", 5, "x", "first")).expect("put");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("the first write, which also created the directory, was reported");
+    drop(watch);
+
+    let (tx, rx) = mpsc::channel();
+    let watch = store
+        .watch(move || {
+            let _ = tx.send(());
+        })
+        .expect("arm on the directory")
+        .expect("the directory exists now");
+    other
+        .put(&note("w-1", 5, "x", "rewritten"))
+        .expect("rewrite");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("a rewrite was reported");
+    while rx.try_recv().is_ok() {}
+    other.remove("w-1").expect("remove");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("a removal was reported");
+    drop(watch);
+}
+
+#[test]
+fn a_store_whose_root_is_not_there_yet_has_nothing_to_watch() {
+    let scratch = Scratch::new("notes-watch-nothing");
+    let holder = TempDir::new("state");
+    let store = Store::open(&holder.path().join("never-made"), scratch.root()).expect("open");
+    let armed = store
+        .watch(|| {})
+        .expect("nothing to watch is not an error");
+    assert!(armed.is_none(), "there is no directory on disk to arm on");
+    assert!(
+        !holder.path().join("never-made").exists(),
+        "and none was made for it"
+    );
+}
+
+/// The server answers a resolve by id, so one note is read without listing
+/// the store; an id the store would never name a file after is simply not
+/// there, and a file that is not a note is an error the caller can show.
+#[test]
+fn a_note_is_read_by_id_and_an_id_the_store_would_not_name_is_none() {
+    let (_scratch, _root, store) = store("notes-get");
+    assert_eq!(
+        store.get("g-1").expect("an absent store holds nothing"),
+        None
+    );
+    store.put(&note("g-1", 5, "x", "first")).expect("put");
+    assert_eq!(
+        store.get("g-1").expect("get").map(|note| note.body),
+        Some("first".to_owned())
+    );
+    assert_eq!(store.get("never").expect("absent is not an error"), None);
+    for bad in ["../g-1", "CON", "G-1", ""] {
+        assert_eq!(
+            store.get(bad).expect("an id the store would not name"),
+            None,
+            "{bad:?}"
+        );
+    }
+    fs::write(
+        store.dir().join("torn-1.note"),
+        "vigia note 1\nid: torn-1\n",
+    )
+    .expect("write");
+    let err = store
+        .get("torn-1")
+        .expect_err("a file cut short is not a note");
+    assert!(matches!(err, Error::Store { .. }), "{err:?}");
+}
+
+/// The server reads a note, changes it and writes it back; the reader can
+/// withdraw it in between, and the write must not bring it back.
+#[test]
+fn a_rewrite_refuses_a_note_that_was_withdrawn() {
+    let (_scratch, _root, store) = store("notes-rewrite-withdrawn");
+    let mut written = note("r-1", 5, "x", "first");
+    assert!(
+        !store
+            .rewrite(&written)
+            .expect("a rewrite of nothing is not an error"),
+        "nothing to rewrite before the first put"
+    );
+    assert!(!store.dir().exists(), "and nothing was made for it");
+
+    store.put(&written).expect("put");
+    written.body = "second".to_owned();
+    assert!(
+        store.rewrite(&written).expect("rewrite"),
+        "the file is there"
+    );
+    assert_eq!(
+        store.get("r-1").expect("get").map(|n| n.body),
+        Some("second".to_owned())
+    );
+
+    store.remove("r-1").expect("the reader withdraws it");
+    written.body = "third".to_owned();
+    assert!(
+        !store.rewrite(&written).expect("rewrite"),
+        "withdrawn between the read and the write"
+    );
+    assert!(
+        files_in(store.dir()).is_empty(),
+        "no file came back, and no temporary stayed"
+    );
+}
+
+/// A state root reached through a symlink, which is every macOS temporary
+/// directory: events carry the resolved path, and the store's own directory
+/// is not there yet to resolve when the watch arms.
+#[cfg(unix)]
+#[test]
+fn a_store_watched_through_a_symlinked_root_still_reports_writes() {
+    let scratch = Scratch::new("notes-watch-symlink");
+    let real = TempDir::new("state-real");
+    let holder = TempDir::new("state-link");
+    let link = holder.path().join("link");
+    std::os::unix::fs::symlink(real.path(), &link).expect("make a symlink to the root");
+    let through_link = Store::open(&link, scratch.root()).expect("open through the link");
+    let direct = Store::open(real.path(), scratch.root()).expect("open directly");
+    assert!(!through_link.dir().exists());
+
+    let (tx, rx) = mpsc::channel();
+    let watch = through_link
+        .watch(move || {
+            let _ = tx.send(());
+        })
+        .expect("arm on the root through the link")
+        .expect("the root exists");
+    direct
+        .put(&note("s-1", 5, "x", "first"))
+        .expect("put by the resolved path");
+    rx.recv_timeout(budget(Duration::from_secs(5)))
+        .expect("a write under the resolved spelling was reported");
+    drop(watch);
 }

@@ -13,6 +13,9 @@ mod glyphs;
 /// integration test and must measure through the same reader the shell uses.
 pub mod icons;
 mod input;
+/// The agent's side of `SPEC.md` §11.2 B21: `vigia mcp`, the stdio server
+/// over the notes store. Public because the suite drives it as the loop does.
+pub mod mcp;
 pub mod memory;
 mod notes;
 mod render;
@@ -106,6 +109,8 @@ pub enum Request {
     Watch,
     /// Print the version and exit successfully.
     Version,
+    /// Serve the notes store to the agent over stdio, `SPEC.md` §11.2 B21.
+    Mcp,
     /// An argument beginning with `-` that is not a version query.
     NoSuchOption,
     /// More than one argument, when the surface is exactly one.
@@ -125,6 +130,10 @@ pub fn request_for(args: &[OsString]) -> Request {
 fn request_for_one(arg: &OsStr) -> Request {
     if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
         return Request::Version;
+    }
+    // The bare word and nothing else: `./mcp` is still a directory to watch.
+    if arg == OsStr::new("mcp") {
+        return Request::Mcp;
     }
     // The first byte rather than a decoded character: both encodings behind
     // `OsStr` are self-synchronising at ASCII, so a leading `b'-'` cannot be the
@@ -172,9 +181,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Where the reader's notes live, resolved once with the rest of the
     // environment. `None` with no home to keep them under, which the first click
     // says rather than the launch: a pane with no notes is still a pane.
-    let store = state_root(cfg!(windows), |key| std::env::var(key).ok())
-        .map(|root| Store::open(&root, worktree.workdir()))
-        .transpose()?;
+    let store = state::store_for(worktree.workdir(), |key| std::env::var(key).ok()).transpose()?;
 
     // The view defaults reach the frame before its first walk, not just the
     // shell. Three of the four keys only arrange rows the frame already holds;
@@ -893,16 +900,7 @@ impl Shell {
     /// failure too, since a withdrawal that failed partway still removed some.
     fn toggle_note(&mut self, offset: usize, now: Instant) {
         let Some(store) = &self.store else {
-            let variables = if cfg!(windows) {
-                "LOCALAPPDATA"
-            } else {
-                "HOME or XDG_STATE_HOME"
-            };
-            self.say(
-                format!("no home to keep a note in: set {variables}"),
-                Voice::Alert,
-                now,
-            );
+            self.say(state::no_home(), Voice::Alert, now);
             return;
         };
         match notes::toggle(store, &self.screen, offset) {

@@ -11,10 +11,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 25;
+const ESCAPING_FILES: usize = 26;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-five";
+const ESCAPING_FILES_SPELLED: &str = "twenty-six";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1574,9 +1574,9 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 391253),
+    ("SPEC.md", 391156),
     ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 93632),
+    ("ROADMAP.md", 93681),
     ("RULINGS.md", 98324),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

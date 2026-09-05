@@ -13,8 +13,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use notify::{EventKind, RecursiveMode, Watcher as _};
+
 use crate::error::{Error, Result};
 use crate::hunk::LineKind;
+use crate::watch::roots_of;
 
 /// The first line of every note file. A file whose first line differs was
 /// written by a `vigia` this one does not know, and is skipped rather than
@@ -54,6 +57,15 @@ impl Side {
             LineKind::Added | LineKind::Context => Self::New,
         }
     }
+
+    /// The word the file and the agent both read.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Old => "old",
+            Self::New => "new",
+        }
+    }
 }
 
 /// Where a note stands on the ladder the agent climbs.
@@ -66,6 +78,18 @@ pub enum Status {
     /// Resolved by the agent with a line of its own; the pane draws the
     /// departure and the server prunes the file.
     Resolved,
+}
+
+impl Status {
+    /// The word the file, the pane and the agent all read.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Seen => "seen",
+            Self::Resolved => "resolved",
+        }
+    }
 }
 
 /// One note, pinned to a line of the diff.
@@ -203,6 +227,18 @@ pub struct Store {
     dir: PathBuf,
 }
 
+/// An armed watch over a store's files, alive for as long as it is held.
+pub struct StoreWatch {
+    _backend: notify::RecommendedWatcher,
+}
+
+/// Whether an event at `path` is about the store at `dir`: the directory
+/// itself appearing, or a note file inside it. A temporary in flight is not,
+/// so one write is one event rather than two.
+fn concerns(dir: &Path, path: &Path) -> bool {
+    path == dir || (path.starts_with(dir) && path.extension().is_some_and(|ext| ext == NOTE_EXT))
+}
+
 /// What a listing found: every note that read whole, and every file that did
 /// not, with why.
 #[derive(Debug, Default)]
@@ -257,7 +293,28 @@ impl Store {
     /// be created; the file cannot be written or moved into place, in which
     /// case the temporary is removed on the way out.
     pub fn put(&self, note: &Note) -> Result<()> {
+        self.write(note, false).map(|_| ())
+    }
+
+    /// Write `note` over the file it already has, and only while that file is
+    /// still there, so a note the reader withdrew between the read and this
+    /// write is not brought back; `false` says it was gone. The check sits
+    /// right before the rename and no closer: two processes with no lock
+    /// between them leave the rename itself as the window a withdrawal can
+    /// still slip into.
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::put`].
+    pub fn rewrite(&self, note: &Note) -> Result<bool> {
+        self.write(note, true)
+    }
+
+    fn write(&self, note: &Note, only_present: bool) -> Result<bool> {
         let done = self.path_of(&note.id)?;
+        if only_present && !done.is_file() {
+            return Ok(false);
+        }
         fs::create_dir_all(&self.dir).map_err(|source| Error::store(&self.dir, source))?;
         let tmp = self.dir.join(format!(
             "{}.{:x}-{:x}.tmp",
@@ -266,10 +323,15 @@ impl Store {
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         fs::write(&tmp, encode(note)).map_err(|source| Error::store(&tmp, source))?;
+        if only_present && !done.is_file() {
+            let _ = fs::remove_file(&tmp);
+            return Ok(false);
+        }
         fs::rename(&tmp, &done).map_err(|source| {
             let _ = fs::remove_file(&tmp);
             Error::store(&done, source)
-        })
+        })?;
+        Ok(true)
     }
 
     /// Delete the note `id`. A note already gone is not an error: two panes on
@@ -286,6 +348,35 @@ impl Store {
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(source) => Err(Error::store(&path, source)),
         }
+    }
+
+    /// The note `id`, or `None` when the store holds none: the file is not
+    /// there, or the id is one the store would never name a file after.
+    ///
+    /// # Errors
+    ///
+    /// The file exists and cannot be read, or reads as something other than a
+    /// note of this version.
+    pub fn get(&self, id: &str) -> Result<Option<Note>> {
+        let Ok(path) = self.path_of(id) else {
+            return Ok(None);
+        };
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(Error::store(&path, source)),
+        };
+        decode(&bytes)
+            .ok()
+            .filter(|note| note.id == id)
+            .map(Some)
+            .ok_or_else(|| {
+                let why = io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "is not a note this version reads",
+                );
+                Error::store(&path, why)
+            })
     }
 
     /// Every note in the store. A store that does not exist yet lists nothing.
@@ -340,6 +431,60 @@ impl Store {
         Ok(listing)
     }
 
+    /// Call `changed` from the platform's watch thread whenever a note file
+    /// under this store is written, moved in or removed, or the store's own
+    /// directory appears. The watch arms on the directory when it exists, on
+    /// the state root above it when only that does, and on nothing when neither
+    /// is there yet, which is `Ok(None)`: the caller asks again once something
+    /// has written. A directory that does not exist cannot be watched, and
+    /// creating one for the watch would give a reader who never writes a note a
+    /// directory per project.
+    ///
+    /// # Errors
+    ///
+    /// The platform's watcher cannot be created or cannot watch the directory.
+    pub fn watch(&self, changed: impl Fn() + Send + 'static) -> Result<Option<StoreWatch>> {
+        let (target, mode) = if self.dir.is_dir() {
+            (self.dir.clone(), RecursiveMode::NonRecursive)
+        } else if let Some(root) = self.dir.parent().filter(|root| root.is_dir()) {
+            (root.to_path_buf(), RecursiveMode::Recursive)
+        } else {
+            return Ok(None);
+        };
+        let mut dirs = roots_of(&self.dir);
+        // The directory may not exist yet, so its resolved spelling has to come
+        // from the root above it, which does: on macOS the temporary root is a
+        // symlink and every event carries the resolved path.
+        if let (Some(parent), Some(name)) = (self.dir.parent(), self.dir.file_name())
+            && let Ok(resolved) = parent.canonicalize()
+        {
+            let spelled = resolved.join(name);
+            if !dirs.contains(&spelled) {
+                dirs.push(spelled);
+            }
+        }
+        let mut backend = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            let Ok(event) = res else {
+                return;
+            };
+            if matches!(event.kind, EventKind::Access(_)) {
+                return;
+            }
+            if event
+                .paths
+                .iter()
+                .any(|path| dirs.iter().any(|dir| concerns(dir, path)))
+            {
+                changed();
+            }
+        })
+        .map_err(|e| Error::Watch(Box::new(e)))?;
+        backend
+            .watch(&target, mode)
+            .map_err(|e| Error::Watch(Box::new(e)))?;
+        Ok(Some(StoreWatch { _backend: backend }))
+    }
+
     /// The file of `id`, or the error a caller can show when `id` could name
     /// something outside the store.
     fn path_of(&self, id: &str) -> Result<PathBuf> {
@@ -368,9 +513,9 @@ fn encode(note: &Note) -> String {
     // Writing to a String cannot fail, so the results are discarded.
     let _ = writeln!(out, "{VERSION_LINE}");
     let _ = writeln!(out, "id: {}", note.id);
-    let _ = writeln!(out, "side: {}", side_name(note.side));
+    let _ = writeln!(out, "side: {}", note.side.name());
     let _ = writeln!(out, "line: {}", note.line);
-    let _ = writeln!(out, "status: {}", status_name(note.status));
+    let _ = writeln!(out, "status: {}", note.status.name());
     let _ = writeln!(out, "written: {secs}");
     let mut block = |name: &str, text: &str| {
         let _ = writeln!(out, "{name} {}", text.len());
@@ -384,21 +529,6 @@ fn encode(note: &Note) -> String {
         block("reply", reply);
     }
     out
-}
-
-fn side_name(side: Side) -> &'static str {
-    match side {
-        Side::Old => "old",
-        Side::New => "new",
-    }
-}
-
-fn status_name(status: Status) -> &'static str {
-    match status {
-        Status::Open => "open",
-        Status::Seen => "seen",
-        Status::Resolved => "resolved",
-    }
 }
 
 /// Parse one file, or say in a sentence why it cannot be trusted. Nothing in

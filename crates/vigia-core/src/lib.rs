@@ -52,7 +52,7 @@ pub use history::{
     HISTORY_WINDOW, History, HistoryStats, PULSE_SAMPLES, Recency, SPARK_GROUPS, scale_of,
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
-pub use notes::{Listing, NEAR, Note, Placement, Side, Status, Store, key, resolve};
+pub use notes::{Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, key, resolve};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{

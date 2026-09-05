@@ -3,7 +3,27 @@
 
 use std::path::{Path, PathBuf};
 
+use vigia_core::{Result, Store};
+
 use crate::theme::home_file;
+
+/// The store for the worktree at `workdir` under the reader's state root, as
+/// the pane and the server both open it, or `None` with no home to keep it
+/// under.
+pub fn store_for(workdir: &Path, lookup: impl Fn(&str) -> Option<String>) -> Option<Result<Store>> {
+    state_root(cfg!(windows), lookup).map(|root| Store::open(&root, workdir))
+}
+
+/// The sentence for a store with no home, naming what would give it one.
+#[must_use]
+pub fn no_home() -> String {
+    let variables = if cfg!(windows) {
+        "LOCALAPPDATA"
+    } else {
+        "HOME or XDG_STATE_HOME"
+    };
+    format!("no home to keep a note in: set {variables}")
+}
 
 /// The directory `vigia` keeps state under, or `None` when the environment
 /// names no home.

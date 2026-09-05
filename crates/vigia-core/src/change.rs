@@ -72,7 +72,24 @@ pub struct FileChange {
     pub(crate) maybe_symlink: bool,
 }
 
+impl ChangeKind {
+    /// The path the content moved or was copied from, for the kinds that have
+    /// one, which is where a note pinned under the old path is looked for.
+    pub fn source(&self) -> Option<&str> {
+        match self {
+            Self::Renamed { from } | Self::Copied { from } => Some(from),
+            _ => None,
+        }
+    }
+}
+
 impl FileChange {
+    /// Every path this change answers to: its own, then the one a rename or a
+    /// copy left behind, so a note pinned under the old path finds it.
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.path.as_str()).chain(self.kind.source())
+    }
+
     /// Whether this change can have hunks at all.
     pub fn is_diffable(&self) -> bool {
         !matches!(self.kind, ChangeKind::Conflict | ChangeKind::TypeChange)
