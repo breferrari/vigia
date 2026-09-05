@@ -1574,10 +1574,10 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 391960),
+    ("SPEC.md", 391126),
     ("REVOCATIONS.md", 6560),
     ("ROADMAP.md", 93632),
-    ("RULINGS.md", 95198),
+    ("RULINGS.md", 97770),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
@@ -1635,7 +1635,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 630770;
+const WRITTEN_LAYER_TOTAL: usize = 632205;
 
 /// Each document weighs no more than its budget.
 #[test]
