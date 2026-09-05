@@ -374,7 +374,7 @@ impl Site {
             return Placed::adrift(context);
         }
         let mut best: Option<Placed> = None;
-        for index in indices {
+        for &index in &indices {
             let Ok((change, diff)) = frame.diff(index) else {
                 continue;
             };
@@ -383,7 +383,15 @@ impl Site {
                 best = Some(placed);
             }
         }
-        best.unwrap_or_else(|| Placed::adrift(Vec::new()))
+        // A diff the frame cannot read is still a file in the diff, which the
+        // pane draws with its reason and the note under its heading as gone.
+        best.unwrap_or_else(|| Placed {
+            placement: Some(Placement::Gone),
+            current_line: None,
+            current_text: None,
+            current_path: Some(frame.files()[indices[0]].path.clone()),
+            context: Vec::new(),
+        })
     }
 
     /// The note placed against one file's diff, listed under `current_path`.
