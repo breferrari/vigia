@@ -362,6 +362,52 @@ fn a_file_whose_name_is_not_a_note_id_is_not_read() {
 }
 
 #[test]
+fn a_torn_file_and_a_newer_version_are_skipped_and_the_rest_listed() {
+    let (_scratch, _root, store) = store("notes-skipped");
+    let good = note("good", 2, "fine", "kept");
+    store.put(&good).expect("put");
+    // A write cut off by a kill: the body announces more bytes than follow.
+    fs::write(
+        store.dir().join("torn.note"),
+        "vigia note 1\nid: torn\nside: new\nline: 1\nstatus: open\nwritten: 1\npath 1\np\ntext 1\nx\nbody 40\nshort\n",
+    )
+    .expect("write a torn file");
+    fs::write(
+        store.dir().join("newer.note"),
+        "vigia note 2\nid: newer\nseverity: high\n",
+    )
+    .expect("write a newer file");
+    // A write in flight from another process is neither listed nor reported.
+    fs::write(
+        store.dir().join("inflight.1f-2.tmp"),
+        "vigia note 1\nid: in",
+    )
+    .expect("write a tmp");
+
+    let listing = store.list().expect("list");
+    assert_eq!(listing.notes, vec![good]);
+    let mut skipped: Vec<(String, String)> = listing
+        .skipped
+        .iter()
+        .map(|(path, why)| {
+            (
+                path.file_name()
+                    .expect("a file name")
+                    .to_string_lossy()
+                    .into_owned(),
+                why.clone(),
+            )
+        })
+        .collect();
+    skipped.sort();
+    assert_eq!(skipped.len(), 2, "{skipped:?}");
+    assert_eq!(skipped[0].0, "newer.note");
+    assert!(skipped[0].1.contains("vigia note 2"), "{}", skipped[0].1);
+    assert_eq!(skipped[1].0, "torn.note");
+    assert!(skipped[1].1.contains("shorter"), "{}", skipped[1].1);
+}
+
+#[test]
 fn a_number_too_large_for_the_file_is_a_skip_and_never_a_panic() {
     // A corrupt note costs that note and never the process.
     let (_scratch, _root, store) = store("notes-huge");
