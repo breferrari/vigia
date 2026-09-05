@@ -14,7 +14,7 @@ use crate::theme::home_file;
 /// platform and the environment are parameters so a test can ask about both
 /// without touching the process environment, as every other lookup here does.
 #[must_use]
-pub fn state_root(windows: bool, lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+pub fn state_root(windows: bool, lookup: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     let set = |name: &str| {
         lookup(name)
             .map(|value| value.trim().to_owned())
@@ -26,5 +26,5 @@ pub fn state_root(windows: bool, lookup: &impl Fn(&str) -> Option<String>) -> Op
     if let Some(xdg) = set("XDG_STATE_HOME").filter(|value| Path::new(value).is_absolute()) {
         return Some(Path::new(&xdg).join("vigia"));
     }
-    home_file(".local/state/vigia", lookup)
+    home_file(".local/state/vigia", &lookup)
 }

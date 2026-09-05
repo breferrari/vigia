@@ -133,7 +133,7 @@ impl fmt::Display for Error {
                 write!(f, "the notes store failed at {}: {source}", path.display())
             }
             Error::Canonicalise { path, source } => {
-                write!(f, "{} has no canonical path: {source}", path.display())
+                write!(f, "could not canonicalise {}: {source}", path.display())
             }
         }
     }

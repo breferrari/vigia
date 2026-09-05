@@ -4,7 +4,7 @@
 mod support;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
 use support::{Scratch, TempDir};
@@ -39,6 +39,14 @@ fn files_in(dir: &Path) -> Vec<String> {
     names
 }
 
+/// A store on a fresh state root for a fresh repository.
+fn store(name: &str) -> (Scratch, TempDir, Store) {
+    let scratch = Scratch::new(name);
+    let root = TempDir::new("state");
+    let store = Store::open(root.path(), scratch.root()).expect("open");
+    (scratch, root, store)
+}
+
 #[test]
 fn the_key_is_one_value_for_one_worktree_from_any_path_inside_it() {
     // Two processes start from two paths: the pane from wherever it was
@@ -62,6 +70,19 @@ fn the_key_is_one_value_for_one_worktree_from_any_path_inside_it() {
 
     let other = Scratch::new("notes-key-other");
     assert_ne!(from_root, key(other.root()).expect("another key"));
+}
+
+#[test]
+fn a_workdir_that_does_not_exist_has_no_key() {
+    let holder = TempDir::new("missing");
+    let missing = holder.path().join("never-made");
+    let err = key(&missing).expect_err("no key for a path that is not there");
+    assert!(matches!(err, Error::Canonicalise { .. }), "{err:?}");
+    assert!(err.to_string().contains("never-made"), "{err}");
+    assert!(
+        Store::open(holder.path(), &missing).is_err(),
+        "a store opened on a missing worktree would key nothing"
+    );
 }
 
 #[test]
@@ -89,35 +110,72 @@ fn a_linked_worktree_has_its_own_key() {
     );
 }
 
+#[cfg(unix)]
 #[test]
-fn a_note_put_by_one_handle_is_read_whole_by_another() {
-    // The pane quitting and coming back, or the server reading what the pane
-    // wrote: a second handle on the same worktree sees every field.
-    let scratch = Scratch::new("notes-roundtrip");
-    let root = TempDir::new("state");
-    let store = Store::open(root.path(), scratch.root()).expect("open");
-    let mut written = note(
-        "a1",
-        5,
-        "    margin.checked_mul(2).unwrap_or(margin)",
-        "use saturating_mul\nand drop the unwrap_or.\n\nreply 3\nbody 0",
+fn a_symlinked_worktree_root_derives_the_same_key() {
+    // A second name for one directory is one worktree, and must be one store.
+    let scratch = Scratch::new("notes-key-symlink");
+    let holder = TempDir::new("symlink");
+    let link = holder.path().join("link");
+    std::os::unix::fs::symlink(scratch.root(), &link).expect("make a symlink");
+    assert_eq!(
+        key(scratch.root()).expect("key"),
+        key(&link).expect("key through the symlink")
     );
-    written.reply = Some("swapped for saturating_mul; the unwrap_or went with it".to_owned());
-    written.status = Status::Resolved;
-    written.side = Side::Old;
-    store.put(&written).expect("put");
+}
+
+#[test]
+fn every_field_of_a_note_is_read_back_whole_by_a_second_handle() {
+    // The pane quitting and coming back, or the server reading what the pane
+    // wrote: a second handle on the same worktree sees every field, at every
+    // status and on either side, with a body that holds the format's own words.
+    let (scratch, root, store) = store("notes-roundtrip");
+    let mut notes = Vec::new();
+    for (i, (status, side)) in [
+        (Status::Open, Side::New),
+        (Status::Seen, Side::Old),
+        (Status::Resolved, Side::New),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut written = note(
+            &format!("n{i}"),
+            5,
+            "    margin.checked_mul(2).unwrap_or(margin)",
+            "use saturating_mul\nand drop the unwrap_or.\n\nreply 3\nbody 0\npath 1",
+        );
+        written.reply = Some(format!("swapped for saturating_mul {i}"));
+        written.status = status;
+        written.side = side;
+        written.written = UNIX_EPOCH + Duration::from_secs(1_800_000_000 + i as u64);
+        store.put(&written).expect("put");
+        notes.push(written);
+    }
 
     let again = Store::open(root.path(), scratch.root()).expect("open again");
     let listing = again.list().expect("list");
+    assert_eq!(listing.notes, notes);
+    assert!(listing.skipped.is_empty(), "{:?}", listing.skipped);
+}
+
+#[test]
+fn a_path_or_a_line_with_a_newline_in_it_cannot_forge_a_field() {
+    // A file name may hold a newline on Unix, and a line of code may hold a
+    // carriage return; neither may become a header the decoder believes.
+    let (_scratch, _root, store) = store("notes-forge");
+    let mut written = note("f1", 1, "a\rb", "body");
+    written.path = "x\nid: stolen\nbody 0".to_owned();
+    store.put(&written).expect("put");
+
+    let listing = store.list().expect("list");
     assert_eq!(listing.notes, vec![written]);
     assert!(listing.skipped.is_empty(), "{:?}", listing.skipped);
 }
 
 #[test]
-fn the_store_creates_nothing_until_the_first_put_and_one_put_is_one_file() {
-    let scratch = Scratch::new("notes-one-file");
-    let root = TempDir::new("state");
-    let store = Store::open(root.path(), scratch.root()).expect("open");
+fn the_store_creates_nothing_until_the_first_put() {
+    let (_scratch, _root, store) = store("notes-lazy");
     assert!(
         !store.dir().exists(),
         "opening the store created its directory"
@@ -126,8 +184,13 @@ fn the_store_creates_nothing_until_the_first_put_and_one_put_is_one_file() {
 
     store.put(&note("a1", 1, "x", "first")).expect("put");
     assert_eq!(files_in(store.dir()), vec!["a1.note".to_owned()]);
+}
 
+#[test]
+fn a_rewrite_reuses_the_note_file() {
     // A status change rewrites the same file rather than adding one.
+    let (_scratch, _root, store) = store("notes-rewrite");
+    store.put(&note("a1", 1, "x", "first")).expect("put");
     store.put(&note("a1", 1, "x", "second")).expect("rewrite");
     assert_eq!(files_in(store.dir()), vec!["a1.note".to_owned()]);
     assert_eq!(store.list().expect("list").notes[0].body, "second");
@@ -136,9 +199,7 @@ fn the_store_creates_nothing_until_the_first_put_and_one_put_is_one_file() {
 #[test]
 fn removing_a_note_twice_is_not_an_error() {
     // Two panes on one worktree may both withdraw it.
-    let scratch = Scratch::new("notes-remove");
-    let root = TempDir::new("state");
-    let store = Store::open(root.path(), scratch.root()).expect("open");
+    let (_scratch, _root, store) = store("notes-remove");
     store.put(&note("a1", 1, "x", "y")).expect("put");
     store.remove("a1").expect("remove");
     assert!(files_in(store.dir()).is_empty());
@@ -149,16 +210,32 @@ fn removing_a_note_twice_is_not_an_error() {
 }
 
 #[test]
+fn an_id_that_could_name_a_file_outside_the_store_is_refused() {
+    // The server will hand the store ids an agent typed.
+    let (_scratch, _root, store) = store("notes-id");
+    for bad in ["../../evil", "a/b", "a\\b", "", ".", "..", "a b", "a\0b"] {
+        let err = store
+            .put(&note(bad, 1, "x", "y"))
+            .expect_err("an id that is not a note id");
+        assert!(matches!(err, Error::Store { .. }), "{bad:?}: {err:?}");
+        assert!(err.to_string().contains("not a note id"), "{bad:?}: {err}");
+        assert!(store.remove(bad).is_err(), "{bad:?} was accepted by remove");
+    }
+    assert!(!store.dir().exists(), "a refused put created the directory");
+    store
+        .put(&note("ok-1", 1, "x", "y"))
+        .expect("a plain id is fine");
+}
+
+#[test]
 fn a_torn_file_and_a_newer_version_are_skipped_and_the_rest_listed() {
-    let scratch = Scratch::new("notes-skipped");
-    let root = TempDir::new("state");
-    let store = Store::open(root.path(), scratch.root()).expect("open");
+    let (_scratch, _root, store) = store("notes-skipped");
     let good = note("good", 2, "fine", "kept");
     store.put(&good).expect("put");
     // A write cut off by a kill: the body announces more bytes than follow.
     fs::write(
         store.dir().join("torn.note"),
-        "vigia note 1\nid: torn\npath: p\nside: new\nline: 1\nstatus: open\nwritten: 1\ntext: x\nbody 40\nshort\n",
+        "vigia note 1\nid: torn\nside: new\nline: 1\nstatus: open\nwritten: 1\npath 1\np\ntext 1\nx\nbody 40\nshort\n",
     )
     .expect("write a torn file");
     fs::write(
@@ -167,7 +244,11 @@ fn a_torn_file_and_a_newer_version_are_skipped_and_the_rest_listed() {
     )
     .expect("write a newer file");
     // A write in flight from another process is neither listed nor reported.
-    fs::write(store.dir().join("inflight.1f.tmp"), "vigia note 1\nid: in").expect("write a tmp");
+    fs::write(
+        store.dir().join("inflight.1f-2.tmp"),
+        "vigia note 1\nid: in",
+    )
+    .expect("write a tmp");
 
     let listing = store.list().expect("list");
     assert_eq!(listing.notes, vec![good]);
@@ -193,6 +274,47 @@ fn a_torn_file_and_a_newer_version_are_skipped_and_the_rest_listed() {
 }
 
 #[test]
+fn a_number_too_large_for_the_file_is_a_skip_and_never_a_panic() {
+    // A corrupt note costs that note and never the process.
+    let (_scratch, _root, store) = store("notes-huge");
+    store.put(&note("good", 1, "x", "kept")).expect("put");
+    let head = "vigia note 1\nid: h\nside: new\nline: 1\nstatus: open\n";
+    let files = [
+        (
+            "body.note",
+            format!(
+                "{head}written: 1\npath 1\np\ntext 1\nx\nbody {}\n\n",
+                usize::MAX
+            ),
+        ),
+        (
+            "reply.note",
+            format!(
+                "{head}written: 1\npath 1\np\ntext 1\nx\nbody 0\n\nreply {}\n\n",
+                usize::MAX
+            ),
+        ),
+        (
+            "time.note",
+            format!(
+                "{head}written: {}\npath 1\np\ntext 1\nx\nbody 0\n\n",
+                u64::MAX
+            ),
+        ),
+        ("empty.note", String::new()),
+        ("version-only.note", "vigia note 1\n".to_owned()),
+    ];
+    for (name, contents) in &files {
+        fs::write(store.dir().join(name), contents).expect("write a hostile file");
+    }
+
+    let listing = store.list().expect("list survives every file");
+    assert_eq!(listing.notes.len(), 1);
+    assert_eq!(listing.skipped.len(), files.len(), "{:?}", listing.skipped);
+    assert!(listing.skipped.iter().all(|(_, why)| !why.is_empty()));
+}
+
+#[test]
 fn an_unwritable_root_is_an_error_the_caller_can_show() {
     // B7's rule: a monitor that dies of its own writes is worse than none, so
     // the failure is a value the footer can say, not a panic.
@@ -210,27 +332,28 @@ fn an_unwritable_root_is_an_error_the_caller_can_show() {
     assert!(!store.dir().exists());
 }
 
-#[test]
-fn a_listing_sees_a_whole_note_while_it_is_being_rewritten() {
-    // Temp-and-rename is what makes a mid-write listing safe; a torn read
-    // would surface as a skipped file or a body that is neither version.
-    let scratch = Scratch::new("notes-atomic");
-    let root = TempDir::new("state");
-    let store = Store::open(root.path(), scratch.root()).expect("open");
+/// Rewrites one note between two versions from `writers` threads while the
+/// caller lists, and asserts every listing saw one version whole.
+fn rewrite_under_a_reader(name: &str, writers: usize) {
+    let (_scratch, _root, store) = store(name);
     let a = note("w", 3, "line", &"A".repeat(8192));
     let b = note("w", 3, "line", &"B".repeat(8192));
     store.put(&a).expect("first put");
 
-    let writer_store = store.clone();
-    let (wa, wb) = (a.clone(), b.clone());
-    let writer = std::thread::spawn(move || {
-        for round in 0..200 {
-            let next = if round % 2 == 0 { &wb } else { &wa };
-            writer_store.put(next).expect("rewrite under a reader");
-        }
-    });
+    let handles: Vec<_> = (0..writers)
+        .map(|w| {
+            let writer_store = store.clone();
+            let (wa, wb) = (a.clone(), b.clone());
+            std::thread::spawn(move || {
+                for round in 0..200 {
+                    let next = if (round + w) % 2 == 0 { &wb } else { &wa };
+                    writer_store.put(next).expect("rewrite under a reader");
+                }
+            })
+        })
+        .collect();
     let mut listed = 0;
-    while !writer.is_finished() {
+    while handles.iter().any(|h| !h.is_finished()) {
         let listing = store.list().expect("list under a writer");
         assert!(
             listing.skipped.is_empty(),
@@ -245,16 +368,31 @@ fn a_listing_sees_a_whole_note_while_it_is_being_rewritten() {
             listed += 1;
         }
     }
-    writer.join().expect("the writer finished");
+    for handle in handles {
+        handle.join().expect("a writer finished");
+    }
     assert!(
         listed > 0,
-        "the reader never listed anything while the writer ran"
+        "the reader never listed anything while the writers ran"
     );
     assert_eq!(
         files_in(store.dir()),
         vec!["w.note".to_owned()],
         "a temporary was left behind"
     );
+}
+
+#[test]
+fn a_listing_sees_a_whole_note_while_it_is_being_rewritten() {
+    // Temp-and-rename is what makes a mid-write listing safe; a torn read
+    // would surface as a skipped file or a body that is neither version.
+    rewrite_under_a_reader("notes-atomic", 1);
+}
+
+#[test]
+fn two_writers_in_one_process_never_produce_a_mixed_note() {
+    // Threads share a process id, so the temporary's name needs more than it.
+    rewrite_under_a_reader("notes-atomic-threads", 2);
 }
 
 #[test]
@@ -289,6 +427,8 @@ fn a_line_is_found_where_it_was_then_by_its_text_nearby_then_judged_changed_or_g
     assert_eq!(resolve(&pinned, &[(2, "b"), (6, "b")]), Placement::Moved(6));
     assert_eq!(resolve(&pinned, &[(3, "b"), (7, "b")]), Placement::Moved(3));
     assert_eq!(resolve(&pinned, &[(7, "b"), (3, "b")]), Placement::Moved(3));
+    // An exact match wins over a nearer duplicate that came first.
+    assert_eq!(resolve(&pinned, &[(4, "b"), (5, "b")]), Placement::At(5));
     // An empty line can carry a note, and an empty line is found by its number.
     let blank = note("e", 9, "", "");
     assert_eq!(
@@ -310,7 +450,7 @@ fn two_spellings_of_one_path_and_a_junction_derive_one_key() {
         .next()
         .expect("a last component")
         .to_owned();
-    let upper = PathBuf::from(format!(
+    let upper = std::path::PathBuf::from(format!(
         "{}{}",
         &spelled[..spelled.len() - last.len()],
         last.to_uppercase()

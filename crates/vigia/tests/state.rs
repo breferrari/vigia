@@ -25,7 +25,7 @@ fn the_state_root_follows_xdg_then_home_and_localappdata_on_windows() {
     assert_eq!(
         state_root(
             false,
-            &env(&[("XDG_STATE_HOME", absolute_str), ("HOME", "/home/r")])
+            env(&[("XDG_STATE_HOME", absolute_str), ("HOME", "/home/r")])
         ),
         Some(absolute.join("vigia"))
     );
@@ -33,32 +33,29 @@ fn the_state_root_follows_xdg_then_home_and_localappdata_on_windows() {
     assert_eq!(
         state_root(
             false,
-            &env(&[("XDG_STATE_HOME", "state"), ("HOME", "/home/r")])
+            env(&[("XDG_STATE_HOME", "state"), ("HOME", "/home/r")])
         ),
         Some(PathBuf::from("/home/r/.local/state/vigia"))
     );
     // Set but empty is unset.
     assert_eq!(
-        state_root(
-            false,
-            &env(&[("XDG_STATE_HOME", "  "), ("HOME", "/home/r")])
-        ),
+        state_root(false, env(&[("XDG_STATE_HOME", "  "), ("HOME", "/home/r")])),
         Some(PathBuf::from("/home/r/.local/state/vigia"))
     );
     assert_eq!(
-        state_root(false, &env(&[("USERPROFILE", "/u/r")])),
+        state_root(false, env(&[("USERPROFILE", "/u/r")])),
         Some(PathBuf::from("/u/r/.local/state/vigia"))
     );
-    assert_eq!(state_root(false, &env(&[])), None);
+    assert_eq!(state_root(false, env(&[])), None);
     assert_eq!(
         state_root(
             true,
-            &env(&[
+            env(&[
                 ("LOCALAPPDATA", "C:\\Users\\r\\AppData\\Local"),
                 ("HOME", "/h")
             ])
         ),
         Some(PathBuf::from("C:\\Users\\r\\AppData\\Local\\vigia\\state"))
     );
-    assert_eq!(state_root(true, &env(&[("HOME", "/h")])), None);
+    assert_eq!(state_root(true, env(&[("HOME", "/h")])), None);
 }

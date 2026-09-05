@@ -24,9 +24,16 @@ const VERSION_LINE: &str = "vigia note 1";
 /// never listed.
 const NOTE_EXT: &str = "note";
 
+/// The longest id the store accepts.
+const ID_MAX: usize = 64;
+
 /// How far from its stored number a line is looked for by its text, in rows on
 /// its own side, before the note is judged to have lost it.
 pub const NEAR: u32 = 8;
+
+/// One per process, so two writes in one process never share a temporary and
+/// two ids minted in one microsecond differ.
+static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Which side of the diff a line is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +59,9 @@ pub enum Status {
 /// One note, pinned to a line of the diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
-    /// Unique across processes and restarts; the file's name.
+    /// Unique across processes and restarts, and the file's name: ASCII
+    /// letters, digits and dashes only, which is what [`Store`] refuses to
+    /// write or remove without.
     pub id: String,
     /// Repository-relative path of the file the line is in.
     pub path: String,
@@ -132,10 +141,20 @@ pub fn key(workdir: &Path) -> Result<String> {
     })?;
     let mut hasher = gix::hash::hasher(gix::hash::Kind::Sha1);
     hasher.update(canonical.to_string_lossy().as_bytes());
+    // The only failure is a detected collision attack in the bytes hashed,
+    // which are a path this process resolved; it is reported as the store
+    // failing at that path because the store is what cannot be opened.
     let id = hasher
         .try_finalize()
         .map_err(|why| Error::store(workdir, io::Error::other(why)))?;
     Ok(id.to_hex().to_string())
+}
+
+/// Whether `id` can be a file name inside the store and nothing else.
+fn is_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= ID_MAX
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// The notes of one worktree, on disk.
@@ -178,7 +197,6 @@ impl Store {
     /// and a counter, all in hex.
     #[must_use]
     pub fn new_id() -> String {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO);
@@ -195,15 +213,18 @@ impl Store {
     ///
     /// # Errors
     ///
-    /// The directory cannot be created or the file cannot be written or moved
-    /// into place; the temporary file is removed on the way out.
+    /// The id is not one the store can name a file after; the directory cannot
+    /// be created; the file cannot be written or moved into place, in which
+    /// case the temporary is removed on the way out.
     pub fn put(&self, note: &Note) -> Result<()> {
+        let done = self.path_of(&note.id)?;
         fs::create_dir_all(&self.dir).map_err(|source| Error::store(&self.dir, source))?;
-        // The process id keeps two writers of one note from sharing a temporary.
-        let tmp = self
-            .dir
-            .join(format!("{}.{:x}.tmp", note.id, std::process::id()));
-        let done = self.path_of(&note.id);
+        let tmp = self.dir.join(format!(
+            "{}.{:x}-{:x}.tmp",
+            note.id,
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::write(&tmp, encode(note)).map_err(|source| Error::store(&tmp, source))?;
         fs::rename(&tmp, &done).map_err(|source| {
             let _ = fs::remove_file(&tmp);
@@ -216,9 +237,10 @@ impl Store {
     ///
     /// # Errors
     ///
-    /// The file exists and cannot be removed.
+    /// The id is not one the store names files after, or the file exists and
+    /// cannot be removed.
     pub fn remove(&self, id: &str) -> Result<()> {
-        let path = self.path_of(id);
+        let path = self.path_of(id)?;
         match fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -261,14 +283,24 @@ impl Store {
         Ok(listing)
     }
 
-    fn path_of(&self, id: &str) -> PathBuf {
-        self.dir.join(format!("{id}.{NOTE_EXT}"))
+    /// The file of `id`, or the error a caller can show when `id` could name
+    /// something outside the store.
+    fn path_of(&self, id: &str) -> Result<PathBuf> {
+        if !is_id(id) {
+            let why = io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{id:?} is not a note id"),
+            );
+            return Err(Error::store(&self.dir, why));
+        }
+        Ok(self.dir.join(format!("{id}.{NOTE_EXT}")))
     }
 }
 
-/// The file: a version line, one `key: value` line per single-line field, then
-/// the body and the reply each announced with its byte length, so either may
-/// hold any line at all.
+/// The file: a version line, one `key: value` line per field that cannot hold
+/// a newline, then every free-text field announced with its byte length, so
+/// no path or line of code can forge a header and a file cut short announces
+/// more bytes than follow.
 fn encode(note: &Note) -> String {
     let secs = note
         .written
@@ -279,19 +311,20 @@ fn encode(note: &Note) -> String {
     // Writing to a String cannot fail, so the results are discarded.
     let _ = writeln!(out, "{VERSION_LINE}");
     let _ = writeln!(out, "id: {}", note.id);
-    let _ = writeln!(out, "path: {}", note.path);
     let _ = writeln!(out, "side: {}", side_name(note.side));
     let _ = writeln!(out, "line: {}", note.line);
     let _ = writeln!(out, "status: {}", status_name(note.status));
     let _ = writeln!(out, "written: {secs}");
-    let _ = writeln!(out, "text: {}", note.text);
-    let _ = writeln!(out, "body {}", note.body.len());
-    out.push_str(&note.body);
-    out.push('\n');
-    if let Some(reply) = &note.reply {
-        let _ = writeln!(out, "reply {}", reply.len());
-        out.push_str(reply);
+    let mut block = |name: &str, text: &str| {
+        let _ = writeln!(out, "{name} {}", text.len());
+        out.push_str(text);
         out.push('\n');
+    };
+    block("path", &note.path);
+    block("text", &note.text);
+    block("body", &note.body);
+    if let Some(reply) = &note.reply {
+        block("reply", reply);
     }
     out
 }
@@ -311,7 +344,9 @@ fn status_name(status: Status) -> &'static str {
     }
 }
 
-/// Parse one file, or say in a sentence why it cannot be trusted.
+/// Parse one file, or say in a sentence why it cannot be trusted. Nothing in
+/// a file, however large a number it names, may panic: a corrupt note costs
+/// that note and never the process.
 fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
     let mut cursor = Cursor { bytes, at: 0 };
     let version = cursor.line()?;
@@ -321,25 +356,21 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
         ));
     }
     let mut id = None;
-    let mut path = None;
     let mut side = None;
     let mut line = None;
     let mut status = None;
     let mut written = None;
-    let mut text = None;
-    let body_len = loop {
-        let header = cursor.line()?;
-        if let Some(len) = header.strip_prefix("body ") {
-            break len
-                .parse::<usize>()
-                .map_err(|_| format!("body length {len:?} is not a number"))?;
+    loop {
+        if cursor.starts_with("path ") {
+            break;
         }
+        let header = cursor.line()?;
         let (name, value) = header
             .split_once(": ")
             .ok_or_else(|| format!("header line {header:?} is not a field"))?;
         match name {
-            "id" => id = Some(value.to_owned()),
-            "path" => path = Some(value.to_owned()),
+            "id" if is_id(value) => id = Some(value.to_owned()),
+            "id" => return Err(format!("id {value:?} is not a note id")),
             "side" => {
                 side = Some(match value {
                     "old" => Side::Old,
@@ -366,38 +397,32 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
                 let secs = value
                     .parse::<u64>()
                     .map_err(|_| format!("written {value:?} is not a number"))?;
-                written = Some(UNIX_EPOCH + Duration::from_secs(secs));
+                let at = UNIX_EPOCH
+                    .checked_add(Duration::from_secs(secs))
+                    .ok_or_else(|| format!("written {value:?} is past any time"))?;
+                written = Some(at);
             }
-            "text" => text = Some(value.to_owned()),
             other => return Err(format!("field {other:?} is not one this version writes")),
         }
-    };
-    let body = cursor.block(body_len, "body")?;
+    }
+    let path = cursor.block("path")?;
+    let text = cursor.block("text")?;
+    let body = cursor.block("body")?;
     let reply = if cursor.at_end() {
         None
     } else {
-        let header = cursor.line()?;
-        let len = header
-            .strip_prefix("reply ")
-            .ok_or_else(|| format!("after the body, {header:?} is not a reply"))?
-            .parse::<usize>()
-            .map_err(|_| format!("reply length in {header:?} is not a number"))?;
-        Some(cursor.block(len, "reply")?)
+        Some(cursor.block("reply")?)
     };
     if !cursor.at_end() {
         return Err("bytes follow the last field".to_owned());
     }
     let missing = |name: &str| format!("the {name} field is missing");
     Ok(Note {
-        id: id
-            .filter(|id| !id.is_empty())
-            .ok_or_else(|| missing("id"))?,
-        path: path
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| missing("path"))?,
+        id: id.ok_or_else(|| missing("id"))?,
+        path,
         side: side.ok_or_else(|| missing("side"))?,
         line: line.ok_or_else(|| missing("line"))?,
-        text: text.ok_or_else(|| missing("text"))?,
+        text,
         body,
         status: status.ok_or_else(|| missing("status"))?,
         reply,
@@ -425,10 +450,23 @@ impl Cursor<'_> {
         Ok(line)
     }
 
-    /// Exactly `len` bytes followed by a newline, as UTF-8.
-    fn block(&mut self, len: usize, what: &str) -> std::result::Result<String, String> {
+    /// Whether the bytes at the cursor begin with `prefix`.
+    fn starts_with(&self, prefix: &str) -> bool {
+        self.bytes[self.at..].starts_with(prefix.as_bytes())
+    }
+
+    /// A block announced as `<what> <len>` on its own line: exactly `len`
+    /// bytes, then a newline, as UTF-8.
+    fn block(&mut self, what: &str) -> std::result::Result<String, String> {
+        let header = self.line()?;
+        let len = header
+            .strip_prefix(what)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .ok_or_else(|| format!("{header:?} is not the {what} block"))?
+            .parse::<usize>()
+            .map_err(|_| format!("the {what} length in {header:?} is not a number"))?;
         let rest = &self.bytes[self.at..];
-        if rest.len() < len + 1 || rest[len] != b'\n' {
+        if rest.get(len) != Some(&b'\n') {
             return Err(format!(
                 "the {what} is shorter than its {len} announced bytes"
             ));

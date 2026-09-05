@@ -257,7 +257,7 @@ fn the_monitor_writes_nothing_while_it_runs() {
     // The state directory B21 opens is outside the tree, so the tree's snapshot
     // cannot see a write there; it gets its own, at the root the shell would
     // resolve from this process's environment.
-    let state = state_root(cfg!(windows), &|name| std::env::var(name).ok());
+    let state = state_root(cfg!(windows), |name| std::env::var(name).ok());
     let state_before = state.as_deref().filter(|dir| dir.exists()).map(snapshot);
     if linked {
         assert!(
