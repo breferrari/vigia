@@ -9,6 +9,14 @@ use vigia_core::{Class, Recency};
 use crate::colour::Depth;
 use crate::render::{Band, Heat};
 
+/// The foreground a fade starts `from`, when it differs from the one it settles
+/// `into`; `None` where the depth has flattened the two together, since there is
+/// no gradient between a colour and itself.
+pub(crate) fn contrast(from: Style, into: Style) -> Option<Color> {
+    let from = from.fg?;
+    (from != into.fg?).then_some(from)
+}
+
 /// Environment variable naming a built-in palette, or a file holding one.
 pub const THEME_VAR: &str = "VIGIA_THEME";
 

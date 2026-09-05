@@ -257,6 +257,12 @@ impl Painted {
         out
     }
 
+    /// Whether any row draws the agent's arrow at the content `origin`.
+    fn drew_reply(&self, origin: u16) -> bool {
+        (0..self.backend.buffer().area.height)
+            .any(|row| self.text(row).chars().nth(usize::from(origin)) == Some('↳'))
+    }
+
     /// The footer's bottom row.
     fn footer(&self) -> String {
         self.text(self.backend.buffer().area.height - 1)
@@ -1777,8 +1783,7 @@ fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
         "the rows snapped away on the click"
     );
     assert!(
-        !(0..PANE.height)
-            .any(|row| leaving.text(row).chars().nth(usize::from(origin)) == Some('↳')),
+        !leaving.drew_reply(origin),
         "a withdrawal drew a line from the agent"
     );
 
@@ -1830,8 +1835,7 @@ fn a_note_that_vanished_from_the_store_departs_the_way_a_withdrawal_does() {
         "the rows snapped away on the wake"
     );
     assert!(
-        !(0..PANE.height)
-            .any(|row| leaving.text(row).chars().nth(usize::from(origin)) == Some('↳')),
+        !leaving.drew_reply(origin),
         "a vanished note drew a line from the agent"
     );
     rig.advance(LEAVING);
@@ -1947,7 +1951,7 @@ fn a_listing_cannot_bring_back_a_note_already_departing() {
     rig.advance(ARRIVING_FRAME);
     let still = rig.paint(&mut frame, PANE, Pointing::default());
     assert!(
-        !(0..PANE.height).any(|row| still.text(row).chars().nth(usize::from(origin)) == Some('↳')),
+        !still.drew_reply(origin),
         "a listing brought the agent's line onto rows already leaving"
     );
     assert_eq!(still.notes_under(y).len(), rows.len());

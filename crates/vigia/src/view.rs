@@ -298,8 +298,8 @@ pub enum Row {
     /// under the file's heading once that line is gone (`SPEC.md` §11.2 B21).
     /// A display row the bar does not count, exactly as [`Row::Wrap`] is.
     Note {
-        /// Which note this row belongs to, as an index into [`Noted::ids`].
-        note: usize,
+        /// The note this row belongs to, by id.
+        id: String,
         /// What stands at the content origin.
         lead: NoteLead,
         /// This row's piece of the body or of the reply, already broken at the
@@ -381,8 +381,6 @@ pub struct Noted {
     /// Notes whose file is not in the diff, drawn nowhere and counted in the
     /// footer.
     pub adrift: usize,
-    /// The id of every note this screen placed, in the order [`Row::Note`] indexes them.
-    pub ids: Vec<String>,
 }
 
 /// Columns a note row spends before its text: the lead and its gap.
@@ -435,8 +433,8 @@ fn prose_rows(text: &str, room: usize) -> Vec<String> {
 }
 
 impl Pin {
-    /// The display rows this note takes under a content width of `content`, each naming pin `at`.
-    fn rows(&self, content: usize, at: usize) -> Vec<Row> {
+    /// The display rows this note takes under a content width of `content`.
+    fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
@@ -456,7 +454,7 @@ impl Pin {
             let count = body.len();
             for (piece, text) in body.into_iter().enumerate() {
                 rows.push(Row::Note {
-                    note: at,
+                    id: self.id.clone(),
                     lead: NoteLead::Bar,
                     text,
                     word: (piece + 1 == count).then_some(self.word),
@@ -467,7 +465,7 @@ impl Pin {
         if let Some(reply) = &self.reply {
             for (piece, text) in pieces(reply).into_iter().enumerate() {
                 rows.push(Row::Note {
-                    note: at,
+                    id: self.id.clone(),
                     lead: if piece == 0 {
                         NoteLead::Reply
                     } else {
@@ -1365,10 +1363,7 @@ impl View {
             crate::render::content_width(gutter, width)
         };
         let under: usize = if drawn {
-            pins.iter()
-                .enumerate()
-                .map(|(at, pin)| pin.rows(content, at).len())
-                .sum()
+            pins.iter().map(|pin| pin.rows(content).len()).sum()
         } else {
             0
         };
@@ -1430,9 +1425,8 @@ impl View {
         // emit below agree on their count.
         let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
         if drawn {
-            self.notes.ids = pins.iter().map(|pin| pin.id.clone()).collect();
-            for (at, pin) in pins.iter().enumerate() {
-                under[pin.row].extend(pin.rows(content, at));
+            for pin in pins {
+                under[pin.row].extend(pin.rows(content));
             }
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at].len();

@@ -12,22 +12,26 @@ use vigia_core::{Note, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::render::NoteCells;
-use crate::theme::Theme;
+use crate::theme::{self, Theme};
 use crate::view::View;
+use crate::{NOTICE_ARRIVING, NOTICE_LINGER};
 
-/// How long the agent's line, or a word the agent moved, takes to crossfade in.
-pub const RESOLVE_ARRIVING: Duration = Duration::from_millis(750);
-
-/// How long a resolve's line holds before the rows dissolve.
-pub const RESOLVE_BEAT: Duration = Duration::from_millis(3000);
+/// How long the agent's line, or a word the agent moved, takes to crossfade in:
+/// an announcement's own arrival, since that is what it is.
+pub const RESOLVE_ARRIVING: Duration = NOTICE_ARRIVING;
 
 /// How long a note's rows take to dissolve, whichever way the note leaves.
-pub const LEAVING: Duration = Duration::from_millis(750);
+pub const LEAVING: Duration = NOTICE_ARRIVING;
 
-/// The whole of a resolve's departure, after which the rows are dropped.
-pub const RESOLVED_DEPARTURE: Duration = RESOLVE_ARRIVING
-    .saturating_add(RESOLVE_BEAT)
-    .saturating_add(LEAVING);
+/// The whole of a resolve's departure, after which the rows are dropped: one
+/// notice's time on the footer, its two ends included. One table with the
+/// footer's, so the pane keeps one rhythm.
+pub const RESOLVED_DEPARTURE: Duration = NOTICE_LINGER;
+
+/// How long a resolve's line holds between arriving and dissolving.
+pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
+    .saturating_sub(RESOLVE_ARRIVING)
+    .saturating_sub(LEAVING);
 
 /// The row of `view` a press on a content row's gutter landed on, or `None` for
 /// any other event: `regions` says the pointer is on the gutter, and `view` says
@@ -128,11 +132,11 @@ pub enum Change {
 
 /// A note on its way off the screen: drawn as it was until `ends`, then dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Departing {
+struct Departing {
     /// The note as it draws while it goes.
-    pub note: Note,
+    note: Note,
     /// When its rows are dropped and the diff below closes up.
-    pub ends: Instant,
+    ends: Instant,
 }
 
 /// What the pane holds of the store: the notes as last listed, the ones leaving,
@@ -201,13 +205,16 @@ impl Ledger {
     /// knows the rows it hands the next collect have changed.
     pub fn settle(&mut self, now: Instant) -> bool {
         let before = self.departing.len();
-        for gone in std::mem::take(&mut self.departing) {
+        let departed = &mut self.departed;
+        self.departing.retain(|gone| {
             if now < gone.ends {
-                self.departing.push(gone);
-            } else if gone.note.status == Status::Resolved {
-                self.departed.insert(gone.note.id);
+                return true;
             }
-        }
+            if gone.note.status == Status::Resolved {
+                departed.insert(gone.note.id.clone());
+            }
+            false
+        });
         self.departing.len() != before
     }
 
@@ -230,11 +237,6 @@ impl Ledger {
             .collect()
     }
 
-    /// The notes on their way off the screen.
-    pub fn departing(&self) -> impl Iterator<Item = &Departing> {
-        self.departing.iter()
-    }
-
     fn is_departing(&self, id: &str) -> bool {
         self.departing.iter().any(|gone| gone.note.id == id)
     }
@@ -243,19 +245,17 @@ impl Ledger {
 /// How the agent's line, and a word the agent moved, arrive on a note's rows:
 /// from an announcement's ink into the chrome's dim the rows are drawn in, the
 /// way the footer's text does. `None` where the depth has flattened the two
-/// together, since there is no gradient between a colour and itself.
+/// together.
 #[must_use]
 pub fn note_arrival(theme: &Theme) -> Option<Effect> {
-    let from = theme.note.fg?;
-    (from != theme.chrome_dim.fg?).then(|| {
-        fx::fade_from_fg(
-            from,
-            (
-                tachyonfx::Duration::from(RESOLVE_ARRIVING),
-                Interpolation::SineInOut,
-            ),
-        )
-    })
+    let from = theme::contrast(theme.note, theme.chrome_dim)?;
+    Some(fx::fade_from_fg(
+        from,
+        (
+            tachyonfx::Duration::from(RESOLVE_ARRIVING),
+            Interpolation::SineInOut,
+        ),
+    ))
 }
 
 /// The departure a resolve runs: the agent's line arrives, holds a beat, and
@@ -298,23 +298,20 @@ pub enum Target {
 }
 
 /// An effect over one note's cells, found by id on every frame that draws it.
-pub struct NoteEffect {
-    /// Whose cells.
-    pub id: String,
-    /// Which of them.
-    pub target: Target,
+struct NoteEffect {
+    id: String,
+    target: Target,
     effect: Effect,
     /// When it is retired whether or not it ever drew: a note off screen is
     /// never processed, and an effect never processed never reports itself done.
-    pub until: Instant,
+    until: Instant,
 }
 
 impl NoteEffect {
     /// The effect `change` arms, or `None` where the palette has nothing to
     /// fade between and the word simply changes, which is the whole of what a
     /// crossfade says.
-    #[must_use]
-    pub fn armed(change: Change, theme: &Theme, now: Instant) -> Option<Self> {
+    fn armed(change: Change, theme: &Theme, now: Instant) -> Option<Self> {
         let (id, target, effect, length) = match change {
             Change::Seen(id) => (id, Target::Word, note_arrival(theme), RESOLVE_ARRIVING),
             Change::Replied(id) => (id, Target::Reply, note_arrival(theme), RESOLVE_ARRIVING),
@@ -335,8 +332,7 @@ impl NoteEffect {
     }
 
     /// Whether the effect has run its length, by its own count or by the clock.
-    #[must_use]
-    pub fn spent(&self, now: Instant) -> bool {
+    fn spent(&self, now: Instant) -> bool {
         now >= self.until || self.effect.done()
     }
 }
@@ -383,10 +379,5 @@ impl NoteEffects {
                 armed.effect.process(since.into(), buf, over);
             }
         }
-    }
-
-    /// The effects running, oldest first.
-    pub fn iter(&self) -> impl Iterator<Item = &NoteEffect> {
-        self.running.iter()
     }
 }

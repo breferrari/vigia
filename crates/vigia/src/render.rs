@@ -312,6 +312,22 @@ const fn text_within(area: Rect, margins: (u16, u16)) -> Rect {
     }
 }
 
+/// The columns of `area` a row's glyphs may use on `pane`: inset from the left,
+/// and stopped at the region's own edge or the pane's trailing margin, whichever
+/// comes first. Shared with [`regions`], which publishes it, so the painter and
+/// the pointer cannot come apart on where a row's text ends.
+fn glyph_span(area: Rect, pane: Rect, margins: (u16, u16)) -> Rect {
+    let left = area.x.saturating_add(margins.0);
+    // Through `Rect::right`, which `ratatui` defines as exactly this saturating
+    // add and which this file already calls one region over.
+    let stop = area.right().min(pane.right().saturating_sub(margins.1));
+    Rect {
+        x: left,
+        width: stop.saturating_sub(left),
+        ..area
+    }
+}
+
 /// The pane width from which the pinned list may become a left rail beside
 /// the diff rather than a strip above it. `SPEC.md` §11.2 B14.
 const RAIL_FROM: u16 = 134;
@@ -735,6 +751,17 @@ impl Bar {
     /// Whether a column is taken for this at all.
     fn drawn(self) -> bool {
         !matches!(self, Self::None)
+    }
+
+    /// `at` less the column this bar takes, when it takes one.
+    fn narrows(self, at: Rect) -> Rect {
+        if !self.drawn() {
+            return at;
+        }
+        Rect {
+            width: at.width.saturating_sub(BAR_WIDTH as u16),
+            ..at
+        }
     }
 
     /// The `(top, rows)` of a region that carry track rather than a button.
@@ -1720,30 +1747,20 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         view.total_rows as u64,
     );
 
-    // The gutter's columns, from the same width and inset `Painter::body` lays the
-    // rows out against, so the pointer's target and the drawn number are one span;
-    // and the columns a row's glyphs run to, from the same narrowing `with_bar` and
-    // `region_text` apply, so an effect over a note's rows stops where its text does.
+    // The span `Painter::body` lays the rows out in, so the pointer's gutter target,
+    // the drawn number and the end of a row's text are one geometry.
     let (gutter, text) = if body.diff > 0 && view.files > 0 {
         let inner = planning_width(areas.diff.width, area.width, 0);
         let digits = view
             .gutter
             .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
-        let (inset, trailing) = margins_of(area.width);
-        let left = areas.diff.x.saturating_add(inset);
-        let narrowed = if diff_bar.drawn() {
-            areas.diff.width.saturating_sub(BAR_WIDTH as u16)
-        } else {
-            areas.diff.width
-        };
-        let stop = areas
-            .diff
-            .x
-            .saturating_add(narrowed)
-            .min(area.right().saturating_sub(trailing));
+        let span = glyph_span(diff_bar.narrows(areas.diff), area, margins_of(area.width));
         (
-            (left, u16::try_from(line_origin(digits)).unwrap_or(u16::MAX)),
-            stop.saturating_sub(left),
+            (
+                span.x,
+                u16::try_from(line_origin(digits)).unwrap_or(u16::MAX),
+            ),
+            span.width,
         )
     } else {
         ((0, 0), 0)
@@ -1806,13 +1823,7 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
     }
     let mut out: Vec<NoteCells> = Vec::new();
     for (offset, row) in view.rows.iter().enumerate().take(usize::from(diff.rows)) {
-        let Row::Note {
-            note, lead, word, ..
-        } = row
-        else {
-            continue;
-        };
-        let Some(id) = view.notes.ids.get(*note) else {
+        let Row::Note { id, lead, word, .. } = row else {
             continue;
         };
         let line = Rect::new(x, diff.top.saturating_add(offset as u16), width, 1);
@@ -2716,15 +2727,7 @@ impl Painter<'_> {
             "a region is being drawn against a different pane than the painter was \
              built for, so its margin and the chrome's have come apart"
         );
-        let left = area.x.saturating_add(self.inset);
-        // Through `Rect::right`, which `ratatui` defines as exactly this saturating
-        // add and which this file already calls one region over.
-        let stop = area.right().min(pane.right().saturating_sub(self.trailing));
-        Rect {
-            x: left,
-            width: stop.saturating_sub(left),
-            ..area
-        }
+        glyph_span(area, pane, (self.inset, self.trailing))
     }
 
     /// Write `text` at `x`, clipped to `limit` columns, and return the next
@@ -3222,16 +3225,7 @@ impl Painter<'_> {
     /// along with the shape decided.
     fn with_bar(&mut self, region: Rect, wide: bool, span: u64, of: u64) -> (Rect, Bar) {
         let bar = bar_for(wide, region.height, span, of);
-        if !bar.drawn() {
-            return (region, bar);
-        }
-        (
-            Rect {
-                width: region.width.saturating_sub(BAR_WIDTH as u16),
-                ..region
-            },
-            bar,
-        )
+        (bar.narrows(region), bar)
     }
 
     /// Draw a one-column scrollbar down the right of `area`.

@@ -39,9 +39,8 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use notes::{
-    Change, Departing, LEAVING, Ledger, NoteEffect, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT,
-    RESOLVED_DEPARTURE, Target, Toggled, leaving, note_arrival, press_at, resolve_departure,
-    skipped_alert, toggle,
+    Change, LEAVING, Ledger, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
+    Target, Toggled, leaving, note_arrival, press_at, resolve_departure, skipped_alert, toggle,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
@@ -665,11 +664,8 @@ pub fn departure(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
 }
 
 /// The colour a message travels from, and back to: the hints it replaces.
-/// `None` when the depth has flattened both ends together, since there is no
-/// gradient between a colour and itself.
 fn travels_from(voice: Voice, theme: &Theme) -> Option<ratatui::style::Color> {
-    let from = theme.chrome_dim.fg?;
-    (from != voice_style(voice, theme).fg?).then_some(from)
+    theme::contrast(theme.chrome_dim, voice_style(voice, theme))
 }
 
 /// Columns the colour's leading edge is soft over as it crosses the message.
