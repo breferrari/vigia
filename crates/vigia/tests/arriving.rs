@@ -8,7 +8,10 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use tachyonfx::{Duration as FxDuration, EffectManager, Interpolation, fx};
-use vigia::{ARRIVING, ARRIVING_FRAME};
+use vigia::{
+    ARRIVING, ARRIVING_FRAME, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Theme,
+    leaving, resolve_departure,
+};
 
 /// The pane every gate here draws on.
 const PANE: Rect = Rect::new(0, 0, 80, 24);
@@ -185,5 +188,88 @@ fn the_effect_reports_its_own_completion_rather_than_a_clock_we_keep() {
         effect.done(),
         "an effect run for its whole length does not report itself finished, so \
          nothing would ever release the clock"
+    );
+}
+
+#[test]
+fn a_departure_ends_inside_its_own_length() {
+    // `SPEC.md` §11.2 B21: a resolve's departure is armed by the wake that
+    // brought the resolve and ends inside its duration, which is the licence I1
+    // grants every effect. The ledger drops the rows at `RESOLVED_DEPARTURE`, so
+    // the effect has to be done by then or the rows leave mid-dissolve.
+    assert_eq!(
+        RESOLVED_DEPARTURE,
+        RESOLVE_ARRIVING + RESOLVE_BEAT + LEAVING,
+        "the departure's length is not the sum of its three parts, so the rows \
+         are dropped before or after the effect over them ends"
+    );
+    for (name, mut effect, length) in [
+        (
+            "a resolve",
+            resolve_departure(&Theme::default()),
+            RESOLVED_DEPARTURE,
+        ),
+        ("a withdrawal", leaving(), LEAVING),
+    ] {
+        let mut spent = std::time::Duration::ZERO;
+        while spent + ARRIVING_FRAME < length {
+            let mut buf = drawn();
+            effect.process(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+            spent += ARRIVING_FRAME;
+            assert!(
+                !effect.done(),
+                "{name}'s departure reported itself done at {spent:?}, inside its \
+                 {length:?}, so the rows are blank before the ledger drops them"
+            );
+        }
+        let mut buf = drawn();
+        effect.process(
+            FxDuration::from(length - spent + ARRIVING_FRAME),
+            &mut buf,
+            PANE,
+        );
+        assert!(
+            effect.done(),
+            "{name}'s departure is still running a frame past its {length:?}, so \
+             it would hold the clock after the rows are gone"
+        );
+    }
+}
+
+#[test]
+fn a_departure_changes_the_cells_it_covers_and_leaves_them_blank() {
+    // The same gate the coalesce has: an effect that runs and leaves the buffer
+    // as it found it is not visible from the arithmetic. And a dissolve has to
+    // end on nothing, because the frame after it drops the rows and a glyph the
+    // dissolve left would be seen leaving twice.
+    let settled = drawn();
+    let mut effect = resolve_departure(&Theme::default());
+    let mut buf = drawn();
+    effect.process(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+    assert_ne!(
+        buf, settled,
+        "one frame into a resolve's departure every cell is as the renderer left \
+         it, so the agent's line arrives without arriving"
+    );
+    // Through the beat, where the line holds, stopping short of the dissolve.
+    let held = RESOLVE_ARRIVING + RESOLVE_BEAT;
+    let mut spent = ARRIVING_FRAME;
+    while spent + ARRIVING_FRAME <= held {
+        buf = drawn();
+        effect.process(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+        spent += ARRIVING_FRAME;
+    }
+    assert_eq!(
+        symbols(&buf),
+        symbols(&settled),
+        "the beat moved a glyph, so the agent's line is not readable while it holds"
+    );
+    // The rest of the beat and the whole dissolve, in one step.
+    buf = drawn();
+    effect.process(FxDuration::from(held - spent + LEAVING), &mut buf, PANE);
+    assert!(
+        symbols(&buf).iter().all(|cell| cell == " "),
+        "a dissolve run for its whole length left glyphs behind, which the frame \
+         after it would drop twice"
     );
 }
