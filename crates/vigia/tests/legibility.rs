@@ -10,7 +10,8 @@ use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
     Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow, Mode,
-    Position, Regions, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
+    NoteLead, Position, Regions, Row, Scale, Theme, View, body_layout, diff_height, regions,
+    render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
@@ -307,6 +308,7 @@ fn chrome() -> Chrome {
         // the chrome it measured before the status readouts existed.
         frame: None,
         memory: None,
+        notes: (0, 0),
     }
 }
 
@@ -318,6 +320,7 @@ fn diagnostics() -> Chrome {
         scrolling: None,
         frame: Some(Duration::from_millis(999)),
         memory: Some(999 * 1024 * 1024),
+        notes: (0, 0),
         ..following()
     }
 }
@@ -405,6 +408,19 @@ fn every_row_kind() -> View {
                 "        for change in self.changes() {",
             ),
             line(LineKind::Added, 260, "        for change in self.walk() {"),
+            // B21's rows under the line above: the reader's note and the agent's line.
+            Row::Note {
+                lead: NoteLead::Bar,
+                text: "walk() re-reads the index on every frame; cache it".to_owned(),
+                word: Some("open"),
+                faded: false,
+            },
+            Row::Note {
+                lead: NoteLead::Reply,
+                text: "cached it in advance(), invalidated on tick".to_owned(),
+                word: None,
+                faded: false,
+            },
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "assets/banner.jpg".to_owned(),
@@ -416,7 +432,7 @@ fn every_row_kind() -> View {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-            Row::Note("binary".to_owned()),
+            Row::Reason("binary".to_owned()),
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia/src/shell.rs".to_owned(),
@@ -435,6 +451,7 @@ fn every_row_kind() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -473,6 +490,7 @@ fn awkward() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -495,6 +513,7 @@ fn empty() -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -523,6 +542,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -765,6 +785,7 @@ fn glancing() -> View {
         scale: Scale::spread(12),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 
@@ -2179,7 +2200,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
                 new_start: 258,
                 new_lines: 9,
             },
-            Row::Note("unresolved conflict".to_owned()),
+            Row::Reason("unresolved conflict".to_owned()),
         ],
         files: 1,
         top: Position::default(),
@@ -2187,6 +2208,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
     let long_name = Chrome {
         pressed: None,
@@ -2315,6 +2337,7 @@ fn a_clipped_content_line_says_it_continues() {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     };
 
     let mut saw_fit = false;
@@ -3318,6 +3341,7 @@ fn overlong(rows: usize) -> View {
         scale: Scale::flat(0),
         gutter: None,
         worktree_churn: Default::default(),
+        notes: Default::default(),
     }
 }
 

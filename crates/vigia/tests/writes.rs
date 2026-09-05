@@ -9,10 +9,13 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render, state_root};
-use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
+use vigia::{
+    Action, App, Glyphs, PaintStats, Pointing, Theme, Toggled, body_layout, regions, render,
+    state_root, toggle,
+};
+use vigia_core::{Frame, Highlighter, History, Store, WARM_FILES, WatchOptions, Worktree};
 
-use support::{Scratch, made_link, settle_tree};
+use support::{Scratch, TempDir, made_link, settle_tree};
 
 /// Small on purpose. This gate counts filesystem entries rather than
 /// milliseconds, so the hundred-file fixture the budget gates share would buy it
@@ -363,5 +366,74 @@ fn the_snapshot_sees_a_write_that_does_happen() {
             .any(|line| line.contains("mod_1.rs") && line.contains("was removed")),
         "a removed file was not reported as removed, so the gate above cannot see a \
          deletion: {moved:?}"
+    );
+}
+
+#[test]
+fn one_gesture_writes_exactly_one_file() {
+    // The other half of §11.1's amended rule: what the reader asked for goes to
+    // the state directory, once, and nothing rides along with it.
+    let scratch = Scratch::large_diff("writes-one-gesture", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let root = TempDir::new("writes-one-gesture-state");
+    let store = Store::open(root.path(), scratch.root()).expect("open the store");
+
+    // A painted frame, so a row's gutter exists to be pressed.
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect a view");
+    let laid = regions(area(), &chrome, &view);
+    let line = view
+        .rows
+        .iter()
+        .position(|row| matches!(row, vigia::Row::Line { .. }))
+        .expect("a content row on the first screen");
+    let (left, _) = laid.diff.gutter;
+    assert!(
+        laid.gutter_at(left, laid.diff.top + line as u16).is_some(),
+        "the row this gate presses has no gutter"
+    );
+
+    settle_tree(root.path());
+    let before = snapshot(root.path());
+    let written = match toggle(&store, &view, line) {
+        Some(Ok(Toggled::Written(id))) => id,
+        other => panic!("the press did not write a note: {other:?}"),
+    };
+    let moved = difference(&before, &snapshot(root.path()));
+
+    // The root's own stamp moves because the store's directory appeared in it,
+    // the directory appeared, and one file appeared inside it. Nothing else.
+    let created: Vec<&String> = moved
+        .iter()
+        .filter(|line| line.ends_with("was created"))
+        .collect();
+    assert_eq!(
+        created.len(),
+        2,
+        "one gesture created {} entries under the state root rather than the \
+         store's directory and one note file:\n{}",
+        created.len(),
+        moved.join("\n")
+    );
+    assert!(
+        created
+            .iter()
+            .any(|line| line.contains(&format!("{written}.note"))),
+        "the one file created is not the note: {moved:?}"
+    );
+    assert!(
+        moved
+            .iter()
+            .all(|line| line.ends_with("was created") || line.starts_with(". moved")),
+        "something other than the root's own stamp changed under the state root:\n{}",
+        moved.join("\n")
     );
 }

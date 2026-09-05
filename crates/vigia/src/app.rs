@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use vigia_core::{Frame, Highlighter, History, Result, Samples};
+use vigia_core::{Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
@@ -99,6 +99,12 @@ pub struct App {
     single: bool,
     /// Whether a too-wide content line continues on the row below (`w`).
     wrap: bool,
+    /// The reader's notes as the store last listed them, placed by every collect.
+    notes: Vec<Note>,
+    /// Whether the note rows are drawn under their lines (`c`); the marks stay.
+    notes_shown: bool,
+    /// Notes the last collect counted, and how many of them were adrift.
+    note_count: (usize, usize),
     /// Logical rows the last frame drew, which a page step is measured in.
     /// Stepping by the display height instead walks over unwrapped content.
     shown: usize,
@@ -155,6 +161,9 @@ impl Default for App {
             single: false,
             staged: false,
             wrap: false,
+            notes: Vec::new(),
+            notes_shown: true,
+            note_count: (0, 0),
             shown: 0,
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
@@ -317,6 +326,11 @@ impl App {
         self.staged
     }
 
+    /// Replace the notes the next collect places, with what the store lists.
+    pub fn set_notes(&mut self, notes: Vec<Note>) {
+        self.notes = notes;
+    }
+
     /// The chrome for this frame.
     pub fn chrome(
         &self,
@@ -343,6 +357,7 @@ impl App {
             gripped,
             hovered,
             scrolling,
+            notes: self.note_count,
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
             mode: self.mode,
@@ -444,6 +459,9 @@ impl App {
             Action::ToggleSingle => self.single = !self.single,
             // The reflow changes what a screenful is; see [`Self::screenful`].
             Action::ToggleWrap => self.wrap = !self.wrap,
+            // Display rows too, and the marks stay: a hidden note is still on its
+            // line, and a click there still withdraws it.
+            Action::ToggleNotes => self.notes_shown = !self.notes_shown,
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;
@@ -696,7 +714,7 @@ impl App {
                 self.sheet = Some(page.min(pages - 1));
             }
         }
-        let view = View::collect(
+        let view = View::collect_noted(
             frame,
             highlighter,
             history,
@@ -732,7 +750,10 @@ impl App {
                 // [`Self::paint`].
                 highlight: self.paint != Paint::Never,
             },
+            &self.notes,
+            self.notes_shown,
         )?;
+        self.note_count = (view.notes.placed + view.notes.adrift, view.notes.adrift);
         // Advanced here rather than by the caller, because this is the call
         // that *is* a frame: a shell that painted without coming through here
         // has not drawn a screen.

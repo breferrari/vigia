@@ -59,6 +59,36 @@ fn every_way_out_is_a_way_out() {
 }
 
 #[test]
+fn c_toggles_the_note_rows() {
+    // `SPEC.md` §11.2 B21: the rows hide and show on a key, and the key changes
+    // what the body is made of rather than where the reader is in it.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('c')), Regions::default()),
+        Some(Action::ToggleNotes)
+    );
+    assert!(
+        !Action::ToggleNotes.is_manual_scroll(),
+        "hiding the note rows disengaged follow"
+    );
+    assert!(
+        !Action::ToggleNotes.needs_height(),
+        "hiding the note rows asked the terminal its size"
+    );
+    // Case is load bearing on this map, and `Ctrl+C` is the way out.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('C')), Regions::default()),
+        None
+    );
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('c')),
+            Regions::default()
+        ),
+        Some(Action::Quit)
+    );
+}
+
+#[test]
 fn arrows_and_their_vi_equivalents_agree() {
     for event in [press(KeyCode::Down), press(KeyCode::Char('j'))] {
         assert_eq!(
@@ -497,6 +527,7 @@ fn two_regions() -> Regions {
             width: 80,
             track: (6, 13),
             bar: Some(79),
+            gutter: (0, 0),
         },
         sheet: None,
     }
@@ -812,6 +843,7 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             width: 80,
             track: (2, 4),
             bar: Some(79),
+            gutter: (0, 0),
         },
         diff: Region {
             top: 8,
@@ -820,6 +852,7 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             width: 80,
             track: (9, 10),
             bar: Some(79),
+            gutter: (0, 0),
         },
         sheet: None,
     };
@@ -1266,6 +1299,7 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
             width: 80,
             track: (2, 4),
             bar: Some(79),
+            gutter: (0, 0),
         },
         diff: Region {
             top: 8,
@@ -1274,6 +1308,7 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
             width: 80,
             track: (9, 10),
             bar: Some(79),
+            gutter: (0, 0),
         },
         sheet: None,
     };

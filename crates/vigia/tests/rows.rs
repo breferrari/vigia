@@ -618,7 +618,7 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     );
     assert_eq!(
         view.rows.get(1),
-        Some(&Row::Note("binary".to_owned())),
+        Some(&Row::Reason("binary".to_owned())),
         "a binary file drew {:?} where its reason should be",
         view.rows.get(1)
     );

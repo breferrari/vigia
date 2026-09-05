@@ -14,8 +14,8 @@ use vigia::{
     render,
 };
 use vigia_core::{
-    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
-    Samples,
+    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
+    Samples, Side, Status,
 };
 
 use support::{
@@ -1789,7 +1789,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 18),
+        (104, 19),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -1819,7 +1819,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 37),
+        (68, 38),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
@@ -1840,6 +1840,155 @@ fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
 #[test]
 fn a_pinned_frame_holds_the_frame_budget() {
     frame_budget_on("shell-i9-single", 0, area(), None, false, true);
+}
+
+/// The pane the fifty-note frame is measured on: tall enough for fifty lines and
+/// the row under each on one screen.
+const NOTED_PANE: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 80,
+    height: 160,
+};
+
+/// I9 with fifty notes on screen (`SPEC.md` §11.2 B21), measured whole: the same
+/// frame with and without them, interleaved.
+#[test]
+fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("notes-frame", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = layout_of(&app, NOTED_PANE, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(NOTED_PANE);
+
+    // The fixture's hunk is every removed line then every added one, so the
+    // working-tree side starts a file's length down. The viewport is put there,
+    // where the rewrite below moves every line under its note each round and
+    // fifty notes resolve down the whole ladder to `changed`, the dearest placement.
+    app.apply(
+        Action::Scroll(isize::try_from(LINES + 2).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll to the working-tree side");
+    let notes: Vec<Note> = {
+        let (_, diff) = frame.diff(0).expect("diff");
+        diff.rows_on(Side::New)
+            .iter()
+            .take(50)
+            .enumerate()
+            .map(|(i, (line, text))| Note {
+                id: format!("n{i}"),
+                path: diff.path.clone(),
+                side: Side::New,
+                line: *line,
+                text: (*text).to_owned(),
+                body: "the reader's words, one row each".to_owned(),
+                status: Status::Open,
+                reply: None,
+                written: std::time::SystemTime::now(),
+            })
+            .collect()
+    };
+    assert_eq!(
+        notes.len(),
+        50,
+        "the first file's diff has fewer than fifty lines"
+    );
+
+    let (mut noted, mut bare) = (Samples::new(SAMPLED_BURSTS), Samples::new(SAMPLED_BURSTS));
+    for round in 1..=SAMPLED_BURSTS {
+        for with in [true, false] {
+            scratch.rewrite_all(FILES, LINES, round);
+            app.set_notes(if with { notes.clone() } else { Vec::new() });
+            let (wall, _) = time_cpu(|| {
+                shell_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
+            });
+            if round > SAMPLED_BURSTS / 4 {
+                if with {
+                    noted.push(wall)
+                } else {
+                    bare.push(wall)
+                }
+            }
+        }
+    }
+
+    // Non-vacuity: the noted arm drew fifty notes on the screen it timed, every
+    // one of them down the ladder.
+    app.set_notes(notes.clone());
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let drawn = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Note { .. }))
+        .count();
+    assert_eq!(
+        view.notes.marked.len(),
+        50,
+        "{} lines carry a mark on the timed screen, not the fifty this gate is \
+         named for",
+        view.notes.marked.len()
+    );
+    assert!(drawn >= 50, "the timed screen drew {drawn} note rows");
+    assert!(
+        view.rows.iter().any(|row| matches!(
+            row,
+            Row::Note {
+                word: Some("changed"),
+                ..
+            }
+        )),
+        "no note resolved to `changed`, so the ladder's dearest placement was not timed"
+    );
+
+    let with = noted.percentile(0.5).expect("a sampled round");
+    let without = bare.percentile(0.5).expect("a sampled round");
+    println!(
+        "fifty notes: frame p50 {with:?} with them, {without:?} without, over {FILES} files \
+         and {LINES} lines on an {}x{} pane",
+        NOTED_PANE.width, NOTED_PANE.height
+    );
+    holds_p99(
+        "I9: a frame with fifty notes on screen",
+        budget(I9_FRAME),
+        &noted,
+        || format!("({without:?} p50 without the notes)"),
+        || {
+            app.set_notes(notes.clone());
+            time_cpu(|| {
+                shell_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
+            })
+        },
+    );
 }
 
 /// What the staged run costs, in the frame it sits in rather than on its own.

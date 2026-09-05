@@ -12,8 +12,9 @@ use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
+use crate::notes::count_cell;
 use crate::theme::Theme;
-use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Row, Scale, View};
+use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View};
 
 /// Columns a tab advances to the next multiple of.
 const TAB_STOP: usize = 4;
@@ -30,8 +31,16 @@ const ELIDED: char = '…';
 /// Shown where anything else ran past the right edge.
 const CONTINUES: &str = "›";
 
-/// What a wrapped content line's continuation draws in the sigil column.
+/// What a wrapped content line's continuation draws in the sigil column, and
+/// what the first row of an agent's reply draws at the content origin.
 const WRAPPED: char = '↳';
+
+/// What the gutter draws under the pointer, and on a line carrying a note with
+/// no body. `SPEC.md` §5.1 records `»` as its CP437 stand-in.
+const NOTE_ICON: char = '✎';
+
+/// The bar down the left of a note's rows. `▌` is the recorded stand-in.
+const NOTE_BAR: char = '▎';
 
 /// The footer's left-hand side when there is nothing wrong, widest rung first.
 const HINT_RUNGS: [&str; 4] = [
@@ -389,7 +398,7 @@ const FOLLOWING: &str = "follow ▶";
 const FOLLOW_MARK: char = '▶';
 
 /// What joins two facts drawn on one line.
-const FACT_SEPARATOR: &str = " · ";
+pub(crate) const FACT_SEPARATOR: &str = " · ";
 
 /// What the body says when there is no diff at all.
 const NOTHING_CHANGED: &str = "no unstaged changes";
@@ -444,6 +453,9 @@ pub struct Chrome {
     pub selected: Option<Selection>,
     /// Which bar is being scrolled and which way, when one is.
     pub scrolling: Option<(Grabbed, isize)>,
+    /// How many notes the reader has, and how many of them are adrift, which
+    /// the footer counts beside the position.
+    pub notes: (usize, usize),
     /// Something the reader should see instead of the key hints.
     pub notice: Option<String>,
     /// What that message is, which the string cannot say.
@@ -484,8 +496,19 @@ fn position_of(file: usize, files: usize) -> String {
 }
 
 /// The state's ladder, widest rung first.
-fn state_rungs(following: bool, position: &str) -> Vec<String> {
-    let mut rungs = Vec::with_capacity(3);
+fn state_rungs(following: bool, position: &str, notes: (usize, usize)) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(4);
+    // The notes count is the first fact a narrowing footer gives up: the position
+    // and the follow marker are about where the reader is, and the count is about
+    // what they left behind.
+    let counted = count_cell(notes.0, notes.1);
+    if !counted.is_empty() {
+        let state = state_rungs(following, position, (0, 0));
+        match state.first().map(String::as_str) {
+            Some("") | None => rungs.push(counted),
+            Some(widest) => rungs.push(format!("{counted}{CELL_GAP}{widest}")),
+        }
+    }
     match (following, position.is_empty()) {
         // `follow ▶ ` with nothing after it would read as a truncation rather
         // than a state, so a clean worktree gets the marker on its own.
@@ -731,6 +754,8 @@ impl Bar {
             // takes the region before `with_bar` narrows it and draws down the right of
             // what it was given.
             bar: self.drawn().then(|| bar_column(at)),
+            // `regions` fills the diff's from the rows it laid out.
+            gutter: (0, 0),
         }
     }
 }
@@ -1182,22 +1207,33 @@ impl<'a> Footer<'a> {
         // The last file's position is the widest this count can produce, since
         // no position numbers higher than the count itself.
         let widest = position_of(files.saturating_sub(1), files);
+        // Whether the footer grows is decided without the notes count: the count
+        // moves on a collect, after the layout was taken from this plan, so a
+        // count that bought a second line would leave the body a row shorter than
+        // the rows collected for it.
+        let bare = width_of(widest_fitting(
+            &state_rungs(chrome.following, &widest, (0, 0)),
+            width,
+        ));
         let reserved = width_of(widest_fitting(
-            &state_rungs(chrome.following, &widest),
+            &state_rungs(chrome.following, &widest, chrome.notes),
             width,
         ));
         // The gap keeps the state from touching the hints, and is only owed when
         // there is a state to keep away from them.
-        let taken = if reserved == 0 {
-            0
-        } else {
-            reserved + CELL_GAP.len()
+        let gap = |state: usize| {
+            if state == 0 {
+                0
+            } else {
+                state + CELL_GAP.len()
+            }
         };
+        let taken = gap(reserved);
 
         // A second line is worth taking only if it buys something: there has to be a
         // state to move up to it, and a body still worth showing underneath.
-        let grows = width_of(HINT_RUNGS[HINT_BASELINE]) + taken > width
-            && reserved > 0
+        let grows = width_of(HINT_RUNGS[HINT_BASELINE]) + gap(bare) > width
+            && bare > 0
             && area.height >= 3 + MIN_BODY;
         let rows = if grows { 2 } else { 1 };
         // Charged the way the second footer line is, against the same floor: one
@@ -1255,7 +1291,7 @@ pub fn voice_style(voice: Voice, theme: &Theme) -> Style {
 fn footer_right(footer: &Footer<'_>, chrome: &Chrome, view: &View) -> String {
     let position = position_of(view.top.file, view.files);
     // Clamped to what was reserved, not to the width.
-    let rungs = state_rungs(chrome.following, &position);
+    let rungs = state_rungs(chrome.following, &position, chrome.notes);
     let state = widest_fitting(&rungs, footer.reserved);
     match (footer.diagnostics.as_str(), state) {
         ("", state) => state.to_owned(),
@@ -1679,9 +1715,27 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         view.total_rows as u64,
     );
 
+    // The gutter's columns, from the same width and inset `Painter::body` lays the
+    // rows out against, so the pointer's target and the drawn number are one span.
+    let gutter = if body.diff > 0 && view.files > 0 {
+        let inner = planning_width(areas.diff.width, area.width, 0);
+        let digits = view
+            .gutter
+            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
+        (
+            areas.diff.x.saturating_add(margins_of(area.width).0),
+            u16::try_from(line_origin(digits)).unwrap_or(u16::MAX),
+        )
+    } else {
+        (0, 0)
+    };
+
     Regions {
         list: list_bar.region(areas.list),
-        diff: diff_bar.region(areas.diff),
+        diff: Region {
+            gutter,
+            ..diff_bar.region(areas.diff)
+        },
         // From the same plan the painter draws, which is what keeps the pointer and the
         // screen one answer: a sheet the reader can see but the pointer cannot would
         // swallow nothing and let a click seek a bar behind it.
@@ -1838,7 +1892,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 15] = [
+const KEYBOARD: [Gesture; 16] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -1900,6 +1954,11 @@ const KEYBOARD: [Gesture; 15] = [
         keys: ["w", "w"],
         verb: ["wrap a long line, or clip it", "wrap long lines"],
     },
+    // Both cells sit inside the field maxima above, so no rung's width moves.
+    Gesture {
+        keys: ["c", "c"],
+        verb: ["show or hide the note rows", "the note rows"],
+    },
     Gesture {
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
@@ -1914,7 +1973,7 @@ const KEYBOARD: [Gesture; 15] = [
 
 /// The order the height ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
-const DROP_ORDER: [usize; KEYBOARD.len()] = [14, 0, 1, 2, 3, 4, 5, 6, 9, 10, 12, 11, 7, 8, 13];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [15, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 14];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2017,7 +2076,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 13 },
+        rows: Rows::Keyboard { from: 7, to: 14 },
     },
     Section {
         label: "mouse",
@@ -2025,7 +2084,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 13, to: 15 },
+        rows: Rows::Keyboard { from: 14, to: 16 },
     },
 ];
 
@@ -3454,6 +3513,32 @@ impl Painter<'_> {
         self.gutter = view
             .gutter
             .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
+
+        // The line row the pointer's gutter mark lands on: the row itself when it is
+        // a line, the line a continuation belongs to, and nothing over a heading, a
+        // hunk header or a note row, which are no target.
+        let hovered = match self.hovered {
+            Some(Hovered::Gutter(y)) if y >= area.y => {
+                let offset = usize::from(y - area.y);
+                view.rows.get(offset).and_then(|row| match row {
+                    Row::Line { .. } => Some(offset),
+                    Row::Wrap { .. } => view.rows[..offset]
+                        .iter()
+                        .rposition(|row| !row.is_display())
+                        .filter(|head| matches!(view.rows[*head], Row::Line { .. })),
+                    _ => None,
+                })
+            }
+            _ => None,
+        };
+        // The rows carrying a note's mark, and whether the note is the anchor alone.
+        let mut marks: Vec<Option<bool>> = vec![None; shown];
+        for mark in &view.notes.marked {
+            if let Some(slot) = marks.get_mut(mark.row) {
+                *slot = Some(slot.unwrap_or(true) && mark.bare);
+            }
+        }
+
         // And the two are allowed to differ, which is the ruling rather than a gap.
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
@@ -3462,6 +3547,15 @@ impl Painter<'_> {
                 height: 1,
                 width: washed,
                 ..area
+            };
+            let mark = if hovered == Some(offset) {
+                Mark::Icon
+            } else {
+                match marks[offset] {
+                    Some(true) => Mark::Icon,
+                    Some(false) => Mark::Number,
+                    None => Mark::None,
+                }
             };
             match row {
                 // Given the planning width rather than the region's, for
@@ -3517,14 +3611,33 @@ impl Painter<'_> {
                 // that closes a file's block, and an unwritten row is already blank: it
                 // is what every row below a short diff has always been.
                 Row::Gap => {}
-                Row::Note(note) => {
-                    let drawn = format!("  {note}");
+                Row::Reason(reason) => {
+                    let drawn = format!("  {reason}");
                     self.put_marked(
                         glyphs.x,
                         y,
                         &drawn,
                         usize::from(glyphs.width),
                         self.theme.note,
+                    );
+                }
+                Row::Note {
+                    lead,
+                    text,
+                    word,
+                    faded,
+                } => {
+                    self.note_row(
+                        Rect {
+                            y,
+                            height: 1,
+                            x: glyphs.x,
+                            width: glyphs.width,
+                        },
+                        *lead,
+                        text,
+                        *word,
+                        *faded,
                     );
                 }
                 Row::Line {
@@ -3549,6 +3662,7 @@ impl Painter<'_> {
                         spans,
                         emph,
                         0,
+                        mark,
                     );
                 }
                 // The same drawer, told it has no number, which is what keeps the wash,
@@ -3575,6 +3689,7 @@ impl Painter<'_> {
                         spans,
                         emph,
                         *indent,
+                        Mark::None,
                     );
                 }
             }
@@ -3902,6 +4017,7 @@ impl Painter<'_> {
         spans: &[Span],
         emph: &[std::ops::Range<u32>],
         indent: usize,
+        mark: Mark,
     ) {
         let (diff, sigil) = match kind {
             LineKind::Added => (self.theme.added, '+'),
@@ -3911,13 +4027,19 @@ impl Painter<'_> {
         // `None` is a continuation, and it changes exactly two cells: the sigil becomes
         // [`WRAPPED`] and the gutter goes blank.
         let sigil = if number.is_some() { sigil } else { WRAPPED };
+        // Without a gutter the sigil's cell is the whole target, so the mark that
+        // would have taken the number takes the sigil instead.
+        let (sigil, sigil_style) = match mark {
+            Mark::Icon if self.gutter == 0 => (NOTE_ICON, self.theme.bar_hover),
+            Mark::Number if self.gutter == 0 => (sigil, self.theme.bar_hover),
+            _ => (sigil, diff),
+        };
 
         let (wash, bar) = match kind {
             LineKind::Added => self.theme.row(true),
             LineKind::Removed => self.theme.row(false),
             LineKind::Context => (Style::new(), Style::new()),
         };
-        let sigil_style = diff;
         if wash.bg.is_some() {
             self.buf.set_style(area, wash);
         }
@@ -3941,10 +4063,14 @@ impl Painter<'_> {
         if self.gutter > 0 {
             let gutter = self.gutter;
             // A continuation has no number, and the blank where one would be is `bat
-            // --style=numbers`' own signal that this row is not a new line.
-            let numbered = match number {
-                Some(number) => format!("{number:>gutter$} "),
-                None => " ".repeat(gutter + 1),
+            // --style=numbers`' own signal that this row is not a new line. Under
+            // the pointer, and on a line whose note is the anchor alone, the number
+            // becomes the icon; on a line with a note under it the number keeps the
+            // icon's ink, so the anchored line can be found from across the pane.
+            let numbered = match (number, mark) {
+                (Some(_), Mark::Icon) => format!("{NOTE_ICON:>gutter$} "),
+                (Some(number), _) => format!("{number:>gutter$} "),
+                (None, _) => " ".repeat(gutter + 1),
             };
             // crush's two-tone gutter (`SPEC.md` §11.2 B18): on a changed row the
             // number cells take a tone one step off the wash, so the gutter reads as a
@@ -3956,7 +4082,13 @@ impl Painter<'_> {
             };
             // `patch` on an unset style is the identity, so the context row
             // and the palettes that draw no tone need no arm of their own.
-            x = self.put(x, area.y, &numbered, room, self.theme.gutter.patch(tone));
+            let ink = match mark {
+                Mark::None => self.theme.gutter.patch(tone),
+                Mark::Icon | Mark::Number => {
+                    self.theme.gutter.patch(tone).patch(self.theme.bar_hover)
+                }
+            };
+            x = self.put(x, area.y, &numbered, room, ink);
             room = room.saturating_sub(gutter + 1);
         }
 
@@ -4000,9 +4132,74 @@ impl Painter<'_> {
         // way a path's tail is. So it says it continues and nothing more.
         self.put_runs_marked(x, area.y, &runs, clipped, room);
     }
+
+    /// `      ▎ use saturating_mul and drop the unwrap_or.               open`
+    ///
+    /// At the content origin, so the gutter runs on unbroken above and below it,
+    /// in the chrome's dim weight so it never reads as a line of the diff.
+    fn note_row(
+        &mut self,
+        glyphs: Rect,
+        lead: NoteLead,
+        text: &str,
+        word: Option<&str>,
+        faded: bool,
+    ) {
+        let origin = line_origin(self.gutter);
+        let room = usize::from(glyphs.width).saturating_sub(origin);
+        if room == 0 {
+            return;
+        }
+        let x = glyphs.x.saturating_add(origin as u16);
+        let dim = if faded {
+            Modifier::DIM
+        } else {
+            Modifier::empty()
+        };
+        let ink = self.theme.chrome_dim.add_modifier(dim);
+        let (glyph, glyph_ink) = match lead {
+            NoteLead::Bar => (NOTE_BAR, self.theme.bar_hover.add_modifier(dim)),
+            NoteLead::Reply => (WRAPPED, ink),
+            NoteLead::Blank => (' ', ink),
+        };
+        // The word first, at the right edge, so the text is bounded by what it leaves.
+        let taken = match word {
+            Some(word) => self.put_right(
+                Rect {
+                    x,
+                    width: room as u16,
+                    ..glyphs
+                },
+                word,
+                ink,
+            ),
+            None => 0,
+        };
+        let next = self.put(x, glyphs.y, &format!("{glyph} "), room, glyph_ink);
+        let spent = usize::from(next - x);
+        self.put_marked(
+            next,
+            glyphs.y,
+            text,
+            room.saturating_sub(spent).saturating_sub(taken),
+            ink,
+        );
+    }
 }
 
-fn width_of(text: &str) -> usize {
+/// What a content row's gutter draws instead of, or over, its number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    /// The number as it always was.
+    None,
+    /// The icon, in the pointer's ink: the pointer rests here, or the note under
+    /// this line is the anchor alone.
+    Icon,
+    /// The number, in the icon's ink: a note with a body sits under this line.
+    Number,
+}
+
+pub(crate) fn width_of(text: &str) -> usize {
     TextSpan::raw(text).width()
 }
 

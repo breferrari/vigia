@@ -14,6 +14,7 @@ mod glyphs;
 pub mod icons;
 mod input;
 pub mod memory;
+mod notes;
 mod render;
 mod signal;
 mod state;
@@ -34,6 +35,7 @@ pub use input::{
     Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
     repainted, scroll_mark, selection_after, settled,
 };
+pub use notes::{Anchor, Toggled, count_cell, press_at, toggle};
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
     diff_height, notice_area, regions, render, voice_style,
@@ -43,9 +45,9 @@ pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
-    block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of,
-    span_in,
+    FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked, NoteLead, Noted, Position, Row, Scale,
+    Slot, View, Viewport, block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted,
+    rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -57,7 +59,7 @@ use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::pattern::{RadialPattern, SweepPattern};
 use tachyonfx::{EffectManager, Interpolation, fx};
-use vigia_core::{Highlighter, History, WatchOptions, Worktree};
+use vigia_core::{Highlighter, History, Store, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
@@ -167,6 +169,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Read here for that same reason, and acted on after the first paint.
     let update = update::wanted(|key| std::env::var(key).ok())?;
 
+    // Where the reader's notes live, resolved once with the rest of the
+    // environment. `None` with no home to keep them under, which the first click
+    // says rather than the launch: a pane with no notes is still a pane.
+    let store = state_root(cfg!(windows), |key| std::env::var(key).ok())
+        .map(|root| Store::open(&root, worktree.workdir()))
+        .transpose()?;
+
     // The view defaults reach the frame before its first walk, not just the
     // shell. Three of the four keys only arrange rows the frame already holds;
     // `staged` decides what it *walks*, so it must be honoured here.
@@ -213,6 +222,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         served: Vec::new(),
         written: false,
         warming: None,
+        store,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -223,6 +233,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             "not catching an external stop, so a kill may not restore the terminal: {e}"
         ));
     }
+
+    // The notes a pane before this one left, so the first frame draws them.
+    shell.reload_notes(Instant::now());
 
     // For a screen with rows on it, so a clean worktree spawns nothing.
     // Starting a monitor on a tree nobody has touched is an ordinary way to
@@ -360,6 +373,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
+                    // A press on a content row's gutter is a note and never a
+                    // selection, which is B20 and B21 sharing no cell: it goes to the
+                    // store here and the wash below never sees it.
+                    if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
+                        shell.toggle_note(offset, Instant::now());
+                        continue;
+                    }
                     // Before the event is interpreted, for the hold's reason: a press
                     // opening one is an action too, and the wash precedes its clearing.
                     let (standing, ended) = selection_after(&event, regions, shell.selected);
@@ -697,6 +717,9 @@ struct Shell {
     written: bool,
     /// The warm this shell last asked for, if any.
     warming: Option<std::thread::JoinHandle<vigia_core::WarmReport>>,
+    /// The reader's notes on this worktree, or `None` when the environment names
+    /// no directory to keep them in.
+    store: Option<Store>,
 }
 
 impl Shell {
@@ -845,6 +868,53 @@ impl Shell {
     fn send_wash(&mut self, span: Selection) {
         if let Some(lines) = self.screen.lines_in(span.offsets(self.regions.diff.top)) {
             self.app.send(&lines);
+        }
+    }
+
+    /// Write the anchor a click asked for, or withdraw the note already there,
+    /// and read the store back so the next frame draws what it holds. A failed
+    /// write is a footer alert rather than the end of the pane, which is B7's
+    /// rule for a monitor's own writes.
+    fn toggle_note(&mut self, offset: usize, now: Instant) {
+        let Some(store) = &self.store else {
+            self.say(
+                "no home to keep a note in: set HOME or XDG_STATE_HOME".to_owned(),
+                Voice::Alert,
+                now,
+            );
+            return;
+        };
+        match notes::toggle(store, &self.screen, offset) {
+            None => {}
+            Some(Ok(_)) => self.reload_notes(now),
+            Some(Err(e)) => self.say(format!("could not write the note: {e}"), Voice::Alert, now),
+        }
+    }
+
+    /// Read the store and hand the notes to the next collect. A file the store
+    /// cannot read is skipped and said once, here, rather than on every frame.
+    fn reload_notes(&mut self, now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        match store.list() {
+            Ok(listing) => {
+                if let Some((path, why)) = listing.skipped.first() {
+                    let name = path.file_name().map_or_else(
+                        || path.display().to_string(),
+                        |name| name.to_string_lossy().into_owned(),
+                    );
+                    let more = listing.skipped.len() - 1;
+                    let told = if more == 0 {
+                        format!("skipped the note file {name}: {why}")
+                    } else {
+                        format!("skipped the note file {name} and {more} more: {why}")
+                    };
+                    self.say(told, Voice::Alert, now);
+                }
+                self.app.set_notes(listing.notes);
+            }
+            Err(e) => self.say(format!("could not read the notes: {e}"), Voice::Alert, now),
         }
     }
 
@@ -1052,9 +1122,10 @@ impl Shell {
             0
         };
 
-        // Rebuilt so a notice raised by the collect above reaches this frame rather
-        // than the next one. Safe to differ from the chrome the height came from: a
-        // notice cannot change how many rows the footer takes, by construction.
+        // Rebuilt so a notice raised by the collect above, and the notes it
+        // counted, reach this frame rather than the next one. Safe to differ from
+        // the chrome the height came from: neither can change how many rows the
+        // footer takes, by construction.
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
