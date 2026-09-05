@@ -567,6 +567,44 @@ fn tree_fingerprint(root: &Path) -> Vec<(PathBuf, u64, Option<std::time::SystemT
     found
 }
 
+/// An empty directory under `parent` that no other test or process is using.
+fn unique_dir(parent: &Path, name: &str) -> PathBuf {
+    let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = parent.join(format!(
+        "vigia-test-{}-{}-{}",
+        std::process::id(),
+        unique,
+        name
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("create a fixture directory");
+    path
+}
+
+/// An empty directory the test owns and removes on drop, for a fixture that is
+/// not a repository: a state root, or a holder for a linked worktree.
+pub struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    pub fn new(name: &str) -> Self {
+        Self {
+            path: unique_dir(&std::env::temp_dir(), name),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 impl Scratch {
     /// Create an initialised repository with deterministic config.
     pub fn new(name: &str) -> Self {
@@ -575,15 +613,7 @@ impl Scratch {
 
     /// The same thing, somewhere other than the temp directory.
     pub fn in_dir(parent: &Path, name: &str) -> Self {
-        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = parent.join(format!(
-            "vigia-test-{}-{}-{}",
-            std::process::id(),
-            unique,
-            name
-        ));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).expect("create scratch dir");
+        let path = unique_dir(parent, name);
 
         let scratch = Scratch { path };
         scratch.git(&["init", "-q", "-b", "main"]);

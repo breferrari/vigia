@@ -9,7 +9,7 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render};
+use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render, state_root};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
 use support::{Scratch, made_link, settle_tree};
@@ -254,6 +254,11 @@ fn the_monitor_writes_nothing_while_it_runs() {
     // monitor.
     settle_tree(&root);
     let before = snapshot(&root);
+    // The state directory B21 opens is outside the tree, so the tree's snapshot
+    // cannot see a write there; it gets its own, at the root the shell would
+    // resolve from this process's environment.
+    let state = state_root(cfg!(windows), |name| std::env::var(name).ok());
+    let state_before = state.as_deref().filter(|dir| dir.exists()).map(snapshot);
     if linked {
         assert!(
             before.contains_key(Path::new("link_to_mod_0.rs")),
@@ -306,6 +311,22 @@ fn the_monitor_writes_nothing_while_it_runs() {
         driven.events,
         moved.join("\n")
     );
+    if let Some(dir) = state.as_deref() {
+        let state_after = dir.exists().then(|| snapshot(dir));
+        let moved = match (&state_before, &state_after) {
+            (None, None) => Vec::new(),
+            (Some(before), Some(after)) => difference(before, after),
+            (None, Some(_)) => vec![format!("{} was created", dir.display())],
+            (Some(_), None) => vec![format!("{} was removed", dir.display())],
+        };
+        assert!(
+            moved.is_empty(),
+            "SPEC.md §11.1: the monitor writes nothing of its own, and with no \
+             gesture this run moved {} entries under the state directory:\n{}",
+            moved.len(),
+            moved.join("\n")
+        );
+    }
 }
 
 #[test]

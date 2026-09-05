@@ -28,6 +28,20 @@ pub enum Error {
     },
     /// The filter configuration git would apply could not be assembled.
     FilterSetup(Box<dyn std::error::Error + Send + Sync>),
+    /// The notes store could not be created, written, read or pruned.
+    Store {
+        /// The path the operation was on.
+        path: std::path::PathBuf,
+        /// The underlying I/O failure.
+        source: std::io::Error,
+    },
+    /// A worktree path has no canonical form, which means it does not exist.
+    Canonicalise {
+        /// The path as given.
+        path: std::path::PathBuf,
+        /// The underlying I/O failure.
+        source: std::io::Error,
+    },
     /// One file could not be normalised the way git's clean filter would.
     Filter {
         /// Repository-relative path that could not be normalised.
@@ -58,7 +72,9 @@ impl Error {
             | Error::Bare
             | Error::Status(_)
             | Error::Watch(_)
-            | Error::FilterSetup(_) => None,
+            | Error::FilterSetup(_)
+            | Error::Store { .. }
+            | Error::Canonicalise { .. } => None,
         }
     }
 
@@ -78,6 +94,14 @@ impl Error {
         Error::Filter {
             path: path.to_owned(),
             source: Box::new(source),
+        }
+    }
+
+    /// The store could not be used at `path`.
+    pub(crate) fn store(path: &std::path::Path, source: std::io::Error) -> Self {
+        Error::Store {
+            path: path.to_owned(),
+            source,
         }
     }
 
@@ -105,6 +129,16 @@ impl fmt::Display for Error {
             Error::Filter { path, source } => {
                 write!(f, "could not normalise {path} the way git would: {source}")
             }
+            Error::Store { path, source } => {
+                write!(
+                    f,
+                    "could not use the notes store at {}: {source}",
+                    path.display()
+                )
+            }
+            Error::Canonicalise { path, source } => {
+                write!(f, "could not canonicalise {}: {source}", path.display())
+            }
         }
     }
 }
@@ -114,7 +148,9 @@ impl std::error::Error for Error {
         match self {
             Error::Discover(e) => Some(e),
             Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) => Some(e.as_ref()),
-            Error::Read { source, .. } => Some(source),
+            Error::Read { source, .. }
+            | Error::Store { source, .. }
+            | Error::Canonicalise { source, .. } => Some(source),
             Error::Filter { source, .. } => Some(source.as_ref()),
             Error::Bare | Error::MissingBlob { .. } => None,
         }
