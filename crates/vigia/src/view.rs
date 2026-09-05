@@ -1421,8 +1421,7 @@ impl View {
                 _ => Vec::new(),
             })
             .collect();
-        // The note rows under each logical row, built once so the clamp and the
-        // emit below agree on their count.
+        // Built once, so the clamp and the emit below agree on their count.
         let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
         if drawn {
             for pin in pins {
