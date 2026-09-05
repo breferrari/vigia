@@ -139,7 +139,7 @@ pub fn key(workdir: &Path) -> Result<String> {
         source,
     })?;
     let mut hasher = gix::hash::hasher(gix::hash::Kind::Sha1);
-    hasher.update(canonical.to_string_lossy().as_bytes());
+    hasher.update(&os_bytes(canonical.as_os_str()));
     // The only failure is a detected collision attack in the bytes hashed,
     // which are a path this process resolved; it is reported as the store
     // failing at that path because the store is what cannot be opened.
@@ -147,6 +147,20 @@ pub fn key(workdir: &Path) -> Result<String> {
         .try_finalize()
         .map_err(|why| Error::store(workdir, io::Error::other(why)))?;
     Ok(id.to_hex().to_string())
+}
+
+/// The bytes of a path as the platform holds them, so two paths that differ
+/// only where UTF-8 cannot represent them still hash apart.
+#[cfg(unix)]
+fn os_bytes(path: &std::ffi::OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt as _;
+    path.as_bytes().to_vec()
+}
+
+#[cfg(windows)]
+fn os_bytes(path: &std::ffi::OsStr) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt as _;
+    path.encode_wide().flat_map(u16::to_le_bytes).collect()
 }
 
 /// Whether `id` can be a file name inside the store and nothing else:

@@ -19,13 +19,19 @@ fn the_state_root_follows_xdg_then_home_and_localappdata_on_windows() {
         }
     };
     // Absolute on every platform, which is what the XDG rule turns on.
-    let absolute = std::env::temp_dir().join("xdg-state");
-    let absolute_str = absolute.to_str().expect("a UTF-8 temp dir");
+    let absolute_str = std::env::temp_dir()
+        .join("xdg-state")
+        .to_string_lossy()
+        .into_owned();
+    let absolute = PathBuf::from(&absolute_str);
 
     assert_eq!(
         state_root(
             false,
-            env(&[("XDG_STATE_HOME", absolute_str), ("HOME", "/home/r")])
+            env(&[
+                ("XDG_STATE_HOME", absolute_str.as_str()),
+                ("HOME", "/home/r")
+            ])
         ),
         Some(absolute.join("vigia"))
     );
