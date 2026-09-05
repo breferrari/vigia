@@ -1939,7 +1939,7 @@ mod tests {
         let body = &code[settle..];
         let body = &body[..body.find("\n    }\n").expect("`settle_notes` never closes")];
         for step in [
-            "std::mem::take(&mut self.notes_stale)",
+            "if std::mem::take(&mut self.notes_stale) {",
             "self.reload_notes(now)",
             "self.ledger.settle(now)",
             "self.note_effects.settle(now)",

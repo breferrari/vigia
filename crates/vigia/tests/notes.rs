@@ -2012,9 +2012,10 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
         .put(&left_as("n1", BODY, Status::Seen, Some(REPLY)))
         .expect("put");
     rig.reload();
-    // The third pane is short enough that the bar is drawn, so the bar clause
-    // below is exercised rather than skipped.
-    let short = Rect::new(0, 0, 80, 16);
+    // The third pane is short enough that the bar is drawn and narrow enough to
+    // have no trailing margin, so only the bar's own narrowing keeps the rows
+    // off its column and the clause below is exercised rather than skipped.
+    let short = Rect::new(0, 0, 40, 20);
     for pane in [PANE, NARROW, short] {
         let painted = rig.paint(&mut frame, pane, Pointing::default());
         if pane == short {
