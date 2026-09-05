@@ -1184,3 +1184,57 @@ fn an_invalid_utf8_line_and_a_batch_are_answered_and_the_server_goes_on() {
     assert!(status.success(), "{status}: {stderr}");
     assert!(stderr.is_empty(), "{stderr}");
 }
+
+#[test]
+fn a_note_that_resolves_better_in_one_run_is_placed_there() {
+    // Line 3 changed and staged; then a line inserted at the top of the
+    // working tree, so the unstaged run finds the stored text one row down
+    // (moved) while the staged run finds it where it was (at). The better
+    // placement wins whichever run is listed first.
+    let rig = Rig::new("mcp-rank");
+    rig.scratch.edit_line(PATH, 2, "staged three");
+    rig.scratch.git(&["add", PATH]);
+    let staged = fs::read_to_string(rig.scratch.path_of(PATH)).expect("read the fixture");
+    rig.scratch.write(PATH, format!("inserted\n{staged}"));
+    rig.store
+        .put(&pinned("rank-1", PATH, Side::New, 3, "staged three"))
+        .expect("put");
+    let config = rig.root.path().join(".config").join("vigia");
+    fs::create_dir_all(&config).expect("make the config directory");
+    fs::write(config.join("config"), "staged = on\n").expect("write the view default");
+
+    let mut server = rig.server();
+    let listed = document(&mut server, false);
+    let note = note_named(&listed, "rank-1");
+    assert_eq!(note["placement"], "at", "{note}");
+    assert_eq!(note["current_line"], 3);
+    assert_eq!(
+        listed["notes"].as_array().map(Vec::len),
+        Some(1),
+        "one placement per note, whatever the number of runs"
+    );
+}
+
+#[test]
+fn a_tie_between_the_two_runs_is_one_placement() {
+    // Line 6 changed and staged, line 10 changed in the working tree: line 8
+    // is context in both hunks, so the note is at its line in both runs.
+    let rig = Rig::new("mcp-tie");
+    rig.scratch.edit_line(PATH, 5, "staged six");
+    rig.scratch.git(&["add", PATH]);
+    rig.scratch.edit_line(PATH, 9, "unstaged ten");
+    rig.store
+        .put(&pinned("tie-1", PATH, Side::New, 8, "line 8"))
+        .expect("put");
+    let config = rig.root.path().join(".config").join("vigia");
+    fs::create_dir_all(&config).expect("make the config directory");
+    fs::write(config.join("config"), "staged = on\n").expect("write the view default");
+
+    let mut server = rig.server();
+    let listed = document(&mut server, false);
+    assert_eq!(listed["notes"].as_array().map(Vec::len), Some(1));
+    let note = note_named(&listed, "tie-1");
+    assert_eq!(note["placement"], "at", "{note}");
+    assert_eq!(note["current_line"], 8);
+    assert_eq!(note["current_path"], PATH);
+}

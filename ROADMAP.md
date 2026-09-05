@@ -158,7 +158,7 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 
 Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
-**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below; numbered so the take order, which sorts on the integer that begins a title, takes it before Phase 8. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414).
+**Filter: does it carry the reader's words to the agent, pinned to a line of the diff, without the pane stopping being a monitor?** Ruled first by the reader on 2026-09-04, ahead of everything below. The design, its mockups and the rulings it waits on are [#414](https://github.com/breferrari/vigia/issues/414).
 
 | | Task | Issue |
 |---|---|---|
@@ -173,6 +173,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 | ⬜ | A bordered box under the line takes the note | [#419](https://github.com/breferrari/vigia/issues/419) |
 | ⬜ | Enter posts the note into the running session's socket | [#420](https://github.com/breferrari/vigia/issues/420) |
 | ⬜ | The README, the sheet and the spec carry the note | [#421](https://github.com/breferrari/vigia/issues/421) |
+| ⬜ | A note on a file in both runs draws under both headings. **Found by #417's audit** | [#434](https://github.com/breferrari/vigia/issues/434) |
 
 ## Phase 8 — look and feel
 
