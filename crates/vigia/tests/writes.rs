@@ -9,8 +9,8 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render};
-use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree, state_root};
+use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render, state_root};
+use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
 use support::{Scratch, made_link, settle_tree};
 
@@ -312,7 +312,7 @@ fn the_monitor_writes_nothing_while_it_runs() {
         moved.join("\n")
     );
     if let Some(dir) = state.as_deref() {
-        let state_after = Some(dir).filter(|dir| dir.exists()).map(snapshot);
+        let state_after = dir.exists().then(|| snapshot(dir));
         let moved = match (&state_before, &state_after) {
             (None, None) => Vec::new(),
             (Some(before), Some(after)) => difference(before, after),

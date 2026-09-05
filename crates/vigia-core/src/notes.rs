@@ -3,9 +3,8 @@
 //!
 //! Headless: nothing here draws, and nothing here decides which rows are on
 //! screen. The pane hands [`resolve`] the rows it drew; the store is one
-//! directory per worktree under the reader's state directory, one file per
-//! note, and every write is a temp-and-rename so a reader lists whole files
-//! or none.
+//! directory per worktree under a root the shell resolves, one file per note,
+//! and every write is a temp-and-rename so a reader lists whole files or none.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -94,64 +93,29 @@ pub enum Placement {
 /// knowledge, so an adrift note is not a placement.
 #[must_use]
 pub fn resolve(note: &Note, rows: &[(u32, &str)]) -> Placement {
-    let text = note.text.as_str();
-    if rows.iter().any(|&(n, t)| n == note.line && t == text) {
-        return Placement::At(note.line);
-    }
-    let mut best: Option<(u32, u32)> = None;
+    let mut number_drawn = false;
+    let mut nearest: Option<(u32, u32)> = None;
     for &(n, t) in rows {
-        if t != text {
+        number_drawn |= n == note.line;
+        if t != note.text {
             continue;
+        }
+        if n == note.line {
+            return Placement::At(n);
         }
         let distance = n.abs_diff(note.line);
-        if distance > NEAR {
-            continue;
-        }
         // Nearest wins; on a tie the earlier line does, so a repeated line
-        // resolves the same way from any starting order of the rows.
-        let better = match best {
-            None => true,
-            Some((d, at)) => distance < d || (distance == d && n < at),
-        };
-        if better {
-            best = Some((distance, n));
+        // resolves the same way whatever order the rows arrive in.
+        let closer = nearest.is_none_or(|(d, at)| distance < d || (distance == d && n < at));
+        if distance <= NEAR && closer {
+            nearest = Some((distance, n));
         }
     }
-    if let Some((_, n)) = best {
-        return Placement::Moved(n);
+    match nearest {
+        Some((_, n)) => Placement::Moved(n),
+        None if number_drawn => Placement::Changed,
+        None => Placement::Gone,
     }
-    if rows.iter().any(|&(n, _)| n == note.line) {
-        Placement::Changed
-    } else {
-        Placement::Gone
-    }
-}
-
-/// The directory `vigia` keeps state under, or `None` when the environment
-/// names no home.
-///
-/// `XDG_STATE_HOME` when it is set, non-empty and absolute, else
-/// `~/.local/state`, which is the XDG base directory rule; `LOCALAPPDATA` on
-/// Windows, where there is no XDG and that is the per-user local root. The
-/// `windows` flag and the `lookup` closure are parameters so a test can ask
-/// about a platform and an environment it is not running in.
-#[must_use]
-pub fn state_root(windows: bool, lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let set = |name: &str| {
-        lookup(name)
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-    };
-    if windows {
-        return set("LOCALAPPDATA").map(|local| Path::new(&local).join("vigia").join("state"));
-    }
-    if let Some(xdg) = set("XDG_STATE_HOME").filter(|value| Path::new(value).is_absolute()) {
-        return Some(Path::new(&xdg).join("vigia"));
-    }
-    ["HOME", "USERPROFILE"]
-        .into_iter()
-        .find_map(set)
-        .map(|home| Path::new(&home).join(".local").join("state").join("vigia"))
 }
 
 /// The store key of `workdir`: forty hex characters of the SHA-1 of its
@@ -182,7 +146,7 @@ pub struct Store {
 
 /// What a listing found: every note that read whole, and every file that did
 /// not, with why.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct Listing {
     /// Oldest first, then by id.
     pub notes: Vec<Note>,
@@ -275,12 +239,12 @@ impl Store {
             Err(source) => return Err(Error::store(&self.dir, source)),
         };
         for entry in entries {
-            let path = entry
-                .map_err(|source| Error::store(&self.dir, source))?
-                .path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some(NOTE_EXT) {
+            let entry = entry.map_err(|source| Error::store(&self.dir, source))?;
+            let name = entry.file_name();
+            if Path::new(&name).extension().and_then(|ext| ext.to_str()) != Some(NOTE_EXT) {
                 continue;
             }
+            let path = entry.path();
             match fs::read(&path) {
                 Ok(bytes) => match decode(&bytes) {
                     Ok(note) => listing.notes.push(note),

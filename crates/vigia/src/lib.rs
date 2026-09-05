@@ -16,6 +16,7 @@ mod input;
 pub mod memory;
 mod render;
 mod signal;
+mod state;
 mod terminal;
 /// Public for [`memory`]'s reason: `tests/palette.rs` is an integration test and
 /// can only reach what the crate exports.
@@ -37,6 +38,7 @@ pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
     diff_height, notice_area, regions, render, voice_style,
 };
+pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};

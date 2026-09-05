@@ -5,41 +5,10 @@ mod support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::Scratch;
-use vigia_core::{
-    Error, NEAR, Note, Placement, Side, Status, Store, Worktree, key, resolve, state_root,
-};
-
-/// A directory the test owns, removed on drop, for a state root that is not
-/// the reader's.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(name: &str) -> Self {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vigia-notes-{}-{}-{name}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).expect("create a temp dir");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use support::{Scratch, TempDir};
+use vigia_core::{Error, NEAR, Note, Placement, Side, Status, Store, Worktree, key, resolve};
 
 fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
     Note {
@@ -326,65 +295,6 @@ fn a_line_is_found_where_it_was_then_by_its_text_nearby_then_judged_changed_or_g
         resolve(&blank, &[(8, "x"), (9, ""), (10, "")]),
         Placement::At(9)
     );
-}
-
-#[test]
-fn the_state_root_follows_xdg_then_home_and_localappdata_on_windows() {
-    let env = |vars: &[(&str, &str)]| {
-        let owned: Vec<(String, String)> = vars
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-            .collect();
-        move |name: &str| {
-            owned
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| v.clone())
-        }
-    };
-    // Absolute on every platform, which is what the XDG rule turns on.
-    let absolute = std::env::temp_dir().join("xdg-state");
-    let absolute_str = absolute.to_str().expect("a UTF-8 temp dir");
-
-    assert_eq!(
-        state_root(
-            false,
-            &env(&[("XDG_STATE_HOME", absolute_str), ("HOME", "/home/r")])
-        ),
-        Some(absolute.join("vigia"))
-    );
-    // A relative value is invalid and ignored, per the specification.
-    assert_eq!(
-        state_root(
-            false,
-            &env(&[("XDG_STATE_HOME", "state"), ("HOME", "/home/r")])
-        ),
-        Some(PathBuf::from("/home/r/.local/state/vigia"))
-    );
-    // Set but empty is unset.
-    assert_eq!(
-        state_root(
-            false,
-            &env(&[("XDG_STATE_HOME", "  "), ("HOME", "/home/r")])
-        ),
-        Some(PathBuf::from("/home/r/.local/state/vigia"))
-    );
-    assert_eq!(
-        state_root(false, &env(&[("USERPROFILE", "/u/r")])),
-        Some(PathBuf::from("/u/r/.local/state/vigia"))
-    );
-    assert_eq!(state_root(false, &env(&[])), None);
-    assert_eq!(
-        state_root(
-            true,
-            &env(&[
-                ("LOCALAPPDATA", "C:\\Users\\r\\AppData\\Local"),
-                ("HOME", "/h")
-            ])
-        ),
-        Some(PathBuf::from("C:\\Users\\r\\AppData\\Local\\vigia\\state"))
-    );
-    assert_eq!(state_root(true, &env(&[("HOME", "/h")])), None);
 }
 
 #[cfg(windows)]
