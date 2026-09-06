@@ -40,8 +40,7 @@ pub use input::{
 };
 pub use notes::{
     Alerts, Change, LEAVING, Ledger, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT,
-    RESOLVED_DEPARTURE, Target, Toggled, leaving, note_arrival, press_at, resolve_departure,
-    toggle,
+    RESOLVED_DEPARTURE, Toggled, leaving, note_arrival, press_at, resolve_departure, toggle,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,

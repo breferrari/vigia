@@ -326,7 +326,7 @@ pub fn leaving() -> Effect {
 
 /// Which of a note's cells an effect runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
+pub(crate) enum Target {
     /// Every row the note draws.
     Rows,
     /// The status word alone.
@@ -338,7 +338,7 @@ pub enum Target {
 impl NoteCells {
     /// The cells `target` names, when this frame drew them.
     #[must_use]
-    pub fn of(&self, target: Target) -> Option<Rect> {
+    pub(crate) fn of(&self, target: Target) -> Option<Rect> {
         match target {
             Target::Rows => Some(self.rows),
             Target::Word => self.word,
