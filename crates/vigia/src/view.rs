@@ -498,9 +498,9 @@ fn prose_pieces(text: &str, room: usize) -> Vec<std::ops::Range<usize>> {
 }
 
 /// The piece the caret stands on and its column there, for a cursor `col`
-/// characters into `line`. Inside a dropped blank, or at the end of a piece
-/// that fills its row, it stands at the head of the next piece, which the
-/// caller makes when none follows: the caret's cell is always inside the row.
+/// characters into `line`. A caret past a row's room takes the head of the next
+/// piece, which the caller makes when none follows, and that covers the blanks
+/// a break dropped: a break lands on one only past the room already.
 fn caret_in(
     line: &str,
     pieces: &[std::ops::Range<usize>],
@@ -516,10 +516,7 @@ fn caret_in(
         .rposition(|range| range.start <= at)
         .unwrap_or(0);
     let range = &pieces[piece];
-    if at > range.end {
-        return (piece + 1, 0);
-    }
-    let column = crate::render::width_of(&line[range.start..at]);
+    let column = crate::render::width_of(&line[range.start..at.max(range.start)]);
     if column >= inner {
         (piece + 1, 0)
     } else {

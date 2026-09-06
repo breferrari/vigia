@@ -1319,14 +1319,23 @@ fn a_box_opened_at_the_top_of_a_bottom_anchored_screen_stays_on_it() {
     // box's rows grow the diff, the bottom clamp answers by dropping that many
     // more off the front, and without a bound at the anchored line the box the
     // reader just opened is carried off the top of the screen.
-    let scratch = fixture("notes-box-both-clamps");
+    // A file long enough that its diff outruns the pane, or there is no bottom
+    // for the clamp to hold the window against.
+    let scratch = Scratch::new("notes-box-both-clamps");
+    scratch.write(PATH, numbered_lines(60));
+    scratch.commit_all("baseline");
+    for line in (4..60).step_by(6) {
+        scratch.edit_line(PATH, line, &format!("changed {}", line + 1));
+    }
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
     let short = Rect::new(0, 0, 80, 10);
 
-    // The diff's own end, which is what arms the bottom clamp.
+    // Scrolled to the diff's own end, which is what arms the bottom clamp: the
+    // walk lands there and pulls the window back so the last row rests on the
+    // bottom of the pane.
     let height = body_layout(
         short,
         &rig.app.chrome("fixture", None, Pointing::default(), 0, ""),
@@ -1335,9 +1344,13 @@ fn a_box_opened_at_the_top_of_a_bottom_anchored_screen_stays_on_it() {
     )
     .diff;
     rig.app
-        .apply(Action::Bottom, &mut frame, height)
-        .expect("go to the last file");
+        .apply(Action::Scroll(500), &mut frame, height)
+        .expect("scroll past the end");
     let bottom = rig.paint(&mut frame, short, Pointing::default());
+    assert!(
+        bottom.view.rows_above > 0,
+        "the fixture's diff fits the pane, so nothing here is bottom anchored"
+    );
     let last_line = bottom
         .view
         .rows
