@@ -16,9 +16,44 @@
 //! left this process.
 
 use std::io::{self, Write};
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::json;
-use vigia_core::{Note, Registration, Registry};
+use vigia_core::{Note, Registration, Registry, Side};
+
+/// How many posts may be in flight at once.
+///
+/// A peer that accepts a connection and then never reads it blocks the thread
+/// writing to it, and on Windows `std` offers no way to bound that wait. So the
+/// bound is on how many such threads can exist at all: a monitor is meant to
+/// run for days, and I3 is why this is a number rather than nothing.
+pub const IN_FLIGHT_MAX: usize = 4;
+
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// A slot to post in, given back when it is dropped, so a thread that ends
+/// however it ends returns it.
+#[derive(Debug)]
+pub struct Permit(());
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        IN_FLIGHT.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// A slot to post in, or `None` when [`IN_FLIGHT_MAX`] are already out, which
+/// is what a wedged peer looks like from here.
+#[must_use]
+pub fn permit() -> Option<Permit> {
+    IN_FLIGHT
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |out| {
+            (out < IN_FLIGHT_MAX).then_some(out + 1)
+        })
+        .ok()
+        .map(|_| Permit(()))
+}
 
 /// What Enter's post came to, and the only thing the footer is told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,16 +162,43 @@ pub fn post(registration: &Registration, content: &str) -> io::Result<()> {
     write_to(&mut socket, registration, content)
 }
 
+/// Whether `socket` names a Windows named pipe, which is the only thing that
+/// transport may open.
+///
+/// `OpenOptions` opens an ordinary file just as willingly as a pipe, and would
+/// write the frame over the first bytes of whatever a stale or hand-edited
+/// registration happened to name, while the footer said it was sent. Unix gets
+/// this for free, since `UnixStream::connect` refuses anything that is not a
+/// socket. Checked before the open, so nothing else is ever opened at all.
+#[must_use]
+pub fn names_a_pipe(socket: &str) -> bool {
+    let spelling = socket.replace('/', r"\").to_ascii_lowercase();
+    spelling.starts_with(r"\\") && spelling[2..].contains(r"\pipe\")
+}
+
 /// A unix domain socket, which is what every platform but Windows binds.
 #[cfg(unix)]
 fn connect(socket: &str) -> io::Result<impl Write> {
-    std::os::unix::net::UnixStream::connect(socket)
+    // The peer closes a connection that has not sent a complete line inside
+    // thirty seconds, so this is well under anything a working one needs, and
+    // it is what stops a peer that never reads from holding the thread.
+    const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    let stream = std::os::unix::net::UnixStream::connect(socket)?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    Ok(stream)
 }
 
 /// A named pipe, which `CreateFile` opens, which is what `OpenOptions` calls.
 /// That is the whole of the Windows transport, and why this needs no crate.
 #[cfg(windows)]
 fn connect(socket: &str) -> io::Result<impl Write> {
+    if !names_a_pipe(socket) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{socket:?} is not a named pipe"),
+        ));
+    }
     std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -179,6 +241,19 @@ pub fn post_each(
         sent |= send(registration, &content).is_ok();
     }
     if sent { Posted::Sent } else { Posted::Failed }
+}
+
+/// The lines the agent is shown around the note's own, read from the working
+/// tree under `workdir`.
+///
+/// A removed line is nowhere in the working tree, so a note on the old side has
+/// none, and the agent has its neighbours from `notes` over MCP instead.
+#[must_use]
+pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
+    match note.side {
+        Side::New => crate::notes::around(workdir, &note.path, note.line),
+        Side::Old => Vec::new(),
+    }
 }
 
 /// [`post_each`] over the real transport.

@@ -1247,7 +1247,7 @@ fn a_tie_between_the_two_runs_is_one_placement() {
 #[test]
 fn a_session_start_payload_registers_and_a_session_end_clears() {
     let env = |key: &str| match key {
-        SOCKET_VAR => Some(r"\.\pipe\LOCAL\cc-msg-abc".to_owned()),
+        SOCKET_VAR => Some(r"\\.\pipe\LOCAL\cc-msg-abc".to_owned()),
         TOKEN_VAR => Some("the-token".to_owned()),
         _ => None,
     };
@@ -1255,7 +1255,7 @@ fn a_session_start_payload_registers_and_a_session_end_clears() {
     match hooked(&start, env) {
         Some(Hooked::Put(registration)) => {
             assert_eq!(registration.session, "aaaa-1111");
-            assert_eq!(registration.socket, r"\.\pipe\LOCAL\cc-msg-abc");
+            assert_eq!(registration.socket, r"\\.\pipe\LOCAL\cc-msg-abc");
             assert_eq!(registration.token, "the-token");
         }
         other => panic!("a SessionStart did not register: {other:?}"),

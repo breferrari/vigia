@@ -125,7 +125,14 @@ fn a_path_that_is_not_valid_unicode_is_still_a_path() {
         OsString::from_wide(&[0xD800, b'r' as u16, b'e' as u16, b'p' as u16, b'o' as u16])
     };
 
-    assert_eq!(request_for(&[arg]), Request::Watch);
+    assert_eq!(request_for(std::slice::from_ref(&arg)), Request::Watch);
+
+    // After `mcp` the same argument is a word rather than a path, and no word
+    // this server has is unspellable in Unicode.
+    assert_eq!(
+        request_for(&[OsString::from("mcp"), arg]),
+        Request::NoSuchWord
+    );
 }
 
 /// The version a release reports is never the placeholder the workspace sits at

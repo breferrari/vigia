@@ -73,9 +73,7 @@ use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::pattern::{RadialPattern, SweepPattern};
 use tachyonfx::{EffectManager, Interpolation, fx};
-use vigia_core::{
-    Highlighter, History, Note, Registry, Side, Store, StoreWatch, WatchOptions, Worktree,
-};
+use vigia_core::{Highlighter, History, Note, Registry, Store, StoreWatch, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
@@ -1116,19 +1114,19 @@ impl Shell {
         let Some(registry) = self.registry.clone() else {
             return;
         };
+        let Some(permit) = post::permit() else {
+            let _ = tx.send(Wake::Posted(Posted::Failed));
+            return;
+        };
         let (root, note, tx) = (self.root.clone(), note.clone(), tx.clone());
         std::thread::spawn(move || {
+            let _permit = permit;
             let message = || {
-                // A removed line is nowhere in the working tree, so there is
-                // nothing to read around it. The anchor and the reader's words
-                // still go, and the agent has the old side's neighbours from
-                // `notes` over MCP.
-                let context = match note.side {
-                    Side::New => notes::around(Path::new(&root), &note.path, note.line),
-                    Side::Old => Vec::new(),
-                };
+                let context = post::context_for(Path::new(&root), &note);
                 post::content(&note, &context)
             };
+            // Nothing joins this thread, so a pane quitting between Enter and
+            // the socket takes it; the note is in the store either way.
             let _ = tx.send(Wake::Posted(post::post_all(&registry, message)));
         });
     }

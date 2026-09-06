@@ -14,7 +14,9 @@ mod support;
 use serde_json::Value;
 use std::cell::RefCell;
 use std::io;
-use vigia::post::{Posted, content, post, post_each, word};
+use vigia::post::{
+    IN_FLIGHT_MAX, Posted, content, context_for, names_a_pipe, permit, post, post_each, word,
+};
 use vigia_core::{Note, Registration, Registry, Side, Status, Store};
 
 use support::{Scratch, TempDir, note, registration};
@@ -380,5 +382,114 @@ fn the_written_time_orders_nothing_the_wire_sees() {
     assert!(
         !rendered.contains("1700000000"),
         "the frame carries a timestamp: {rendered}"
+    );
+}
+
+#[test]
+fn only_a_named_pipe_is_ever_opened_on_windows() {
+    // `OpenOptions` opens an ordinary file as willingly as a pipe, so without
+    // this check a stale or hand-edited registration naming a real file would
+    // have the frame written over its first bytes and the footer would say it
+    // was sent.
+    for pipe in [
+        r"\\.\pipe\LOCAL\cc-msg-e616753ecb04ded84d11504b757e8728",
+        r"\\.\PIPE\cc-msg-abc",
+        r"\\server\pipe\something",
+        "//./pipe/cc-msg-abc",
+    ] {
+        assert!(names_a_pipe(pipe), "{pipe:?} is a named pipe");
+    }
+    for not in [
+        r"C:\Users\me\notes.txt",
+        r"C:\pipe\notes.txt",
+        "inbox.sock",
+        "",
+        r"\\.\NUL",
+        r"\\.\pipeline\x",
+        r"\.\pipe\one-backslash",
+        "/tmp/cc-socks/1.sock",
+    ] {
+        assert!(!names_a_pipe(not), "{not:?} is not a named pipe");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_socket_naming_a_real_file_is_refused_and_the_file_is_untouched() {
+    let root = TempDir::new("not-a-pipe");
+    let path = root.path().join("notes.txt");
+    let was = "the reader's own file\n";
+    std::fs::write(&path, was).expect("write");
+
+    let registration = registration("aaaa-1111", &path.to_string_lossy());
+    assert!(
+        post(&registration, "the note").is_err(),
+        "an ordinary file was opened as though it were a pipe"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read back"),
+        was,
+        "the file was written into"
+    );
+}
+
+#[test]
+fn only_so_many_posts_may_be_in_flight_at_once() {
+    // A peer that accepts and never reads holds its thread until the platform
+    // gives up, and Windows gives `std` no way to bound that wait, so the bound
+    // is on how many such threads can exist.
+    let held: Vec<_> = (0..IN_FLIGHT_MAX)
+        .map(|_| permit().expect("a slot"))
+        .collect();
+    assert!(permit().is_none(), "the bound did not hold");
+
+    drop(held);
+    assert!(permit().is_some(), "a slot was not given back");
+}
+
+#[test]
+fn a_registry_that_cannot_be_read_is_noted_rather_than_silent() {
+    // Distinct from an empty one: nothing was sent, and the reader should know
+    // the note only got as far as the store.
+    let scratch = Scratch::new("socket-unreadable");
+    let root = TempDir::new("state");
+    let registry = Registry::open(root.path(), scratch.root()).expect("registry");
+
+    // A file where the directory should be, which is what a listing cannot read.
+    std::fs::create_dir_all(registry.dir().parent().expect("a parent")).expect("parent");
+    std::fs::write(registry.dir(), "not a directory").expect("in the way");
+
+    let wire = Wire::default();
+    let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
+    assert_eq!(posted, Posted::Failed);
+    assert_eq!(word(posted), Some("noted"));
+    assert!(wire.sessions().is_empty(), "something was opened");
+}
+
+#[test]
+fn a_note_on_the_old_side_carries_its_anchor_alone() {
+    // The line is not in the working tree by definition, so there is nothing to
+    // read around it. This is the decision the pane makes on every Enter, and it
+    // lives here rather than in the shell so that it has a gate at all.
+    let scratch = Scratch::new("socket-context");
+    scratch.write(PATH, "one\ntwo\nthree\nfour\nfive\nsix\nseven\n");
+
+    let mut new = anchored("n1", "look here");
+    new.line = 4;
+    new.text = "four".to_owned();
+    let around = context_for(scratch.root(), &new);
+    assert!(!around.is_empty(), "the working-tree side has neighbours");
+    assert!(
+        around
+            .iter()
+            .any(|(number, text)| *number == 4 && text == "four"),
+        "the anchored line is among them: {around:?}"
+    );
+
+    let mut old = new.clone();
+    old.side = Side::Old;
+    assert!(
+        context_for(scratch.root(), &old).is_empty(),
+        "a removed line has no working-tree neighbours to show"
     );
 }

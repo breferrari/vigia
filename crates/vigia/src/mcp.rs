@@ -788,6 +788,11 @@ pub fn pending_line(open: usize) -> Option<String> {
 
 /// `vigia mcp pending`: say how many notes are waiting, for the hook rung that
 /// every reader gets whether or not a socket is registered.
+///
+/// A store it cannot read counts none and says nothing, rather than reporting.
+/// This runs on every prompt the reader types, and a hook that writes to stderr
+/// or exits non-zero puts a line in front of them every one of them; the notes
+/// are still in the store for the agent's own listing.
 #[must_use]
 pub fn pending() -> ExitCode {
     let env = |key: &str| std::env::var(key).ok();

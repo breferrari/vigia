@@ -89,11 +89,8 @@ impl Registry {
         let done = self.path_of(&registration.session)?;
         fs::create_dir_all(&self.dir).map_err(|source| Error::session(&self.dir, source))?;
         let tmp = self.dir.join(temp_name(&registration.session));
-        fs::write(&tmp, encode(registration)).map_err(|source| Error::session(&tmp, source))?;
-        // The token is the whole of the authority this file carries, so on a
-        // platform with modes it is the reader's alone before it is put where
-        // anything looks for it. Windows has none, and inherits a per-user root.
-        restrict(&tmp);
+        write_private(&tmp, &encode(registration))
+            .map_err(|source| Error::session(&tmp, source))?;
         rename_into_place(&tmp, &done).map_err(|source| Error::session(&done, source))
     }
 
@@ -120,7 +117,10 @@ impl Registry {
     /// A file that cannot be read as a registration is skipped rather than
     /// reported. Unlike a note, nothing here is the reader's words, so there is
     /// nothing to lose and nothing worth a line on the footer: a session killed
-    /// mid-write must not cost the reader the sessions that did register.
+    /// mid-write must not cost the reader the sessions that did register. The
+    /// cost of that is at the far end: a registry whose every file is unreadable
+    /// lists nothing, and the pane cannot tell it from a reader who never
+    /// installed the hook.
     ///
     /// # Errors
     ///
@@ -148,6 +148,12 @@ impl Registry {
             else {
                 continue;
             };
+            // The type of the entry itself, which does not follow a link: this
+            // reads whole files into memory, and a registration is only ever
+            // written here as one.
+            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                continue;
+            }
             if let Ok(bytes) = fs::read(entry.path())
                 && let Some(registration) = decode(&bytes).filter(|it| it.session == stem)
             {
@@ -174,17 +180,31 @@ impl Registry {
     }
 }
 
-/// Keep the file to the reader who wrote it, where the platform has modes.
+/// Write the file, readable by nobody else where the platform has modes.
+///
+/// The mode is set as the file is created rather than after it is written: the
+/// token is the whole of the authority the file carries, and a chmod after the
+/// write leaves a window in which anyone on the machine can read it. Windows has
+/// no modes and inherits a per-user root instead.
 #[cfg(unix)]
-fn restrict(path: &Path) {
-    use std::os::unix::fs::PermissionsExt as _;
-    // A mode that will not take is not worth failing the registration over:
-    // the file is already under a directory only this user's tools write.
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+fn write_private(path: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    // The name carries this process and a counter, so an existing one is a
+    // collision worth failing on rather than a file to write over.
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(text.as_bytes())
 }
 
 #[cfg(not(unix))]
-fn restrict(_path: &Path) {}
+fn write_private(path: &Path, text: &str) -> io::Result<()> {
+    fs::write(path, text)
+}
 
 /// The file: a version line, the two fields that cannot hold a newline, then
 /// the socket and the token announced with their byte lengths, so a path or a

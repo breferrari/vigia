@@ -422,6 +422,15 @@ impl Store {
                     .push((path, "is not named by a note id".to_owned()));
                 continue;
             };
+            // The type of the entry itself, which does not follow a link: this
+            // reads whole files into memory, and a note is only ever written
+            // here as one.
+            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                listing
+                    .skipped
+                    .push((path, "is not a file this store wrote".to_owned()));
+                continue;
+            }
             match fs::read(&path) {
                 Ok(bytes) => match decode(&bytes) {
                     Ok(note) if note.id == stem => listing.notes.push(note),
