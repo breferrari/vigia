@@ -5,10 +5,12 @@ use ratatui::crossterm::event::{
 };
 use std::time::{Duration, Instant};
 
+use ratatui::layout::Rect;
 use vigia::{
-    ARRIVING, ARRIVING_FRAME, Action, Deadlines, Grabbed, Held, Hovered, LEAVING, LIST_SETTLED,
-    NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
-    WHEEL_ROWS, action_for, drag_action, hover_after, patience, repainted, scroll_mark, settled,
+    ARRIVING, ARRIVING_FRAME, Action, BOX_ARRIVING, BoxRoute, Deadlines, Grabbed, Held, Hovered,
+    LEAVING, LIST_SETTLED, NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT,
+    Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, box_route, drag_action, hover_after, patience,
+    repainted, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -56,6 +58,113 @@ fn every_way_out_is_a_way_out() {
         Some(Action::Escape),
         "Esc no longer asks to leave the frontmost thing"
     );
+}
+
+/// `SPEC.md` §11.2 B21: the box is the pane's first mode, and its bounds are
+/// the ruling. Every key the map names goes to the box while it is open and
+/// means itself again once it closes; the pointer's buttons close it from
+/// anywhere else; the wheel and a resize pass through.
+#[test]
+fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
+    let over = Some(Rect::new(6, 5, 60, 3));
+    let map = [
+        press(KeyCode::Char('q')),
+        with(KeyModifiers::CONTROL, KeyCode::Char('c')),
+        with(KeyModifiers::CONTROL, KeyCode::Char('d')),
+        press(KeyCode::Char('j')),
+        press(KeyCode::Char('k')),
+        press(KeyCode::Down),
+        press(KeyCode::Up),
+        press(KeyCode::Char(' ')),
+        press(KeyCode::PageDown),
+        press(KeyCode::PageUp),
+        press(KeyCode::Char('d')),
+        press(KeyCode::Char('u')),
+        press(KeyCode::Char('g')),
+        press(KeyCode::Char('G')),
+        press(KeyCode::Home),
+        press(KeyCode::End),
+        press(KeyCode::Char('n')),
+        press(KeyCode::Char('p')),
+        press(KeyCode::Right),
+        press(KeyCode::Left),
+        press(KeyCode::Char('1')),
+        press(KeyCode::Char('6')),
+        press(KeyCode::Char('J')),
+        press(KeyCode::Char('K')),
+        with(KeyModifiers::SHIFT, KeyCode::Down),
+        with(KeyModifiers::SHIFT, KeyCode::Up),
+        press(KeyCode::Char('f')),
+        press(KeyCode::Char('m')),
+        press(KeyCode::Char('r')),
+        press(KeyCode::Char('s')),
+        press(KeyCode::Char('a')),
+        press(KeyCode::Char('w')),
+        press(KeyCode::Char('c')),
+        press(KeyCode::Char('?')),
+    ];
+    for event in &map {
+        assert!(
+            action_for(event, Regions::default()).is_some(),
+            "{event:?} is not on the map, so this gate is not sweeping the map"
+        );
+        assert!(
+            matches!(box_route(event, over), BoxRoute::Edit(_)),
+            "{event:?} reached the pane while the box was open"
+        );
+    }
+    // The two the box keeps for itself, and the newline.
+    assert_eq!(box_route(&press(KeyCode::Enter), over), BoxRoute::Send);
+    assert_eq!(
+        box_route(&with(KeyModifiers::SHIFT, KeyCode::Enter), over),
+        BoxRoute::Send
+    );
+    assert_eq!(box_route(&press(KeyCode::Esc), over), BoxRoute::Cancel);
+    assert!(matches!(
+        box_route(&with(KeyModifiers::ALT, KeyCode::Enter), over),
+        BoxRoute::Edit(_)
+    ));
+    // A release is not a key.
+    let released = Event::Key(KeyEvent {
+        kind: KeyEventKind::Release,
+        ..KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+    });
+    assert_eq!(box_route(&released, over), BoxRoute::Inert);
+    // The pointer: a press outside closes, a press inside is nothing, the wheel
+    // and the rest pass through, and a paste goes in.
+    let inside = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 10,
+        row: 6,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert_eq!(box_route(&inside, over), BoxRoute::Inert);
+    assert_eq!(
+        box_route(&wheel(MouseEventKind::Down(MouseButton::Left)), over),
+        BoxRoute::Close
+    );
+    assert_eq!(
+        box_route(&wheel(MouseEventKind::Down(MouseButton::Right)), over),
+        BoxRoute::Close
+    );
+    for through in [
+        wheel(MouseEventKind::ScrollDown),
+        wheel(MouseEventKind::ScrollUp),
+        wheel(MouseEventKind::Moved),
+        wheel(MouseEventKind::Up(MouseButton::Left)),
+        wheel(MouseEventKind::Drag(MouseButton::Left)),
+        Event::Resize(100, 30),
+        Event::FocusGained,
+        Event::FocusLost,
+    ] {
+        assert_eq!(box_route(&through, over), BoxRoute::Through, "{through:?}");
+    }
+    assert_eq!(
+        box_route(&Event::Paste("words".to_owned()), over),
+        BoxRoute::Paste("words".to_owned())
+    );
+    // And with no box drawn, a press anywhere closes: nothing is inside.
+    assert_eq!(box_route(&inside, None), BoxRoute::Close);
 }
 
 #[test]
@@ -1828,6 +1937,32 @@ fn nothing_armed_means_no_deadline_at_all() {
         Some(SETTLING),
         "the file settles first and the loop was told to sleep past it, so the \
          total stays stale until the arrows go out"
+    );
+
+    // The box's leaving, alone and against a later clock: the frame after it
+    // ends is the one that drops its rows.
+    assert_eq!(
+        patience(
+            Deadlines {
+                closing: Some(now + BOX_ARRIVING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(BOX_ARRIVING)
+    );
+    assert_eq!(
+        patience(
+            Deadlines {
+                notice: Some(now + NOTICE_LINGER),
+                closing: Some(now + BOX_ARRIVING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(BOX_ARRIVING),
+        "the box leaves first and the loop was told to sleep past it, so its \
+         rows outlive the entrance played backwards"
     );
 }
 

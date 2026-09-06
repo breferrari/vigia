@@ -39,22 +39,24 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use notes::{
-    Alerts, Change, LEAVING, Ledger, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT,
-    RESOLVED_DEPARTURE, Toggled, leaving, note_arrival, press_at, resolve_departure, toggle,
+    Alerts, BOX_ARRIVING, BoxEffect, BoxRoute, Change, Committed, LEAVING, Ledger, NoteBox,
+    NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, box_entrance, box_exit,
+    box_route, commit, leaving, note_arrival, opening, press_at, resolve_departure,
 };
+pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
-    PaintStats, body_layout, count_cell, diff_height, note_cells, notice_area, regions, render,
-    voice_style,
+    PaintStats, body_layout, box_cells, count_cell, diff_height, note_cells, notice_area, regions,
+    render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
-    Anchor, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked, NoteLead, Noted, Position, Row,
-    Scale, Slot, View, Viewport, block_rows, diff_rows, file_at, last_top, list_plan,
-    list_rows_wanted, rows_in, rows_of, span_in,
+    Anchor, BOX_FRAME, BOX_ROWS, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked,
+    NoteLead, Noted, Position, Row, Scale, Slot, View, Viewport, block_rows, diff_rows, file_at,
+    last_top, list_plan, list_rows_wanted, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -240,6 +242,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         notes_stale: false,
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
+        box_effect: None,
         alerts: Alerts::default(),
         effects_ran: false,
     };
@@ -398,11 +401,36 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // A press on a content row's gutter is a note and never a
-                    // selection, which is B20 and B21 sharing no cell: it goes to the
-                    // store here and the wash below never sees it.
+                    // The mode: while the reader's hand is in the box every key is the
+                    // box's and a press anywhere else closes it, and only what the box
+                    // does not answer reaches the map below.
+                    if shell.app.box_open() {
+                        match notes::box_route(&event, shell.box_area()) {
+                            BoxRoute::Send => {
+                                shell.commit_box(&tx, Instant::now());
+                                continue;
+                            }
+                            BoxRoute::Cancel | BoxRoute::Close => {
+                                shell.cancel_box(Instant::now());
+                                continue;
+                            }
+                            BoxRoute::Edit(input) => {
+                                shell.app.box_edit(input);
+                                continue;
+                            }
+                            BoxRoute::Paste(text) => {
+                                shell.app.box_paste(&text);
+                                continue;
+                            }
+                            BoxRoute::Inert => continue,
+                            BoxRoute::Through => {}
+                        }
+                    }
+                    // A press on a content row's gutter opens the box and never begins
+                    // a selection, which is B20 and B21 sharing no cell: it is answered
+                    // here and the wash below never sees it.
                     if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
-                        shell.toggle_note(offset, &tx, Instant::now());
+                        shell.open_box(offset, Instant::now());
                         continue;
                     }
                     // Before the event is interpreted, for the hold's reason: a press
@@ -787,6 +815,8 @@ struct Shell {
     ledger: Ledger,
     /// The effects running over notes' rows.
     note_effects: NoteEffects,
+    /// The effect over the note box's rows while it arrives or leaves.
+    box_effect: Option<BoxEffect>,
     /// What the last listing had to say, so the alert is said when that changes
     /// and not on every wake.
     alerts: Alerts,
@@ -869,13 +899,21 @@ impl Shell {
                 // frame only while one is running and goes untimed the moment none is.
                 arriving: (self.effects.is_running()
                     || self.notice_effects.is_running()
-                    || self.note_effects.is_running())
+                    || self.note_effects.is_running()
+                    || self.box_effect.as_ref().is_some_and(BoxEffect::is_running))
                 .then(|| now + ARRIVING_FRAME),
                 // The frame after a departure ends is the one that drops its rows.
                 departing: self.ledger.ends_in(),
+                // And the frame after the box has left is the one that drops its.
+                closing: self.app.box_ends_in(),
             },
             now,
         )
+    }
+
+    /// The cells the box drew on the last paint, which a press is judged against.
+    fn box_area(&self) -> Option<Rect> {
+        render::box_cells(&self.regions, &self.screen)
     }
 
     /// Note which way an action is moving the viewport, so the bar can say so.
@@ -948,29 +986,65 @@ impl Shell {
         }
     }
 
-    /// Write the anchor a press asked for, or withdraw the note already there,
-    /// and read the store back so the next frame draws what it holds. A failed
-    /// write is a footer alert rather than the end of the pane, which is B7's
-    /// rule for a monitor's own writes, and the store is read back after a
-    /// failure too, since a withdrawal that failed partway still removed some.
-    fn toggle_note(&mut self, offset: usize, tx: &Sender<Wake>, now: Instant) {
-        let Some(store) = &self.store else {
+    /// Open the box under the line a press landed on, with the text of the open
+    /// note already there when there is one, and arm its entrance. With no store
+    /// to write to there is nothing to open: the footer says so instead.
+    fn open_box(&mut self, offset: usize, now: Instant) {
+        if self.store.is_none() {
             self.say(state::no_home(), Voice::Alert, now);
             return;
+        }
+        let Some((anchor, existing)) = notes::opening(&self.screen, offset, self.app.notes())
+        else {
+            return;
         };
-        match notes::toggle(store, &self.screen, offset) {
-            None => return,
-            // The first write made the directory, so there is something to watch.
-            Some(Ok(Toggled::Written(_))) => {
-                if self.store_watch.is_none() {
-                    self.watch_store(tx, now);
-                }
+        self.app.open_box(anchor, existing.as_ref());
+        self.box_effect = Some(BoxEffect::new(
+            notes::box_entrance(&self.theme),
+            now + notes::BOX_ARRIVING,
+        ));
+    }
+
+    /// Enter: write what the box holds, close it at once, and read the store
+    /// back so the next frame draws the note arriving under its line. A write
+    /// the store refuses is a footer alert and the box stays with its text,
+    /// which is B7's rule for a monitor's own writes and the reader's words kept.
+    fn commit_box(&mut self, tx: &Sender<Wake>, now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let Some(open) = self.app.note_box() else {
+            return;
+        };
+        let arrived = match notes::commit(store, open) {
+            Ok(Committed::Written(id) | Committed::Rewritten(id)) => Some(id),
+            Ok(Committed::Withdrawn(_) | Committed::Nothing) => None,
+            Err(e) => {
+                self.say(format!("could not write the note: {e}"), Voice::Alert, now);
+                return;
             }
-            // The read-back below finds the file gone and starts its departure.
-            Some(Ok(Toggled::Withdrawn(_))) => {}
-            Some(Err(e)) => self.say(format!("could not write the note: {e}"), Voice::Alert, now),
+        };
+        self.app.take_box();
+        self.box_effect = None;
+        // The first write made the directory, so there is something to watch.
+        if arrived.is_some() && self.store_watch.is_none() {
+            self.watch_store(tx, now);
         }
         self.reload_notes(now);
+        if let Some(id) = arrived {
+            self.note_effects
+                .arm(vec![Change::Written(id)], &self.theme, now);
+        }
+    }
+
+    /// Esc, or a press anywhere outside the box: the keys are the pane's again
+    /// now, and the rows stay drawn while the entrance plays backwards.
+    fn cancel_box(&mut self, now: Instant) {
+        self.app.close_box(now + notes::BOX_ARRIVING);
+        self.box_effect = Some(BoxEffect::new(
+            notes::box_exit(&self.theme),
+            now + notes::BOX_ARRIVING,
+        ));
     }
 
     /// Arm the watch over the store, so a write by the agent or another pane is
@@ -1021,6 +1095,15 @@ impl Shell {
             self.publish_notes();
         }
         self.note_effects.settle(now);
+        // The box's own end, on the same terms: dropped on the turn that finds it.
+        self.app.settle_box(now);
+        if self
+            .box_effect
+            .as_ref()
+            .is_some_and(|armed| armed.spent(now))
+        {
+            self.box_effect = None;
+        }
     }
 
     /// Hand the next collect what the ledger says is drawn.
@@ -1257,6 +1340,7 @@ impl Shell {
         let effects = &mut self.effects;
         let notice_effects = &mut self.notice_effects;
         let note_effects = &mut self.note_effects;
+        let box_effect = &mut self.box_effect;
         let mut painted = Regions::default();
         let was = self.regions;
         self.session.screen().draw(|f| {
@@ -1287,6 +1371,12 @@ impl Shell {
                 let cells = render::note_cells(&painted, screen);
                 note_effects.draw(since, f.buffer_mut(), &cells);
             }
+            // The box's, over the cells it drew; off screen it waits the same way.
+            if let Some(armed) = box_effect.as_mut()
+                && let Some(over) = render::box_cells(&painted, screen)
+            {
+                armed.draw(since, f.buffer_mut(), over);
+            }
             // Separate from the pass above, which is clipped to the diff: a
             // notice effect in that manager would be clipped away unseen.
             if let Some(notice) = render::notice_area(area, &chrome, screen) {
@@ -1296,7 +1386,8 @@ impl Shell {
         self.painted = now;
         self.effects_ran = self.effects.is_running()
             || self.notice_effects.is_running()
-            || self.note_effects.is_running();
+            || self.note_effects.is_running()
+            || self.box_effect.as_ref().is_some_and(BoxEffect::is_running);
         self.hovered = chrome.hovered;
         if chrome.selected.is_none() {
             self.deselect();
@@ -1583,42 +1674,62 @@ mod tests {
     /// see it, and the store is read back whatever the write answered. Both live
     /// inside methods that own a terminal, so they are read here.
     #[test]
-    fn a_gutter_press_reaches_the_store_before_the_wash_and_is_read_back() {
+    fn a_gutter_press_opens_the_box_before_the_wash_and_enter_reads_the_store_back() {
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
+        // The mode first, then the gutter press, then the wash: a key while the
+        // box is open never reaches the map, and a press that opens the box
+        // never begins a selection.
+        let mode = shipped
+            .find("if shell.app.box_open() {")
+            .expect("the input arm no longer asks whether the box owns the keys");
         let press = shipped
             .find("notes::press_at(&shell.screen, regions, &event)")
-            .expect("the input arm no longer routes a gutter press to the store");
+            .expect("the input arm no longer routes a gutter press to the box");
         let wash = shipped
             .find("selection_after(&event, regions, shell.selected)")
             .expect("the input arm no longer opens a wash");
         assert!(
-            press < wash,
-            "the wash is consulted before the gutter press, so a press that writes \
-             a note also begins a selection"
+            mode < press && press < wash,
+            "the input arm consults the box, the gutter press and the wash out of \
+             order, so a key reaches the pane through an open box or a press that \
+             opens it also begins a selection"
         );
-        let toggle = shipped
-            .split("fn toggle_note(&mut self, offset: usize, tx: &Sender<Wake>, now: Instant) {")
+        let commit = shipped
+            .split("fn commit_box(&mut self, tx: &Sender<Wake>, now: Instant) {")
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
-            .expect("`toggle_note` is gone");
-        let outcomes = toggle
-            .split("match notes::toggle(")
-            .nth(1)
-            .expect("`toggle_note` no longer asks the store");
-        // After the arm that reports a failure, so it runs on every outcome that
-        // reached the store rather than inside the one that succeeded.
-        let failed = outcomes
-            .find("Some(Err(")
-            .expect("`toggle_note` no longer has a failure arm");
-        let read_back = outcomes
+            .expect("`commit_box` is gone");
+        // The box is taken only once the store has answered, after the arm that
+        // reports a refusal returns, so a refused write keeps the reader's words.
+        let refused = commit
+            .find("Err(e) =>")
+            .expect("`commit_box` no longer has a failure arm");
+        let taken = commit
+            .find("self.app.take_box()")
+            .expect("`commit_box` no longer takes the box");
+        let read_back = commit
             .find("self.reload_notes(now)")
-            .expect("`toggle_note` no longer reads the store back");
+            .expect("`commit_box` no longer reads the store back");
+        let arrived = commit
+            .find("Change::Written(id)")
+            .expect("`commit_box` no longer arms the rows' arrival");
         assert!(
-            read_back > failed,
-            "the store is read back inside one arm rather than after every outcome, \
-             so a withdrawal that failed partway leaves the screen showing notes the \
-             store no longer holds"
+            refused < taken && taken < read_back && read_back < arrived,
+            "`commit_box` takes the box, reads the store back and arms the arrival \
+             out of order, so a refused write loses the text or the rows arrive \
+             before the collect has them"
+        );
+        let cancel = shipped
+            .split("fn cancel_box(&mut self, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`cancel_box` is gone");
+        assert!(
+            cancel.contains("self.app.close_box(now + notes::BOX_ARRIVING)")
+                && cancel.contains("notes::box_exit(&self.theme)"),
+            "`cancel_box` no longer sends the box away over the entrance played \
+             backwards"
         );
     }
 
@@ -1864,6 +1975,7 @@ mod tests {
             "settling: frame.settles_in(",
             "self.note_effects.is_running()",
             "departing: self.ledger.ends_in()",
+            "closing: self.app.box_ends_in()",
         ] {
             assert!(
                 sources.contains(clock),

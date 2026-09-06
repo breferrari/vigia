@@ -1,5 +1,5 @@
-//! `SPEC.md` §11.2 B21, the mark-only half: what the pane draws for a note, the
-//! press that writes and withdraws one, and where each state of the world puts
+//! `SPEC.md` §11.2 B21: what the pane draws for a note, the box a press opens
+//! and what Enter and Esc do with it, and where each state of the world puts
 //! the rows.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
@@ -11,14 +11,17 @@ use std::time::{Duration, Instant};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Cell;
-use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
-    ARRIVING_FRAME, Action, Alerts, App, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects,
-    Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
-    Toggled, View, Viewport, body_layout, count_cell, hover_after, note_cells, press_at, regions,
-    render, repainted, selection_after, toggle,
+    ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxEffect, BoxRoute,
+    Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
+    RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme, View,
+    Viewport, body_layout, box_cells, box_entrance, box_exit, box_route, commit, count_cell,
+    hover_after, note_cells, opening, press_at, regions, render, repainted, selection_after,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -76,6 +79,8 @@ struct Rig {
     /// What the shell keeps of the store between wakes, and the effects over it.
     ledger: Ledger,
     effects: NoteEffects,
+    /// The effect over the box while it arrives or leaves.
+    box_effect: Option<BoxEffect>,
     /// A clock moved by hand, so a departure's end is a fact and not a sleep.
     clock: Instant,
     /// How far the clock moved since the last paint, which is what the effects
@@ -105,6 +110,7 @@ impl Rig {
             store,
             ledger: Ledger::default(),
             effects: NoteEffects::default(),
+            box_effect: None,
             clock: Instant::now(),
             elapsed: Duration::ZERO,
             workdir: scratch.root().to_path_buf(),
@@ -137,6 +143,14 @@ impl Rig {
             self.app.set_notes(self.ledger.drawn());
         }
         self.effects.settle(self.clock);
+        self.app.settle_box(self.clock);
+        if self
+            .box_effect
+            .as_ref()
+            .is_some_and(|armed| armed.spent(self.clock))
+        {
+            self.box_effect = None;
+        }
     }
 
     /// The shell's frame: chrome, layout, collect, paint, the effects over the
@@ -157,6 +171,7 @@ impl Rig {
             Terminal::new(TestBackend::new(pane.width, pane.height)).expect("terminal");
         let theme = &self.theme;
         let effects = &mut self.effects;
+        let box_effect = &mut self.box_effect;
         let since = std::mem::take(&mut self.elapsed);
         terminal
             .draw(|f| {
@@ -172,6 +187,11 @@ impl Rig {
                 if effects.is_running() {
                     effects.draw(since, f.buffer_mut(), &note_cells(&laid, &view));
                 }
+                if let Some(armed) = box_effect.as_mut()
+                    && let Some(over) = box_cells(&laid, &view)
+                {
+                    armed.draw(since, f.buffer_mut(), over);
+                }
             })
             .expect("draw");
         Painted {
@@ -181,15 +201,96 @@ impl Rig {
         }
     }
 
-    /// The loop's own routing of a press: a note press goes to the store, and
-    /// anything else is left to the selection. Answers what the store did.
-    fn click(&mut self, painted: &Painted, column: u16, row: u16) -> Option<Toggled> {
-        let offset = press_at(&painted.view, painted.laid, &press(column, row))?;
-        let done = toggle(&self.store, &painted.view, offset)
-            .expect("a note press resolved to no anchor")
-            .expect("the store refused the write");
+    /// The loop's own routing of a press on the gutter: it opens the box, with
+    /// the text of the open note already there, and arms the entrance. `false`
+    /// anywhere a press is not a note press. The clock then moves past the
+    /// entrance, whose frames `arriving.rs` gates on the effect itself: what the
+    /// gates here look at is the box once it has arrived.
+    fn press_opens(&mut self, painted: &Painted, column: u16, row: u16) -> bool {
+        let Some(offset) = press_at(&painted.view, painted.laid, &press(column, row)) else {
+            return false;
+        };
+        let (anchor, existing) = opening(&painted.view, offset, self.app.notes())
+            .expect("a note press resolved to no anchor");
+        self.app.open_box(anchor, existing.as_ref());
+        self.box_effect = Some(BoxEffect::new(
+            box_entrance(&self.theme),
+            self.clock + BOX_ARRIVING,
+        ));
+        self.advance(BOX_ARRIVING + ARRIVING_FRAME);
+        // The entrance was spent by the clock and never drawn, so the next paint
+        // tells whatever it arms nothing of that spell, as the shell's
+        // `effect_interval` would.
+        self.elapsed = Duration::ZERO;
+        true
+    }
+
+    /// One key into the open box, routed the way the loop routes it.
+    fn key(&mut self, event: &Event) -> BoxRoute {
+        let route = box_route(event, None);
+        match &route {
+            BoxRoute::Edit(input) => {
+                self.app.box_edit(input.clone());
+            }
+            BoxRoute::Paste(text) => {
+                self.app.box_paste(text);
+            }
+            _ => {}
+        }
+        route
+    }
+
+    /// Type `text` into the open box one key at a time, as a terminal delivers it.
+    fn type_text(&mut self, text: &str) {
+        for c in text.chars() {
+            let route = self.key(&Event::Key(KeyEvent::new(
+                KeyCode::Char(c),
+                KeyModifiers::NONE,
+            )));
+            assert!(
+                matches!(route, BoxRoute::Edit(_)),
+                "{c:?} did not reach the box: {route:?}"
+            );
+        }
+    }
+
+    /// Erase everything in the open box, one Backspace at a time.
+    fn erase(&mut self) {
+        while self
+            .app
+            .note_box()
+            .is_some_and(|open| !open.body().is_empty())
+        {
+            self.key(&Event::Key(KeyEvent::new(
+                KeyCode::Backspace,
+                KeyModifiers::NONE,
+            )));
+        }
+    }
+
+    /// Enter, as the loop takes it: write what the box holds, close it at
+    /// once, read the store back, and arm the note rows' arrival.
+    fn enter(&mut self) -> Committed {
+        let open = self.app.note_box().expect("no box is open").clone();
+        let done = commit(&self.store, &open).expect("the store refused the write");
+        self.app.take_box();
+        self.box_effect = None;
         self.reload();
-        Some(done)
+        if let Committed::Written(id) | Committed::Rewritten(id) = &done {
+            self.effects
+                .arm(vec![Change::Written(id.clone())], &self.theme, self.clock);
+        }
+        done
+    }
+
+    /// Esc, as the loop takes it: the keys are the pane's again now, and the
+    /// rows stay drawn while the entrance plays backwards.
+    fn esc(&mut self) {
+        self.app.close_box(self.clock + BOX_ARRIVING);
+        self.box_effect = Some(BoxEffect::new(
+            box_exit(&self.theme),
+            self.clock + BOX_ARRIVING,
+        ));
     }
 }
 
@@ -252,6 +353,22 @@ impl Painted {
                     .skip(usize::from(origin) + 2)
                     .collect::<String>(),
             );
+            row += 1;
+        }
+        out
+    }
+
+    /// The consecutive box rows drawn under row `y`, as their whole text.
+    fn box_under(&self, y: u16) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut row = y + 1;
+        while row < self.laid.diff.top + self.laid.diff.rows
+            && matches!(
+                self.view.rows.get(usize::from(row - self.laid.diff.top)),
+                Some(Row::Box { .. })
+            )
+        {
+            out.push(self.text(row));
             row += 1;
         }
         out
@@ -457,35 +574,141 @@ fn a_hunk_header_and_a_heading_draw_no_icon_under_the_pointer() {
 }
 
 #[test]
-fn a_press_on_the_gutter_writes_one_file_and_a_press_on_content_still_selects() {
+fn a_press_on_the_gutter_opens_the_box_and_writes_nothing() {
     let scratch = fixture("notes-press");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
-    let painted = rig.paint(&mut frame, PANE, Pointing::default());
-    let y = painted.row_of(EDITED);
-    let (left, _, origin) = painted.gutter();
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    assert!(plain.text(y + 1).contains("line 6"));
     assert!(
         !rig.store.dir().exists(),
         "the store had a directory before any gesture"
     );
 
-    // The press, routed the way the loop routes it.
+    // The press, routed the way the loop routes it: it opens the box and
+    // nothing reaches the store.
     let on_gutter = press(left + 1, y);
-    let offset = press_at(&painted.view, painted.laid, &on_gutter)
+    let offset = press_at(&plain.view, plain.laid, &on_gutter)
         .expect("a press on a content row's gutter is not a note press");
-    assert_eq!(offset, usize::from(y - painted.laid.diff.top));
-    let written = match toggle(&rig.store, &painted.view, offset) {
-        Some(Ok(Toggled::Written(id))) => id,
-        other => panic!("the press did not write a note: {other:?}"),
-    };
+    assert_eq!(offset, usize::from(y - plain.laid.diff.top));
+    assert!(rig.press_opens(&plain, left + 1, y));
+    assert!(rig.app.box_open(), "the press opened no box");
+    assert!(
+        !rig.store.dir().exists(),
+        "the press wrote to the store; the gesture that writes is Enter"
+    );
 
-    // One file, holding the anchor alone.
-    let files = files_in(rig.store.dir());
-    assert_eq!(files, vec![format!("{written}.note")]);
-    let listing = rig.store.list().expect("list");
-    let note = &listing.notes[0];
+    // Under the line, pushing the diff down: the top edge with the anchor, one
+    // empty row holding the caret, the bottom edge with the two keys.
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(y);
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    let o = usize::from(origin);
+    assert!(
+        rows[0][o..].starts_with("┌ note · src/watch.rs:5 ─"),
+        "{:?}",
+        rows[0]
+    );
+    assert!(rows[0].trim_end().ends_with('┐'), "{:?}", rows[0]);
+    assert!(rows[1][o..].starts_with("│ "), "{:?}", rows[1]);
+    assert!(rows[1].trim_end().ends_with('│'), "{:?}", rows[1]);
+    assert!(
+        rows[2][o..].starts_with("└ Enter sends · Esc cancels ─"),
+        "{:?}",
+        rows[2]
+    );
+    assert!(rows[2].trim_end().ends_with('┘'), "{:?}", rows[2]);
+    assert!(
+        opened.text(y + 4).contains("line 6"),
+        "the diff below did not move down under the box:\n{}",
+        opened.rows().join("\n")
+    );
+    // The caret: the cell after the side, reversed, which is the editor's own.
+    assert!(
+        opened
+            .cell(origin + 2, y + 2)
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED),
+        "no caret in the empty box"
+    );
+    // The frame and its labels in the chrome's dim, so nothing reads as code.
+    let dim = Theme::default().chrome_dim.fg;
+    assert_eq!(opened.fg(origin, y + 1), dim);
+    assert_eq!(opened.fg(origin + 3, y + 3), dim);
+    // The line keeps the note's ink while the box is open, so the box can be
+    // traced to it from across the pane.
+    let five = (left..origin)
+        .find(|x| opened.cell(*x, y).symbol() == "5")
+        .expect("the anchored line's number");
+    assert_eq!(opened.fg(five, y), Theme::default().bar_hover.fg);
+    assert!(
+        opened
+            .cell(five, y)
+            .style()
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    // The cells a press is judged against are the box's three rows across the
+    // content width.
+    let over = box_cells(&opened.laid, &opened.view).expect("the box's cells");
+    assert_eq!((over.x, over.y, over.height), (origin, y + 1, 3));
+    assert_eq!(over.width, opened.laid.diff.text - (origin - left));
+
+    // The same row's content is no note press and begins a selection, as B20 rules.
+    let on_content = press(origin + 3, y);
+    assert_eq!(press_at(&plain.view, plain.laid, &on_content), None);
+    assert!(
+        selection_after(&on_content, plain.laid, None).0.is_some(),
+        "a press on content stopped beginning a selection"
+    );
+    // And a release on the gutter opens nothing.
+    assert_eq!(
+        press_at(&plain.view, plain.laid, &release(left + 1, y)),
+        None
+    );
+}
+
+#[test]
+fn enter_writes_one_file_and_the_rows_arrive_under_the_line() {
+    let scratch = fixture("notes-enter");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text(BODY);
+    let typed = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        typed.box_under(y).len() > 3,
+        "the body did not wrap inside the box: {:?}",
+        typed.box_under(y)
+    );
+    assert_eq!(
+        rig.key(&Event::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE
+        ))),
+        BoxRoute::Send
+    );
+    let written = match rig.enter() {
+        Committed::Written(id) => id,
+        other => panic!("Enter did not write a note: {other:?}"),
+    };
+    assert!(!rig.app.box_open(), "Enter left the box open");
+
+    // One file, holding the anchor and the words.
+    assert_eq!(files_in(rig.store.dir()), vec![format!("{written}.note")]);
+    let note = rig.store.get(&written).expect("get").expect("the note");
     assert_eq!(
         (
             note.path.as_str(),
@@ -495,64 +718,139 @@ fn a_press_on_the_gutter_writes_one_file_and_a_press_on_content_still_selects() 
             note.body.as_str(),
             note.status
         ),
-        (PATH, Side::New, 5, EDITED, "", Status::Open)
+        (PATH, Side::New, 5, EDITED, BODY, Status::Open)
     );
 
-    // The same row's content is no note press and begins a selection, as B20 rules.
-    let on_content = press(origin + 3, y);
-    assert_eq!(press_at(&painted.view, painted.laid, &on_content), None);
-    assert!(
-        selection_after(&on_content, painted.laid, None).0.is_some(),
-        "a press on content stopped beginning a selection"
-    );
-    // And neither a release on the gutter nor a press elsewhere writes anything.
+    // The rows stand under the line where the box was, arriving: the note's ink
+    // first, the chrome's dim once the arrival has run.
+    let arriving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(arriving.box_under(y).is_empty(), "the box is still drawn");
+    let under = arriving.notes_under(y);
     assert_eq!(
-        press_at(&painted.view, painted.laid, &release(left + 1, y)),
-        None
+        rejoined(&under, "open"),
+        BODY,
+        "the rows do not carry the body"
     );
-    assert_eq!(files_in(rig.store.dir()).len(), 1);
+    assert!(under.last().expect("a row").trim_end().ends_with("open"));
+    assert!(rig.effects.is_running(), "the rows landed without arriving");
+    assert_ne!(arriving.fg(origin + 2, y + 1), Some(dim));
+    rig.advance(RESOLVE_ARRIVING + ARRIVING_FRAME);
+    let settled = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(settled.fg(origin + 2, y + 1), Some(dim));
+    assert!(!rig.effects.is_running());
 }
 
 #[test]
-fn a_second_press_on_a_noted_line_withdraws_it() {
-    let scratch = fixture("notes-withdraw");
+fn esc_closes_the_box_and_writes_nothing() {
+    let scratch = fixture("notes-esc");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
     let plain = rig.paint(&mut frame, PANE, Pointing::default());
     let y = plain.row_of(EDITED);
-    let (left, _, origin) = plain.gutter();
+    let (left, _, _) = plain.gutter();
 
-    assert!(matches!(
-        rig.click(&plain, left + 1, y),
-        Some(Toggled::Written(_))
-    ));
-    let marked = rig.paint(&mut frame, PANE, Pointing::default());
-    // The anchor alone draws the icon durably, in the pointer's ink, and one row
-    // under the line carrying the word the agent will climb from.
-    let icon = (left..origin)
-        .find(|x| marked.cell(*x, y).symbol() == "✎")
-        .unwrap_or_else(|| {
-            panic!(
-                "a line carrying a bare note draws no icon:\n{}",
-                marked.text(y)
-            )
-        });
-    assert_eq!(marked.fg(icon, y), Theme::default().bar_hover.fg);
-    let under = marked.notes_under(y);
-    assert_eq!(under.len(), 1, "a bare note drew {} rows", under.len());
-    assert!(under[0].trim_end().ends_with("open"), "{:?}", under[0]);
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text("never sent");
     assert_eq!(
-        marked
+        rig.key(&Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))),
+        BoxRoute::Cancel
+    );
+    rig.esc();
+    // The keys are the pane's again at once.
+    assert!(!rig.app.box_open(), "Esc left the keys with the box");
+    assert!(!rig.store.dir().exists(), "Esc wrote to the store");
+
+    // The rows stay while the entrance plays backwards, and go on the frame
+    // after it ends.
+    let leaving = rig.paint(&mut frame, PANE, Pointing::default());
+    let whole = leaving.box_under(y);
+    assert_eq!(whole.len(), 3, "the rows left with the keys");
+    assert!(whole[0].contains("note · src/watch.rs:5"), "{whole:?}");
+    rig.advance(BOX_ARRIVING / 2);
+    let halfway = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(halfway.box_under(y).len(), 3);
+    assert_ne!(
+        halfway.box_under(y),
+        whole,
+        "halfway out the box is drawn whole"
+    );
+    rig.advance(BOX_ARRIVING / 2);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(gone.rows(), plain.rows(), "the box left something drawn");
+    assert!(rig.box_effect.is_none(), "the exit outlived the rows");
+}
+
+#[test]
+fn an_emptied_box_on_enter_writes_nothing() {
+    let scratch = fixture("notes-empty");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, _) = plain.gutter();
+
+    assert!(rig.press_opens(&plain, left + 1, y));
+    // Blank is empty: the body is trimmed at both ends.
+    rig.type_text("   ");
+    assert_eq!(rig.enter(), Committed::Nothing);
+    assert!(!rig.app.box_open());
+    assert!(!rig.store.dir().exists(), "an empty box wrote a file");
+    let after = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(after.rows(), plain.rows());
+}
+
+#[test]
+fn a_press_on_a_noted_line_reopens_the_box_with_its_text_and_an_emptied_box_withdraws_it() {
+    let scratch = fixture("notes-reopen");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (left, _, _) = noted.gutter();
+    assert_eq!(noted.notes_under(y).len(), 2);
+
+    // The press reopens the note in the box rather than writing a second one,
+    // and the note's own rows stand aside while the box holds its text.
+    assert!(rig.press_opens(&noted, left + 1, y));
+    let open = rig.app.note_box().expect("the box");
+    assert_eq!(open.over(), Some("n1"));
+    assert_eq!(open.lines().join(" "), BODY);
+    assert_eq!(open.cursor(), (0, BODY.chars().count()));
+    let reopened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = reopened.box_under(y);
+    assert!(rows.len() > 3, "{rows:?}");
+    assert!(
+        rows[1].contains("checked_mul on a Duration"),
+        "{:?}",
+        rows[1]
+    );
+    assert!(
+        !reopened
             .view
-            .marked_at(usize::from(y - marked.laid.diff.top))
-            .len(),
-        1
+            .rows
+            .iter()
+            .any(|row| matches!(row, Row::Note { .. })),
+        "the note's rows are drawn under the box that holds its text"
+    );
+    assert_eq!(
+        reopened
+            .view
+            .marked_at(usize::from(y - reopened.laid.diff.top)),
+        vec!["n1"]
     );
 
-    // The second press withdraws it rather than adding a second: one open note per line.
-    assert_eq!(rig.click(&marked, left + 1, y), Some(Toggled::Withdrawn(1)));
+    // Emptied and sent, the note is withdrawn: one open note per line, and
+    // this is how the reader takes it back.
+    rig.erase();
+    assert_eq!(rig.enter(), Committed::Withdrawn("n1".to_owned()));
     assert!(
         files_in(rig.store.dir()).is_empty(),
         "the file was not removed"
@@ -560,10 +858,334 @@ fn a_second_press_on_a_noted_line_withdraws_it() {
     // The rows leave over `LEAVING` and are dropped on the frame after.
     rig.advance(LEAVING);
     let clear = rig.paint(&mut frame, PANE, Pointing::default());
+    let plain = {
+        let mut bare = Rig::open(&scratch);
+        bare.paint(&mut frame, PANE, Pointing::default())
+    };
     assert_eq!(
         clear.rows(),
         plain.rows(),
         "the withdrawn note left something drawn"
+    );
+}
+
+#[test]
+fn a_rewritten_note_is_open_again_and_keeps_its_id_and_reply() {
+    let scratch = fixture("notes-rewrite");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, Some("which margin?")))
+        .expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (left, _, _) = noted.gutter();
+
+    assert!(rig.press_opens(&noted, left + 1, y));
+    rig.type_text(", the settle one");
+    assert_eq!(rig.enter(), Committed::Rewritten("n1".to_owned()));
+    let note = rig.store.get("n1").expect("get").expect("the note");
+    assert_eq!(note.body, "short, the settle one");
+    assert_eq!(
+        note.status,
+        Status::Open,
+        "the agent has not read the new text"
+    );
+    assert_eq!(note.reply.as_deref(), Some("which margin?"));
+    assert_eq!(files_in(rig.store.dir()).len(), 1);
+
+    let drawn = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = drawn.notes_under(y);
+    assert!(under[0].starts_with("short, the settle one"), "{under:?}");
+    assert!(under[0].trim_end().ends_with("open"), "{under:?}");
+    assert!(under[1].starts_with("which margin?"), "{under:?}");
+}
+
+#[test]
+fn a_note_resolved_under_an_open_box_is_written_as_a_new_note() {
+    let scratch = fixture("notes-resolved-under-box");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (left, _, _) = noted.gutter();
+    assert!(rig.press_opens(&noted, left + 1, y));
+
+    // The agent resolves it while the reader is typing: the resolve answers the
+    // old text and keeps its file, and the new text goes down beside it.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    rig.type_text(" and more");
+    let fresh = match rig.enter() {
+        Committed::Written(id) => id,
+        other => panic!("the new text was not written as a new note: {other:?}"),
+    };
+    assert_ne!(fresh, "n1");
+    assert_eq!(files_in(rig.store.dir()).len(), 2);
+    let resolved = rig.store.get("n1").expect("get").expect("the resolve");
+    assert_eq!(resolved.status, Status::Resolved);
+    assert_eq!(resolved.reply.as_deref(), Some(REPLY));
+    let written = rig.store.get(&fresh).expect("get").expect("the new note");
+    assert_eq!(written.body, "short and more");
+    assert_eq!(written.status, Status::Open);
+}
+
+#[test]
+fn a_press_outside_the_box_closes_it_and_a_press_inside_leaves_it_open() {
+    let scratch = fixture("notes-press-elsewhere");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let over = box_cells(&opened.laid, &opened.view).expect("the box's cells");
+
+    // Inside: nothing. Outside, anywhere: close, and nothing else.
+    assert_eq!(
+        box_route(&press(origin + 4, y + 2), Some(over)),
+        BoxRoute::Inert
+    );
+    assert_eq!(box_route(&press(left + 1, y), Some(over)), BoxRoute::Close);
+    assert_eq!(
+        box_route(&press(2, opened.laid.list.top), Some(over)),
+        BoxRoute::Close
+    );
+    // The wheel, a resize, focus and the pointer resting pass through to the pane.
+    for through in [
+        at(MouseEventKind::ScrollDown, origin + 4, y + 2),
+        at(MouseEventKind::ScrollUp, 2, opened.laid.list.top),
+        moved(origin + 4, y + 2),
+        release(origin + 4, y + 2),
+        Event::Resize(120, 40),
+        Event::FocusLost,
+        Event::FocusGained,
+    ] {
+        assert_eq!(
+            box_route(&through, Some(over)),
+            BoxRoute::Through,
+            "{through:?}"
+        );
+    }
+    // And a paste goes into the box.
+    assert_eq!(
+        rig.key(&Event::Paste("pasted".to_owned())),
+        BoxRoute::Paste("pasted".to_owned())
+    );
+    assert_eq!(rig.app.note_box().expect("the box").body(), "pasted");
+}
+
+#[test]
+fn alt_enter_breaks_the_body_and_the_note_rows_break_with_it() {
+    let scratch = fixture("notes-newline");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+
+    rig.type_text("first");
+    let newline = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+    assert!(matches!(rig.key(&newline), BoxRoute::Edit(_)));
+    rig.type_text("second");
+    let open = rig.app.note_box().expect("the box");
+    assert_eq!(open.lines(), ["first", "second"]);
+    assert_eq!(open.cursor(), (1, 6));
+    let typed = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = typed.box_under(y);
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert!(rows[1].contains("first") && rows[2].contains("second"));
+    // The caret on the second row, after its word.
+    assert!(
+        typed
+            .cell(origin + 2 + 6, y + 3)
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED)
+    );
+
+    assert!(matches!(rig.enter(), Committed::Written(_)));
+    let listing = rig.store.list().expect("list");
+    assert_eq!(listing.notes[0].body, "first\nsecond");
+    let drawn = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = drawn.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert!(under[0].starts_with("first") && under[1].starts_with("second"));
+}
+
+#[test]
+fn the_box_wraps_at_the_inner_width_and_scrolls_so_the_caret_is_drawn() {
+    let scratch = fixture("notes-box-scrolls");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+
+    let long = format!("{BODY} {BODY} {BODY} at the end");
+    rig.type_text(&long);
+    let typed = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = typed.box_under(y);
+    assert_eq!(
+        rows.len(),
+        BOX_ROWS + 2,
+        "the box grew past its cap: {rows:?}"
+    );
+    // Every body row fits between the sides, and the sides stand at the
+    // content's edges.
+    let inner = usize::from(typed.laid.diff.text - (origin - left)) - BOX_FRAME;
+    let past_side = |row: &str| -> String { row.chars().skip(usize::from(origin) + 2).collect() };
+    for row in &rows[1..=BOX_ROWS] {
+        let body = past_side(row);
+        let text = body[..body.rfind('│').expect("the right side")].trim_end();
+        assert!(
+            text.chars().count() <= inner,
+            "{text:?} is wider than {inner}"
+        );
+    }
+    // The first words scrolled out and the last are drawn: what the box shows
+    // is the tail of the text, with the caret after it on the last row.
+    let visible = rejoined(
+        &rows[1..=BOX_ROWS]
+            .iter()
+            .map(|row| {
+                let body = past_side(row);
+                body[..body.rfind('│').expect("the right side")].to_owned()
+            })
+            .collect::<Vec<_>>(),
+        "",
+    );
+    assert!(
+        long.ends_with(&visible) && visible.len() < long.len(),
+        "the box shows {visible:?}, which is not the tail of the text"
+    );
+    let last = past_side(&rows[BOX_ROWS]);
+    let tail = last
+        .find("at the end")
+        .expect("the last words are not drawn");
+    let caret = usize::from(origin) + 2 + last[..tail].chars().count() + "at the end".len();
+    assert!(
+        typed
+            .cell(caret as u16, y + 1 + BOX_ROWS as u16)
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED),
+        "the caret is not after the last word"
+    );
+}
+
+#[test]
+fn at_forty_columns_the_box_takes_the_content_width_and_the_label_drops_its_head() {
+    let scratch = fixture("notes-box-narrow");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, NARROW, Pointing::default());
+    let y = plain.row_of("margin.checked");
+    let (left, _, origin) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text(BODY);
+    let narrow = rig.paint(&mut frame, NARROW, Pointing::default());
+    let rows = narrow.box_under(y);
+    assert!(rows.len() > 3, "{rows:?}");
+    // Across the content width, the sides at its edges, and the whole anchor
+    // still fits here.
+    let end = usize::from(origin) + usize::from(narrow.laid.diff.text - (origin - left));
+    for row in &rows {
+        assert_eq!(row.trim_end().chars().count(), end, "{row:?}");
+        assert_eq!(row.chars().nth(end).unwrap_or(' '), ' ', "{row:?}");
+    }
+    assert!(rows[0].contains("note · src/watch.rs:5"), "{:?}", rows[0]);
+
+    // Narrower still, the anchor gives up its word first and keeps its path;
+    // `legibility.rs` sweeps the rung below, where the path loses its head the
+    // way a heading's does.
+    let tight = rig.paint(&mut frame, Rect::new(0, 0, 20, 24), Pointing::default());
+    let y = tight.row_of("margin");
+    let rows = tight.box_under(y);
+    assert!(rows.len() > 3, "{rows:?}");
+    let top = rows[0].trim_end();
+    assert!(!top.contains("note ·"), "{top:?}");
+    assert!(
+        top.contains("src/watch.rs:5") && top.ends_with('┐'),
+        "{top:?}"
+    );
+}
+
+#[test]
+fn follow_holds_the_viewport_under_an_open_box() {
+    // The mockup's file and a second one after it, both changed.
+    let scratch = Scratch::new("notes-box-follow");
+    scratch.write(PATH, numbered_lines(12));
+    scratch.write("zzz/other.rs", numbered_lines(40));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line("zzz/other.rs", 30, "    changed under the reader");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, _) = plain.gutter();
+    assert!(rig.app.following());
+    assert!(rig.press_opens(&plain, left + 1, y));
+    let before = rig.app.position();
+
+    // The agent writes the other file: follow would jump, and holds instead.
+    assert!(!rig.app.follow("zzz/other.rs", &frame));
+    assert_eq!(rig.app.position(), before);
+    assert!(rig.app.following(), "holding still disengaged follow");
+    let held = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(held.box_under(y).len(), 3);
+
+    // Closed, the next write moves the viewport again.
+    rig.esc();
+    assert!(rig.app.follow("zzz/other.rs", &frame));
+    assert_ne!(rig.app.position(), before);
+}
+
+#[test]
+fn box_rows_are_display_rows_the_bar_does_not_count() {
+    let scratch = fixture("notes-box-display");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, _) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text(BODY);
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(opened.box_under(y).len() > 3);
+    assert_eq!(opened.view.shown(), plain.view.shown());
+    assert_eq!(opened.view.total_rows, plain.view.total_rows);
+    assert_eq!(opened.view.rows_above, plain.view.rows_above);
+    // And a box row is no target: no anchor, no note press.
+    let offset = usize::from(y + 2 - opened.laid.diff.top);
+    assert_eq!(opened.view.anchor_at(offset), None);
+    assert_eq!(
+        press_at(&opened.view, opened.laid, &press(left + 1, y + 2)),
+        None
     );
 }
 
@@ -1072,7 +1694,7 @@ fn a_resolved_note_without_a_reply_draws_its_body_and_the_word() {
 }
 
 #[test]
-fn an_unwritable_store_refuses_the_note_and_the_pane_paints_on() {
+fn a_store_that_refuses_the_write_leaves_the_box_and_its_text() {
     let scratch = fixture("notes-unwritable");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1090,13 +1712,62 @@ fn an_unwritable_store_refuses_the_note_and_the_pane_paints_on() {
     let y = painted.row_of(EDITED);
     let (left, _, _) = painted.gutter();
 
-    let offset = press_at(&painted.view, painted.laid, &press(left, y)).expect("a note press");
-    let refused = toggle(&store, &painted.view, offset).expect("a content row");
+    assert!(rig.press_opens(&painted, left, y));
+    rig.type_text("kept");
+    let typed = rig.paint(&mut frame, PANE, Pointing::default());
+    let refused = commit(&store, rig.app.note_box().expect("the box"));
     let why = refused.expect_err("the store wrote into a file");
     assert!(!why.to_string().is_empty());
-    // Nothing is lost and nothing stops: the next frame is the frame before.
+    // Nothing is lost and nothing stops: the box stays with its text, and the
+    // next frame is the frame before.
+    assert!(rig.app.box_open(), "a refused write closed the box");
+    assert_eq!(rig.app.note_box().expect("the box").body(), "kept");
     let after = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!(after.rows(), painted.rows());
+    assert_eq!(after.rows(), typed.rows());
+}
+
+#[test]
+fn a_line_that_moves_under_an_open_box_keeps_it() {
+    let scratch = fixture("notes-box-moved");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, _) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text("still here");
+
+    // A line inserted above pushes the anchored line down to 6, and the box
+    // goes with it: the anchor is re-resolved every frame, as a note's is.
+    let mut lines: Vec<String> = numbered_lines(12).lines().map(str::to_owned).collect();
+    lines[4] = EDITED.to_owned();
+    lines.insert(1, "inserted".to_owned());
+    scratch.write(PATH, lines.join("\n") + "\n");
+    frame.advance().expect("advance after the insert");
+    let moved = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = moved.row_of(EDITED);
+    assert!(
+        moved.text(y).trim_start().starts_with('6'),
+        "the anchored line is not numbered 6 after the insert: {:?}",
+        moved.text(y)
+    );
+    let rows = moved.box_under(y);
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert!(rows[0].contains("src/watch.rs:5"), "{:?}", rows[0]);
+    assert!(rows[1].contains("still here"), "{:?}", rows[1]);
+    assert!(rig.app.box_open());
+    // And Enter pins the note to the number it was opened on, which is what a
+    // note stores: the walk finds it by its text from there.
+    assert!(matches!(rig.enter(), Committed::Written(_)));
+    let listing = rig.store.list().expect("list");
+    assert_eq!(
+        (listing.notes[0].line, listing.notes[0].text.as_str()),
+        (5, EDITED)
+    );
+    let written = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(written.notes_under(y).len(), 1);
 }
 
 #[test]
@@ -1210,12 +1881,10 @@ fn a_continuation_row_anchors_to_its_head_line() {
         "the continuation row itself changed"
     );
 
-    // And a press there pins the whole line at the head's number.
-    let offset = press_at(&painted.view, painted.laid, &press(left, y + 1)).expect("a note press");
-    assert!(matches!(
-        toggle(&rig.store, &painted.view, offset),
-        Some(Ok(Toggled::Written(_)))
-    ));
+    // And a press there opens the box on the whole line at the head's number.
+    assert!(rig.press_opens(&painted, left, y + 1));
+    rig.type_text("on the head");
+    assert!(matches!(rig.enter(), Committed::Written(_)));
     let written = &rig.store.list().expect("list").notes[0];
     assert_eq!(written.line, 5);
     assert_eq!(written.text, long.trim_end());
@@ -1468,10 +2137,10 @@ fn a_note_whose_line_is_off_screen_draws_nothing_and_stays_counted() {
 }
 
 #[test]
-fn two_notes_on_one_line_draw_both_and_one_press_withdraws_both() {
+fn two_notes_on_one_line_draw_both_and_the_box_reopens_the_first() {
     // Two panes on one worktree can each write the same line before either sees
-    // the other's note. The line then carries both, and the reader's press
-    // withdraws both, which is how it holds one open note again.
+    // the other's note. The line then carries both, the press reopens the first
+    // in the box, and the second keeps its rows under it.
     let scratch = fixture("notes-two-on-one");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1499,8 +2168,16 @@ fn two_notes_on_one_line_draw_both_and_one_press_withdraws_both() {
         2
     );
 
-    assert_eq!(rig.click(&painted, left, y), Some(Toggled::Withdrawn(2)));
-    assert!(files_in(rig.store.dir()).is_empty());
+    assert!(rig.press_opens(&painted, left, y));
+    assert_eq!(rig.app.note_box().expect("the box").over(), Some("n1"));
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(y);
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    let second = opened.notes_under(y + 3);
+    assert_eq!(second.len(), 1, "{second:?}");
+    assert!(second[0].starts_with("second"), "{second:?}");
+    rig.esc();
+    assert_eq!(files_in(rig.store.dir()).len(), 2);
 }
 
 #[test]
@@ -1770,11 +2447,14 @@ fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
     let rows = noted.notes_under(y);
     assert_eq!(rows.len(), 2, "{rows:?}");
 
-    // The click deletes the file on the spot, and the rows leave over `LEAVING`.
-    assert_eq!(rig.click(&noted, left + 1, y), Some(Toggled::Withdrawn(1)));
+    // The emptied box on Enter deletes the file on the spot, and the rows leave
+    // over `LEAVING`.
+    assert!(rig.press_opens(&noted, left + 1, y));
+    rig.erase();
+    assert_eq!(rig.enter(), Committed::Withdrawn("n1".to_owned()));
     assert!(
         files_in(rig.store.dir()).is_empty(),
-        "the file outlived the click"
+        "the file outlived the withdrawal"
     );
     let leaving = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
@@ -1940,7 +2620,9 @@ fn a_listing_cannot_bring_back_a_note_already_departing() {
     rig.reload();
     let noted = rig.paint(&mut frame, PANE, Pointing::default());
     let rows = noted.notes_under(y);
-    assert_eq!(rig.click(&noted, left + 1, y), Some(Toggled::Withdrawn(1)));
+    assert!(rig.press_opens(&noted, left + 1, y));
+    rig.erase();
+    assert_eq!(rig.enter(), Committed::Withdrawn("n1".to_owned()));
 
     // The agent's resolve lands after the withdrawal began: the store holds the
     // file again, and the pane keeps drawing the departure it started.
@@ -2213,7 +2895,7 @@ fn a_reply_landing_on_an_open_note_crossfades_in() {
 }
 
 #[test]
-fn a_resolve_between_a_stale_view_and_a_withdraw_click_survives() {
+fn a_resolve_between_a_stale_view_and_an_emptied_box_survives() {
     let scratch = fixture("notes-stale-withdraw");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -2225,20 +2907,22 @@ fn a_resolve_between_a_stale_view_and_a_withdraw_click_survives() {
     let y = marked.row_of(EDITED);
     let (left, _, origin) = marked.gutter();
 
-    // The agent resolves it while the screen still shows it open, and the
-    // reader's press lands on that screen.
+    // The agent resolves it while the screen still shows it open, the reader's
+    // press lands on that screen, and the box is emptied and sent.
     rig.agent()
         .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
         .expect("rewrite");
+    assert!(rig.press_opens(&marked, left + 1, y));
+    rig.erase();
     assert_eq!(
-        rig.click(&marked, left + 1, y),
-        Some(Toggled::Withdrawn(0)),
-        "the press withdrew a note the agent had already resolved"
+        rig.enter(),
+        Committed::Nothing,
+        "the emptied box withdrew a note the agent had already resolved"
     );
     assert_eq!(
         files_in(rig.store.dir()).len(),
         1,
-        "the press deleted the agent's resolve and its line"
+        "Enter deleted the agent's resolve and its line"
     );
     let departing = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
@@ -2247,19 +2931,22 @@ fn a_resolve_between_a_stale_view_and_a_withdraw_click_survives() {
         "the resolve that landed first is not what the next frame shows"
     );
 
-    // And a press on a note nobody resolved still withdraws it, so the case
-    // above is the resolve being honoured and not a press that removes nothing.
+    // And an emptied box over a note nobody resolved still withdraws it, so the
+    // case above is the resolve being honoured and not an Enter that removes
+    // nothing.
     rig.store
         .put(&note("n2", 6, "line 6", "short"))
         .expect("put");
     rig.reload();
     let open = rig.paint(&mut frame, PANE, Pointing::default());
     let six = open.row_of("line 6");
-    assert_eq!(rig.click(&open, left + 1, six), Some(Toggled::Withdrawn(1)));
+    assert!(rig.press_opens(&open, left + 1, six));
+    rig.erase();
+    assert_eq!(rig.enter(), Committed::Withdrawn("n2".to_owned()));
     assert_eq!(
         files_in(rig.store.dir()).len(),
         1,
-        "the press on an open note left its file behind"
+        "the emptied box over an open note left its file behind"
     );
 }
 

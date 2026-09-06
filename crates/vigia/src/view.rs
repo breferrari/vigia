@@ -311,6 +311,11 @@ pub enum Row {
         /// line was edited under it.
         faded: bool,
     },
+    /// One display row of the note box, under the line it is being written for.
+    Box {
+        /// Which row of the box this is.
+        part: BoxPart,
+    },
     /// The blank row that closes a file's block.
     Gap,
 }
@@ -326,16 +331,38 @@ pub enum NoteLead {
     Blank,
 }
 
+/// One row of the note box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoxPart {
+    /// The top edge, carrying the anchor.
+    Top {
+        /// `path:line`, whole; the painter elides it to the edge's room.
+        label: String,
+    },
+    /// One row of the reader's text, between the box's sides.
+    Body {
+        /// This row's piece, already broken at the box's inner width.
+        text: String,
+        /// The column the caret stands in, on the one row that holds it.
+        caret: Option<usize>,
+    },
+    /// The bottom edge, carrying the two keys.
+    Bottom,
+}
+
 impl Row {
     /// Whether this row continues the line above rather than starting one.
     pub fn is_wrap(&self) -> bool {
         matches!(self, Self::Wrap { .. })
     }
 
-    /// Whether this is a display row the bar does not count: a continuation or
-    /// a note row, both belonging to the line above them.
+    /// Whether this is a display row the bar does not count: a continuation, a
+    /// note row or a row of the box, each belonging to the line above it.
     pub fn is_display(&self) -> bool {
-        matches!(self, Self::Wrap { .. } | Self::Note { .. })
+        matches!(
+            self,
+            Self::Wrap { .. } | Self::Note { .. } | Self::Box { .. }
+        )
     }
 
     /// A file heading row.
@@ -381,10 +408,35 @@ pub struct Noted {
     /// Notes whose file is not in the diff, drawn nowhere and counted in the
     /// footer.
     pub adrift: usize,
+    /// The row of the line the note box is open under, when that line is on
+    /// this screen, so the number keeps the note's ink while the box is up.
+    pub boxed: Option<usize>,
 }
 
 /// Columns a note row spends before its text: the lead and its gap.
 const NOTE_LEAD: usize = 2;
+
+/// Body rows the note box grows to before it scrolls inside itself.
+pub const BOX_ROWS: usize = 4;
+
+/// Columns the box's two sides and their gaps cost a body row.
+pub const BOX_FRAME: usize = 4;
+
+/// The note box as the walk places it, before the display pass makes its rows.
+#[derive(Debug, Clone)]
+struct BoxPin {
+    /// Index into the logical rows.
+    row: usize,
+    /// The note the box reopened, whose own rows stay undrawn under it.
+    over: Option<String>,
+    /// Whether `row` is the anchored line rather than the file's heading.
+    marks: bool,
+    /// `path:line`, for the top edge.
+    label: String,
+    lines: Vec<String>,
+    /// As a line and a character within it.
+    cursor: (usize, usize),
+}
 
 /// A note the walk placed on a logical row, before the display pass draws it.
 #[derive(Debug, Clone)]
@@ -406,14 +458,28 @@ struct Pin {
     resolved: bool,
 }
 
-/// `text` in rows of at most `room` columns, broken the way prose breaks: at the
-/// last blank that fits, and inside a word only when the word alone is wider
-/// than the row. The blank a row breaks on is drawn on neither row. Empty text
-/// is one empty row, so a note with no body still has a row for its word.
+/// `text` in rows of at most `room` columns, broken the way prose breaks: at
+/// every newline, then at the last blank that fits, and inside a word only when
+/// the word alone is wider than the row. The blank a row breaks on is drawn on
+/// neither row. Empty text is one empty row, so a note with no body still has a
+/// row for its word.
 fn prose_rows(text: &str, room: usize) -> Vec<String> {
-    let mut rows = Vec::new();
-    let mut rest = text;
-    while room > 0 && crate::render::width_of(rest) > room {
+    text.split('\n')
+        .flat_map(|paragraph| {
+            prose_pieces(paragraph, room)
+                .into_iter()
+                .map(|piece| paragraph[piece].to_owned())
+        })
+        .collect()
+}
+
+/// Where one paragraph breaks into rows of at most `room` columns, as byte
+/// ranges: the blank a break drops sits between two ranges and inside neither.
+fn prose_pieces(text: &str, room: usize) -> Vec<std::ops::Range<usize>> {
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    while room > 0 && crate::render::width_of(&text[start..]) > room {
+        let rest = &text[start..];
         let Some(cut) = crate::render::split_at(rest, room) else {
             break;
         };
@@ -425,10 +491,90 @@ fn prose_rows(text: &str, room: usize) -> Vec<String> {
                 _ => cut,
             }
         };
-        rows.push(rest[..at].to_owned());
-        rest = rest[at..].trim_start_matches(' ');
+        pieces.push(start..start + at);
+        let dropped = rest[at..].len() - rest[at..].trim_start_matches(' ').len();
+        start += at + dropped;
     }
-    rows.push(rest.to_owned());
+    pieces.push(start..text.len());
+    pieces
+}
+
+/// The piece the caret stands on and its column there, for a cursor `col`
+/// characters into `line`. Inside a dropped blank, or at the end of a piece
+/// that fills its row, it stands at the head of the next piece, which the
+/// caller makes when none follows: the caret's cell is always inside the row.
+fn caret_in(
+    line: &str,
+    pieces: &[std::ops::Range<usize>],
+    col: usize,
+    inner: usize,
+) -> (usize, usize) {
+    let at = line
+        .char_indices()
+        .nth(col)
+        .map_or(line.len(), |(index, _)| index);
+    let piece = pieces
+        .iter()
+        .rposition(|range| range.start <= at)
+        .unwrap_or(0);
+    let range = &pieces[piece];
+    if at > range.end {
+        return (piece + 1, 0);
+    }
+    let column = crate::render::width_of(&line[range.start..at]);
+    if column >= inner {
+        (piece + 1, 0)
+    } else {
+        (piece, column)
+    }
+}
+
+/// The rows the box takes under a content width of `content`, and none at a
+/// width that leaves the body no column.
+fn box_rows(pin: &BoxPin, content: usize) -> Vec<Row> {
+    if content <= BOX_FRAME {
+        return Vec::new();
+    }
+    let inner = content - BOX_FRAME;
+    let (cursor_line, cursor_col) = pin.cursor;
+    let mut body: Vec<(String, Option<usize>)> = Vec::new();
+    let mut caret_row = 0;
+    for (index, line) in pin.lines.iter().enumerate() {
+        let pieces = prose_pieces(line, inner);
+        let first = body.len();
+        body.extend(
+            pieces
+                .iter()
+                .map(|range| (line[range.clone()].to_owned(), None)),
+        );
+        if index == cursor_line {
+            let (piece, column) = caret_in(line, &pieces, cursor_col, inner);
+            if piece >= pieces.len() {
+                body.push((String::new(), None));
+            }
+            caret_row = first + piece;
+            body[caret_row].1 = Some(column);
+        }
+    }
+    // The box holds `BOX_ROWS` rows and the caret's is always one of them: past
+    // the cap the body scrolls so the caret rests on the last row drawn.
+    let top = caret_row.saturating_sub(BOX_ROWS - 1);
+    let mut rows = vec![Row::Box {
+        part: BoxPart::Top {
+            label: pin.label.clone(),
+        },
+    }];
+    rows.extend(
+        body.into_iter()
+            .skip(top)
+            .take(BOX_ROWS)
+            .map(|(text, caret)| Row::Box {
+                part: BoxPart::Body { text, caret },
+            }),
+    );
+    rows.push(Row::Box {
+        part: BoxPart::Bottom,
+    });
     rows
 }
 
@@ -858,6 +1004,9 @@ struct Changed<'f> {
     /// The reader's notes on this file, by its path and by the path it was
     /// renamed from.
     notes: Vec<&'f Note>,
+    /// The note box, as the anchor it is open on, when that anchor is in this
+    /// file.
+    boxed: Option<&'f crate::notes::Standing<'f>>,
 }
 
 /// Everything a row about this file needs, for either region.
@@ -939,7 +1088,7 @@ impl View {
         history: &History,
         viewport: Viewport,
     ) -> Result<Self> {
-        Self::collect_noted(frame, highlighter, history, viewport, &[], true)
+        Self::collect_noted(frame, highlighter, history, viewport, &[], true, None)
     }
 
     /// [`View::collect`] with the reader's notes placed under the lines they are
@@ -955,6 +1104,7 @@ impl View {
         viewport: Viewport,
         notes: &[Note],
         rows: bool,
+        note_box: Option<&crate::notes::NoteBox>,
     ) -> Result<Self> {
         let Viewport {
             position,
@@ -1019,6 +1169,8 @@ impl View {
         for note in notes {
             by_path.entry(note.path.as_str()).or_default().push(note);
         }
+        // The box is placed the way a note is, against the same anchor.
+        let draft = note_box.map(crate::notes::NoteBox::stand_in);
         if !by_path.is_empty() {
             // Whether a note's file is in the diff at all is a fact about the changed set
             // rather than the screen, so it is answered here for every note, drawn or not.
@@ -1130,6 +1282,9 @@ impl View {
                         }
                     }
                 }
+                let boxed = draft
+                    .as_ref()
+                    .filter(|standing| change.paths().any(|path| path == standing.note.path));
                 view.take_file(
                     Changed {
                         kind: &change.kind,
@@ -1139,6 +1294,7 @@ impl View {
                         closes: gap_rows(index, stop) > 0,
                         listed: list_rows > 0,
                         notes: file_notes,
+                        boxed,
                     },
                     // The pass is taken whatever this frame does with it, so the sweep
                     // in its `Drop` still runs and the cache stays bounded the way I3
@@ -1163,7 +1319,7 @@ impl View {
                 // After the cheap terms, so an ordinary follow frame never pays for it:
                 // this walks every collected row and the three conditions above are
                 // field reads.
-                && view.display_rows(width, wrap, height, &walked.pins, rows) < height
+                && view.display_rows(width, wrap, height, &walked, rows) < height
                 && view.top
                     != Position {
                         file: first,
@@ -1179,6 +1335,7 @@ impl View {
             view.rows.clear();
             // And what indexes into them.
             walked.pins.clear();
+            walked.boxed = None;
             view.notes.segments.clear();
             // `walked.drawn` is deliberately kept.
 
@@ -1213,7 +1370,7 @@ impl View {
                 && (anchored || single || (view.top.row > 0 && !view.landed))
                 && view.top != floor);
 
-        let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked.pins, rows);
+        let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked, rows);
 
         // After the walk, because only the walk knows where the diff landed.
         view.take_list(frame, history, list_rows, list_follows, &walked.drawn)?;
@@ -1226,7 +1383,9 @@ impl View {
     /// the head of a continuation. `None` off a content row, which is a heading,
     /// a hunk header, a note row and the blank rows.
     pub fn anchor_at(&self, offset: usize) -> Option<Anchor> {
-        if offset >= self.rows.len() || matches!(self.rows[offset], Row::Note { .. }) {
+        if offset >= self.rows.len()
+            || matches!(self.rows[offset], Row::Note { .. } | Row::Box { .. })
+        {
             return None;
         }
         let head = self.head_of(offset);
@@ -1353,7 +1512,7 @@ impl View {
         width: usize,
         wrap: bool,
         height: usize,
-        pins: &[Pin],
+        walked: &Walked,
         drawn: bool,
     ) -> usize {
         let content = if width == 0 {
@@ -1362,11 +1521,19 @@ impl View {
             let gutter = crate::render::gutter_width(&self.rows, width);
             crate::render::content_width(gutter, width)
         };
-        let under: usize = if drawn {
-            pins.iter().map(|pin| pin.rows(content).len()).sum()
+        let mut under: usize = if drawn {
+            walked
+                .pins
+                .iter()
+                .filter(|pin| !walked.covers(pin))
+                .map(|pin| pin.rows(content).len())
+                .sum()
         } else {
             0
         };
+        if let Some(boxed) = &walked.boxed {
+            under += box_rows(boxed, content).len();
+        }
         if !wrap || content == 0 {
             return self.rows.len() + under;
         }
@@ -1393,9 +1560,10 @@ impl View {
         wrap: bool,
         height: usize,
         at_bottom: bool,
-        pins: &[Pin],
+        walked: &Walked,
         drawn: bool,
     ) -> usize {
+        let pins = &walked.pins;
         // Only where a width was passed, so a caller that named none leaves
         // the decision where it has always been. See [`View::gutter`].
         self.gutter = (width > 0).then(|| crate::render::gutter_width(&self.rows, width));
@@ -1424,9 +1592,14 @@ impl View {
         // Built once, so the clamp and the emit below agree on their count.
         let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
         if drawn {
-            for pin in pins {
+            for pin in pins.iter().filter(|pin| !walked.covers(pin)) {
                 under[pin.row].extend(pin.rows(content));
             }
+        }
+        // The box stands first under its line, whatever else is pinned there,
+        // and whether or not the rows are shown: a mode is not a toggle.
+        if let Some(boxed) = &walked.boxed {
+            under[boxed.row].splice(0..0, box_rows(boxed, content));
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at].len();
         let total: usize = (0..breaks.len()).map(cost).sum();
@@ -1443,6 +1616,11 @@ impl View {
                     bare: pin.body.is_empty(),
                 })
                 .collect();
+            self.notes.boxed = walked
+                .boxed
+                .as_ref()
+                .filter(|boxed| boxed.marks)
+                .map(|boxed| boxed.row);
             return 0;
         }
 
@@ -1571,6 +1749,11 @@ impl View {
                 })
             })
             .collect();
+        self.notes.boxed = walked
+            .boxed
+            .as_ref()
+            .filter(|boxed| boxed.marks)
+            .and_then(|boxed| landed[boxed.row]);
         // A segment names the first row of its file still on screen, which after
         // the trim may be a later row than the one the walk recorded.
         let segments = std::mem::take(&mut self.notes.segments);
@@ -1654,7 +1837,8 @@ impl View {
             }
             Row::Reason(reason) => reason.clone(),
             Row::Note { text, .. } => text.clone(),
-            Row::Gap => String::new(),
+            // A draft is not a line of anything yet.
+            Row::Box { .. } | Row::Gap => String::new(),
         }
     }
 
@@ -1700,7 +1884,11 @@ impl View {
         height: usize,
         walked: &mut Walked,
     ) {
-        let Walked { drawn, pins } = walked;
+        let Walked {
+            drawn,
+            pins,
+            boxed: box_pin,
+        } = walked;
         let Changed {
             kind,
             origin,
@@ -1709,6 +1897,7 @@ impl View {
             closes,
             listed,
             notes,
+            boxed,
         } = file;
         let mut n = 0usize;
         let first = self.rows.len();
@@ -1773,7 +1962,7 @@ impl View {
                         if self.rows.len() >= height {
                             break 'block;
                         }
-                        if !notes.is_empty() {
+                        if !notes.is_empty() || boxed.is_some() {
                             placed.push((Side::of(line.kind), number, self.rows.len()));
                         }
                         self.rows.push(Row::Line {
@@ -1815,6 +2004,9 @@ impl View {
         if !notes.is_empty() {
             pin(pins, &notes, diff, heading, &placed);
         }
+        if let Some(stand_in) = boxed {
+            *box_pin = place_box(stand_in, diff, heading, &placed);
+        }
     }
 }
 
@@ -1827,6 +2019,61 @@ struct Walked {
     drawn: Vec<(usize, FileEntry)>,
     /// Notes placed on logical rows, for the display pass to draw.
     pins: Vec<Pin>,
+    /// The note box, placed on its logical row, when its line is on screen.
+    boxed: Option<BoxPin>,
+}
+
+impl Walked {
+    /// Whether the box is open over this note and holds its text.
+    fn covers(&self, pin: &Pin) -> bool {
+        self.boxed
+            .as_ref()
+            .is_some_and(|boxed| boxed.over.as_deref() == Some(pin.id.as_str()))
+    }
+}
+
+/// The logical row a note's line landed on, the word it carries there, whether
+/// its rows dim, and whether the row is the line rather than the heading;
+/// `None` off this screen, which is not a state.
+fn placed_at(
+    note: &Note,
+    rows: &[(u32, &str)],
+    heading: Option<usize>,
+    placed: &[(Side, u32, usize)],
+) -> Option<(usize, &'static str, bool, bool)> {
+    let row_of = |number: u32| {
+        placed
+            .iter()
+            .find(|(side, at, _)| *side == note.side && *at == number)
+            .map(|(_, _, row)| *row)
+    };
+    let (row, word, faded, marks) = match resolve(note, rows) {
+        Placement::At(number) | Placement::Moved(number) => {
+            (row_of(number), note.status.name(), false, true)
+        }
+        Placement::Changed => (row_of(note.line), "changed", true, true),
+        Placement::Gone => (heading, "gone", false, false),
+    };
+    row.map(|row| (row, word, faded, marks))
+}
+
+/// Place the box the way a note is placed, so it follows its line as one does.
+fn place_box(
+    stand_in: &crate::notes::Standing<'_>,
+    diff: &FileDiff,
+    heading: Option<usize>,
+    placed: &[(Side, u32, usize)],
+) -> Option<BoxPin> {
+    let rows = diff.rows_on(stand_in.note.side);
+    let (row, _, _, marks) = placed_at(&stand_in.note, &rows, heading, placed)?;
+    Some(BoxPin {
+        row,
+        over: stand_in.over.map(str::to_owned),
+        marks,
+        label: format!("{}:{}", stand_in.note.path, stand_in.note.line),
+        lines: stand_in.lines.to_vec(),
+        cursor: stand_in.cursor,
+    })
 }
 
 /// Place each of a file's notes on the logical row that draws its line, or on
@@ -1848,22 +2095,9 @@ fn pin(
             Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
             Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
         };
-        let row_of = |number: u32| {
-            placed
-                .iter()
-                .find(|(side, at, _)| *side == note.side && *at == number)
-                .map(|(_, _, row)| *row)
-        };
-        let (row, word, faded, marks) = match resolve(note, rows) {
-            Placement::At(number) | Placement::Moved(number) => {
-                (row_of(number), note.status.name(), false, true)
-            }
-            Placement::Changed => (row_of(note.line), "changed", true, true),
-            Placement::Gone => (heading, "gone", false, false),
-        };
         // Off screen this frame, which is not a state: the row it belongs on is
         // not drawn, so neither is it.
-        let Some(row) = row else {
+        let Some((row, word, faded, marks)) = placed_at(note, rows, heading, placed) else {
             continue;
         };
         pins.push(Pin {

@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    ARRIVING_FRAME, Action, App, Body, Change, Glyphs, NoteEffects, PaintStats, Pointing, Row,
-    Theme, View, WHEEL_ROWS, body_layout, note_cells, regions, render,
+    ARRIVING_FRAME, Action, App, BOX_ROWS, Body, Change, Glyphs, Input, Key, NoteEffects,
+    PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout, box_cells, box_entrance,
+    note_cells, opening, regions, render,
 };
 use vigia_core::{
     CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
@@ -2289,5 +2290,164 @@ fn what_the_staged_run_costs_the_frame_it_is_drawn_in() {
     println!(
         "staged run: frame p50 {with:?} with both runs, {without:?} with one, over \
          {FILES} files and {LINES} lines"
+    );
+}
+
+/// I9 with the note box open on the fifty-notes screen and its entrance
+/// running: every note's rows, the box's rows under one line, and the effect
+/// over the box's cells on every frame, which is the frame `SPEC.md` §11.2 B21
+/// names as the dearest the box adds. The entrance is re-armed the moment it
+/// ends, so no timed frame draws the box still.
+#[test]
+fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("notes-box-open", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+    let screen = layout_of(&app, NOTED_PANE, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(NOTED_PANE);
+
+    app.apply(
+        Action::Scroll(isize::try_from(LINES + 2).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll to the working-tree side");
+    let notes: Vec<Note> = {
+        let (_, diff) = frame.diff(0).expect("diff");
+        diff.rows_on(Side::New)
+            .iter()
+            .take(50)
+            .enumerate()
+            .map(|(i, (line, text))| Note {
+                id: format!("n{i}"),
+                path: diff.path.clone(),
+                side: Side::New,
+                line: *line,
+                text: (*text).to_owned(),
+                body: "the reader's words, one row each".to_owned(),
+                status: Status::Open,
+                reply: None,
+                written: std::time::SystemTime::now(),
+            })
+            .collect()
+    };
+    app.set_notes(notes);
+
+    // The box, open on the first line of the timed screen, holding four rows of
+    // text so it draws at its cap.
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let offset = view
+        .rows
+        .iter()
+        .position(|row| matches!(row, Row::Line { .. }))
+        .expect("a content row on the timed screen");
+    let (anchor, existing) = opening(&view, offset, app.notes()).expect("a line to open on");
+    app.open_box(anchor, existing.as_ref());
+    for c in "the settle margin is two seconds and the walk waits it out before it reads the height again, which is what keeps the burst off the frame; the wait is the frame's to own and the wake at its end is the one that reads, so nothing here polls and nothing here reads twice".chars() {
+        app.box_edit(Input {
+            key: Key::Char(c),
+            ctrl: false,
+            alt: false,
+            shift: false,
+        });
+    }
+    assert!(app.box_open());
+
+    let mut entrance = box_entrance(&theme);
+    // A cell rather than a counter, because the sampler outlives the reader.
+    let processed = std::cell::Cell::new(0usize);
+    let mut edits = 0usize;
+    let mut next_frame =
+        |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
+            scratch.edit_line(
+                EDITED_PATH,
+                0,
+                &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
+            );
+            edits += 1;
+            time_cpu(|| {
+                sample(history, scratch.root(), EDITED_PATH);
+                frame.advance().expect("advance");
+                app.sample_memory();
+                let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+                let view = app.view(frame, highlighter, history, screen).expect("view");
+                let laid = regions(NOTED_PANE, &chrome, &view);
+                render(
+                    &mut buf,
+                    NOTED_PANE,
+                    &view,
+                    &theme,
+                    Glyphs::default(),
+                    &chrome,
+                );
+                if let Some(over) = box_cells(&laid, &view) {
+                    entrance.process(ARRIVING_FRAME.into(), &mut buf, over);
+                    processed.set(processed.get() + 1);
+                }
+                if entrance.done() {
+                    entrance = box_entrance(&theme);
+                }
+            })
+        };
+
+    for _ in 0..WARMUP_FRAMES {
+        next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
+    }
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(next_frame(&mut frame, &mut app, &mut highlighter, &mut history).0);
+    }
+
+    // Non-vacuity: the box was on every timed screen at its cap, and the
+    // entrance ran over it on every one.
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let boxed = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Box { .. }))
+        .count();
+    assert_eq!(
+        boxed,
+        BOX_ROWS + 2,
+        "the timed screen drew {boxed} box rows rather than the box at its cap"
+    );
+    assert!(
+        view.notes.marked.len() >= 40,
+        "{} lines carry a mark on the timed screen, not the fifty this gate stands on",
+        view.notes.marked.len()
+    );
+    assert_eq!(
+        processed.get(),
+        WARMUP_FRAMES + SAMPLED_FRAMES,
+        "the entrance ran on {} of the frames, so some timed frame drew the box still",
+        processed.get()
+    );
+
+    println!(
+        "the box open with its entrance running: frame p50 {:?} over {FILES} files and {LINES} lines on an {}x{} pane",
+        frames.percentile(0.5).expect("a sampled frame"),
+        NOTED_PANE.width,
+        NOTED_PANE.height
+    );
+    holds_p99(
+        "I9: a frame with the note box open and its entrance running over fifty notes",
+        budget(I9_FRAME),
+        &frames,
+        String::new,
+        || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
 }

@@ -34,7 +34,7 @@ fn drawn(view: &View) -> Vec<String> {
             }
             Row::Reason(note) => note.clone(),
             Row::Hunk { .. } => "@@".to_owned(),
-            Row::Gap => String::new(),
+            Row::Box { .. } | Row::Gap => String::new(),
         })
         .collect()
 }
