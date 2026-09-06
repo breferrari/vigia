@@ -21,7 +21,8 @@ use vigia::{
     Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
     RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme, Timed, View,
     Viewport, body_layout, box_cells, box_entrance, box_exit, box_route, commit, count_cell,
-    hover_after, note_cells, opening, press_at, regions, render, repainted, selection_after,
+    has_room, hover_after, note_cells, opening, press_at, regions, render, repainted,
+    selection_after,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -217,6 +218,7 @@ impl Rig {
         };
         let (anchor, existing) = opening(&painted.view, offset, self.app.notes())
             .expect("a note press resolved to no anchor");
+        let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
         self.app.open_box(anchor, existing.as_ref());
         self.box_effect = Some(Timed::new(
             box_entrance(&self.theme),
@@ -230,9 +232,12 @@ impl Rig {
         true
     }
 
-    /// One key into the open box, routed the way the loop routes it.
-    fn key(&mut self, event: &Event) -> BoxRoute {
-        let route = box_route(event, None);
+    /// One event into the open box, routed the way the loop routes it: with the
+    /// cells the box drew on the frame `painted`, since a press is judged
+    /// against them. `None` where no frame is in hand, which is a key's case.
+    fn key_over(&mut self, event: &Event, painted: Option<&Painted>) -> BoxRoute {
+        let over = painted.and_then(|painted| box_cells(&painted.laid, &painted.view));
+        let route = box_route(event, over);
         match &route {
             BoxRoute::Edit(input) => {
                 self.app.box_edit(input.clone());
@@ -243,6 +248,11 @@ impl Rig {
             _ => {}
         }
         route
+    }
+
+    /// One key into the open box, which is judged without geometry.
+    fn key(&mut self, event: &Event) -> BoxRoute {
+        self.key_over(event, None)
     }
 
     /// Type `text` into the open box one key at a time, as a terminal delivers it.
@@ -1136,6 +1146,44 @@ fn at_forty_columns_the_box_takes_the_content_width_and_the_label_drops_its_head
 }
 
 #[test]
+fn a_pane_with_no_room_for_the_box_opens_none() {
+    // Below the box's own floor nothing of it can be drawn, and a mode the
+    // reader cannot see is one they cannot leave on purpose: every key would go
+    // into it and Enter would write a note nothing on screen ever showed.
+    let scratch = fixture("notes-box-no-room");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    // Wide enough to draw content rows a press can land on, too narrow for the
+    // box between its two sides.
+    let cramped = rig.paint(&mut frame, Rect::new(0, 0, 6, 24), Pointing::default());
+    assert!(
+        !has_room(cramped.laid),
+        "the six-column pane has room for the box, so this gate is not narrow"
+    );
+    let (left, _, _) = cramped.gutter();
+    let y = cramped
+        .view
+        .rows
+        .iter()
+        .position(|row| matches!(row, Row::Line { .. }))
+        .map(|at| cramped.laid.diff.top + at as u16)
+        .expect("a content row on the cramped pane");
+    // The press still lands on a gutter, so the room is what refuses it rather
+    // than the absence of a target.
+    assert!(
+        press_at(&cramped.view, cramped.laid, &press(left, y)).is_some(),
+        "the cramped pane has no gutter to press, so this gate proves nothing"
+    );
+
+    // And where the box does draw, the same rule says so.
+    let roomy = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(has_room(roomy.laid));
+}
+
+#[test]
 fn follow_holds_the_viewport_under_an_open_box() {
     // The mockup's file and a second one after it, both changed.
     let scratch = Scratch::new("notes-box-follow");
@@ -1238,6 +1286,83 @@ fn a_box_opened_on_the_last_drawn_row_is_still_whole() {
     assert!(
         text.contains(&anchored),
         "the anchored line {anchored:?} left the screen:\n{text}"
+    );
+}
+
+#[test]
+fn the_box_and_the_diffs_own_bottom_ask_the_clamp_for_different_amounts() {
+    // The two clamps are one expression, and this is the only screen where both
+    // want something: the diff resting on its last row, and a box under a line
+    // near it. Whichever asks for more has to win, or one of them is cut.
+    let scratch = fixture("notes-box-both-clamps");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let short = Rect::new(0, 0, 80, 10);
+
+    // The diff's own end, which is what arms the bottom clamp.
+    let height = body_layout(
+        short,
+        &rig.app.chrome("fixture", None, Pointing::default(), 0, ""),
+        1,
+        1,
+    )
+    .diff;
+    rig.app
+        .apply(Action::Bottom, &mut frame, height)
+        .expect("go to the last file");
+    let bottom = rig.paint(&mut frame, short, Pointing::default());
+    let last_line = bottom
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::Line { .. }))
+        .map(|(at, _)| at)
+        .next_back()
+        .expect("a content row at the bottom");
+    let tail = match &bottom.view.rows[last_line] {
+        Row::Line { text, .. } => text.clone(),
+        other => panic!("not a line: {other:?}"),
+    };
+    let (left, _, _) = bottom.gutter();
+
+    // A line a little above it, so the box wants more room than the diff's end.
+    let on = bottom
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::Line { .. }))
+        .map(|(at, _)| at)
+        .next_back()
+        .expect("a content row");
+    assert!(rig.press_opens(&bottom, left + 1, bottom.laid.diff.top + on as u16));
+    rig.type_text("both clamps");
+    let opened = rig.paint(&mut frame, short, Pointing::default());
+
+    let parts: Vec<&BoxPart> = opened
+        .view
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::Box { part } => Some(part),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(parts.first(), Some(BoxPart::Top { .. }))
+            && matches!(parts.last(), Some(BoxPart::Bottom)),
+        "the box was cut where both clamps wanted the window:\n{}",
+        opened.rows().join("\n")
+    );
+    // And the row the box hangs from is still the diff's own last line, so the
+    // bottom clamp did not lose its own claim to the box's.
+    assert!(
+        opened.rows().join("\n").contains(&tail),
+        "the diff's last line left the screen:\n{}",
+        opened.rows().join("\n")
     );
 }
 
@@ -2264,6 +2389,115 @@ fn two_notes_on_one_line_draw_both_and_the_box_reopens_the_first() {
     );
     rig.esc();
     assert_eq!(files_in(rig.store.dir()).len(), 2);
+}
+
+#[test]
+fn a_press_while_the_box_is_leaving_reopens_the_note_it_held() {
+    // Esc takes the keys back at once and the rows stay a beat while they go.
+    // A press landing in that beat opens the box again, and the line it lands
+    // on is marked by the box rather than by the note under it, so without
+    // asking the box the press would find nothing and Enter would write a
+    // second note on a line that already has one.
+    let scratch = fixture("notes-press-while-leaving");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (left, _, _) = noted.gutter();
+
+    assert!(rig.press_opens(&noted, left + 1, y));
+    assert_eq!(rig.app.note_box().expect("the box").over(), Some("n1"));
+    rig.esc();
+    // Halfway out: the keys are the pane's, the rows are still drawn.
+    rig.advance(BOX_ARRIVING / 2);
+    let leaving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(!rig.app.box_open(), "Esc left the keys with the box");
+    assert!(
+        leaving.box_under(y).len() > 2,
+        "the rows left with the keys: {:?}",
+        leaving.box_under(y)
+    );
+
+    assert!(rig.press_opens(&leaving, left + 1, y));
+    let open = rig.app.note_box().expect("the box");
+    assert_eq!(
+        open.over(),
+        Some("n1"),
+        "the press opened a box over nothing while the first was still leaving"
+    );
+    assert_eq!(open.lines().join(" "), BODY);
+
+    // And Enter rewrites the one note rather than writing a second beside it.
+    rig.type_text(" again");
+    assert_eq!(rig.enter(), Committed::Rewritten("n1".to_owned()));
+    assert_eq!(
+        files_in(rig.store.dir()).len(),
+        1,
+        "the line carries two notes where the reader wrote one"
+    );
+}
+
+#[test]
+fn a_caret_above_a_grown_box_stays_on_screen_on_a_pane_that_cannot_hold_it() {
+    // The box scrolls its body to the caret, and the pane can be shorter than
+    // the box: then the window shows the caret's row rather than the box's
+    // last, since a reader who cannot see the caret cannot see what they type.
+    let scratch = fixture("notes-caret-short-pane");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    // Six rows of pane leaves the diff about three, against a box of six.
+    let tiny = Rect::new(0, 0, 80, 6);
+    let plain = rig.paint(&mut frame, tiny, Pointing::default());
+    let y = plain
+        .view
+        .rows
+        .iter()
+        .position(|row| matches!(row, Row::Line { .. }))
+        .map(|at| plain.laid.diff.top + at as u16)
+        .expect("a content row on the tiny pane");
+    let (left, _, _) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+
+    // Five lines, then the caret moved off the last of them.
+    for line in ["one", "two", "three", "four", "five"] {
+        rig.type_text(line);
+        let newline = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+        assert!(matches!(rig.key(&newline), BoxRoute::Edit(_)));
+    }
+    rig.type_text("six");
+    for _ in 0..3 {
+        let up = Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert!(matches!(rig.key(&up), BoxRoute::Edit(_)));
+    }
+    let (line, _) = rig.app.note_box().expect("the box").cursor();
+    assert_eq!(line, 2, "the caret did not move off the last line");
+
+    let painted = rig.paint(&mut frame, tiny, Pointing::default());
+    let carets = painted
+        .view
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row,
+                Row::Box {
+                    part: BoxPart::Body { caret: Some(_), .. }
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        carets,
+        1,
+        "the caret's row is not on a pane too short for the whole box:\n{}",
+        painted.rows().join("\n")
+    );
 }
 
 #[test]

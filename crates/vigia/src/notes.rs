@@ -59,6 +59,16 @@ pub fn press_at(view: &View, regions: Regions, event: &Event) -> Option<usize> {
     view.anchor_at(offset).map(|_| offset)
 }
 
+/// Whether the pane leaves a content row room for the box between its two
+/// sides. A mode the reader cannot see is one they cannot leave on purpose, so
+/// a press on a pane this narrow opens nothing rather than taking the keys
+/// while nothing on screen says where they are going.
+#[must_use]
+pub fn has_room(regions: Regions) -> bool {
+    let (_, gutter) = regions.diff.gutter;
+    usize::from(regions.diff.text.saturating_sub(gutter)) > crate::view::BOX_FRAME
+}
+
 /// What a press at row `offset` of `view` opens the box on: the line's anchor,
 /// and the open note already pinned there when there is one, whose text the
 /// box takes. `None` off a content row.

@@ -1596,9 +1596,21 @@ impl View {
         // The box stands first under its line, whatever else is pinned there,
         // and whether or not the rows are shown: a mode is not a toggle.
         let mut boxed_rows = 0usize;
+        let mut caret_at = 0usize;
         if let Some(boxed) = &walked.boxed {
             let rows = box_rows(boxed, content);
             boxed_rows = rows.len();
+            caret_at = rows
+                .iter()
+                .position(|row| {
+                    matches!(
+                        row,
+                        Row::Box {
+                            part: BoxPart::Body { caret: Some(_), .. }
+                        }
+                    )
+                })
+                .unwrap_or(boxed_rows.saturating_sub(1));
             under[boxed.row].splice(0..0, rows);
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at].len();
@@ -1631,16 +1643,26 @@ impl View {
         } else {
             0
         };
-        // A top edge with nothing under it is a mode the reader is in and
-        // cannot see, so a box whose last row falls past the pane brings the
-        // window forward, as the clamp above does for the diff's own end.
+        // A box the reader cannot see is a mode they cannot leave on purpose,
+        // so the window is pulled into the span that shows one.
         if boxed_rows > 0
             && let Some(boxed) = &walked.boxed
         {
-            // The rows above the line, the line with its continuations, the box.
-            let ends =
-                (0..boxed.row).map(cost).sum::<usize>() + breaks[boxed.row].len() + 1 + boxed_rows;
-            dropped = dropped.max(ends.saturating_sub(height));
+            // The rows above the line, then the line with its continuations.
+            let above_line = (0..boxed.row).map(cost).sum::<usize>();
+            let opens = above_line + breaks[boxed.row].len() + 1;
+            // Show as much of the box as the pane holds, from its last row up.
+            let ends = opens + boxed_rows;
+            // Never past the anchored line, or the clamp for the diff's own end
+            // takes the box off the top while making room at the bottom. And
+            // never short of the caret's own row, which is what a box taller
+            // than the pane keeps instead of its bottom edge: a reader who
+            // cannot see the caret cannot see what they are typing.
+            let caret = opens + caret_at;
+            dropped = dropped
+                .max(ends.saturating_sub(height))
+                .min(above_line)
+                .max((caret + 1).saturating_sub(height));
         }
         let mut from = 0usize;
         let mut above = dropped;

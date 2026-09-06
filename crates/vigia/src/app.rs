@@ -360,6 +360,18 @@ impl App {
         self.note_box.as_ref()
     }
 
+    /// The note a box still on screen holds, when `anchor` is the line it was
+    /// opened on. It stands in for that note, so the line stops being marked
+    /// and a press landing while the box leaves would otherwise find nothing.
+    pub fn box_over(&self, anchor: &Anchor) -> Option<&Note> {
+        let open = self.note_box.as_ref()?;
+        if open.anchor() != anchor {
+            return None;
+        }
+        let id = open.over()?;
+        self.notes.iter().find(|note| note.id == id)
+    }
+
     /// The box while the reader's hand is still in it: one leaving is drawn
     /// and takes nothing.
     fn open_mut(&mut self) -> Option<&mut NoteBox> {

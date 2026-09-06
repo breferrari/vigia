@@ -41,7 +41,7 @@ pub use input::{
 pub use notes::{
     Alerts, BOX_ARRIVING, BoxRoute, Change, Committed, LEAVING, Ledger, NoteBox, NoteEffects,
     RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Timed, box_entrance, box_exit, box_route,
-    commit, leaving, note_arrival, opening, press_at, resolve_departure,
+    commit, has_room, leaving, note_arrival, opening, press_at, resolve_departure,
 };
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
@@ -994,16 +994,30 @@ impl Shell {
 
     /// Open the box under the line a press landed on, with the text of the open
     /// note already there when there is one, and arm its entrance. With no store
-    /// to write to there is nothing to open: the footer says so instead.
+    /// to write to, and on a pane too narrow to draw the box, there is nothing
+    /// to open: the footer says so instead.
     fn open_box(&mut self, offset: usize, now: Instant) {
         if self.store.is_none() {
             self.say(state::no_home(), Voice::Alert, now);
+            return;
+        }
+        if !notes::has_room(self.regions) {
+            self.say(
+                "no room for a note on this pane".to_owned(),
+                Voice::Alert,
+                now,
+            );
             return;
         }
         let Some((anchor, existing)) = notes::opening(&self.screen, offset, self.app.notes())
         else {
             return;
         };
+        // A box still leaving stands in for the note it holds, so the screen
+        // this press landed on no longer marks that line: without asking the
+        // box, the press would open an empty one and Enter would write a second
+        // note beside the first.
+        let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
         self.app.open_box(anchor, existing.as_ref());
         self.box_effect = Some(Timed::new(
             notes::box_entrance(&self.theme),
@@ -1728,6 +1742,33 @@ mod tests {
             "`cancel_box` no longer sends the box away over the entrance played \
              backwards"
         );
+        // Both refusals sit ahead of the open, and the pane's own is the one no
+        // drawn screen can catch: without it a press on a pane too narrow to
+        // draw the box still takes every key.
+        let open = shipped
+            .split("fn open_box(&mut self, offset: usize, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`open_box` is gone");
+        let opened = open
+            .find("self.app.open_box(")
+            .expect("`open_box` no longer opens one");
+        assert!(
+            open.contains("self.app.box_over(&anchor)"),
+            "`open_box` no longer asks the box still leaving which note it holds, \
+             so a press inside its exit opens an empty one and Enter writes a \
+             second note on a line that already has one"
+        );
+        for refusal in ["self.store.is_none()", "!notes::has_room(self.regions)"] {
+            let at = open
+                .find(refusal)
+                .unwrap_or_else(|| panic!("`open_box` no longer refuses on {refusal}"));
+            assert!(
+                at < opened,
+                "`open_box` opens the box before it asks {refusal}, so the reader \
+                 is put in a mode the pane cannot show them"
+            );
+        }
     }
 
     /// An announcement outlasts a receipt, and the one place a notice is armed
@@ -2098,12 +2139,14 @@ mod tests {
             "self.reload_notes(now)",
             "self.ledger.settle(now)",
             "self.note_effects.settle(now)",
+            "self.app.settle_box(now)",
+            "self.box_effect.take_if(|armed| armed.spent(now))",
         ] {
             assert!(
                 body.contains(step),
                 "`settle_notes` no longer runs `{step}`, so one of a stale store, an \
-                 ended departure and a spent effect outlives the frame that should \
-                 have settled it"
+                 ended departure, a spent effect and the box's own end outlives the \
+                 frame that should have settled it"
             );
         }
 
