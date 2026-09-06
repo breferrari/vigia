@@ -14,6 +14,8 @@
 //! and the peer says nothing and holds the connection open, so no word here can
 //! ever mean *delivered*. [`word`] says `sent`, which claims only that the line
 //! left this process.
+//!
+//! [`word`]: crate::post::word
 
 use std::fmt::Write as _;
 use std::io::{self, Write};
