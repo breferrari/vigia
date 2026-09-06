@@ -38,10 +38,14 @@ pub use input::{
     Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
     repainted, scroll_mark, selection_after, settled,
 };
-pub use notes::{Toggled, press_at, toggle};
+pub use notes::{
+    Alerts, Change, LEAVING, Ledger, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT,
+    RESOLVED_DEPARTURE, Toggled, leaving, note_arrival, press_at, resolve_departure, toggle,
+};
 pub use render::{
-    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCount, PaintStats,
-    body_layout, count_cell, diff_height, notice_area, regions, render, voice_style,
+    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
+    PaintStats, body_layout, count_cell, diff_height, note_cells, notice_area, regions, render,
+    voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
@@ -62,7 +66,7 @@ use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::pattern::{RadialPattern, SweepPattern};
 use tachyonfx::{EffectManager, Interpolation, fx};
-use vigia_core::{Highlighter, History, Store, WatchOptions, Worktree};
+use vigia_core::{Highlighter, History, Store, StoreWatch, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
@@ -83,6 +87,8 @@ enum Wake {
     Warmed,
     /// A newer version exists, so the footer can name it.
     Update(String),
+    /// The notes store changed under another process's hand.
+    Notes,
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
@@ -230,6 +236,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         written: false,
         warming: None,
         store,
+        store_watch: None,
+        notes_stale: false,
+        ledger: Ledger::default(),
+        note_effects: NoteEffects::default(),
+        alerts: Alerts::default(),
+        effects_ran: false,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -269,6 +281,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone());
+
+    // And the store's own, an event source beside the tree's: what the agent
+    // writes there is a wake, never a poll.
+    shell.watch_store(&tx, Instant::now());
 
     // What the tree is made of, which the changed set cannot say on a tree nobody has
     // written to yet.
@@ -342,6 +358,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             let began = Instant::now();
             shell.settle_scroll(began);
             shell.settle_footer(began);
+            // A departure's end, which is a deadline this frame may be the one to find.
+            shell.settle_notes(began);
             // The margin's end after a print that moved, which no filesystem event marks.
             shell.settle_heights(&mut frame);
             shell.app.sample_memory();
@@ -384,7 +402,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // selection, which is B20 and B21 sharing no cell: it goes to the
                     // store here and the wash below never sees it.
                     if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
-                        shell.toggle_note(offset, Instant::now());
+                        shell.toggle_note(offset, &tx, Instant::now());
                         continue;
                     }
                     // Before the event is interpreted, for the hold's reason: a press
@@ -505,11 +523,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         began,
                     );
                 }
+                // Marked rather than read here, so a burst of writes in one batch
+                // is one listing.
+                Wake::Notes => shell.notes_stale = true,
             }
         }
 
         // Before the paint: a notice either of them raises has to reach this frame.
         shell.settle_footer(began);
+        // The store, read back once for the batch, and the departures due.
+        shell.settle_notes(began);
         // And the settle deadline, which can fall due under a drained batch too.
         shell.settle_heights(&mut frame);
 
@@ -624,6 +647,21 @@ pub fn arrival(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
     })
 }
 
+/// The time an effect is told passed since the previous paint, given whether an
+/// effect was drawing then. The loop paints on wakes alone, so `since_paint` on
+/// the first wake after a quiet spell is the whole of the spell; an effect armed
+/// on that wake has lived through none of it, and told all of it a departure
+/// would end inside its first frame. While one was drawing, the loop was
+/// painting at its cadence and the interval is the frame it says.
+#[must_use]
+pub fn effect_interval(ran: bool, since_paint: std::time::Duration) -> std::time::Duration {
+    if ran {
+        since_paint
+    } else {
+        std::time::Duration::ZERO
+    }
+}
+
 /// How each voice leaves: back to the hints' colour, by the road it came. The
 /// message stays drawn throughout, or this lands on the hints instead.
 #[doc(hidden)]
@@ -642,11 +680,8 @@ pub fn departure(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
 }
 
 /// The colour a message travels from, and back to: the hints it replaces.
-/// `None` when the depth has flattened both ends together, since there is no
-/// gradient between a colour and itself.
 fn travels_from(voice: Voice, theme: &Theme) -> Option<ratatui::style::Color> {
-    let from = theme.chrome_dim.fg?;
-    (from != voice_style(voice, theme).fg?).then_some(from)
+    theme::contrast(theme.chrome_dim, voice_style(voice, theme))
 }
 
 /// Columns the colour's leading edge is soft over as it crosses the message.
@@ -690,7 +725,8 @@ struct Shell {
     /// The footer's own: the diff's are clipped to it, and one manager processed
     /// twice advances every effect in it twice a frame.
     notice_effects: EffectManager<String>,
-    /// When the previous frame painted: the elapsed time an effect is told about.
+    /// When the previous frame painted. The time since it is what an effect is
+    /// told, through `effect_interval`, which may answer none of it.
     painted: Instant,
     /// The syntax classes of whatever is on screen, kept between frames.
     highlighter: Highlighter,
@@ -742,6 +778,21 @@ struct Shell {
     /// The reader's notes on this worktree, or `None` when the environment names
     /// no directory to keep them in.
     store: Option<Store>,
+    /// The watch over the store, or `None` until something has written there.
+    store_watch: Option<StoreWatch>,
+    /// A wake said the store changed and no paint has read it back yet.
+    notes_stale: bool,
+    /// What the pane holds of the store between wakes: the notes as listed and
+    /// the ones on their way off the screen.
+    ledger: Ledger,
+    /// The effects running over notes' rows.
+    note_effects: NoteEffects,
+    /// What the last listing had to say, so the alert is said when that changes
+    /// and not on every wake.
+    alerts: Alerts,
+    /// Whether an effect was drawing at the previous paint, which decides what the
+    /// next one is told passed.
+    effects_ran: bool,
 }
 
 impl Shell {
@@ -816,8 +867,12 @@ impl Shell {
                 settling: frame.settles_in(SystemTime::now()),
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
-                arriving: (self.effects.is_running() || self.notice_effects.is_running())
-                    .then(|| now + ARRIVING_FRAME),
+                arriving: (self.effects.is_running()
+                    || self.notice_effects.is_running()
+                    || self.note_effects.is_running())
+                .then(|| now + ARRIVING_FRAME),
+                // The frame after a departure ends is the one that drops its rows.
+                departing: self.ledger.ends_in(),
             },
             now,
         )
@@ -898,44 +953,79 @@ impl Shell {
     /// write is a footer alert rather than the end of the pane, which is B7's
     /// rule for a monitor's own writes, and the store is read back after a
     /// failure too, since a withdrawal that failed partway still removed some.
-    fn toggle_note(&mut self, offset: usize, now: Instant) {
+    fn toggle_note(&mut self, offset: usize, tx: &Sender<Wake>, now: Instant) {
         let Some(store) = &self.store else {
             self.say(state::no_home(), Voice::Alert, now);
             return;
         };
         match notes::toggle(store, &self.screen, offset) {
             None => return,
-            Some(Ok(_)) => {}
+            // The first write made the directory, so there is something to watch.
+            Some(Ok(Toggled::Written(_))) => {
+                if self.store_watch.is_none() {
+                    self.watch_store(tx, now);
+                }
+            }
+            // The read-back below finds the file gone and starts its departure.
+            Some(Ok(Toggled::Withdrawn(_))) => {}
             Some(Err(e)) => self.say(format!("could not write the note: {e}"), Voice::Alert, now),
         }
         self.reload_notes(now);
     }
 
-    /// Read the store and hand the notes to the next collect. A file the store
-    /// cannot read is skipped and said once, here, rather than on every frame.
+    /// Arm the watch over the store, so a write by the agent or another pane is
+    /// a wake. With nothing on disk to arm on yet it stays unarmed until this
+    /// pane's first write makes the directory; a watch that cannot be made is one
+    /// footer alert, and the store still reads back on this pane's own writes.
+    fn watch_store(&mut self, tx: &Sender<Wake>, now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let tx = tx.clone();
+        match store.watch(move || {
+            let _ = tx.send(Wake::Notes);
+        }) {
+            Ok(watch) => self.store_watch = watch,
+            Err(e) => self.say(format!("not watching the notes: {e}"), Voice::Alert, now),
+        }
+    }
+
+    /// Read the store, arm an effect for whatever moved, and hand the notes to
+    /// the next collect. A file the store cannot read is skipped, and a store
+    /// that cannot be read is left as it was; either is said when it changes,
+    /// rather than on every wake the agent causes.
     fn reload_notes(&mut self, now: Instant) {
         let Some(store) = &self.store else {
             return;
         };
-        match store.list() {
-            Ok(listing) => {
-                if let Some((path, why)) = listing.skipped.first() {
-                    let name = path.file_name().map_or_else(
-                        || path.display().to_string(),
-                        |name| name.to_string_lossy().into_owned(),
-                    );
-                    let more = listing.skipped.len() - 1;
-                    let told = if more == 0 {
-                        format!("skipped the note file {name}: {why}")
-                    } else {
-                        format!("skipped the note file {name} and {more} more: {why}")
-                    };
-                    self.say(told, Voice::Alert, now);
-                }
-                self.app.set_notes(listing.notes);
-            }
-            Err(e) => self.say(format!("could not read the notes: {e}"), Voice::Alert, now),
+        let listing = store.list();
+        if let Some(told) = self.alerts.of(&listing) {
+            self.say(told, Voice::Alert, now);
         }
+        if let Ok(listing) = listing {
+            let changes = self.ledger.reload(listing.notes, now);
+            self.note_effects.arm(changes, &self.theme, now);
+            self.publish_notes();
+        }
+    }
+
+    /// Take the notes through one frame: read the store back if a wake said it
+    /// changed, drop the departures that have ended, and retire the effects that
+    /// have run their length. On every path to a paint, so a departure's end is
+    /// consumed on the turn that finds it and not on a timeout.
+    fn settle_notes(&mut self, now: Instant) {
+        if std::mem::take(&mut self.notes_stale) {
+            self.reload_notes(now);
+        }
+        if self.ledger.settle(now) {
+            self.publish_notes();
+        }
+        self.note_effects.settle(now);
+    }
+
+    /// Hand the next collect what the ledger says is drawn.
+    fn publish_notes(&mut self) {
+        self.app.set_notes(self.ledger.drawn());
     }
 
     /// Write what a gesture asked for, and say so for `NOTICE_LINGER`, which is
@@ -1158,11 +1248,15 @@ impl Shell {
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
         let (theme, screen, glyphs) = (&self.theme, &self.screen, self.glyphs);
-        // Since the previous paint: an effect is told how much time passed, not what
-        // time it is. Taken before the draw so it and the frame agree on the interval.
-        let since = now.saturating_duration_since(self.painted);
+        // What an effect is told passed. Taken before the draw so it and the frame
+        // agree on the interval.
+        let since = effect_interval(
+            self.effects_ran,
+            now.saturating_duration_since(self.painted),
+        );
         let effects = &mut self.effects;
         let notice_effects = &mut self.notice_effects;
+        let note_effects = &mut self.note_effects;
         let mut painted = Regions::default();
         let was = self.regions;
         self.session.screen().draw(|f| {
@@ -1186,6 +1280,13 @@ impl Shell {
                 painted.diff.rows,
             );
             effects.process_effects(since.into(), f.buffer_mut(), over);
+            // The notes' own, each over the cells its note drew this frame. A note
+            // off screen draws no cells and its effect waits, and `settle_notes`
+            // retires it at its own end whether it ever drew or not.
+            if note_effects.is_running() {
+                let cells = render::note_cells(&painted, screen);
+                note_effects.draw(since, f.buffer_mut(), &cells);
+            }
             // Separate from the pass above, which is clipped to the diff: a
             // notice effect in that manager would be clipped away unseen.
             if let Some(notice) = render::notice_area(area, &chrome, screen) {
@@ -1193,6 +1294,9 @@ impl Shell {
             }
         })?;
         self.painted = now;
+        self.effects_ran = self.effects.is_running()
+            || self.notice_effects.is_running()
+            || self.note_effects.is_running();
         self.hovered = chrome.hovered;
         if chrome.selected.is_none() {
             self.deselect();
@@ -1494,7 +1598,7 @@ mod tests {
              a note also begins a selection"
         );
         let toggle = shipped
-            .split("fn toggle_note(&mut self, offset: usize, now: Instant) {")
+            .split("fn toggle_note(&mut self, offset: usize, tx: &Sender<Wake>, now: Instant) {")
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`toggle_note` is gone");
@@ -1746,13 +1850,20 @@ mod tests {
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
-        let sources = &code[asked..asked + 340.min(code.len() - asked)];
+        // Bounded on `patience`'s closing brace rather than a byte count, so the
+        // scan cannot reach a clock named by the next function.
+        let sources = &code[asked..];
+        let sources = &sources[..sources
+            .find("\n    }\n")
+            .expect("`Shell::patience` never closes")];
         for clock in [
             "held: self.held",
             "linger: self.scrolling_until",
             "notice: self.leaving.or_else(|| self.app.flash_until())",
             "ageing: self.history.ages_in",
             "settling: frame.settles_in(",
+            "self.note_effects.is_running()",
+            "departing: self.ledger.ends_in()",
         ] {
             assert!(
                 sources.contains(clock),
@@ -1786,6 +1897,15 @@ mod tests {
                      settled height on that path waits for the next event",
                 );
             assert!(walked < paint);
+            let noted = code[previous..paint]
+                .rfind("shell.settle_notes(began)")
+                .map(|at| previous + at)
+                .expect(
+                    "a paint with no `settle_notes` before it in the same arm, so a \
+                     departure that ended on that path keeps its rows until the next \
+                     event",
+                );
+            assert!(noted < paint);
             previous = paint;
         }
 
@@ -1794,6 +1914,88 @@ mod tests {
             "the loop no longer decides how long to wait through `Held::wait`, so \
              the one function that can answer *is there a timer at all* is not the \
              one being asked"
+        );
+    }
+
+    /// The store is an event source beside the tree's: its watch is armed once
+    /// the first frame is up, its wake marks the store stale rather than reading
+    /// it, and the read happens where every path to a paint passes.
+    #[test]
+    fn the_store_watch_is_armed_after_the_first_paint_and_its_wake_is_read_before_the_paint() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let first_paint = code
+            .find("shell.draw(&mut frame, &worktree, Instant::now())?")
+            .expect("`run` no longer paints before the loop");
+        let armed = code
+            .find("shell.watch_store(&tx, Instant::now())")
+            .expect("`run` no longer arms the store watch");
+        let input = code
+            .find("spawn_input(tx.clone())")
+            .expect("`run` no longer spawns the input thread");
+        assert!(
+            first_paint < armed && armed < input,
+            "the store watch is armed before the first paint or after input is \
+             live, so either a wake precedes the screen it redraws or a write \
+             between the two is missed"
+        );
+
+        let arm = code
+            .find("Wake::Notes => shell.notes_stale = true")
+            .expect("the loop no longer marks the store stale on its wake");
+        let paints: Vec<usize> = code
+            .match_indices("shell.draw(&mut frame, &worktree, began)?")
+            .map(|(at, _)| at)
+            .collect();
+        assert!(
+            paints.iter().any(|paint| arm < *paint),
+            "the wake's arm sits after the batch's paint, so the listing it marks \
+             stale is read one frame late"
+        );
+
+        let settle = code
+            .find("fn settle_notes(&mut self, now: Instant)")
+            .expect("`Shell::settle_notes` is gone");
+        let body = &code[settle..];
+        let body = &body[..body.find("\n    }\n").expect("`settle_notes` never closes")];
+        for step in [
+            "if std::mem::take(&mut self.notes_stale) {",
+            "self.reload_notes(now)",
+            "self.ledger.settle(now)",
+            "self.note_effects.settle(now)",
+        ] {
+            assert!(
+                body.contains(step),
+                "`settle_notes` no longer runs `{step}`, so one of a stale store, an \
+                 ended departure and a spent effect outlives the frame that should \
+                 have settled it"
+            );
+        }
+
+        // And the paint asks the interval rule with what the previous paint
+        // recorded, and records for the next one after the effects have drawn.
+        let paint = code.find("fn paint(\n").expect("`Shell::paint` is gone");
+        let paint = &code[paint..];
+        let paint = &paint[..paint.find("\n    }\n").expect("`paint` never closes")];
+        let asked = paint
+            .find("effect_interval(\n            self.effects_ran,")
+            .expect("`paint` no longer asks `effect_interval` with the previous paint's answer");
+        let drawn = paint
+            .find("process_effects(")
+            .expect("`paint` no longer processes effects");
+        let recorded = paint
+            .find("self.effects_ran = self.effects.is_running()")
+            .expect("`paint` no longer records whether an effect drew");
+        assert!(
+            asked < drawn && drawn < recorded,
+            "the interval is asked or recorded on the wrong side of the draw, so an \
+             effect armed after a quiet spell is told the whole of it"
         );
     }
 }

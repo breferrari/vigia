@@ -276,7 +276,28 @@ fn the_monitor_writes_nothing_while_it_runs() {
         before.len()
     );
 
+    // The store's own watch, armed for the run on a root of its own, so its
+    // footprint sits inside a window this gate compares: `Store::watch` creates
+    // nothing, and this is where that claim is checked rather than trusted.
+    let watched = TempDir::new("writes-nothing-watch");
+    let store = Store::open(watched.path(), &root).expect("open the store");
+    let watch = store
+        .watch(|| {})
+        .expect("arm the store watch")
+        .expect("the root exists, so there is something to arm on");
+    settle_tree(watched.path());
+    let watched_before = snapshot(watched.path());
+
     let driven = drive(&root);
+    drop(watch);
+    let watched_moved = difference(&watched_before, &snapshot(watched.path()));
+    assert!(
+        watched_moved.is_empty(),
+        "SPEC.md §11.1: the monitor writes nothing of its own, and the store's \
+         watch moved {} entries under the root it was armed on:\n{}",
+        watched_moved.len(),
+        watched_moved.join("\n")
+    );
 
     // Before the filesystem is compared, not after.
     assert_eq!(

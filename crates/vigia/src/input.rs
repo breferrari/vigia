@@ -31,9 +31,10 @@ pub struct Region {
     pub track: (u16, u16),
     /// The column this region's bar is drawn in, when it has one.
     pub bar: Option<u16>,
-    /// The first column of the gutter a content row draws before its text and how
-    /// many columns that is; none on a region that draws no content rows.
+    /// The gutter's first column and its width, before a content row's text; none with no rows.
     pub gutter: (u16, u16),
+    /// Columns a row's glyphs span from the gutter's first column, short of the bar; zero with no rows.
+    pub text: u16,
 }
 
 impl Region {
@@ -47,6 +48,7 @@ impl Region {
             track: (top, rows),
             bar,
             gutter: (0, 0),
+            text: 0,
         }
     }
 
@@ -473,6 +475,8 @@ pub struct Deadlines {
     pub settling: Option<Duration>,
     /// When the fade on an arriving change is done, if one is still running.
     pub arriving: Option<Instant>,
+    /// When the next note that is leaving has its rows dropped.
+    pub departing: Option<Instant>,
 }
 
 /// How long the loop may block before some clock here has to act.
@@ -486,6 +490,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.ageing,
         due.settling,
         due.arriving.map(since),
+        due.departing.map(since),
     ]
     .into_iter()
     .flatten()

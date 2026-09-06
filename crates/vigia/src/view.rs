@@ -298,6 +298,8 @@ pub enum Row {
     /// under the file's heading once that line is gone (`SPEC.md` §11.2 B21).
     /// A display row the bar does not count, exactly as [`Row::Wrap`] is.
     Note {
+        /// The note this row belongs to, by id.
+        id: String,
         /// What stands at the content origin.
         lead: NoteLead,
         /// This row's piece of the body or of the reply, already broken at the
@@ -450,19 +452,21 @@ impl Pin {
                 body.push(String::new());
             }
             let count = body.len();
-            for (at, text) in body.into_iter().enumerate() {
+            for (piece, text) in body.into_iter().enumerate() {
                 rows.push(Row::Note {
+                    id: self.id.clone(),
                     lead: NoteLead::Bar,
                     text,
-                    word: (at + 1 == count).then_some(self.word),
+                    word: (piece + 1 == count).then_some(self.word),
                     faded: self.faded,
                 });
             }
         }
         if let Some(reply) = &self.reply {
-            for (at, text) in pieces(reply).into_iter().enumerate() {
+            for (piece, text) in pieces(reply).into_iter().enumerate() {
                 rows.push(Row::Note {
-                    lead: if at == 0 {
+                    id: self.id.clone(),
+                    lead: if piece == 0 {
                         NoteLead::Reply
                     } else {
                         NoteLead::Blank
@@ -1417,8 +1421,7 @@ impl View {
                 _ => Vec::new(),
             })
             .collect();
-        // The note rows under each logical row, built once so the clamp and the
-        // emit below agree on their count.
+        // Built once, so the clamp and the emit below agree on their count.
         let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
         if drawn {
             for pin in pins {

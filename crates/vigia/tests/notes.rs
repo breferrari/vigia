@@ -6,6 +6,7 @@
 mod support;
 
 use std::fs;
+use std::time::{Duration, Instant};
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -14,9 +15,10 @@ use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, Mo
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
-    Action, App, Glyphs, Hovered, NoteCount, Pointing, Region, Regions, Row, Theme, Toggled, View,
-    Viewport, body_layout, count_cell, hover_after, press_at, regions, render, repainted,
-    selection_after, toggle,
+    ARRIVING_FRAME, Action, Alerts, App, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects,
+    Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
+    Toggled, View, Viewport, body_layout, count_cell, hover_after, note_cells, press_at, regions,
+    render, repainted, selection_after, toggle,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -71,6 +73,16 @@ struct Rig {
     history: History,
     theme: Theme,
     store: Store,
+    /// What the shell keeps of the store between wakes, and the effects over it.
+    ledger: Ledger,
+    effects: NoteEffects,
+    /// A clock moved by hand, so a departure's end is a fact and not a sleep.
+    clock: Instant,
+    /// How far the clock moved since the last paint, which is what the effects
+    /// are told.
+    elapsed: Duration,
+    /// The worktree the store is keyed by, so a second handle can be opened.
+    workdir: std::path::PathBuf,
     _root: TempDir,
 }
 
@@ -91,19 +103,44 @@ impl Rig {
             history: History::new(),
             theme: Theme::default(),
             store,
+            ledger: Ledger::default(),
+            effects: NoteEffects::default(),
+            clock: Instant::now(),
+            elapsed: Duration::ZERO,
+            workdir: scratch.root().to_path_buf(),
             _root: root,
         }
     }
 
-    /// What the shell does after its own write: read the store back.
+    /// The agent's hand on the same store: a second handle, as `vigia mcp` has.
+    fn agent(&self) -> Store {
+        Store::open(self._root.path(), &self.workdir).expect("open a second handle")
+    }
+
+    /// What the shell does on a wake from the store and after its own write:
+    /// read it back, arm an effect for what moved, and hand the next collect
+    /// what the ledger says is drawn.
     fn reload(&mut self) {
         let listing = self.store.list().expect("list the store");
         assert!(listing.skipped.is_empty(), "{:?}", listing.skipped);
-        self.app.set_notes(listing.notes);
+        let changes = self.ledger.reload(listing.notes, self.clock);
+        self.effects.arm(changes, &self.theme, self.clock);
+        self.app.set_notes(self.ledger.drawn());
     }
 
-    /// The shell's frame: chrome, layout, collect, paint, and the regions the
-    /// pointer is told about.
+    /// Move the clock by `by` and take the notes through the frame the shell
+    /// would: departures that ended are dropped and spent effects retired.
+    fn advance(&mut self, by: Duration) {
+        self.clock += by;
+        self.elapsed += by;
+        if self.ledger.settle(self.clock) {
+            self.app.set_notes(self.ledger.drawn());
+        }
+        self.effects.settle(self.clock);
+    }
+
+    /// The shell's frame: chrome, layout, collect, paint, the effects over the
+    /// notes' cells, and the regions the pointer is told about.
     fn paint(&mut self, frame: &mut Frame, pane: Rect, pointing: Pointing) -> Painted {
         let files = frame.files().len();
         let chrome = self.app.chrome("fixture", None, pointing, 0, "");
@@ -115,9 +152,12 @@ impl Rig {
         // Rebuilt after the collect, as the shell rebuilds it, so the count this
         // frame placed reaches this frame's footer.
         let chrome = self.app.chrome("fixture", None, pointing, 0, "");
+        let laid = regions(pane, &chrome, &view);
         let mut terminal =
             Terminal::new(TestBackend::new(pane.width, pane.height)).expect("terminal");
         let theme = &self.theme;
+        let effects = &mut self.effects;
+        let since = std::mem::take(&mut self.elapsed);
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -129,9 +169,11 @@ impl Rig {
                     Glyphs::default(),
                     &chrome,
                 );
+                if effects.is_running() {
+                    effects.draw(since, f.buffer_mut(), &note_cells(&laid, &view));
+                }
             })
             .expect("draw");
-        let laid = regions(pane, &chrome, &view);
         Painted {
             backend: terminal.backend().clone(),
             view,
@@ -213,6 +255,12 @@ impl Painted {
             row += 1;
         }
         out
+    }
+
+    /// Whether any row draws the agent's arrow at the content `origin`.
+    fn drew_reply(&self, origin: u16) -> bool {
+        (0..self.backend.buffer().area.height)
+            .any(|row| self.text(row).chars().nth(usize::from(origin)) == Some('↳'))
     }
 
     /// The footer's bottom row.
@@ -509,6 +557,8 @@ fn a_second_press_on_a_noted_line_withdraws_it() {
         files_in(rig.store.dir()).is_empty(),
         "the file was not removed"
     );
+    // The rows leave over `LEAVING` and are dropped on the frame after.
+    rig.advance(LEAVING);
     let clear = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
         clear.rows(),
@@ -1314,6 +1364,9 @@ fn below_the_gutters_floor_the_sigil_takes_the_mark() {
             .contains(Modifier::BOLD)
     );
     rig.store.remove("n1").expect("remove");
+    // Gone from the store without a press, so it leaves over `LEAVING` first.
+    rig.reload();
+    rig.advance(LEAVING);
     rig.store.put(&note("n2", 5, EDITED, "")).expect("put");
     rig.reload();
     let bare = rig.paint(&mut frame, floor, Pointing::default());
@@ -1522,6 +1575,9 @@ fn the_word_takes_a_row_of_its_own_when_the_body_leaves_it_none() {
     let right = probe.text(y + 1).trim_end().chars().count();
     let room = right - usize::from(origin) - 2;
     rig.store.remove("probe").expect("remove");
+    // Gone from the store without a press, so it leaves over `LEAVING` first.
+    rig.reload();
+    rig.advance(LEAVING);
 
     // Exactly the room, so the word cannot share the row.
     let full = "y".repeat(room);
@@ -1553,4 +1609,772 @@ fn the_word_takes_a_row_of_its_own_when_the_body_leaves_it_none() {
         "{:?}",
         under[0]
     );
+}
+
+/// The mockup's own reply.
+const REPLY: &str = "swapped for saturating_mul; the unwrap_or went with it";
+
+/// A note as the agent leaves it: `status`, and the line when it wrote one.
+fn left_as(id: &str, body: &str, status: Status, reply: Option<&str>) -> vigia_core::Note {
+    let mut note = note(id, 5, EDITED, body);
+    note.status = status;
+    note.reply = reply.map(str::to_owned);
+    note
+}
+
+#[test]
+fn a_seen_landing_from_another_handle_crossfades_the_word() {
+    let scratch = fixture("notes-seen");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
+    assert!(
+        vigia::note_arrival(&rig.theme).is_some(),
+        "the default palette has nothing to fade between, so this gate would \
+         pass on a word that simply changed"
+    );
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = open.row_of(EDITED);
+    assert!(open.notes_under(y)[1].trim_end().ends_with("open"));
+
+    // The agent lists the store: the file is rewritten under the pane's hand and
+    // the wake reads it back.
+    rig.agent()
+        .rewrite(&left_as("n1", BODY, Status::Seen, None))
+        .expect("rewrite");
+    rig.reload();
+    rig.advance(ARRIVING_FRAME);
+    let arriving = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = arriving.notes_under(y);
+    assert!(under[1].trim_end().ends_with("seen"), "{under:?}");
+    let cells = note_cells(&arriving.laid, &arriving.view);
+    let word = cells[0].word.expect("the word's cells");
+    assert!(
+        (word.x..word.right()).all(|x| arriving.fg(x, word.y) != Some(dim)),
+        "one frame into the crossfade the word is drawn in the chrome's dim, so \
+         the agent's reading arrived without arriving"
+    );
+    // Nothing else on the row moved: the body keeps the chrome's dim.
+    let (_, _, origin) = arriving.gutter();
+    assert_eq!(arriving.fg(origin + 2, word.y), Some(dim));
+
+    rig.advance(RESOLVE_ARRIVING);
+    let settled = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        (word.x..word.right()).all(|x| settled.fg(x, word.y) == Some(dim)),
+        "the crossfade ran its length and the word did not settle on the chrome's dim"
+    );
+    assert!(
+        !rig.effects.is_running(),
+        "the crossfade is still holding the frame clock past its own length"
+    );
+}
+
+#[test]
+fn a_resolve_runs_the_departure_once_and_the_rows_are_gone_after_it() {
+    let scratch = fixture("notes-resolve");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    assert!(plain.text(y + 1).contains("line 6"));
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, None))
+        .expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(noted.notes_under(y).len(), 1);
+    assert!(noted.text(y + 2).contains("line 6"));
+
+    // The agent resolves it: the rows become the agent's line, arriving.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    rig.reload();
+    let arriving = rig.paint(&mut frame, PANE, Pointing::default());
+    let (_, _, origin) = arriving.gutter();
+    let under = arriving.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("swapped for"), "{:?}", under[0]);
+    assert_eq!(
+        arriving.text(y + 1).chars().nth(usize::from(origin)),
+        Some('↳')
+    );
+    assert_ne!(
+        arriving.fg(origin + 2, y + 1),
+        Some(dim),
+        "the agent's line landed in the chrome's dim rather than arriving"
+    );
+    assert!(arriving.text(y + 2).contains("line 6"));
+
+    // The beat: the line holds, readable, in the chrome's dim.
+    rig.advance(RESOLVE_ARRIVING + ARRIVING_FRAME);
+    let holding = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(holding.fg(origin + 2, y + 1), Some(dim));
+    assert_eq!(holding.notes_under(y), under);
+
+    // The dissolve: halfway through, the line is going and the diff has not
+    // closed up yet.
+    rig.advance(RESOLVE_BEAT + LEAVING / 2);
+    let dissolving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_ne!(
+        dissolving.text(y + 1),
+        arriving.text(y + 1),
+        "halfway through the dissolve the agent's line is drawn whole"
+    );
+    assert!(
+        dissolving.text(y + 2).contains("line 6"),
+        "the diff closed up before the departure ended"
+    );
+
+    // The frame after: the rows are dropped and the diff is back where it was.
+    rig.advance(LEAVING / 2);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        gone.rows(),
+        plain.rows(),
+        "the departed note left something drawn"
+    );
+    assert!(!rig.effects.is_running());
+
+    // Once: the file is still in the store until the server prunes it, and a
+    // listing that holds it does not run the departure again.
+    assert_eq!(files_in(rig.store.dir()).len(), 1);
+    rig.reload();
+    let again = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(again.rows(), plain.rows(), "a resolved note departed twice");
+    assert!(!rig.effects.is_running());
+}
+
+#[test]
+fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
+    let scratch = fixture("notes-withdraw-departs");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = noted.notes_under(y);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+
+    // The click deletes the file on the spot, and the rows leave over `LEAVING`.
+    assert_eq!(rig.click(&noted, left + 1, y), Some(Toggled::Withdrawn(1)));
+    assert!(
+        files_in(rig.store.dir()).is_empty(),
+        "the file outlived the click"
+    );
+    let leaving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        leaving.notes_under(y),
+        rows,
+        "the rows snapped away on the click"
+    );
+    assert!(
+        !leaving.drew_reply(origin),
+        "a withdrawal drew a line from the agent"
+    );
+
+    rig.advance(LEAVING / 2);
+    let dissolving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_ne!(
+        dissolving.text(y + 1),
+        leaving.text(y + 1),
+        "halfway through the dissolve the reader's words are drawn whole"
+    );
+    assert!(dissolving.text(y + 3).contains("line 6"));
+
+    rig.advance(LEAVING / 2);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        gone.rows(),
+        plain.rows(),
+        "the withdrawn note left something drawn"
+    );
+    assert!(!rig.effects.is_running());
+}
+
+#[test]
+fn a_note_that_vanished_from_the_store_departs_the_way_a_withdrawal_does() {
+    let scratch = fixture("notes-vanished");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (_, _, origin) = plain.gutter();
+    rig.store
+        .put(&left_as("n1", BODY, Status::Seen, None))
+        .expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = noted.notes_under(y);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+
+    // Pruned by the server, or withdrawn from another pane: the pane never saw
+    // it resolved and cannot know the agent's line, so it leaves as a withdrawal.
+    rig.agent().remove("n1").expect("remove");
+    rig.reload();
+    let leaving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        leaving.notes_under(y),
+        rows,
+        "the rows snapped away on the wake"
+    );
+    assert!(
+        !leaving.drew_reply(origin),
+        "a vanished note drew a line from the agent"
+    );
+    rig.advance(LEAVING);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        gone.rows(),
+        plain.rows(),
+        "the vanished note left something drawn"
+    );
+}
+
+#[test]
+fn a_resolve_off_screen_departs_unseen_and_the_count_follows() {
+    let scratch = fixture("notes-off-screen");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    // Adrift: its file is not in the diff, so it is drawn nowhere and counted.
+    let mut adrift = note("n1", 5, EDITED, "short");
+    adrift.path = "src/other.rs".to_owned();
+    rig.store.put(&adrift).expect("put");
+    rig.reload();
+    let counted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        counted.footer().contains("1 note"),
+        "{:?}",
+        counted.footer()
+    );
+    assert!(
+        counted.footer().contains("1 adrift"),
+        "{:?}",
+        counted.footer()
+    );
+    let before = counted.rows();
+
+    adrift.status = Status::Resolved;
+    adrift.reply = Some(REPLY.to_owned());
+    rig.agent().rewrite(&adrift).expect("rewrite");
+    rig.reload();
+    rig.advance(ARRIVING_FRAME);
+    let unseen = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        unseen.rows(),
+        before,
+        "a resolve on a note drawn nowhere changed the screen"
+    );
+    assert!(
+        !unseen.rows().iter().any(|row| row.contains(REPLY)),
+        "the agent's line was drawn for a note with no row to draw it under"
+    );
+
+    // The departure runs its length unseen; then the note is dropped and the
+    // count follows, and the effect nobody could see holds nothing.
+    rig.advance(RESOLVED_DEPARTURE);
+    let after = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(!after.footer().contains("note"), "{:?}", after.footer());
+    assert!(
+        !rig.effects.is_running(),
+        "an effect over a note drawn nowhere is still holding the frame clock"
+    );
+}
+
+#[test]
+fn a_resolved_note_met_at_startup_runs_the_departure() {
+    let scratch = fixture("notes-startup");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (_, _, origin) = plain.gutter();
+
+    // Resolved overnight, before this pane ever listed it.
+    rig.agent()
+        .put(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("put");
+    rig.reload();
+    let arriving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        arriving.text(y + 1).chars().nth(usize::from(origin)),
+        Some('↳')
+    );
+    assert!(arriving.notes_under(y)[0].starts_with("swapped for"));
+    rig.advance(RESOLVED_DEPARTURE);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(gone.rows(), plain.rows());
+}
+
+#[test]
+fn a_listing_cannot_bring_back_a_note_already_departing() {
+    let scratch = fixture("notes-race");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, origin) = plain.gutter();
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = noted.notes_under(y);
+    assert_eq!(rig.click(&noted, left + 1, y), Some(Toggled::Withdrawn(1)));
+
+    // The agent's resolve lands after the withdrawal began: the store holds the
+    // file again, and the pane keeps drawing the departure it started.
+    rig.agent()
+        .put(&left_as("n1", BODY, Status::Resolved, Some(REPLY)))
+        .expect("put");
+    rig.reload();
+    rig.advance(ARRIVING_FRAME);
+    let still = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        !still.drew_reply(origin),
+        "a listing brought the agent's line onto rows already leaving"
+    );
+    assert_eq!(still.notes_under(y).len(), rows.len());
+
+    // Once the departure has ended, the store is the truth again.
+    rig.advance(LEAVING);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(gone.rows(), plain.rows());
+    rig.reload();
+    let truth = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        truth.text(y + 1).chars().nth(usize::from(origin)),
+        Some('↳')
+    );
+}
+
+#[test]
+fn the_departed_set_follows_the_store() {
+    let scratch = fixture("notes-departed");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    rig.agent()
+        .put(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("put");
+    rig.reload();
+    rig.advance(RESOLVED_DEPARTURE);
+    assert_eq!(
+        rig.paint(&mut frame, PANE, Pointing::default()).rows(),
+        plain.rows()
+    );
+    // Listed again, still resolved: hidden, since it has departed.
+    rig.reload();
+    assert_eq!(
+        rig.paint(&mut frame, PANE, Pointing::default()).rows(),
+        plain.rows()
+    );
+
+    // Pruned, then the id is reused for a new note: it draws, because the set
+    // of departed ids holds only what the store still does.
+    rig.agent().remove("n1").expect("remove");
+    rig.reload();
+    rig.store.put(&note("n1", 5, EDITED, "again")).expect("put");
+    rig.reload();
+    let reused = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = reused.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("again"), "{:?}", under[0]);
+}
+
+#[test]
+fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
+    let scratch = fixture("notes-cells");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&left_as("n1", BODY, Status::Seen, Some(REPLY)))
+        .expect("put");
+    rig.reload();
+    // The third pane is short enough that the bar is drawn and narrow enough to
+    // have no trailing margin, so only the bar's own narrowing keeps the rows
+    // off its column and the clause below is exercised rather than skipped.
+    let short = Rect::new(0, 0, 40, 20);
+    for pane in [PANE, NARROW, short] {
+        let painted = rig.paint(&mut frame, pane, Pointing::default());
+        if pane == short {
+            assert!(
+                painted.laid.diff.bar.is_some(),
+                "the short pane drew no bar, so nothing here checks the rows stop short of one"
+            );
+        }
+        // A needle the forty-column pane does not cut.
+        let y = painted.row_of("margin.checked_mul");
+        let (_, _, origin) = painted.gutter();
+        let under = painted.notes_under(y);
+        let cells = note_cells(&painted.laid, &painted.view);
+        assert_eq!(cells.len(), 1, "{cells:?}");
+        let cells = &cells[0];
+        assert_eq!(cells.id, "n1");
+        assert_eq!(
+            cells.rows.x, origin,
+            "the rows do not start at the content origin"
+        );
+        assert_eq!(cells.rows.y, y + 1);
+        assert_eq!(
+            usize::from(cells.rows.height),
+            under.len(),
+            "the rows do not cover every row the note drew"
+        );
+        // The word, spelled by the cells the rect names and nothing beside them.
+        let word = cells.word.expect("the word's cells");
+        let spelled: String = (word.x..word.right())
+            .map(|x| painted.cell(x, word.y).symbol().to_owned())
+            .collect();
+        assert_eq!(spelled, "seen", "at {} columns", pane.width);
+        assert_eq!(painted.cell(word.x - 1, word.y).symbol(), " ");
+        // The agent's line: the rows under the word, from the arrow on.
+        let reply = cells.reply.expect("the reply's cells");
+        assert_eq!(reply.y, word.y + 1);
+        assert_eq!(reply.bottom(), cells.rows.bottom());
+        assert_eq!(painted.cell(reply.x, reply.y).symbol(), "↳");
+        // And the row's right edge stops short of the bar and the margin: the
+        // cell past it is never a glyph of the note.
+        assert!(
+            cells.rows.right() <= pane.width,
+            "the rows run past the pane at {} columns",
+            pane.width
+        );
+        if let Some(bar) = painted.laid.diff.bar {
+            assert!(
+                cells.rows.right() <= bar,
+                "the rows reach the bar's column at {} columns",
+                pane.width
+            );
+        }
+        for row in cells.rows.y..cells.rows.bottom() {
+            if cells.rows.right() < pane.width {
+                let past = painted.cell(cells.rows.right(), row).symbol();
+                assert!(
+                    past == " " || past == "│" || past == "█",
+                    "the cell past the rows' right edge holds {past:?} on row {row}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_listing_alert_is_said_once_per_change() {
+    use vigia_core::Listing;
+    let torn = (std::path::PathBuf::from("a.note"), "torn".to_owned());
+    let newer = (std::path::PathBuf::from("b.note"), "newer".to_owned());
+    let skipping = |files: &[(std::path::PathBuf, String)]| {
+        Ok(Listing {
+            notes: Vec::new(),
+            skipped: files.to_vec(),
+        })
+    };
+    let mut alerts = Alerts::default();
+    assert_eq!(
+        alerts.of(&skipping(std::slice::from_ref(&torn))),
+        Some("skipped the note file a.note: torn".to_owned())
+    );
+    assert_eq!(
+        alerts.of(&skipping(std::slice::from_ref(&torn))),
+        None,
+        "the same torn file was said again on the next wake"
+    );
+    assert_eq!(
+        alerts.of(&skipping(&[torn.clone(), newer.clone()])),
+        Some("skipped the note file a.note and 1 more: torn".to_owned())
+    );
+    assert_eq!(
+        alerts.of(&skipping(&[])),
+        None,
+        "files that read again are not news"
+    );
+    assert_eq!(
+        alerts.of(&skipping(std::slice::from_ref(&newer))),
+        Some("skipped the note file b.note: newer".to_owned()),
+        "a file torn again after reading whole is news again"
+    );
+    let differently = (newer.0.clone(), "torn differently".to_owned());
+    assert_eq!(
+        alerts.of(&skipping(std::slice::from_ref(&differently))),
+        Some("skipped the note file b.note: torn differently".to_owned()),
+        "the same file skipped for a new reason was not news"
+    );
+    // The store lists in the directory's order, which a write beside the files
+    // can move; the same files in another order are not news.
+    assert_eq!(
+        alerts.of(&skipping(&[differently.clone(), torn.clone()])),
+        Some("skipped the note file a.note and 1 more: torn".to_owned()),
+        "the sorted set names its first file first"
+    );
+    assert_eq!(
+        alerts.of(&skipping(&[torn.clone(), differently.clone()])),
+        None,
+        "the same skipped files in another order were said again"
+    );
+
+    // A store that cannot be read at all: a file where its directory should be.
+    let scratch = fixture("notes-unreadable-listing");
+    let root = TempDir::new("notes-unreadable-listing-state");
+    let store = Store::open(root.path(), scratch.root()).expect("open the store");
+    fs::write(store.dir(), b"not a directory").expect("block the store's directory");
+    let failed = store.list();
+    assert!(
+        failed.is_err(),
+        "a file where the directory should be listed"
+    );
+    let first = alerts
+        .of(&failed)
+        .expect("a store that cannot be read is news");
+    assert!(first.starts_with("could not read the notes: "), "{first:?}");
+    assert_eq!(
+        alerts.of(&store.list()),
+        None,
+        "the same failure was said again on the next wake"
+    );
+    fs::remove_file(store.dir()).expect("unblock the store's directory");
+    assert_eq!(
+        alerts.of(&store.list()),
+        None,
+        "a store that reads whole again is not news"
+    );
+    fs::write(store.dir(), b"not a directory").expect("block it again");
+    assert_eq!(
+        alerts.of(&store.list()),
+        Some(first),
+        "a store that fails again after reading whole is news again"
+    );
+}
+
+#[test]
+fn a_reply_landing_on_an_open_note_crossfades_in() {
+    let scratch = fixture("notes-replied");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = open.row_of(EDITED);
+    let (_, _, origin) = open.gutter();
+    assert_eq!(open.notes_under(y).len(), 1);
+
+    // The agent answers without closing the note: the line arrives under it.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Seen, Some(REPLY)))
+        .expect("rewrite");
+    rig.reload();
+    rig.advance(ARRIVING_FRAME);
+    let arriving = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = arriving.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert!(under[1].starts_with("swapped for"), "{:?}", under[1]);
+    let cells = note_cells(&arriving.laid, &arriving.view);
+    let reply = cells[0].reply.expect("the reply's cells");
+    assert_ne!(
+        arriving.fg(reply.x + 2, reply.y),
+        Some(dim),
+        "one frame in, the agent's line is drawn in the chrome's dim rather than arriving"
+    );
+    // The note's own rows do not move: the body keeps the chrome's dim.
+    assert_eq!(arriving.fg(origin + 2, y + 1), Some(dim));
+
+    rig.advance(RESOLVE_ARRIVING);
+    let settled = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(settled.fg(reply.x + 2, reply.y), Some(dim));
+    assert!(!rig.effects.is_running());
+}
+
+#[test]
+fn a_resolve_between_a_stale_view_and_a_withdraw_click_survives() {
+    let scratch = fixture("notes-stale-withdraw");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let marked = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = marked.row_of(EDITED);
+    let (left, _, origin) = marked.gutter();
+
+    // The agent resolves it while the screen still shows it open, and the
+    // reader's press lands on that screen.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    assert_eq!(
+        rig.click(&marked, left + 1, y),
+        Some(Toggled::Withdrawn(0)),
+        "the press withdrew a note the agent had already resolved"
+    );
+    assert_eq!(
+        files_in(rig.store.dir()).len(),
+        1,
+        "the press deleted the agent's resolve and its line"
+    );
+    let departing = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        departing.text(y + 1).chars().nth(usize::from(origin)),
+        Some('↳'),
+        "the resolve that landed first is not what the next frame shows"
+    );
+
+    // And a press on a note nobody resolved still withdraws it, so the case
+    // above is the resolve being honoured and not a press that removes nothing.
+    rig.store
+        .put(&note("n2", 6, "line 6", "short"))
+        .expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let six = open.row_of("line 6");
+    assert_eq!(rig.click(&open, left + 1, six), Some(Toggled::Withdrawn(1)));
+    assert_eq!(
+        files_in(rig.store.dir()).len(),
+        1,
+        "the press on an open note left its file behind"
+    );
+}
+
+#[test]
+fn a_resolve_landing_inside_a_crossfade_supersedes_it() {
+    use vigia::Change;
+    let now = Instant::now();
+    let theme = Theme::default();
+    let mut effects = NoteEffects::default();
+    effects.arm(vec![Change::Seen("n1".to_owned())], &theme, now);
+    effects.arm(vec![Change::Replied("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.live(),
+        2,
+        "a word and a line arrive on their own cells"
+    );
+    effects.arm(vec![Change::Replied("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.live(),
+        2,
+        "a line arriving again replaced nothing, so two effects draw one cell"
+    );
+    effects.arm(vec![Change::Resolved("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.live(),
+        1,
+        "a resolve arrived over a word or a line still arriving, so two effects draw one cell"
+    );
+    effects.arm(vec![Change::Seen("n2".to_owned())], &theme, now);
+    assert_eq!(effects.live(), 2, "another note's effect was evicted");
+    effects.arm(vec![Change::Seen("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.live(),
+        2,
+        "a word arriving over a whole note already leaving was armed beside it"
+    );
+
+    // And the one left on n1 is the whole note's: at its first frame the fade
+    // holds every cell of the rows in the announcement's ink, the body's
+    // included, where a word's or a line's effect would reach the word alone.
+    let from = theme.note.fg.expect("the announcement's ink");
+    let rows = Rect::new(0, 0, 20, 2);
+    let cells = vec![vigia::NoteCells {
+        id: "n1".to_owned(),
+        rows,
+        word: Some(Rect::new(16, 0, 4, 1)),
+        reply: Some(Rect::new(0, 1, 20, 1)),
+    }];
+    let mut buf = ratatui::buffer::Buffer::empty(rows);
+    buf.set_string(
+        0,
+        0,
+        "the reader's own  seen",
+        ratatui::style::Style::default(),
+    );
+    buf.set_string(0, 1, "the agent's line", ratatui::style::Style::default());
+    effects.draw(Duration::ZERO, &mut buf, &cells);
+    assert_eq!(
+        buf[(0, 0)].style().fg,
+        Some(from),
+        "the effect left on n1 does not cover its body, so the narrower one survived"
+    );
+}
+
+#[test]
+fn a_second_reply_on_a_still_open_note_crossfades_too() {
+    use vigia::Change;
+    let now = Instant::now();
+    let mut ledger = Ledger::default();
+    ledger.reload(vec![note("n1", 5, EDITED, "short")], now);
+    assert_eq!(
+        ledger.reload(
+            vec![left_as("n1", "short", Status::Seen, Some("first"))],
+            now
+        ),
+        vec![
+            Change::Seen("n1".to_owned()),
+            Change::Replied("n1".to_owned())
+        ]
+    );
+    assert_eq!(
+        ledger.reload(
+            vec![left_as("n1", "short", Status::Seen, Some("second"))],
+            now
+        ),
+        vec![Change::Replied("n1".to_owned())],
+        "a line the agent rewrote popped into place rather than arriving"
+    );
+    assert!(
+        ledger
+            .reload(
+                vec![left_as("n1", "short", Status::Seen, Some("second"))],
+                now
+            )
+            .is_empty(),
+        "a line that did not change was drawn arriving again"
+    );
+}
+
+#[test]
+fn a_note_that_replies_and_resolves_in_one_wake_departs_once() {
+    // Two things moved in one wake, and only the departure is armed: the
+    // agent's line arrives inside it, not once for the reply and once again.
+    use vigia::Change;
+    let now = Instant::now();
+    let mut ledger = Ledger::default();
+    assert!(
+        ledger
+            .reload(vec![note("n1", 5, EDITED, "short")], now)
+            .is_empty(),
+        "a note first met moved nothing"
+    );
+    let changes = ledger.reload(
+        vec![left_as("n1", "short", Status::Resolved, Some(REPLY))],
+        now,
+    );
+    assert_eq!(changes, vec![Change::Resolved("n1".to_owned())]);
 }

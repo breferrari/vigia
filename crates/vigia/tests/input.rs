@@ -6,7 +6,7 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    ARRIVING, ARRIVING_FRAME, Action, Deadlines, Grabbed, Held, Hovered, LIST_SETTLED,
+    ARRIVING, ARRIVING_FRAME, Action, Deadlines, Grabbed, Held, Hovered, LEAVING, LIST_SETTLED,
     NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
     WHEEL_ROWS, action_for, drag_action, hover_after, patience, repainted, scroll_mark, settled,
 };
@@ -528,6 +528,7 @@ fn two_regions() -> Regions {
             track: (6, 13),
             bar: Some(79),
             gutter: (0, 0),
+            text: 0,
         },
         sheet: None,
     }
@@ -844,6 +845,7 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             track: (2, 4),
             bar: Some(79),
             gutter: (0, 0),
+            text: 0,
         },
         diff: Region {
             top: 8,
@@ -853,6 +855,7 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             track: (9, 10),
             bar: Some(79),
             gutter: (0, 0),
+            text: 0,
         },
         sheet: None,
     };
@@ -1300,6 +1303,7 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
             track: (2, 4),
             bar: Some(79),
             gutter: (0, 0),
+            text: 0,
         },
         diff: Region {
             top: 8,
@@ -1309,6 +1313,7 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
             track: (9, 10),
             bar: Some(79),
             gutter: (0, 0),
+            text: 0,
         },
         sheet: None,
     };
@@ -1736,6 +1741,18 @@ fn nothing_armed_means_no_deadline_at_all() {
         Some(SETTLING),
         "a print that moved inside the margin did not ask the loop to wake, so the \
          bar stays scaled to the old total until the next event"
+    );
+    assert_eq!(
+        patience(
+            Deadlines {
+                departing: Some(now + LEAVING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(LEAVING),
+        "a note on its way off the screen did not ask the loop to wake, so its \
+         rows stay drawn after the departure until the next event"
     );
 
     // The nearest of them, whichever it is, because the loop has to wake for
