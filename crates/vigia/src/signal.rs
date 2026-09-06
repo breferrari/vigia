@@ -448,7 +448,8 @@ mod tests {
             // from a `Reply` back to a `BOOL` uncalled.
             assert!(
                 !CAUGHT.contains(&5),
-                "5 is claimed now, so handing it to the real handler would park                  forever; pick a kind outside `CAUGHT` or drop this test"
+                "5 is claimed now, so handing it to the real handler would park \
+                 forever; pick a kind outside `CAUGHT` or drop this test"
             );
 
             // SAFETY: `on_ctrl` performs no unsafe operation. It does read `SHELL`,
