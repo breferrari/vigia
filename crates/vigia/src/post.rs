@@ -143,8 +143,13 @@ fn connect(socket: &str) -> io::Result<impl Write> {
         .open(socket)
 }
 
-/// Post `content` to every session registered against this worktree, through
-/// `send`, and say what came of it.
+/// Post to every session registered against this worktree, through `send`, and
+/// say what came of it.
+///
+/// `content` is a closure and is called only once a registration is in hand,
+/// because building the message reads the file the note's neighbours come from
+/// and most readers never install the hook: the common Enter must not spend a
+/// whole-file read on a message nobody is listening for.
 ///
 /// Every registration gets exactly one message. A registration exists only
 /// because a live session ran the hook in this tree, and a note about a line of
@@ -156,7 +161,7 @@ fn connect(socket: &str) -> io::Result<impl Write> {
 /// rung entirely.
 pub fn post_each(
     registry: &Registry,
-    content: &str,
+    content: impl FnOnce() -> String,
     mut send: impl FnMut(&Registration, &str) -> io::Result<()>,
 ) -> Posted {
     // A registry that cannot be read is not the same as an empty one: nothing
@@ -168,14 +173,15 @@ pub fn post_each(
     if registered.is_empty() {
         return Posted::Unregistered;
     }
+    let content = content();
     let mut sent = false;
     for registration in &registered {
-        sent |= send(registration, content).is_ok();
+        sent |= send(registration, &content).is_ok();
     }
     if sent { Posted::Sent } else { Posted::Failed }
 }
 
 /// [`post_each`] over the real transport.
-pub fn post_all(registry: &Registry, content: &str) -> Posted {
+pub fn post_all(registry: &Registry, content: impl FnOnce() -> String) -> Posted {
     post_each(registry, content, post)
 }

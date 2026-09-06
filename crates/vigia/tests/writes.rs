@@ -15,10 +15,10 @@ use vigia::{
     opening, regions, render, state_root,
 };
 use vigia_core::{
-    Frame, Highlighter, History, Registration, Registry, Store, WARM_FILES, WatchOptions, Worktree,
+    Frame, Highlighter, History, Note, Registry, Store, WARM_FILES, WatchOptions, Worktree,
 };
 
-use support::{Scratch, TempDir, made_link, settle_tree};
+use support::{Scratch, TempDir, made_link, note, registration, settle_tree};
 
 /// Small on purpose. This gate counts filesystem entries rather than
 /// milliseconds, so the hundred-file fixture the budget gates share would buy it
@@ -489,24 +489,12 @@ fn a_registered_session_is_read_and_never_written() {
     let store = Store::open(root.path(), scratch.root()).expect("open the store");
     let registry = Registry::open(root.path(), scratch.root()).expect("open the registry");
 
-    let registration = Registration {
-        session: "aaaa-1111".to_owned(),
-        socket: "inbox.sock".to_owned(),
-        token: "0123456789abcdef".to_owned(),
-        written: SystemTime::UNIX_EPOCH,
-    };
+    let registration = registration("aaaa-1111", "inbox.sock");
     registry.put(&registration).expect("register");
 
-    let note = vigia_core::Note {
-        id: "n1".to_owned(),
+    let note = Note {
         path: "src/a.rs".to_owned(),
-        side: vigia_core::Side::New,
-        line: 1,
-        text: "one".to_owned(),
-        body: "use saturating_mul".to_owned(),
-        status: vigia_core::Status::Open,
-        reply: None,
-        written: SystemTime::UNIX_EPOCH,
+        ..note("n1", 1, "one", "use saturating_mul")
     };
 
     settle_tree(root.path());
@@ -514,7 +502,7 @@ fn a_registered_session_is_read_and_never_written() {
 
     // The whole of Enter's second half, over a transport that takes everything.
     store.put(&note).expect("the store took it");
-    let posted = post_each(&registry, &content(&note, &[]), |_, _| Ok(()));
+    let posted = post_each(&registry, || content(&note, &[]), |_, _| Ok(()));
     assert_eq!(posted, vigia::Posted::Sent);
 
     let moved = difference(&before, &snapshot(root.path()));

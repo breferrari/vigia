@@ -18,11 +18,10 @@ use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::{Error, Result};
-use crate::notes::{Cursor, is_id, key};
+use crate::notes::{Cursor, is_id, key, rename_into_place, temp_name};
 
 /// The first line of every registration file. A file whose first line differs
 /// was written by a `vigia` this one does not know, and is skipped rather than
@@ -36,9 +35,6 @@ const SESSION_EXT: &str = "session";
 /// The directory registrations live in, under the state root and beside the
 /// stores.
 const SESSIONS_DIR: &str = "sessions";
-
-/// One per process, so two writes in one process never share a temporary.
-static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// One agent session's inbox, as that session's own hook recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,21 +88,13 @@ impl Registry {
     pub fn put(&self, registration: &Registration) -> Result<()> {
         let done = self.path_of(&registration.session)?;
         fs::create_dir_all(&self.dir).map_err(|source| Error::session(&self.dir, source))?;
-        let tmp = self.dir.join(format!(
-            "{}.{:x}-{:x}.tmp",
-            registration.session,
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        let tmp = self.dir.join(temp_name(&registration.session));
         fs::write(&tmp, encode(registration)).map_err(|source| Error::session(&tmp, source))?;
         // The token is the whole of the authority this file carries, so on a
         // platform with modes it is the reader's alone before it is put where
         // anything looks for it. Windows has none, and inherits a per-user root.
         restrict(&tmp);
-        fs::rename(&tmp, &done).map_err(|source| {
-            let _ = fs::remove_file(&tmp);
-            Error::session(&done, source)
-        })
+        rename_into_place(&tmp, &done).map_err(|source| Error::session(&done, source))
     }
 
     /// Forget the session `session`. One already gone is not an error: a

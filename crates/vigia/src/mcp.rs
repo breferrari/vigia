@@ -676,59 +676,61 @@ pub const SOCKET_VAR: &str = "CLAUDE_CODE_MESSAGING_SOCKET";
 pub const TOKEN_VAR: &str = "CLAUDE_CODE_MESSAGING_TOKEN";
 
 /// What a `SessionStart` or `SessionEnd` hook's payload asks the registry for.
+///
+/// `None` from [`hooked`] is nothing to do and nothing wrong: the payload names
+/// no session, or the environment carries no socket because messaging is off or
+/// this Claude Code is below the floor that has it. A hook that failed loudly at
+/// every session start would be worse than the rung being absent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hooked {
     /// Record the hook's own session, replacing whatever it had.
     Put(Registration),
     /// The session has ended: forget it.
     Clear(String),
-    /// Nothing to do, and nothing wrong. The payload names no session, or the
-    /// environment carries no socket because messaging is off or this Claude
-    /// Code is below the floor that has it. A hook that failed loudly at every
-    /// session start would be worse than the rung being absent.
-    Nothing,
 }
 
-/// Read a hook's JSON payload and say what the registry should do about it.
+/// A hook's payload, or `Value::Null` for one that is not JSON at all, which
+/// asks for the same nothing an empty one does.
+#[must_use]
+pub fn hook_payload(text: &str) -> Value {
+    serde_json::from_str(text).unwrap_or(Value::Null)
+}
+
+/// Read a hook's payload and say what the registry should do about it.
 ///
 /// The event decides the direction: `SessionEnd` clears and everything else
 /// records, so a session that starts, resumes, is cleared or is forked all
 /// leave one current registration behind them.
 #[must_use]
-pub fn hooked(payload: &str, env: impl Fn(&str) -> Option<String>) -> Hooked {
-    let Ok(hook) = serde_json::from_str::<Value>(payload) else {
-        return Hooked::Nothing;
-    };
-    let Some(session) = hook.get("session_id").and_then(Value::as_str) else {
-        return Hooked::Nothing;
-    };
+pub fn hooked(hook: &Value, env: impl Fn(&str) -> Option<String>) -> Option<Hooked> {
+    let session = hook.get("session_id").and_then(Value::as_str)?;
     if hook.get("hook_event_name").and_then(Value::as_str) == Some("SessionEnd") {
-        return Hooked::Clear(session.to_owned());
+        return Some(Hooked::Clear(session.to_owned()));
     }
     let present = |name: &str| env(name).filter(|value| !value.is_empty());
-    match (present(SOCKET_VAR), present(TOKEN_VAR)) {
-        (Some(socket), Some(token)) => Hooked::Put(Registration {
-            session: session.to_owned(),
-            socket,
-            token,
-            written: SystemTime::now(),
-        }),
-        _ => Hooked::Nothing,
-    }
+    Some(Hooked::Put(Registration {
+        session: session.to_owned(),
+        socket: present(SOCKET_VAR)?,
+        token: present(TOKEN_VAR)?,
+        written: SystemTime::now(),
+    }))
 }
 
-/// Where a hook's process should look for the worktree: the variable Claude
-/// Code sets for it, then the directory the payload says the session is in,
-/// then this process's own.
-fn hook_workdir(payload: &str, env: &impl Fn(&str) -> Option<String>) -> PathBuf {
+/// The worktree the variable Claude Code sets for a server or a hook names, if
+/// it names one.
+fn project_dir(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     env(PROJECT_VAR)
         .filter(|value| !value.is_empty())
-        .or_else(|| {
-            serde_json::from_str::<Value>(payload)
-                .ok()
-                .and_then(|hook| hook.get("cwd").and_then(Value::as_str).map(str::to_owned))
-        })
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+        .map(PathBuf::from)
+}
+
+/// Where a hook's process should look for the worktree: what Claude Code set
+/// for it, then the directory the payload says the session is in, then this
+/// process's own.
+fn hook_workdir(hook: &Value, env: &impl Fn(&str) -> Option<String>) -> PathBuf {
+    project_dir(env)
+        .or_else(|| hook.get("cwd").and_then(Value::as_str).map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// `vigia mcp register`: record the hook's own session and its socket from a
@@ -745,11 +747,11 @@ pub fn register() -> ExitCode {
     let _ = io::stdin().read_to_string(&mut payload);
     let env = |key: &str| std::env::var(key).ok();
 
-    let wanted = hooked(&payload, env);
-    if wanted == Hooked::Nothing {
+    let hook = hook_payload(&payload);
+    let Some(wanted) = hooked(&hook, env) else {
         return ExitCode::SUCCESS;
-    }
-    let Ok(worktree) = Worktree::discover(hook_workdir(&payload, &env)) else {
+    };
+    let Ok(worktree) = Worktree::discover(hook_workdir(&hook, &env)) else {
         return ExitCode::SUCCESS;
     };
     let Some(Ok(registry)) = state::registry_for(worktree.workdir(), env) else {
@@ -758,7 +760,6 @@ pub fn register() -> ExitCode {
     let done = match &wanted {
         Hooked::Put(registration) => registry.put(registration),
         Hooked::Clear(session) => registry.remove(session),
-        Hooked::Nothing => Ok(()),
     };
     match done {
         Ok(()) => ExitCode::SUCCESS,
@@ -790,9 +791,7 @@ pub fn pending_line(open: usize) -> Option<String> {
 #[must_use]
 pub fn pending() -> ExitCode {
     let env = |key: &str| std::env::var(key).ok();
-    let project = env(PROJECT_VAR)
-        .filter(|value| !value.is_empty())
-        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let project = project_dir(&env).unwrap_or_else(|| PathBuf::from("."));
     let open = Worktree::discover(project)
         .ok()
         .and_then(|worktree| match state::store_for(worktree.workdir(), env) {
@@ -817,10 +816,9 @@ pub fn pending() -> ExitCode {
 /// under one lock, so no two messages interleave.
 #[must_use]
 pub fn serve() -> ExitCode {
-    let project = std::env::var_os(PROJECT_VAR)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    let mut server = Server::open(project.as_deref(), |key| std::env::var(key).ok());
+    let env = |key: &str| std::env::var(key).ok();
+    let project = project_dir(&env);
+    let mut server = Server::open(project.as_deref(), env);
     if let Some(notice) = server.notice() {
         eprintln!("vigia mcp: {notice}");
     }

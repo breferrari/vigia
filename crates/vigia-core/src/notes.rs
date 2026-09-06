@@ -39,6 +39,25 @@ pub const NEAR: u32 = 8;
 /// two ids minted in one microsecond differ.
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// A temporary beside `stem` that no other process or thread can be writing.
+/// Every record under the state root is written through this and
+/// [`rename_into_place`], so the two are one rule rather than one per record.
+pub(crate) fn temp_name(stem: &str) -> String {
+    format!(
+        "{stem}.{:x}-{:x}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Move a written temporary onto its final name, taking the temporary with it
+/// when it cannot: a failed write must leave nothing behind to be listed.
+pub(crate) fn rename_into_place(tmp: &Path, done: &Path) -> io::Result<()> {
+    fs::rename(tmp, done).inspect_err(|_| {
+        let _ = fs::remove_file(tmp);
+    })
+}
+
 /// Which side of the diff a line is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -316,21 +335,13 @@ impl Store {
             return Ok(false);
         }
         fs::create_dir_all(&self.dir).map_err(|source| Error::store(&self.dir, source))?;
-        let tmp = self.dir.join(format!(
-            "{}.{:x}-{:x}.tmp",
-            note.id,
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        let tmp = self.dir.join(temp_name(&note.id));
         fs::write(&tmp, encode(note)).map_err(|source| Error::store(&tmp, source))?;
         if only_present && !done.is_file() {
             let _ = fs::remove_file(&tmp);
             return Ok(false);
         }
-        fs::rename(&tmp, &done).map_err(|source| {
-            let _ = fs::remove_file(&tmp);
-            Error::store(&done, source)
-        })?;
+        rename_into_place(&tmp, &done).map_err(|source| Error::store(&done, source))?;
         Ok(true)
     }
 

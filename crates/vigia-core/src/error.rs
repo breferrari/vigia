@@ -28,16 +28,12 @@ pub enum Error {
     },
     /// The filter configuration git would apply could not be assembled.
     FilterSetup(Box<dyn std::error::Error + Send + Sync>),
-    /// The notes store could not be created, written, read or pruned.
+    /// A record under the reader's state directory could not be created,
+    /// written, read or removed.
     Store {
-        /// The path the operation was on.
-        path: std::path::PathBuf,
-        /// The underlying I/O failure.
-        source: std::io::Error,
-    },
-    /// The registry of agent sessions could not be created, written, read or
-    /// cleared.
-    Session {
+        /// Which record it is, for the sentence: the notes store, or the
+        /// registry of agent sessions.
+        what: &'static str,
         /// The path the operation was on.
         path: std::path::PathBuf,
         /// The underlying I/O failure.
@@ -82,7 +78,6 @@ impl Error {
             | Error::Watch(_)
             | Error::FilterSetup(_)
             | Error::Store { .. }
-            | Error::Session { .. }
             | Error::Canonicalise { .. } => None,
         }
     }
@@ -106,9 +101,10 @@ impl Error {
         }
     }
 
-    /// The store could not be used at `path`.
+    /// The notes store could not be used at `path`.
     pub(crate) fn store(path: &std::path::Path, source: std::io::Error) -> Self {
         Error::Store {
+            what: "notes store",
             path: path.to_owned(),
             source,
         }
@@ -116,7 +112,8 @@ impl Error {
 
     /// The session registry could not be used at `path`.
     pub(crate) fn session(path: &std::path::Path, source: std::io::Error) -> Self {
-        Error::Session {
+        Error::Store {
+            what: "session registry",
             path: path.to_owned(),
             source,
         }
@@ -146,17 +143,10 @@ impl fmt::Display for Error {
             Error::Filter { path, source } => {
                 write!(f, "could not normalise {path} the way git would: {source}")
             }
-            Error::Store { path, source } => {
+            Error::Store { what, path, source } => {
                 write!(
                     f,
-                    "could not use the notes store at {}: {source}",
-                    path.display()
-                )
-            }
-            Error::Session { path, source } => {
-                write!(
-                    f,
-                    "could not use the session registry at {}: {source}",
+                    "could not use the {what} at {}: {source}",
                     path.display()
                 )
             }
@@ -174,7 +164,6 @@ impl std::error::Error for Error {
             Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) => Some(e.as_ref()),
             Error::Read { source, .. }
             | Error::Store { source, .. }
-            | Error::Session { source, .. }
             | Error::Canonicalise { source, .. } => Some(source),
             Error::Filter { source, .. } => Some(source.as_ref()),
             Error::Bare | Error::MissingBlob { .. } => None,

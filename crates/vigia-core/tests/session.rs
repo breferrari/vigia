@@ -4,10 +4,10 @@
 mod support;
 
 use std::fs;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
-use support::{Scratch, TempDir, files_in};
-use vigia_core::{Registration, Registry, Store};
+use support::{Scratch, TempDir, files_in, registration};
+use vigia_core::{Registry, Store};
 
 /// A registry on a fresh state root for a fresh repository.
 fn registry(name: &str) -> (Scratch, TempDir, Registry) {
@@ -15,15 +15,6 @@ fn registry(name: &str) -> (Scratch, TempDir, Registry) {
     let root = TempDir::new("state");
     let registry = Registry::open(root.path(), scratch.root()).expect("open");
     (scratch, root, registry)
-}
-
-fn registration(session: &str, socket: &str) -> Registration {
-    Registration {
-        session: session.to_owned(),
-        socket: socket.to_owned(),
-        token: "0123456789abcdef".to_owned(),
-        written: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
-    }
 }
 
 #[test]

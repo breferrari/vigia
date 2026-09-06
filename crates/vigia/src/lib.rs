@@ -1116,17 +1116,20 @@ impl Shell {
         let Some(registry) = self.registry.clone() else {
             return;
         };
-        // A removed line is nowhere in the working tree, so there is nothing to
-        // read around it. The anchor and the reader's words still go, and the
-        // agent has the old side's neighbours from `notes` over MCP.
-        let context = match note.side {
-            Side::New => notes::around(Path::new(&self.root), &note.path, note.line),
-            Side::Old => Vec::new(),
-        };
-        let content = post::content(note, &context);
-        let tx = tx.clone();
+        let (root, note, tx) = (self.root.clone(), note.clone(), tx.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(Wake::Posted(post::post_all(&registry, &content)));
+            let message = || {
+                // A removed line is nowhere in the working tree, so there is
+                // nothing to read around it. The anchor and the reader's words
+                // still go, and the agent has the old side's neighbours from
+                // `notes` over MCP.
+                let context = match note.side {
+                    Side::New => notes::around(Path::new(&root), &note.path, note.line),
+                    Side::Old => Vec::new(),
+                };
+                post::content(&note, &context)
+            };
+            let _ = tx.send(Wake::Posted(post::post_all(&registry, message)));
         });
     }
 

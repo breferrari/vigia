@@ -11,26 +11,15 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use serde_json::Value;
 use std::cell::RefCell;
 use std::io;
-use std::time::{Duration, UNIX_EPOCH};
-
-use serde_json::Value;
 use vigia::post::{Posted, content, post, post_each, word};
 use vigia_core::{Note, Registration, Registry, Side, Status, Store};
 
-use support::{Scratch, TempDir, note};
+use support::{Scratch, TempDir, note, registration};
 
 const PATH: &str = "src/watch.rs";
-
-fn registration(session: &str, socket: &str) -> Registration {
-    Registration {
-        session: session.to_owned(),
-        socket: socket.to_owned(),
-        token: format!("token-of-{session}"),
-        written: UNIX_EPOCH + Duration::from_secs(1_700_000_000),
-    }
-}
 
 /// A registry on a fresh state root for a fresh repository, with `sessions`
 /// registered against it.
@@ -106,7 +95,7 @@ fn enter_writes_the_auth_line_then_exactly_one_user_frame() {
     let (_scratch, _root, registry) = registry("socket-one", &["aaaa-1111"]);
     let wire = Wire::default();
 
-    let posted = post_each(&registry, "the note", wire.taking());
+    let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Sent);
 
     let lines = wire.only();
@@ -128,7 +117,7 @@ fn the_frame_names_the_registered_session() {
     // has ended from delivering into whichever session next answers its socket.
     let (_scratch, _root, registry) = registry("socket-session", &["aaaa-1111"]);
     let wire = Wire::default();
-    post_each(&registry, "the note", wire.taking());
+    post_each(&registry, || "the note".to_owned(), wire.taking());
 
     let frame: Value = serde_json::from_str(&wire.only()[1]).expect("JSON");
     assert_eq!(frame["session_id"], "aaaa-1111");
@@ -140,7 +129,7 @@ fn the_frame_offers_no_reply_address() {
     // way back is the MCP `resolve` and `reply` the pane already draws.
     let (_scratch, _root, registry) = registry("socket-from", &["aaaa-1111"]);
     let wire = Wire::default();
-    post_each(&registry, "the note", wire.taking());
+    post_each(&registry, || "the note".to_owned(), wire.taking());
 
     let frame: Value = serde_json::from_str(&wire.only()[1]).expect("JSON");
     assert!(frame.get("from").is_none(), "frame carries a from: {frame}");
@@ -153,7 +142,7 @@ fn a_note_body_that_would_break_the_wire_is_carried_whole() {
     let (_scratch, _root, registry) = registry("socket-escape", &["aaaa-1111"]);
     let wire = Wire::default();
     let typed = "line one\nline \"two\"\\ and a tab\there";
-    post_each(&registry, typed, wire.taking());
+    post_each(&registry, || typed.to_owned(), wire.taking());
 
     let lines = wire.only();
     assert_eq!(lines.len(), 2, "the body did not end the frame: {lines:?}");
@@ -208,7 +197,7 @@ fn no_registration_attempts_no_connection() {
     let (_scratch, _root, registry) = registry("socket-none", &[]);
     let wire = Wire::default();
 
-    let posted = post_each(&registry, "the note", wire.taking());
+    let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Unregistered);
     assert!(wire.sessions().is_empty(), "something was opened");
     assert_eq!(word(Posted::Unregistered), None);
@@ -228,7 +217,7 @@ fn a_dead_socket_costs_one_failed_connect_and_the_note_stays_in_the_store() {
     store.put(&note).expect("the store took it");
 
     let wire = Wire::default();
-    let posted = post_each(&registry, "the note", wire.dead());
+    let posted = post_each(&registry, || "the note".to_owned(), wire.dead());
 
     assert_eq!(posted, Posted::Failed);
     assert_eq!(wire.sessions(), vec!["aaaa-1111"], "exactly one attempt");
@@ -250,7 +239,7 @@ fn every_registration_on_the_worktree_takes_exactly_one_message() {
     let (_scratch, _root, registry) = registry("socket-many", &["aaaa-1111", "bbbb-2222"]);
     let wire = Wire::default();
 
-    let posted = post_each(&registry, "the note", wire.taking());
+    let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Sent);
 
     let mut sessions = wire.sessions();
@@ -263,13 +252,17 @@ fn one_session_taking_it_is_sent_even_when_another_refuses() {
     let (_scratch, _root, registry) = registry("socket-mixed", &["aaaa-1111", "bbbb-2222"]);
     let taken = RefCell::new(Vec::new());
 
-    let posted = post_each(&registry, "the note", |registration, _| {
-        if registration.session == "aaaa-1111" {
-            return Err(io::Error::from(io::ErrorKind::NotFound));
-        }
-        taken.borrow_mut().push(registration.session.clone());
-        Ok(())
-    });
+    let posted = post_each(
+        &registry,
+        || "the note".to_owned(),
+        |registration, _| {
+            if registration.session == "aaaa-1111" {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+            taken.borrow_mut().push(registration.session.clone());
+            Ok(())
+        },
+    );
 
     assert_eq!(posted, Posted::Sent, "one took it, so it was sent");
     assert_eq!(taken.into_inner(), vec!["bbbb-2222"]);
@@ -346,17 +339,21 @@ fn a_note_is_posted_only_once_its_words_are_in_the_store() {
     store.put(&note).expect("put");
 
     let on_disk = RefCell::new(Vec::new());
-    post_each(&registry, "the note", |_, _| {
-        on_disk.borrow_mut().extend(
-            store
-                .list()
-                .expect("list")
-                .notes
-                .iter()
-                .map(|n| n.id.clone()),
-        );
-        Ok(())
-    });
+    post_each(
+        &registry,
+        || "the note".to_owned(),
+        |_, _| {
+            on_disk.borrow_mut().extend(
+                store
+                    .list()
+                    .expect("list")
+                    .notes
+                    .iter()
+                    .map(|n| n.id.clone()),
+            );
+            Ok(())
+        },
+    );
 
     assert_eq!(
         on_disk.into_inner(),
@@ -376,7 +373,7 @@ fn the_written_time_orders_nothing_the_wire_sees() {
     // machine going to the agent.
     let (_scratch, _root, registry) = registry("socket-time", &["aaaa-1111"]);
     let wire = Wire::default();
-    post_each(&registry, "the note", wire.taking());
+    post_each(&registry, || "the note".to_owned(), wire.taking());
 
     let frame: Value = serde_json::from_str(&wire.only()[1]).expect("JSON");
     let rendered = frame.to_string();

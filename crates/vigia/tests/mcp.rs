@@ -14,8 +14,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use vigia::mcp::{
-    Hooked, PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, SOCKET_VAR, Server, TOKEN_VAR, hooked,
-    pending_line,
+    Hooked, PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, SOCKET_VAR, Server, TOKEN_VAR,
+    hook_payload, hooked, pending_line,
 };
 use vigia::{VERSION, state_root};
 use vigia_core::{Note, Side, Status, Store};
@@ -1252,8 +1252,8 @@ fn a_session_start_payload_registers_and_a_session_end_clears() {
         _ => None,
     };
     let start = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart", "cwd": "."});
-    match hooked(&start.to_string(), env) {
-        Hooked::Put(registration) => {
+    match hooked(&start, env) {
+        Some(Hooked::Put(registration)) => {
             assert_eq!(registration.session, "aaaa-1111");
             assert_eq!(registration.socket, r"\.\pipe\LOCAL\cc-msg-abc");
             assert_eq!(registration.token, "the-token");
@@ -1264,8 +1264,8 @@ fn a_session_start_payload_registers_and_a_session_end_clears() {
     let end =
         json!({"session_id": "aaaa-1111", "hook_event_name": "SessionEnd", "reason": "other"});
     assert_eq!(
-        hooked(&end.to_string(), env),
-        Hooked::Clear("aaaa-1111".to_owned()),
+        hooked(&end, env),
+        Some(Hooked::Clear("aaaa-1111".to_owned())),
         "only SessionEnd clears, and it clears by session"
     );
 
@@ -1274,7 +1274,7 @@ fn a_session_start_payload_registers_and_a_session_end_clears() {
     for event in ["SessionStart", "SessionResume", "anything else"] {
         let payload = json!({"session_id": "bbbb-2222", "hook_event_name": event});
         assert!(
-            matches!(hooked(&payload.to_string(), env), Hooked::Put(_)),
+            matches!(hooked(&payload, env), Some(Hooked::Put(_))),
             "{event} did not record"
         );
     }
@@ -1289,18 +1289,22 @@ fn a_hook_with_nothing_to_do_is_silent_rather_than_failing() {
         TOKEN_VAR => Some("the-token".to_owned()),
         _ => None,
     };
-    let named = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart"}).to_string();
+    let named = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart"});
 
     for (why, payload, env) in [
         (
             "no payload at all",
-            String::new(),
+            hook_payload(""),
             &full as &dyn Fn(&str) -> Option<String>,
         ),
-        ("a payload that is not JSON", "not json".to_owned(), &full),
+        (
+            "a payload that is not JSON",
+            hook_payload("not json"),
+            &full,
+        ),
         (
             "a payload naming no session",
-            json!({"hook_event_name": "SessionStart"}).to_string(),
+            json!({"hook_event_name": "SessionStart"}),
             &full,
         ),
         (
@@ -1325,11 +1329,7 @@ fn a_hook_with_nothing_to_do_is_silent_rather_than_failing() {
             }),
         ),
     ] {
-        assert_eq!(
-            hooked(&payload, env),
-            Hooked::Nothing,
-            "{why} should ask for nothing"
-        );
+        assert_eq!(hooked(&payload, env), None, "{why} should ask for nothing");
     }
 }
 

@@ -11,8 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use vigia_core::{
-    CONTEXT, Class, FileChange, Frame, FrameStats, HighlightStats, Highlighter, Note, Samples,
-    Side, Status, Worktree,
+    CONTEXT, Class, FileChange, Frame, FrameStats, HighlightStats, Highlighter, Note, Registration,
+    Samples, Side, Status, Worktree,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -389,6 +389,18 @@ pub fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
         status: Status::Open,
         reply: None,
         written: SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000),
+    }
+}
+
+/// A registration as the registry holds it, for `session` at `socket`, written
+/// at one fixed second. The token is derived from the session so a gate over
+/// several of them can tell whose line it is reading.
+pub fn registration(session: &str, socket: &str) -> Registration {
+    Registration {
+        session: session.to_owned(),
+        socket: socket.to_owned(),
+        token: format!("token-of-{session}"),
+        written: SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
     }
 }
 
