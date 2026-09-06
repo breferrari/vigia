@@ -1964,6 +1964,22 @@ fn nothing_armed_means_no_deadline_at_all() {
         "the box leaves first and the loop was told to sleep past it, so its \
          rows outlive the entrance played backwards"
     );
+
+    // A deadline already past folds to zero rather than being dropped, so the
+    // loop takes one immediate turn and settles it. Dropped, the box's rows
+    // would wait for the next event; kept as a live clock, it would spin.
+    assert_eq!(
+        patience(
+            Deadlines {
+                closing: Some(now - Duration::from_millis(1)),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(Duration::ZERO),
+        "a spent closing deadline is not offered to the loop, so the rows it \
+         should have dropped wait for something else to happen"
+    );
 }
 
 #[test]

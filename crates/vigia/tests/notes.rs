@@ -17,8 +17,8 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
-    ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxRoute, Change,
-    Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
+    ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxPart, BoxRoute,
+    Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
     RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme, Timed, View,
     Viewport, body_layout, box_cells, box_entrance, box_exit, box_route, commit, count_cell,
     hover_after, note_cells, opening, press_at, regions, render, repainted, selection_after,
@@ -1166,6 +1166,79 @@ fn follow_holds_the_viewport_under_an_open_box() {
     rig.esc();
     assert!(rig.app.follow("zzz/other.rs", &frame));
     assert_ne!(rig.app.position(), before);
+}
+
+#[test]
+fn a_box_opened_on_the_last_drawn_row_is_still_whole() {
+    // The bottom of the pane is an ordinary place to click, and a top edge with
+    // nothing under it is a mode the reader is in and cannot see: the window
+    // comes forward instead, the way it does for the diff's own last row.
+    let scratch = fixture("notes-box-bottom");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    // Short enough that the box cannot fit under the last line it draws.
+    let short = Rect::new(0, 0, 80, 10);
+    let plain = rig.paint(&mut frame, short, Pointing::default());
+    let last = plain
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::Line { .. }))
+        .map(|(at, _)| at)
+        .next_back()
+        .expect("a content row on the short pane");
+    assert_eq!(
+        last + 1,
+        plain.view.rows.len(),
+        "the fixture's last drawn row is not a line, so this gate is not \
+         pressing the row it is named for"
+    );
+    let y = plain.laid.diff.top + last as u16;
+    let anchored = match &plain.view.rows[last] {
+        Row::Line { text, .. } => text.clone(),
+        other => panic!("the last row is not a line: {other:?}"),
+    };
+    let (left, _, _) = plain.gutter();
+
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text("at the bottom");
+    let opened = rig.paint(&mut frame, short, Pointing::default());
+
+    // Every part of it: both edges and the row the caret stands on.
+    let parts: Vec<&BoxPart> = opened
+        .view
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::Box { part } => Some(part),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(parts.first(), Some(BoxPart::Top { .. }))
+            && matches!(parts.last(), Some(BoxPart::Bottom)),
+        "the box drew {} rows and not a closed box:\n{}",
+        parts.len(),
+        opened.rows().join("\n")
+    );
+    let caret = parts
+        .iter()
+        .any(|part| matches!(part, BoxPart::Body { caret: Some(_), .. }));
+    assert!(caret, "the caret's row is not among the box's drawn rows");
+    let text = opened.rows().join("\n");
+    assert!(
+        text.contains("at the bottom"),
+        "the reader's own words are not on screen:\n{text}"
+    );
+    // And the line it is anchored to came with it, above the box rather than
+    // scrolled off to make room for it.
+    assert!(
+        text.contains(&anchored),
+        "the anchored line {anchored:?} left the screen:\n{text}"
+    );
 }
 
 #[test]

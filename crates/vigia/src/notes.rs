@@ -275,7 +275,10 @@ pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
     let body = open.body();
     // The screen the press landed on may be a frame behind the store: a resolve
     // that landed since answers the old text and keeps its file, so the new text
-    // goes down beside it as a new note rather than over it.
+    // goes down beside it as a new note rather than over it. The read sits as
+    // close to the write below as it can, and the two are still not one act:
+    // a resolve landing between them is overwritten, which is the window the
+    // store's own rewrite names and no portable primitive closes.
     let standing = open.over.as_deref().and_then(|id| match store.get(id) {
         Ok(Some(note)) if note.status != Status::Resolved => Some(note),
         _ => None,
@@ -769,6 +772,71 @@ impl NoteEffects {
             if let Some(over) = found.of(armed.target) {
                 armed.timed.draw(since, buf, over);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The ring the box's border draws itself in along, which is arithmetic no
+    //! drawn screen can check: a step counted twice or skipped leaves a cell
+    //! that never arrives or one that arrives ahead of its neighbours.
+
+    use super::*;
+
+    /// Every cell of `area`'s edge, by the step the sweep gives it.
+    fn steps(area: Rect) -> Vec<Option<usize>> {
+        (area.top()..area.bottom())
+            .flat_map(|y| (area.left()..area.right()).map(move |x| Position::new(x, y)))
+            .map(|at| ring_step(area, at))
+            .collect()
+    }
+
+    #[test]
+    fn the_ring_numbers_its_edge_once_each_and_counts_them_all() {
+        // The box is drawn at four rows and any width, and clipped to one row
+        // or one column by a pane that leaves it nothing else.
+        for area in [
+            Rect::new(6, 5, 60, 4),
+            Rect::new(0, 0, 1, 1),
+            Rect::new(3, 2, 1, 9),
+            Rect::new(3, 2, 9, 1),
+            Rect::new(0, 0, 2, 2),
+        ] {
+            let mut on_ring: Vec<usize> = steps(area).into_iter().flatten().collect();
+            let len = ring_len(area);
+            on_ring.sort_unstable();
+            assert_eq!(
+                on_ring,
+                (0..len).collect::<Vec<_>>(),
+                "{area:?} numbers its edge {on_ring:?} rather than every step once"
+            );
+            // And the sweep reaches all of it: at the end of its run every step
+            // is drawn, so no cell of the border is left blank behind it.
+            assert_eq!(
+                ring_drawn(area, 1.0),
+                len,
+                "{area:?} ends short of its ring"
+            );
+            assert_eq!(ring_drawn(area, 0.0), 0, "{area:?} starts part way in");
+        }
+    }
+
+    #[test]
+    fn a_cell_inside_the_box_is_on_no_step_of_the_ring() {
+        // The inside is the text's, which fades rather than draws in, so a cell
+        // the ring claimed would be blanked while the reader is typing in it.
+        let area = Rect::new(6, 5, 60, 4);
+        assert_eq!(ring_step(area, Position::new(7, 6)), None);
+        assert_eq!(ring_step(area, Position::new(64, 6)), None);
+        // And a cell outside it is on none either, whichever side it lies past.
+        for outside in [
+            Position::new(5, 6),
+            Position::new(66, 6),
+            Position::new(7, 4),
+            Position::new(7, 9),
+        ] {
+            assert_eq!(ring_step(area, outside), None, "{outside:?}");
         }
     }
 }

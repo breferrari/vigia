@@ -1283,8 +1283,7 @@ impl View {
                 let boxed = draft
                     .as_ref()
                     .filter(|standing| change.paths().any(|path| path == standing.note.path));
-                // The note the box reopened is not among the file's: the box
-                // holds its text, and its own rows would say it twice.
+                // The box holds this note's text, so its rows would say it twice.
                 if let Some(over) = boxed.and_then(|standing| standing.over) {
                     file_notes.retain(|note| note.id != over);
                 }
@@ -1596,8 +1595,11 @@ impl View {
         }
         // The box stands first under its line, whatever else is pinned there,
         // and whether or not the rows are shown: a mode is not a toggle.
+        let mut boxed_rows = 0usize;
         if let Some(boxed) = &walked.boxed {
-            under[boxed.row].splice(0..0, box_rows(boxed, content));
+            let rows = box_rows(boxed, content);
+            boxed_rows = rows.len();
+            under[boxed.row].splice(0..0, rows);
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at].len();
         let total: usize = (0..breaks.len()).map(cost).sum();
@@ -1622,18 +1624,29 @@ impl View {
             return 0;
         }
 
-        // The bottom clamp, in the units it now has to be in.
+        // Both clamps as display rows dropped off the front, the only thing
+        // either can move.
+        let mut dropped = if at_bottom {
+            total.saturating_sub(height)
+        } else {
+            0
+        };
+        // A top edge with nothing under it is a mode the reader is in and
+        // cannot see, so a box whose last row falls past the pane brings the
+        // window forward, as the clamp above does for the diff's own end.
+        if boxed_rows > 0
+            && let Some(boxed) = &walked.boxed
+        {
+            // The rows above the line, the line with its continuations, the box.
+            let ends =
+                (0..boxed.row).map(cost).sum::<usize>() + breaks[boxed.row].len() + 1 + boxed_rows;
+            dropped = dropped.max(ends.saturating_sub(height));
+        }
         let mut from = 0usize;
-        let mut above = 0usize;
-        if at_bottom && total > height {
-            let mut tail = 0usize;
-            let mut at = breaks.len();
-            while at > 0 && tail < height {
-                at -= 1;
-                tail += cost(at);
-            }
-            from = at;
-            above = tail.saturating_sub(height);
+        let mut above = dropped;
+        while from < breaks.len() && above >= cost(from) {
+            above -= cost(from);
+            from += 1;
         }
 
         // [`Self::top`] is not moved, and that is what makes the end of the

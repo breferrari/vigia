@@ -16,6 +16,10 @@ use vigia::{
 
 /// The anchor the sweep's box carries: long enough to lose its head at most widths.
 const BOX_LABEL: &str = "crates/vigia/src/shell.rs:2";
+
+/// The narrowest pane the box draws on: below it the content leaves no column
+/// between the box's own two sides.
+const BOX_FLOOR: u16 = 7;
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// The mark meaning "this continues past the right edge".
@@ -501,7 +505,7 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
     let chrome = chrome();
     let mut whole = 0usize;
     let mut elided = 0usize;
-    let mut drawn = 0usize;
+    let mut drawn: Vec<u16> = Vec::new();
     for width in WIDTHS {
         let rows = rows_at(width, 24, &view, &chrome);
         let Some(top) = rows
@@ -528,16 +532,42 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
                 "at {width} columns the box's edge reads {top:?}: the anchor is neither whole nor marked as cut"
             );
         }
-        drawn += 1;
+        drawn.push(width);
         assert!(
             top.ends_with(['┐', '╮']),
             "at {width} columns the box's top edge does not close: {top:?}"
         );
+        // The bottom edge closes too, whichever rung of the hint ladder it is
+        // down to, including the one that spells nothing at all.
+        let bottom = rows
+            .iter()
+            .find(|row| row.contains(['└', '╰']))
+            .unwrap_or_else(|| panic!("at {width} columns the box has no bottom edge"))
+            .trim_end();
+        assert!(
+            bottom.ends_with(['┘', '╯']),
+            "at {width} columns the box's bottom edge does not close: {bottom:?}"
+        );
     }
+    // Every width from the floor up, with no gap. A count alone leaves a band
+    // where the box drew nothing indistinguishable from one where it drew
+    // correctly, since the assertions above only run on the widths it reached.
+    let floor = *drawn.first().expect("the sweep never drew the box");
+    assert_eq!(
+        drawn,
+        (floor..=*WIDTHS.end()).collect::<Vec<_>>(),
+        "the box is missing from a width at or above {floor}, so the sweep \
+         passed over a band it never drew"
+    );
+    assert_eq!(
+        floor, BOX_FLOOR,
+        "the box's narrowest pane moved, which is a rung of the ladder rather \
+         than a number for this gate to follow"
+    );
     assert!(
-        whole > 0 && elided > 0 && drawn > 60,
-        "the sweep saw the whole anchor at {whole} widths and a cut one at {elided} of \
-         the {drawn} it drew the box on, so one rung of the ladder was never drawn"
+        whole > 0 && elided > 0,
+        "the sweep saw the whole anchor at {whole} widths and a cut one at \
+         {elided}, so one rung of the ladder was never drawn"
     );
 }
 
