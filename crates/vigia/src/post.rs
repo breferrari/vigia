@@ -63,7 +63,9 @@ pub enum Posted {
     Unregistered,
     /// At least one registered session took the line.
     Sent,
-    /// Every registered session refused it, or the registry could not be read.
+    /// Nothing took it: every registered session refused, the registry could
+    /// not be read, or [`IN_FLIGHT_MAX`] posts were already out. The note is in
+    /// the store either way, which is what the footer's word says.
     Failed,
 }
 
@@ -173,7 +175,16 @@ pub fn post(registration: &Registration, content: &str) -> io::Result<()> {
 #[must_use]
 pub fn names_a_pipe(socket: &str) -> bool {
     let spelling = socket.replace('/', r"\").to_ascii_lowercase();
-    spelling.starts_with(r"\\") && spelling[2..].contains(r"\pipe\")
+    let Some(rest) = spelling.strip_prefix(r"\\") else {
+        return false;
+    };
+    // The host, then `pipe`, then a name. The pipe namespace is that second
+    // component and nowhere else, so a file share with a folder called `pipe`
+    // somewhere inside it stays an ordinary path.
+    let mut segments = rest.split('\\');
+    segments.next().is_some_and(|host| !host.is_empty())
+        && segments.next() == Some("pipe")
+        && segments.next().is_some_and(|name| !name.is_empty())
 }
 
 /// A unix domain socket, which is what every platform but Windows binds.

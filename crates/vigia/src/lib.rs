@@ -1081,10 +1081,22 @@ impl Shell {
                 return;
             }
         };
-        // Read back while the store is still borrowed, and before anything else
-        // takes `self`: what goes to the agent is the note as the store took it,
-        // never the box's own copy, so the two rungs cannot disagree.
-        let posting = arrived.as_ref().and_then(|id| store.get(id).ok().flatten());
+        // What goes to the agent is the note as the store took it, never the
+        // box's own copy, so the two rungs cannot disagree. A note simply gone
+        // was withdrawn by another hand between the two acts, which is a race
+        // rather than a fault and says nothing.
+        let posting = match arrived.as_ref().map(|id| store.get(id)) {
+            Some(Err(e)) => {
+                self.say(
+                    format!("wrote the note but could not read it back: {e}"),
+                    Voice::Alert,
+                    now,
+                );
+                None
+            }
+            Some(Ok(note)) => note,
+            None => None,
+        };
         self.app.take_box();
         self.box_effect = None;
         // The first write made the directory, so there is something to watch.

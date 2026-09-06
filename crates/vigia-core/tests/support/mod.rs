@@ -392,6 +392,25 @@ pub fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
     }
 }
 
+/// Link `link` to `target` by absolute path, or report that this platform would
+/// not, the way [`made_link`] does for a `Scratch`. Windows makes a file symlink
+/// only for a privileged process or a machine in developer mode, so a `false`
+/// here is a skip rather than a failure.
+pub fn linked_file(target: &Path, link: &Path) -> bool {
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(target, link).is_ok();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_file(target, link).is_ok();
+    if !made {
+        eprintln!(
+            "note: this platform would not link {} -> {}, so the reading through it              is unchecked here; it is checked wherever one can be made",
+            link.display(),
+            target.display()
+        );
+    }
+    made
+}
+
 /// A registration as the registry holds it, for `session` at `socket`, written
 /// at one fixed second. The token is derived from the session so a gate over
 /// several of them can tell whose line it is reading.

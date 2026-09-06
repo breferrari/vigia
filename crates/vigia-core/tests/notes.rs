@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::mpsc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir, budget, files_in, note};
+use support::{Scratch, TempDir, budget, files_in, linked_file, note};
 use vigia_core::{
     Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
     key, resolve,
@@ -848,4 +848,32 @@ fn a_store_watched_through_a_symlinked_root_still_reports_writes() {
     rx.recv_timeout(budget(Duration::from_secs(5)))
         .expect("a write under the resolved spelling was reported");
     drop(watch);
+}
+
+/// A symlink is not what the store wrote, and following one would read whatever
+/// it points at into memory.
+#[test]
+fn a_symlinked_note_is_skipped_rather_than_followed() {
+    let (_scratch, _root, store) = store("notes-symlink");
+    store
+        .put(&note("n1", 5, "five", "the real one"))
+        .expect("put");
+
+    let elsewhere = store.dir().join("elsewhere");
+    fs::write(&elsewhere, "vigia note 1\n").expect("a file to point at");
+    if !linked_file(&elsewhere, &store.dir().join("n2.note")) {
+        return;
+    }
+
+    let listing = store.list().expect("list");
+    assert_eq!(listing.notes.len(), 1, "the link was followed: {listing:?}");
+    assert_eq!(listing.notes[0].id, "n1");
+    assert!(
+        listing
+            .skipped
+            .iter()
+            .any(|(path, _)| path.ends_with("n2.note")),
+        "the link was not reported as skipped: {:?}",
+        listing.skipped
+    );
 }

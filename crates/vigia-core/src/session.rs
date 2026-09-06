@@ -186,24 +186,33 @@ impl Registry {
 /// token is the whole of the authority the file carries, and a chmod after the
 /// write leaves a window in which anyone on the machine can read it. Windows has
 /// no modes and inherits a per-user root instead.
-#[cfg(unix)]
 fn write_private(path: &Path, text: &str) -> io::Result<()> {
     use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
 
-    // The name carries this process and a counter, so an existing one is a
-    // collision worth failing on rather than a file to write over.
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut file = create_private(path)?;
     file.write_all(text.as_bytes())
 }
 
+/// The name carries this process and a counter, so an existing one is a
+/// collision worth failing on rather than a file to write over. Only the mode
+/// differs by platform.
+#[cfg(unix)]
+fn create_private(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
 #[cfg(not(unix))]
-fn write_private(path: &Path, text: &str) -> io::Result<()> {
-    fs::write(path, text)
+fn create_private(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 /// The file: a version line, the two fields that cannot hold a newline, then

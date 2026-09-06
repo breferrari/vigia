@@ -12,14 +12,14 @@
 mod support;
 
 use serde_json::Value;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io;
 use vigia::post::{
     IN_FLIGHT_MAX, Posted, content, context_for, names_a_pipe, permit, post, post_each, word,
 };
 use vigia_core::{Note, Registration, Registry, Side, Status, Store};
 
-use support::{Scratch, TempDir, note, registration};
+use support::{Scratch, TempDir, linked_file, note, registration};
 
 const PATH: &str = "src/watch.rs";
 
@@ -407,6 +407,12 @@ fn only_a_named_pipe_is_ever_opened_on_windows() {
         r"\\.\NUL",
         r"\\.\pipeline\x",
         r"\.\pipe\one-backslash",
+        // A file share with a folder called `pipe` somewhere inside it. The
+        // pipe namespace is the second component and nowhere else.
+        r"\\fileserver\backups\old\pipe\notes.txt",
+        r"\\.\pipe",
+        r"\\.\pipe\",
+        r"\\\pipe\x",
         "/tmp/cc-socks/1.sock",
     ] {
         assert!(!names_a_pipe(not), "{not:?} is not a named pipe");
@@ -492,4 +498,67 @@ fn a_note_on_the_old_side_carries_its_anchor_alone() {
         context_for(scratch.root(), &old).is_empty(),
         "a removed line has no working-tree neighbours to show"
     );
+}
+
+/// A message builder that says how many times it was asked for one.
+fn counting(calls: &Cell<u32>) -> impl FnOnce() -> String + '_ {
+    move || {
+        calls.set(calls.get() + 1);
+        "the note".to_owned()
+    }
+}
+
+#[test]
+fn the_message_is_built_only_when_a_registration_is_in_hand() {
+    // Building it reads the whole file the note's neighbours come from, and
+    // most readers never install the hook, so the common Enter must not pay for
+    // a message nobody is listening for. `FnOnce` forbids a second call and
+    // says nothing about a first, so the count is the only thing that holds it.
+    let calls = Cell::new(0);
+
+    let (_scratch, _root, none) = registry("socket-lazy-none", &[]);
+    assert_eq!(
+        post_each(&none, counting(&calls), |_, _| Ok(())),
+        Posted::Unregistered
+    );
+    assert_eq!(calls.get(), 0, "a message was built for nobody");
+
+    let (_scratch, _root, two) = registry("socket-lazy-two", &["aaaa-1111", "bbbb-2222"]);
+    assert_eq!(
+        post_each(&two, counting(&calls), |_, _| Ok(())),
+        Posted::Sent
+    );
+    assert_eq!(calls.get(), 1, "two registrations built the message twice");
+
+    // The unreadable registry takes the same path out, before the closure.
+    let scratch = Scratch::new("socket-lazy-broken");
+    let root = TempDir::new("state");
+    let broken = Registry::open(root.path(), scratch.root()).expect("registry");
+    std::fs::create_dir_all(broken.dir().parent().expect("a parent")).expect("parent");
+    std::fs::write(broken.dir(), "not a directory").expect("in the way");
+    assert_eq!(
+        post_each(&broken, counting(&calls), |_, _| Ok(())),
+        Posted::Failed
+    );
+    assert_eq!(
+        calls.get(),
+        1,
+        "a message was built for a registry it could not read"
+    );
+}
+
+/// A symlink is not what the registry wrote, and following one would read
+/// whatever it points at into memory.
+#[test]
+fn a_symlinked_registration_is_skipped_rather_than_followed() {
+    let (_scratch, _root, registry) = registry("socket-symlink", &["bbbb-2222"]);
+    let elsewhere = registry.dir().join("elsewhere");
+    std::fs::write(&elsewhere, "vigia session 1\n").expect("a file to point at");
+    if !linked_file(&elsewhere, &registry.dir().join("aaaa-1111.session")) {
+        return;
+    }
+
+    let listed = registry.list().expect("list");
+    assert_eq!(listed.len(), 1, "the link was followed: {listed:?}");
+    assert_eq!(listed[0].session, "bbbb-2222");
 }
