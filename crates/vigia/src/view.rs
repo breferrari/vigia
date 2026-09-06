@@ -2116,12 +2116,90 @@ fn pin(
 
 #[cfg(test)]
 mod tests {
-    //! The heat projection and the follow landing, tested as the arithmetic
-    //! they are.
+    //! The heat projection, the follow landing and the box's own wrap, tested
+    //! as the arithmetic they are.
 
     use vigia_core::Line;
 
     use super::*;
+
+    /// A box holding `lines` with the caret at `cursor`, placed on row zero.
+    fn boxed(lines: &[&str], cursor: (usize, usize)) -> BoxPin {
+        BoxPin {
+            row: 0,
+            marks: true,
+            label: "src/watch.rs:5".to_owned(),
+            lines: lines.iter().map(|line| (*line).to_owned()).collect(),
+            cursor,
+        }
+    }
+
+    /// The body rows `pin` draws at `content` columns, and which one holds the
+    /// caret.
+    fn body_of(pin: &BoxPin, content: usize) -> (Vec<String>, Option<usize>) {
+        let mut text = Vec::new();
+        let mut caret = None;
+        for row in box_rows(pin, content) {
+            if let Row::Box {
+                part:
+                    BoxPart::Body {
+                        text: piece,
+                        caret: column,
+                    },
+            } = row
+            {
+                if column.is_some() {
+                    caret = Some(text.len());
+                }
+                text.push(piece);
+            }
+        }
+        (text, caret)
+    }
+
+    #[test]
+    fn the_box_draws_its_cap_and_no_more_wherever_the_caret_sits() {
+        // The rows below the caret are what a cap off by one adds, so a caret
+        // at the end of the text cannot tell the two apart: there is nothing
+        // under it left to draw.
+        let lines = ["one", "two", "three", "four", "five", "six"];
+        for (cursor, at) in [
+            ((0, 0), Some(0)),
+            ((2, 0), Some(2)),
+            ((5, 3), Some(BOX_ROWS - 1)),
+        ] {
+            let (body, caret) = body_of(&boxed(&lines, cursor), 40);
+            assert_eq!(
+                body.len(),
+                BOX_ROWS,
+                "a caret at {cursor:?} drew {} body rows rather than the cap",
+                body.len()
+            );
+            assert_eq!(
+                caret, at,
+                "the caret's row moved for a cursor at {cursor:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_caret_stands_inside_a_row_wherever_a_break_dropped_a_blank() {
+        // A break drops the blanks it broke on, so a caret among them belongs
+        // to no piece: it takes the head of the next row rather than a column
+        // off the end of the row before, where no cell would draw it.
+        let content = "aaaa  bbbb";
+        let pieces = prose_pieces(content, 4);
+        assert_eq!(pieces, vec![0..4, 6..10], "the fixture does not break here");
+        assert_eq!(caret_in(content, &pieces, 4, 4), (1, 0));
+        assert_eq!(caret_in(content, &pieces, 5, 4), (1, 0));
+        assert_eq!(caret_in(content, &pieces, 6, 4), (1, 0));
+        // And inside a piece it is where the characters put it.
+        assert_eq!(caret_in(content, &pieces, 2, 4), (0, 2));
+        assert_eq!(caret_in(content, &pieces, 8, 4), (1, 2));
+        // Past the end of a piece that fills its row it takes the row after,
+        // which is the row the caller makes when none follows.
+        assert_eq!(caret_in("aaaa", &prose_pieces("aaaa", 4), 4, 4), (1, 0));
+    }
 
     fn line(kind: LineKind) -> Line {
         Line {

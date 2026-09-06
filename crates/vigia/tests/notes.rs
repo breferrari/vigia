@@ -2254,8 +2254,72 @@ fn two_notes_on_one_line_draw_both_and_the_box_reopens_the_first() {
     let second = opened.notes_under(y + 3);
     assert_eq!(second.len(), 1, "{second:?}");
     assert!(second[0].starts_with("second"), "{second:?}");
+    // The box's own cells, with a note's rows drawn right under them: the
+    // effect runs over the box and never over the note that outlived it.
+    let over = box_cells(&opened.laid, &opened.view).expect("the box's cells");
+    assert_eq!(
+        (over.y, over.height),
+        (y + 1, 3),
+        "the box's cells reach past its own rows onto the note below"
+    );
     rig.esc();
     assert_eq!(files_in(rig.store.dir()).len(), 2);
+}
+
+#[test]
+fn a_press_on_a_line_whose_note_is_departing_opens_an_empty_box() {
+    // The pane still draws a resolved note while it leaves, so its line is
+    // still a target. The box does not reopen it: the agent has answered it,
+    // and its text is on its way off the screen rather than back into an editor.
+    let scratch = fixture("notes-press-departing");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (left, _, _) = noted.gutter();
+
+    rig.agent()
+        .rewrite(&left_as("n1", BODY, Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    rig.reload();
+    let departing = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        !departing.notes_under(y).is_empty(),
+        "the resolved note left before its departure ran"
+    );
+
+    assert!(rig.press_opens(&departing, left + 1, y));
+    let open = rig.app.note_box().expect("the box");
+    assert_eq!(
+        open.over(),
+        None,
+        "the box reopened a note the agent resolved"
+    );
+    assert_eq!(
+        open.body(),
+        "",
+        "the resolved note's words went into the box"
+    );
+    // And Enter writes a note of its own beside the resolve rather than over it.
+    rig.type_text("a second look");
+    let written = match rig.enter() {
+        Committed::Written(id) => id,
+        other => panic!("Enter did not write a new note: {other:?}"),
+    };
+    assert_ne!(written, "n1");
+    assert_eq!(
+        rig.store
+            .get("n1")
+            .expect("get")
+            .expect("the resolve")
+            .reply
+            .as_deref(),
+        Some(REPLY)
+    );
 }
 
 #[test]
