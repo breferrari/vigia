@@ -846,13 +846,15 @@ mod tests {
 
         assert!(
             busiest > spiked.scale() * 4,
-            "the outlier's own bucket is {busiest} against a scale of {}, so the              fixture has no outlier to speak of and this proves nothing",
+            "the outlier's own bucket is {busiest} against a scale of {}, so the \
+             fixture has no outlier to speak of and this proves nothing",
             spiked.scale()
         );
         assert_eq!(
             spiked.churn("b").unwrap()[HISTORY_BUCKETS - 1],
             1,
-            "the small path stopped being recorded, so the fixture changed rather              than the scale"
+            "the small path stopped being recorded, so the fixture changed rather \
+             than the scale"
         );
     }
 

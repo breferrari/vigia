@@ -291,7 +291,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 
 **Older issues, notes and the dated cells below cite "Phase 5", and every such citation means this shelf**: the milestone URL keeps `/5` from the name it carried until 2026-08-06, `take-next` skips it by the `Shelf:` description prefix, and a title with no phase number sorts last by that query's own fallback, so the two guards agree.
 
-**A shelf item comes off it when daily use asks for it, and the asking is the whole test.** That sentence used to live here, was deleted at some point, and survives only as a quotation in two pull-forward rows below, which is a rule that exists solely as its own citation. Restated because a filter nobody can read is not one, and because the sixty-odd rows under it are what happens when the entry trigger fires on every audit and the exit trigger fires on a judgement nobody is scheduled to make.
+**A shelf item comes off it when daily use asks for it, and the asking is the whole test.** The rows under it are what happens when the entry trigger fires on every audit and the exit fires on a judgement nobody is scheduled to make.
 
 **The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask it of an item when something reaches for it, not on a schedule nobody keeps. An item that cannot answer yes is not waiting for a phase, it is declined, and closing it as such is a result rather than a loss. Five declines in a hundred and twenty-seven closed issues is not a shelf being filtered; it is a shelf being filled.
 
@@ -303,6 +303,8 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
 | ✅ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
+| ✅ | Four assertion messages carry a lost line continuation | [#438](https://github.com/breferrari/vigia/issues/438) |
+| ✅ | The CPU clock gate takes an absolute bound once, so a loaded suite fails it | [#439](https://github.com/breferrari/vigia/issues/439) |
 | ⬜ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |

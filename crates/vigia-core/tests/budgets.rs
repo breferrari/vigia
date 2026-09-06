@@ -878,21 +878,40 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
 fn the_cpu_clock_tells_waiting_from_working() {
     // Non-vacuity for the two gates above, and the only thing here that touches the
     // platform.
+    //
+    // The busy half is asked several times and needs one round to hold, because
+    // the claim is that this clock *can* tell the two apart rather than that a
+    // loaded machine always lets it: the whole suite's binaries run beside this
+    // one, and a thread descheduled through its own measurement reports somebody
+    // else's load as its own. A clock that cannot do it once in five is broken,
+    // which is what this exists to catch. The sleeping half needs no rounds,
+    // since load can only push CPU time down and its bound is an upper one.
     let busy = Duration::from_millis(80);
-    let (wall, cpu) = time_cpu(|| {
-        let deadline = std::time::Instant::now() + busy;
-        let mut sum = 0u64;
-        while std::time::Instant::now() < deadline {
-            for at in 0..10_000u64 {
-                sum = sum.wrapping_add(std::hint::black_box(at).wrapping_mul(2_654_435_761));
+    let mut best = Duration::ZERO;
+    let mut wall = Duration::ZERO;
+    for _ in 0..5 {
+        let (round_wall, cpu) = time_cpu(|| {
+            let deadline = std::time::Instant::now() + busy;
+            let mut sum = 0u64;
+            while std::time::Instant::now() < deadline {
+                for at in 0..10_000u64 {
+                    sum = sum.wrapping_add(std::hint::black_box(at).wrapping_mul(2_654_435_761));
+                }
             }
+            std::hint::black_box(sum);
+        });
+        if cpu > best {
+            (best, wall) = (cpu, round_wall);
         }
-        std::hint::black_box(sum);
-    });
+        if best >= busy / 2 {
+            break;
+        }
+    }
     assert!(
-        cpu >= busy / 2,
-        "the CPU clock reported {cpu:?} for {wall:?} of work that never waited for \
-         anything, so a real overshoot would read as somebody else's load"
+        best >= busy / 2,
+        "the CPU clock's best of five reported {best:?} for {wall:?} of work that \
+         never waited for anything, so a real overshoot would read as somebody \
+         else's load"
     );
 
     let (slept_wall, slept_cpu) = time_cpu(|| std::thread::sleep(Duration::from_millis(60)));
