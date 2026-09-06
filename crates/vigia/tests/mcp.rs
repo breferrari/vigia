@@ -13,7 +13,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use vigia::mcp::{PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, Server};
+use vigia::mcp::{
+    Hooked, PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, SOCKET_VAR, Server, TOKEN_VAR, hooked,
+    pending_line,
+};
 use vigia::{VERSION, state_root};
 use vigia_core::{Note, Side, Status, Store};
 
@@ -1237,4 +1240,112 @@ fn a_tie_between_the_two_runs_is_one_placement() {
     assert_eq!(note["placement"], "at", "{note}");
     assert_eq!(note["current_line"], 8);
     assert_eq!(note["current_path"], PATH);
+}
+
+/// `SPEC.md` §11.2 B21's send rung: what a `SessionStart` or `SessionEnd` hook's
+/// payload asks the registry for, decided before any file is touched.
+#[test]
+fn a_session_start_payload_registers_and_a_session_end_clears() {
+    let env = |key: &str| match key {
+        SOCKET_VAR => Some(r"\.\pipe\LOCAL\cc-msg-abc".to_owned()),
+        TOKEN_VAR => Some("the-token".to_owned()),
+        _ => None,
+    };
+    let start = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart", "cwd": "."});
+    match hooked(&start.to_string(), env) {
+        Hooked::Put(registration) => {
+            assert_eq!(registration.session, "aaaa-1111");
+            assert_eq!(registration.socket, r"\.\pipe\LOCAL\cc-msg-abc");
+            assert_eq!(registration.token, "the-token");
+        }
+        other => panic!("a SessionStart did not register: {other:?}"),
+    }
+
+    let end =
+        json!({"session_id": "aaaa-1111", "hook_event_name": "SessionEnd", "reason": "other"});
+    assert_eq!(
+        hooked(&end.to_string(), env),
+        Hooked::Clear("aaaa-1111".to_owned()),
+        "only SessionEnd clears, and it clears by session"
+    );
+
+    // Resume, clear and fork all leave one current registration behind them, so
+    // every event that is not the end records.
+    for event in ["SessionStart", "SessionResume", "anything else"] {
+        let payload = json!({"session_id": "bbbb-2222", "hook_event_name": event});
+        assert!(
+            matches!(hooked(&payload.to_string(), env), Hooked::Put(_)),
+            "{event} did not record"
+        );
+    }
+}
+
+#[test]
+fn a_hook_with_nothing_to_do_is_silent_rather_than_failing() {
+    // A reader installs the hook once and it runs in every project, on every
+    // client. None of these is an error and none of them writes.
+    let full = |key: &str| match key {
+        SOCKET_VAR => Some("inbox.sock".to_owned()),
+        TOKEN_VAR => Some("the-token".to_owned()),
+        _ => None,
+    };
+    let named = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart"}).to_string();
+
+    for (why, payload, env) in [
+        (
+            "no payload at all",
+            String::new(),
+            &full as &dyn Fn(&str) -> Option<String>,
+        ),
+        ("a payload that is not JSON", "not json".to_owned(), &full),
+        (
+            "a payload naming no session",
+            json!({"hook_event_name": "SessionStart"}).to_string(),
+            &full,
+        ),
+        (
+            "messaging off, so no socket",
+            named.clone(),
+            &(|_: &str| None),
+        ),
+        (
+            "a socket with no token",
+            named.clone(),
+            &(|key: &str| (key == SOCKET_VAR).then(|| "inbox.sock".to_owned())),
+        ),
+        (
+            "an empty socket, which is the variable present and unset",
+            named.clone(),
+            &(|key: &str| {
+                Some(if key == SOCKET_VAR {
+                    String::new()
+                } else {
+                    "t".to_owned()
+                })
+            }),
+        ),
+    ] {
+        assert_eq!(
+            hooked(&payload, env),
+            Hooked::Nothing,
+            "{why} should ask for nothing"
+        );
+    }
+}
+
+#[test]
+fn the_pending_line_counts_notes_and_says_nothing_about_none() {
+    // The line a `UserPromptSubmit` hook puts in front of the agent. An empty
+    // store costs the reader's next prompt nothing at all.
+    assert_eq!(pending_line(0), None);
+    let one = pending_line(1).expect("one note is a line");
+    assert!(one.starts_with("1 open note in vigia"), "{one}");
+    let many = pending_line(4).expect("four notes are a line");
+    assert!(many.starts_with("4 open notes in vigia"), "{many}");
+    for line in [&one, &many] {
+        assert!(
+            line.contains("notes"),
+            "the line does not name the tool that reads them: {line}"
+        );
+    }
 }
