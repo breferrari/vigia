@@ -726,7 +726,8 @@ struct Shell {
     /// The footer's own: the diff's are clipped to it, and one manager processed
     /// twice advances every effect in it twice a frame.
     notice_effects: EffectManager<String>,
-    /// When the previous frame painted: the elapsed time an effect is told about.
+    /// When the previous frame painted. The time since it is what an effect is
+    /// told, through `effect_interval`, which may answer none of it.
     painted: Instant,
     /// The syntax classes of whatever is on screen, kept between frames.
     highlighter: Highlighter,

@@ -130,14 +130,15 @@ impl Alerts {
             }
         };
         self.failed = None;
-        // Sorted, because the store lists its files in the directory's order and a
-        // write beside them can move that.
-        let mut skipped = listing.skipped.clone();
-        skipped.sort();
-        if skipped == self.skipped {
+        // Compared sorted, because the store lists its files in the directory's
+        // order and a write beside them can move that; copied only on a change.
+        let mut seen: Vec<&(PathBuf, String)> = listing.skipped.iter().collect();
+        seen.sort();
+        if seen.len() == self.skipped.len() && seen.iter().zip(&self.skipped).all(|(a, b)| *a == b)
+        {
             return None;
         }
-        self.skipped = skipped;
+        self.skipped = seen.into_iter().cloned().collect();
         let (path, why) = self.skipped.first()?;
         let name = path.file_name().map_or_else(
             || path.display().to_string(),
@@ -396,13 +397,13 @@ impl NoteEffects {
     /// Arm one effect per change. A change landing on cells already moving
     /// replaces the effect over them rather than stacking on it.
     pub fn arm(&mut self, changes: Vec<Change>, theme: &Theme, now: Instant) {
+        // The whole of a note's rows outranks a word or a line on them, whichever
+        // arrives second, or two effects would draw the same cells at once.
+        let whole = |effect: &NoteEffect| effect.target == Target::Rows;
         for change in changes {
             let Some(armed) = NoteEffect::armed(change, theme, now) else {
                 continue;
             };
-            // The whole of a note's rows outranks a word or a line on them, whichever
-            // arrives second, or two effects would draw the same cells at once.
-            let whole = |effect: &NoteEffect| effect.target == Target::Rows;
             if !whole(&armed)
                 && self
                     .running
