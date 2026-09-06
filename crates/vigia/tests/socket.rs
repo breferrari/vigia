@@ -14,8 +14,10 @@ mod support;
 use serde_json::Value;
 use std::cell::{Cell, RefCell};
 use std::io;
+use std::sync::{Mutex, PoisonError, mpsc};
+use std::time::Duration;
 use vigia::post::{
-    IN_FLIGHT_MAX, Posted, content, context_for, names_a_pipe, permit, post, post_each, word,
+    IN_FLIGHT_MAX, Posted, content, context_for, names_a_pipe, permit, post, post_each, spawn, word,
 };
 use vigia_core::{Note, Registration, Registry, Side, Store};
 
@@ -292,8 +294,6 @@ fn a_socket_that_is_not_there_is_refused_rather_than_waited_on() {
     assert!(refused.is_err(), "a socket nothing serves was opened");
 }
 
-/// The true transport, which only unix can stand a server up for from `std`.
-/// Windows named pipes have no server side outside the platform API, so the
 #[test]
 fn the_written_time_orders_nothing_the_wire_sees() {
     // A registration's timestamp orders the listing and nothing else: it must
@@ -367,6 +367,7 @@ fn a_socket_naming_a_real_file_is_refused_and_the_file_is_untouched() {
 
 #[test]
 fn only_so_many_posts_may_be_in_flight_at_once() {
+    let _slots = SLOTS.lock().unwrap_or_else(PoisonError::into_inner);
     // A peer that accepts and never reads holds its thread until the platform
     // gives up, and Windows gives `std` no way to bound that wait, so the bound
     // is on how many such threads can exist.
@@ -557,4 +558,79 @@ fn a_real_socket_receives_the_two_lines() {
 
     // Bound rather than the fixture's, so it is this test's to clear.
     let _ = std::fs::remove_file(&path);
+}
+
+/// The slot counter is one per process and these tests move it, so they take
+/// this before they do. Cargo runs a file's tests as threads of one binary.
+static SLOTS: Mutex<()> = Mutex::new(());
+
+/// Long enough that a machine under load still answers, short enough that a
+/// post that never answers fails rather than hangs the suite.
+const ANSWERED: Duration = Duration::from_secs(10);
+
+/// Whether every slot is free, waited for: a thread gives its slot back as it
+/// ends, which is just after it has answered.
+fn all_slots_back() -> bool {
+    for _ in 0..1_000 {
+        let held: Vec<_> = (0..IN_FLIGHT_MAX).filter_map(|_| permit()).collect();
+        let got = held.len();
+        drop(held);
+        if got == IN_FLIGHT_MAX {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    false
+}
+
+#[test]
+fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
+    // The pane is one process a reader presses Enter in all afternoon, so the
+    // slots have to come back; and the bound is read before anything is
+    // spawned, so a post refused for want of one costs no thread at all.
+    let _slots = SLOTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let (_scratch, _root, registry) = registry("socket-spawn", &[]);
+    let (tx, rx) = mpsc::channel();
+
+    assert!(all_slots_back(), "another test left a slot out");
+    let held: Vec<_> = (0..IN_FLIGHT_MAX)
+        .map(|_| permit().expect("a slot"))
+        .collect();
+    let sender = tx.clone();
+    spawn(
+        registry.clone(),
+        || "the note".to_owned(),
+        move |posted| {
+            let _ = sender.send(posted);
+        },
+    );
+    assert_eq!(
+        rx.recv_timeout(ANSWERED)
+            .expect("an answer without a thread"),
+        Posted::Failed,
+        "a post with no slot to take was not refused"
+    );
+    drop(held);
+
+    // Twice the bound, one after another, which is the shape the pane has.
+    for round in 0..IN_FLIGHT_MAX * 2 {
+        assert!(
+            all_slots_back(),
+            "the slot before post {round} never came back"
+        );
+        let sender = tx.clone();
+        spawn(
+            registry.clone(),
+            || "the note".to_owned(),
+            move |posted| {
+                let _ = sender.send(posted);
+            },
+        );
+        assert_eq!(
+            rx.recv_timeout(ANSWERED)
+                .unwrap_or_else(|_| panic!("post {round} never answered")),
+            Posted::Unregistered
+        );
+    }
+    assert!(all_slots_back(), "the last post kept its slot");
 }

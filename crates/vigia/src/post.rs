@@ -7,8 +7,8 @@
 //! `message.content` is missing, empty or not a string. `session_id` is
 //! optional and *checked* when present, which is why it is always sent: a
 //! registration a session left behind cannot then deliver into whichever
-//! session next answers to its socket. Read from the shipped client and
-//! confirmed against a live session on 2026-09-06.
+//! session next answers to its socket. Read from the client that speaks it
+//! and confirmed against a live session, since no documentation carries it.
 //!
 //! **Nothing is written back.** The connection is accepted, the frame is taken,
 //! and the peer says nothing and holds the connection open, so no word here can
@@ -265,6 +265,30 @@ pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
         Side::New => crate::notes::around(workdir, &note.path, note.line),
         Side::Old => Vec::new(),
     }
+}
+
+/// Post on a thread of its own, and hand the answer to `report`.
+///
+/// The slot is taken here rather than inside the thread, so a post refused for
+/// want of one is refused without spawning anything, and it is given back when
+/// the thread ends however it ends.
+///
+/// Nothing joins the thread: the pane must never wait on a socket, so a pane
+/// that quits between Enter and the write takes it with it, and the note is in
+/// the store either way.
+pub fn spawn(
+    registry: Registry,
+    message: impl FnOnce() -> String + Send + 'static,
+    report: impl FnOnce(Posted) + Send + 'static,
+) {
+    let Some(permit) = permit() else {
+        report(Posted::Failed);
+        return;
+    };
+    std::thread::spawn(move || {
+        let _permit = permit;
+        report(post_all(&registry, message));
+    });
 }
 
 /// [`post_each`] over the real transport.

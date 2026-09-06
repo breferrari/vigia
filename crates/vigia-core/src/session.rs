@@ -269,6 +269,8 @@ fn decode(bytes: &[u8]) -> Option<Registration> {
         session,
         socket,
         token,
-        written: UNIX_EPOCH + Duration::from_secs(secs),
+        // Checked: adding to a `SystemTime` panics on overflow, and this number
+        // came off the disk.
+        written: UNIX_EPOCH.checked_add(Duration::from_secs(secs))?,
     })
 }

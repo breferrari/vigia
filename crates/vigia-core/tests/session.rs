@@ -173,3 +173,78 @@ fn the_newest_registration_lists_last() {
         vec!["bbbb-2222", "aaaa-1111"]
     );
 }
+
+#[test]
+fn registering_a_session_again_replaces_what_it_had() {
+    // A resume, a clear and a fork all fire `SessionStart` again for the same
+    // session, and a session's socket is not the same one twice. Two rows for
+    // one session would post the note down a socket that has gone.
+    let (_scratch, _root, registry) = registry("session-again");
+    registry
+        .put(&registration("aaaa-1111", "first.sock"))
+        .expect("first");
+
+    let mut again = registration("aaaa-1111", "second.sock");
+    again.token = "a-newer-token".to_owned();
+    registry.put(&again).expect("again");
+
+    let listed = registry.list().expect("list");
+    assert_eq!(listed, vec![again], "one session, its newest registration");
+    assert_eq!(files_in(registry.dir()).len(), 1, "a second file was left");
+}
+
+#[test]
+fn a_time_no_clock_can_hold_is_skipped_rather_than_a_panic() {
+    // The number comes off the disk, and adding to a `SystemTime` panics on
+    // overflow. A corrupt registration costs that session and never the pane,
+    // which reads this on every Enter.
+    let (_scratch, _root, registry) = registry("session-overflow");
+    registry
+        .put(&registration("bbbb-2222", "good.sock"))
+        .expect("good");
+
+    fs::create_dir_all(registry.dir()).expect("dir");
+    let far = format!(
+        "vigia session 1\nsession: aaaa-1111\nwritten: {}\nsocket 4\nsock\ntoken 3\nabc\n",
+        u64::MAX
+    );
+    fs::write(registry.dir().join("aaaa-1111.session"), far).expect("write");
+
+    let listed = registry.list().expect("list");
+    assert_eq!(listed.len(), 1, "the far future was read: {listed:?}");
+    assert_eq!(listed[0].session, "bbbb-2222");
+}
+
+#[test]
+fn a_listing_never_sees_half_a_registration_being_written() {
+    // The hook writes while the pane lists, in two processes with no lock
+    // between them. Every listing is whole files or none of them.
+    let (_scratch, _root, registry) = registry("session-racing");
+    let writing = registry.clone();
+    let writer = std::thread::spawn(move || {
+        for n in 0..200 {
+            writing
+                .put(&registration("aaaa-1111", &format!("socket-{n}")))
+                .expect("put");
+        }
+    });
+
+    let mut seen = 0;
+    while !writer.is_finished() {
+        for one in registry
+            .list()
+            .expect("a listing while another hand writes")
+        {
+            assert_eq!(one.session, "aaaa-1111");
+            assert!(
+                one.socket.starts_with("socket-"),
+                "a torn socket: {:?}",
+                one.socket
+            );
+            assert_eq!(one.token, "token-of-aaaa-1111", "a torn token");
+            seen += 1;
+        }
+    }
+    writer.join().expect("the writer");
+    assert!(seen > 0, "the listing never caught the writer at work");
+}

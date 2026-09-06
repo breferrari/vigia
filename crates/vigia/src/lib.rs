@@ -1126,21 +1126,14 @@ impl Shell {
         let Some(registry) = self.registry.clone() else {
             return;
         };
-        let Some(permit) = post::permit() else {
-            let _ = tx.send(Wake::Posted(Posted::Failed));
-            return;
-        };
         let (root, note, tx) = (self.root.clone(), note.clone(), tx.clone());
-        std::thread::spawn(move || {
-            let _permit = permit;
-            let message = || {
-                let context = post::context_for(Path::new(&root), &note);
-                post::content(&note, &context)
-            };
-            // Nothing joins this thread, so a pane quitting between Enter and
-            // the socket takes it; the note is in the store either way.
-            let _ = tx.send(Wake::Posted(post::post_all(&registry, message)));
-        });
+        post::spawn(
+            registry,
+            move || post::content(&note, &post::context_for(Path::new(&root), &note)),
+            move |posted| {
+                let _ = tx.send(Wake::Posted(posted));
+            },
+        );
     }
 
     /// Esc, or a press anywhere outside the box: the keys are the pane's again
