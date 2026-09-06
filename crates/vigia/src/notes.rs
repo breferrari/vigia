@@ -9,7 +9,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::{Effect, Interpolation, fx};
-use vigia_core::{Note, Result, Status, Store};
+use vigia_core::{Listing, Note, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::render::NoteCells;
@@ -72,12 +72,20 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
     let anchor = view.anchor_at(offset)?;
     let marked = view.marked_at(offset);
     if !marked.is_empty() {
+        let mut withdrawn = 0;
         for id in &marked {
+            // The screen the press landed on may be a frame behind the store: a
+            // note the agent has resolved since keeps its file, because the resolve
+            // landed first and its line is what the next frame shows leaving.
+            if matches!(store.get(id), Ok(Some(note)) if note.status == Status::Resolved) {
+                continue;
+            }
             if let Err(e) = store.remove(id) {
                 return Some(Err(e));
             }
+            withdrawn += 1;
         }
-        return Some(Ok(Toggled::Withdrawn(marked.len())));
+        return Some(Ok(Toggled::Withdrawn(withdrawn)));
     }
     let note = Note {
         id: Store::new_id(),
@@ -93,26 +101,51 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
     Some(store.put(&note).map(|()| Toggled::Written(note.id)))
 }
 
-/// The one footer alert for files a listing skipped, said when the skipped set
-/// differs from `last` and not on every wake the agent causes; `last` is
-/// brought up to date. `None` when nothing changed, an emptied set included:
-/// files that read again are not news.
-#[must_use]
-pub fn skipped_alert(skipped: &[(PathBuf, String)], last: &mut Vec<PathBuf>) -> Option<String> {
-    let now: Vec<PathBuf> = skipped.iter().map(|(path, _)| path.clone()).collect();
-    if now == *last {
-        return None;
+/// What the last listing had to say for itself, so the footer's alert is said
+/// when that changes and not on every wake the agent causes.
+#[derive(Debug, Default)]
+pub struct Alerts {
+    skipped: Vec<PathBuf>,
+    failed: Option<String>,
+}
+
+impl Alerts {
+    /// The one footer alert `listing` earns, when it differs from the last: the
+    /// first file skipped and how many more, or why the store could not be read.
+    /// `None` when nothing changed, a store that reads whole again included:
+    /// files that read again are not news.
+    pub fn of(&mut self, listing: &Result<Listing>) -> Option<String> {
+        let listing = match listing {
+            Ok(listing) => listing,
+            Err(e) => {
+                let told = format!("could not read the notes: {e}");
+                if self.failed.as_ref() == Some(&told) {
+                    return None;
+                }
+                self.failed = Some(told.clone());
+                return Some(told);
+            }
+        };
+        self.failed = None;
+        let now: Vec<PathBuf> = listing
+            .skipped
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect();
+        if now == self.skipped {
+            return None;
+        }
+        self.skipped = now;
+        let (path, why) = listing.skipped.first()?;
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        Some(match listing.skipped.len() - 1 {
+            0 => format!("skipped the note file {name}: {why}"),
+            more => format!("skipped the note file {name} and {more} more: {why}"),
+        })
     }
-    *last = now;
-    let (path, why) = skipped.first()?;
-    let name = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    );
-    Some(match skipped.len() - 1 {
-        0 => format!("skipped the note file {name}: {why}"),
-        more => format!("skipped the note file {name} and {more} more: {why}"),
-    })
 }
 
 /// What a reload of the store found had moved, each naming the note's id, for
@@ -121,7 +154,8 @@ pub fn skipped_alert(skipped: &[(PathBuf, String)], last: &mut Vec<PathBuf>) -> 
 pub enum Change {
     /// The agent listed the note, so its word climbed from *open* to *seen*.
     Seen(String),
-    /// The agent answered without closing the note, so its line is new.
+    /// The agent answered without closing the note, so its line is new or has
+    /// changed.
     Replied(String),
     /// The agent resolved it: it departs with the agent's line.
     Resolved(String),
@@ -179,7 +213,7 @@ impl Ledger {
                 if before.status == Status::Open && note.status == Status::Seen {
                     changes.push(Change::Seen(note.id.clone()));
                 }
-                if before.reply.is_none() && note.reply.is_some() {
+                if note.reply.is_some() && before.reply != note.reply {
                     changes.push(Change::Replied(note.id.clone()));
                 }
             }

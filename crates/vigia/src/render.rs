@@ -312,6 +312,17 @@ const fn text_within(area: Rect, margins: (u16, u16)) -> Rect {
     }
 }
 
+/// The cells `width` columns of text take at the right edge of `area`, or none
+/// where the text is empty or wider than the area. Shared with [`note_cells`],
+/// so an effect over the status word covers the cells the word was drawn in.
+fn flush_right(area: Rect, width: usize) -> Option<Rect> {
+    if width == 0 || width > usize::from(area.width) {
+        return None;
+    }
+    let width = u16::try_from(width).unwrap_or(u16::MAX);
+    Some(Rect::new(area.x + area.width - width, area.y, width, 1))
+}
+
 /// The columns of `area` a row's glyphs may use on `pane`: inset from the left,
 /// and stopped at the region's own edge or the pane's trailing margin, whichever
 /// comes first. Shared with [`regions`], which publishes it, so the painter and
@@ -1829,10 +1840,7 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
         };
         cells.rows = cells.rows.union(line);
         if let Some(word) = word {
-            let took = width_of(word) as u16;
-            if took <= width {
-                cells.word = Some(Rect::new(x + width - took, line.y, took, 1));
-            }
+            cells.word = flush_right(line, width_of(word));
         }
         if matches!(lead, NoteLead::Reply | NoteLead::Blank) {
             cells.reply = Some(cells.reply.map_or(line, |reply| reply.union(line)));
@@ -2781,16 +2789,10 @@ impl Painter<'_> {
     /// Write `text` so that it ends at the right edge of `area`.
     fn put_right(&mut self, area: Rect, text: &str, style: Style) -> usize {
         let width = width_of(text);
-        if width == 0 || width > usize::from(area.width) {
+        let Some(at) = flush_right(area, width) else {
             return 0;
-        }
-        self.buf.set_stringn(
-            area.x + area.width - width as u16,
-            area.y,
-            text,
-            width,
-            style,
-        );
+        };
+        self.buf.set_stringn(at.x, at.y, text, width, style);
         // The gap keeps the right-hand text from touching whatever is drawn from
         // the left, which at forty columns happens constantly.
         width + 1

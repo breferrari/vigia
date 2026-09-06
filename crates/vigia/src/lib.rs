@@ -39,8 +39,9 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use notes::{
-    Change, LEAVING, Ledger, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
-    Target, Toggled, leaving, note_arrival, press_at, resolve_departure, skipped_alert, toggle,
+    Alerts, Change, LEAVING, Ledger, NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT,
+    RESOLVED_DEPARTURE, Target, Toggled, leaving, note_arrival, press_at, resolve_departure,
+    toggle,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
@@ -240,7 +241,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         notes_stale: false,
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
-        skipped: Vec::new(),
+        alerts: Alerts::default(),
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -770,9 +771,9 @@ struct Shell {
     ledger: Ledger,
     /// The effects running over notes' rows.
     note_effects: NoteEffects,
-    /// The files the last listing skipped, so the alert is said when that set
-    /// changes and not on every wake.
-    skipped: Vec<PathBuf>,
+    /// What the last listing had to say, so the alert is said when that changes
+    /// and not on every wake.
+    alerts: Alerts,
 }
 
 impl Shell {
@@ -971,22 +972,21 @@ impl Shell {
     }
 
     /// Read the store, arm an effect for whatever moved, and hand the notes to
-    /// the next collect. A file the store cannot read is skipped and said when
-    /// the skipped set changes, rather than on every wake the agent causes.
+    /// the next collect. A file the store cannot read is skipped, and a store
+    /// that cannot be read is left as it was; either is said when it changes,
+    /// rather than on every wake the agent causes.
     fn reload_notes(&mut self, now: Instant) {
         let Some(store) = &self.store else {
             return;
         };
-        match store.list() {
-            Ok(listing) => {
-                if let Some(told) = notes::skipped_alert(&listing.skipped, &mut self.skipped) {
-                    self.say(told, Voice::Alert, now);
-                }
-                let changes = self.ledger.reload(listing.notes, now);
-                self.note_effects.arm(changes, &self.theme, now);
-                self.publish_notes();
-            }
-            Err(e) => self.say(format!("could not read the notes: {e}"), Voice::Alert, now),
+        let listing = store.list();
+        if let Some(told) = self.alerts.of(&listing) {
+            self.say(told, Voice::Alert, now);
+        }
+        if let Ok(listing) = listing {
+            let changes = self.ledger.reload(listing.notes, now);
+            self.note_effects.arm(changes, &self.theme, now);
+            self.publish_notes();
         }
     }
 
@@ -1825,7 +1825,12 @@ mod tests {
         let asked = code.find("input::patience(").expect(
             "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
-        let sources = &code[asked..asked + 700.min(code.len() - asked)];
+        // Bounded on `patience`'s closing brace rather than a byte count, so the
+        // scan cannot reach a clock named by the next function.
+        let sources = &code[asked..];
+        let sources = &sources[..sources
+            .find("\n    }\n")
+            .expect("`Shell::patience` never closes")];
         for clock in [
             "held: self.held",
             "linger: self.scrolling_until",

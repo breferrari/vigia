@@ -15,7 +15,7 @@ use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, Mo
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
-    ARRIVING_FRAME, Action, App, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects,
+    ARRIVING_FRAME, Action, Alerts, App, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects,
     Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
     Toggled, View, Viewport, body_layout, count_cell, hover_after, note_cells, press_at, regions,
     render, repainted, selection_after, toggle,
@@ -2085,31 +2085,202 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
 }
 
 #[test]
-fn the_skipped_alert_is_said_once_per_change() {
+fn the_listing_alert_is_said_once_per_change() {
+    use vigia_core::Listing;
     let torn = (std::path::PathBuf::from("a.note"), "torn".to_owned());
     let newer = (std::path::PathBuf::from("b.note"), "newer".to_owned());
-    let mut last = Vec::new();
+    let skipping = |files: &[(std::path::PathBuf, String)]| {
+        Ok(Listing {
+            notes: Vec::new(),
+            skipped: files.to_vec(),
+        })
+    };
+    let mut alerts = Alerts::default();
     assert_eq!(
-        vigia::skipped_alert(std::slice::from_ref(&torn), &mut last),
+        alerts.of(&skipping(std::slice::from_ref(&torn))),
         Some("skipped the note file a.note: torn".to_owned())
     );
     assert_eq!(
-        vigia::skipped_alert(std::slice::from_ref(&torn), &mut last),
+        alerts.of(&skipping(std::slice::from_ref(&torn))),
         None,
         "the same torn file was said again on the next wake"
     );
     assert_eq!(
-        vigia::skipped_alert(&[torn.clone(), newer.clone()], &mut last),
+        alerts.of(&skipping(&[torn.clone(), newer.clone()])),
         Some("skipped the note file a.note and 1 more: torn".to_owned())
     );
     assert_eq!(
-        vigia::skipped_alert(&[], &mut last),
+        alerts.of(&skipping(&[])),
         None,
         "files that read again are not news"
     );
     assert_eq!(
-        vigia::skipped_alert(std::slice::from_ref(&newer), &mut last),
+        alerts.of(&skipping(std::slice::from_ref(&newer))),
         Some("skipped the note file b.note: newer".to_owned()),
         "a file torn again after reading whole is news again"
     );
+
+    // A store that cannot be read at all: a file where its directory should be.
+    let scratch = fixture("notes-unreadable-listing");
+    let root = TempDir::new("notes-unreadable-listing-state");
+    let store = Store::open(root.path(), scratch.root()).expect("open the store");
+    fs::write(store.dir(), b"not a directory").expect("block the store's directory");
+    let failed = store.list();
+    assert!(
+        failed.is_err(),
+        "a file where the directory should be listed"
+    );
+    let first = alerts
+        .of(&failed)
+        .expect("a store that cannot be read is news");
+    assert!(first.starts_with("could not read the notes: "), "{first:?}");
+    assert_eq!(
+        alerts.of(&store.list()),
+        None,
+        "the same failure was said again on the next wake"
+    );
+    fs::remove_file(store.dir()).expect("unblock the store's directory");
+    assert_eq!(
+        alerts.of(&store.list()),
+        None,
+        "a store that reads whole again is not news"
+    );
+    fs::write(store.dir(), b"not a directory").expect("block it again");
+    assert_eq!(
+        alerts.of(&store.list()),
+        Some(first),
+        "a store that fails again after reading whole is news again"
+    );
+}
+
+#[test]
+fn a_reply_landing_on_an_open_note_crossfades_in() {
+    let scratch = fixture("notes-replied");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = open.row_of(EDITED);
+    let (_, _, origin) = open.gutter();
+    assert_eq!(open.notes_under(y).len(), 1);
+
+    // The agent answers without closing the note: the line arrives under it.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Seen, Some(REPLY)))
+        .expect("rewrite");
+    rig.reload();
+    rig.advance(ARRIVING_FRAME);
+    let arriving = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = arriving.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert!(under[1].starts_with("swapped for"), "{:?}", under[1]);
+    let cells = note_cells(&arriving.laid, &arriving.view);
+    let reply = cells[0].reply.expect("the reply's cells");
+    assert_ne!(
+        arriving.fg(reply.x + 2, reply.y),
+        Some(dim),
+        "one frame in, the agent's line is drawn in the chrome's dim rather than arriving"
+    );
+    // The note's own rows do not move: the body keeps the chrome's dim.
+    assert_eq!(arriving.fg(origin + 2, y + 1), Some(dim));
+
+    rig.advance(RESOLVE_ARRIVING);
+    let settled = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(settled.fg(reply.x + 2, reply.y), Some(dim));
+    assert!(!rig.effects.is_running());
+}
+
+#[test]
+fn a_resolve_between_a_stale_view_and_a_withdraw_click_survives() {
+    let scratch = fixture("notes-stale-withdraw");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let marked = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = marked.row_of(EDITED);
+    let (left, _, origin) = marked.gutter();
+
+    // The agent resolves it while the screen still shows it open, and the
+    // reader's press lands on that screen.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    assert_eq!(
+        rig.click(&marked, left + 1, y),
+        Some(Toggled::Withdrawn(0)),
+        "the press withdrew a note the agent had already resolved"
+    );
+    assert_eq!(
+        files_in(rig.store.dir()).len(),
+        1,
+        "the press deleted the agent's resolve and its line"
+    );
+    let departing = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        departing.text(y + 1).chars().nth(usize::from(origin)),
+        Some('↳'),
+        "the resolve that landed first is not what the next frame shows"
+    );
+}
+
+#[test]
+fn a_second_reply_on_a_still_open_note_crossfades_too() {
+    use vigia::Change;
+    let now = Instant::now();
+    let mut ledger = Ledger::default();
+    ledger.reload(vec![note("n1", 5, EDITED, "short")], now);
+    assert_eq!(
+        ledger.reload(
+            vec![left_as("n1", "short", Status::Seen, Some("first"))],
+            now
+        ),
+        vec![
+            Change::Seen("n1".to_owned()),
+            Change::Replied("n1".to_owned())
+        ]
+    );
+    assert_eq!(
+        ledger.reload(
+            vec![left_as("n1", "short", Status::Seen, Some("second"))],
+            now
+        ),
+        vec![Change::Replied("n1".to_owned())],
+        "a line the agent rewrote popped into place rather than arriving"
+    );
+    assert!(
+        ledger
+            .reload(
+                vec![left_as("n1", "short", Status::Seen, Some("second"))],
+                now
+            )
+            .is_empty(),
+        "a line that did not change was drawn arriving again"
+    );
+}
+
+#[test]
+fn a_note_that_replies_and_resolves_in_one_wake_departs_once() {
+    // Two things moved in one wake, and only the departure is armed: the
+    // agent's line arrives inside it, not once for the reply and once again.
+    use vigia::Change;
+    let now = Instant::now();
+    let mut ledger = Ledger::default();
+    assert!(
+        ledger
+            .reload(vec![note("n1", 5, EDITED, "short")], now)
+            .is_empty(),
+        "a note first met moved nothing"
+    );
+    let changes = ledger.reload(
+        vec![left_as("n1", "short", Status::Resolved, Some(REPLY))],
+        now,
+    );
+    assert_eq!(changes, vec![Change::Resolved("n1".to_owned())]);
 }
