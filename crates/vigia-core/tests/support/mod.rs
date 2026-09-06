@@ -403,7 +403,8 @@ pub fn linked_file(target: &Path, link: &Path) -> bool {
     let made = std::os::windows::fs::symlink_file(target, link).is_ok();
     if !made {
         eprintln!(
-            "note: this platform would not link {} -> {}, so the reading through it              is unchecked here; it is checked wherever one can be made",
+            "note: this platform would not link {} -> {}, so the reading through \
+             it is unchecked here; it is checked wherever one can be made",
             link.display(),
             target.display()
         );
