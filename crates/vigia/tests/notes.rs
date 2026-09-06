@@ -2127,10 +2127,10 @@ fn the_listing_alert_is_said_once_per_change() {
     );
     // The store lists in the directory's order, which a write beside the files
     // can move; the same files in another order are not news.
-    assert!(
-        alerts
-            .of(&skipping(&[differently.clone(), torn.clone()]))
-            .is_some()
+    assert_eq!(
+        alerts.of(&skipping(&[differently.clone(), torn.clone()])),
+        Some("skipped the note file a.note and 1 more: torn".to_owned()),
+        "the sorted set names its first file first"
     );
     assert_eq!(
         alerts.of(&skipping(&[torn.clone(), differently.clone()])),
