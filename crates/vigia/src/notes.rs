@@ -130,11 +130,15 @@ impl Alerts {
             }
         };
         self.failed = None;
-        if listing.skipped == self.skipped {
+        // Sorted, because the store lists its files in the directory's order and a
+        // write beside them can move that.
+        let mut skipped = listing.skipped.clone();
+        skipped.sort();
+        if skipped == self.skipped {
             return None;
         }
-        self.skipped = listing.skipped.clone();
-        let (path, why) = listing.skipped.first()?;
+        self.skipped = skipped;
+        let (path, why) = self.skipped.first()?;
         let name = path.file_name().map_or_else(
             || path.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
@@ -396,11 +400,19 @@ impl NoteEffects {
             let Some(armed) = NoteEffect::armed(change, theme, now) else {
                 continue;
             };
-            // The whole of a note's rows supersedes a word or a line still
-            // arriving on them, or two effects would draw the same cells at once.
+            // The whole of a note's rows outranks a word or a line on them, whichever
+            // arrives second, or two effects would draw the same cells at once.
+            let whole = |effect: &NoteEffect| effect.target == Target::Rows;
+            if !whole(&armed)
+                && self
+                    .running
+                    .iter()
+                    .any(|running| running.id == armed.id && whole(running))
+            {
+                continue;
+            }
             self.running.retain(|running| {
-                running.id != armed.id
-                    || (armed.target != Target::Rows && running.target != armed.target)
+                running.id != armed.id || (!whole(&armed) && running.target != armed.target)
             });
             self.running.push(armed);
         }
@@ -417,9 +429,9 @@ impl NoteEffects {
         !self.running.is_empty()
     }
 
-    /// How many effects are running.
+    /// How many effects are live.
     #[must_use]
-    pub fn running(&self) -> usize {
+    pub fn live(&self) -> usize {
         self.running.len()
     }
 

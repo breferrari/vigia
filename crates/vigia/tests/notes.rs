@@ -2125,6 +2125,18 @@ fn the_listing_alert_is_said_once_per_change() {
         Some("skipped the note file b.note: torn differently".to_owned()),
         "the same file skipped for a new reason is not news"
     );
+    // The store lists in the directory's order, which a write beside the files
+    // can move; the same files in another order are not news.
+    assert!(
+        alerts
+            .of(&skipping(&[differently.clone(), torn.clone()]))
+            .is_some()
+    );
+    assert_eq!(
+        alerts.of(&skipping(&[torn.clone(), differently.clone()])),
+        None,
+        "the same skipped files in another order were said again"
+    );
 
     // A store that cannot be read at all: a file where its directory should be.
     let scratch = fixture("notes-unreadable-listing");
@@ -2260,18 +2272,56 @@ fn a_resolve_landing_inside_a_crossfade_supersedes_it() {
     effects.arm(vec![Change::Seen("n1".to_owned())], &theme, now);
     effects.arm(vec![Change::Replied("n1".to_owned())], &theme, now);
     assert_eq!(
-        effects.running(),
+        effects.live(),
         2,
         "a word and a line arrive on their own cells"
     );
+    effects.arm(vec![Change::Replied("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.live(),
+        2,
+        "a line arriving again replaced nothing, so two effects draw one cell"
+    );
     effects.arm(vec![Change::Resolved("n1".to_owned())], &theme, now);
     assert_eq!(
-        effects.running(),
+        effects.live(),
         1,
         "a resolve arrived over a word or a line still arriving, so two effects draw one cell"
     );
     effects.arm(vec![Change::Seen("n2".to_owned())], &theme, now);
-    assert_eq!(effects.running(), 2, "another note's effect was evicted");
+    assert_eq!(effects.live(), 2, "another note's effect was evicted");
+    effects.arm(vec![Change::Seen("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.live(),
+        2,
+        "a word arriving over a whole note already leaving was armed beside it"
+    );
+
+    // And the one left on n1 is the whole note's: at its first frame the fade
+    // holds every cell of the rows in the announcement's ink, the body's
+    // included, where a word's or a line's effect would reach the word alone.
+    let from = theme.note.fg.expect("the announcement's ink");
+    let rows = Rect::new(0, 0, 20, 2);
+    let cells = vec![vigia::NoteCells {
+        id: "n1".to_owned(),
+        rows,
+        word: Some(Rect::new(16, 0, 4, 1)),
+        reply: Some(Rect::new(0, 1, 20, 1)),
+    }];
+    let mut buf = ratatui::buffer::Buffer::empty(rows);
+    buf.set_string(
+        0,
+        0,
+        "the reader's own  seen",
+        ratatui::style::Style::default(),
+    );
+    buf.set_string(0, 1, "the agent's line", ratatui::style::Style::default());
+    effects.draw(Duration::ZERO, &mut buf, &cells);
+    assert_eq!(
+        buf[(0, 0)].style().fg,
+        Some(from),
+        "the effect left on n1 does not cover its body, so the narrower one survived"
+    );
 }
 
 #[test]

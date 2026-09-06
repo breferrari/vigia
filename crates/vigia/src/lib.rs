@@ -242,6 +242,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
         alerts: Alerts::default(),
+        effects_ran: false,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -647,6 +648,21 @@ pub fn arrival(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
     })
 }
 
+/// The time an effect is told passed since the previous paint, given whether an
+/// effect was drawing then. The loop paints on wakes alone, so `since_paint` on
+/// the first wake after a quiet spell is the whole of the spell; an effect armed
+/// on that wake has lived through none of it, and told all of it a departure
+/// would end inside its first frame. While one was drawing, the loop was
+/// painting at its cadence and the interval is the frame it says.
+#[must_use]
+pub fn effect_interval(ran: bool, since_paint: std::time::Duration) -> std::time::Duration {
+    if ran {
+        since_paint
+    } else {
+        std::time::Duration::ZERO
+    }
+}
+
 /// How each voice leaves: back to the hints' colour, by the road it came. The
 /// message stays drawn throughout, or this lands on the hints instead.
 #[doc(hidden)]
@@ -774,6 +790,9 @@ struct Shell {
     /// What the last listing had to say, so the alert is said when that changes
     /// and not on every wake.
     alerts: Alerts,
+    /// Whether an effect was drawing at the previous paint, which decides what the
+    /// next one is told passed.
+    effects_ran: bool,
 }
 
 impl Shell {
@@ -1229,9 +1248,12 @@ impl Shell {
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
         let (theme, screen, glyphs) = (&self.theme, &self.screen, self.glyphs);
-        // Since the previous paint: an effect is told how much time passed, not what
-        // time it is. Taken before the draw so it and the frame agree on the interval.
-        let since = now.saturating_duration_since(self.painted);
+        // What an effect is told passed. Taken before the draw so it and the frame
+        // agree on the interval.
+        let since = effect_interval(
+            self.effects_ran,
+            now.saturating_duration_since(self.painted),
+        );
         let effects = &mut self.effects;
         let notice_effects = &mut self.notice_effects;
         let note_effects = &mut self.note_effects;
@@ -1272,6 +1294,9 @@ impl Shell {
             }
         })?;
         self.painted = now;
+        self.effects_ran = self.effects.is_running()
+            || self.notice_effects.is_running()
+            || self.note_effects.is_running();
         self.hovered = chrome.hovered;
         if chrome.selected.is_none() {
             self.deselect();
@@ -1952,5 +1977,25 @@ mod tests {
                  have settled it"
             );
         }
+
+        // And the paint asks the interval rule with what the previous paint
+        // recorded, and records for the next one after the effects have drawn.
+        let paint = code.find("fn paint(\n").expect("`Shell::paint` is gone");
+        let paint = &code[paint..];
+        let paint = &paint[..paint.find("\n    }\n").expect("`paint` never closes")];
+        let asked = paint
+            .find("effect_interval(\n            self.effects_ran,")
+            .expect("`paint` no longer asks `effect_interval` with the previous paint's answer");
+        let drawn = paint
+            .find("process_effects(")
+            .expect("`paint` no longer processes effects");
+        let recorded = paint
+            .find("self.effects_ran = self.effects.is_running()")
+            .expect("`paint` no longer records whether an effect drew");
+        assert!(
+            asked < drawn && drawn < recorded,
+            "the interval is asked or recorded on the wrong side of the draw, so an \
+             effect armed after a quiet spell is told the whole of it"
+        );
     }
 }

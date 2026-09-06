@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use tachyonfx::{Duration as FxDuration, EffectManager, Interpolation, fx};
 use vigia::{
     ARRIVING, ARRIVING_FRAME, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Theme,
-    leaving, resolve_departure,
+    effect_interval, leaving, resolve_departure,
 };
 
 /// The pane every gate here draws on.
@@ -188,6 +188,34 @@ fn the_effect_reports_its_own_completion_rather_than_a_clock_we_keep() {
         effect.done(),
         "an effect run for its whole length does not report itself finished, so \
          nothing would ever release the clock"
+    );
+}
+
+#[test]
+fn an_effect_armed_after_a_quiet_spell_starts_at_its_beginning() {
+    // The loop paints on wakes alone, so the interval since the previous paint on
+    // the first wake after a quiet spell is the whole spell, which an effect armed
+    // on that wake has not lived through.
+    let spell = std::time::Duration::from_secs(600);
+    assert_eq!(
+        effect_interval(false, spell),
+        std::time::Duration::ZERO,
+        "an effect armed after a quiet spell is told the spell passed"
+    );
+    assert_eq!(
+        effect_interval(true, ARRIVING_FRAME),
+        ARRIVING_FRAME,
+        "an effect that was drawing is not told the frame that passed"
+    );
+    // And what the rule prevents, on the effect itself: told the spell, a
+    // departure ends inside its first frame and the reader sees none of it.
+    let mut effect = resolve_departure(&Theme::default());
+    let mut buf = drawn();
+    effect.process(FxDuration::from(spell), &mut buf, PANE);
+    assert!(
+        effect.done(),
+        "a departure survives an interval longer than itself, so the rule above \
+         guards nothing"
     );
 }
 
