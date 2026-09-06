@@ -15,6 +15,7 @@
 //! ever mean *delivered*. [`word`] says `sent`, which claims only that the line
 //! left this process.
 
+use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -108,10 +109,11 @@ pub fn user_frame(session: &str, content: &str) -> String {
 /// channel carries.
 #[must_use]
 pub fn content(note: &Note, context: &[(u32, String)]) -> String {
-    let mut out = format!(
-        "vigia note on {}:{}\n\n{}\n",
-        note.path, note.line, note.body
-    );
+    // Writing to a String cannot fail, so the results are discarded, which is
+    // what `encode` does for the record one crate over.
+    let mut out = String::new();
+    let _ = writeln!(out, "vigia note on {}:{}", note.path, note.line);
+    let _ = writeln!(out, "\n{}", note.body);
     if !context.is_empty() {
         let width = context
             .iter()
@@ -121,14 +123,15 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
         out.push('\n');
         for (number, text) in context {
             let mark = if *number == note.line { '>' } else { ' ' };
-            out.push_str(&format!("{mark} {number:>width$} | {text}\n"));
+            let _ = writeln!(out, "{mark} {number:>width$} | {text}");
         }
     }
-    out.push_str(&format!(
+    let _ = writeln!(
+        out,
         "\nResolve it with the vigia MCP server: resolve(id: {:?}, note: \"<one line saying what \
-         you did>\").\n",
+         you did>\").",
         note.id
-    ));
+    );
     out
 }
 
@@ -276,6 +279,10 @@ pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
 /// Nothing joins the thread: the pane must never wait on a socket, so a pane
 /// that quits between Enter and the write takes it with it, and the note is in
 /// the store either way.
+///
+/// Nothing on this thread may panic. A release build aborts rather than
+/// unwinds, so a panic here takes the pane with it and the slot is moot; every
+/// value it touches comes off the disk and is decoded accordingly.
 pub fn spawn(
     registry: Registry,
     message: impl FnOnce() -> String + Send + 'static,

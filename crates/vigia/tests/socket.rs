@@ -589,7 +589,10 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
     // slots have to come back; and the bound is read before anything is
     // spawned, so a post refused for want of one costs no thread at all.
     let _slots = SLOTS.lock().unwrap_or_else(PoisonError::into_inner);
-    let (_scratch, _root, registry) = registry("socket-spawn", &[]);
+    // A registration whose socket is not there, so each post holds its slot
+    // across a real failed connect rather than across a directory read that
+    // finds nothing.
+    let (_scratch, _root, registry) = registry("socket-spawn", &["aaaa-1111"]);
     let (tx, rx) = mpsc::channel();
 
     assert!(all_slots_back(), "another test left a slot out");
@@ -629,8 +632,44 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
         assert_eq!(
             rx.recv_timeout(ANSWERED)
                 .unwrap_or_else(|_| panic!("post {round} never answered")),
-            Posted::Unregistered
+            Posted::Failed
         );
     }
     assert!(all_slots_back(), "the last post kept its slot");
+}
+
+#[test]
+fn a_week_of_dead_registrations_still_reaches_the_one_live_session() {
+    // `SessionEnd` does not fire when a terminal is killed, so a registry
+    // accumulates sessions that have gone. Each costs one failed connect, and
+    // the note still reaches whoever is actually there.
+    let dead: Vec<String> = (0..12).map(|n| format!("dead-{n:04}")).collect();
+    let mut sessions: Vec<&str> = dead.iter().map(String::as_str).collect();
+    sessions.push("live-0001");
+    let (_scratch, _root, registry) = registry("socket-accumulated", &sessions);
+
+    let taken = RefCell::new(Vec::new());
+    let posted = post_each(
+        &registry,
+        || "the note".to_owned(),
+        |registration, _| {
+            if registration.session.starts_with("dead-") {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
+            taken.borrow_mut().push(registration.session.clone());
+            Ok(())
+        },
+    );
+
+    assert_eq!(posted, Posted::Sent, "the live session was not reached");
+    assert_eq!(
+        taken.into_inner(),
+        vec!["live-0001"],
+        "the note went somewhere it should not have"
+    );
+    assert_eq!(
+        registry.list().expect("list").len(),
+        sessions.len(),
+        "a refusal forgot a registration, which is SessionEnd's to do"
+    );
 }

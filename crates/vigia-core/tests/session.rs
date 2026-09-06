@@ -219,10 +219,21 @@ fn a_time_no_clock_can_hold_is_skipped_rather_than_a_panic() {
 fn a_listing_never_sees_half_a_registration_being_written() {
     // The hook writes while the pane lists, in two processes with no lock
     // between them. Every listing is whole files or none of them.
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     let (_scratch, _root, registry) = registry("session-racing");
+    // The writer runs until the reader has caught it at work, bounded so it
+    // ends either way, which is what the store's own race gate does: a writer
+    // that finishes first would leave the reader with nothing to interleave.
+    let enough = Arc::new(AtomicBool::new(false));
     let writing = registry.clone();
+    let told = Arc::clone(&enough);
     let writer = std::thread::spawn(move || {
-        for n in 0..200 {
+        for n in 0..4_000 {
+            if told.load(Ordering::Relaxed) {
+                break;
+            }
             writing
                 .put(&registration("aaaa-1111", &format!("socket-{n}")))
                 .expect("put");
@@ -243,6 +254,9 @@ fn a_listing_never_sees_half_a_registration_being_written() {
             );
             assert_eq!(one.token, "token-of-aaaa-1111", "a torn token");
             seen += 1;
+        }
+        if seen > 0 {
+            enough.store(true, Ordering::Relaxed);
         }
     }
     writer.join().expect("the writer");
