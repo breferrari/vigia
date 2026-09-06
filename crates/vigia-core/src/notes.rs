@@ -39,6 +39,25 @@ pub const NEAR: u32 = 8;
 /// two ids minted in one microsecond differ.
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+/// A temporary beside `stem` that no other process or thread can be writing.
+/// Every record under the state root is written through this and
+/// [`rename_into_place`], so the two are one rule rather than one per record.
+pub(crate) fn temp_name(stem: &str) -> String {
+    format!(
+        "{stem}.{:x}-{:x}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Move a written temporary onto its final name, taking the temporary with it
+/// when it cannot: a failed write must leave nothing behind to be listed.
+pub(crate) fn rename_into_place(tmp: &Path, done: &Path) -> io::Result<()> {
+    fs::rename(tmp, done).inspect_err(|_| {
+        let _ = fs::remove_file(tmp);
+    })
+}
+
 /// Which side of the diff a line is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -204,7 +223,7 @@ fn os_bytes(path: &std::ffi::OsStr) -> Vec<u8> {
 /// cannot give one file two names; and not a Windows device name, which is a
 /// device whatever extension follows it, refused on every platform so the
 /// store stays one rule.
-fn is_id(id: &str) -> bool {
+pub(crate) fn is_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= ID_MAX
         && id
@@ -316,21 +335,13 @@ impl Store {
             return Ok(false);
         }
         fs::create_dir_all(&self.dir).map_err(|source| Error::store(&self.dir, source))?;
-        let tmp = self.dir.join(format!(
-            "{}.{:x}-{:x}.tmp",
-            note.id,
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        let tmp = self.dir.join(temp_name(&note.id));
         fs::write(&tmp, encode(note)).map_err(|source| Error::store(&tmp, source))?;
         if only_present && !done.is_file() {
             let _ = fs::remove_file(&tmp);
             return Ok(false);
         }
-        fs::rename(&tmp, &done).map_err(|source| {
-            let _ = fs::remove_file(&tmp);
-            Error::store(&done, source)
-        })?;
+        rename_into_place(&tmp, &done).map_err(|source| Error::store(&done, source))?;
         Ok(true)
     }
 
@@ -411,6 +422,15 @@ impl Store {
                     .push((path, "is not named by a note id".to_owned()));
                 continue;
             };
+            // The type of the entry itself, which does not follow a link: this
+            // reads whole files into memory, and a note is only ever written
+            // here as one.
+            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                listing
+                    .skipped
+                    .push((path, "is not a file this store wrote".to_owned()));
+                continue;
+            }
             match fs::read(&path) {
                 Ok(bytes) => match decode(&bytes) {
                     Ok(note) if note.id == stem => listing.notes.push(note),
@@ -632,15 +652,22 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
 }
 
 /// A position in the bytes being decoded.
-struct Cursor<'a> {
+pub(crate) struct Cursor<'a> {
     bytes: &'a [u8],
     at: usize,
+}
+
+impl<'a> Cursor<'a> {
+    /// A cursor at the start of `bytes`.
+    pub(crate) fn over(bytes: &'a [u8]) -> Self {
+        Self { bytes, at: 0 }
+    }
 }
 
 impl Cursor<'_> {
     /// The next line without its newline. A file that ends first, at a line's
     /// end or inside one, was cut short.
-    fn line(&mut self) -> std::result::Result<&str, String> {
+    pub(crate) fn line(&mut self) -> std::result::Result<&str, String> {
         let rest = &self.bytes[self.at..];
         let end = rest.iter().position(|&b| b == b'\n').ok_or_else(|| {
             if rest.is_empty() {
@@ -662,7 +689,7 @@ impl Cursor<'_> {
 
     /// A block announced as `<what> <len>` on its own line: exactly `len`
     /// bytes, then a newline, as UTF-8.
-    fn block(&mut self, what: &str) -> std::result::Result<String, String> {
+    pub(crate) fn block(&mut self, what: &str) -> std::result::Result<String, String> {
         let header = self.line()?;
         let len = header
             .strip_prefix(what)
@@ -683,7 +710,7 @@ impl Cursor<'_> {
         Ok(block)
     }
 
-    fn at_end(&self) -> bool {
+    pub(crate) fn at_end(&self) -> bool {
         self.at == self.bytes.len()
     }
 }

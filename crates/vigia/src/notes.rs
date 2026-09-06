@@ -3,7 +3,8 @@
 //! B21).
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::buffer::Buffer;
@@ -13,7 +14,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::{Margin, Position, Rect};
 use ratatui_textarea::{CursorMove, Input, TextArea};
 use tachyonfx::{CellFilter, Effect, Interpolation, fx};
-use vigia_core::{Listing, Note, Result, Status, Store};
+use vigia_core::{CONTEXT, Listing, Note, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::render::NoteCells;
@@ -334,6 +335,28 @@ pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
             Ok(Committed::Written(note.id))
         }
     }
+}
+
+/// The working-tree lines within [`CONTEXT`] of `centre` in `path`, numbered,
+/// and none when the file cannot be read.
+///
+/// Both rungs to the agent read it, so a note it meets over the socket and the
+/// same note it lists over MCP show it one neighbourhood. Only the working-tree
+/// side: a removed line is nowhere in the file, and what the server puts around
+/// one comes from the diff it already holds.
+#[must_use]
+pub fn around(workdir: &Path, path: &str, centre: u32) -> Vec<(u32, String)> {
+    let Ok(text) = fs::read_to_string(workdir.join(path)) else {
+        return Vec::new();
+    };
+    let first = centre.saturating_sub(CONTEXT).max(1);
+    let last = centre.saturating_add(CONTEXT);
+    text.lines()
+        .enumerate()
+        .map(|(at, line)| (u32::try_from(at + 1).unwrap_or(u32::MAX), line))
+        .filter(|(number, _)| (first..=last).contains(number))
+        .map(|(number, line)| (number, line.to_owned()))
+        .collect()
 }
 
 /// How the box arrives: its border drawn in cell by cell around the ring from

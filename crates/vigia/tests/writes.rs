@@ -9,13 +9,16 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use vigia::post::{content, post_each};
 use vigia::{
     Action, App, Committed, Glyphs, Input, Key, PaintStats, Pointing, Theme, body_layout, commit,
     opening, regions, render, state_root,
 };
-use vigia_core::{Frame, Highlighter, History, Store, WARM_FILES, WatchOptions, Worktree};
+use vigia_core::{
+    Frame, Highlighter, History, Note, Registry, Store, WARM_FILES, WatchOptions, Worktree,
+};
 
-use support::{Scratch, TempDir, made_link, settle_tree};
+use support::{Scratch, TempDir, made_link, note, registration, settle_tree};
 
 /// Small on purpose. This gate counts filesystem entries rather than
 /// milliseconds, so the hundred-file fixture the budget gates share would buy it
@@ -473,5 +476,62 @@ fn one_gesture_writes_exactly_one_file() {
             .all(|line| line.ends_with("was created") || line.starts_with(". moved")),
         "something other than the root's own stamp changed under the state root:\n{}",
         moved.join("\n")
+    );
+}
+
+/// §11.2 B21's send rung reads the registry and never writes it: the hook owns
+/// that file, and a pane that rewrote it would be the monitor writing something
+/// the reader did not type.
+#[test]
+fn a_registered_session_is_read_and_never_written() {
+    let scratch = Scratch::large_diff("writes-registered", FILES, LINES);
+    let root = TempDir::new("writes-registered-state");
+    let store = Store::open(root.path(), scratch.root()).expect("open the store");
+    let registry = Registry::open(root.path(), scratch.root()).expect("open the registry");
+
+    let registration = registration("aaaa-1111", "inbox.sock");
+    registry.put(&registration).expect("register");
+
+    let note = Note {
+        path: "src/a.rs".to_owned(),
+        ..note("n1", 1, "one", "use saturating_mul")
+    };
+
+    settle_tree(root.path());
+    let before = snapshot(root.path());
+
+    // The whole of Enter's second half, over a transport that takes everything.
+    store.put(&note).expect("the store took it");
+    let posted = post_each(&registry, || content(&note, &[]), |_, _| Ok(()));
+    assert_eq!(posted, vigia::Posted::Sent);
+
+    let moved = difference(&before, &snapshot(root.path()));
+    assert!(
+        moved.iter().all(|line| !line.contains(".session")),
+        "the gesture touched a registration the hook owns:\n{}",
+        moved.join("\n")
+    );
+    let created: Vec<&String> = moved
+        .iter()
+        .filter(|line| line.ends_with("was created"))
+        .collect();
+    // The store's directory and the note inside it, as the sibling above counts
+    // them. The registry's directory is already there and stays untouched.
+    assert_eq!(
+        created.len(),
+        2,
+        "one gesture created {} entries rather than the store's directory and one \
+         note file:\n{}",
+        created.len(),
+        moved.join("\n")
+    );
+    assert!(
+        created.iter().any(|line| line.contains("n1.note")),
+        "no note file was created: {moved:?}"
+    );
+    assert_eq!(
+        registry.list().expect("still registered"),
+        vec![registration],
+        "the registration did not survive the gesture unchanged"
     );
 }

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use vigia_core::{Result, Store};
+use vigia_core::{Registry, Result, Store};
 
 use crate::theme::home_file;
 
@@ -12,6 +12,16 @@ use crate::theme::home_file;
 /// under.
 pub fn store_for(workdir: &Path, lookup: impl Fn(&str) -> Option<String>) -> Option<Result<Store>> {
     state_root(cfg!(windows), lookup).map(|root| Store::open(&root, workdir))
+}
+
+/// The registered agent sessions for the worktree at `workdir`, as the pane
+/// reads them and the hook writes them, or `None` with no home to keep them
+/// under.
+pub fn registry_for(
+    workdir: &Path,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> Option<Result<Registry>> {
+    state_root(cfg!(windows), lookup).map(|root| Registry::open(&root, workdir))
 }
 
 /// The sentence for a store with no home, naming what would give it one.

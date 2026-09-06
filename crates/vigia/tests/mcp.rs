@@ -13,9 +13,12 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use vigia::mcp::{PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, Server};
+use vigia::mcp::{
+    Hooked, PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, SOCKET_VAR, Server, TOKEN_VAR,
+    hook_payload, hooked, pending_line,
+};
 use vigia::{VERSION, state_root};
-use vigia_core::{Note, Side, Status, Store};
+use vigia_core::{Note, Registry, Side, Status, Store};
 
 use support::{Scratch, TempDir, budget, files_in, note, numbered_lines};
 
@@ -1237,4 +1240,242 @@ fn a_tie_between_the_two_runs_is_one_placement() {
     assert_eq!(note["placement"], "at", "{note}");
     assert_eq!(note["current_line"], 8);
     assert_eq!(note["current_path"], PATH);
+}
+
+/// `SPEC.md` §11.2 B21's send rung: what a `SessionStart` or `SessionEnd` hook's
+/// payload asks the registry for, decided before any file is touched.
+#[test]
+fn a_session_start_payload_registers_and_a_session_end_clears() {
+    let env = |key: &str| match key {
+        SOCKET_VAR => Some(r"\\.\pipe\LOCAL\cc-msg-abc".to_owned()),
+        TOKEN_VAR => Some("the-token".to_owned()),
+        _ => None,
+    };
+    let start = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart", "cwd": "."});
+    match hooked(&start, env) {
+        Some(Hooked::Put(registration)) => {
+            assert_eq!(registration.session, "aaaa-1111");
+            assert_eq!(registration.socket, r"\\.\pipe\LOCAL\cc-msg-abc");
+            assert_eq!(registration.token, "the-token");
+        }
+        other => panic!("a SessionStart did not register: {other:?}"),
+    }
+
+    let end =
+        json!({"session_id": "aaaa-1111", "hook_event_name": "SessionEnd", "reason": "other"});
+    assert_eq!(
+        hooked(&end, env),
+        Some(Hooked::Clear("aaaa-1111".to_owned())),
+        "only SessionEnd clears, and it clears by session"
+    );
+
+    // Resume, clear and fork all leave one current registration behind them, so
+    // every event that is not the end records.
+    for event in ["SessionStart", "SessionResume", "anything else"] {
+        let payload = json!({"session_id": "bbbb-2222", "hook_event_name": event});
+        assert!(
+            matches!(hooked(&payload, env), Some(Hooked::Put(_))),
+            "{event} did not record"
+        );
+    }
+}
+
+#[test]
+fn a_hook_with_nothing_to_do_is_silent_rather_than_failing() {
+    // A reader installs the hook once and it runs in every project, on every
+    // client. None of these is an error and none of them writes.
+    let full = |key: &str| match key {
+        SOCKET_VAR => Some("inbox.sock".to_owned()),
+        TOKEN_VAR => Some("the-token".to_owned()),
+        _ => None,
+    };
+    let named = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart"});
+
+    for (why, payload, env) in [
+        (
+            "no payload at all",
+            hook_payload(""),
+            &full as &dyn Fn(&str) -> Option<String>,
+        ),
+        (
+            "a payload that is not JSON",
+            hook_payload("not json"),
+            &full,
+        ),
+        (
+            "a payload naming no session",
+            json!({"hook_event_name": "SessionStart"}),
+            &full,
+        ),
+        (
+            "messaging off, so no socket",
+            named.clone(),
+            &(|_: &str| None),
+        ),
+        (
+            "a socket with no token",
+            named.clone(),
+            &(|key: &str| (key == SOCKET_VAR).then(|| "inbox.sock".to_owned())),
+        ),
+        (
+            "an empty socket, which is the variable present and unset",
+            named.clone(),
+            &(|key: &str| {
+                Some(if key == SOCKET_VAR {
+                    String::new()
+                } else {
+                    "t".to_owned()
+                })
+            }),
+        ),
+    ] {
+        assert_eq!(hooked(&payload, env), None, "{why} should ask for nothing");
+    }
+}
+
+#[test]
+fn the_pending_line_counts_notes_and_says_nothing_about_none() {
+    // The line a `UserPromptSubmit` hook puts in front of the agent. An empty
+    // store costs the reader's next prompt nothing at all.
+    assert_eq!(pending_line(0), None);
+    let one = pending_line(1).expect("one note is a line");
+    assert!(one.starts_with("1 open note in vigia"), "{one}");
+    let many = pending_line(4).expect("four notes are a line");
+    assert!(many.starts_with("4 open notes in vigia"), "{many}");
+    for line in [&one, &many] {
+        assert!(
+            line.contains("notes"),
+            "the line does not name the tool that reads them: {line}"
+        );
+    }
+}
+
+/// Run `vigia mcp <word>` the way a hook runs it: the payload on stdin, the
+/// state root and the project in the environment.
+fn hook_run(
+    word: &str,
+    project: &Path,
+    root: &Path,
+    payload: &str,
+    extra: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_vigia"));
+    command
+        .arg("mcp")
+        .arg(word)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("XDG_STATE_HOME", root)
+        .env("LOCALAPPDATA", root)
+        .env("HOME", root)
+        .env("USERPROFILE", root)
+        .env(PROJECT_VAR, project)
+        .env_remove(SOCKET_VAR)
+        .env_remove(TOKEN_VAR);
+    for (key, value) in extra {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().expect("spawn vigia mcp");
+    child
+        .stdin
+        .take()
+        .expect("a piped stdin")
+        .write_all(payload.as_bytes())
+        .expect("write the payload");
+    let out = child.wait_with_output().expect("wait");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The whole hook rung end to end, through the real binary: the registration a
+/// `SessionStart` writes, the count a `UserPromptSubmit` reads, and the
+/// registration a `SessionEnd` clears.
+#[test]
+fn the_hook_words_register_count_and_clear() {
+    let scratch = Scratch::new("mcp-register");
+    let root = TempDir::new("mcp-register-state");
+    let state = state_of(root.path());
+    let registry = Registry::open(&state, scratch.root()).expect("registry");
+    let socket = r"\\.\pipe\LOCAL\cc-msg-abc";
+    let started = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart", "cwd": "."})
+        .to_string();
+
+    let (code, out, err) = hook_run(
+        "register",
+        scratch.root(),
+        root.path(),
+        &started,
+        &[(SOCKET_VAR, socket), (TOKEN_VAR, "the-token")],
+    );
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        out.is_empty(),
+        "a SessionStart hook said something: {out:?}"
+    );
+
+    let listed = registry.list().expect("list");
+    assert_eq!(listed.len(), 1, "the hook registered nothing");
+    assert_eq!(listed[0].session, "aaaa-1111");
+    assert_eq!(listed[0].socket, socket, "the pipe path did not survive");
+    assert_eq!(listed[0].token, "the-token");
+
+    // Nothing open, so the reader's next prompt costs nothing at all.
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(out.is_empty(), "an empty store put a line up: {out:?}");
+
+    let store = Store::open(&state, scratch.root()).expect("store");
+    store.put(&note("n1", 1, "one", "look here")).expect("put");
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(out.starts_with("1 open note in vigia"), "{out:?}");
+
+    let ended =
+        json!({"session_id": "aaaa-1111", "hook_event_name": "SessionEnd", "reason": "other"})
+            .to_string();
+    let (code, _, err) = hook_run(
+        "register",
+        scratch.root(),
+        root.path(),
+        &ended,
+        &[(SOCKET_VAR, socket), (TOKEN_VAR, "the-token")],
+    );
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        registry.list().expect("list").is_empty(),
+        "SessionEnd left the registration behind"
+    );
+}
+
+/// A reader installs the hook once and it runs in every project they open, on
+/// every client. Neither of these is an error and neither writes.
+#[test]
+fn a_hook_with_no_socket_or_no_repository_writes_nothing_and_says_nothing() {
+    let scratch = Scratch::new("mcp-register-quiet");
+    let root = TempDir::new("mcp-register-quiet-state");
+    let registry = Registry::open(&state_of(root.path()), scratch.root()).expect("registry");
+    let payload = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart"}).to_string();
+
+    let (code, out, err) = hook_run("register", scratch.root(), root.path(), &payload, &[]);
+    assert_eq!(code, Some(0), "messaging off made the hook fail: {err}");
+    assert!(
+        out.is_empty() && err.is_empty(),
+        "it said something: {out:?} {err:?}"
+    );
+    assert!(registry.list().expect("list").is_empty());
+
+    let elsewhere = TempDir::new("mcp-register-not-a-repo");
+    let (code, _, err) = hook_run(
+        "register",
+        elsewhere.path(),
+        root.path(),
+        &payload,
+        &[(SOCKET_VAR, "inbox.sock"), (TOKEN_VAR, "t")],
+    );
+    assert_eq!(code, Some(0), "outside a repository the hook failed: {err}");
+    assert!(registry.list().expect("list").is_empty());
 }

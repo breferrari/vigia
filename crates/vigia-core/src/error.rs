@@ -28,8 +28,12 @@ pub enum Error {
     },
     /// The filter configuration git would apply could not be assembled.
     FilterSetup(Box<dyn std::error::Error + Send + Sync>),
-    /// The notes store could not be created, written, read or pruned.
+    /// A record under the reader's state directory could not be created,
+    /// written, read or removed.
     Store {
+        /// Which record it is, for the sentence: the notes store, or the
+        /// registry of agent sessions.
+        what: &'static str,
         /// The path the operation was on.
         path: std::path::PathBuf,
         /// The underlying I/O failure.
@@ -97,9 +101,19 @@ impl Error {
         }
     }
 
-    /// The store could not be used at `path`.
+    /// The notes store could not be used at `path`.
     pub(crate) fn store(path: &std::path::Path, source: std::io::Error) -> Self {
         Error::Store {
+            what: "notes store",
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    /// The session registry could not be used at `path`.
+    pub(crate) fn session(path: &std::path::Path, source: std::io::Error) -> Self {
+        Error::Store {
+            what: "session registry",
             path: path.to_owned(),
             source,
         }
@@ -129,10 +143,10 @@ impl fmt::Display for Error {
             Error::Filter { path, source } => {
                 write!(f, "could not normalise {path} the way git would: {source}")
             }
-            Error::Store { path, source } => {
+            Error::Store { what, path, source } => {
                 write!(
                     f,
-                    "could not use the notes store at {}: {source}",
+                    "could not use the {what} at {}: {source}",
                     path.display()
                 )
             }

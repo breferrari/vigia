@@ -35,6 +35,7 @@ mod highlight;
 mod history;
 mod hunk;
 mod notes;
+mod session;
 mod timing;
 mod watch;
 mod worktree;
@@ -53,6 +54,7 @@ pub use history::{
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use notes::{Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, key, resolve};
+pub use session::{Registration, Registry};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{
