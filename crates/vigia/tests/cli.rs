@@ -241,12 +241,7 @@ fn mcp_is_the_second_word_and_a_path_spelled_like_it_is_still_a_path() {
             "{arg:?} is a path, not the server"
         );
     }
-    for args in [
-        vec!["mcp", "."],
-        vec!["mcp", "register"],
-        vec![".", "mcp"],
-        vec!["mcp", "--version"],
-    ] {
+    for args in [vec![".", "mcp"], vec![".", "."]] {
         assert_eq!(
             request_all(&args),
             Request::TooManyArguments,
@@ -259,4 +254,48 @@ fn mcp_is_the_second_word_and_a_path_spelled_like_it_is_still_a_path() {
         usage.contains("mcp"),
         "the refusal accepts mcp and does not mention it: {usage:?}"
     );
+}
+
+/// `SPEC.md` §11.2 B6 as amended by B21: `mcp` has two words of its own, which
+/// are the server's and not the pane's.
+#[test]
+fn mcp_takes_its_own_two_words() {
+    assert_eq!(request_all(&["mcp", "register"]), Request::McpRegister);
+    assert_eq!(request_all(&["mcp", "pending"]), Request::McpPending);
+}
+
+#[test]
+fn mcp_refuses_a_word_it_does_not_have() {
+    // A word dropped in silence is the worse answer: the hook would appear to
+    // have registered and nothing would ever be posted.
+    for word in ["serve", "forget", "Register", "--register", ".", "-"] {
+        assert_eq!(
+            request_all(&["mcp", word]),
+            Request::NoSuchWord,
+            "mcp {word:?} is not one of its words"
+        );
+    }
+
+    let (status, _, refusal) = run_binary(&["mcp", "forget"]);
+    assert_eq!(status, Some(1));
+    for named in ["register", "pending"] {
+        assert!(
+            refusal.contains(named),
+            "the refusal does not name {named}: {refusal:?}"
+        );
+    }
+}
+
+#[test]
+fn mcp_refuses_a_third_argument() {
+    for args in [
+        vec!["mcp", "register", "."],
+        vec!["mcp", "pending", "--version"],
+    ] {
+        assert_eq!(
+            request_all(&args),
+            Request::TooManyArguments,
+            "{args:?} is one argument too many"
+        );
+    }
 }

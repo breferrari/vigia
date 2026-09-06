@@ -35,6 +35,14 @@ pub enum Error {
         /// The underlying I/O failure.
         source: std::io::Error,
     },
+    /// The registry of agent sessions could not be created, written, read or
+    /// cleared.
+    Session {
+        /// The path the operation was on.
+        path: std::path::PathBuf,
+        /// The underlying I/O failure.
+        source: std::io::Error,
+    },
     /// A worktree path has no canonical form, which means it does not exist.
     Canonicalise {
         /// The path as given.
@@ -74,6 +82,7 @@ impl Error {
             | Error::Watch(_)
             | Error::FilterSetup(_)
             | Error::Store { .. }
+            | Error::Session { .. }
             | Error::Canonicalise { .. } => None,
         }
     }
@@ -100,6 +109,14 @@ impl Error {
     /// The store could not be used at `path`.
     pub(crate) fn store(path: &std::path::Path, source: std::io::Error) -> Self {
         Error::Store {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    /// The session registry could not be used at `path`.
+    pub(crate) fn session(path: &std::path::Path, source: std::io::Error) -> Self {
+        Error::Session {
             path: path.to_owned(),
             source,
         }
@@ -136,6 +153,13 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
+            Error::Session { path, source } => {
+                write!(
+                    f,
+                    "could not use the session registry at {}: {source}",
+                    path.display()
+                )
+            }
             Error::Canonicalise { path, source } => {
                 write!(f, "could not canonicalise {}: {source}", path.display())
             }
@@ -150,6 +174,7 @@ impl std::error::Error for Error {
             Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) => Some(e.as_ref()),
             Error::Read { source, .. }
             | Error::Store { source, .. }
+            | Error::Session { source, .. }
             | Error::Canonicalise { source, .. } => Some(source),
             Error::Filter { source, .. } => Some(source.as_ref()),
             Error::Bare | Error::MissingBlob { .. } => None,

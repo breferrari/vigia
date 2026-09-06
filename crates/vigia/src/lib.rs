@@ -18,6 +18,10 @@ mod input;
 pub mod mcp;
 pub mod memory;
 mod notes;
+/// `SPEC.md` §11.2 B21's send rung: what Enter puts on the agent session's
+/// socket. Public because the wire is the whole subject and no drawn cell shows
+/// it, so the suite drives it as the pane does.
+pub mod post;
 mod render;
 mod signal;
 mod state;
@@ -43,6 +47,7 @@ pub use notes::{
     RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Timed, box_entrance, box_exit, box_route,
     commit, has_room, leaving, note_arrival, opening, press_at, resolve_departure,
 };
+pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
@@ -68,7 +73,9 @@ use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::pattern::{RadialPattern, SweepPattern};
 use tachyonfx::{EffectManager, Interpolation, fx};
-use vigia_core::{Highlighter, History, Store, StoreWatch, WatchOptions, Worktree};
+use vigia_core::{
+    Highlighter, History, Note, Registry, Side, Store, StoreWatch, WatchOptions, Worktree,
+};
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
@@ -91,6 +98,8 @@ enum Wake {
     Update(String),
     /// The notes store changed under another process's hand.
     Notes,
+    /// Enter's post to the registered agent sessions came back.
+    Posted(Posted),
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
@@ -119,9 +128,16 @@ pub enum Request {
     Version,
     /// Serve the notes store to the agent over stdio, `SPEC.md` §11.2 B21.
     Mcp,
+    /// Record this agent session's socket, or clear it, from a hook.
+    McpRegister,
+    /// Say how many notes are open, for a hook to put in front of the agent.
+    McpPending,
     /// An argument beginning with `-` that is not a version query.
     NoSuchOption,
-    /// More than one argument, when the surface is exactly one.
+    /// A second word after `mcp` that is neither of the server's own.
+    NoSuchWord,
+    /// More than one argument, when the surface is exactly one, or two after
+    /// `mcp`.
     TooManyArguments,
 }
 
@@ -130,6 +146,14 @@ pub fn request_for(args: &[OsString]) -> Request {
     match args {
         [] => Request::Watch,
         [arg] => request_for_one(arg),
+        // The server has words of its own, which are the server's and not the
+        // pane's: they take no terminal and change no frame. `SPEC.md` §11.2 B6
+        // as amended by B21.
+        [first, second] if first == OsStr::new("mcp") => match second.to_str() {
+            Some("register") => Request::McpRegister,
+            Some("pending") => Request::McpPending,
+            _ => Request::NoSuchWord,
+        },
         _ => Request::TooManyArguments,
     }
 }
@@ -191,6 +215,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // says rather than the launch: a pane with no notes is still a pane.
     let store = state::store_for(worktree.workdir(), |key| std::env::var(key).ok()).transpose()?;
 
+    // Beside it, and read only on Enter: which agent sessions have registered a
+    // socket against this worktree. A reader with no hook installed has none,
+    // which is the common case and costs a directory read that finds nothing.
+    let registry =
+        state::registry_for(worktree.workdir(), |key| std::env::var(key).ok()).transpose()?;
+
     // The view defaults reach the frame before its first walk, not just the
     // shell. Three of the four keys only arrange rows the frame already holds;
     // `staged` decides what it *walks*, so it must be honoured here.
@@ -238,6 +268,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         written: false,
         warming: None,
         store,
+        registry,
         store_watch: None,
         notes_stale: false,
         ledger: Ledger::default(),
@@ -554,6 +585,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // Marked rather than read here, so a burst of writes in one batch
                 // is one listing.
                 Wake::Notes => shell.notes_stale = true,
+                Wake::Posted(posted) => {
+                    if let Some(word) = post::word(posted) {
+                        shell.say(word.to_owned(), Voice::Said, began);
+                    }
+                }
             }
         }
 
@@ -806,6 +842,9 @@ struct Shell {
     /// The reader's notes on this worktree, or `None` when the environment names
     /// no directory to keep them in.
     store: Option<Store>,
+    /// The agent sessions that have registered a socket against this worktree,
+    /// which Enter posts into. `None` alongside `store`, for the same reason.
+    registry: Option<Registry>,
     /// The watch over the store, or `None` until something has written there.
     store_watch: Option<StoreWatch>,
     /// A wake said the store changed and no paint has read it back yet.
@@ -1044,6 +1083,10 @@ impl Shell {
                 return;
             }
         };
+        // Read back while the store is still borrowed, and before anything else
+        // takes `self`: what goes to the agent is the note as the store took it,
+        // never the box's own copy, so the two rungs cannot disagree.
+        let posting = arrived.as_ref().and_then(|id| store.get(id).ok().flatten());
         self.app.take_box();
         self.box_effect = None;
         // The first write made the directory, so there is something to watch.
@@ -1055,6 +1098,36 @@ impl Shell {
             self.note_effects
                 .arm(vec![Change::Written(id)], &self.theme, now);
         }
+        if let Some(note) = posting {
+            self.post_note(tx, &note);
+        }
+    }
+
+    /// Hand the note to every agent session registered against this worktree,
+    /// which is `SPEC.md` §11.2 B21 ruling 6's second half: the store is written
+    /// first either way, and this runs after it.
+    ///
+    /// On a thread of its own, because opening a socket is the one act here that
+    /// waits on something outside this process and a session that has ended must
+    /// never be something the pane learns about by waiting. The footer's word
+    /// comes back as a wake, and the note is already drawn under its line by
+    /// then, so nothing on screen is waiting for it either.
+    fn post_note(&self, tx: &Sender<Wake>, note: &Note) {
+        let Some(registry) = self.registry.clone() else {
+            return;
+        };
+        // A removed line is nowhere in the working tree, so there is nothing to
+        // read around it. The anchor and the reader's words still go, and the
+        // agent has the old side's neighbours from `notes` over MCP.
+        let context = match note.side {
+            Side::New => notes::around(Path::new(&self.root), &note.path, note.line),
+            Side::Old => Vec::new(),
+        };
+        let content = post::content(note, &context);
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Wake::Posted(post::post_all(&registry, &content)));
+        });
     }
 
     /// Esc, or a press anywhere outside the box: the keys are the pane's again

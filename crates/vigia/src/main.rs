@@ -26,8 +26,15 @@ fn main() -> ExitCode {
         // A server rather than a pane: no terminal is taken and there is no
         // frame it can change, which is what keeps it outside B6's count.
         Request::Mcp => vigia::mcp::serve(),
+        // The server's own two words, which a hook runs and a reader does not.
+        Request::McpRegister => vigia::mcp::register(),
+        Request::McpPending => vigia::mcp::pending(),
         Request::NoSuchOption => {
             eprintln!("vigia: no such option. {USAGE}");
+            ExitCode::FAILURE
+        }
+        Request::NoSuchWord => {
+            eprintln!("vigia: mcp has no such word. {WORDS}");
             ExitCode::FAILURE
         }
         Request::TooManyArguments => {
@@ -56,3 +63,8 @@ fn main() -> ExitCode {
 const USAGE: &str = "It takes one optional path, or the word mcp, and --version \
                      (or -V) is the only option. `vigia .` watches this tree; \
                      `vigia mcp` serves its notes to the agent.";
+
+/// The server's own words, named where somebody has just mistyped one.
+const WORDS: &str = "`vigia mcp` serves the notes over stdio; `vigia mcp register` records this \
+                     session's socket from a hook and `vigia mcp pending` says how many notes are \
+                     open.";

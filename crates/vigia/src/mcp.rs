@@ -8,19 +8,20 @@
 //! method-not-found it gets here, which is the answer its fallback rule names.
 
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use vigia_core::{
-    CONTEXT, FileDiff, Frame, Hunk, LineKind, Note, Placement, Side, Status, Store, StoreWatch,
-    Worktree, resolve,
+    CONTEXT, FileDiff, Frame, Hunk, LineKind, Note, Placement, Registration, Side, Status, Store,
+    StoreWatch, Worktree, resolve,
 };
 
 use crate::config::{self, Config};
+use crate::notes;
 use crate::state;
 use crate::{VERSION, arm_frame};
 
@@ -425,20 +426,10 @@ impl Site {
         }
     }
 
-    /// The working-tree lines within [`CONTEXT`] of `centre`, numbered, and
-    /// none when the file cannot be read.
+    /// The working-tree lines around `centre`, which the pane's own rung reads
+    /// the same way.
     fn around(&self, path: &str, centre: u32) -> Vec<(u32, String)> {
-        let Ok(text) = fs::read_to_string(self.worktree.workdir().join(path)) else {
-            return Vec::new();
-        };
-        let first = centre.saturating_sub(CONTEXT).max(1);
-        let last = centre.saturating_add(CONTEXT);
-        text.lines()
-            .enumerate()
-            .map(|(at, line)| (u32::try_from(at + 1).unwrap_or(u32::MAX), line))
-            .filter(|(number, _)| (first..=last).contains(number))
-            .map(|(number, line)| (number, line.to_owned()))
-            .collect()
+        notes::around(self.worktree.workdir(), path, centre)
     }
 
     fn resolve(&self, args: &Value) -> Value {
@@ -674,6 +665,151 @@ enum Armed {
     NotYet,
     /// The platform refused, said once; not asked again.
     Failed,
+}
+
+/// The variable Claude Code exports to a session's own child processes, hooks
+/// included, holding that session's inbox socket.
+pub const SOCKET_VAR: &str = "CLAUDE_CODE_MESSAGING_SOCKET";
+
+/// The per-session key the first line of a connection to that socket presents.
+/// The only way native Windows verifies the poster is the session's own child.
+pub const TOKEN_VAR: &str = "CLAUDE_CODE_MESSAGING_TOKEN";
+
+/// What a `SessionStart` or `SessionEnd` hook's payload asks the registry for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hooked {
+    /// Record the hook's own session, replacing whatever it had.
+    Put(Registration),
+    /// The session has ended: forget it.
+    Clear(String),
+    /// Nothing to do, and nothing wrong. The payload names no session, or the
+    /// environment carries no socket because messaging is off or this Claude
+    /// Code is below the floor that has it. A hook that failed loudly at every
+    /// session start would be worse than the rung being absent.
+    Nothing,
+}
+
+/// Read a hook's JSON payload and say what the registry should do about it.
+///
+/// The event decides the direction: `SessionEnd` clears and everything else
+/// records, so a session that starts, resumes, is cleared or is forked all
+/// leave one current registration behind them.
+#[must_use]
+pub fn hooked(payload: &str, env: impl Fn(&str) -> Option<String>) -> Hooked {
+    let Ok(hook) = serde_json::from_str::<Value>(payload) else {
+        return Hooked::Nothing;
+    };
+    let Some(session) = hook.get("session_id").and_then(Value::as_str) else {
+        return Hooked::Nothing;
+    };
+    if hook.get("hook_event_name").and_then(Value::as_str) == Some("SessionEnd") {
+        return Hooked::Clear(session.to_owned());
+    }
+    let present = |name: &str| env(name).filter(|value| !value.is_empty());
+    match (present(SOCKET_VAR), present(TOKEN_VAR)) {
+        (Some(socket), Some(token)) => Hooked::Put(Registration {
+            session: session.to_owned(),
+            socket,
+            token,
+            written: SystemTime::now(),
+        }),
+        _ => Hooked::Nothing,
+    }
+}
+
+/// Where a hook's process should look for the worktree: the variable Claude
+/// Code sets for it, then the directory the payload says the session is in,
+/// then this process's own.
+fn hook_workdir(payload: &str, env: &impl Fn(&str) -> Option<String>) -> PathBuf {
+    env(PROJECT_VAR)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            serde_json::from_str::<Value>(payload)
+                .ok()
+                .and_then(|hook| hook.get("cwd").and_then(Value::as_str).map(str::to_owned))
+        })
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+}
+
+/// `vigia mcp register`: record the hook's own session and its socket from a
+/// `SessionStart` hook, or clear it from a `SessionEnd` one.
+///
+/// Silent and successful whenever there is nothing to do, including outside a
+/// repository, since a hook a reader installed once runs in every project they
+/// open. Only a write it actually attempted and could not finish is reported.
+#[must_use]
+pub fn register() -> ExitCode {
+    let mut payload = String::new();
+    // A hook with no payload is not an error: the words still say what to do
+    // for everything but the session id, and without one there is nothing to do.
+    let _ = io::stdin().read_to_string(&mut payload);
+    let env = |key: &str| std::env::var(key).ok();
+
+    let wanted = hooked(&payload, env);
+    if wanted == Hooked::Nothing {
+        return ExitCode::SUCCESS;
+    }
+    let Ok(worktree) = Worktree::discover(hook_workdir(&payload, &env)) else {
+        return ExitCode::SUCCESS;
+    };
+    let Some(Ok(registry)) = state::registry_for(worktree.workdir(), env) else {
+        return ExitCode::SUCCESS;
+    };
+    let done = match &wanted {
+        Hooked::Put(registration) => registry.put(registration),
+        Hooked::Clear(session) => registry.remove(session),
+        Hooked::Nothing => Ok(()),
+    };
+    match done {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("vigia mcp register: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The line a `UserPromptSubmit` hook puts in front of the agent, or `None`
+/// when there is nothing open: an empty store should cost the reader's next
+/// prompt nothing at all.
+#[must_use]
+pub fn pending_line(open: usize) -> Option<String> {
+    match open {
+        0 => None,
+        1 => Some(
+            "1 open note in vigia. Call the vigia MCP server's notes tool to read it.".to_owned(),
+        ),
+        many => Some(format!(
+            "{many} open notes in vigia. Call the vigia MCP server's notes tool to read them."
+        )),
+    }
+}
+
+/// `vigia mcp pending`: say how many notes are waiting, for the hook rung that
+/// every reader gets whether or not a socket is registered.
+#[must_use]
+pub fn pending() -> ExitCode {
+    let env = |key: &str| std::env::var(key).ok();
+    let project = env(PROJECT_VAR)
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let open = Worktree::discover(project)
+        .ok()
+        .and_then(|worktree| match state::store_for(worktree.workdir(), env) {
+            Some(Ok(store)) => store.list().ok(),
+            _ => None,
+        })
+        .map_or(0, |listing| {
+            listing
+                .notes
+                .iter()
+                .filter(|note| note.status != Status::Resolved)
+                .count()
+        });
+    if let Some(line) = pending_line(open) {
+        println!("{line}");
+    }
+    ExitCode::SUCCESS
 }
 
 /// The loop: read stdin a line at a time until it closes, answer on stdout,
