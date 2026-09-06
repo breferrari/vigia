@@ -232,10 +232,9 @@ impl Regions {
         {
             return ((column, row) == sheet.close).then_some(Hovered::Button(column, row));
         }
-        // The bar's column first, for [`Regions::grab_at`]'s reason one
-        // function up: the scrollbar is drawn *inside* whichever region owns
-        // those rows, so asking the list first would answer `Row` for a pointer
-        // resting on the bar and mark a file the reader is not pointing at.
+        // The bar's column first, for [`Regions::grab_at`]'s reason: the scrollbar
+        // is drawn *inside* whichever region owns those rows, so asking the list
+        // first would mark a file under a pointer resting on the bar.
         let (on_list_bar, on_diff_bar) =
             (self.list.on_bar(column, row), self.diff.on_bar(column, row));
         if on_list_bar || on_diff_bar {
@@ -477,6 +476,8 @@ pub struct Deadlines {
     pub arriving: Option<Instant>,
     /// When the next note that is leaving has its rows dropped.
     pub departing: Option<Instant>,
+    /// When the note box Esc sent away has its rows dropped.
+    pub closing: Option<Instant>,
 }
 
 /// How long the loop may block before some clock here has to act.
@@ -491,6 +492,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.settling,
         due.arriving.map(since),
         due.departing.map(since),
+        due.closing.map(since),
     ]
     .into_iter()
     .flatten()

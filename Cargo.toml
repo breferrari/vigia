@@ -72,6 +72,16 @@ tinyvec = ">=1.12, <1.13"
 # C toolchain; `compact_str` and `unicode-width` are already here beneath
 # ratatui-core, and `thiserror` beneath gix. See `SPEC.md` §6.
 tachyonfx = { version = "0.25", default-features = false, features = ["std"] }
+# The note box's editor, SPEC.md section 11.2 B21: the text, the caret, the
+# editing keys and undo. Under the `ratatui` organisation like tachyonfx above.
+# The shell draws its cells itself, so the widget half of the crate is unused
+# and the box wraps by the note rows' own rule. `default-features = false`
+# with `crossterm` alone: no `search`, so no `regex`, and no `serde`. It
+# declares `ratatui-widgets` with that crate's defaults, so `time` and its
+# tree arrive through it, measured in SPEC.md section 6; pure Rust throughout.
+ratatui-textarea = { version = "0.9.2", default-features = false, features = [
+    "crossterm",
+] }
 # Native filesystem events, which I1 requires instead of a timer. The
 # companion debouncer crate is deliberately not taken: coalesce policy lives in
 # vigia-core, which is the only place I1 is testable.
@@ -145,7 +155,9 @@ criterion = { version = "0.8", default-features = false, features = [
 # Everything else is off, including the default widget set and macros. The shell
 # writes cells directly: a `Paragraph` would wrap, and a wrapped diff line moves
 # every line below it, so the shape of the screen stops meaning anything. Not
-# taking the widgets also keeps `time` and its transitive tree out of the graph.
+# taking the widgets kept `time` and its transitive tree out of the graph until
+# `ratatui-textarea` below brought `ratatui-widgets` in with its defaults, which
+# nothing on this side can turn back off; SPEC.md section 6 carries the count.
 ratatui = { version = "0.30", default-features = false, features = [
     "crossterm",
 ] }

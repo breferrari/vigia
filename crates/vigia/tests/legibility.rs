@@ -9,10 +9,17 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow, Marked,
-    Mode, NoteLead, Noted, Position, Regions, Row, Scale, Theme, View, body_layout, diff_height,
-    regions, render,
+    Body, BoxPart, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow,
+    Marked, Mode, NoteLead, Noted, Position, Regions, Row, Scale, Theme, View, body_layout,
+    diff_height, regions, render,
 };
+
+/// The anchor the sweep's box carries: long enough to lose its head at most widths.
+const BOX_LABEL: &str = "crates/vigia/src/shell.rs:2";
+
+/// The narrowest pane the box draws on: below it the content leaves no column
+/// between the box's own two sides.
+const BOX_FLOOR: u16 = 7;
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// The mark meaning "this continues past the right edge".
@@ -446,6 +453,29 @@ fn every_row_kind() -> View {
                 newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
+            Row::Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 2,
+            },
+            line(LineKind::Added, 2, "fn main() {}"),
+            // B21's box under the line above, open with a wrapped body and the
+            // caret at its end.
+            Row::Box {
+                part: BoxPart::Top {
+                    label: BOX_LABEL.to_owned(),
+                },
+            },
+            Row::Box {
+                part: BoxPart::Body {
+                    text: "the walk re-reads the index on every frame; cache it".to_owned(),
+                    caret: Some(52),
+                },
+            },
+            Row::Box {
+                part: BoxPart::Bottom,
+            },
         ],
         files: 3,
         top: Position::default(),
@@ -461,9 +491,84 @@ fn every_row_kind() -> View {
                 id: "n1".to_owned(),
                 bare: false,
             }],
+            boxed: Some(11),
             ..Default::default()
         },
     }
+}
+
+/// I6 on the box's top edge: the anchor keeps its tail and says what it lost,
+/// the way a heading's path does, at every width the sweep draws it.
+#[test]
+fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
+    let view = every_row_kind();
+    let chrome = chrome();
+    let mut whole = 0usize;
+    let mut elided = 0usize;
+    let mut drawn: Vec<u16> = Vec::new();
+    for width in WIDTHS {
+        let rows = rows_at(width, 24, &view, &chrome);
+        let Some(top) = rows
+            .iter()
+            .find(|row| row.contains("note ·") || row.contains(['┌', '╭']))
+        else {
+            continue;
+        };
+        let top = top.trim_end();
+        if top.contains(BOX_LABEL) {
+            whole += 1;
+        } else if let Some(at) = top.find(ELIDED) {
+            // The mark alone, at a width with room for nothing after it, still
+            // says the anchor was here and lost.
+            let tail = top[at + ELIDED.len_utf8()..].trim_end_matches(['─', '┐', '╮', ' ']);
+            assert!(
+                BOX_LABEL.ends_with(tail),
+                "at {width} columns the box's edge reads {top:?}, whose tail is not \
+                 the anchor's"
+            );
+            elided += 1;
+        } else {
+            panic!(
+                "at {width} columns the box's edge reads {top:?}: the anchor is neither whole nor marked as cut"
+            );
+        }
+        drawn.push(width);
+        assert!(
+            top.ends_with(['┐', '╮']),
+            "at {width} columns the box's top edge does not close: {top:?}"
+        );
+        // The bottom edge closes too, whichever rung of the hint ladder it is
+        // down to, including the one that spells nothing at all.
+        let bottom = rows
+            .iter()
+            .find(|row| row.contains(['└', '╰']))
+            .unwrap_or_else(|| panic!("at {width} columns the box has no bottom edge"))
+            .trim_end();
+        assert!(
+            bottom.ends_with(['┘', '╯']),
+            "at {width} columns the box's bottom edge does not close: {bottom:?}"
+        );
+    }
+    // Every width from the floor up, with no gap. A count alone leaves a band
+    // where the box drew nothing indistinguishable from one where it drew
+    // correctly, since the assertions above only run on the widths it reached.
+    let floor = *drawn.first().expect("the sweep never drew the box");
+    assert_eq!(
+        drawn,
+        (floor..=*WIDTHS.end()).collect::<Vec<_>>(),
+        "the box is missing from a width at or above {floor}, so the sweep \
+         passed over a band it never drew"
+    );
+    assert_eq!(
+        floor, BOX_FLOOR,
+        "the box's narrowest pane moved, which is a rung of the ladder rather \
+         than a number for this gate to follow"
+    );
+    assert!(
+        whole > 0 && elided > 0,
+        "the sweep saw the whole anchor at {whole} widths and a cut one at \
+         {elided}, so one rung of the ladder was never drawn"
+    );
 }
 
 /// A view with content nobody wrote for a display: double-width, and a path

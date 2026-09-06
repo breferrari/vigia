@@ -13,7 +13,9 @@ use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
-use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View};
+use crate::view::{
+    BOX_FRAME, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View,
+};
 
 /// Columns a tab advances to the next multiple of.
 const TAB_STOP: usize = 4;
@@ -1793,6 +1795,31 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     }
 }
 
+/// Where a display row's own text begins in the diff region and how wide it
+/// runs, past the gutter the row does not use; `None` where the region leaves
+/// it no column.
+fn content_cells(diff: Region) -> Option<(u16, u16)> {
+    let (left, columns) = diff.gutter;
+    let width = diff.text.saturating_sub(columns);
+    (width > 0).then(|| (left.saturating_add(columns), width))
+}
+
+/// The cells the note box took on a painted screen, from its top edge to its
+/// bottom one, for its effect to run over and for a press to be told it landed
+/// inside. `None` on a screen that drew no box.
+#[must_use]
+pub fn box_cells(laid: &Regions, view: &View) -> Option<Rect> {
+    let diff = laid.diff;
+    let (x, width) = content_cells(diff)?;
+    view.rows
+        .iter()
+        .enumerate()
+        .take(usize::from(diff.rows))
+        .filter(|(_, row)| matches!(row, Row::Box { .. }))
+        .map(|(offset, _)| Rect::new(x, diff.top.saturating_add(offset as u16), width, 1))
+        .reduce(|whole, line| whole.union(line))
+}
+
 /// The cells one note's rows took on a painted screen, for an effect to run over.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteCells {
@@ -1813,12 +1840,9 @@ pub struct NoteCells {
 #[must_use]
 pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
     let diff = laid.diff;
-    let (left, columns) = diff.gutter;
-    let x = left.saturating_add(columns);
-    let width = diff.text.saturating_sub(columns);
-    if width == 0 {
+    let Some((x, width)) = content_cells(diff) else {
         return Vec::new();
-    }
+    };
     let mut out: Vec<NoteCells> = Vec::new();
     for (offset, row) in view.rows.iter().enumerate().take(usize::from(diff.rows)) {
         let Row::Note { id, lead, word, .. } = row else {
@@ -3611,15 +3635,21 @@ impl Painter<'_> {
         // The rows carrying a note's mark, and whether the note is the anchor alone.
         // Built only for a screen that has one, so a pane with no notes allocates
         // nothing for them.
-        let marks: Option<Vec<Option<bool>>> = (!view.notes.marked.is_empty()).then(|| {
-            let mut marks = vec![None; shown];
-            for mark in &view.notes.marked {
-                if let Some(slot) = marks.get_mut(mark.row) {
-                    *slot = Some(slot.unwrap_or(true) && mark.bare);
+        let marks: Option<Vec<Option<bool>>> =
+            (!view.notes.marked.is_empty() || view.notes.boxed.is_some()).then(|| {
+                let mut marks = vec![None; shown];
+                for mark in &view.notes.marked {
+                    if let Some(slot) = marks.get_mut(mark.row) {
+                        *slot = Some(slot.unwrap_or(true) && mark.bare);
+                    }
                 }
-            }
-            marks
-        });
+                // The line the box is open under keeps the note's ink, so the box
+                // can be traced to its line from across the pane.
+                if let Some(slot) = view.notes.boxed.and_then(|row| marks.get_mut(row)) {
+                    *slot = Some(false);
+                }
+                marks
+            });
 
         // And the two are allowed to differ, which is the ruling rather than a gap.
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
@@ -3721,6 +3751,17 @@ impl Painter<'_> {
                         text,
                         *word,
                         *faded,
+                    );
+                }
+                Row::Box { part } => {
+                    self.box_row(
+                        Rect {
+                            y,
+                            height: 1,
+                            x: glyphs.x,
+                            width: glyphs.width,
+                        },
+                        part,
                     );
                 }
                 Row::Line {
@@ -4262,7 +4303,102 @@ impl Painter<'_> {
         let spent = usize::from(next - x);
         self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), ink);
     }
+
+    /// ```text
+    ///       ┌ note · src/watch.rs:5 ─────────────────────────────────┐
+    ///       │ checked_mul on a Duration cannot overflow here; use    │
+    ///       │ saturating_mul and drop the unwrap_or.▏                │
+    ///       └ Enter sends · Esc cancels ─────────────────────────────┘
+    /// ```
+    ///
+    /// At the content origin like a note's rows, across the content width, the
+    /// frame and its labels in the chrome's dim weight and the reader's text in
+    /// the chrome's own, so nothing in it reads as a line of the diff. The
+    /// corners follow the glyph rung the sheet's do.
+    fn box_row(&mut self, glyphs: Rect, part: &BoxPart) {
+        let origin = line_origin(self.gutter);
+        let room = usize::from(glyphs.width).saturating_sub(origin);
+        if room <= BOX_FRAME {
+            return;
+        }
+        let x = glyphs.x.saturating_add(origin as u16);
+        let frame = self.theme.chrome_dim;
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
+        match part {
+            BoxPart::Top { label } => {
+                let corners = if rounded {
+                    ('╭', '╮')
+                } else {
+                    ('┌', '┐')
+                };
+                // The label between the corners, with a rule after it: the whole
+                // anchor, then the anchor alone, then the anchor's tail marked
+                // the way a heading's path is, down to the mark by itself.
+                let inner = room - 2;
+                let named = format!(" note · {label} ");
+                let bare = format!(" {label} ");
+                let title = if width_of(&named) <= inner {
+                    named
+                } else if width_of(&bare) <= inner {
+                    bare
+                } else {
+                    format!(" {} ", elide_head(label, inner - 2))
+                };
+                self.box_edge(x, glyphs.y, room, corners, &title, frame);
+            }
+            BoxPart::Body { text, caret } => {
+                let inner = room - BOX_FRAME;
+                self.put(x, glyphs.y, "│ ", 2, frame);
+                self.put(x + 2, glyphs.y, text, inner, self.theme.chrome);
+                self.put(x + (room - 2) as u16, glyphs.y, " │", 2, frame);
+                // The editor's own caret: the cell it stands in, reversed, which
+                // survives every rung a palette has.
+                if let Some(column) = caret.filter(|column| *column < inner) {
+                    let at = x + 2 + column as u16;
+                    if let Some(cell) = self.buf.cell_mut((at, glyphs.y)) {
+                        // A caret past the text stands on a blank in the text's ink,
+                        // so it reads as the text's block wherever it is.
+                        cell.set_style(cell.style().patch(self.theme.chrome));
+                        cell.modifier.insert(Modifier::REVERSED);
+                    }
+                }
+            }
+            BoxPart::Bottom => {
+                let corners = if rounded {
+                    ('╰', '╯')
+                } else {
+                    ('└', '┘')
+                };
+                let inner = room - 2;
+                let hint = widest_fitting_or_last(&BOX_HINT_RUNGS, inner);
+                self.box_edge(x, glyphs.y, room, corners, hint, frame);
+            }
+        }
+    }
+
+    /// One edge of the box: a corner, a label, the rule to the far corner.
+    fn box_edge(
+        &mut self,
+        x: u16,
+        y: u16,
+        room: usize,
+        corners: (char, char),
+        label: &str,
+        frame: Style,
+    ) {
+        let mut edge = String::with_capacity(room * 3);
+        edge.push(corners.0);
+        edge.push_str(label);
+        for _ in 0..(room - 2).saturating_sub(width_of(label)) {
+            edge.push(RULE);
+        }
+        edge.push(corners.1);
+        self.put(x, y, &edge, room, frame);
+    }
 }
+
+/// What the box's bottom edge spells, widest rung first.
+const BOX_HINT_RUNGS: [&str; 3] = [" Enter sends · Esc cancels ", " Enter · Esc ", ""];
 
 /// What a content row's gutter draws instead of, or over, its number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

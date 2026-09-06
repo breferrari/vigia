@@ -2,12 +2,14 @@
 
 use std::time::{Duration, Instant};
 
+use ratatui_textarea::Input;
 use vigia_core::{Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
+use crate::notes::NoteBox;
 use crate::render::{Body, Chrome, Mode, NoteCount};
-use crate::view::{Position, View, Viewport, rows_in};
+use crate::view::{Anchor, Position, View, Viewport, rows_in};
 
 /// Completed frames the status bar's p99 is taken over.
 const FRAME_SAMPLES: usize = 128;
@@ -103,6 +105,9 @@ pub struct App {
     notes: Vec<Note>,
     /// Whether the note rows are drawn under their lines (`c`); the marks stay.
     notes_shown: bool,
+    /// The box the reader is typing a note into, or one still drawn while it
+    /// leaves; `None` when the pane has no mode.
+    note_box: Option<NoteBox>,
     /// The notes as the footer counts them, from the last collect.
     note_count: NoteCount,
     /// Logical rows the last frame drew, which a page step is measured in.
@@ -163,6 +168,7 @@ impl Default for App {
             wrap: false,
             notes: Vec::new(),
             notes_shown: true,
+            note_box: None,
             note_count: NoteCount::default(),
             shown: 0,
             icons: false,
@@ -331,6 +337,88 @@ impl App {
         self.notes = notes;
     }
 
+    /// The notes the next collect places.
+    pub fn notes(&self) -> &[Note] {
+        &self.notes
+    }
+
+    /// Open the box under `anchor`, holding `existing`'s text when the line
+    /// already carries a note. From here until Enter, Esc or a press elsewhere,
+    /// every key is the box's.
+    pub fn open_box(&mut self, anchor: Anchor, existing: Option<&Note>) {
+        self.note_box = Some(NoteBox::open(anchor, existing));
+    }
+
+    /// Whether the reader's hand is in the box, so the keys are its and follow
+    /// holds the viewport still under it.
+    pub fn box_open(&self) -> bool {
+        self.note_box.as_ref().is_some_and(NoteBox::is_open)
+    }
+
+    /// The box, open or leaving, for the frame that draws it.
+    pub fn note_box(&self) -> Option<&NoteBox> {
+        self.note_box.as_ref()
+    }
+
+    /// The note a box still on screen holds, when `anchor` is the line it was
+    /// opened on. It stands in for that note, so the line stops being marked
+    /// and a press landing while the box leaves would otherwise find nothing.
+    pub fn box_over(&self, anchor: &Anchor) -> Option<&Note> {
+        let open = self.note_box.as_ref()?;
+        if open.anchor() != anchor {
+            return None;
+        }
+        let id = open.over()?;
+        self.notes.iter().find(|note| note.id == id)
+    }
+
+    /// The box while the reader's hand is still in it: one leaving is drawn
+    /// and takes nothing.
+    fn open_mut(&mut self) -> Option<&mut NoteBox> {
+        self.note_box.as_mut().filter(|open| open.is_open())
+    }
+
+    /// Hand the open box one key; `true` when the text changed.
+    pub fn box_edit(&mut self, input: Input) -> bool {
+        self.open_mut().is_some_and(|open| open.edit(input))
+    }
+
+    /// Insert pasted text into the open box.
+    pub fn box_paste(&mut self, text: &str) -> bool {
+        self.open_mut().is_some_and(|open| open.paste(text))
+    }
+
+    /// Take the open box, which is Enter: its rows go with it on this frame.
+    pub fn take_box(&mut self) -> Option<NoteBox> {
+        self.note_box.take_if(|open| open.is_open())
+    }
+
+    /// Send the open box away, which is Esc: the keys are the pane's again now,
+    /// and the rows stay drawn until `until` while they leave.
+    pub fn close_box(&mut self, until: Instant) {
+        if let Some(open) = self.open_mut() {
+            open.close(until);
+        }
+    }
+
+    /// Drop a box whose leaving has ended. It answers nothing where the ledger's
+    /// settle answers what moved: the box is in no list a collect is handed.
+    pub fn settle_box(&mut self, now: Instant) {
+        let ended = self
+            .note_box
+            .as_ref()
+            .and_then(NoteBox::ends_in)
+            .is_some_and(|until| now >= until);
+        if ended {
+            self.note_box = None;
+        }
+    }
+
+    /// When the leaving box has its rows dropped, if one is leaving.
+    pub fn box_ends_in(&self) -> Option<Instant> {
+        self.note_box.as_ref().and_then(NoteBox::ends_in)
+    }
+
     /// The chrome for this frame.
     pub fn chrome(
         &self,
@@ -379,7 +467,9 @@ impl App {
     pub fn follow(&mut self, path: &str, frame: &Frame) -> bool {
         // Stored even while disengaged, so `f` has somewhere to jump to.
         self.newest = Some(path.to_owned());
-        self.following && self.jump_to_newest(frame)
+        // Not while the reader's hand is in the box: a jump would carry the box
+        // off the screen with the keys still its, and the next tick jumps anyway.
+        self.following && !self.box_open() && self.jump_to_newest(frame)
     }
 
     /// Move the viewport to the newest changed file, if it is still one.
@@ -752,6 +842,7 @@ impl App {
             },
             &self.notes,
             self.notes_shown,
+            self.note_box.as_ref(),
         )?;
         self.note_count = NoteCount {
             total: self.notes.len(),

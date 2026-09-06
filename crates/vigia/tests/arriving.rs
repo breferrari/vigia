@@ -9,12 +9,129 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use tachyonfx::{Duration as FxDuration, EffectManager, Interpolation, fx};
 use vigia::{
-    ARRIVING, ARRIVING_FRAME, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Theme,
-    effect_interval, leaving, resolve_departure,
+    ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT,
+    RESOLVED_DEPARTURE, Theme, box_entrance, box_exit, effect_interval, leaving, resolve_departure,
 };
 
 /// The pane every gate here draws on.
 const PANE: Rect = Rect::new(0, 0, 80, 24);
+
+/// Where the box's gates draw it: three rows under a line, across the content.
+const BOX: Rect = Rect::new(6, 5, 60, 4);
+
+/// A buffer with the box drawn in the chrome's ink, standing in for what
+/// `render` leaves behind: a ring of rule and text inside it.
+fn boxed(theme: &Theme) -> Buffer {
+    let mut buf = Buffer::empty(PANE);
+    for y in BOX.top()..BOX.bottom() {
+        for x in BOX.left()..BOX.right() {
+            let edge =
+                y == BOX.top() || y + 1 == BOX.bottom() || x == BOX.left() || x + 1 == BOX.right();
+            let cell = &mut buf[(x, y)];
+            if edge {
+                cell.set_symbol("─").set_style(theme.chrome_dim);
+            } else {
+                cell.set_symbol("x").set_style(theme.chrome);
+            }
+        }
+    }
+    buf
+}
+
+/// The ring's cells still drawn, and the inner cells still in the chrome's ink.
+fn drawn_of(buf: &Buffer, theme: &Theme) -> (usize, usize) {
+    let mut ring = 0;
+    let mut lit = 0;
+    for y in BOX.top()..BOX.bottom() {
+        for x in BOX.left()..BOX.right() {
+            let edge =
+                y == BOX.top() || y + 1 == BOX.bottom() || x == BOX.left() || x + 1 == BOX.right();
+            let cell = &buf[(x, y)];
+            if edge {
+                ring += usize::from(cell.symbol() != " ");
+            } else {
+                lit += usize::from(cell.style().fg == theme.chrome.fg);
+            }
+        }
+    }
+    (ring, lit)
+}
+
+/// `SPEC.md` §11.2 B21: the box arrives through `tachyonfx` under §5.3's
+/// licence, armed by the click and done when done, over what a changed file
+/// takes; Esc plays it backwards. The border draws itself in from the
+/// anchor's corner and the text fades up behind it.
+#[test]
+fn the_box_entrance_ends_inside_its_duration_and_esc_plays_it_backwards() {
+    let theme = Theme::default();
+    let ring = 2 * (usize::from(BOX.width) + usize::from(BOX.height)) - 4;
+    let inner = usize::from(BOX.width - 2) * usize::from(BOX.height - 2);
+
+    // In: nothing of the ring at the start, all of it at the end, and the text
+    // lit only once the fade has run.
+    let mut entrance = box_entrance(&theme);
+    let mut buf = boxed(&theme);
+    entrance.process(FxDuration::ZERO, &mut buf, BOX);
+    assert_eq!(
+        drawn_of(&buf, &theme),
+        (0, 0),
+        "the box is drawn whole on the frame that opened it"
+    );
+    let mut spent = std::time::Duration::ZERO;
+    let mut grew = false;
+    while spent + ARRIVING_FRAME < BOX_ARRIVING {
+        let mut buf = boxed(&theme);
+        entrance.process(FxDuration::from(ARRIVING_FRAME), &mut buf, BOX);
+        spent += ARRIVING_FRAME;
+        let (drawn, _) = drawn_of(&buf, &theme);
+        grew |= drawn > 0 && drawn < ring;
+        assert!(
+            !entrance.done(),
+            "the entrance reported itself done at {spent:?}, inside its {BOX_ARRIVING:?}"
+        );
+    }
+    assert!(grew, "the border never drew part way in: it snapped");
+    let mut buf = boxed(&theme);
+    entrance.process(
+        FxDuration::from(BOX_ARRIVING - spent + ARRIVING_FRAME),
+        &mut buf,
+        BOX,
+    );
+    assert!(
+        entrance.done(),
+        "the entrance is still running past its length"
+    );
+    assert_eq!(
+        drawn_of(&buf, &theme),
+        (ring, inner),
+        "the entrance did not end on the box as drawn"
+    );
+
+    // Out: the mirror image, ending on a blank ring and dim text.
+    let mut exit = box_exit(&theme);
+    let mut buf = boxed(&theme);
+    exit.process(FxDuration::ZERO, &mut buf, BOX);
+    assert_eq!(drawn_of(&buf, &theme), (ring, inner));
+    let mut spent = std::time::Duration::ZERO;
+    while spent + ARRIVING_FRAME < BOX_ARRIVING {
+        let mut buf = boxed(&theme);
+        exit.process(FxDuration::from(ARRIVING_FRAME), &mut buf, BOX);
+        spent += ARRIVING_FRAME;
+        assert!(!exit.done(), "the exit reported itself done at {spent:?}");
+    }
+    let mut buf = boxed(&theme);
+    exit.process(
+        FxDuration::from(BOX_ARRIVING - spent + ARRIVING_FRAME),
+        &mut buf,
+        BOX,
+    );
+    assert!(exit.done(), "the exit is still running past its length");
+    assert_eq!(
+        drawn_of(&buf, &theme),
+        (0, 0),
+        "the exit did not end on the box gone"
+    );
+}
 
 /// A buffer with text in it, standing in for what `render` leaves behind.
 fn drawn() -> Buffer {

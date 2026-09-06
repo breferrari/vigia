@@ -10,8 +10,8 @@ use std::time::SystemTime;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Glyphs, PaintStats, Pointing, Theme, Toggled, body_layout, regions, render,
-    state_root, toggle,
+    Action, App, Committed, Glyphs, Input, Key, PaintStats, Pointing, Theme, body_layout, commit,
+    opening, regions, render, state_root,
 };
 use vigia_core::{Frame, Highlighter, History, Store, WARM_FILES, WatchOptions, Worktree};
 
@@ -424,9 +424,26 @@ fn one_gesture_writes_exactly_one_file() {
 
     settle_tree(root.path());
     let before = snapshot(root.path());
-    let written = match toggle(&store, &view, line) {
-        Some(Ok(Toggled::Written(id))) => id,
-        other => panic!("the press did not write a note: {other:?}"),
+
+    // The press opens the box and writes nothing: the gesture is Enter.
+    let (anchor, existing) = opening(&view, line, app.notes()).expect("the press opened nothing");
+    app.open_box(anchor, existing.as_ref());
+    for c in "use saturating_mul".chars() {
+        app.box_edit(Input {
+            key: Key::Char(c),
+            ctrl: false,
+            alt: false,
+            shift: false,
+        });
+    }
+    assert!(
+        difference(&before, &snapshot(root.path())).is_empty(),
+        "opening the box and typing into it wrote to the state root before Enter"
+    );
+
+    let written = match commit(&store, app.note_box().expect("the box is open")) {
+        Ok(Committed::Written(id)) => id,
+        other => panic!("Enter did not write a note: {other:?}"),
     };
     let moved = difference(&before, &snapshot(root.path()));
 

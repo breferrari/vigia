@@ -33,6 +33,7 @@ exclude = ["tests/**"]
 
 [dependencies]
 ratatui.workspace = true
+ratatui-textarea.workspace = true
 serde_json.workspace = true
 tachyonfx.workspace = true
 vigia-core.workspace = true
