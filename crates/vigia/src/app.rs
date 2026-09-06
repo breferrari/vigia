@@ -401,9 +401,9 @@ impl App {
         }
     }
 
-    /// Drop a box whose leaving has ended; `true` when one was dropped, so the
-    /// caller knows the rows the next collect makes have changed.
-    pub fn settle_box(&mut self, now: Instant) -> bool {
+    /// Drop a box whose leaving has ended. It answers nothing where the ledger's
+    /// settle answers what moved: the box is in no list a collect is handed.
+    pub fn settle_box(&mut self, now: Instant) {
         let ended = self
             .note_box
             .as_ref()
@@ -412,7 +412,6 @@ impl App {
         if ended {
             self.note_box = None;
         }
-        ended
     }
 
     /// When the leaving box has its rows dropped, if one is leaving.

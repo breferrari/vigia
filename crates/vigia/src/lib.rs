@@ -1115,6 +1115,18 @@ impl Shell {
             self.publish_notes();
         }
         self.note_effects.settle(now);
+        // A pane narrowed under an open box can no longer draw it, and the rule
+        // that a mode is never invisible has to hold after the resize and not
+        // only at the press: the box leaves the way Esc sends it, and the
+        // footer says why, since the reader did not ask for either.
+        if self.app.box_open() && !notes::has_room(self.regions) {
+            self.cancel_box(now);
+            self.say(
+                "no room for a note on this pane".to_owned(),
+                Voice::Alert,
+                now,
+            );
+        }
         // The box's own end, on the same terms: dropped on the turn that finds it.
         self.app.settle_box(now);
         self.box_effect.take_if(|armed| armed.spent(now));
@@ -2141,6 +2153,7 @@ mod tests {
             "self.note_effects.settle(now)",
             "self.app.settle_box(now)",
             "self.box_effect.take_if(|armed| armed.spent(now))",
+            "if self.app.box_open() && !notes::has_room(self.regions) {",
         ] {
             assert!(
                 body.contains(step),

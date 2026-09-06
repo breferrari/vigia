@@ -527,11 +527,12 @@ fn caret_in(
     }
 }
 
-/// The rows the box takes under a content width of `content`, and none at a
-/// width that leaves the body no column.
-fn box_rows(pin: &BoxPin, content: usize) -> Vec<Row> {
+/// The rows the box takes under a content width of `content`, and which of
+/// them carries the caret, which the clamp keeps on screen. None at a width
+/// that leaves the body no column between the box's two sides.
+fn box_rows(pin: &BoxPin, content: usize) -> (Vec<Row>, usize) {
     if content <= BOX_FRAME {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
     let inner = content - BOX_FRAME;
     let (cursor_line, cursor_col) = pin.cursor;
@@ -573,7 +574,9 @@ fn box_rows(pin: &BoxPin, content: usize) -> Vec<Row> {
     rows.push(Row::Box {
         part: BoxPart::Bottom,
     });
-    rows
+    // The window above always holds the caret's row, since it begins at most
+    // `BOX_ROWS` back from it, and the top edge stands before them all.
+    (rows, 1 + caret_row - top)
 }
 
 impl Pin {
@@ -1529,7 +1532,7 @@ impl View {
             0
         };
         if let Some(boxed) = &walked.boxed {
-            under += box_rows(boxed, content).len();
+            under += box_rows(boxed, content).0.len();
         }
         if !wrap || content == 0 {
             return self.rows.len() + under;
@@ -1598,19 +1601,9 @@ impl View {
         let mut boxed_rows = 0usize;
         let mut caret_at = 0usize;
         if let Some(boxed) = &walked.boxed {
-            let rows = box_rows(boxed, content);
+            let (rows, caret) = box_rows(boxed, content);
             boxed_rows = rows.len();
-            caret_at = rows
-                .iter()
-                .position(|row| {
-                    matches!(
-                        row,
-                        Row::Box {
-                            part: BoxPart::Body { caret: Some(_), .. }
-                        }
-                    )
-                })
-                .unwrap_or(boxed_rows.saturating_sub(1));
+            caret_at = caret;
             under[boxed.row].splice(0..0, rows);
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at].len();
@@ -1653,16 +1646,15 @@ impl View {
             let opens = above_line + breaks[boxed.row].len() + 1;
             // Show as much of the box as the pane holds, from its last row up.
             let ends = opens + boxed_rows;
-            // Never past the anchored line, or the clamp for the diff's own end
-            // takes the box off the top while making room at the bottom. And
-            // never short of the caret's own row, which is what a box taller
-            // than the pane keeps instead of its bottom edge: a reader who
-            // cannot see the caret cannot see what they are typing.
+            // The caret's row has to be on screen or the reader cannot see what
+            // they are typing. The anchored line is preferred, then the top
+            // edge, and each gives way in that order on a pane too short.
             let caret = opens + caret_at;
+            let floor = (caret + 1).saturating_sub(height);
+            let ceiling = above_line.max(floor).min(opens.max(floor));
             dropped = dropped
                 .max(ends.saturating_sub(height))
-                .min(above_line)
-                .max((caret + 1).saturating_sub(height));
+                .clamp(floor, ceiling);
         }
         let mut from = 0usize;
         let mut above = dropped;
@@ -2161,7 +2153,7 @@ mod tests {
     fn body_of(pin: &BoxPin, content: usize) -> (Vec<String>, Option<usize>) {
         let mut text = Vec::new();
         let mut caret = None;
-        for row in box_rows(pin, content) {
+        for row in box_rows(pin, content).0 {
             if let Row::Box {
                 part:
                     BoxPart::Body {

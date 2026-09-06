@@ -216,6 +216,10 @@ impl Rig {
         let Some(offset) = press_at(&painted.view, painted.laid, &press(column, row)) else {
             return false;
         };
+        // The loop's own refusals, in its own order.
+        if !has_room(painted.laid) {
+            return false;
+        }
         let (anchor, existing) = opening(&painted.view, offset, self.app.notes())
             .expect("a note press resolved to no anchor");
         let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
@@ -1177,10 +1181,29 @@ fn a_pane_with_no_room_for_the_box_opens_none() {
         press_at(&cramped.view, cramped.laid, &press(left, y)).is_some(),
         "the cramped pane has no gutter to press, so this gate proves nothing"
     );
+    // And the press itself opens nothing: no box, no keys taken, no store.
+    assert!(!rig.press_opens(&cramped, left, y));
+    assert!(
+        !rig.app.box_open(),
+        "a pane too narrow to draw the box still gave it the keys"
+    );
+    assert!(rig.app.note_box().is_none());
+    assert!(!rig.store.dir().exists());
+    let after = rig.paint(&mut frame, Rect::new(0, 0, 6, 24), Pointing::default());
+    assert_eq!(
+        after.rows(),
+        cramped.rows(),
+        "the refused press drew something"
+    );
 
-    // And where the box does draw, the same rule says so.
+    // And where the box does draw, the same rule says so and the press opens one,
+    // so the refusal above is the width and not something else about the press.
     let roomy = rig.paint(&mut frame, PANE, Pointing::default());
     assert!(has_room(roomy.laid));
+    let y = roomy.row_of(EDITED);
+    let (left, _, _) = roomy.gutter();
+    assert!(rig.press_opens(&roomy, left + 1, y));
+    assert!(rig.app.box_open());
 }
 
 #[test]
@@ -1290,10 +1313,12 @@ fn a_box_opened_on_the_last_drawn_row_is_still_whole() {
 }
 
 #[test]
-fn the_box_and_the_diffs_own_bottom_ask_the_clamp_for_different_amounts() {
-    // The two clamps are one expression, and this is the only screen where both
-    // want something: the diff resting on its last row, and a box under a line
-    // near it. Whichever asks for more has to win, or one of them is cut.
+fn a_box_opened_at_the_top_of_a_bottom_anchored_screen_stays_on_it() {
+    // The diff resting on its last row already drops every row the box would,
+    // so the box's own floor never binds there. What binds is the ceiling: the
+    // box's rows grow the diff, the bottom clamp answers by dropping that many
+    // more off the front, and without a bound at the anchored line the box the
+    // reader just opened is carried off the top of the screen.
     let scratch = fixture("notes-box-both-clamps");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1328,16 +1353,18 @@ fn the_box_and_the_diffs_own_bottom_ask_the_clamp_for_different_amounts() {
     };
     let (left, _, _) = bottom.gutter();
 
-    // A line a little above it, so the box wants more room than the diff's end.
+    // The first line on that screen, which is the row the bottom clamp carries
+    // off the top as soon as the box's rows grow the diff under it.
     let on = bottom
         .view
         .rows
         .iter()
-        .enumerate()
-        .filter(|(_, row)| matches!(row, Row::Line { .. }))
-        .map(|(at, _)| at)
-        .next_back()
-        .expect("a content row");
+        .position(|row| matches!(row, Row::Line { .. }))
+        .expect("a content row at the top of the bottom-anchored screen");
+    assert!(
+        on < last_line,
+        "the fixture drew one content row, not a screen"
+    );
     assert!(rig.press_opens(&bottom, left + 1, bottom.laid.diff.top + on as u16));
     rig.type_text("both clamps");
     let opened = rig.paint(&mut frame, short, Pointing::default());
@@ -1354,15 +1381,22 @@ fn the_box_and_the_diffs_own_bottom_ask_the_clamp_for_different_amounts() {
     assert!(
         matches!(parts.first(), Some(BoxPart::Top { .. }))
             && matches!(parts.last(), Some(BoxPart::Bottom)),
-        "the box was cut where both clamps wanted the window:\n{}",
+        "the box the reader just opened was carried off the screen by the clamp \
+         for the diff's own end:\n{}",
         opened.rows().join("\n")
     );
-    // And the row the box hangs from is still the diff's own last line, so the
-    // bottom clamp did not lose its own claim to the box's.
     assert!(
-        opened.rows().join("\n").contains(&tail),
-        "the diff's last line left the screen:\n{}",
+        opened.rows().join("\n").contains("both clamps"),
+        "the reader's own words left the screen:\n{}",
         opened.rows().join("\n")
+    );
+    // The diff's end gave up exactly the rows the box took and no more, so the
+    // bottom clamp is still doing its own job around it.
+    let shown = opened.rows().join("\n");
+    assert!(
+        !shown.contains(&tail),
+        "the window did not move at all, so this screen never had the bottom \
+         clamp on it:\n{shown}"
     );
 }
 
