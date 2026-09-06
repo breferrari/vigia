@@ -208,14 +208,13 @@ impl NoteBox {
 pub enum BoxRoute {
     /// Enter: write the note and close the box.
     Send,
-    /// Esc: close the box and write nothing.
+    /// Esc, or a press outside the box: close it, write nothing, and do
+    /// nothing else with the event.
     Cancel,
     /// A key for the editor, Alt+Enter's newline included.
     Edit(Input),
     /// Pasted text for the editor.
     Paste(String),
-    /// A press outside the box: close it, write nothing, and do nothing else.
-    Close,
     /// A press inside the box, or a key's release: nothing.
     Inert,
     /// Not the box's to answer: the wheel, a resize, focus and the pointer
@@ -241,7 +240,7 @@ pub fn box_route(event: &Event, over: Option<Rect>) -> BoxRoute {
                 if over.is_some_and(|over| over.contains(Position::new(mouse.column, mouse.row))) {
                     BoxRoute::Inert
                 } else {
-                    BoxRoute::Close
+                    BoxRoute::Cancel
                 }
             }
             _ => BoxRoute::Through,
@@ -399,15 +398,17 @@ fn ring_step(area: Rect, at: Position) -> Option<usize> {
     }
 }
 
-/// The effect running over the box's cells, arriving or leaving.
-pub struct BoxEffect {
+/// An effect and when it is retired, which the box holds one of and every
+/// note effect is built on.
+pub struct Timed {
     effect: Effect,
-    /// When it is retired whether or not it ever drew, for the reason a note's
-    /// effect carries one: a box off screen is never processed.
+    /// The clock is the retirement and the effect's own count is the other
+    /// half: a thing off screen is never processed, and an effect never
+    /// processed never reports itself done.
     until: Instant,
 }
 
-impl BoxEffect {
+impl Timed {
     /// Arm `effect` until `until`.
     #[must_use]
     pub fn new(effect: Effect, until: Instant) -> Self {
@@ -426,7 +427,7 @@ impl BoxEffect {
         now >= self.until || self.effect.done()
     }
 
-    /// Advance it by `since` over `over`, the cells the box drew this frame.
+    /// Advance it by `since` over `over`, the cells its subject drew this frame.
     pub fn draw(&mut self, since: Duration, buf: &mut Buffer, over: Rect) {
         self.effect.process(since.into(), buf, over);
     }
@@ -681,10 +682,7 @@ impl NoteCells {
 struct NoteEffect {
     id: String,
     target: Target,
-    effect: Effect,
-    /// When it is retired whether or not it ever drew: a note off screen is
-    /// never processed, and an effect never processed never reports itself done.
-    until: Instant,
+    timed: Timed,
 }
 
 impl NoteEffect {
@@ -707,14 +705,8 @@ impl NoteEffect {
         Some(Self {
             id,
             target,
-            effect: effect?,
-            until: now + length,
+            timed: Timed::new(effect?, now + length),
         })
-    }
-
-    /// Whether the effect has run its length, by its own count or by the clock.
-    fn spent(&self, now: Instant) -> bool {
-        now >= self.until || self.effect.done()
     }
 }
 
@@ -752,7 +744,7 @@ impl NoteEffects {
 
     /// Retire every effect that has run its length.
     pub fn settle(&mut self, now: Instant) {
-        self.running.retain(|armed| !armed.spent(now));
+        self.running.retain(|armed| !armed.timed.spent(now));
     }
 
     /// Whether anything is running, which is what keeps the frame clock armed.
@@ -775,7 +767,7 @@ impl NoteEffects {
                 continue;
             };
             if let Some(over) = found.of(armed.target) {
-                armed.effect.process(since.into(), buf, over);
+                armed.timed.draw(since, buf, over);
             }
         }
     }

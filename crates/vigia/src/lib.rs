@@ -39,9 +39,9 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use notes::{
-    Alerts, BOX_ARRIVING, BoxEffect, BoxRoute, Change, Committed, LEAVING, Ledger, NoteBox,
-    NoteEffects, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, box_entrance, box_exit,
-    box_route, commit, leaving, note_arrival, opening, press_at, resolve_departure,
+    Alerts, BOX_ARRIVING, BoxRoute, Change, Committed, LEAVING, Ledger, NoteBox, NoteEffects,
+    RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Timed, box_entrance, box_exit, box_route,
+    commit, leaving, note_arrival, opening, press_at, resolve_departure,
 };
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
@@ -410,7 +410,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                                 shell.commit_box(&tx, Instant::now());
                                 continue;
                             }
-                            BoxRoute::Cancel | BoxRoute::Close => {
+                            BoxRoute::Cancel => {
                                 shell.cancel_box(Instant::now());
                                 continue;
                             }
@@ -816,7 +816,7 @@ struct Shell {
     /// The effects running over notes' rows.
     note_effects: NoteEffects,
     /// The effect over the note box's rows while it arrives or leaves.
-    box_effect: Option<BoxEffect>,
+    box_effect: Option<Timed>,
     /// What the last listing had to say, so the alert is said when that changes
     /// and not on every wake.
     alerts: Alerts,
@@ -878,6 +878,16 @@ impl Shell {
         self.hovered
     }
 
+    /// Whether anything drawn is still moving. Asked by the clock that offers
+    /// the next frame and by the record of whether one drew, so the two cannot
+    /// disagree about what counts as an effect.
+    fn effects_running(&self) -> bool {
+        self.effects.is_running()
+            || self.notice_effects.is_running()
+            || self.note_effects.is_running()
+            || self.box_effect.as_ref().is_some_and(Timed::is_running)
+    }
+
     /// How long the loop may block before something here has to act.
     fn patience(&self, frame: &vigia_core::Frame, now: Instant) -> Option<std::time::Duration> {
         // Every deadline is folded here rather than at the receive, so `patience`
@@ -897,11 +907,7 @@ impl Shell {
                 settling: frame.settles_in(SystemTime::now()),
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
-                arriving: (self.effects.is_running()
-                    || self.notice_effects.is_running()
-                    || self.note_effects.is_running()
-                    || self.box_effect.as_ref().is_some_and(BoxEffect::is_running))
-                .then(|| now + ARRIVING_FRAME),
+                arriving: self.effects_running().then(|| now + ARRIVING_FRAME),
                 // The frame after a departure ends is the one that drops its rows.
                 departing: self.ledger.ends_in(),
                 // And the frame after the box has left is the one that drops its.
@@ -999,7 +1005,7 @@ impl Shell {
             return;
         };
         self.app.open_box(anchor, existing.as_ref());
-        self.box_effect = Some(BoxEffect::new(
+        self.box_effect = Some(Timed::new(
             notes::box_entrance(&self.theme),
             now + notes::BOX_ARRIVING,
         ));
@@ -1041,7 +1047,7 @@ impl Shell {
     /// now, and the rows stay drawn while the entrance plays backwards.
     fn cancel_box(&mut self, now: Instant) {
         self.app.close_box(now + notes::BOX_ARRIVING);
-        self.box_effect = Some(BoxEffect::new(
+        self.box_effect = Some(Timed::new(
             notes::box_exit(&self.theme),
             now + notes::BOX_ARRIVING,
         ));
@@ -1097,13 +1103,7 @@ impl Shell {
         self.note_effects.settle(now);
         // The box's own end, on the same terms: dropped on the turn that finds it.
         self.app.settle_box(now);
-        if self
-            .box_effect
-            .as_ref()
-            .is_some_and(|armed| armed.spent(now))
-        {
-            self.box_effect = None;
-        }
+        self.box_effect.take_if(|armed| armed.spent(now));
     }
 
     /// Hand the next collect what the ledger says is drawn.
@@ -1384,10 +1384,7 @@ impl Shell {
             }
         })?;
         self.painted = now;
-        self.effects_ran = self.effects.is_running()
-            || self.notice_effects.is_running()
-            || self.note_effects.is_running()
-            || self.box_effect.as_ref().is_some_and(BoxEffect::is_running);
+        self.effects_ran = self.effects_running();
         self.hovered = chrome.hovered;
         if chrome.selected.is_none() {
             self.deselect();
@@ -1973,7 +1970,7 @@ mod tests {
             "notice: self.leaving.or_else(|| self.app.flash_until())",
             "ageing: self.history.ages_in",
             "settling: frame.settles_in(",
-            "self.note_effects.is_running()",
+            "arriving: self.effects_running()",
             "departing: self.ledger.ends_in()",
             "closing: self.app.box_ends_in()",
         ] {
@@ -1981,6 +1978,26 @@ mod tests {
                 sources.contains(clock),
                 "`{clock}` is no longer among the deadlines `patience` is given, so \
                  that clock is either armed somewhere else or has stopped: {sources}"
+            );
+        }
+        // And every manager is inside the one predicate the clock above asks,
+        // since a manager dropped from it is an effect the loop stops offering
+        // frames to and no gate over a drawn screen can see that.
+        let running = code
+            .split("fn effects_running(&self) -> bool {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("`Shell::effects_running` is gone");
+        for manager in [
+            "self.effects.is_running()",
+            "self.notice_effects.is_running()",
+            "self.note_effects.is_running()",
+            "self.box_effect.as_ref().is_some_and(Timed::is_running)",
+        ] {
+            assert!(
+                running.contains(manager),
+                "`{manager}` is no longer one of the effects `effects_running` \
+                 answers for, so the loop stops offering it frames: {running}"
             );
         }
         // Each path to a paint settles the footer on the way: an announcement
@@ -2102,7 +2119,7 @@ mod tests {
             .find("process_effects(")
             .expect("`paint` no longer processes effects");
         let recorded = paint
-            .find("self.effects_ran = self.effects.is_running()")
+            .find("self.effects_ran = self.effects_running()")
             .expect("`paint` no longer records whether an effect drew");
         assert!(
             asked < drawn && drawn < recorded,

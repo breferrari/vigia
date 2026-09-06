@@ -360,20 +360,20 @@ impl App {
         self.note_box.as_ref()
     }
 
+    /// The box while the reader's hand is still in it: one leaving is drawn
+    /// and takes nothing.
+    fn open_mut(&mut self) -> Option<&mut NoteBox> {
+        self.note_box.as_mut().filter(|open| open.is_open())
+    }
+
     /// Hand the open box one key; `true` when the text changed.
     pub fn box_edit(&mut self, input: Input) -> bool {
-        self.note_box
-            .as_mut()
-            .filter(|open| open.is_open())
-            .is_some_and(|open| open.edit(input))
+        self.open_mut().is_some_and(|open| open.edit(input))
     }
 
     /// Insert pasted text into the open box.
     pub fn box_paste(&mut self, text: &str) -> bool {
-        self.note_box
-            .as_mut()
-            .filter(|open| open.is_open())
-            .is_some_and(|open| open.paste(text))
+        self.open_mut().is_some_and(|open| open.paste(text))
     }
 
     /// Take the open box, which is Enter: its rows go with it on this frame.
@@ -384,7 +384,7 @@ impl App {
     /// Send the open box away, which is Esc: the keys are the pane's again now,
     /// and the rows stay drawn until `until` while they leave.
     pub fn close_box(&mut self, until: Instant) {
-        if let Some(open) = self.note_box.as_mut().filter(|open| open.is_open()) {
+        if let Some(open) = self.open_mut() {
             open.close(until);
         }
     }

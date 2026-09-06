@@ -1795,18 +1795,22 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     }
 }
 
+/// Where a display row's own text begins in the diff region and how wide it
+/// runs, past the gutter the row does not use; `None` where the region leaves
+/// it no column.
+fn content_cells(diff: Region) -> Option<(u16, u16)> {
+    let (left, columns) = diff.gutter;
+    let width = diff.text.saturating_sub(columns);
+    (width > 0).then(|| (left.saturating_add(columns), width))
+}
+
 /// The cells the note box took on a painted screen, from its top edge to its
 /// bottom one, for its effect to run over and for a press to be told it landed
 /// inside. `None` on a screen that drew no box.
 #[must_use]
 pub fn box_cells(laid: &Regions, view: &View) -> Option<Rect> {
     let diff = laid.diff;
-    let (left, columns) = diff.gutter;
-    let x = left.saturating_add(columns);
-    let width = diff.text.saturating_sub(columns);
-    if width == 0 {
-        return None;
-    }
+    let (x, width) = content_cells(diff)?;
     view.rows
         .iter()
         .enumerate()
@@ -1836,12 +1840,9 @@ pub struct NoteCells {
 #[must_use]
 pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
     let diff = laid.diff;
-    let (left, columns) = diff.gutter;
-    let x = left.saturating_add(columns);
-    let width = diff.text.saturating_sub(columns);
-    if width == 0 {
+    let Some((x, width)) = content_cells(diff) else {
         return Vec::new();
-    }
+    };
     let mut out: Vec<NoteCells> = Vec::new();
     for (offset, row) in view.rows.iter().enumerate().take(usize::from(diff.rows)) {
         let Row::Note { id, lead, word, .. } = row else {
@@ -4325,7 +4326,7 @@ impl Painter<'_> {
         let rounded = !matches!(self.glyphs, Glyphs::Block);
         match part {
             BoxPart::Top { label } => {
-                let (left, right) = if rounded {
+                let corners = if rounded {
                     ('╭', '╮')
                 } else {
                     ('┌', '┐')
@@ -4343,7 +4344,7 @@ impl Painter<'_> {
                 } else {
                     format!(" {} ", elide_head(label, inner - 2))
                 };
-                self.box_edge(x, glyphs.y, room, left, &title, right, frame);
+                self.box_edge(x, glyphs.y, room, corners, &title, frame);
             }
             BoxPart::Body { text, caret } => {
                 let inner = room - BOX_FRAME;
@@ -4363,37 +4364,35 @@ impl Painter<'_> {
                 }
             }
             BoxPart::Bottom => {
-                let (left, right) = if rounded {
+                let corners = if rounded {
                     ('╰', '╯')
                 } else {
                     ('└', '┘')
                 };
                 let inner = room - 2;
                 let hint = widest_fitting_or_last(&BOX_HINT_RUNGS, inner);
-                self.box_edge(x, glyphs.y, room, left, hint, right, frame);
+                self.box_edge(x, glyphs.y, room, corners, hint, frame);
             }
         }
     }
 
     /// One edge of the box: a corner, a label, the rule to the far corner.
-    #[allow(clippy::too_many_arguments)]
     fn box_edge(
         &mut self,
         x: u16,
         y: u16,
         room: usize,
-        left: char,
+        corners: (char, char),
         label: &str,
-        right: char,
         frame: Style,
     ) {
         let mut edge = String::with_capacity(room * 3);
-        edge.push(left);
+        edge.push(corners.0);
         edge.push_str(label);
         for _ in 0..(room - 2).saturating_sub(width_of(label)) {
             edge.push(RULE);
         }
-        edge.push(right);
+        edge.push(corners.1);
         self.put(x, y, &edge, room, frame);
     }
 }

@@ -17,9 +17,9 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
-    ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxEffect, BoxRoute,
-    Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
-    RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme, View,
+    ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxRoute, Change,
+    Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
+    RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme, Timed, View,
     Viewport, body_layout, box_cells, box_entrance, box_exit, box_route, commit, count_cell,
     hover_after, note_cells, opening, press_at, regions, render, repainted, selection_after,
 };
@@ -80,7 +80,7 @@ struct Rig {
     ledger: Ledger,
     effects: NoteEffects,
     /// The effect over the box while it arrives or leaves.
-    box_effect: Option<BoxEffect>,
+    box_effect: Option<Timed>,
     /// A clock moved by hand, so a departure's end is a fact and not a sleep.
     clock: Instant,
     /// How far the clock moved since the last paint, which is what the effects
@@ -207,13 +207,18 @@ impl Rig {
     /// entrance, whose frames `arriving.rs` gates on the effect itself: what the
     /// gates here look at is the box once it has arrived.
     fn press_opens(&mut self, painted: &Painted, column: u16, row: u16) -> bool {
+        assert!(
+            !self.app.box_open(),
+            "the loop routes a press to the open box, so this never reaches the \
+             gutter with one up"
+        );
         let Some(offset) = press_at(&painted.view, painted.laid, &press(column, row)) else {
             return false;
         };
         let (anchor, existing) = opening(&painted.view, offset, self.app.notes())
             .expect("a note press resolved to no anchor");
         self.app.open_box(anchor, existing.as_ref());
-        self.box_effect = Some(BoxEffect::new(
+        self.box_effect = Some(Timed::new(
             box_entrance(&self.theme),
             self.clock + BOX_ARRIVING,
         ));
@@ -287,10 +292,7 @@ impl Rig {
     /// rows stay drawn while the entrance plays backwards.
     fn esc(&mut self) {
         self.app.close_box(self.clock + BOX_ARRIVING);
-        self.box_effect = Some(BoxEffect::new(
-            box_exit(&self.theme),
-            self.clock + BOX_ARRIVING,
-        ));
+        self.box_effect = Some(Timed::new(box_exit(&self.theme), self.clock + BOX_ARRIVING));
     }
 }
 
@@ -840,12 +842,15 @@ fn a_press_on_a_noted_line_reopens_the_box_with_its_text_and_an_emptied_box_with
             .any(|row| matches!(row, Row::Note { .. })),
         "the note's rows are drawn under the box that holds its text"
     );
-    assert_eq!(
-        reopened
-            .view
-            .marked_at(usize::from(y - reopened.laid.diff.top)),
-        vec!["n1"]
-    );
+    // The line keeps the note's ink from the box rather than from the note the
+    // box holds, so nothing on screen says that note twice.
+    let offset = usize::from(y - reopened.laid.diff.top);
+    assert_eq!(reopened.view.notes.boxed, Some(offset));
+    assert!(reopened.view.marked_at(offset).is_empty());
+    let five = (left..reopened.gutter().2)
+        .find(|x| reopened.cell(*x, y).symbol() == "5")
+        .expect("the anchored line's number");
+    assert_eq!(reopened.fg(five, y), Theme::default().bar_hover.fg);
 
     // Emptied and sent, the note is withdrawn: one open note per line, and
     // this is how the reader takes it back.
@@ -957,10 +962,10 @@ fn a_press_outside_the_box_closes_it_and_a_press_inside_leaves_it_open() {
         box_route(&press(origin + 4, y + 2), Some(over)),
         BoxRoute::Inert
     );
-    assert_eq!(box_route(&press(left + 1, y), Some(over)), BoxRoute::Close);
+    assert_eq!(box_route(&press(left + 1, y), Some(over)), BoxRoute::Cancel);
     assert_eq!(
         box_route(&press(2, opened.laid.list.top), Some(over)),
-        BoxRoute::Close
+        BoxRoute::Cancel
     );
     // The wheel, a resize, focus and the pointer resting pass through to the pane.
     for through in [

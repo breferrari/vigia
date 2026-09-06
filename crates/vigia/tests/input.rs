@@ -141,11 +141,11 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
     assert_eq!(box_route(&inside, over), BoxRoute::Inert);
     assert_eq!(
         box_route(&wheel(MouseEventKind::Down(MouseButton::Left)), over),
-        BoxRoute::Close
+        BoxRoute::Cancel
     );
     assert_eq!(
         box_route(&wheel(MouseEventKind::Down(MouseButton::Right)), over),
-        BoxRoute::Close
+        BoxRoute::Cancel
     );
     for through in [
         wheel(MouseEventKind::ScrollDown),
@@ -164,7 +164,7 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
         BoxRoute::Paste("words".to_owned())
     );
     // And with no box drawn, a press anywhere closes: nothing is inside.
-    assert_eq!(box_route(&inside, None), BoxRoute::Close);
+    assert_eq!(box_route(&inside, None), BoxRoute::Cancel);
 }
 
 #[test]

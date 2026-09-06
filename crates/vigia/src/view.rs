@@ -427,8 +427,6 @@ pub const BOX_FRAME: usize = 4;
 struct BoxPin {
     /// Index into the logical rows.
     row: usize,
-    /// The note the box reopened, whose own rows stay undrawn under it.
-    over: Option<String>,
     /// Whether `row` is the anchored line rather than the file's heading.
     marks: bool,
     /// `path:line`, for the top edge.
@@ -1285,6 +1283,11 @@ impl View {
                 let boxed = draft
                     .as_ref()
                     .filter(|standing| change.paths().any(|path| path == standing.note.path));
+                // The note the box reopened is not among the file's: the box
+                // holds its text, and its own rows would say it twice.
+                if let Some(over) = boxed.and_then(|standing| standing.over) {
+                    file_notes.retain(|note| note.id != over);
+                }
                 view.take_file(
                     Changed {
                         kind: &change.kind,
@@ -1522,12 +1525,7 @@ impl View {
             crate::render::content_width(gutter, width)
         };
         let mut under: usize = if drawn {
-            walked
-                .pins
-                .iter()
-                .filter(|pin| !walked.covers(pin))
-                .map(|pin| pin.rows(content).len())
-                .sum()
+            walked.pins.iter().map(|pin| pin.rows(content).len()).sum()
         } else {
             0
         };
@@ -1592,7 +1590,7 @@ impl View {
         // Built once, so the clamp and the emit below agree on their count.
         let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
         if drawn {
-            for pin in pins.iter().filter(|pin| !walked.covers(pin)) {
+            for pin in pins {
                 under[pin.row].extend(pin.rows(content));
             }
         }
@@ -2023,15 +2021,6 @@ struct Walked {
     boxed: Option<BoxPin>,
 }
 
-impl Walked {
-    /// Whether the box is open over this note and holds its text.
-    fn covers(&self, pin: &Pin) -> bool {
-        self.boxed
-            .as_ref()
-            .is_some_and(|boxed| boxed.over.as_deref() == Some(pin.id.as_str()))
-    }
-}
-
 /// The logical row a note's line landed on, the word it carries there, whether
 /// its rows dim, and whether the row is the line rather than the heading;
 /// `None` off this screen, which is not a state.
@@ -2068,7 +2057,6 @@ fn place_box(
     let (row, _, _, marks) = placed_at(&stand_in.note, &rows, heading, placed)?;
     Some(BoxPin {
         row,
-        over: stand_in.over.map(str::to_owned),
         marks,
         label: format!("{}:{}", stand_in.note.path, stand_in.note.line),
         lines: stand_in.lines.to_vec(),
