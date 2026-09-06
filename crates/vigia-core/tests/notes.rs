@@ -859,15 +859,29 @@ fn a_symlinked_note_is_skipped_rather_than_followed() {
         .put(&note("n1", 5, "five", "the real one"))
         .expect("put");
 
+    // The target is a whole note under the name the link takes, moved aside and
+    // pointed at. Anything less would be skipped for its content whether or not
+    // the link was followed, and the guard would go untested.
+    store
+        .put(&note("n2", 6, "six", "moved aside"))
+        .expect("put");
+    let named = store.dir().join("n2.note");
     let elsewhere = store.dir().join("elsewhere");
-    fs::write(&elsewhere, "vigia note 1\n").expect("a file to point at");
-    if !linked_file(&elsewhere, &store.dir().join("n2.note")) {
+    fs::rename(&named, &elsewhere).expect("move it aside");
+    if !linked_file(&elsewhere, &named) {
         return;
     }
 
     let listing = store.list().expect("list");
-    assert_eq!(listing.notes.len(), 1, "the link was followed: {listing:?}");
-    assert_eq!(listing.notes[0].id, "n1");
+    assert_eq!(
+        listing
+            .notes
+            .iter()
+            .map(|it| it.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["n1"],
+        "the link was followed and what it points at was read"
+    );
     assert!(
         listing
             .skipped

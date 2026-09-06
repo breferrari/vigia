@@ -2185,6 +2185,33 @@ mod tests {
         );
     }
 
+    /// `SPEC.md` §11.2 B21 ruling 6: Enter writes the store first either way, so
+    /// a note no socket takes is still the reader's.
+    ///
+    /// The order is inside a private method, which the suite cannot drive, so it
+    /// is held by reading the source the way the loop's own ordering is below.
+    #[test]
+    fn the_note_reaches_the_store_before_it_reaches_a_socket() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let body = shipped
+            .split_once("fn commit_box(")
+            .expect("the shell no longer has `commit_box`")
+            .1;
+
+        let wrote = body
+            .find("notes::commit(store, open)")
+            .expect("`commit_box` no longer writes the store");
+        let posted = body
+            .find("self.post_note(")
+            .expect("`commit_box` no longer posts the note");
+        assert!(
+            wrote < posted,
+            "`commit_box` posts before it writes, so a socket could take a note \
+             the store then refuses"
+        );
+    }
+
     /// The store is an event source beside the tree's: its watch is armed once
     /// the first frame is up, its wake marks the store stale rather than reading
     /// it, and the read happens where every path to a paint passes.

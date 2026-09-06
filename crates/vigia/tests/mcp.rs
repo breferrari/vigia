@@ -18,7 +18,7 @@ use vigia::mcp::{
     hook_payload, hooked, pending_line,
 };
 use vigia::{VERSION, state_root};
-use vigia_core::{Note, Side, Status, Store};
+use vigia_core::{Note, Registry, Side, Status, Store};
 
 use support::{Scratch, TempDir, budget, files_in, note, numbered_lines};
 
@@ -1348,4 +1348,134 @@ fn the_pending_line_counts_notes_and_says_nothing_about_none() {
             "the line does not name the tool that reads them: {line}"
         );
     }
+}
+
+/// Run `vigia mcp <word>` the way a hook runs it: the payload on stdin, the
+/// state root and the project in the environment.
+fn hook_run(
+    word: &str,
+    project: &Path,
+    root: &Path,
+    payload: &str,
+    extra: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_vigia"));
+    command
+        .arg("mcp")
+        .arg(word)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("XDG_STATE_HOME", root)
+        .env("LOCALAPPDATA", root)
+        .env("HOME", root)
+        .env("USERPROFILE", root)
+        .env(PROJECT_VAR, project)
+        .env_remove(SOCKET_VAR)
+        .env_remove(TOKEN_VAR);
+    for (key, value) in extra {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().expect("spawn vigia mcp");
+    child
+        .stdin
+        .take()
+        .expect("a piped stdin")
+        .write_all(payload.as_bytes())
+        .expect("write the payload");
+    let out = child.wait_with_output().expect("wait");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The whole hook rung end to end, through the real binary: the registration a
+/// `SessionStart` writes, the count a `UserPromptSubmit` reads, and the
+/// registration a `SessionEnd` clears.
+#[test]
+fn the_hook_words_register_count_and_clear() {
+    let scratch = Scratch::new("mcp-register");
+    let root = TempDir::new("mcp-register-state");
+    let state = state_of(root.path());
+    let registry = Registry::open(&state, scratch.root()).expect("registry");
+    let socket = r"\\.\pipe\LOCAL\cc-msg-abc";
+    let started = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart", "cwd": "."})
+        .to_string();
+
+    let (code, out, err) = hook_run(
+        "register",
+        scratch.root(),
+        root.path(),
+        &started,
+        &[(SOCKET_VAR, socket), (TOKEN_VAR, "the-token")],
+    );
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        out.is_empty(),
+        "a SessionStart hook said something: {out:?}"
+    );
+
+    let listed = registry.list().expect("list");
+    assert_eq!(listed.len(), 1, "the hook registered nothing");
+    assert_eq!(listed[0].session, "aaaa-1111");
+    assert_eq!(listed[0].socket, socket, "the pipe path did not survive");
+    assert_eq!(listed[0].token, "the-token");
+
+    // Nothing open, so the reader's next prompt costs nothing at all.
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(out.is_empty(), "an empty store put a line up: {out:?}");
+
+    let store = Store::open(&state, scratch.root()).expect("store");
+    store.put(&note("n1", 1, "one", "look here")).expect("put");
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(out.starts_with("1 open note in vigia"), "{out:?}");
+
+    let ended =
+        json!({"session_id": "aaaa-1111", "hook_event_name": "SessionEnd", "reason": "other"})
+            .to_string();
+    let (code, _, err) = hook_run(
+        "register",
+        scratch.root(),
+        root.path(),
+        &ended,
+        &[(SOCKET_VAR, socket), (TOKEN_VAR, "the-token")],
+    );
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        registry.list().expect("list").is_empty(),
+        "SessionEnd left the registration behind"
+    );
+}
+
+/// A reader installs the hook once and it runs in every project they open, on
+/// every client. Neither of these is an error and neither writes.
+#[test]
+fn a_hook_with_no_socket_or_no_repository_writes_nothing_and_says_nothing() {
+    let scratch = Scratch::new("mcp-register-quiet");
+    let root = TempDir::new("mcp-register-quiet-state");
+    let registry = Registry::open(&state_of(root.path()), scratch.root()).expect("registry");
+    let payload = json!({"session_id": "aaaa-1111", "hook_event_name": "SessionStart"}).to_string();
+
+    let (code, out, err) = hook_run("register", scratch.root(), root.path(), &payload, &[]);
+    assert_eq!(code, Some(0), "messaging off made the hook fail: {err}");
+    assert!(
+        out.is_empty() && err.is_empty(),
+        "it said something: {out:?} {err:?}"
+    );
+    assert!(registry.list().expect("list").is_empty());
+
+    let elsewhere = TempDir::new("mcp-register-not-a-repo");
+    let (code, _, err) = hook_run(
+        "register",
+        elsewhere.path(),
+        root.path(),
+        &payload,
+        &[(SOCKET_VAR, "inbox.sock"), (TOKEN_VAR, "t")],
+    );
+    assert_eq!(code, Some(0), "outside a repository the hook failed: {err}");
+    assert!(registry.list().expect("list").is_empty());
 }

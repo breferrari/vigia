@@ -17,7 +17,7 @@ use std::io;
 use vigia::post::{
     IN_FLIGHT_MAX, Posted, content, context_for, names_a_pipe, permit, post, post_each, word,
 };
-use vigia_core::{Note, Registration, Registry, Side, Status, Store};
+use vigia_core::{Note, Registration, Registry, Side, Store};
 
 use support::{Scratch, TempDir, linked_file, note, registration};
 
@@ -294,80 +294,6 @@ fn a_socket_that_is_not_there_is_refused_rather_than_waited_on() {
 
 /// The true transport, which only unix can stand a server up for from `std`.
 /// Windows named pipes have no server side outside the platform API, so the
-/// gates above carry that leg and this one proves the bytes reach a real peer.
-#[cfg(unix)]
-#[test]
-fn a_real_socket_receives_the_two_lines() {
-    use std::io::{BufRead, BufReader};
-    use std::os::unix::net::UnixListener;
-
-    let root = TempDir::new("real-socket");
-    let path = root.path().join("inbox.sock");
-    let listener = UnixListener::bind(&path).expect("bind");
-
-    let taker = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("accept");
-        BufReader::new(stream)
-            .lines()
-            .map(|line| line.expect("line"))
-            .collect::<Vec<_>>()
-    });
-
-    let registration = registration("aaaa-1111", &path.to_string_lossy());
-    post(&registration, "the note").expect("post");
-
-    let lines = taker.join().expect("the taker");
-    assert_eq!(lines.len(), 2, "{lines:?}");
-    let auth: Value = serde_json::from_str(&lines[0]).expect("auth");
-    assert_eq!(auth["token"], "token-of-aaaa-1111");
-    let frame: Value = serde_json::from_str(&lines[1]).expect("frame");
-    assert_eq!(frame["message"]["content"], "the note");
-}
-
-#[test]
-fn a_note_is_posted_only_once_its_words_are_in_the_store() {
-    // Ruling 6: the store is written first either way, so a note the socket
-    // never took is still the reader's. This is the ordering, asserted where
-    // the two acts meet.
-    let scratch = Scratch::new("socket-order");
-    let root = TempDir::new("state");
-    let store = Store::open(root.path(), scratch.root()).expect("store");
-    let registry = Registry::open(root.path(), scratch.root()).expect("registry");
-    registry
-        .put(&registration("aaaa-1111", "one.sock"))
-        .expect("put");
-
-    let note = anchored("n1", "the words");
-    store.put(&note).expect("put");
-
-    let on_disk = RefCell::new(Vec::new());
-    post_each(
-        &registry,
-        || "the note".to_owned(),
-        |_, _| {
-            on_disk.borrow_mut().extend(
-                store
-                    .list()
-                    .expect("list")
-                    .notes
-                    .iter()
-                    .map(|n| n.id.clone()),
-            );
-            Ok(())
-        },
-    );
-
-    assert_eq!(
-        on_disk.into_inner(),
-        vec!["n1"],
-        "the note was not in the store when the socket was opened"
-    );
-    assert_eq!(
-        store.get("n1").expect("get").map(|n| n.status),
-        Some(Status::Open)
-    );
-}
-
 #[test]
 fn the_written_time_orders_nothing_the_wire_sees() {
     // A registration's timestamp orders the listing and nothing else: it must
@@ -552,13 +478,70 @@ fn the_message_is_built_only_when_a_registration_is_in_hand() {
 #[test]
 fn a_symlinked_registration_is_skipped_rather_than_followed() {
     let (_scratch, _root, registry) = registry("socket-symlink", &["bbbb-2222"]);
+
+    // The target is a whole registration under the name the link takes, moved
+    // aside and pointed at. Anything less would be skipped for its content
+    // whether or not the link was followed, and the guard would go untested.
+    registry
+        .put(&registration("aaaa-1111", "linked.sock"))
+        .expect("put");
+    let named = registry.dir().join("aaaa-1111.session");
     let elsewhere = registry.dir().join("elsewhere");
-    std::fs::write(&elsewhere, "vigia session 1\n").expect("a file to point at");
-    if !linked_file(&elsewhere, &registry.dir().join("aaaa-1111.session")) {
+    std::fs::rename(&named, &elsewhere).expect("move it aside");
+    if !linked_file(&elsewhere, &named) {
         return;
     }
 
     let listed = registry.list().expect("list");
-    assert_eq!(listed.len(), 1, "the link was followed: {listed:?}");
-    assert_eq!(listed[0].session, "bbbb-2222");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|it| it.session.as_str())
+            .collect::<Vec<_>>(),
+        vec!["bbbb-2222"],
+        "the link was followed and what it points at was read"
+    );
+}
+
+/// The true transport, which only unix can stand a server up for from `std`:
+/// Windows named pipes have no server side outside the platform API, so the
+/// gates above carry that leg and this one proves the bytes reach a real peer.
+/// It drives `post_all`, which is the composition the pane itself calls.
+#[cfg(unix)]
+#[test]
+fn a_real_socket_receives_the_two_lines() {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixListener;
+
+    use vigia::post::post_all;
+
+    let scratch = Scratch::new("socket-real");
+    let root = TempDir::new("state");
+    let registry = Registry::open(root.path(), scratch.root()).expect("registry");
+    let path = root.path().join("inbox.sock");
+    let listener = UnixListener::bind(&path).expect("bind");
+    registry
+        .put(&registration("aaaa-1111", &path.to_string_lossy()))
+        .expect("put");
+
+    let taker = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("accept");
+        BufReader::new(stream)
+            .lines()
+            .map(|line| line.expect("line"))
+            .collect::<Vec<_>>()
+    });
+
+    assert_eq!(
+        post_all(&registry, || "the note".to_owned()),
+        Posted::Sent,
+        "the real transport refused a socket that is listening"
+    );
+
+    let lines = taker.join().expect("the taker");
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    let auth: Value = serde_json::from_str(&lines[0]).expect("auth");
+    assert_eq!(auth["token"], "token-of-aaaa-1111");
+    let frame: Value = serde_json::from_str(&lines[1]).expect("frame");
+    assert_eq!(frame["message"]["content"], "the note");
 }
