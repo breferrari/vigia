@@ -316,10 +316,9 @@ const fn text_within(area: Rect, margins: (u16, u16)) -> Rect {
 /// where the text is empty or wider than the area. Shared with [`note_cells`],
 /// so an effect over the status word covers the cells the word was drawn in.
 fn flush_right(area: Rect, width: usize) -> Option<Rect> {
-    if width == 0 || width > usize::from(area.width) {
-        return None;
-    }
-    let width = u16::try_from(width).unwrap_or(u16::MAX);
+    let width = u16::try_from(width)
+        .ok()
+        .filter(|width| (1..=area.width).contains(width))?;
     Some(Rect::new(area.x + area.width - width, area.y, width, 1))
 }
 

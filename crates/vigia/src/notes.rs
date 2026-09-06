@@ -76,7 +76,10 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
         for id in &marked {
             // The screen the press landed on may be a frame behind the store: a
             // note the agent has resolved since keeps its file, because the resolve
-            // landed first and its line is what the next frame shows leaving.
+            // landed first and its line is what the next frame shows leaving. The
+            // check sits right before the removal and no closer; two processes
+            // with no lock between them leave the removal itself as the window a
+            // resolve can still slip into, as the store's own rewrite says.
             if matches!(store.get(id), Ok(Some(note)) if note.status == Status::Resolved) {
                 continue;
             }
@@ -105,7 +108,7 @@ pub fn toggle(store: &Store, view: &View, offset: usize) -> Option<Result<Toggle
 /// when that changes and not on every wake the agent causes.
 #[derive(Debug, Default)]
 pub struct Alerts {
-    skipped: Vec<PathBuf>,
+    skipped: Vec<(PathBuf, String)>,
     failed: Option<String>,
 }
 
@@ -127,15 +130,10 @@ impl Alerts {
             }
         };
         self.failed = None;
-        let now: Vec<PathBuf> = listing
-            .skipped
-            .iter()
-            .map(|(path, _)| path.clone())
-            .collect();
-        if now == self.skipped {
+        if listing.skipped == self.skipped {
             return None;
         }
-        self.skipped = now;
+        self.skipped = listing.skipped.clone();
         let (path, why) = listing.skipped.first()?;
         let name = path.file_name().map_or_else(
             || path.display().to_string(),
@@ -166,7 +164,7 @@ pub enum Change {
 }
 
 /// A note on its way off the screen: drawn as it was until `ends`, then dropped.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 struct Departing {
     /// The note as it draws while it goes.
     note: Note,
@@ -392,14 +390,18 @@ pub struct NoteEffects {
 
 impl NoteEffects {
     /// Arm one effect per change. A change landing on cells already moving
-    /// replaces that effect rather than stacking on it.
+    /// replaces the effect over them rather than stacking on it.
     pub fn arm(&mut self, changes: Vec<Change>, theme: &Theme, now: Instant) {
         for change in changes {
             let Some(armed) = NoteEffect::armed(change, theme, now) else {
                 continue;
             };
-            self.running
-                .retain(|running| !(running.id == armed.id && running.target == armed.target));
+            // The whole of a note's rows supersedes a word or a line still
+            // arriving on them, or two effects would draw the same cells at once.
+            self.running.retain(|running| {
+                running.id != armed.id
+                    || (armed.target != Target::Rows && running.target != armed.target)
+            });
             self.running.push(armed);
         }
     }
@@ -413,6 +415,12 @@ impl NoteEffects {
     #[must_use]
     pub fn is_running(&self) -> bool {
         !self.running.is_empty()
+    }
+
+    /// How many effects are running.
+    #[must_use]
+    pub fn running(&self) -> usize {
+        self.running.len()
     }
 
     /// Advance every effect by `since` over the cells its note drew this frame,

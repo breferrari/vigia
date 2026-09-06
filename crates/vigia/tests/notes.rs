@@ -2119,6 +2119,12 @@ fn the_listing_alert_is_said_once_per_change() {
         Some("skipped the note file b.note: newer".to_owned()),
         "a file torn again after reading whole is news again"
     );
+    let differently = (newer.0.clone(), "torn differently".to_owned());
+    assert_eq!(
+        alerts.of(&skipping(std::slice::from_ref(&differently))),
+        Some("skipped the note file b.note: torn differently".to_owned()),
+        "the same file skipped for a new reason is not news"
+    );
 
     // A store that cannot be read at all: a file where its directory should be.
     let scratch = fixture("notes-unreadable-listing");
@@ -2228,6 +2234,44 @@ fn a_resolve_between_a_stale_view_and_a_withdraw_click_survives() {
         Some('↳'),
         "the resolve that landed first is not what the next frame shows"
     );
+
+    // And a press on a note nobody resolved still withdraws it, so the case
+    // above is the resolve being honoured and not a press that removes nothing.
+    rig.store
+        .put(&note("n2", 6, "line 6", "short"))
+        .expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let six = open.row_of("line 6");
+    assert_eq!(rig.click(&open, left + 1, six), Some(Toggled::Withdrawn(1)));
+    assert_eq!(
+        files_in(rig.store.dir()).len(),
+        1,
+        "the press on an open note left its file behind"
+    );
+}
+
+#[test]
+fn a_resolve_landing_inside_a_crossfade_supersedes_it() {
+    use vigia::Change;
+    let now = Instant::now();
+    let theme = Theme::default();
+    let mut effects = NoteEffects::default();
+    effects.arm(vec![Change::Seen("n1".to_owned())], &theme, now);
+    effects.arm(vec![Change::Replied("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.running(),
+        2,
+        "a word and a line arrive on their own cells"
+    );
+    effects.arm(vec![Change::Resolved("n1".to_owned())], &theme, now);
+    assert_eq!(
+        effects.running(),
+        1,
+        "a resolve arrived over a word or a line still arriving, so two effects draw one cell"
+    );
+    effects.arm(vec![Change::Seen("n2".to_owned())], &theme, now);
+    assert_eq!(effects.running(), 2, "another note's effect was evicted");
 }
 
 #[test]
