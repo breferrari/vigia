@@ -2123,7 +2123,7 @@ fn the_listing_alert_is_said_once_per_change() {
     assert_eq!(
         alerts.of(&skipping(std::slice::from_ref(&differently))),
         Some("skipped the note file b.note: torn differently".to_owned()),
-        "the same file skipped for a new reason is not news"
+        "the same file skipped for a new reason was not news"
     );
     // The store lists in the directory's order, which a write beside the files
     // can move; the same files in another order are not news.
