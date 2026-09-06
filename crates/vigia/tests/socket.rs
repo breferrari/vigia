@@ -589,9 +589,12 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
     // slots have to come back; and the bound is read before anything is
     // spawned, so a post refused for want of one costs no thread at all.
     let _slots = SLOTS.lock().unwrap_or_else(PoisonError::into_inner);
-    // A registration whose socket is not there, so each post holds its slot
-    // across a real failed connect rather than across a directory read that
-    // finds nothing.
+    // Two registries on purpose. The refusal is checked against one that would
+    // answer `Unregistered` if it were ever reached, so `Failed` there can only
+    // mean the slot was refused; the rounds after it use a socket that is not
+    // there, so each holds its slot across a real failed connect rather than
+    // across a directory read that finds nothing.
+    let (_empty_scratch, _empty_root, empty) = registry("socket-spawn-none", &[]);
     let (_scratch, _root, registry) = registry("socket-spawn", &["aaaa-1111"]);
     let (tx, rx) = mpsc::channel();
 
@@ -601,7 +604,7 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
         .collect();
     let sender = tx.clone();
     spawn(
-        registry.clone(),
+        empty,
         || "the note".to_owned(),
         move |posted| {
             let _ = sender.send(posted);
@@ -611,7 +614,7 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
         rx.recv_timeout(ANSWERED)
             .expect("an answer without a thread"),
         Posted::Failed,
-        "a post with no slot to take was not refused"
+        "a post with no slot to take reached the registry instead of being refused"
     );
     drop(held);
 
