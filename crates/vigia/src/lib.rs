@@ -2194,10 +2194,14 @@ mod tests {
     fn the_note_reaches_the_store_before_it_reaches_a_socket() {
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
-        let body = shipped
+        let tail = shipped
             .split_once("fn commit_box(")
             .expect("the shell no longer has `commit_box`")
             .1;
+        // Bounded at the next method, or a call moved out of `commit_box` into
+        // anything defined below it would still be found and still read as in
+        // order.
+        let body = tail.split_once("\n    fn ").map_or(tail, |(body, _)| body);
 
         let wrote = body
             .find("notes::commit(store, open)")

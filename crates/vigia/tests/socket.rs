@@ -518,7 +518,17 @@ fn a_real_socket_receives_the_two_lines() {
     let scratch = Scratch::new("socket-real");
     let root = TempDir::new("state");
     let registry = Registry::open(root.path(), scratch.root()).expect("registry");
-    let path = root.path().join("inbox.sock");
+
+    // The only path in the suite that becomes a socket address, and an address
+    // is not a path: `sun_path` is 104 bytes on macOS, where the default
+    // temporary directory is long enough on its own that a fixture under it can
+    // overflow. So this one is built short and outside the fixture.
+    let path = std::path::PathBuf::from("/tmp").join(format!("vigia-{}.sock", std::process::id()));
+    assert!(
+        path.as_os_str().len() < 100,
+        "the socket address has grown towards what macOS will take: {path:?}"
+    );
+    let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).expect("bind");
     registry
         .put(&registration("aaaa-1111", &path.to_string_lossy()))
@@ -544,4 +554,7 @@ fn a_real_socket_receives_the_two_lines() {
     assert_eq!(auth["token"], "token-of-aaaa-1111");
     let frame: Value = serde_json::from_str(&lines[1]).expect("frame");
     assert_eq!(frame["message"]["content"], "the note");
+
+    // Bound rather than the fixture's, so it is this test's to clear.
+    let _ = std::fs::remove_file(&path);
 }
