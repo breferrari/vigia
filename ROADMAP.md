@@ -170,7 +170,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 | ✅ | The line number becomes the note icon under the pointer, and the note rows draw under the line | [#416](https://github.com/breferrari/vigia/issues/416) |
 | ✅ | `vigia mcp` serves the notes to the agent over stdio | [#417](https://github.com/breferrari/vigia/issues/417) |
 | ✅ | The pane wakes when the agent writes to the store | [#418](https://github.com/breferrari/vigia/issues/418) |
-| ⬜ | A bordered box under the line takes the note | [#419](https://github.com/breferrari/vigia/issues/419) |
+| ✅ | A bordered box under the line takes the note | [#419](https://github.com/breferrari/vigia/issues/419) |
 | ⬜ | Enter posts the note into the running session's socket | [#420](https://github.com/breferrari/vigia/issues/420) |
 | ⬜ | The README, the sheet and the spec carry the note | [#421](https://github.com/breferrari/vigia/issues/421) |
 | ⬜ | A note on a file in both runs draws under both headings. **Found by #417's audit** | [#434](https://github.com/breferrari/vigia/issues/434) |
@@ -289,7 +289,7 @@ Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5)
 
 Everything on the deferral shelf below has a milestone here, so shelved work is still reachable by a milestone-filtered query rather than only readable in prose. The shelf carries the *reason*; this table carries the *state*.
 
-**It carried the name "Phase 5 — deferred findings" until 2026-08-06, and the number is retired because it was a lie with a good excuse.** A phase number claims a place in a sequence; this is a shelf, permanently open, never "next", and the file spent a paragraph fighting its own name. The sections above run 4 → 6 → 7 → 8 in the order they are meant to be taken, and the shelf sits after all of them because it holds no place among them at all. What survives the rename: the milestone URL keeps `/5`, and older issues, notes and the dated cells below cite "Phase 5" — every such citation means this shelf. The exclusion mechanism never rested on the name: `take-next` step 1 skips it by the `Shelf:` description prefix, which is unchanged, and a title with no phase number now also sorts last by that query's own fallback, so the two guards finally agree instead of one covering for the other.
+**Older issues, notes and the dated cells below cite "Phase 5", and every such citation means this shelf**: the milestone URL keeps `/5` from the name it carried until 2026-08-06, `take-next` skips it by the `Shelf:` description prefix, and a title with no phase number sorts last by that query's own fallback, so the two guards agree.
 
 **A shelf item comes off it when daily use asks for it, and the asking is the whole test.** That sentence used to live here, was deleted at some point, and survives only as a quotation in two pull-forward rows below, which is a rule that exists solely as its own citation. Restated because a filter nobody can read is not one, and because the sixty-odd rows under it are what happens when the entry trigger fires on every audit and the exit trigger fires on a judgement nobody is scheduled to make.
 
