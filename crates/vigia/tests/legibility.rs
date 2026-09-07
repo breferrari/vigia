@@ -420,16 +420,16 @@ fn every_row_kind() -> View {
                 id: String::new(),
                 lead: NoteLead::Bar,
                 text: "walk() re-reads the index on every frame; cache it".to_owned(),
-                word: Some("open"),
                 state: "open",
+                last: true,
                 faded: false,
             },
             Row::Note {
                 id: String::new(),
                 lead: NoteLead::Reply,
                 text: "cached it in advance(), invalidated on tick".to_owned(),
-                word: None,
                 state: "open",
+                last: false,
                 faded: false,
             },
             Row::file(FileEntry {

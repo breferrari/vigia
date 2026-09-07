@@ -3084,7 +3084,9 @@ fn a_note_rows_lead_never_overwrites_its_word() {
         );
         for (offset, row) in painted.view.rows.iter().enumerate() {
             let Row::Note {
-                word: Some(word), ..
+                state: word,
+                last: true,
+                ..
             } = row
             else {
                 continue;

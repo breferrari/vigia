@@ -37,25 +37,6 @@ macro_rules! palette {
             /// Every key a theme file may set, in declaration order.
             pub const KEYS: &'static [&'static str] = &[$(stringify!($field)),*];
 
-            /// The ink a note's `▎` and its status word both take, chosen by the word
-    /// the walk placed there.
-    ///
-    /// `resolved` shares `note_seen`: it is the same fact one step further on,
-    /// the agent has the note and has answered it, and a resolving note is
-    /// already leaving. A word this does not know falls back to the frame's ink,
-    /// so a state added without an ink still reads as the note's rather than as
-    /// furniture, and `palette.rs` gates that no such word exists.
-    #[must_use]
-    pub fn note_ink(&self, word: &str) -> Style {
-        match word {
-            "open" => self.note_open,
-            "seen" | "resolved" => self.note_seen,
-            "changed" => self.note_changed,
-            "gone" => self.note_gone,
-            _ => self.note_frame,
-        }
-    }
-
     /// Set one key, or say it is not one.
             fn set(&mut self, key: &str, style: Style) -> bool {
                 match key {
@@ -258,6 +239,24 @@ impl Theme {
             out.selection = out.selection.add_modifier(Modifier::REVERSED);
         }
         out
+    }
+
+    /// The ink a note's `▎` and its status word both take, chosen by the word
+    /// the walk placed there.
+    ///
+    /// `resolved` shares `note_seen`: it is the same fact one step further on,
+    /// and a resolving note is already leaving. A word this does not know falls
+    /// back to the frame's ink, so a state added without one still reads as the
+    /// note's rather than as furniture; `palette.rs` gates that none exists.
+    #[must_use]
+    pub fn note_ink(&self, word: &str) -> Style {
+        match word {
+            "open" => self.note_open,
+            "seen" | "resolved" => self.note_seen,
+            "changed" => self.note_changed,
+            "gone" => self.note_gone,
+            _ => self.note_frame,
+        }
     }
 
     /// The style a file heading is drawn in at `recency`.

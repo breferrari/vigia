@@ -1845,7 +1845,14 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
     };
     let mut out: Vec<NoteCells> = Vec::new();
     for (offset, row) in view.rows.iter().enumerate().take(usize::from(diff.rows)) {
-        let Row::Note { id, lead, word, .. } = row else {
+        let Row::Note {
+            id,
+            lead,
+            state,
+            last,
+            ..
+        } = row
+        else {
             continue;
         };
         let line = Rect::new(x, diff.top.saturating_add(offset as u16), width, 1);
@@ -1862,8 +1869,8 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
             }
         };
         cells.rows = cells.rows.union(line);
-        if let Some(word) = word {
-            cells.word = flush_right(line, width_of(word));
+        if *last {
+            cells.word = flush_right(line, width_of(state));
         }
         if matches!(lead, NoteLead::Reply | NoteLead::Blank) {
             cells.reply = Some(cells.reply.map_or(line, |reply| reply.union(line)));
@@ -3758,8 +3765,8 @@ impl Painter<'_> {
                 Row::Note {
                     lead,
                     text,
-                    word,
                     state,
+                    last,
                     faded,
                     ..
                 } => {
@@ -3772,8 +3779,8 @@ impl Painter<'_> {
                         },
                         *lead,
                         text,
-                        *word,
                         state,
+                        *last,
                         *faded,
                     );
                 }
@@ -4288,8 +4295,8 @@ impl Painter<'_> {
         glyphs: Rect,
         lead: NoteLead,
         text: &str,
-        word: Option<&str>,
         state: &str,
+        last: bool,
         faded: bool,
     ) {
         let origin = line_origin(self.gutter);
@@ -4304,6 +4311,7 @@ impl Painter<'_> {
             Modifier::empty()
         };
         let ink = self.theme.chrome_dim.add_modifier(dim);
+        let word = last.then_some(state);
         let state = self.theme.note_ink(state);
         let (glyph, glyph_ink) = match lead {
             NoteLead::Bar => (NOTE_BAR, state.add_modifier(dim)),
@@ -4338,8 +4346,8 @@ impl Painter<'_> {
     /// ```
     ///
     /// At the content origin like a note's rows, across the content width, the
-    /// frame and its labels in the chrome's dim weight and the reader's text in
-    /// the chrome's own, so nothing in it reads as a line of the diff. The
+    /// frame and its labels in the note's own ink and the reader's text in the
+    /// chrome's, so nothing in it reads as a line of the diff. The
     /// corners follow the glyph rung the sheet's do.
     fn box_row(&mut self, glyphs: Rect, part: &BoxPart) {
         let origin = line_origin(self.gutter);

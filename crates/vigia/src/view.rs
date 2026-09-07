@@ -305,10 +305,10 @@ pub enum Row {
         /// This row's piece of the body or of the reply, already broken at the
         /// content width less the lead.
         text: String,
-        /// The word at the right edge, on the note's last body row.
-        word: Option<&'static str>,
-        /// The same word on every row, since each row's `▎` takes the state's ink.
+        /// The note's state: every row's `▎` takes its ink, the last draws the word.
         state: &'static str,
+        /// Whether this is that last row.
+        last: bool,
         /// Whether the whole row takes the dim weight, which is a note whose
         /// line was edited under it.
         faded: bool,
@@ -607,8 +607,8 @@ impl Pin {
                     id: self.id.clone(),
                     lead: NoteLead::Bar,
                     text,
-                    word: (piece + 1 == count).then_some(self.word),
                     state: self.word,
+                    last: piece + 1 == count,
                     faded: self.faded,
                 });
             }
@@ -623,8 +623,8 @@ impl Pin {
                         NoteLead::Blank
                     },
                     text,
-                    word: None,
                     state: self.word,
+                    last: false,
                     faded: self.faded,
                 });
             }
