@@ -1236,12 +1236,12 @@ impl View {
             }
             // The box belongs to the row the reader pressed, and both runs can draw that
             // line identically, so the note's own rule would answer the tie for the wrong
-            // one. The path goes with the run: a rename can put two entries in one run.
+            // one. The run tells them apart: one run holds a path once.
             if let Some(standing) = draft.as_ref().filter(|held| held.note.path == **path) {
-                let pressed = indices.iter().copied().find(|&at| {
-                    let change = &frame.files()[at];
-                    change.origin == standing.origin && change.path == standing.note.path
-                });
+                let pressed = indices
+                    .iter()
+                    .copied()
+                    .find(|&at| frame.files()[at].origin == standing.origin);
                 let at = match pressed {
                     Some(at) => at,
                     // Left when the run the press was in is no longer in the changed set.
