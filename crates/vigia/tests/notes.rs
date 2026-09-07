@@ -2109,6 +2109,63 @@ fn the_box_on_a_line_both_runs_hold_opens_under_the_run_pressed() {
 }
 
 #[test]
+fn a_note_whose_path_a_rename_carried_into_the_other_run_goes_with_its_line() {
+    // The staged run renamed the file and edited it; the working tree then put a
+    // new file back at the old name. Both runs answer to that name, one through
+    // the rename's source, and only the staged run still holds the note's line.
+    let scratch = Scratch::new("notes-runs-rename");
+    scratch.write("src/a.rs", numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.git(&["mv", "src/a.rs", "src/b.rs"]);
+    scratch.edit_line("src/b.rs", 7, "staged eight");
+    scratch.git(&["add", "src/b.rs"]);
+    scratch.write(
+        "src/a.rs",
+        "a brand new file that took the old name
+",
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let answering = frame
+        .files()
+        .iter()
+        .filter(|change| change.paths().any(|path| path == "src/a.rs"))
+        .count();
+    assert_eq!(
+        answering, 2,
+        "the fixture is not a path answered by both runs"
+    );
+
+    let mut rig = Rig::open(&scratch);
+    let mut pinned = note("n1", 5, "line 5", "went with the rename");
+    pinned.path = "src/a.rs".to_owned();
+    rig.store.put(&pinned).expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(painted.view.notes.adrift, 0, "the path is in the diff");
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join(
+            "
+"
+        )
+    );
+    let y = painted.row_of("line 5");
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with("went with the rename"),
+        "{:?}",
+        under[0]
+    );
+}
+
+#[test]
 fn a_deleted_file_draws_its_note_under_the_heading() {
     let scratch = fixture("notes-deleted");
     let worktree = scratch.worktree();
