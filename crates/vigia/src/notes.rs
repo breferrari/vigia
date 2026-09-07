@@ -11,37 +11,20 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
-use ratatui::layout::{Margin, Position, Rect};
+use ratatui::layout::{Position, Rect};
+use ratatui::style::Style;
 use ratatui_textarea::{CursorMove, Input, TextArea};
-use tachyonfx::{CellFilter, Effect, Interpolation, fx};
+use tachyonfx::Effect;
+use tachyonfx::pattern::AnyPattern;
 use vigia_core::{CONTEXT, Listing, Note, Origin, Result, Status, Store};
 
 use crate::input::Regions;
+use crate::motion::{
+    self, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Timed,
+};
 use crate::render::NoteCells;
 use crate::theme::{self, Theme};
 use crate::view::{Anchor, View};
-use crate::{ARRIVING, NOTICE_ARRIVING, NOTICE_LINGER};
-
-/// How long the box takes to arrive, and to leave on Esc: what a changed file
-/// takes.
-pub const BOX_ARRIVING: Duration = ARRIVING;
-
-/// How long the agent's line, or a word the agent moved, takes to crossfade in:
-/// an announcement's own arrival, since that is what it is.
-pub const RESOLVE_ARRIVING: Duration = NOTICE_ARRIVING;
-
-/// How long a note's rows take to dissolve, whichever way the note leaves.
-pub const LEAVING: Duration = NOTICE_ARRIVING;
-
-/// The whole of a resolve's departure, after which the rows are dropped: one
-/// notice's time on the footer, its two ends included. One table with the
-/// footer's, so the pane keeps one rhythm.
-pub const RESOLVED_DEPARTURE: Duration = NOTICE_LINGER;
-
-/// How long a resolve's line holds between arriving and dissolving.
-pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
-    .saturating_sub(RESOLVE_ARRIVING)
-    .saturating_sub(LEAVING);
 
 /// The row of `view` a press on a content row's gutter landed on, or `None` for
 /// any other event: `regions` says the pointer is on the gutter, and `view` says
@@ -363,114 +346,32 @@ pub fn around(workdir: &Path, path: &str, centre: u32) -> Vec<(u32, String)> {
         .collect()
 }
 
-/// How the box arrives: its border drawn in cell by cell around the ring from
-/// the anchor's corner, clockwise, and its text fading up from the chrome's dim
-/// behind it, over what a changed file takes. Where the depth has flattened the
-/// two inks together the border alone arrives.
+/// The radial edge's softness where a note's cells arrive, in cells.
+pub const TRANSITION: f32 = 10.0;
+
+/// Columns the sweep's leading edge is soft over as it clears a note away.
+pub const SWEEP: u32 = 35;
+
+/// How a note's cells arrive, and how they leave.
+fn evolving(ink: Style, over: Duration) -> Effect {
+    motion::evolving(ink, over, TRANSITION)
+}
+
+fn sweeping(over: Duration) -> Effect {
+    motion::sweeping(over, SWEEP)
+}
+
+/// How the box arrives: the reader's words evolving in behind its frame's ink,
+/// over what a changed file takes.
 #[must_use]
 pub fn box_entrance(theme: &Theme) -> Effect {
-    let timer = (
-        tachyonfx::Duration::from(BOX_ARRIVING),
-        Interpolation::QuadOut,
-    );
-    let border = fx::effect_fn((), timer, |(): &mut (), context, cells| {
-        let area = context.area;
-        let drawn = ring_drawn(area, context.alpha());
-        for (at, cell) in cells {
-            if ring_step(area, at).is_some_and(|step| step >= drawn) {
-                cell.set_symbol(" ");
-            }
-        }
-    });
-    match theme::contrast(theme.chrome_dim, theme.chrome) {
-        Some(from) => fx::parallel(&[
-            border,
-            fx::fade_from_fg(from, timer).with_filter(CellFilter::Inner(Margin::new(1, 1))),
-        ]),
-        None => border,
-    }
+    evolving(theme.note_frame, BOX_ARRIVING)
 }
 
-/// How the box leaves on Esc: its entrance played backwards.
+/// How the box leaves on Esc.
 #[must_use]
-pub fn box_exit(theme: &Theme) -> Effect {
-    box_entrance(theme).reversed()
-}
-
-/// How many cells of the ring the sweep has reached at `alpha` of its run.
-fn ring_drawn(area: Rect, alpha: f32) -> usize {
-    // Rounded rather than floored, so the run's end draws the last cell.
-    (alpha * ring_len(area) as f32).round() as usize
-}
-
-/// Cells on the edge of `area`.
-fn ring_len(area: Rect) -> usize {
-    let (width, height) = (usize::from(area.width), usize::from(area.height));
-    if width < 2 || height < 2 {
-        width * height
-    } else {
-        2 * (width + height) - 4
-    }
-}
-
-/// Where `at` stands along the edge of `area`, counted clockwise from its top
-/// left corner, or `None` inside it.
-fn ring_step(area: Rect, at: Position) -> Option<usize> {
-    let (width, height) = (usize::from(area.width), usize::from(area.height));
-    let x = usize::from(at.x.checked_sub(area.x)?);
-    let y = usize::from(at.y.checked_sub(area.y)?);
-    if x >= width || y >= height {
-        return None;
-    }
-    if width < 2 || height < 2 {
-        return Some(y * width + x);
-    }
-    if y == 0 {
-        Some(x)
-    } else if x == width - 1 {
-        Some(width - 1 + y)
-    } else if y == height - 1 {
-        Some(width - 1 + height - 1 + (width - 1 - x))
-    } else if x == 0 {
-        Some(2 * (width - 1) + height - 1 + (height - 1 - y))
-    } else {
-        None
-    }
-}
-
-/// An effect and when it is retired, which the box holds one of and every
-/// note effect is built on.
-pub struct Timed {
-    effect: Effect,
-    /// The clock is the retirement and the effect's own count is the other
-    /// half: a thing off screen is never processed, and an effect never
-    /// processed never reports itself done.
-    until: Instant,
-}
-
-impl Timed {
-    /// Arm `effect` until `until`.
-    #[must_use]
-    pub fn new(effect: Effect, until: Instant) -> Self {
-        Self { effect, until }
-    }
-
-    /// Whether it still has frames to draw, which keeps the frame clock armed.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        !self.effect.done()
-    }
-
-    /// Whether it has run its length, by its own count or by the clock.
-    #[must_use]
-    pub fn spent(&self, now: Instant) -> bool {
-        now >= self.until || self.effect.done()
-    }
-
-    /// Advance it by `since` over `over`, the cells its subject drew this frame.
-    pub fn draw(&mut self, since: Duration, buf: &mut Buffer, over: Rect) {
-        self.effect.process(since.into(), buf, over);
-    }
+pub fn box_exit() -> Effect {
+    sweeping(BOX_ARRIVING)
 }
 
 /// What the last listing had to say for itself, so the footer's alert is said
@@ -651,48 +552,42 @@ impl Ledger {
     }
 }
 
-/// How the agent's line, and a word the agent moved, arrive on a note's rows:
-/// from an announcement's ink into the chrome's dim the rows are drawn in, the
-/// way the footer's text does. `None` where the depth has flattened the two
-/// together.
+/// How a word the agent moved arrives: from an announcement's ink into the
+/// chrome's dim it is drawn in, the way the footer's text does. `None` where
+/// the depth has flattened the two together, and then the word simply changes,
+/// which is the whole of what a crossfade says.
 #[must_use]
-pub fn note_arrival(theme: &Theme) -> Option<Effect> {
+pub fn word_arrival(theme: &Theme) -> Option<Effect> {
     let from = theme::contrast(theme.note, theme.chrome_dim)?;
-    Some(fx::fade_from_fg(
+    Some(motion::fading(
         from,
-        (
-            tachyonfx::Duration::from(RESOLVE_ARRIVING),
-            Interpolation::SineInOut,
-        ),
+        RESOLVE_ARRIVING,
+        AnyPattern::default(),
+        false,
     ))
 }
 
 /// The departure a resolve runs: the agent's line arrives, holds a beat, and
-/// the rows dissolve. Where the line cannot fade it holds for the same length,
-/// so the departure is one duration on every palette.
+/// the rows are swept away. Its length is its own, which is what retires it.
+fn resolving(theme: &Theme) -> Effect {
+    motion::holding(
+        evolving(theme.note_reply, RESOLVE_ARRIVING),
+        RESOLVE_BEAT,
+        sweeping(LEAVING),
+    )
+}
+
+/// The same, as the effect the suite drives directly.
 #[must_use]
 pub fn resolve_departure(theme: &Theme) -> Effect {
-    let arrive = note_arrival(theme).unwrap_or_else(|| {
-        fx::sleep((
-            tachyonfx::Duration::from(RESOLVE_ARRIVING),
-            Interpolation::Linear,
-        ))
-    });
-    fx::sequence(&[
-        arrive,
-        fx::sleep((
-            tachyonfx::Duration::from(RESOLVE_BEAT),
-            Interpolation::Linear,
-        )),
-        leaving(),
-    ])
+    resolving(theme)
 }
 
 /// The departure a withdrawal runs, and a note whose file vanished: the rows
-/// dissolve, with no line from the agent to show first.
+/// are swept away, with no line from the agent to show first.
 #[must_use]
 pub fn leaving() -> Effect {
-    fx::dissolve((tachyonfx::Duration::from(LEAVING), Interpolation::Linear))
+    sweeping(LEAVING)
 }
 
 /// Which of a note's cells an effect runs over.
@@ -726,26 +621,30 @@ struct NoteEffect {
 }
 
 impl NoteEffect {
-    /// The effect `change` arms, or `None` where the palette has nothing to
-    /// fade between and the word simply changes, which is the whole of what a
-    /// crossfade says.
+    /// The motion `change` arms, or `None` for the one change that needs two
+    /// inks to say anything: a word crossfading on a palette that has none.
     fn armed(change: Change, theme: &Theme, now: Instant) -> Option<Self> {
-        let (id, target, effect, length) = match change {
-            Change::Written(id) => (id, Target::Rows, note_arrival(theme), RESOLVE_ARRIVING),
-            Change::Seen(id) => (id, Target::Word, note_arrival(theme), RESOLVE_ARRIVING),
-            Change::Replied(id) => (id, Target::Reply, note_arrival(theme), RESOLVE_ARRIVING),
-            Change::Resolved(id) => (
+        let (id, target, motion) = match change {
+            // The rows arrive in the ink of the state they arrive in, which for
+            // a note the reader just wrote or rewrote is always open.
+            Change::Written(id) => (
                 id,
                 Target::Rows,
-                Some(resolve_departure(theme)),
-                RESOLVED_DEPARTURE,
+                evolving(theme.note_open, RESOLVE_ARRIVING),
             ),
-            Change::Left(id) => (id, Target::Rows, Some(leaving()), LEAVING),
+            Change::Seen(id) => (id, Target::Word, word_arrival(theme)?),
+            Change::Replied(id) => (
+                id,
+                Target::Reply,
+                evolving(theme.note_reply, RESOLVE_ARRIVING),
+            ),
+            Change::Resolved(id) => (id, Target::Rows, resolving(theme)),
+            Change::Left(id) => (id, Target::Rows, sweeping(LEAVING)),
         };
         Some(Self {
             id,
             target,
-            timed: Timed::new(effect?, now + length),
+            timed: Timed::armed(motion, now),
         })
     }
 }
@@ -809,71 +708,6 @@ impl NoteEffects {
             if let Some(over) = found.of(armed.target) {
                 armed.timed.draw(since, buf, over);
             }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    //! The ring the box's border draws itself in along, which is arithmetic no
-    //! drawn screen can check: a step counted twice or skipped leaves a cell
-    //! that never arrives or one that arrives ahead of its neighbours.
-
-    use super::*;
-
-    /// Every cell of `area`'s edge, by the step the sweep gives it.
-    fn steps(area: Rect) -> Vec<Option<usize>> {
-        (area.top()..area.bottom())
-            .flat_map(|y| (area.left()..area.right()).map(move |x| Position::new(x, y)))
-            .map(|at| ring_step(area, at))
-            .collect()
-    }
-
-    #[test]
-    fn the_ring_numbers_its_edge_once_each_and_counts_them_all() {
-        // The box is drawn at four rows and any width, and clipped to one row
-        // or one column by a pane that leaves it nothing else.
-        for area in [
-            Rect::new(6, 5, 60, 4),
-            Rect::new(0, 0, 1, 1),
-            Rect::new(3, 2, 1, 9),
-            Rect::new(3, 2, 9, 1),
-            Rect::new(0, 0, 2, 2),
-        ] {
-            let mut on_ring: Vec<usize> = steps(area).into_iter().flatten().collect();
-            let len = ring_len(area);
-            on_ring.sort_unstable();
-            assert_eq!(
-                on_ring,
-                (0..len).collect::<Vec<_>>(),
-                "{area:?} numbers its edge {on_ring:?} rather than every step once"
-            );
-            // And the sweep reaches all of it: at the end of its run every step
-            // is drawn, so no cell of the border is left blank behind it.
-            assert_eq!(
-                ring_drawn(area, 1.0),
-                len,
-                "{area:?} ends short of its ring"
-            );
-            assert_eq!(ring_drawn(area, 0.0), 0, "{area:?} starts part way in");
-        }
-    }
-
-    #[test]
-    fn a_cell_inside_the_box_is_on_no_step_of_the_ring() {
-        // The inside is the text's, which fades rather than draws in, so a cell
-        // the ring claimed would be blanked while the reader is typing in it.
-        let area = Rect::new(6, 5, 60, 4);
-        assert_eq!(ring_step(area, Position::new(7, 6)), None);
-        assert_eq!(ring_step(area, Position::new(64, 6)), None);
-        // And a cell outside it is on none either, whichever side it lies past.
-        for outside in [
-            Position::new(5, 6),
-            Position::new(66, 6),
-            Position::new(7, 4),
-            Position::new(7, 9),
-        ] {
-            assert_eq!(ring_step(area, outside), None, "{outside:?}");
         }
     }
 }

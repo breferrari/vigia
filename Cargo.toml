@@ -67,11 +67,12 @@ gix = { version = "0.87", default-features = false, features = [
 tinyvec = ">=1.12, <1.13"
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
 # Under the `ratatui` organisation, and it schedules nothing: the host passes the
-# elapsed duration in, so I1's clock stays this program's. `default-features =
-# false` drops the DSL, and with it `anpa`. It adds `bon` and `micromath` and no
-# C toolchain; `compact_str` and `unicode-width` are already here beneath
+# elapsed duration in, so I1's clock stays this program's. The `dsl` feature is
+# taken, because the pane's motions are written in it, and it adds `anpa`, which
+# has no dependencies of its own. It adds `bon` and `micromath` and no C
+# toolchain; `compact_str` and `unicode-width` are already here beneath
 # ratatui-core, and `thiserror` beneath gix. See `SPEC.md` §6.
-tachyonfx = { version = "0.25", default-features = false, features = ["std"] }
+tachyonfx = { version = "0.25", default-features = false, features = ["std", "dsl"] }
 # The note box's editor, SPEC.md section 11.2 B21: the text, the caret, the
 # editing keys and undo. Under the `ratatui` organisation like tachyonfx above.
 # The shell draws its cells itself, so the widget half of the crate is unused

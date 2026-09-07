@@ -37,13 +37,14 @@ What follows groups the keys by surface. The docblocks in `crates/vigia/src/them
 |---|---|
 | `chrome` | the header and footer lines |
 | `chrome_dim` | secondary chrome text: key hints, the follow marker, readouts, and the chrome rows' background |
-| `note` | a stand-in for content there is no diff for, binary and conflict, and the footer's word when it has news rather than a problem. Not the reader's notes, which the six below carry |
+| `note` | a stand-in for content there is no diff for, binary and conflict, and the footer's word when it has news rather than a problem. Not the reader's notes, which the seven below carry |
 | `note_frame` | the note box's border and both its labels |
 | `note_line` | the number of a diff line carrying a note, drawn bold |
 | `note_open` | a note the agent has not read, on the bar and the status word |
 | `note_seen` | a note the agent has read, and one it has resolved while that departs |
 | `note_changed` | a note whose line was edited under it |
 | `note_gone` | a note whose line has left the diff |
+| `note_reply` | the agent's answer under a note: the arrow that opens it and the text after it |
 | `alert` | something went wrong and the reader should know |
 
 The four state keys are what tells one note's state from another's at a glance, on the `▎` and the word together. Where there is no colour at all the four collapse and the word is what distinguishes them, which is what it did before these keys existed; `note_changed` alone also dims, so it survives that rung.

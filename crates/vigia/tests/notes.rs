@@ -18,11 +18,11 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
     ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxPart, BoxRoute,
-    Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, Pointing,
-    RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme, Timed, View,
-    Viewport, body_layout, box_cells, box_entrance, box_exit, box_route, commit, count_cell,
-    has_room, hover_after, note_cells, opening, press_at, regions, render, repainted,
-    selection_after,
+    Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
+    Pointing, REPLY_INDENT, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions,
+    Row, Theme, Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit,
+    box_route, commit, count_cell, has_room, hover_after, note_cells, opening, press_at, regions,
+    render, repainted, selection_after,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -64,13 +64,62 @@ fn in_both_runs(name: &str, staged: usize, text: &str) -> Scratch {
     scratch
 }
 
-/// Rows of `painted` carrying note `id`, wherever in the frame they were drawn.
+/// The shade blocks an arriving surface evolves through.
+const SHADES: [&str; 4] = ["░", "▒", "▓", "█"];
+
+/// Cells of `over` holding a shade block rather than what the renderer drew.
+fn shaded(painted: &Painted, over: Rect) -> usize {
+    (over.y..over.bottom())
+        .flat_map(|row| (over.x..over.right()).map(move |x| (x, row)))
+        .filter(|(x, row)| SHADES.contains(&painted.cell(*x, *row).symbol()))
+        .count()
+}
+
+/// The same over every row a note drew under `y`, at any width.
+fn shading(painted: &Painted, y: u16) -> usize {
+    let width = painted.backend.buffer().area.width;
+    let under = y + 1;
+    shaded(
+        painted,
+        Rect::new(
+            0,
+            under,
+            width,
+            painted.after_notes(y).saturating_sub(under),
+        ),
+    )
+}
+
+/// Rows note `id` drew on `painted`, wherever in the frame they landed.
 fn note_rows(painted: &Painted, id: &str) -> usize {
     painted
         .view
         .rows
         .iter()
         .filter(|row| matches!(row, Row::Note { id: at, .. } if at == id))
+        .count()
+}
+
+/// How many times note `id` is drawn on `painted`.
+///
+/// Its rows are contiguous, so this counts the places they begin rather than the
+/// rows they take: the enclosure's height follows the body's wrap, and what
+/// every caller is asking is whether the note was placed once, twice or not at
+/// all.
+fn note_blocks(painted: &Painted, id: &str) -> usize {
+    let drawn = |row: Option<&Row>| matches!(row, Some(Row::Note { id: at, .. }) if at == id);
+    painted
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(n, row)| {
+            drawn(Some(row))
+                && !drawn(
+                    n.checked_sub(1)
+                        .and_then(|above| painted.view.rows.get(above)),
+                )
+        })
         .count()
 }
 
@@ -262,10 +311,7 @@ impl Rig {
             .expect("a note press resolved to no anchor");
         let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
         self.app.open_box(anchor, existing.as_ref());
-        self.box_effect = Some(Timed::new(
-            box_entrance(&self.theme),
-            self.clock + BOX_ARRIVING,
-        ));
+        self.box_effect = Some(Timed::armed(box_entrance(&self.theme), self.clock));
         self.advance(BOX_ARRIVING + ARRIVING_FRAME);
         // The entrance was spent by the clock and never drawn, so the next paint
         // tells whatever it arms nothing of that spell, as the shell's
@@ -341,10 +387,10 @@ impl Rig {
     }
 
     /// Esc, as the loop takes it: the keys are the pane's again now, and the
-    /// rows stay drawn while the entrance plays backwards.
+    /// rows stay drawn while the box is swept away.
     fn esc(&mut self) {
         self.app.close_box(self.clock + BOX_ARRIVING);
-        self.box_effect = Some(Timed::new(box_exit(&self.theme), self.clock + BOX_ARRIVING));
+        self.box_effect = Some(Timed::armed(box_exit(), self.clock));
     }
 }
 
@@ -387,27 +433,92 @@ impl Painted {
     }
 
     /// The consecutive note rows drawn under row `y`, as their text past the lead.
+    /// The status word, read off whichever surface carries it: the enclosure's
+    /// bottom edge, or the last row of the bar rung on a pane too narrow to
+    /// hold an enclosure. Drawn cells rather than the row model, so a word that
+    /// stopped being painted fails here rather than passing.
+    fn note_word(&self, y: u16) -> String {
+        let mut last = String::new();
+        for row in y + 1..self.after_notes(y) {
+            match self.lead_at(row) {
+                Some(NoteLead::Bottom) => return self.text(row).trim_end().to_owned(),
+                Some(NoteLead::Bar) => last = self.text(row).trim_end().to_owned(),
+                _ => {}
+            }
+        }
+        last
+    }
+
+    /// The row under `y` carrying the answer's arrow.
+    ///
+    /// Found rather than counted: the enclosure's height follows the body's
+    /// wrap, so an offset from the noted line is an off-by-one waiting for the
+    /// next fixture whose body is a word longer.
+    fn reply_row(&self, y: u16) -> u16 {
+        (y + 1..self.after_notes(y))
+            .find(|row| self.lead_at(*row) == Some(NoteLead::Reply))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no answer under row {y}:
+{}",
+                    self.rows().join(
+                        "
+"
+                    )
+                )
+            })
+    }
+
+    /// The first row under `y` that is not one of its note's, which is where
+    /// the diff picks up again.
+    fn after_notes(&self, y: u16) -> u16 {
+        let floor = self.laid.diff.top + self.laid.diff.rows;
+        (y + 1..floor)
+            .find(|row| self.lead_at(*row).is_none())
+            .unwrap_or(floor)
+    }
+
+    /// What `row` of the diff region draws, when a note drew it.
+    fn lead_at(&self, row: u16) -> Option<NoteLead> {
+        match self.view.rows.get(usize::from(row - self.laid.diff.top)) {
+            Some(Row::Note { lead, .. }) => Some(*lead),
+            _ => None,
+        }
+    }
+
+    /// What a note says under `y`: the reader's own words and the agent's, with
+    /// the enclosure around the first left out.
+    ///
+    /// The frame is not content and every caller here is asking what the note
+    /// reads. `a_committed_note_is_enclosed_and_the_word_rides_the_bottom_edge`
+    /// is what holds the edges themselves, off the painted cells rather than
+    /// through this.
     fn notes_under(&self, y: u16) -> Vec<String> {
         let (_, _, origin) = self.gutter();
         let mut out = Vec::new();
-        let mut row = y + 1;
-        while row < self.laid.diff.top + self.laid.diff.rows {
+        for row in y + 1..self.after_notes(y) {
             let text = self.text(row);
-            let lead = text.chars().nth(usize::from(origin));
-            if !matches!(lead, Some('▎' | '↳'))
-                && !matches!(
-                    self.view.rows.get(usize::from(row - self.laid.diff.top)),
-                    Some(Row::Note { .. })
-                )
-            {
+            let Some(lead) = self.lead_at(row) else {
                 break;
+            };
+            let skip = usize::from(origin)
+                + match lead {
+                    NoteLead::Reply | NoteLead::Blank => REPLY_INDENT + 2,
+                    _ => 2,
+                };
+            match lead {
+                // The edges carry no words of anyone's.
+                NoteLead::Top | NoteLead::Bottom => {}
+                NoteLead::Body => {
+                    // Between the two sides, and the trailing one goes with the
+                    // padding it stands in.
+                    let inner: String = text.chars().skip(skip).collect();
+                    out.push(inner.trim_end().trim_end_matches('│').trim_end().to_owned());
+                }
+                NoteLead::Bar | NoteLead::Reply | NoteLead::Blank => {
+                    out.push(text.chars().skip(skip).collect::<String>());
+                }
             }
-            out.push(
-                text.chars()
-                    .skip(usize::from(origin) + 2)
-                    .collect::<String>(),
-            );
-            row += 1;
         }
         out
     }
@@ -430,8 +541,12 @@ impl Painted {
 
     /// Whether any row draws the agent's arrow at the content `origin`.
     fn drew_reply(&self, origin: u16) -> bool {
-        (0..self.backend.buffer().area.height)
-            .any(|row| self.text(row).chars().nth(usize::from(origin)) == Some('↳'))
+        (0..self.backend.buffer().area.height).any(|row| {
+            self.text(row)
+                .chars()
+                .nth(usize::from(origin) + REPLY_INDENT)
+                == Some('↳')
+        })
     }
 
     /// The footer's bottom row.
@@ -735,7 +850,6 @@ fn enter_writes_one_file_and_the_rows_arrive_under_the_line() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
-    let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
     let plain = rig.paint(&mut frame, PANE, Pointing::default());
     let y = plain.row_of(EDITED);
     let (left, _, origin) = plain.gutter();
@@ -776,22 +890,40 @@ fn enter_writes_one_file_and_the_rows_arrive_under_the_line() {
         (PATH, Side::New, 5, EDITED, BODY, Status::Open)
     );
 
-    // The rows stand under the line where the box was, arriving: the note's ink
-    // first, the chrome's dim once the arrival has run.
+    // The rows stand under the line where the box was, evolving in: shade
+    // blocks first, the reader's words once the arrival has run.
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(opened.box_under(y).is_empty(), "the box is still drawn");
+    rig.advance(RESOLVE_ARRIVING / 2);
     let arriving = rig.paint(&mut frame, PANE, Pointing::default());
-    assert!(arriving.box_under(y).is_empty(), "the box is still drawn");
-    let under = arriving.notes_under(y);
+    assert!(
+        shading(&arriving, y) > 0,
+        "the rows arrived drawn rather than evolving:
+{}",
+        arriving.rows().join(
+            "
+"
+        )
+    );
+    rig.advance(RESOLVE_ARRIVING);
+    let settled = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = settled.notes_under(y);
     assert_eq!(
         rejoined(&under, "open"),
         BODY,
         "the rows do not carry the body"
     );
-    assert!(under.last().expect("a row").trim_end().ends_with("open"));
-    assert!(rig.effects.is_running(), "the rows landed without arriving");
-    assert_ne!(arriving.fg(origin + 2, y + 1), Some(dim));
-    rig.advance(RESOLVE_ARRIVING + ARRIVING_FRAME);
+    assert!(settled.note_word(y).contains("open"));
+    // And the rows settle on what the renderer drew, in the ink the box showed
+    // the reader's words in while they were being typed.
+    rig.advance(ARRIVING_FRAME);
     let settled = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!(settled.fg(origin + 2, y + 1), Some(dim));
+    assert_eq!(
+        shading(&settled, y),
+        0,
+        "the arrival is still shading the rows"
+    );
+    assert_eq!(settled.fg(origin + 2, y + 2), rig.theme.chrome.fg);
     assert!(!rig.effects.is_running());
 }
 
@@ -955,10 +1087,11 @@ fn a_rewritten_note_is_open_again_and_keeps_its_id_and_reply() {
     assert_eq!(note.reply.as_deref(), Some("which margin?"));
     assert_eq!(files_in(rig.store.dir()).len(), 1);
 
+    rig.advance(RESOLVE_ARRIVING);
     let drawn = rig.paint(&mut frame, PANE, Pointing::default());
     let under = drawn.notes_under(y);
     assert!(under[0].starts_with("short, the settle one"), "{under:?}");
-    assert!(under[0].trim_end().ends_with("open"), "{under:?}");
+    assert!(drawn.note_word(y).contains("open"), "{under:?}");
     assert!(under[1].starts_with("which margin?"), "{under:?}");
 }
 
@@ -1079,6 +1212,7 @@ fn alt_enter_breaks_the_body_and_the_note_rows_break_with_it() {
     assert!(matches!(rig.enter(), Committed::Written(_)));
     let listing = rig.store.list().expect("list");
     assert_eq!(listing.notes[0].body, "first\nsecond");
+    rig.advance(RESOLVE_ARRIVING);
     let drawn = rig.paint(&mut frame, PANE, Pointing::default());
     let under = drawn.notes_under(y);
     assert_eq!(under.len(), 2, "{under:?}");
@@ -1479,7 +1613,7 @@ fn box_rows_are_display_rows_the_bar_does_not_count() {
 }
 
 #[test]
-fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
+fn a_note_draws_under_its_line_enclosed_with_the_word_on_the_bottom_edge() {
     let scratch = fixture("notes-rows");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1490,38 +1624,68 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     let y = painted.row_of(EDITED);
     let (left, _, origin) = painted.gutter();
+    let at = usize::from(origin);
     let theme = Theme::default();
 
     // The number stays a number and keeps the icon's ink, so the anchored line
     // can be found from across the pane.
     let five = (left..origin)
         .find(|x| painted.cell(*x, y).symbol() == "5")
-        .unwrap_or_else(|| panic!("the number was replaced:\n{}", painted.text(y)));
+        .unwrap_or_else(|| {
+            panic!(
+                "the number was replaced:
+{}",
+                painted.text(y)
+            )
+        });
     assert_eq!(painted.fg(five, y), theme.note_line.fg);
 
-    // Two rows under it: the bar at the content origin with a blank gutter behind
-    // it, the body in the chrome's dim ink, and the word on the last row.
+    // Four rows under it: an edge, the reader's words between two sides, and an
+    // edge carrying the word. The gutter behind all four is blank.
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 2, "{under:?}");
-    for row in y + 1..=y + 2 {
-        let text = painted.text(row);
+    let rows: Vec<String> = (y + 1..=y + 4).map(|row| painted.text(row)).collect();
+    for text in &rows {
         assert!(
-            text.chars().take(usize::from(origin)).all(|c| c == ' '),
+            text.chars().take(at).all(|c| c == ' '),
             "the gutter under a note row is not blank: {text:?}"
         );
-        assert_eq!(text.chars().nth(usize::from(origin)), Some('▎'));
+    }
+    assert_eq!(rows[0].chars().nth(at), Some('┌'), "{:?}", rows[0]);
+    assert!(rows[0].trim_end().ends_with('┐'), "{:?}", rows[0]);
+    assert_eq!(
+        painted.fg(origin, y + 1),
+        theme.note_open.fg,
+        "the enclosure is not in the open state's ink"
+    );
+    for row in y + 2..=y + 3 {
+        assert_eq!(painted.text(row).chars().nth(at), Some('│'));
         assert_eq!(
             painted.fg(origin, row),
             theme.note_open.fg,
-            "the bar is not in the open state's ink"
+            "the enclosure's side is not in the state's ink"
         );
+        // The reader's own words, in the ink the box showed them in while they
+        // were being typed: committing them does not demote them.
         assert_eq!(
             painted.fg(origin + 2, row),
-            theme.chrome_dim.fg,
-            "the body is not dim"
+            theme.chrome.fg,
+            "the body is dimmer committed than it was typed"
         );
     }
-    assert!(under[1].trim_end().ends_with("open"), "{:?}", under[1]);
+    let bottom = &rows[3];
+    assert_eq!(bottom.chars().nth(at), Some('└'), "{bottom:?}");
+    assert_eq!(
+        bottom.chars().nth(at + REPLY_INDENT),
+        Some('┬'),
+        "the stem is not where the answer's arrow goes: {bottom:?}"
+    );
+    assert!(bottom.trim_end().ends_with('┘'), "{bottom:?}");
+    assert!(
+        painted.note_word(y).contains("open"),
+        "the word is not on the surface that carries it: {:?}",
+        painted.note_word(y)
+    );
     // Prose wraps at a blank, so the first row ends on a whole word, and nothing
     // of it is lost.
     let first = under[0].trim_end();
@@ -1530,22 +1694,22 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
         "the first row broke inside a word: {first:?}"
     );
     assert_eq!(rejoined(&under, "open"), BODY);
-    // The word stands apart from the body at the row's right edge: further right
-    // than any content on the noted line, with a gap before it.
-    let last_row = painted.text(y + 2);
-    let word_end = last_row.trim_end().chars().count();
+    // The word rides the bottom edge, set in from the corner and clear of the
+    // stem, so it reads as a label on the frame rather than the frame ending.
+    // Counted in characters: the rule and the corners are three bytes each.
+    let edge: Vec<char> = bottom.trim_end().chars().collect();
+    let word_at = edge
+        .windows(4)
+        .position(|four| four.iter().copied().eq("open".chars()))
+        .unwrap_or_else(|| panic!("the word is not on the bottom edge: {bottom:?}"));
     assert!(
-        word_end > painted.text(y).trim_end().chars().count(),
-        "the word is not against the right edge: {last_row:?}"
+        word_at > at + REPLY_INDENT + 1 && word_at + 4 + WORD_INSET < edge.len(),
+        "the word does not ride the bottom edge between the stem and the corner: {bottom:?}"
     );
     assert!(
-        last_row.trim_end().trim_end_matches("open").ends_with("  "),
-        "the word runs into the body: {last_row:?}"
-    );
-    assert!(
-        painted.text(y + 3).contains("line 6"),
+        painted.text(y + 5).contains("line 6"),
         "{}",
-        painted.text(y + 3)
+        painted.text(y + 5)
     );
     assert!(painted.footer().contains("1 note"), "{}", painted.footer());
 }
@@ -1579,7 +1743,11 @@ fn a_note_wraps_at_the_content_width_at_forty_columns() {
         );
     }
     assert_eq!(rejoined(&under, "open"), BODY);
-    assert!(under.last().expect("rows").trim_end().ends_with("open"));
+    assert!(
+        narrow.note_word(y).contains("open"),
+        "the word is not on the surface that carries it: {:?}",
+        narrow.note_word(y)
+    );
 }
 
 #[test]
@@ -1610,10 +1778,11 @@ fn a_moved_line_keeps_its_note_and_the_store_is_not_rewritten() {
     );
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("short"), "{:?}", under[0]);
     assert!(
-        under[0].starts_with("short") && under[0].trim_end().ends_with("open"),
+        painted.note_word(y).contains("open"),
         "{:?}",
-        under[0]
+        painted.note_word(y)
     );
     assert_eq!(painted.view.notes.marked.len(), 1);
     assert_eq!(
@@ -1642,7 +1811,11 @@ fn an_edited_line_draws_its_note_dimmer_with_the_word_changed() {
 
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 1, "{under:?}");
-    assert!(under[0].trim_end().ends_with("changed"), "{:?}", under[0]);
+    assert!(
+        painted.note_word(y).contains("changed"),
+        "the word is not on the surface that carries it: {:?}",
+        painted.note_word(y)
+    );
     let row = y + 1;
     for x in [
         origin,
@@ -1687,9 +1860,13 @@ fn a_line_gone_from_the_diff_draws_its_note_under_the_heading() {
 
     let under = painted.notes_under(heading);
     assert_eq!(under.len(), 1, "{under:?}");
-    assert!(under[0].trim_end().ends_with("gone"), "{:?}", under[0]);
     assert!(
-        painted.text(heading + 2).contains("@@"),
+        painted.note_word(heading).contains("gone"),
+        "the word is not on the surface that carries it: {:?}",
+        painted.note_word(heading)
+    );
+    assert!(
+        painted.text(painted.after_notes(heading)).contains("@@"),
         "the hunk header did not follow the note"
     );
     assert!(
@@ -1823,7 +2000,7 @@ fn a_note_on_a_line_only_the_staged_diff_holds_draws_under_that_run_alone() {
         under[0]
     );
     assert_eq!(
-        note_rows(&painted, "n1"),
+        note_blocks(&painted, "n1"),
         1,
         "{}",
         painted.rows().join("\n")
@@ -1866,7 +2043,7 @@ fn a_line_both_runs_hold_takes_its_note_under_the_unstaged_run() {
     assert!(under[0].starts_with("context in both"), "{:?}", under[0]);
     assert!(painted.notes_under(drawn[1]).is_empty());
     assert_eq!(
-        note_rows(&painted, "n1"),
+        note_blocks(&painted, "n1"),
         1,
         "{}",
         painted.rows().join("\n")
@@ -1896,7 +2073,7 @@ fn a_line_neither_run_holds_draws_its_note_once_under_the_unstaged_heading() {
     let painted = rig.paint(&mut frame, TALL, Pointing::default());
     assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
     assert_eq!(
-        note_rows(&painted, "n1"),
+        note_blocks(&painted, "n1"),
         1,
         "{}",
         painted.rows().join("\n")
@@ -1906,9 +2083,9 @@ fn a_line_neither_run_holds_draws_its_note_once_under_the_unstaged_heading() {
     assert_eq!(under.len(), 1, "{under:?}");
     assert!(under[0].starts_with("in neither hunk"), "{:?}", under[0]);
     assert!(
-        painted.text(heading + 1).contains("gone"),
+        painted.note_word(heading).contains("gone"),
         "{:?}",
-        painted.text(heading + 1)
+        painted.note_word(heading)
     );
     assert!(
         painted.view.notes.marked.is_empty(),
@@ -1948,7 +2125,7 @@ fn a_note_whose_text_one_run_moved_and_the_other_edited_over_goes_where_the_text
     let painted = rig.paint(&mut frame, TALL, Pointing::default());
     assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
     assert_eq!(
-        note_rows(&painted, "n1"),
+        note_blocks(&painted, "n1"),
         1,
         "{}",
         painted.rows().join("\n")
@@ -2050,7 +2227,7 @@ fn the_box_keeps_the_note_it_holds_when_a_later_edit_moves_the_rank() {
     frame.advance().expect("advance after the edit");
     let after = rig.paint(&mut frame, TALL, Pointing::default());
     assert_eq!(
-        note_rows(&after, "n1"),
+        note_blocks(&after, "n1"),
         0,
         "the note the box holds drew its rows in the other run:\n{}",
         after.rows().join("\n")
@@ -2144,7 +2321,7 @@ fn a_note_whose_path_a_rename_carried_into_the_other_run_goes_with_its_line() {
     let painted = rig.paint(&mut frame, TALL, Pointing::default());
     assert_eq!(painted.view.notes.adrift, 0, "the path is in the diff");
     assert_eq!(
-        note_rows(&painted, "n1"),
+        note_blocks(&painted, "n1"),
         1,
         "{}",
         painted.rows().join("\n")
@@ -2199,7 +2376,7 @@ fn a_note_the_box_holds_stands_aside_in_the_run_the_box_is_not_drawn_in() {
         scrolled.rows().join("\n")
     );
     assert_eq!(
-        note_rows(&scrolled, "n1"),
+        note_blocks(&scrolled, "n1"),
         0,
         "the note the box holds drew itself in the other run:\n{}",
         scrolled.rows().join("\n")
@@ -2227,7 +2404,11 @@ fn a_deleted_file_draws_its_note_under_the_heading() {
     );
     let under = painted.notes_under(heading);
     assert_eq!(under.len(), 1, "{under:?}");
-    assert!(under[0].trim_end().ends_with("gone"), "{:?}", under[0]);
+    assert!(
+        painted.note_word(heading).contains("gone"),
+        "the word is not on the surface that carries it: {:?}",
+        painted.note_word(heading)
+    );
 }
 
 #[test]
@@ -2330,6 +2511,116 @@ fn note_rows_are_display_rows_the_bar_does_not_count() {
     );
 }
 
+/// The reader's note is enclosed, and the answer descends from the enclosure.
+///
+/// The enclosure is what tells the two speakers apart, so the answer carries no
+/// mark down its side: it leaves through a stem in the bottom edge, the arrow
+/// opens it once, and the rest is free indented text.
+#[test]
+fn a_committed_note_is_enclosed_and_the_word_rides_the_bottom_edge() {
+    let scratch = fixture("notes-enclosure");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let (_, _, origin) = painted.gutter();
+    let theme = Theme::default();
+    let at = |row: u16| painted.text(row).chars().nth(usize::from(origin));
+
+    let under = painted.notes_under(y);
+    assert!(
+        under.len() >= 2,
+        "an enclosed note is at least a top edge, a body row and a bottom edge: {under:?}"
+    );
+
+    // The edges, found rather than counted, so the body may wrap to any height.
+    let rows: Vec<u16> = (y + 1..=y + 8).collect();
+    let top = rows
+        .iter()
+        .copied()
+        .find(|row| matches!(at(*row), Some('╭' | '┌')))
+        .unwrap_or_else(|| panic!("no top edge under the line:\n{}", painted.text(y + 1)));
+    let bottom = rows
+        .iter()
+        .copied()
+        .find(|row| matches!(at(*row), Some('╰' | '└')))
+        .unwrap_or_else(|| panic!("no bottom edge under the line:\n{}", painted.text(y + 2)));
+    assert!(bottom > top, "the bottom edge is above the top one");
+
+    // The frame carries the state, which is what the bar carried before it.
+    assert_eq!(
+        painted.fg(origin, top),
+        theme.note_open.fg,
+        "the enclosure is not drawn in the state's ink"
+    );
+
+    // The word rides the bottom edge, where the box being typed in carries its
+    // two keys, rather than taking a row of the body.
+    assert!(
+        painted.text(bottom).contains("open"),
+        "the status word is not on the bottom edge: {:?}",
+        painted.text(bottom)
+    );
+    for row in top + 1..bottom {
+        assert!(
+            !painted.text(row).contains("open"),
+            "the word is still in the body at row {row}: {:?}",
+            painted.text(row)
+        );
+    }
+}
+
+/// The agent's answer is not drawn in the reader's own ink.
+#[test]
+fn the_reply_is_not_the_readers_ink() {
+    let scratch = fixture("notes-reply-ink");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut seen = note("n1", 5, EDITED, "short");
+    seen.status = Status::Seen;
+    seen.reply = Some("swapped for saturating_mul; the unwrap_or went with it".to_owned());
+    rig.store.put(&seen).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let (_, _, origin) = painted.gutter();
+    let theme = Theme::default();
+
+    let arrow = (y + 1..=y + 8)
+        .find(|row| painted.text(*row).contains('↳'))
+        .unwrap_or_else(|| panic!("no reply arrow under the note"));
+    let column = painted
+        .text(arrow)
+        .chars()
+        .position(|c| c == '↳')
+        .map(|c| c as u16)
+        .expect("the arrow's column");
+
+    assert_eq!(
+        painted.fg(column, arrow),
+        theme.note_reply.fg,
+        "the arrow is not in the reply's ink"
+    );
+    assert_ne!(
+        painted.fg(column, arrow),
+        theme.chrome_dim.fg,
+        "the arrow is still the reader's own ink"
+    );
+    // And the answer's text with it, which is the half the reader reported.
+    assert_eq!(
+        painted.fg(column + 2, arrow),
+        theme.note_reply.fg,
+        "the answer's text is not in the reply's ink"
+    );
+    let _ = origin;
+}
+
 #[test]
 fn a_reply_draws_under_the_note_with_the_arrow() {
     let scratch = fixture("notes-reply");
@@ -2348,24 +2639,35 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
 
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 2, "{under:?}");
-    assert!(under[0].trim_end().ends_with("seen"), "{:?}", under[0]);
+    assert!(
+        painted.note_word(y).contains("seen"),
+        "the word is not on the surface that carries it: {:?}",
+        painted.note_word(y)
+    );
+    let arrow = painted.reply_row(y);
     assert_eq!(
-        painted.text(y + 2).chars().nth(usize::from(origin)),
-        Some('↳')
+        painted
+            .text(arrow)
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT),
+        Some('↳'),
+        "the answer does not descend from the stem in the enclosure's bottom edge"
     );
     assert!(
         under[1].starts_with("swapped for saturating_mul"),
         "{:?}",
         under[1]
     );
-    assert!(painted.text(y + 3).contains("line 6"));
+    assert!(painted.text(painted.after_notes(y)).contains("line 6"));
 
     // Resolved, the reply alone stays, which is the last frame of the departure
-    // the store watch will animate.
+    // the store watch will animate. Read once the answer has evolved in: the
+    // first frames of an arrival are shade blocks, which is the arrival.
     let mut resolved = seen.clone();
     resolved.status = Status::Resolved;
     rig.store.put(&resolved).expect("put");
     rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
     let departing = rig.paint(&mut frame, PANE, Pointing::default());
     let under = departing.notes_under(departing.row_of(EDITED));
     assert_eq!(under.len(), 1, "{under:?}");
@@ -2386,13 +2688,20 @@ fn a_resolved_note_without_a_reply_draws_its_body_and_the_word() {
     resolved.status = Status::Resolved;
     rig.store.put(&resolved).expect("put");
     rig.reload();
+    // Once the departure's first movement has run: it evolves the rows in
+    // before it holds them, so their first frames are shade blocks.
+    rig.advance(RESOLVE_ARRIVING);
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     let y = painted.row_of(EDITED);
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 1, "{under:?}");
     assert!(under[0].starts_with("short"), "{:?}", under[0]);
-    assert!(under[0].trim_end().ends_with("resolved"), "{:?}", under[0]);
-    assert!(painted.text(y + 2).contains("line 6"));
+    assert!(
+        painted.note_word(y).contains("resolved"),
+        "the word is not on the surface that carries it: {:?}",
+        painted.note_word(y)
+    );
+    assert!(painted.text(painted.after_notes(y)).contains("line 6"));
 }
 
 #[test]
@@ -2623,7 +2932,10 @@ fn the_bottom_clamp_counts_note_rows() {
         .iter()
         .filter(|row| matches!(row, Row::Note { .. }))
         .count();
-    assert_eq!(note_rows, 2, "the note's rows are not on the last screen");
+    assert_eq!(
+        note_rows, 4,
+        "the note's enclosure and its two body rows are not on the last screen"
+    );
     assert_eq!(
         painted.view.rows.len(),
         height,
@@ -2859,7 +3171,10 @@ fn two_notes_on_one_line_draw_both_and_the_box_reopens_the_first() {
 
     let under = painted.notes_under(y);
     assert_eq!(under.len(), 2, "{under:?}");
-    assert!(under[0].trim_end().ends_with("open") && under[1].starts_with("second"));
+    assert!(
+        painted.note_word(y).contains("open") && under[1].starts_with("second"),
+        "{under:?}"
+    );
     // One of the two has a body, so the line keeps its number rather than the icon.
     assert!((left..origin).any(|x| painted.cell(x, y).symbol() == "5"));
     assert_eq!(
@@ -3055,11 +3370,277 @@ fn a_press_on_a_line_whose_note_is_departing_opens_an_empty_box() {
     );
 }
 
+/// The mockup's own reply.
+const REPLY: &str = "swapped for saturating_mul; the unwrap_or went with it";
+
+/// A note as the agent leaves it: `status`, and the line when it wrote one.
+fn left_as(id: &str, body: &str, status: Status, reply: Option<&str>) -> vigia_core::Note {
+    let mut note = note(id, 5, EDITED, body);
+    note.status = status;
+    note.reply = reply.map(str::to_owned);
+    note
+}
+
+/// The enclosure's own side, which every body row closes on.
+const SIDE: char = '\u{2502}';
+
 #[test]
-fn a_note_rows_lead_never_overwrites_its_word() {
-    // The word is drawn first at the right edge and the lead is bounded by what
-    // it leaves, so a pane too narrow for both drops the lead and never the
-    // reader's status.
+fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
+    // The width the enclosure needs is its frame plus the word riding its
+    // bottom edge, so the boundary moves with the word. `resolved` is the
+    // longest one a note carries, and a body of double-width characters is what
+    // would push a side over if the wrap counted characters rather than columns.
+    let scratch = fixture("notes-widest-word");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    // Its stored text is no line of the diff, so it lands on `changed`, which
+    // is the longest word a note carries while it stays on screen.
+    rig.store
+        .put(&note(
+            "n1",
+            5,
+            "a line the file no longer holds",
+            "実装を共有する方法",
+        ))
+        .expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+
+    let mut enclosed = 0;
+    let mut barred = 0;
+    for width in 10..=40u16 {
+        let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 24), Pointing::default());
+        let leads: Vec<NoteLead> = painted
+            .view
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Note { lead, .. } => Some(*lead),
+                _ => None,
+            })
+            .collect();
+        if leads.is_empty() {
+            continue;
+        }
+        if !leads.contains(&NoteLead::Top) {
+            barred += 1;
+            continue;
+        }
+        enclosed += 1;
+        // The widest word still fits its edge, and the edge still closes.
+        let bottom = painted
+            .view
+            .rows
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    Row::Note {
+                        lead: NoteLead::Bottom,
+                        ..
+                    }
+                )
+            })
+            .expect("the enclosure's bottom edge");
+        let edge = painted.text(painted.laid.diff.top + bottom as u16);
+        assert!(
+            edge.contains("changed") && edge.trim_end().ends_with(['┘', '╯']),
+            "at {width} columns the widest word did not fit its edge: {edge:?}"
+        );
+        // And every body row closes, which a double-width glyph counted as one
+        // column would break.
+        for row in painted
+            .view
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                matches!(
+                    row,
+                    Row::Note {
+                        lead: NoteLead::Body,
+                        ..
+                    }
+                )
+            })
+            .map(|(at, _)| painted.text(painted.laid.diff.top + at as u16))
+        {
+            let drawn = row.trim_end();
+            assert!(
+                drawn.ends_with(SIDE),
+                "at {width} columns a body row of wide glyphs does not close: {row:?}"
+            );
+            // And it is exactly as wide as its own edge. A double-width glyph
+            // counted as one column would carry the side out past the corner,
+            // or wrap early and leave the row short.
+            assert_eq!(
+                drawn.chars().count(),
+                edge.trim_end().chars().count(),
+                "at {width} columns a body row of wide glyphs is not as wide as \
+                 its edge: {row:?}"
+            );
+        }
+    }
+    assert!(
+        enclosed > 0 && barred > 0,
+        "the sweep did not cross the boundary for the widest word: {enclosed} \
+         enclosed against {barred} barred"
+    );
+}
+
+#[test]
+fn on_the_bar_rung_a_full_row_pushes_the_word_onto_its_own() {
+    // The rung under the enclosure keeps the behaviour the enclosure made
+    // unnecessary: there the word shares the reader's last row, so a body that
+    // fills that row would either be cut or push the word off the edge. Neither
+    // happens; the word moves down, and the body keeps every character.
+    let scratch = fixture("notes-bar-word-row");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    // Narrow enough that the enclosure gives way to the bar.
+    let narrow = Rect::new(0, 0, 14, 24);
+    // By the rows rather than by the line's text, which this pane cuts.
+    let noted = |painted: &Painted| {
+        let first = painted
+            .view
+            .rows
+            .iter()
+            .position(|row| matches!(row, Row::Note { .. }))
+            .expect("a note row");
+        painted.laid.diff.top + first as u16 - 1
+    };
+
+    // The body grows a character at a time until the word gives up the row.
+    // Measured rather than derived, so the fixture follows the layout.
+    let rows_at = |rig: &mut Rig, frame: &mut Frame, body: &str| {
+        rig.store.put(&note("n1", 5, EDITED, body)).expect("put");
+        rig.reload();
+        rig.advance(RESOLVE_ARRIVING);
+        let painted = rig.paint(frame, narrow, Pointing::default());
+        let y = noted(&painted);
+        (painted.notes_under(y), painted.note_word(y), painted)
+    };
+    let mut moved = None;
+    for len in 1..40usize {
+        let body = "y".repeat(len);
+        let (under, _, painted) = rows_at(&mut rig, &mut frame, &body);
+        assert_eq!(
+            painted.lead_at(noted(&painted) + 1),
+            Some(NoteLead::Bar),
+            "the pane drew an enclosure, so this gate is not on the rung it is              named for:
+{}",
+            painted.rows().join("
+")
+        );
+        if under.len() > 1 {
+            moved = Some(len);
+            break;
+        }
+        assert!(
+            under[0].starts_with(&body),
+            "the body was cut to fit the word: {:?}",
+            under[0]
+        );
+    }
+    let moved = moved.expect("no body up to forty characters moved the word down");
+
+    // At that length the word is alone on the row under the body, and the body
+    // is whole; one character shorter and they share a row.
+    let full = "y".repeat(moved);
+    let (under, word, _) = rows_at(&mut rig, &mut frame, &full);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert_eq!(
+        under[0].trim_end(),
+        full,
+        "the body gave up a character to the word it no longer shares a row with"
+    );
+    assert_eq!(
+        under[1].trim(),
+        "open",
+        "the word did not take a row of its own"
+    );
+    assert!(word.ends_with("open"), "{word:?}");
+
+    let short = "y".repeat(moved - 1);
+    let (under, word, _) = rows_at(&mut rig, &mut frame, &short);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with(&short) && under[0].trim_end().ends_with("open"),
+        "one column short of the boundary the word left the row: {:?}",
+        under[0]
+    );
+    assert!(word.ends_with("open"), "{word:?}");
+}
+
+#[test]
+fn a_body_that_fills_the_enclosure_is_not_cut_by_the_word() {
+    // The reader's words are never cut to fit a status: the word has an edge of
+    // its own, so a body filling its row to the column keeps every character.
+    let scratch = fixture("notes-word-row");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (_, _, origin) = plain.gutter();
+    // The room the enclosure leaves its body. Measured off a painted note rather
+    // than derived, so the fixture follows the layout.
+    rig.store.put(&note("probe", 5, EDITED, "x")).expect("put");
+    rig.reload();
+    let probe = rig.paint(&mut frame, PANE, Pointing::default());
+    let edge = probe.text(y + 1).trim_end().chars().count();
+    let inner = edge - usize::from(origin) - BOX_FRAME;
+    rig.store.remove("probe").expect("remove");
+    // Gone from the store without a press, so it leaves over `LEAVING` first.
+    rig.reload();
+    rig.advance(LEAVING);
+
+    // Exactly the room, so a column less would cut it.
+    let full = "y".repeat(inner);
+    rig.store.put(&note("n1", 5, EDITED, &full)).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert_eq!(
+        under[0].trim_end(),
+        full,
+        "the body was cut or wrapped early"
+    );
+    assert!(
+        painted.note_word(y).contains("open"),
+        "the word left the edge when the body filled the row: {:?}",
+        painted.note_word(y)
+    );
+
+    // One column more, and it wraps rather than losing the character.
+    let over = "y".repeat(inner + 1);
+    rig.store.put(&note("n1", 5, EDITED, &over)).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert_eq!(
+        under.iter().map(|row| row.trim_end()).collect::<String>(),
+        over,
+        "a character was lost at the wrap"
+    );
+}
+
+#[test]
+fn the_bar_is_the_rung_under_the_enclosure_and_keeps_the_word() {
+    // A box returns early where it has no room, so a committed note on a narrow
+    // enough pane would draw nothing at all. The bar is the rung under it, and
+    // there the word is drawn first at the right edge with the lead bounded by
+    // what it leaves, so the reader's status is never what gives way.
     let scratch = fixture("notes-narrow-word");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -3068,19 +3649,65 @@ fn a_note_rows_lead_never_overwrites_its_word() {
     rig.store.put(&note("n1", 5, EDITED, "")).expect("put");
     rig.reload();
     let mut drawn = 0;
-    for width in 6..=20u16 {
+    let mut rungs = (0, 0);
+    for width in 6..=30u16 {
         let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 24), Pointing::default());
-        // An empty body is one row at every width: the word alone, never a blank
-        // row bought for a gap the body does not have.
-        let note_rows = painted
+        let leads: Vec<NoteLead> = painted
             .view
             .rows
             .iter()
-            .filter(|row| matches!(row, Row::Note { .. }))
-            .count();
+            .filter_map(|row| match row {
+                Row::Note { lead, .. } => Some(*lead),
+                _ => None,
+            })
+            .collect();
+        if leads.is_empty() {
+            continue;
+        }
+        if leads.contains(&NoteLead::Top) {
+            rungs.0 += 1;
+            // An empty body is still enclosed: an edge, an empty row between the
+            // sides, and the edge that carries the word.
+            assert_eq!(
+                leads,
+                vec![NoteLead::Top, NoteLead::Body, NoteLead::Bottom],
+                "at {width} columns the enclosure is not three rows"
+            );
+            let bottom = painted
+                .view
+                .rows
+                .iter()
+                .position(|row| {
+                    matches!(
+                        row,
+                        Row::Note {
+                            lead: NoteLead::Bottom,
+                            ..
+                        }
+                    )
+                })
+                .expect("the enclosure's bottom edge");
+            let edge = painted.text(painted.laid.diff.top + bottom as u16);
+            assert!(
+                edge.contains("open"),
+                "at {width} columns the enclosure lost the word: {edge:?}"
+            );
+            // And the edge closes. This is where the rung's boundary is pinned:
+            // one column narrower than the word and its frame need, the corner
+            // is what the row runs out of room for.
+            assert!(
+                edge.trim_end().ends_with(['┘', '╯']),
+                "at {width} columns the enclosure's bottom edge does not close: {edge:?}"
+            );
+            continue;
+        }
+        rungs.1 += 1;
+        // The rung under it: the bar, where an empty body is one row, the word
+        // alone, never a blank row bought for a gap the body does not have.
         assert!(
-            note_rows <= 1,
-            "at {width} columns an empty body took {note_rows} rows"
+            leads.len() <= 1,
+            "at {width} columns an empty body took {} bar rows",
+            leads.len()
         );
         for (offset, row) in painted.view.rows.iter().enumerate() {
             let Row::Note {
@@ -3107,73 +3734,12 @@ fn a_note_rows_lead_never_overwrites_its_word() {
         drawn > 0,
         "no width drew the word, so nothing here was checked"
     );
-}
-
-#[test]
-fn the_word_takes_a_row_of_its_own_when_the_body_leaves_it_none() {
-    // A body that fills its last row to the column would push the word off the
-    // edge, or the word would cut the body; neither happens, the word moves down.
-    let scratch = fixture("notes-word-row");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    frame.advance().expect("advance");
-    let mut rig = Rig::open(&scratch);
-    let plain = rig.paint(&mut frame, PANE, Pointing::default());
-    let y = plain.row_of(EDITED);
-    let (_, _, origin) = plain.gutter();
-    // The room a note's text has: the row's text columns less the lead. Measured
-    // off a painted note rather than derived, so the fixture follows the layout.
-    rig.store.put(&note("probe", 5, EDITED, "x")).expect("put");
-    rig.reload();
-    let probe = rig.paint(&mut frame, PANE, Pointing::default());
-    let right = probe.text(y + 1).trim_end().chars().count();
-    let room = right - usize::from(origin) - 2;
-    rig.store.remove("probe").expect("remove");
-    // Gone from the store without a press, so it leaves over `LEAVING` first.
-    rig.reload();
-    rig.advance(LEAVING);
-
-    // Exactly the room, so the word cannot share the row.
-    let full = "y".repeat(room);
-    rig.store.put(&note("n1", 5, EDITED, &full)).expect("put");
-    rig.reload();
-    let painted = rig.paint(&mut frame, PANE, Pointing::default());
-    let under = painted.notes_under(y);
-    assert_eq!(under.len(), 2, "{under:?}");
-    assert_eq!(
-        under[0].trim_end(),
-        full,
-        "the body was cut or wrapped early"
-    );
-    assert_eq!(
-        under[1].trim(),
-        "open",
-        "the word did not take a row of its own"
-    );
-
-    // One column short, and the word shares the row again, a blank between them.
-    let short = "y".repeat(room - 5);
-    rig.store.put(&note("n1", 5, EDITED, &short)).expect("put");
-    rig.reload();
-    let painted = rig.paint(&mut frame, PANE, Pointing::default());
-    let under = painted.notes_under(y);
-    assert_eq!(under.len(), 1, "{under:?}");
     assert!(
-        under[0].starts_with(&short) && under[0].trim_end().ends_with(" open"),
-        "{:?}",
-        under[0]
+        rungs.0 > 0 && rungs.1 > 0,
+        "the sweep did not cross the width where the enclosure gives way:          {} enclosed against {} barred",
+        rungs.0,
+        rungs.1
     );
-}
-
-/// The mockup's own reply.
-const REPLY: &str = "swapped for saturating_mul; the unwrap_or went with it";
-
-/// A note as the agent leaves it: `status`, and the line when it wrote one.
-fn left_as(id: &str, body: &str, status: Status, reply: Option<&str>) -> vigia_core::Note {
-    let mut note = note(id, 5, EDITED, body);
-    note.status = status;
-    note.reply = reply.map(str::to_owned);
-    note
 }
 
 #[test]
@@ -3185,7 +3751,7 @@ fn a_seen_landing_from_another_handle_crossfades_the_word() {
     let mut rig = Rig::open(&scratch);
     let dim = rig.theme.chrome_dim.fg.expect("the chrome's dim ink");
     assert!(
-        vigia::note_arrival(&rig.theme).is_some(),
+        vigia::word_arrival(&rig.theme).is_some(),
         "the default palette has nothing to fade between, so this gate would \
          pass on a word that simply changed"
     );
@@ -3193,7 +3759,7 @@ fn a_seen_landing_from_another_handle_crossfades_the_word() {
     rig.reload();
     let open = rig.paint(&mut frame, PANE, Pointing::default());
     let y = open.row_of(EDITED);
-    assert!(open.notes_under(y)[1].trim_end().ends_with("open"));
+    assert!(open.note_word(y).contains("open"));
 
     // The agent lists the store: the file is rewritten under the pane's hand and
     // the wake reads it back.
@@ -3203,8 +3769,11 @@ fn a_seen_landing_from_another_handle_crossfades_the_word() {
     rig.reload();
     rig.advance(ARRIVING_FRAME);
     let arriving = rig.paint(&mut frame, PANE, Pointing::default());
-    let under = arriving.notes_under(y);
-    assert!(under[1].trim_end().ends_with("seen"), "{under:?}");
+    assert!(
+        arriving.note_word(y).contains("seen"),
+        "{:?}",
+        arriving.note_word(y)
+    );
     let cells = note_cells(&arriving.laid, &arriving.view);
     let word = cells[0].word.expect("the word's cells");
     assert!(
@@ -3212,9 +3781,9 @@ fn a_seen_landing_from_another_handle_crossfades_the_word() {
         "one frame into the crossfade the word is drawn in the chrome's dim, so \
          the agent's reading arrived without arriving"
     );
-    // Nothing else on the row moved: the body keeps the chrome's dim.
+    // Nothing else moved: the reader's words above the edge keep their ink.
     let (_, _, origin) = arriving.gutter();
-    assert_eq!(arriving.fg(origin + 2, word.y), Some(dim));
+    assert_eq!(arriving.fg(origin + 2, word.y - 1), rig.theme.chrome.fg);
 
     rig.advance(RESOLVE_ARRIVING);
     let settled = rig.paint(&mut frame, PANE, Pointing::default());
@@ -3246,46 +3815,63 @@ fn a_resolve_runs_the_departure_once_and_the_rows_are_gone_after_it() {
     rig.reload();
     let noted = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(noted.notes_under(y).len(), 1);
-    assert!(noted.text(y + 2).contains("line 6"));
+    assert!(noted.text(noted.after_notes(y)).contains("line 6"));
 
     // The agent resolves it: the rows become the agent's line, arriving.
     rig.agent()
         .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
         .expect("rewrite");
     rig.reload();
+    let (_, _, origin) = noted.gutter();
+    // Halfway in, the line is evolving: shade blocks where its words will be.
+    rig.advance(RESOLVE_ARRIVING / 2);
     let arriving = rig.paint(&mut frame, PANE, Pointing::default());
-    let (_, _, origin) = arriving.gutter();
-    let under = arriving.notes_under(y);
+    assert!(
+        shading(&arriving, y) > 0,
+        "the agent's line landed drawn rather than evolving:
+{}",
+        arriving.rows().join(
+            "
+"
+        )
+    );
+
+    // The beat: the line holds, readable, in the answer's own ink.
+    rig.advance(RESOLVE_ARRIVING / 2 + ARRIVING_FRAME);
+    let holding = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = holding.notes_under(y);
     assert_eq!(under.len(), 1, "{under:?}");
     assert!(under[0].starts_with("swapped for"), "{:?}", under[0]);
+    let arrow = holding.reply_row(y);
     assert_eq!(
-        arriving.text(y + 1).chars().nth(usize::from(origin)),
+        holding
+            .text(arrow)
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT),
         Some('↳')
     );
-    assert_ne!(
-        arriving.fg(origin + 2, y + 1),
-        Some(dim),
-        "the agent's line landed in the chrome's dim rather than arriving"
+    let stem = origin + REPLY_INDENT as u16;
+    assert_eq!(
+        holding.fg(stem, arrow),
+        rig.theme.note_reply.fg,
+        "the answer is not in the reply's ink once it has arrived"
     );
-    assert!(arriving.text(y + 2).contains("line 6"));
-
-    // The beat: the line holds, readable, in the chrome's dim.
-    rig.advance(RESOLVE_ARRIVING + ARRIVING_FRAME);
-    let holding = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!(holding.fg(origin + 2, y + 1), Some(dim));
-    assert_eq!(holding.notes_under(y), under);
+    assert_ne!(holding.fg(stem, arrow), Some(dim));
+    assert!(holding.text(holding.after_notes(y)).contains("line 6"));
 
     // The dissolve: halfway through, the line is going and the diff has not
     // closed up yet.
     rig.advance(RESOLVE_BEAT + LEAVING / 2);
     let dissolving = rig.paint(&mut frame, PANE, Pointing::default());
     assert_ne!(
-        dissolving.text(y + 1),
-        arriving.text(y + 1),
+        dissolving.text(arrow),
+        holding.text(arrow),
         "halfway through the dissolve the agent's line is drawn whole"
     );
     assert!(
-        dissolving.text(y + 2).contains("line 6"),
+        dissolving
+            .text(dissolving.after_notes(y))
+            .contains("line 6"),
         "the diff closed up before the departure ended"
     );
 
@@ -3351,7 +3937,31 @@ fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
         leaving.text(y + 1),
         "halfway through the dissolve the reader's words are drawn whole"
     );
-    assert!(dissolving.text(y + 3).contains("line 6"));
+    // And it travels: halfway through, the half the sweep started on is the
+    // emptier one. Without this the gate holds for a dissolve in any direction,
+    // or none.
+    let width = dissolving.text(y + 2).chars().count() as u16;
+    let middle = (origin + width) / 2;
+    let cleared = |painted: &Painted, from: u16, to: u16| {
+        (y + 1..painted.after_notes(y))
+            .flat_map(|row| (from..to).map(move |x| (x, row)))
+            .filter(|(x, row)| painted.cell(*x, *row).symbol() == " ")
+            .count()
+    };
+    assert!(
+        cleared(&dissolving, origin, middle) > cleared(&dissolving, middle, width),
+        "the sweep did not clear the rows' left half ahead of their right:
+{}",
+        dissolving.rows().join(
+            "
+"
+        )
+    );
+    assert!(
+        dissolving
+            .text(dissolving.after_notes(y))
+            .contains("line 6")
+    );
 
     rig.advance(LEAVING / 2);
     let gone = rig.paint(&mut frame, PANE, Pointing::default());
@@ -3472,9 +4082,15 @@ fn a_resolved_note_met_at_startup_runs_the_departure() {
         .put(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
         .expect("put");
     rig.reload();
+    // Once the answer has evolved in: its first frames are shade blocks, which
+    // is the arrival, and what this gate is about is which rows are left.
+    rig.advance(RESOLVE_ARRIVING);
     let arriving = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
-        arriving.text(y + 1).chars().nth(usize::from(origin)),
+        arriving
+            .text(arriving.reply_row(y))
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT),
         Some('↳')
     );
     assert!(arriving.notes_under(y)[0].starts_with("swapped for"));
@@ -3520,9 +4136,13 @@ fn a_listing_cannot_bring_back_a_note_already_departing() {
     let gone = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(gone.rows(), plain.rows());
     rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
     let truth = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
-        truth.text(y + 1).chars().nth(usize::from(origin)),
+        truth
+            .text(truth.reply_row(y))
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT),
         Some('↳')
     );
 }
@@ -3571,14 +4191,21 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
+    let long = format!("{REPLY}, and the second clause wraps at every width here");
     rig.store
-        .put(&left_as("n1", BODY, Status::Seen, Some(REPLY)))
+        .put(&left_as("n1", BODY, Status::Seen, Some(&long)))
         .expect("put");
     rig.reload();
+    // Past the answer's arrival, so the cells hold what the renderer drew
+    // rather than the shade blocks it evolves through.
+    rig.advance(RESOLVE_ARRIVING);
     // The third pane is short enough that the bar is drawn and narrow enough to
     // have no trailing margin, so only the bar's own narrowing keeps the rows
     // off its column and the clause below is exercised rather than skipped.
-    let short = Rect::new(0, 0, 40, 20);
+    // Two rows taller than the bar alone needs: the enclosure costs a note two
+    // rows more than the bar did, and rows past the region's floor are not the
+    // cells' to cover.
+    let short = Rect::new(0, 0, 40, 22);
     for pane in [PANE, NARROW, short] {
         let painted = rig.paint(&mut frame, pane, Pointing::default());
         if pane == short {
@@ -3590,7 +4217,6 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
         // A needle the forty-column pane does not cut.
         let y = painted.row_of("margin.checked_mul");
         let (_, _, origin) = painted.gutter();
-        let under = painted.notes_under(y);
         let cells = note_cells(&painted.laid, &painted.view);
         assert_eq!(cells.len(), 1, "{cells:?}");
         let cells = &cells[0];
@@ -3602,7 +4228,7 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
         assert_eq!(cells.rows.y, y + 1);
         assert_eq!(
             usize::from(cells.rows.height),
-            under.len(),
+            note_rows(&painted, "n1"),
             "the rows do not cover every row the note drew"
         );
         // The word, spelled by the cells the rect names and nothing beside them.
@@ -3617,6 +4243,13 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
         assert_eq!(reply.y, word.y + 1);
         assert_eq!(reply.bottom(), cells.rows.bottom());
         assert_eq!(painted.cell(reply.x, reply.y).symbol(), "↳");
+        // Over every row of the answer, not the arrow's alone: a wrapped reply
+        // is one `Reply` row and the rest `Blank`, and the rect is their union.
+        assert!(
+            reply.height > 1,
+            "the answer did not wrap at {} columns, so the union over its              continuations is not exercised",
+            pane.width
+        );
         // And the row's right edge stops short of the bar and the margin: the
         // cell past it is never a glyph of the note.
         assert!(
@@ -3731,7 +4364,7 @@ fn the_listing_alert_is_said_once_per_change() {
 }
 
 #[test]
-fn a_reply_landing_on_an_open_note_crossfades_in() {
+fn a_reply_landing_on_an_open_note_evolves_in() {
     let scratch = fixture("notes-replied");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -3750,24 +4383,35 @@ fn a_reply_landing_on_an_open_note_crossfades_in() {
         .rewrite(&left_as("n1", "short", Status::Seen, Some(REPLY)))
         .expect("rewrite");
     rig.reload();
-    rig.advance(ARRIVING_FRAME);
+    rig.advance(RESOLVE_ARRIVING / 2);
     let arriving = rig.paint(&mut frame, PANE, Pointing::default());
-    let under = arriving.notes_under(y);
-    assert_eq!(under.len(), 2, "{under:?}");
-    assert!(under[1].starts_with("swapped for"), "{:?}", under[1]);
     let cells = note_cells(&arriving.laid, &arriving.view);
     let reply = cells[0].reply.expect("the reply's cells");
-    assert_ne!(
-        arriving.fg(reply.x + 2, reply.y),
-        Some(dim),
-        "one frame in, the agent's line is drawn in the chrome's dim rather than arriving"
+    assert!(
+        shaded(&arriving, reply) > 0,
+        "halfway in, the agent's line is drawn rather than evolving:
+{}",
+        arriving.rows().join(
+            "
+"
+        )
     );
-    // The note's own rows do not move: the body keeps the chrome's dim.
-    assert_eq!(arriving.fg(origin + 2, y + 1), Some(dim));
+    // The note's own rows do not move: only the answer's cells are the
+    // effect's, which is what the reply's rect is for.
+    assert_eq!(arriving.fg(origin + 2, y + 2), rig.theme.chrome.fg);
+    assert_eq!(shading(&arriving, y), shaded(&arriving, reply));
 
     rig.advance(RESOLVE_ARRIVING);
     let settled = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!(settled.fg(reply.x + 2, reply.y), Some(dim));
+    let under = settled.notes_under(y);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert!(under[1].starts_with("swapped for"), "{:?}", under[1]);
+    assert_eq!(
+        settled.fg(reply.x + 2, reply.y),
+        rig.theme.note_reply.fg,
+        "the answer settled in an ink that is not its own"
+    );
+    assert_ne!(settled.fg(reply.x + 2, reply.y), Some(dim));
     assert!(!rig.effects.is_running());
 }
 
@@ -3801,9 +4445,13 @@ fn a_resolve_between_a_stale_view_and_an_emptied_box_survives() {
         1,
         "Enter deleted the agent's resolve and its line"
     );
+    rig.advance(RESOLVE_ARRIVING);
     let departing = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
-        departing.text(y + 1).chars().nth(usize::from(origin)),
+        departing
+            .text(departing.reply_row(y))
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT),
         Some('↳'),
         "the resolve that landed first is not what the next frame shows"
     );
@@ -3861,10 +4509,10 @@ fn a_resolve_landing_inside_a_crossfade_supersedes_it() {
         "a word arriving over a whole note already leaving was armed beside it"
     );
 
-    // And the one left on n1 is the whole note's: at its first frame the fade
-    // holds every cell of the rows in the announcement's ink, the body's
-    // included, where a word's or a line's effect would reach the word alone.
-    let from = theme.note.fg.expect("the announcement's ink");
+    // And the one left on n1 is the whole note's: at its first frame the evolve
+    // holds every cell of the rows in the answer's ink, the body's included,
+    // where a word's or a line's effect would reach the word alone.
+    let from = theme.note_reply.fg.expect("the answer's ink");
     let rows = Rect::new(0, 0, 20, 2);
     let cells = vec![vigia::NoteCells {
         id: "n1".to_owned(),

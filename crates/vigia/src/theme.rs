@@ -183,6 +183,11 @@ palette! {
     note_changed,
     /// A note whose line has left the diff, drawn under the file's heading.
     note_gone,
+    /// The agent's answer under a note: the arrow that opens it and the text
+    /// that follows. One ink whatever the note's state is doing, because the
+    /// enclosure above already carries the state and this key exists to tell
+    /// two speakers apart rather than two states.
+    note_reply,
 
     /// Something went wrong and the reader should know.
     alert,
@@ -465,6 +470,7 @@ impl Theme {
             // Grey, so a note whose line has gone steps back rather than competing
             // with a live one for the eye.
             note_gone: fg(Color::Gray),
+            note_reply: fg(Color::Cyan),
             alert: fg(Color::Red).add_modifier(Modifier::BOLD),
             // The mockup's hues, mapped onto the sixteen names every terminal resolves.
             keyword: fg(Color::LightRed),
@@ -560,6 +566,11 @@ impl Theme {
             note_changed: rgb(0xff, 0xa6, 0x57),
             // The chrome's own dim, so a gone note recedes into the furniture.
             note_gone: rgb(0x8b, 0x94, 0x9e),
+            // Cyan is the hue this palette has left, and 0xbf rather than 0xcf is
+            // load-bearing: `to_ansi16` calls a colour bright at 0xc0 and up, and
+            // `note_seen` already lands on LightCyan there, so a brighter teal
+            // collapses onto it at sixteen colours.
+            note_reply: rgb(0x39, 0xb3, 0xbf),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
             type_name: rgb(0xff, 0xa6, 0x57),
@@ -644,6 +655,7 @@ impl Theme {
             note_seen: rgb(0x09, 0x69, 0xda),
             note_changed: rgb(0x95, 0x38, 0x00),
             note_gone: rgb(0x59, 0x63, 0x6e),
+            note_reply: rgb(0x1b, 0x7c, 0x83),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),
             keyword: rgb(0xcf, 0x22, 0x2e),
             type_name: rgb(0x95, 0x38, 0x00),
