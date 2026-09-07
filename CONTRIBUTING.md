@@ -41,6 +41,7 @@ These are the ones a first PR is most likely to trip on.
 - **Pure Rust.** Any dependency pulling `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows, and CI fails the build if one appears.
 - **Do not hard-wrap prose.** Commit message bodies wrap at 72; markdown and PR bodies do not wrap at all, because GitHub renders a single newline as a line break.
 - **Titles say what is broken or what to build.** One clause, no "because" — the explanation goes in the body.
+- **A pull request title becomes a release note.** The release writes its notes from the titles in it, so a title is read by people who will never open the diff.
 
 ## Running things
 

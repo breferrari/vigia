@@ -81,9 +81,15 @@ jobs:
       # against a local HTTP server: with the extraheader set, both the initial
       # request and the post-401 retry sent the bot's token and the URL's was
       # never sent at all. `release.yml` already checks out this way.
+      #
+      # **`fetch-depth: 0` is what lets the release say what changed**, and the
+      # default fails quietly rather than loudly: a shallow checkout carries no
+      # tags, so the range the notes are written from has no previous release to
+      # start at and the section comes out holding the whole history or nothing.
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -352,10 +358,42 @@ jobs:
           sh .github/scripts/raise-version.sh '${{ steps.version.outputs.next }}'
           cargo update --workspace
 
+      # **What the release tells a user it changed.** `dist` reads CHANGELOG.md,
+      # matches the section whose heading carries the version being released,
+      # and puts it above the install instructions in the release body. A
+      # version with no section is not an error there: the body falls back to
+      # the install instructions alone, with no warning anywhere, so a release
+      # that had nothing to say and a release whose notes were lost look
+      # identical to the person reading it. That is why this runs here, before
+      # the commit, rather than being left to whoever remembers.
+      #
+      # Same shape as the raise above and for the same reason: the filtering
+      # that decides what a user is told lives in a script a test can drive.
+      # `--first-parent` is insurance rather than a correction, since every
+      # merge here is squashed and the log is already one subject per pull
+      # request.
+      - name: write the changelog section
+        run: |
+          set -euo pipefail
+          previous=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$previous" ]; then
+            echo "::error::no tag to write the notes from; a shallow checkout is the usual cause"
+            exit 1
+          fi
+          git log --first-parent --format='%s' "${previous}..HEAD" \
+            | sh .github/scripts/changelog-entry.sh \
+                '${{ steps.version.outputs.next }}' "$(date -u +%F)"
+
       # The gate that makes the sed above safe, run before anything is pushed.
       # It compares the two strings the edit touched and fails if they disagree.
       - name: the manifests agree
         run: cargo test -p vigia --test package the_internal_dependency_tracks_the_workspace_version
+
+      # And the section landed under the version being released, which is the
+      # only thing `dist` looks at. CI cannot have checked this: the version it
+      # ran against is the one before this job moved it.
+      - name: the changelog names the version being released
+        run: cargo test -p vigia --test package the_changelog_names_the_version_the_manifest_carries
 
       # And the binary reports the new number, which is the claim a user checks.
       - name: the binary reports the new version
@@ -382,7 +420,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
+          git add Cargo.toml Cargo.lock CHANGELOG.md
           git commit -m "release: ${{ steps.version.outputs.next }}"
 
           # **Pushed with `RELEASE_TOKEN`, and this only works because the
