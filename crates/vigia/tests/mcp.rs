@@ -271,7 +271,6 @@ fn notes_on_an_empty_store_answers_an_empty_list_and_no_error() {
     assert_eq!(document["notes"], json!([]));
     assert_eq!(document["skipped"], json!([]));
     assert_eq!(document["warnings"], json!([]));
-    assert_eq!(document["pruned"], 0);
     assert_eq!(
         document["worktree"].as_str().map(Path::new),
         Some(rig.scratch.worktree().workdir())
@@ -537,7 +536,7 @@ fn resolve_without_a_note_is_refused() {
 }
 
 #[test]
-fn a_resolved_file_is_absent_from_the_default_listing_and_gone_after_the_next_one() {
+fn a_resolved_file_is_absent_from_the_default_listing_and_left_for_the_pane() {
     let rig = Rig::new("mcp-pruned");
     rig.store
         .put(&note("open-1", 5, EDITED, "one"))
@@ -553,24 +552,42 @@ fn a_resolved_file_is_absent_from_the_default_listing_and_gone_after_the_next_on
     );
     assert_eq!(files_in(rig.store.dir()), ["open-1.note", "open-2.note"]);
 
-    let document = document(&mut server, false);
-    let ids: Vec<&str> = document["notes"]
+    let listed = document(&mut server, false);
+    let ids: Vec<&str> = listed["notes"]
         .as_array()
         .expect("notes")
         .iter()
         .map(|note| note["id"].as_str().expect("id"))
         .collect();
     assert_eq!(ids, ["open-2"], "the resolved note is not listed");
-    assert_eq!(document["pruned"], 1);
     assert_eq!(
         files_in(rig.store.dir()),
-        ["open-2.note"],
-        "and its file is gone after the listing"
+        ["open-1.note", "open-2.note"],
+        "a listing took the resolved file the pane has not drawn yet"
+    );
+
+    // However often it is asked, and whichever way it is asked. B21 has the
+    // reader watch the agent's line arrive before the note leaves, and nothing
+    // reachable from here can see whether a pane has drawn it, or whether one
+    // was open at all while the agent worked.
+    for _ in 0..3 {
+        document(&mut server, false);
+        document(&mut server, true);
+        result(
+            &mut server,
+            "resources/read",
+            json!({ "uri": RESOURCE_URI }),
+        );
+    }
+    assert_eq!(
+        files_in(rig.store.dir()),
+        ["open-1.note", "open-2.note"],
+        "reading the store often enough took the resolved file"
     );
 }
 
 #[test]
-fn notes_all_lists_resolved_notes_and_prunes_nothing() {
+fn notes_all_lists_the_resolved_notes_the_default_listing_passes_over() {
     let rig = Rig::new("mcp-all");
     rig.store
         .put(&note("open-1", 5, EDITED, "one"))
@@ -585,7 +602,6 @@ fn notes_all_lists_resolved_notes_and_prunes_nothing() {
     let resolved = note_named(&document, "open-1");
     assert_eq!(resolved["status"], "resolved");
     assert_eq!(resolved["reply"], "done");
-    assert_eq!(document["pruned"], 0);
     assert_eq!(
         files_in(rig.store.dir()),
         ["open-1.note"],
@@ -616,7 +632,6 @@ fn reply_writes_the_line_without_resolving() {
     let document = document(&mut server, false);
     let note = note_named(&document, "open-1");
     assert_eq!(note["reply"], "which margin do you mean?");
-    assert_eq!(document["pruned"], 0, "an answered note stays");
 
     let refused = call(&mut server, "reply", json!({ "id": "open-1" }));
     assert_eq!(refused["isError"], true);

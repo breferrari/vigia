@@ -449,9 +449,20 @@ struct Departing {
     ends: Instant,
 }
 
+/// What one settle came to: whether the rows the next collect places moved, and
+/// the resolved notes whose departure has run and whose files the caller now
+/// owns the removal of.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Settled {
+    /// A departure ended, so the drawn set is not what it was.
+    pub changed: bool,
+    /// Resolved ids whose files are to be removed, in the order they ended.
+    pub prune: Vec<String>,
+}
+
 /// What the pane holds of the store: the notes as last listed, the ones leaving,
-/// and the resolved ones already gone from the screen whose files the server has
-/// not pruned yet, so nothing resolved is ever drawn twice.
+/// and the resolved ones already gone from the screen whose files have not been
+/// removed yet, so nothing resolved is ever drawn twice.
 #[derive(Debug, Default)]
 pub struct Ledger {
     listed: Vec<Note>,
@@ -510,22 +521,32 @@ impl Ledger {
         changes
     }
 
-    /// Drop every departure that has ended, remembering a resolved one until the
-    /// server prunes its file. `true` when something was dropped, so the caller
-    /// knows the rows it hands the next collect have changed.
-    pub fn settle(&mut self, now: Instant) -> bool {
+    /// Drop every departure that has ended, and name the resolved ones whose
+    /// files are now the caller's to remove.
+    ///
+    /// The pane is what knows a resolve has been drawn, so the pane is what
+    /// prunes: the server leaves a resolved file where it is precisely because
+    /// it cannot tell a note the reader watched leave from one written while
+    /// there was no pane open at all. A resolved id is remembered either way, so
+    /// a removal that fails costs the file rather than a second departure.
+    pub fn settle(&mut self, now: Instant) -> Settled {
         let before = self.departing.len();
         let departed = &mut self.departed;
+        let mut prune = Vec::new();
         self.departing.retain(|gone| {
             if now < gone.ends {
                 return true;
             }
             if gone.note.status == Status::Resolved {
                 departed.insert(gone.note.id.clone());
+                prune.push(gone.note.id.clone());
             }
             false
         });
-        self.departing.len() != before
+        Settled {
+            changed: self.departing.len() != before,
+            prune,
+        }
     }
 
     /// When the next departure ends, which is the next frame something here

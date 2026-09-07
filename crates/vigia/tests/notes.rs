@@ -227,8 +227,15 @@ impl Rig {
     fn advance(&mut self, by: Duration) {
         self.clock += by;
         self.elapsed += by;
-        if self.ledger.settle(self.clock) {
+        let settled = self.ledger.settle(self.clock);
+        if settled.changed {
             self.app.set_notes(self.ledger.drawn());
+        }
+        // The shell's own prune: a resolved file is the pane's to remove once
+        // the departure it drew has run, and a refusal is an alert there rather
+        // than an end, so it is not one here either.
+        for id in &settled.prune {
+            let _ = self.store.remove(id);
         }
         self.effects.settle(self.clock);
         self.app.settle_box(self.clock);
@@ -3885,9 +3892,19 @@ fn a_resolve_runs_the_departure_once_and_the_rows_are_gone_after_it() {
     );
     assert!(!rig.effects.is_running());
 
-    // Once: the file is still in the store until the server prunes it, and a
-    // listing that holds it does not run the departure again.
-    assert_eq!(files_in(rig.store.dir()).len(), 1);
+    // The pane's own prune: the file goes on the frame that drops the rows,
+    // which is what leaves the reader having watched the line before the note
+    // left.
+    assert!(
+        files_in(rig.store.dir()).is_empty(),
+        "the departure ran and the file stayed"
+    );
+
+    // Once: a resolved file still in the store, which is a removal the store
+    // refused or another pane's copy, does not run the departure again.
+    rig.agent()
+        .put(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("put it back");
     rig.reload();
     let again = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(again.rows(), plain.rows(), "a resolved note departed twice");
@@ -4736,5 +4753,53 @@ fn the_box_frame_takes_the_notes_own_ink_and_not_the_chromes() {
         rig.theme.note_frame.fg, rig.theme.chrome_dim.fg,
         "the palette draws the note's frame in the chrome's dim, so this gate \
          cannot tell the two apart"
+    );
+}
+
+/// B21: the agent "resolves it with a line the reader watches arrive before the
+/// note leaves." Resolve-then-list in one breath is the ordinary shape of an
+/// agent working a queue, and a reader whose pane was closed while it worked
+/// meets every resolve at startup instead. Neither may cost the line, so the
+/// pane is what removes a resolved file, at the end of the departure it drew.
+#[test]
+fn the_pane_draws_a_resolve_before_it_takes_the_file() {
+    let scratch = fixture("notes-resolve-pruned");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, None))
+        .expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    assert_eq!(noted.notes_under(y).len(), 1);
+
+    // The agent resolves. Whatever it does next, the file is still there for
+    // this pane to draw: the server's half of that is gated in `tests/mcp.rs`.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    assert_eq!(files_in(rig.store.dir()), ["n1.note"]);
+
+    // The pane wakes whenever it wakes, and the line is still there to draw.
+    rig.reload();
+    let departing = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = departing.notes_under(y);
+    assert!(
+        under
+            .first()
+            .is_some_and(|row| row.starts_with("swapped for")),
+        "the note left without the agent's line ever being drawn: {under:?}"
+    );
+
+    // And the pane is what takes the file, once it has run the departure.
+    rig.advance(RESOLVED_DEPARTURE);
+    rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        files_in(rig.store.dir()).is_empty(),
+        "the departure ran and nobody took the file"
     );
 }

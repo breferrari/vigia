@@ -277,8 +277,15 @@ impl Site {
     }
 
     /// The document `notes` and the resource answer: every note placed against
-    /// the diff as it is now, open ones marked seen, resolved ones pruned
+    /// the diff as it is now, open ones marked seen, resolved ones passed over
     /// unless `all` asked to read them.
+    ///
+    /// A resolved file is left where it is. B21 has the reader watch the agent's
+    /// line arrive before the note leaves, and nothing reachable from here knows
+    /// whether a pane has drawn it yet: a resolve and the listing after it are
+    /// one turn of the agent's loop, and a pane that was closed for either has
+    /// not seen the note at all. The pane removes the file at the end of the
+    /// departure it draws, which is the only place that knowledge exists.
     fn listing(&self, all: bool) -> Result<Value, String> {
         let mut listing = self.store.list().map_err(|e| e.to_string())?;
         let mut frame = self.worktree.frame();
@@ -288,16 +295,10 @@ impl Site {
             .map_err(|e| format!("could not read the diff: {e}"))?;
         let mut notes = Vec::new();
         let mut warnings = Vec::new();
-        let mut pruned = 0;
         for note in &mut listing.notes {
             if note.status == Status::Resolved {
                 if all {
                     notes.push(self.describe(&mut frame, note));
-                } else {
-                    match self.store.remove(&note.id) {
-                        Ok(()) => pruned += 1,
-                        Err(e) => warnings.push(format!("could not prune {}: {e}", note.id)),
-                    }
                 }
                 continue;
             }
@@ -326,7 +327,6 @@ impl Site {
             "notes": notes,
             "skipped": skipped,
             "warnings": warnings,
-            "pruned": pruned,
         }))
     }
 
@@ -559,15 +559,15 @@ fn tools() -> Value {
             "description": "List the reader's notes pinned to lines of the diff in the vigia \
                             pane: open ones by default, resolved ones too with all. Each carries \
                             its id, its anchor, the body, where the line is now and the lines \
-                            around it. Listing marks each note seen and, unless all is set, \
-                            removes the resolved ones; act on the code, then resolve by id with \
-                            one line saying what you did.",
+                            around it. Listing marks each note seen; act on the code, then \
+                            resolve by id with one line saying what you did.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "all": {
                         "type": "boolean",
-                        "description": "List resolved notes too, and prune none.",
+                        "description": "List the resolved notes too, which are otherwise passed \
+                                        over.",
                     },
                 },
                 "additionalProperties": false,
@@ -611,7 +611,7 @@ fn resource() -> Value {
         "name": "notes",
         "title": "Notes pinned in the vigia pane",
         "description": "The reader's open notes on lines of the diff, placed against the diff as \
-                        it is now. Reading marks them seen and removes the resolved ones.",
+                        it is now. Reading marks them seen.",
         "mimeType": "application/json",
     })
 }
