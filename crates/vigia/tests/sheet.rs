@@ -2143,8 +2143,8 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
 
 #[test]
 fn the_two_column_rung_is_the_size_the_ruling_states() {
-    // `SPEC.md` §11.1 states 104 by 20 wide and 71 by 20 tight, and without this gate
-    // no test can fail on either.
+    // `SPEC.md` §11.1 states 104 wide and 71 tight and leaves the heights to the
+    // table, and without this gate no test can fail on any of it.
     let wide = Rect::new(0, 0, 120, 23);
     let tight = Rect::new(0, 0, 80, 23);
 
@@ -2258,8 +2258,8 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // these, which is why this list is read as a set rather than case by
             // case.
             (81, 26, (5, 2, 71, 20)),
-            // The whole table in one column reaches this width, so this is the
-            // twenty-one-row sheet rather than a dropping rung of thirteen rows.
+            // The whole table in one column reaches this width, so this is the sheet
+            // that draws every gesture rather than a rung that has given rows up.
             (43, 33, (3, 1, 38, 30)),
             // The level probe's own boundary.
             (58, 33, (1, 1, 56, 30)),
