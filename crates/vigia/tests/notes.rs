@@ -2762,7 +2762,7 @@ fn a_persisted_mark_is_bold_where_the_pointers_is_not() {
     let mut rig = Rig::open(&scratch);
     rig.theme = Theme::dark();
     assert!(
-        !rig.theme.note_line.add_modifier.contains(Modifier::BOLD),
+        !rig.theme.bar_hover.add_modifier.contains(Modifier::BOLD),
         "the dark palette's pointer is bold, so this compares nothing"
     );
     let plain = rig.paint(&mut frame, PANE, Pointing::default());

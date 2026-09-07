@@ -37,7 +37,7 @@ macro_rules! palette {
             /// Every key a theme file may set, in declaration order.
             pub const KEYS: &'static [&'static str] = &[$(stringify!($field)),*];
 
-    /// Set one key, or say it is not one.
+            /// Set one key, or say it is not one.
             fn set(&mut self, key: &str, style: Style) -> bool {
                 match key {
                     $(stringify!($field) => { self.$field = style; true }),*,
@@ -175,7 +175,8 @@ palette! {
     /// together. The four state inks are the one part of this surface a reader
     /// takes in without reading it, which is why they are keyed by state.
     note_open,
-    /// A note the agent has read and not yet answered.
+    /// A note the agent has read, and one it has resolved for as long as that
+    /// departure draws: the same fact one step on, and already leaving.
     note_seen,
     /// A note whose line was edited under it, so the anchor no longer carries
     /// the text it was pinned to.
