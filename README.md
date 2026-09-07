@@ -358,7 +358,7 @@ The socket is Claude Code's own, exported to hooks from v2.1.224, and v2.1.234 o
 
 A user-scoped server is started from your own config directory rather than from the repository, so what tells it where to look is the project Claude Code names for it. That has been dependable since v2.1.238. On anything older it falls back to its working directory, which for a user-scoped server is not your worktree, and `--scope project` is the shape that works there.
 
-`vigia` is not the session's child, so a session that asks you before it acts may hold the note for approval rather than starting on it. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
+`vigia` is not the session's child and nothing comes back down the socket, so whether the session acted on your note, held it behind a permission prompt or dropped it is not something the pane can tell you. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
 
 </details>
 
