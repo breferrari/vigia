@@ -551,7 +551,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 
 There is no Phase 5 in that table: the shelf, where deferred work waits with the dated reason it was deferred for, was numbered as one until August and kept its milestone.
 
-Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked.
+Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked. [`CHANGELOG.md`](CHANGELOG.md) is every released version and what moved in it.
 
 <details>
 <summary><b>🖼️ About that picture at the top</b></summary>
@@ -578,7 +578,7 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 
 <div align="center">
 
-**MIT** · Built in the open · [SPEC](SPEC.md) · [ROADMAP](ROADMAP.md) · [Issues](https://github.com/breferrari/vigia/issues)
+**MIT** · Built in the open · [SPEC](SPEC.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [Issues](https://github.com/breferrari/vigia/issues)
 
 </div>
 

@@ -1568,6 +1568,241 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
     );
 }
 
+/// Every release section's heading, newest first, as `(version, date)`.
+///
+/// A line match rather than a parse, because the heading is the whole of what
+/// has to be right: `dist` finds the section by the version inside it and
+/// reads nothing else to decide which one to publish.
+fn changelog_headings() -> Vec<(String, String)> {
+    repo_file("CHANGELOG.md")
+        .lines()
+        .filter_map(|line| line.strip_prefix("## ["))
+        .map(|rest| {
+            let (version, date) = rest.split_once("] - ").unwrap_or_else(|| {
+                panic!("a changelog heading reads `## [{rest}`, which carries no version and date")
+            });
+            (version.to_owned(), date.trim().to_owned())
+        })
+        .collect()
+}
+
+/// The notes the release publishes are the ones for the version it ships.
+///
+/// `dist` reads CHANGELOG.md, matches the section whose heading carries the
+/// version being released, and puts it above the install instructions in the
+/// body. **A version it finds no section for is not an error there**: the body
+/// falls back to the install instructions alone and nothing warns, in the log
+/// or on the release, so a release that had nothing to say and a release whose
+/// notes went missing are the same release to whoever reads it. This is what
+/// tells them apart, and the bump runs it between writing the section and
+/// committing it, which is before anything irreversible.
+#[test]
+fn the_changelog_names_the_version_the_manifest_carries() {
+    let manifest = repo_file("Cargo.toml");
+    let version = manifest
+        .lines()
+        .find_map(|line| line.strip_prefix("version = \""))
+        .and_then(|rest| rest.split('"').next())
+        .expect("the workspace manifest carries a version");
+
+    let headings = changelog_headings();
+    let (newest, date) = headings
+        .first()
+        .expect("CHANGELOG.md carries at least one release section");
+    assert_eq!(
+        newest, version,
+        "the manifest is at {version} and the newest section in CHANGELOG.md is \
+         {newest}. dist matches the section by version and falls back to the \
+         install instructions when it finds none, so this release would ship \
+         telling nobody what changed"
+    );
+    assert!(
+        date.len() == 10 && date.starts_with("20") && date.split('-').count() == 3,
+        "the newest changelog heading dates the release {date:?}, which is not an \
+         ISO date"
+    );
+}
+
+/// The file reads newest first, which is the order a new section is written in.
+///
+/// The generator inserts above the first heading it finds rather than sorting,
+/// so a file that is out of order stays out of order and puts the next release
+/// in the middle of the list.
+#[test]
+fn the_changelog_runs_newest_first() {
+    let semver = |version: &str| -> (u64, u64, u64) {
+        let mut parts = version.split('.').map(|part| {
+            part.parse::<u64>()
+                .unwrap_or_else(|_| panic!("{version} is not three numbers"))
+        });
+        let mut next = || parts.next().unwrap_or_else(|| panic!("{version} is short"));
+        (next(), next(), next())
+    };
+
+    let headings = changelog_headings();
+    assert!(
+        headings.len() > 1,
+        "CHANGELOG.md holds {} section(s), so this gate is passing on nothing",
+        headings.len()
+    );
+
+    let out_of_order: Vec<String> = headings
+        .windows(2)
+        .filter(|pair| semver(&pair[0].0) <= semver(&pair[1].0))
+        .map(|pair| format!("  {} sits above {}", pair[0].0, pair[1].0))
+        .collect();
+    assert!(
+        out_of_order.is_empty(),
+        "CHANGELOG.md is not in descending version order, so the next release is \
+         written into the middle of it:\n{}",
+        out_of_order.join("\n")
+    );
+}
+
+/// The release writes the section it publishes, and commits it.
+///
+/// Four claims, and none implies the others. That the notes come from the
+/// script the gate below drives. That the range starts at the previous
+/// release. That the checkout is deep enough for that range to resolve, since
+/// a shallow one carries no tags and would leave the section holding the whole
+/// history or nothing. And that the file reaches the commit: a release that
+/// writes the section and leaves it behind publishes the notes once and loses
+/// them, so the next release starts from a file that never saw this one.
+#[test]
+fn the_bump_writes_the_changelog_it_publishes() {
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let step = step_block(&bump, "write the changelog section");
+    assert!(
+        step.contains("sh .github/scripts/changelog-entry.sh"),
+        "bump.yml's changelog step does not run changelog-entry.sh, so the gate \
+         over the script proves nothing about the release: {step}"
+    );
+    assert!(
+        step.contains("git describe --tags --abbrev=0"),
+        "bump.yml's changelog step does not start the range at the previous \
+         release: {step}"
+    );
+    assert!(
+        bump.contains("fetch-depth: 0"),
+        "bump.yml checks out without `fetch-depth: 0`, so it holds no tags and \
+         the range the notes are written from cannot reach the previous release"
+    );
+
+    // A step that can be skipped is a release that can ship without notes, and
+    // the fallback that follows is silent.
+    assert_step_always_runs(&bump, "write the changelog section");
+    assert_precedes(
+        &bump,
+        "name: write the changelog section",
+        "name: commit the bump",
+        "bump.yml commits before it writes the changelog section, so the section \
+         is written into a tree nothing commits",
+    );
+
+    let commit = step_block(&bump, "commit the bump");
+    assert!(
+        commit.contains("git add Cargo.toml Cargo.lock CHANGELOG.md"),
+        "the bump commits without CHANGELOG.md, so the section it just wrote \
+         reaches the release body and never reaches the default branch: {commit}"
+    );
+}
+
+/// Drives the generator against fixed subjects, in a scratch directory of its
+/// own. Returns whether it passed and the file it left behind.
+#[cfg(unix)]
+fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -> (bool, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let script = repo_root().join(".github/scripts/changelog-entry.sh");
+    let dir = std::env::temp_dir().join(format!("vigia-changelog-{}-{case}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    let path = dir.join("CHANGELOG.md");
+    std::fs::write(&path, changelog).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+
+    let mut child = Command::new("sh")
+        .arg(&script)
+        .arg(version)
+        .arg("2026-01-01")
+        .arg(&path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
+    child
+        .stdin
+        .take()
+        .expect("the child's stdin is a pipe")
+        .write_all(subjects.as_bytes())
+        .expect("the subjects reach the script");
+    let passed = child.wait().expect("the script exits").success();
+
+    let left = read(&path);
+    let _ = std::fs::remove_dir_all(&dir);
+    (passed, left)
+}
+
+/// The generator keeps what a reader of the pane can see and drops the rest.
+///
+/// The filter is the only part of the release that decides what a user is
+/// told, and it is a heuristic over commit subjects, so it is driven here
+/// rather than trusted. One subject of each class it sorts on: prefixed
+/// internal work, unprefixed internal work naming a document, and two changes
+/// a reader can observe, whose trailing references belong to the tracker and
+/// come off.
+#[cfg(unix)]
+#[test]
+fn the_changelog_entry_keeps_what_a_reader_can_see() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let subjects = "roadmap: a row moves\n\
+                    The roadmap marks a row done (#449)\n\
+                    `w` wraps a long line, capped at two (#272) (#344)\n\
+                    The pane stops showing what is no longer there (#340) (#341)\n";
+    let (passed, left) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
+    assert!(
+        passed,
+        "the generator refused a section it can write:\n{left}"
+    );
+
+    let written: Vec<&str> = left
+        .lines()
+        .skip_while(|line| !line.starts_with("## [0.2.0]"))
+        .take_while(|line| !line.starts_with("## [0.1.0]"))
+        .filter(|line| line.starts_with("- "))
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "- `w` wraps a long line, capped at two",
+            "- The pane stops showing what is no longer there",
+        ],
+        "the generator kept the wrong subjects:\n{left}"
+    );
+
+    // Nothing a reader can see is not the same as no section at all, and the
+    // difference is the whole reason this writes one: a missing section makes
+    // dist fall back to the install instructions without saying so.
+    let (passed, left) = changelog_entry("internal", "0.3.0", "roadmap: a row moves\n", BEFORE);
+    assert!(
+        passed,
+        "the generator refused an all-internal range:\n{left}"
+    );
+    assert!(
+        left.contains("## [0.3.0]") && left.contains("Internal changes only"),
+        "an all-internal range left no section, so the release would fall back to \
+         the install instructions in silence:\n{left}"
+    );
+
+    // A section already written is the better text, so it is not overwritten.
+    // A re-run of a release reaches this, and so does a section written by
+    // hand.
+    let (passed, left) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
+    assert!(
+        !passed && left == BEFORE,
+        "the generator overwrote a section that was already written:\n{left}"
+    );
+}
+
 /// What each document is allowed to weigh, in bytes.
 ///
 /// The two a session reads before anything else are in the table, because
