@@ -301,13 +301,15 @@ That is the whole of it. `vigia` calls no model, summarises nothing and judges n
 
 ### Give the agent the server
 
-`vigia mcp` is an MCP server over stdio. It serves the notes for one worktree, so it belongs to the project rather than to your account:
+`vigia mcp` is an MCP server over stdio, and it belongs to **you** rather than to any one repository. Register it once:
 
 ```sh
-claude mcp add --scope project vigia -- vigia mcp
+claude mcp add --scope user vigia -- vigia mcp
 ```
 
-That writes `.mcp.json` at the root of the repository, which is three lines you can write yourself:
+That covers every project you open from now on. Claude Code tells the server which project the session is in, so one registration finds whichever worktree you are watching, and the notes are kept per worktree, so two repositories never see each other's.
+
+**`--scope project` is the other shape, and it is a decision about your team rather than about you.** It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
 
 ```json
 {
@@ -317,11 +319,13 @@ That writes `.mcp.json` at the root of the repository, which is three lines you 
 }
 ```
 
+Right when the whole team watches its diffs this way, and only then. If it is just you, take the line above it.
+
 The agent gets three tools and one resource. `notes` lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen`. `reply` writes a line under a note and leaves it open. `resolve` closes one, and its line is required, because that line is what you watch arrive. The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
 
 ### And reach the session already running
 
-With the server alone your note waits until the agent next looks. Two hooks in `.claude/settings.json` make it arrive instead:
+With the server alone your note waits until the agent next looks. Two hooks make it arrive instead, and they go in `~/.claude/settings.json` for the same reason the server does: write them once, and every repository you open is covered.
 
 ```json
 {
@@ -348,9 +352,11 @@ With the server alone your note waits until the agent next looks. Two hooks in `
 
 <br>
 
-Both commands are safe to install once and forget. Outside a repository, with no store, or with nothing open, they do nothing and say nothing, which matters because a hook you installed in one project runs in every project you open.
+Both commands are safe to install once and forget, which is what makes them worth putting in your user settings at all: outside a repository, with no store, or with nothing open, they do nothing and say nothing, and a hook installed there runs in every project you open.
 
 The socket is Claude Code's own, exported to hooks from v2.1.224, and v2.1.234 on native Windows. Below those the registration finds nothing to record and `Enter` still writes the note to the store, where the server and the `pending` line both reach it.
+
+A user-scoped server is started from your own config directory rather than from the repository, so what tells it where to look is the project Claude Code names for it. That has been dependable since v2.1.238. On anything older it falls back to its working directory, which for a user-scoped server is not your worktree, and `--scope project` is the shape that works there.
 
 `vigia` is not the session's child, so a session that asks you before it acts may hold the note for approval rather than starting on it. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
 
