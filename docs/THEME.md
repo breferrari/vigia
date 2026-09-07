@@ -44,9 +44,9 @@ What follows groups the keys by surface. The docblocks in `crates/vigia/src/them
 | `note_seen` | a note the agent has read, and one it has resolved while that departs |
 | `note_changed` | a note whose line was edited under it |
 | `note_gone` | a note whose line has left the diff |
+| `alert` | something went wrong and the reader should know |
 
 The four state keys are what tells one note's state from another's at a glance, on the `▎` and the word together. Where there is no colour at all the four collapse and the word is what distinguishes them, which is what it did before these keys existed; `note_changed` alone also dims, so it survives that rung.
-| `alert` | something went wrong and the reader should know |
 
 ### The file list
 
