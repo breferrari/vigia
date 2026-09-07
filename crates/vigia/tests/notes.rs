@@ -3381,6 +3381,9 @@ fn left_as(id: &str, body: &str, status: Status, reply: Option<&str>) -> vigia_c
     note
 }
 
+/// The enclosure's own side, which every body row closes on.
+const SIDE: char = '\u{2502}';
+
 #[test]
 fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
     // The width the enclosure needs is its frame plus the word riding its
@@ -3464,9 +3467,19 @@ fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
             })
             .map(|(at, _)| painted.text(painted.laid.diff.top + at as u16))
         {
+            let drawn = row.trim_end();
             assert!(
-                row.trim_end().ends_with('\u{2502}'),
+                drawn.ends_with(SIDE),
                 "at {width} columns a body row of wide glyphs does not close: {row:?}"
+            );
+            // And it is exactly as wide as its own edge. A double-width glyph
+            // counted as one column would carry the side out past the corner,
+            // or wrap early and leave the row short.
+            assert_eq!(
+                drawn.chars().count(),
+                edge.trim_end().chars().count(),
+                "at {width} columns a body row of wide glyphs is not as wide as \
+                 its edge: {row:?}"
             );
         }
     }
