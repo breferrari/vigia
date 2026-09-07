@@ -156,8 +156,13 @@ impl NoteBox {
     }
 
     /// Insert pasted text at the caret; `true` when anything went in.
+    ///
+    /// Tabs are expanded on the way in rather than left for the wrap, which
+    /// prices one at its stop while the buffer draws it as nothing and would
+    /// stand the caret a column off its own character. A paste is the only way
+    /// one arrives, since `Tab` is the editor's own soft indent.
     pub fn paste(&mut self, text: &str) -> bool {
-        self.editor.insert_str(text)
+        self.editor.insert_str(crate::render::detabbed(text))
     }
 
     /// Whether the reader's hand is still in it, so keys are its.

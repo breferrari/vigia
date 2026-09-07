@@ -4803,3 +4803,52 @@ fn the_pane_draws_a_resolve_before_it_takes_the_file() {
         "the departure ran and nobody took the file"
     );
 }
+
+/// A note's wrap measures the paragraph two ways, and a tab is the one
+/// character they price differently: `width_of` gives it the nothing the buffer
+/// draws a control character as, while the cut comes from `split_at`, which
+/// walks it out to its stop the way a line of the diff is drawn. A body is then
+/// cut against columns its rows never spend, and can break onto one carrying
+/// nothing but the status word. A reader pastes indented code into the box,
+/// which is the thing there is to paste.
+///
+/// A tab wraps as what it draws or the two are still disagreeing, so the tabbed
+/// body below and the same text with those tabs already spelled as the spaces
+/// they advance to are one drawing and one set of rows.
+#[test]
+fn a_tabbed_note_wraps_as_the_columns_its_tabs_are_drawn_in() {
+    let rows_for = |name: &str, body: &str| {
+        let scratch = fixture(name);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut rig = Rig::open(&scratch);
+        rig.store.put(&note("n1", 5, EDITED, body)).expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, NARROW, Pointing::default());
+        painted.notes_under(painted.row_of("checked_mul"))
+    };
+
+    // Each tab sits on a four-column boundary already, so the stop it advances
+    // to is a full four spaces and the two bodies are the same drawing.
+    let tabbed = rows_for(
+        "notes-tabbed",
+        "aaaa\tbbbb\tcccc\tdddd\teeee\tffff\tgggg\thhhh\tiiii\tjjjj",
+    );
+    let spelled = rows_for(
+        "notes-spelled",
+        "aaaa    bbbb    cccc    dddd    eeee    ffff    gggg    hhhh    iiii    jjjj",
+    );
+
+    assert!(
+        !tabbed
+            .iter()
+            .any(|row| row.trim_end().is_empty() || row.trim_end() == "open"),
+        "the body broke onto a row that draws nothing but its word: {tabbed:?}"
+    );
+    assert_eq!(
+        tabbed, spelled,
+        "a tab wrapped and drew as something other than the columns it advances \
+         to:\n{tabbed:?}\n{spelled:?}"
+    );
+}

@@ -482,9 +482,11 @@ struct Pin {
 fn prose_rows(text: &str, room: usize) -> Vec<String> {
     text.split('\n')
         .flat_map(|paragraph| {
-            prose_pieces(paragraph, room)
+            let paragraph = crate::render::detabbed(paragraph);
+            prose_pieces(&paragraph, room)
                 .into_iter()
                 .map(|piece| paragraph[piece].to_owned())
+                .collect::<Vec<_>>()
         })
         .collect()
 }

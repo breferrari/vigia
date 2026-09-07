@@ -19,7 +19,7 @@ use crate::view::{
 };
 
 /// Columns a tab advances to the next multiple of.
-const TAB_STOP: usize = 4;
+pub(crate) const TAB_STOP: usize = 4;
 
 /// Characters a column may cost before the walk gives up on the row.
 const CHARS_PER_COLUMN: usize = 4;
@@ -4619,6 +4619,42 @@ pub fn count_cell(notes: usize, adrift: usize) -> String {
 
 pub(crate) fn width_of(text: &str) -> usize {
     TextSpan::raw(text).width()
+}
+
+/// `text` with each tab expanded to the stop it advances to, the column
+/// restarting at every newline.
+///
+/// A note's prose is measured two ways that only agree once the tabs are gone:
+/// [`width_of`] gives a tab the nothing the buffer draws it as, since a
+/// grapheme holding a control character is dropped before it reaches a cell,
+/// while [`split_at`] walks it out to its stop the way a line of the diff is
+/// drawn. Left in, the two disagree and the body breaks against columns its
+/// rows never spend. Expanding is the side that keeps pasted indentation
+/// visible instead of silently gone.
+pub(crate) fn detabbed(text: &str) -> String {
+    if !text.contains('\t') {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len() + TAB_STOP);
+    let mut column = 0usize;
+    for c in text.chars() {
+        match c {
+            '\t' => {
+                let stop = TAB_STOP - (column % TAB_STOP);
+                out.extend(std::iter::repeat_n(' ', stop));
+                column += stop;
+            }
+            '\n' => {
+                out.push(c);
+                column = 0;
+            }
+            c => {
+                out.push(c);
+                column += width_of(c.encode_utf8(&mut [0u8; 4]));
+            }
+        }
+    }
+    out
 }
 
 /// One side of a hunk header, in git's own shorthand.
