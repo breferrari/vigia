@@ -74,7 +74,7 @@ pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
 /// Shade blocks rather than a crossfade because they are glyphs, so this is the
 /// one arrival on the note surface that still draws where the depth has
 /// flattened the palette and there are no two inks to travel between.
-pub const EVOLVING: &str = r#"
+const EVOLVING: &str = r#"
     fx::parallel(&[
         fx::evolve_into((EvolveSymbolSet::Shaded, ink), (over, Linear)),
         fx::coalesce((over, Linear)),
@@ -82,18 +82,18 @@ pub const EVOLVING: &str = r#"
 "#;
 
 /// A surface leaving: swept away, left to right.
-pub const SWEEPING: &str = r#"
+const SWEEPING: &str = r#"
     fx::dissolve((over, Linear)).with_pattern(SweepPattern::left_to_right(span))
 "#;
 
 /// A departure that shows something first: it arrives, holds a beat, and goes.
-pub const HOLDING: &str = r#"
+const HOLDING: &str = r#"
     fx::sequence(&[arriving, fx::sleep((beat, Linear)), leaving])
 "#;
 
 /// A message's ink arriving from the colour it replaces, by the road its voice
 /// travels.
-pub const FADING_IN: &str = r#"
+const FADING_IN: &str = r#"
     fx::fade_from_fg(ink, (over, SineInOut)).with_pattern(road)
 "#;
 
@@ -102,12 +102,12 @@ pub const FADING_IN: &str = r#"
 /// Not [`FADING_IN`] reversed: `fade_from_fg` mirrors its timer, so reversing it
 /// flips the interpolation as well as the direction, and a voice would leave on
 /// a curve it did not arrive on.
-pub const FADING_OUT: &str = r#"
+const FADING_OUT: &str = r#"
     fx::fade_to_fg(ink, (over, SineInOut)).with_pattern(road)
 "#;
 
 /// A change arriving on the diff: the cells landing in their own order.
-pub const COALESCING: &str = r#"
+const COALESCING: &str = r#"
     fx::coalesce((over, QuadOut))
 "#;
 
@@ -204,18 +204,14 @@ pub struct Timed {
 }
 
 impl Timed {
-    /// Arm `effect` until `until`.
-    #[must_use]
-    pub fn new(effect: Effect, until: Instant) -> Self {
-        Self { effect, until }
-    }
-
     /// Arm `effect` for as long as it says it runs, which for a composed one is
     /// its parts added up, or the longest of them, by the crate's own count.
     #[must_use]
     pub fn armed(effect: Effect, now: Instant) -> Self {
-        let until = now + length(&effect);
-        Self::new(effect, until)
+        Self {
+            until: now + length(&effect),
+            effect,
+        }
     }
 
     /// Whether it still has frames to draw, which keeps the frame clock armed.
@@ -254,4 +250,35 @@ pub fn length(effect: &Effect) -> Duration {
 #[must_use]
 pub fn effect_interval(ran: bool, since_paint: Duration) -> Duration {
     if ran { since_paint } else { Duration::ZERO }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The arm no drawn screen reaches: what a source that will not compile
+    //! leaves behind. Everything else here is gated on the pane in
+    //! `tests/motion.rs`, which compiles every source this binary ships.
+
+    use super::*;
+
+    #[test]
+    fn a_source_that_will_not_compile_draws_nothing_and_retires_at_once() {
+        let broken = dsl().compiler().compile("fx::a_motion_nobody_wrote(");
+        assert!(broken.is_err(), "the DSL accepted a source that is not one");
+
+        let effect = compiled(broken);
+        assert_eq!(
+            length(&effect),
+            Duration::ZERO,
+            "a source that will not compile armed an effect with a length, so the              cells under it are held for a motion that never draws"
+        );
+
+        // And it changes nothing, so the surface the renderer drew stands.
+        let over = Rect::new(0, 0, 8, 2);
+        let settled = ratatui::buffer::Buffer::empty(over);
+        let mut buf = settled.clone();
+        let mut effect = effect;
+        effect.process(tachyonfx::Duration::from(ARRIVING), &mut buf, over);
+        assert_eq!(buf, settled);
+        assert!(effect.done());
+    }
 }

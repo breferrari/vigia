@@ -3382,6 +3382,102 @@ fn left_as(id: &str, body: &str, status: Status, reply: Option<&str>) -> vigia_c
 }
 
 #[test]
+fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
+    // The width the enclosure needs is its frame plus the word riding its
+    // bottom edge, so the boundary moves with the word. `resolved` is the
+    // longest one a note carries, and a body of double-width characters is what
+    // would push a side over if the wrap counted characters rather than columns.
+    let scratch = fixture("notes-widest-word");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    // Its stored text is no line of the diff, so it lands on `changed`, which
+    // is the longest word a note carries while it stays on screen.
+    rig.store
+        .put(&note(
+            "n1",
+            5,
+            "a line the file no longer holds",
+            "実装を共有する方法",
+        ))
+        .expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+
+    let mut enclosed = 0;
+    let mut barred = 0;
+    for width in 10..=40u16 {
+        let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 24), Pointing::default());
+        let leads: Vec<NoteLead> = painted
+            .view
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Note { lead, .. } => Some(*lead),
+                _ => None,
+            })
+            .collect();
+        if leads.is_empty() {
+            continue;
+        }
+        if !leads.contains(&NoteLead::Top) {
+            barred += 1;
+            continue;
+        }
+        enclosed += 1;
+        // The widest word still fits its edge, and the edge still closes.
+        let bottom = painted
+            .view
+            .rows
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    Row::Note {
+                        lead: NoteLead::Bottom,
+                        ..
+                    }
+                )
+            })
+            .expect("the enclosure's bottom edge");
+        let edge = painted.text(painted.laid.diff.top + bottom as u16);
+        assert!(
+            edge.contains("changed") && edge.trim_end().ends_with(['┘', '╯']),
+            "at {width} columns the widest word did not fit its edge: {edge:?}"
+        );
+        // And every body row closes, which a double-width glyph counted as one
+        // column would break.
+        for row in painted
+            .view
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                matches!(
+                    row,
+                    Row::Note {
+                        lead: NoteLead::Body,
+                        ..
+                    }
+                )
+            })
+            .map(|(at, _)| painted.text(painted.laid.diff.top + at as u16))
+        {
+            assert!(
+                row.trim_end().ends_with('\u{2502}'),
+                "at {width} columns a body row of wide glyphs does not close: {row:?}"
+            );
+        }
+    }
+    assert!(
+        enclosed > 0 && barred > 0,
+        "the sweep did not cross the boundary for the widest word: {enclosed} \
+         enclosed against {barred} barred"
+    );
+}
+
+#[test]
 fn a_body_that_fills_the_enclosure_is_not_cut_by_the_word() {
     // The reader's words are never cut to fit a status: the word has an edge of
     // its own, so a body filling its row to the column keeps every character.
@@ -3995,8 +4091,9 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
+    let long = format!("{REPLY}, and the second clause wraps at every width here");
     rig.store
-        .put(&left_as("n1", BODY, Status::Seen, Some(REPLY)))
+        .put(&left_as("n1", BODY, Status::Seen, Some(&long)))
         .expect("put");
     rig.reload();
     // Past the answer's arrival, so the cells hold what the renderer drew
@@ -4046,6 +4143,13 @@ fn note_cells_cover_the_rows_and_the_word_and_never_the_bar() {
         assert_eq!(reply.y, word.y + 1);
         assert_eq!(reply.bottom(), cells.rows.bottom());
         assert_eq!(painted.cell(reply.x, reply.y).symbol(), "↳");
+        // Over every row of the answer, not the arrow's alone: a wrapped reply
+        // is one `Reply` row and the rest `Blank`, and the rect is their union.
+        assert!(
+            reply.height > 1,
+            "the answer did not wrap at {} columns, so the union over its              continuations is not exercised",
+            pane.width
+        );
         // And the row's right edge stops short of the bar and the margin: the
         // cell past it is never a glyph of the note.
         assert!(
