@@ -1,10 +1,10 @@
 //! One screenful, and nothing more than one screenful.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use vigia_core::{
-    ChangeKind, FileChange, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
-    Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
+    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Note,
+    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -1169,15 +1169,51 @@ impl View {
         }
         // The box is placed the way a note is, against the same anchor.
         let draft = note_box.map(crate::notes::NoteBox::stand_in);
-        if !by_path.is_empty() {
-            // Whether a note's file is in the diff at all is a fact about the changed set
-            // rather than the screen, so it is answered here for every note, drawn or not.
-            let present: HashSet<&str> = frame.files().iter().flat_map(FileChange::paths).collect();
+        // Which entries answer to each anchored path, which is a fact about the changed
+        // set rather than the screen and so is answered for every note, drawn or not:
+        // no entry means adrift, and two mean the two runs both hold the file.
+        let mut runs_of: HashMap<&str, Vec<usize>> = HashMap::new();
+        for path in by_path
+            .keys()
+            .copied()
+            .chain(draft.as_ref().map(|standing| standing.note.path.as_str()))
+        {
+            runs_of.entry(path).or_default();
+        }
+        if !runs_of.is_empty() {
+            for (index, change) in frame.files().iter().enumerate() {
+                for path in change.paths() {
+                    if let Some(runs) = runs_of.get_mut(path) {
+                        runs.push(index);
+                    }
+                }
+            }
             view.notes.adrift = notes
                 .iter()
-                .filter(|note| !present.contains(note.path.as_str()))
+                .filter(|note| runs_of.get(note.path.as_str()).is_none_or(Vec::is_empty))
                 .count();
         }
+        // A file staged and then edited further is a diff in each run and the note
+        // belongs under one: the run its line resolves best in, the earlier index on a
+        // tie, which is the unstaged one since `Frame::advance` lays that run down
+        // first. `vigia mcp` places by the same rule; only a path in both runs pays.
+        let mut chosen: HashMap<&str, usize> = HashMap::new();
+        for (path, indices) in &runs_of {
+            if indices.len() < 2 {
+                continue;
+            }
+            if let Some(here) = by_path.get(*path) {
+                for (note, at) in here.iter().zip(run_of(frame, indices, here)) {
+                    chosen.insert(note.id.as_str(), at);
+                }
+            }
+        }
+        // The box takes the same decision, and needs it twice over: its assignment in
+        // [`Self::take_file`] is unconditional, so a later entry would take it there.
+        let boxed_run = draft.as_ref().and_then(|standing| {
+            let indices = runs_of.get(standing.note.path.as_str())?;
+            (indices.len() > 1).then(|| run_of(frame, indices, &[&standing.note])[0])
+        });
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.
             view.top.row = 0;
@@ -1279,10 +1315,13 @@ impl View {
                             file_notes.extend(found.iter().copied());
                         }
                     }
+                    file_notes
+                        .retain(|note| chosen.get(note.id.as_str()).is_none_or(|&at| at == index));
                 }
                 let boxed = draft
                     .as_ref()
-                    .filter(|standing| change.paths().any(|path| path == standing.note.path));
+                    .filter(|standing| change.paths().any(|path| path == standing.note.path))
+                    .filter(|_| boxed_run.is_none_or(|at| at == index));
                 // The box holds this note's text, so its rows would say it twice.
                 if let Some(over) = boxed.and_then(|standing| standing.over) {
                     file_notes.retain(|note| note.id != over);
@@ -2086,6 +2125,34 @@ fn place_box(
         lines: stand_in.lines.to_vec(),
         cursor: stand_in.cursor,
     })
+}
+
+/// The entry of `indices` each of `notes` draws under: the one its line resolves
+/// best in, the earliest index on a tie.
+///
+/// A diff the frame cannot read ranks there as a missing line rather than ending
+/// the frame: this reaches entries the walk never would, so a failure here is not
+/// one the screen was going to meet.
+fn run_of(frame: &mut Frame, indices: &[usize], notes: &[&Note]) -> Vec<usize> {
+    let mut best = vec![(0u8, indices[0]); notes.len()];
+    for &index in indices {
+        let Ok((_, diff)) = frame.diff(index) else {
+            continue;
+        };
+        let mut on_new: Option<Vec<(u32, &str)>> = None;
+        let mut on_old: Option<Vec<(u32, &str)>> = None;
+        for (held, note) in best.iter_mut().zip(notes) {
+            let rows = match note.side {
+                Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
+                Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
+            };
+            let rank = resolve(note, rows).rank();
+            if rank > held.0 {
+                *held = (rank, index);
+            }
+        }
+    }
+    best.into_iter().map(|(_, index)| index).collect()
 }
 
 /// Place each of a file's notes on the logical row that draws its line, or on

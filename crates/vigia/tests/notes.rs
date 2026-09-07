@@ -30,6 +30,9 @@ use support::{Scratch, TempDir, files_in, note, numbered_lines};
 
 const PANE: Rect = Rect::new(0, 0, 80, 24);
 const NARROW: Rect = Rect::new(0, 0, 40, 24);
+/// Tall enough to draw both runs of one path at once, which the gates over a
+/// path in both runs assert before they read a placement.
+const TALL: Rect = Rect::new(0, 0, 80, 40);
 const PATH: &str = "src/watch.rs";
 
 /// The mockup's own line, edited into the fixture as its fifth.
@@ -46,6 +49,41 @@ fn fixture(name: &str) -> Scratch {
     scratch.commit_all("baseline");
     scratch.edit_line(PATH, 4, EDITED);
     scratch
+}
+
+/// One committed file staged at `staged` and then edited further at line ten,
+/// so the path is two entries: the staged run holds the earlier hunk and the
+/// unstaged one the later.
+fn in_both_runs(name: &str, staged: usize, text: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(PATH, numbered_lines(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, staged, text);
+    scratch.git(&["add", PATH]);
+    scratch.edit_line(PATH, 9, "unstaged ten");
+    scratch
+}
+
+/// Rows of `painted` carrying note `id`, wherever in the frame they were drawn.
+fn note_rows(painted: &Painted, id: &str) -> usize {
+    painted
+        .view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Note { id: at, .. } if at == id))
+        .count()
+}
+
+/// File headings on `painted`, which both gates below assert is two before they
+/// read a placement: one entry off screen makes a single placement look right
+/// for the wrong reason.
+fn headings(painted: &Painted) -> usize {
+    painted
+        .view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::File(_)))
+        .count()
 }
 
 fn at(kind: MouseEventKind, column: u16, row: u16) -> Event {
@@ -1752,6 +1790,129 @@ fn a_renamed_file_carries_its_note_to_the_new_path() {
         press_at(&painted.view, painted.laid, &press(left, y)),
         Some(usize::from(y - painted.laid.diff.top))
     );
+}
+
+#[test]
+fn a_note_on_a_line_only_the_staged_diff_holds_draws_under_that_run_alone() {
+    let scratch = in_both_runs("notes-runs-staged", 2, "staged three");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        2,
+        "the fixture is not a path in both runs"
+    );
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 3, "staged three", "only the staged run"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+
+    let y = painted.row_of("staged three");
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with("only the staged run"),
+        "{:?}",
+        under[0]
+    );
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    assert_eq!(painted.view.notes.marked.len(), 1);
+    assert_eq!(
+        painted.view.notes.marked[0].row,
+        usize::from(y - painted.laid.diff.top)
+    );
+    assert!(
+        !painted.rows().iter().any(|row| row.contains("gone")),
+        "the run that does not hold the line said gone about it:\n{}",
+        painted.rows().join("\n")
+    );
+    assert_eq!(painted.view.notes.adrift, 0);
+}
+
+#[test]
+fn a_line_both_runs_hold_takes_its_note_under_the_unstaged_run() {
+    let scratch = in_both_runs("notes-runs-tie", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "context in both"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+    let drawn: Vec<u16> = (painted.laid.diff.top..painted.laid.diff.top + painted.laid.diff.rows)
+        .filter(|y| painted.text(*y).contains("line 8"))
+        .collect();
+    assert_eq!(drawn.len(), 2, "line 8 is not context in both hunks");
+
+    let under = painted.notes_under(drawn[0]);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("context in both"), "{:?}", under[0]);
+    assert!(painted.notes_under(drawn[1]).is_empty());
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    assert_eq!(painted.view.notes.marked.len(), 1);
+    assert_eq!(
+        painted.view.notes.marked[0].row,
+        usize::from(drawn[0] - painted.laid.diff.top)
+    );
+}
+
+#[test]
+fn the_box_on_a_line_both_runs_hold_opens_under_the_run_pressed() {
+    let scratch = in_both_runs("notes-runs-box", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+    let y = painted.row_of("line 8");
+    let (left, _, _) = painted.gutter();
+
+    assert!(rig.press_opens(&painted, left + 1, y));
+    let opened = rig.paint(&mut frame, TALL, Pointing::default());
+    let tops = opened
+        .view
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row,
+                Row::Box {
+                    part: BoxPart::Top { .. }
+                }
+            )
+        })
+        .count();
+    assert_eq!(tops, 1, "{}", opened.rows().join("\n"));
+    assert_eq!(
+        opened.view.notes.boxed,
+        Some(usize::from(y - opened.laid.diff.top)),
+        "the box left the line the press was on"
+    );
+    let rows = opened.box_under(y);
+    assert!(rows[0].contains("src/watch.rs:8"), "{rows:?}");
 }
 
 #[test]

@@ -151,6 +151,21 @@ pub enum Placement {
     Gone,
 }
 
+impl Placement {
+    /// How well the line was found, for choosing between two runs of one path:
+    /// a file staged and then edited further is a diff in each, and the note
+    /// belongs under one of them.
+    #[must_use]
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::At(_) => 3,
+            Self::Moved(_) => 2,
+            Self::Changed => 1,
+            Self::Gone => 0,
+        }
+    }
+}
+
 /// Where the line `note` was pinned to is among `rows`, each a `(number, text)`
 /// on the note's side. Whether the file is in the diff at all is the caller's
 /// knowledge, so an adrift note is not a placement.

@@ -526,13 +526,10 @@ impl Placed {
     }
 
     /// How well the line was found, for choosing between two runs of one path.
+    /// A diff the frame could not read placed the note nowhere, which ranks
+    /// with the run that does not hold its line.
     fn rank(&self) -> u8 {
-        match self.placement {
-            Some(Placement::At(_)) => 3,
-            Some(Placement::Moved(_)) => 2,
-            Some(Placement::Changed) => 1,
-            Some(Placement::Gone) | None => 0,
-        }
+        self.placement.map_or(0, Placement::rank)
     }
 }
 
