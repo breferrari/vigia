@@ -2,7 +2,8 @@
 //! holds them between the two processes (`SPEC.md` §11.2 B21).
 //!
 //! Headless: nothing here draws, and nothing here decides which rows are on
-//! screen. The pane hands [`resolve`] the rows it drew; the store is one
+//! screen. The pane hands [`resolve`] the rows it drew and [`run_of`] the entries
+//! a path answers to; the store is one
 //! directory per worktree under a root the shell resolves, one file per note,
 //! and every write is a temp-and-rename so a reader lists whole files or none.
 
@@ -16,6 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::error::{Error, Result};
+use crate::frame::Frame;
 use crate::hunk::LineKind;
 use crate::watch::roots_of;
 
@@ -151,6 +153,21 @@ pub enum Placement {
     Gone,
 }
 
+impl Placement {
+    /// How well the line was found, for choosing between two runs of one path:
+    /// a file staged and then edited further is a diff in each, and the note
+    /// belongs under one of them.
+    #[must_use]
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::At(_) => 3,
+            Self::Moved(_) => 2,
+            Self::Changed => 1,
+            Self::Gone => 0,
+        }
+    }
+}
+
 /// Where the line `note` was pinned to is among `rows`, each a `(number, text)`
 /// on the note's side. Whether the file is in the diff at all is the caller's
 /// knowledge, so an adrift note is not a placement.
@@ -179,6 +196,47 @@ pub fn resolve(note: &Note, rows: &[(u32, &str)]) -> Placement {
         None if number_drawn => Placement::Changed,
         None => Placement::Gone,
     }
+}
+
+/// The entry of `indices` each of `notes` draws under: the one its line resolves
+/// best in, the earliest index on a tie, which is the unstaged run since
+/// [`crate::Frame::advance`] lays that one down first.
+///
+/// A file staged and then edited further is a diff in each run and a note
+/// belongs under one of them, so the pane and the server choose here rather than
+/// each keeping a ladder of its own. An entry whose diff the frame cannot read
+/// is passed over rather than ending the caller, which may be reaching entries
+/// its own walk never would; when none can be read the first is the answer.
+///
+/// # Panics
+///
+/// If `indices` is empty and `notes` is not. Every caller has found the path in
+/// the changed set already, so an entry is what it holds.
+#[must_use]
+pub fn run_of(frame: &mut Frame, indices: &[usize], notes: &[&Note]) -> Vec<usize> {
+    let mut best: Vec<Option<(u8, usize)>> = vec![None; notes.len()];
+    for &index in indices {
+        let Ok((_, diff)) = frame.diff(index) else {
+            continue;
+        };
+        let mut on_new: Option<Vec<(u32, &str)>> = None;
+        let mut on_old: Option<Vec<(u32, &str)>> = None;
+        for (held, note) in best.iter_mut().zip(notes) {
+            let rows = match note.side {
+                Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
+                Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
+            };
+            let rank = resolve(note, rows).rank();
+            // The first entry that reads is the answer until one strictly beats
+            // it, so an unreadable entry never takes a note off a readable one.
+            if held.is_none_or(|(held, _)| rank > held) {
+                *held = Some((rank, index));
+            }
+        }
+    }
+    best.into_iter()
+        .map(|held| held.map_or(indices[0], |(_, index)| index))
+        .collect()
 }
 
 /// The store key of `workdir`: forty hex characters of the SHA-1 of its

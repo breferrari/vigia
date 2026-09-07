@@ -30,6 +30,9 @@ use support::{Scratch, TempDir, files_in, note, numbered_lines};
 
 const PANE: Rect = Rect::new(0, 0, 80, 24);
 const NARROW: Rect = Rect::new(0, 0, 40, 24);
+/// Tall enough to draw both runs of one path at once, which the gates over a
+/// path in both runs assert before they read a placement.
+const TALL: Rect = Rect::new(0, 0, 80, 40);
 const PATH: &str = "src/watch.rs";
 
 /// The mockup's own line, edited into the fixture as its fifth.
@@ -46,6 +49,41 @@ fn fixture(name: &str) -> Scratch {
     scratch.commit_all("baseline");
     scratch.edit_line(PATH, 4, EDITED);
     scratch
+}
+
+/// One committed file staged at `staged` and then edited further at line ten,
+/// so the path is two entries: the staged run holds the earlier hunk and the
+/// unstaged one the later.
+fn in_both_runs(name: &str, staged: usize, text: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(PATH, numbered_lines(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, staged, text);
+    scratch.git(&["add", PATH]);
+    scratch.edit_line(PATH, 9, "unstaged ten");
+    scratch
+}
+
+/// Rows of `painted` carrying note `id`, wherever in the frame they were drawn.
+fn note_rows(painted: &Painted, id: &str) -> usize {
+    painted
+        .view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Note { id: at, .. } if at == id))
+        .count()
+}
+
+/// File headings on `painted`, which both gates below assert is two before they
+/// read a placement: one entry off screen makes a single placement look right
+/// for the wrong reason.
+fn headings(painted: &Painted) -> usize {
+    painted
+        .view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::File(_)))
+        .count()
 }
 
 fn at(kind: MouseEventKind, column: u16, row: u16) -> Event {
@@ -1751,6 +1789,419 @@ fn a_renamed_file_carries_its_note_to_the_new_path() {
     assert_eq!(
         press_at(&painted.view, painted.laid, &press(left, y)),
         Some(usize::from(y - painted.laid.diff.top))
+    );
+}
+
+#[test]
+fn a_note_on_a_line_only_the_staged_diff_holds_draws_under_that_run_alone() {
+    let scratch = in_both_runs("notes-runs-staged", 2, "staged three");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        2,
+        "the fixture is not a path in both runs"
+    );
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 3, "staged three", "only the staged run"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+
+    let y = painted.row_of("staged three");
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with("only the staged run"),
+        "{:?}",
+        under[0]
+    );
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    assert_eq!(painted.view.notes.marked.len(), 1);
+    assert_eq!(
+        painted.view.notes.marked[0].row,
+        usize::from(y - painted.laid.diff.top)
+    );
+    assert!(
+        !painted.rows().iter().any(|row| row.contains("gone")),
+        "the run that does not hold the line said gone about it:\n{}",
+        painted.rows().join("\n")
+    );
+    assert_eq!(painted.view.notes.adrift, 0);
+}
+
+#[test]
+fn a_line_both_runs_hold_takes_its_note_under_the_unstaged_run() {
+    let scratch = in_both_runs("notes-runs-tie", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "context in both"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+    let drawn: Vec<u16> = (painted.laid.diff.top..painted.laid.diff.top + painted.laid.diff.rows)
+        .filter(|y| painted.text(*y).contains("line 8"))
+        .collect();
+    assert_eq!(drawn.len(), 2, "line 8 is not context in both hunks");
+
+    let under = painted.notes_under(drawn[0]);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("context in both"), "{:?}", under[0]);
+    assert!(painted.notes_under(drawn[1]).is_empty());
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    assert_eq!(painted.view.notes.marked.len(), 1);
+    assert_eq!(
+        painted.view.notes.marked[0].row,
+        usize::from(drawn[0] - painted.laid.diff.top)
+    );
+}
+
+#[test]
+fn a_line_neither_run_holds_draws_its_note_once_under_the_unstaged_heading() {
+    // Line 1 is outside the staged hunk at 3 to 9 and the unstaged one at 7 to 12,
+    // so neither run resolves it and the earlier run takes it.
+    let scratch = in_both_runs("notes-runs-gone", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 1, "line 1", "in neither hunk"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    let heading = painted.row_of("src/watch.rs");
+    let under = painted.notes_under(heading);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(under[0].starts_with("in neither hunk"), "{:?}", under[0]);
+    assert!(
+        painted.text(heading + 1).contains("gone"),
+        "{:?}",
+        painted.text(heading + 1)
+    );
+    assert!(
+        painted.view.notes.marked.is_empty(),
+        "a gone note marked a line"
+    );
+    assert_eq!(painted.view.notes.adrift, 0, "the file is in the diff");
+}
+
+#[test]
+fn a_note_whose_text_one_run_moved_and_the_other_edited_over_goes_where_the_text_is() {
+    // The index holds `line 8` one row down, where a staged insert put it; the
+    // working tree then edits that row, so the stored number is drawn with other
+    // text there. Moved outranks changed, which is the rung neither gate above
+    // reaches.
+    let scratch = Scratch::new("notes-runs-moved");
+    let lines: Vec<String> = (1..=12).map(|i| format!("line {i}")).collect();
+    scratch.write(PATH, format!("{}\n", lines.join("\n")));
+    scratch.commit_all("baseline");
+    let mut staged = lines.clone();
+    staged.insert(6, "inserted".to_owned());
+    scratch.write(PATH, format!("{}\n", staged.join("\n")));
+    scratch.git(&["add", PATH]);
+    let mut edited = staged.clone();
+    assert_eq!(edited[8], "line 8", "the fixture moved the wrong row");
+    edited[8] = "edited".to_owned();
+    scratch.write(PATH, format!("{}\n", edited.join("\n")));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "follows its text"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    let at = painted
+        .view
+        .rows
+        .iter()
+        .position(|row| matches!(row, Row::Note { .. }))
+        .expect("a note row");
+    let staged_from = painted
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::File(_)))
+        .nth(1)
+        .map(|(index, _)| index)
+        .expect("a second heading");
+    assert!(
+        at > staged_from,
+        "the note landed in the run that edited over its line:\n{}",
+        painted.rows().join("\n")
+    );
+    assert!(
+        matches!(&painted.view.rows[at - 1], Row::Line { number: 9, text, .. } if text == "line 8"),
+        "{:?}",
+        painted.view.rows[at - 1]
+    );
+}
+
+/// Both occurrences of a line both runs hold, in row order. The two are drawn
+/// with the same number and the same text, so nothing but the row the press
+/// landed on says which run the reader meant.
+fn both_occurrences(painted: &Painted, needle: &str) -> Vec<u16> {
+    let diff = painted.laid.diff;
+    let drawn: Vec<u16> = (diff.top..diff.top + diff.rows)
+        .filter(|y| painted.text(*y).contains(needle))
+        .collect();
+    assert_eq!(drawn.len(), 2, "{needle} is not drawn in both runs");
+    drawn
+}
+
+#[test]
+fn the_box_opens_under_whichever_run_was_pressed() {
+    for occurrence in [0, 1] {
+        let scratch = in_both_runs(&format!("notes-runs-box-{occurrence}"), 5, "staged six");
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.show_staged(true);
+        frame.advance().expect("advance");
+        let mut rig = Rig::open(&scratch);
+        let painted = rig.paint(&mut frame, TALL, Pointing::default());
+        assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+        let y = both_occurrences(&painted, "line 8")[occurrence];
+        let (left, _, _) = painted.gutter();
+
+        assert!(rig.press_opens(&painted, left + 1, y));
+        let opened = rig.paint(&mut frame, TALL, Pointing::default());
+        assert_eq!(
+            opened.view.notes.boxed,
+            Some(usize::from(y - opened.laid.diff.top)),
+            "a press on occurrence {occurrence} opened the box on the other run"
+        );
+    }
+}
+
+#[test]
+fn the_box_keeps_the_note_it_holds_when_a_later_edit_moves_the_rank() {
+    // Line 8 is context in both hunks, so the note ties and takes the unstaged
+    // run, and the reader reopens it there. The agent then edits line 8 in the
+    // working tree: the note's stored text stops resolving in the unstaged run
+    // and still resolves in the staged one, so its rank moves while the box
+    // stays where the reader is typing.
+    let scratch = in_both_runs("notes-runs-box-rank", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "reopened here"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    let y = both_occurrences(&painted, "line 8")[0];
+    let (left, _, _) = painted.gutter();
+    assert_eq!(
+        painted
+            .view
+            .marked_at(usize::from(y - painted.laid.diff.top)),
+        ["n1"]
+    );
+    assert!(rig.press_opens(&painted, left + 1, y));
+    assert_eq!(rig.app.note_box().expect("the box").over(), Some("n1"));
+
+    scratch.edit_line(PATH, 7, "the agent edited eight");
+    frame.advance().expect("advance after the edit");
+    let after = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(
+        note_rows(&after, "n1"),
+        0,
+        "the note the box holds drew its rows in the other run:\n{}",
+        after.rows().join("\n")
+    );
+    let tops = after
+        .view
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row,
+                Row::Box {
+                    part: BoxPart::Top { .. }
+                }
+            )
+        })
+        .count();
+    assert_eq!(tops, 1, "{}", after.rows().join("\n"));
+}
+
+#[test]
+fn the_box_on_a_line_both_runs_hold_opens_under_the_run_pressed() {
+    let scratch = in_both_runs("notes-runs-box", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+    let y = painted.row_of("line 8");
+    let (left, _, _) = painted.gutter();
+
+    assert!(rig.press_opens(&painted, left + 1, y));
+    let opened = rig.paint(&mut frame, TALL, Pointing::default());
+    let tops = opened
+        .view
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row,
+                Row::Box {
+                    part: BoxPart::Top { .. }
+                }
+            )
+        })
+        .count();
+    assert_eq!(tops, 1, "{}", opened.rows().join("\n"));
+    assert_eq!(
+        opened.view.notes.boxed,
+        Some(usize::from(y - opened.laid.diff.top)),
+        "the box left the line the press was on"
+    );
+    let rows = opened.box_under(y);
+    assert!(rows[0].contains("src/watch.rs:8"), "{rows:?}");
+}
+
+#[test]
+fn a_note_whose_path_a_rename_carried_into_the_other_run_goes_with_its_line() {
+    // The staged run renamed the file and edited it; the working tree then put a
+    // new file back at the old name. Both runs answer to that name, one through
+    // the rename's source, and only the staged run still holds the note's line.
+    let scratch = Scratch::new("notes-runs-rename");
+    scratch.write("src/a.rs", numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.git(&["mv", "src/a.rs", "src/b.rs"]);
+    scratch.edit_line("src/b.rs", 7, "staged eight");
+    scratch.git(&["add", "src/b.rs"]);
+    scratch.write("src/a.rs", "a brand new file that took the old name\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let answering = frame
+        .files()
+        .iter()
+        .filter(|change| change.paths().any(|path| path == "src/a.rs"))
+        .count();
+    assert_eq!(
+        answering, 2,
+        "the fixture is not a path answered by both runs"
+    );
+
+    let mut rig = Rig::open(&scratch);
+    let mut pinned = note("n1", 5, "line 5", "went with the rename");
+    pinned.path = "src/a.rs".to_owned();
+    rig.store.put(&pinned).expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(painted.view.notes.adrift, 0, "the path is in the diff");
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "{}",
+        painted.rows().join("\n")
+    );
+    let y = painted.row_of("line 5");
+    let under = painted.notes_under(y);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with("went with the rename"),
+        "{:?}",
+        under[0]
+    );
+}
+
+#[test]
+fn a_note_the_box_holds_stands_aside_in_the_run_the_box_is_not_drawn_in() {
+    // The box is opened on the unstaged run's line 8 and the reader then scrolls
+    // into the staged run, which draws the same line. The box has gone off screen
+    // with the row it is anchored to, and the note it holds does not take the
+    // chance to draw itself in the run that is left.
+    let scratch = in_both_runs("notes-runs-box-scrolled", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "held by the box"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    let y = both_occurrences(&painted, "line 8")[0];
+    let (left, _, _) = painted.gutter();
+    assert!(rig.press_opens(&painted, left + 1, y));
+    assert_eq!(rig.app.note_box().expect("the box").over(), Some("n1"));
+
+    let height = body_layout(
+        TALL,
+        &rig.app.chrome("fixture", None, Pointing::default(), 0, ""),
+        2,
+        2,
+    )
+    .diff;
+    rig.app
+        .apply(Action::Scroll(500), &mut frame, height)
+        .expect("scroll into the staged run");
+    let scrolled = rig.paint(&mut frame, TALL, Pointing::default());
+    assert!(
+        scrolled.rows().iter().any(|row| row.contains("staged six")),
+        "the scroll did not reach the staged run:\n{}",
+        scrolled.rows().join("\n")
+    );
+    assert_eq!(
+        note_rows(&scrolled, "n1"),
+        0,
+        "the note the box holds drew itself in the other run:\n{}",
+        scrolled.rows().join("\n")
     );
 }
 

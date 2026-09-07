@@ -1,10 +1,10 @@
 //! One screenful, and nothing more than one screenful.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use vigia_core::{
-    ChangeKind, FileChange, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
-    Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
+    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Note,
+    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve, run_of,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -383,6 +383,9 @@ pub struct Anchor {
     /// Its whole text, which is what finds it again after an edit above moves
     /// the number.
     pub text: String,
+    /// The run the row was drawn in. A path in both runs draws the same line
+    /// twice, so nothing else says which of them the reader pressed.
+    pub origin: Origin,
 }
 
 /// A display row that carries a note's mark, and whose note it is.
@@ -402,9 +405,10 @@ pub struct Marked {
 pub struct Noted {
     /// Every row carrying a mark, in row order.
     pub marked: Vec<Marked>,
-    /// The first row of each file's rows on this screen and that file's path,
-    /// so a row can be traced to the file it is in without a heading on screen.
-    pub segments: Vec<(usize, String)>,
+    /// The first row of each file's rows on this screen, that file's path and
+    /// the run it was drawn in, so a row can be traced to the entry it is in
+    /// without a heading on screen.
+    pub segments: Vec<(usize, String, Origin)>,
     /// Notes whose file is not in the diff, drawn nowhere and counted in the
     /// footer.
     pub adrift: usize,
@@ -1169,13 +1173,27 @@ impl View {
         }
         // The box is placed the way a note is, against the same anchor.
         let draft = note_box.map(crate::notes::NoteBox::stand_in);
-        if !by_path.is_empty() {
-            // Whether a note's file is in the diff at all is a fact about the changed set
-            // rather than the screen, so it is answered here for every note, drawn or not.
-            let present: HashSet<&str> = frame.files().iter().flat_map(FileChange::paths).collect();
+        // Which entries answer to each anchored path, a fact about the changed set rather
+        // than the screen: no entry means adrift, and two mean both runs hold the file.
+        let mut runs_of: HashMap<&str, Vec<usize>> = HashMap::new();
+        for path in by_path
+            .keys()
+            .copied()
+            .chain(draft.as_ref().map(|standing| standing.note.path.as_str()))
+        {
+            runs_of.entry(path).or_default();
+        }
+        if !runs_of.is_empty() {
+            for (index, change) in frame.files().iter().enumerate() {
+                for path in change.paths() {
+                    if let Some(runs) = runs_of.get_mut(path) {
+                        runs.push(index);
+                    }
+                }
+            }
             view.notes.adrift = notes
                 .iter()
-                .filter(|note| !present.contains(note.path.as_str()))
+                .filter(|note| runs_of.get(note.path.as_str()).is_none_or(Vec::is_empty))
                 .count();
         }
         if files == 0 {
@@ -1199,6 +1217,44 @@ impl View {
         } else {
             (0, files)
         };
+
+        // A file staged and then edited further is a diff in each run and the note
+        // belongs under one: the run its line resolves best in, the earlier index on a
+        // tie. Resolving it costs the entry the walk was not going to read, so it is
+        // asked only of a path the walk can still reach, which is one file in `single`.
+        let reachable = view.top.file..stop;
+        let mut chosen: HashMap<&str, usize> = HashMap::new();
+        let mut boxed_run = None;
+        for (path, indices) in &runs_of {
+            if indices.len() < 2 || !indices.iter().any(|at| reachable.contains(at)) {
+                continue;
+            }
+            if let Some(here) = by_path.get(*path) {
+                for (note, at) in here.iter().zip(run_of(frame, indices, here)) {
+                    chosen.insert(note.id.as_str(), at);
+                }
+            }
+            // The box belongs to the row the reader pressed, and both runs can draw that
+            // line identically, so the note's own rule would answer the tie for the wrong
+            // one. The run tells them apart: one run holds a path once.
+            if let Some(standing) = draft.as_ref().filter(|held| held.note.path == **path) {
+                let pressed = indices
+                    .iter()
+                    .copied()
+                    .find(|&at| frame.files()[at].origin == standing.origin);
+                let at = match pressed {
+                    Some(at) => at,
+                    // Left when the run the press was in is no longer in the changed set.
+                    None => run_of(frame, indices, &[&standing.note])[0],
+                };
+                boxed_run = Some(at);
+                // The box stands in for the note it holds, so that note goes where the box
+                // is: an edit under an open box moves the rank without moving the box.
+                if let Some(over) = standing.over {
+                    chosen.insert(over, at);
+                }
+            }
+        }
 
         let mut index = view.top.file;
         let mut skip = position.row;
@@ -1279,10 +1335,16 @@ impl View {
                             file_notes.extend(found.iter().copied());
                         }
                     }
+                    if !chosen.is_empty() {
+                        file_notes.retain(|note| {
+                            chosen.get(note.id.as_str()).is_none_or(|&at| at == index)
+                        });
+                    }
                 }
                 let boxed = draft
                     .as_ref()
-                    .filter(|standing| change.paths().any(|path| path == standing.note.path));
+                    .filter(|standing| change.paths().any(|path| path == standing.note.path))
+                    .filter(|_| boxed_run.is_none_or(|at| at == index));
                 // The box holds this note's text, so its rows would say it twice.
                 if let Some(over) = boxed.and_then(|standing| standing.over) {
                     file_notes.retain(|note| note.id != over);
@@ -1399,13 +1461,14 @@ impl View {
             .segments
             .iter()
             .rev()
-            .find(|(at, _)| *at <= head)
-            .map(|(_, path)| path.clone())?;
+            .find(|(at, _, _)| *at <= head)
+            .map(|(_, path, origin)| (path.clone(), *origin))?;
         Some(Anchor {
-            path,
+            path: path.0,
             side: Side::of(*kind),
             line: *number,
             text: self.line_at(head),
+            origin: path.1,
         })
     }
 
@@ -1782,12 +1845,14 @@ impl View {
         self.notes.segments = segments
             .iter()
             .enumerate()
-            .filter_map(|(at, (first, path))| {
-                let end = segments.get(at + 1).map_or(landed.len(), |(next, _)| *next);
+            .filter_map(|(at, (first, path, origin))| {
+                let end = segments
+                    .get(at + 1)
+                    .map_or(landed.len(), |(next, _, _)| *next);
                 landed[*first..end]
                     .iter()
                     .find_map(|row| *row)
-                    .map(|row| (row, path.clone()))
+                    .map(|row| (row, path.clone(), *origin))
             })
             .collect();
         from
@@ -2021,7 +2086,7 @@ impl View {
         }
 
         if self.rows.len() > first {
-            self.notes.segments.push((first, diff.path.clone()));
+            self.notes.segments.push((first, diff.path.clone(), origin));
         }
         if !notes.is_empty() {
             pin(pins, &notes, diff, heading, &placed);

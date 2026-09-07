@@ -14,7 +14,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::{Margin, Position, Rect};
 use ratatui_textarea::{CursorMove, Input, TextArea};
 use tachyonfx::{CellFilter, Effect, Interpolation, fx};
-use vigia_core::{CONTEXT, Listing, Note, Result, Status, Store};
+use vigia_core::{CONTEXT, Listing, Note, Origin, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::render::NoteCells;
@@ -106,6 +106,9 @@ pub struct NoteBox {
 pub struct Standing<'b> {
     /// The anchor, with nothing written in it.
     pub note: Note,
+    /// The run the reader pressed in, which a note has no field for: the store
+    /// holds one placement and this holds a gesture.
+    pub origin: Origin,
     /// The note the box is open over, whose rows the box stands in for.
     pub over: Option<&'b str>,
     /// The reader's text, one entry per line the editor holds.
@@ -196,6 +199,7 @@ impl NoteBox {
     #[must_use]
     pub fn stand_in(&self) -> Standing<'_> {
         Standing {
+            origin: self.anchor.origin,
             note: Note {
                 id: String::new(),
                 path: self.anchor.path.clone(),
