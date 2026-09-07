@@ -345,7 +345,7 @@ With the server alone your note waits until the agent next looks. Two hooks make
 
 `vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is registered. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
 
-`vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying how many notes are open, and prints nothing when there are none.
+`vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
 
 <details>
 <summary><b>The small print on the hooks</b></summary>

@@ -16,8 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use vigia_core::{
-    CONTEXT, FileDiff, Frame, Hunk, LineKind, Note, Placement, Registration, Side, Status, Store,
-    StoreWatch, Worktree, resolve, run_of,
+    CONTEXT, FileDiff, Frame, Hunk, LineKind, Listing, Note, Placement, Registration, Side, Status,
+    Store, StoreWatch, Worktree, resolve, run_of,
 };
 
 use crate::config::{self, Config};
@@ -757,20 +757,74 @@ pub fn register() -> ExitCode {
     }
 }
 
+/// What the store holds that is not resolved, split by what each note is
+/// waiting on.
+///
+/// Three counts rather than three arguments: transposing two of them is a
+/// silent wrong answer, and the type is what stops it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pending {
+    /// Written by the reader and not yet listed by the agent.
+    pub open: usize,
+    /// Listed, not answered, not resolved: the agent still owes it work.
+    pub read: usize,
+    /// Answered with `reply` and left unresolved, so it waits on the reader.
+    pub replied: usize,
+}
+
+/// What a listing is waiting on, which is the half of this that no test could
+/// reach while it lived inside [`pending`].
+#[must_use]
+pub fn pending_of(listing: &Listing) -> Pending {
+    let mut counts = Pending::default();
+    for note in &listing.notes {
+        match (note.status, note.reply.is_some()) {
+            (Status::Resolved, _) => {}
+            (Status::Open, _) => counts.open += 1,
+            // `reply` answers without resolving, for a question back to the
+            // reader, so the agent owes this one nothing until they answer.
+            (Status::Seen, true) => counts.replied += 1,
+            (Status::Seen, false) => counts.read += 1,
+        }
+    }
+    counts
+}
+
 /// The line a `UserPromptSubmit` hook puts in front of the agent, or `None`
-/// when there is nothing open: an empty store should cost the reader's next
+/// when nothing is pending: an empty store should cost the reader's next
 /// prompt nothing at all.
 #[must_use]
-pub fn pending_line(open: usize) -> Option<String> {
-    match open {
-        0 => None,
-        1 => Some(
+pub fn pending_line(pending: Pending) -> Option<String> {
+    let mut said: Vec<String> = Vec::new();
+    match pending.open {
+        0 => {}
+        1 => said.push(
             "1 open note in vigia. Call the vigia MCP server's notes tool to read it.".to_owned(),
         ),
-        many => Some(format!(
+        many => said.push(format!(
             "{many} open notes in vigia. Call the vigia MCP server's notes tool to read them."
         )),
     }
+    match pending.read {
+        0 => {}
+        1 => said.push(
+            "1 note in vigia is read and not resolved. Resolve it with the resolve tool when \
+             its work is done."
+                .to_owned(),
+        ),
+        many => said.push(format!(
+            "{many} notes in vigia are read and not resolved. Resolve each with the resolve \
+             tool when its work is done."
+        )),
+    }
+    match pending.replied {
+        0 => {}
+        1 => said.push("1 note in vigia is waiting on the reader after your reply.".to_owned()),
+        many => said.push(format!(
+            "{many} notes in vigia are waiting on the reader after your replies."
+        )),
+    }
+    (!said.is_empty()).then(|| said.join(" "))
 }
 
 /// `vigia mcp pending`: say how many notes are waiting, for the hook rung that
@@ -784,20 +838,14 @@ pub fn pending_line(open: usize) -> Option<String> {
 pub fn pending() -> ExitCode {
     let env = |key: &str| std::env::var(key).ok();
     let project = project_dir(&env).unwrap_or_else(|| PathBuf::from("."));
-    let open = Worktree::discover(project)
+    let pending = Worktree::discover(project)
         .ok()
         .and_then(|worktree| match state::store_for(worktree.workdir(), env) {
             Some(Ok(store)) => store.list().ok(),
             _ => None,
         })
-        .map_or(0, |listing| {
-            listing
-                .notes
-                .iter()
-                .filter(|note| note.status != Status::Resolved)
-                .count()
-        });
-    if let Some(line) = pending_line(open) {
+        .map_or_else(Pending::default, |listing| pending_of(&listing));
+    if let Some(line) = pending_line(pending) {
         println!("{line}");
     }
     ExitCode::SUCCESS
