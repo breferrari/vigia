@@ -14,7 +14,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::{Margin, Position, Rect};
 use ratatui_textarea::{CursorMove, Input, TextArea};
 use tachyonfx::{CellFilter, Effect, Interpolation, fx};
-use vigia_core::{CONTEXT, Frame, Listing, Note, Result, Side, Status, Store, resolve};
+use vigia_core::{CONTEXT, Listing, Note, Origin, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::render::NoteCells;
@@ -106,6 +106,9 @@ pub struct NoteBox {
 pub struct Standing<'b> {
     /// The anchor, with nothing written in it.
     pub note: Note,
+    /// The run the reader pressed in, which a note has no field for: the store
+    /// holds one placement and this holds a gesture.
+    pub origin: Origin,
     /// The note the box is open over, whose rows the box stands in for.
     pub over: Option<&'b str>,
     /// The reader's text, one entry per line the editor holds.
@@ -196,6 +199,7 @@ impl NoteBox {
     #[must_use]
     pub fn stand_in(&self) -> Standing<'_> {
         Standing {
+            origin: self.anchor.origin,
             note: Note {
                 id: String::new(),
                 path: self.anchor.path.clone(),
@@ -339,42 +343,6 @@ pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
 
 /// The working-tree lines within [`CONTEXT`] of `centre` in `path`, numbered,
 /// and none when the file cannot be read.
-/// The entry of `indices` each of `notes` draws under: the one its line resolves
-/// best in, the earliest index on a tie, which is the unstaged run since
-/// [`vigia_core::Frame::advance`] lays that one down first.
-///
-/// A file staged and then edited further is a diff in each run and a note belongs
-/// under one of them, so both the pane and the server choose here rather than
-/// each keeping a ladder of its own. A diff the frame cannot read ranks as a
-/// missing line rather than ending the caller: a caller may reach entries its own
-/// walk never would, and a failure there is not one it was going to meet.
-///
-/// # Panics
-///
-/// If `indices` is empty. Every caller has found the path in the changed set
-/// already, so an entry is what it holds.
-pub fn run_of(frame: &mut Frame, indices: &[usize], notes: &[&Note]) -> Vec<usize> {
-    let mut best = vec![(0u8, indices[0]); notes.len()];
-    for &index in indices {
-        let Ok((_, diff)) = frame.diff(index) else {
-            continue;
-        };
-        let mut on_new: Option<Vec<(u32, &str)>> = None;
-        let mut on_old: Option<Vec<(u32, &str)>> = None;
-        for (held, note) in best.iter_mut().zip(notes) {
-            let rows = match note.side {
-                Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
-                Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
-            };
-            let rank = resolve(note, rows).rank();
-            if rank > held.0 {
-                *held = (rank, index);
-            }
-        }
-    }
-    best.into_iter().map(|(_, index)| index).collect()
-}
-
 ///
 /// Both rungs to the agent read it, so a note it meets over the socket and the
 /// same note it lists over MCP show it one neighbourhood. Only the working-tree

@@ -1979,6 +1979,42 @@ fn a_note_whose_text_one_run_moved_and_the_other_edited_over_goes_where_the_text
     );
 }
 
+/// Both occurrences of a line both runs hold, in row order. The two are drawn
+/// with the same number and the same text, so nothing but the row the press
+/// landed on says which run the reader meant.
+fn both_occurrences(painted: &Painted, needle: &str) -> Vec<u16> {
+    let diff = painted.laid.diff;
+    let drawn: Vec<u16> = (diff.top..diff.top + diff.rows)
+        .filter(|y| painted.text(*y).contains(needle))
+        .collect();
+    assert_eq!(drawn.len(), 2, "{needle} is not drawn in both runs");
+    drawn
+}
+
+#[test]
+fn the_box_opens_under_whichever_run_was_pressed() {
+    for occurrence in [0, 1] {
+        let scratch = in_both_runs(&format!("notes-runs-box-{occurrence}"), 5, "staged six");
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.show_staged(true);
+        frame.advance().expect("advance");
+        let mut rig = Rig::open(&scratch);
+        let painted = rig.paint(&mut frame, TALL, Pointing::default());
+        assert_eq!(headings(&painted), 2, "{}", painted.rows().join("\n"));
+        let y = both_occurrences(&painted, "line 8")[occurrence];
+        let (left, _, _) = painted.gutter();
+
+        assert!(rig.press_opens(&painted, left + 1, y));
+        let opened = rig.paint(&mut frame, TALL, Pointing::default());
+        assert_eq!(
+            opened.view.notes.boxed,
+            Some(usize::from(y - opened.laid.diff.top)),
+            "a press on occurrence {occurrence} opened the box on the other run"
+        );
+    }
+}
+
 #[test]
 fn the_box_on_a_line_both_runs_hold_opens_under_the_run_pressed() {
     let scratch = in_both_runs("notes-runs-box", 5, "staged six");

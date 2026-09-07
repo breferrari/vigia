@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use vigia_core::{
     ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Note,
-    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
+    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve, run_of,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -383,6 +383,9 @@ pub struct Anchor {
     /// Its whole text, which is what finds it again after an edit above moves
     /// the number.
     pub text: String,
+    /// The run the row was drawn in. A path in both runs draws the same line
+    /// twice, so nothing else says which of them the reader pressed.
+    pub origin: Origin,
 }
 
 /// A display row that carries a note's mark, and whose note it is.
@@ -402,9 +405,10 @@ pub struct Marked {
 pub struct Noted {
     /// Every row carrying a mark, in row order.
     pub marked: Vec<Marked>,
-    /// The first row of each file's rows on this screen and that file's path,
-    /// so a row can be traced to the file it is in without a heading on screen.
-    pub segments: Vec<(usize, String)>,
+    /// The first row of each file's rows on this screen, that file's path and
+    /// the run it was drawn in, so a row can be traced to the entry it is in
+    /// without a heading on screen.
+    pub segments: Vec<(usize, String, Origin)>,
     /// Notes whose file is not in the diff, drawn nowhere and counted in the
     /// footer.
     pub adrift: usize,
@@ -1227,14 +1231,23 @@ impl View {
                 continue;
             }
             if let Some(here) = by_path.get(*path) {
-                for (note, at) in here.iter().zip(crate::notes::run_of(frame, indices, here)) {
+                for (note, at) in here.iter().zip(run_of(frame, indices, here)) {
                     chosen.insert(note.id.as_str(), at);
                 }
             }
-            // Its assignment in [`Self::take_file`] is unconditional, so without this a
-            // later entry answering to the same path would take the box off its line.
+            // The box belongs to the row the reader pressed, and both runs can draw
+            // that line with the same number and the same text, so resolving it the
+            // way a note is resolved would answer the tie for the wrong one. The
+            // fall back is for a run the changed set no longer holds.
             if let Some(standing) = draft.as_ref().filter(|held| held.note.path == **path) {
-                boxed_run = Some(crate::notes::run_of(frame, indices, &[&standing.note])[0]);
+                let pressed = indices
+                    .iter()
+                    .copied()
+                    .find(|&at| frame.files()[at].origin == standing.origin);
+                boxed_run = Some(match pressed {
+                    Some(at) => at,
+                    None => run_of(frame, indices, &[&standing.note])[0],
+                });
             }
         }
 
@@ -1443,13 +1456,14 @@ impl View {
             .segments
             .iter()
             .rev()
-            .find(|(at, _)| *at <= head)
-            .map(|(_, path)| path.clone())?;
+            .find(|(at, _, _)| *at <= head)
+            .map(|(_, path, origin)| (path.clone(), *origin))?;
         Some(Anchor {
-            path,
+            path: path.0,
             side: Side::of(*kind),
             line: *number,
             text: self.line_at(head),
+            origin: path.1,
         })
     }
 
@@ -1826,12 +1840,14 @@ impl View {
         self.notes.segments = segments
             .iter()
             .enumerate()
-            .filter_map(|(at, (first, path))| {
-                let end = segments.get(at + 1).map_or(landed.len(), |(next, _)| *next);
+            .filter_map(|(at, (first, path, origin))| {
+                let end = segments
+                    .get(at + 1)
+                    .map_or(landed.len(), |(next, _, _)| *next);
                 landed[*first..end]
                     .iter()
                     .find_map(|row| *row)
-                    .map(|row| (row, path.clone()))
+                    .map(|row| (row, path.clone(), *origin))
             })
             .collect();
         from
@@ -2065,7 +2081,7 @@ impl View {
         }
 
         if self.rows.len() > first {
-            self.notes.segments.push((first, diff.path.clone()));
+            self.notes.segments.push((first, diff.path.clone(), origin));
         }
         if !notes.is_empty() {
             pin(pins, &notes, diff, heading, &placed);

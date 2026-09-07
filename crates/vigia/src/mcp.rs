@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 use vigia_core::{
     CONTEXT, FileDiff, Frame, Hunk, LineKind, Note, Placement, Registration, Side, Status, Store,
-    StoreWatch, Worktree, resolve,
+    StoreWatch, Worktree, resolve, run_of,
 };
 
 use crate::config::{self, Config};
@@ -374,7 +374,7 @@ impl Site {
             };
             return Placed::adrift(context);
         }
-        let at = notes::run_of(frame, &indices, &[note])[0];
+        let at = run_of(frame, &indices, &[note])[0];
         match frame.diff(at) {
             Ok((change, diff)) => {
                 let path = change.path.clone();
