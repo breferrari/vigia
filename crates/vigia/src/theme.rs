@@ -450,8 +450,11 @@ impl Theme {
             // Magenta, which `note` already spends on the agent's own announcement,
             // so the surface and the thing that answers it agree. Seen takes blue
             // rather than the second magenta: two stops of one hue is what sixteen
-            // names hold, and these four need four.
-            note_frame: fg(Color::Gray),
+            // names hold, and these four need four. The frame takes the note's hue
+            // too: grey would leave the box the colour it was reported as, and it never
+            // shares a screen with an open note's word, since the box stands in for the
+            // rows of the note it holds.
+            note_frame: fg(Color::Magenta),
             note_line: fg(Color::LightMagenta),
             note_open: fg(Color::Magenta),
             note_seen: fg(Color::Blue),
