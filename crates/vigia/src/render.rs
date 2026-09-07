@@ -2102,7 +2102,7 @@ const KEYBOARD: [Gesture; 17] = [
     },
 ];
 
-/// The order the height ladder gives keyboard rows up, first to go, as indices
+/// The order the width ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
 ///
 /// The box's keys rank second for the reason `q` ranks first: the box writes
@@ -2121,7 +2121,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
         .map(|(_, row)| row)
 }
 
-/// The mouse half, which is the first gesture the height ladder drops.
+/// The mouse half, which is the first thing the width ladder drops.
 const MOUSE: [Gesture; 10] = [
     Gesture {
         keys: ["wheel", "wheel"],
@@ -2512,7 +2512,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     let capacity = usize::from(body).saturating_sub(SHEET_FRAME);
     // The floor, stated once and early rather than folded into the rung sequence. Below
     // it no rung fits on the height axis at all, and not only the paged ones: the
-    // shortest rung above them is the two-column one at sixteen rows.
+    // shortest rung above them is the two-column one, which is many times it.
     if capacity < SHEET_KEEP {
         return None;
     }
