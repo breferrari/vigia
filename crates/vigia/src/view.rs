@@ -307,6 +307,8 @@ pub enum Row {
         text: String,
         /// The word at the right edge, on the note's last body row.
         word: Option<&'static str>,
+        /// The same word on every row, since each row's `▎` takes the state's ink.
+        state: &'static str,
         /// Whether the whole row takes the dim weight, which is a note whose
         /// line was edited under it.
         faded: bool,
@@ -606,6 +608,7 @@ impl Pin {
                     lead: NoteLead::Bar,
                     text,
                     word: (piece + 1 == count).then_some(self.word),
+                    state: self.word,
                     faded: self.faded,
                 });
             }
@@ -621,6 +624,7 @@ impl Pin {
                     },
                     text,
                     word: None,
+                    state: self.word,
                     faded: self.faded,
                 });
             }

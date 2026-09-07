@@ -3759,6 +3759,7 @@ impl Painter<'_> {
                     lead,
                     text,
                     word,
+                    state,
                     faded,
                     ..
                 } => {
@@ -3772,6 +3773,7 @@ impl Painter<'_> {
                         *lead,
                         text,
                         *word,
+                        state,
                         *faded,
                     );
                 }
@@ -4287,6 +4289,7 @@ impl Painter<'_> {
         lead: NoteLead,
         text: &str,
         word: Option<&str>,
+        state: &str,
         faded: bool,
     ) {
         let origin = line_origin(self.gutter);
@@ -4301,8 +4304,9 @@ impl Painter<'_> {
             Modifier::empty()
         };
         let ink = self.theme.chrome_dim.add_modifier(dim);
+        let state = self.theme.note_ink(state);
         let (glyph, glyph_ink) = match lead {
-            NoteLead::Bar => (NOTE_BAR, self.theme.bar_hover.add_modifier(dim)),
+            NoteLead::Bar => (NOTE_BAR, state.add_modifier(dim)),
             NoteLead::Reply => (WRAPPED, ink),
             NoteLead::Blank => (' ', ink),
         };
@@ -4316,7 +4320,7 @@ impl Painter<'_> {
                     ..glyphs
                 },
                 word,
-                ink,
+                state.add_modifier(dim),
             ),
             None => 0,
         };
@@ -4344,7 +4348,7 @@ impl Painter<'_> {
             return;
         }
         let x = glyphs.x.saturating_add(origin as u16);
-        let frame = self.theme.chrome_dim;
+        let frame = self.theme.note_frame;
         let rounded = !matches!(self.glyphs, Glyphs::Block);
         match part {
             BoxPart::Top { label } => {
@@ -4442,14 +4446,13 @@ impl Mark {
         matches!(self, Self::Hover | Self::Bare)
     }
 
-    /// The ink over the gutter's own, or none. A note's ink is the pointer's
-    /// colour made bold: bold is what survives a palette with no colour, and it
+    /// The ink over the gutter's own, or none. A note's ink is its own, made bold: bold is what survives a palette with no colour, and it
     /// is what keeps the persisted mark brighter than the pointer resting on it.
     fn ink(self, theme: &Theme) -> Option<Style> {
         match self {
             Self::None => None,
             Self::Hover => Some(theme.bar_hover),
-            Self::Bare | Self::Noted => Some(theme.bar_hover.add_modifier(Modifier::BOLD)),
+            Self::Bare | Self::Noted => Some(theme.note_line.add_modifier(Modifier::BOLD)),
         }
     }
 }

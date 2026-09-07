@@ -4,12 +4,12 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use std::collections::HashSet;
 
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use vigia::{
     Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Scale, Theme,
     View, render,
 };
-use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
+use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency, Status};
 
 /// Buckets a sparkline draws on the panes this file renders at.
 const DRAWN_BUCKETS: usize = 12;
@@ -350,6 +350,12 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         gutter,
         context,
         note,
+        note_frame,
+        note_line,
+        note_open,
+        note_seen,
+        note_changed,
+        note_gone,
         alert,
         comment,
 
@@ -421,6 +427,14 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("kind", kind),
         ("hunk", hunk),
         ("note", note),
+        // Every part of the note surface is read: the word and the bar carry
+        // the state, the frame holds the box and the line is the mark.
+        ("note_frame", note_frame),
+        ("note_line", note_line),
+        ("note_open", note_open),
+        ("note_seen", note_seen),
+        ("note_changed", note_changed),
+        ("note_gone", note_gone),
         ("alert", alert),
         ("context", context),
         ("comment", comment),
@@ -1725,5 +1739,83 @@ fn the_selection_survives_every_colour_depth() {
                  a reversal, so a reader drags and sees nothing while the release still sends"
             );
         }
+    }
+}
+
+/// The four states are what a reader takes in without reading the word, so one
+/// ink for two of them is the failure this key set exists to remove.
+#[test]
+fn the_four_note_states_draw_in_four_different_inks() {
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            let inks = [
+                ("open", theme.note_open.fg),
+                ("seen", theme.note_seen.fg),
+                ("changed", theme.note_changed.fg),
+                ("gone", theme.note_gone.fg),
+            ];
+            for (at, (first, ink)) in inks.iter().enumerate() {
+                for (second, other) in inks.iter().skip(at + 1) {
+                    assert_ne!(
+                        ink, other,
+                        "{name} at {depth:?} draws {first} and {second} in one ink, so the \
+                         state is unreadable without reading the word"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// `Theme::note_ink` matches on the word the walk placed, which no compiler can
+/// check. This is what does: every word the pane can draw resolves to a state's
+/// own ink, and a word it does not know falls through to the frame's.
+#[test]
+fn every_word_the_pane_can_draw_has_a_state_ink() {
+    let theme = Theme::dark();
+    let drawn = [
+        Status::Open.name(),
+        Status::Seen.name(),
+        Status::Resolved.name(),
+        // The two a placement spells rather than a status, from `placed_at`.
+        "changed",
+        "gone",
+    ];
+    for word in drawn {
+        assert_ne!(
+            theme.note_ink(word),
+            theme.note_frame,
+            "the word {word:?} fell through to the frame's ink, so a state the pane \
+             draws has none of its own"
+        );
+    }
+    assert_eq!(
+        theme.note_ink("a word no placement spells"),
+        theme.note_frame,
+        "an unknown word did not fall through, so this gate proves nothing"
+    );
+}
+
+/// B10's surviving reason, kept after the reader overruled its colour: the mark
+/// is bold where a pointer resting on the same line is not, so a palette with no
+/// colour at all still tells a noted line from a hovered one.
+#[test]
+fn a_noted_line_stays_brighter_than_a_pointer_resting_on_it() {
+    for (name, theme) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        assert!(
+            !theme.bar_hover.add_modifier.contains(Modifier::BOLD)
+                || theme.note_line.fg != theme.bar_hover.fg,
+            "{name} draws a hovered line as bold as a noted one in the same ink, so the \
+             two are one thing where colour is gone"
+        );
     }
 }

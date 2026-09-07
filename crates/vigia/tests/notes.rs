@@ -699,7 +699,7 @@ fn a_press_on_the_gutter_opens_the_box_and_writes_nothing() {
     let five = (left..origin)
         .find(|x| opened.cell(*x, y).symbol() == "5")
         .expect("the anchored line's number");
-    assert_eq!(opened.fg(five, y), Theme::default().bar_hover.fg);
+    assert_eq!(opened.fg(five, y), Theme::default().note_line.fg);
     assert!(
         opened
             .cell(five, y)
@@ -902,7 +902,7 @@ fn a_press_on_a_noted_line_reopens_the_box_with_its_text_and_an_emptied_box_with
     let five = (left..reopened.gutter().2)
         .find(|x| reopened.cell(*x, y).symbol() == "5")
         .expect("the anchored line's number");
-    assert_eq!(reopened.fg(five, y), Theme::default().bar_hover.fg);
+    assert_eq!(reopened.fg(five, y), Theme::default().note_line.fg);
 
     // Emptied and sent, the note is withdrawn: one open note per line, and
     // this is how the reader takes it back.
@@ -1496,7 +1496,7 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
     let five = (left..origin)
         .find(|x| painted.cell(*x, y).symbol() == "5")
         .unwrap_or_else(|| panic!("the number was replaced:\n{}", painted.text(y)));
-    assert_eq!(painted.fg(five, y), theme.bar_hover.fg);
+    assert_eq!(painted.fg(five, y), theme.note_line.fg);
 
     // Two rows under it: the bar at the content origin with a blank gutter behind
     // it, the body in the chrome's dim ink, and the word on the last row.
@@ -1511,8 +1511,8 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
         assert_eq!(text.chars().nth(usize::from(origin)), Some('▎'));
         assert_eq!(
             painted.fg(origin, row),
-            theme.bar_hover.fg,
-            "the bar is not in the note's ink"
+            theme.note_open.fg,
+            "the bar is not in the open state's ink"
         );
         assert_eq!(
             painted.fg(origin + 2, row),
@@ -2265,7 +2265,7 @@ fn c_hides_the_rows_and_keeps_the_mark() {
     let five = (left..origin)
         .find(|x| hidden.cell(*x, y).symbol() == "5")
         .expect("the number");
-    assert_eq!(hidden.fg(five, y), Theme::default().bar_hover.fg);
+    assert_eq!(hidden.fg(five, y), Theme::default().note_line.fg);
     assert_eq!(
         hidden.view.marked_at(usize::from(y - hidden.laid.diff.top)),
         vec!["n1"]
@@ -2761,7 +2761,7 @@ fn a_persisted_mark_is_bold_where_the_pointers_is_not() {
     let mut rig = Rig::open(&scratch);
     rig.theme = Theme::dark();
     assert!(
-        !rig.theme.bar_hover.add_modifier.contains(Modifier::BOLD),
+        !rig.theme.note_line.add_modifier.contains(Modifier::BOLD),
         "the dark palette's pointer is bold, so this compares nothing"
     );
     let plain = rig.paint(&mut frame, PANE, Pointing::default());
@@ -2798,7 +2798,7 @@ fn a_persisted_mark_is_bold_where_the_pointers_is_not() {
             .add_modifier
             .contains(Modifier::BOLD)
     );
-    assert_eq!(noted.fg(icon, y), rig.theme.bar_hover.fg);
+    assert_eq!(noted.fg(icon, y), rig.theme.note_line.fg);
     // And the noted number differs from a plain one by more than colour, which is
     // what a palette with no colour is left with.
     assert_ne!(
@@ -3216,8 +3216,8 @@ fn a_seen_landing_from_another_handle_crossfades_the_word() {
     rig.advance(RESOLVE_ARRIVING);
     let settled = rig.paint(&mut frame, PANE, Pointing::default());
     assert!(
-        (word.x..word.right()).all(|x| settled.fg(x, word.y) == Some(dim)),
-        "the crossfade ran its length and the word did not settle on the chrome's dim"
+        (word.x..word.right()).all(|x| settled.fg(x, word.y) == rig.theme.note_seen.fg),
+        "the crossfade ran its length and the word did not settle on the seen state's ink"
     );
     assert!(
         !rig.effects.is_running(),

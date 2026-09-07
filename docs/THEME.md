@@ -37,7 +37,13 @@ What follows groups the keys by surface. The docblocks in `crates/vigia/src/them
 |---|---|
 | `chrome` | the header and footer lines |
 | `chrome_dim` | secondary chrome text: key hints, the follow marker, readouts, and the chrome rows' background |
-| `note` | a stand-in for content there is no diff for: binary, conflict |
+| `note` | a stand-in for content there is no diff for, binary and conflict, and the footer's word when it has news rather than a problem. Not the reader's notes, which the six below carry |
+| `note_frame` | the note box's border and both its labels |
+| `note_line` | the number of a diff line carrying a note, drawn bold |
+| `note_open` | a note the agent has not read, on the bar and the status word |
+| `note_seen` | a note the agent has read, and one it has resolved while that departs |
+| `note_changed` | a note whose line was edited under it |
+| `note_gone` | a note whose line has left the diff |
 | `alert` | something went wrong and the reader should know |
 
 ### The file list
