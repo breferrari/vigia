@@ -1315,8 +1315,11 @@ impl View {
                             file_notes.extend(found.iter().copied());
                         }
                     }
-                    file_notes
-                        .retain(|note| chosen.get(note.id.as_str()).is_none_or(|&at| at == index));
+                    if !chosen.is_empty() {
+                        file_notes.retain(|note| {
+                            chosen.get(note.id.as_str()).is_none_or(|&at| at == index)
+                        });
+                    }
                 }
                 let boxed = draft
                     .as_ref()
