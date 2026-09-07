@@ -1844,12 +1844,12 @@ fn a_pinned_frame_holds_the_frame_budget() {
 }
 
 /// The pane the fifty-note frame is measured on: tall enough for fifty lines and
-/// the row under each on one screen.
+/// the three rows each note's enclosure takes under one, on one screen.
 const NOTED_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 80,
-    height: 160,
+    height: 272,
 };
 
 /// I9 with fifty notes on screen (`SPEC.md` §11.2 B21), measured whole and on

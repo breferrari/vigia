@@ -44,6 +44,13 @@ const NOTE_ICON: char = '✎';
 /// The bar down the left of a note's rows. `▌` is the recorded stand-in.
 const NOTE_BAR: char = '▎';
 
+/// Where the answer leaves the enclosure: the notch in its bottom edge, above
+/// the arrow that follows it.
+const STEM: char = '┬';
+
+/// Rules between the status word and the corner it rides in from.
+pub const WORD_INSET: usize = 3;
+
 /// The footer's left-hand side when there is nothing wrong, widest rung first.
 const HINT_RUNGS: [&str; 4] = [
     "q quit · f follow · ? keys",
@@ -1871,10 +1878,32 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
         };
         cells.rows = cells.rows.union(line);
         if *last {
-            cells.word = flush_right(line, width_of(state));
+            // The word rides the enclosure's bottom edge set in from the corner,
+            // and sits flush right on the bar rung under it.
+            cells.word = match lead {
+                NoteLead::Bottom => {
+                    // Past the corner, the rules that set the word in, and the
+                    // blank between them.
+                    let after = WORD_INSET + 2;
+                    flush_right(line, width_of(state) + after).map(|word| Rect {
+                        width: word.width - after as u16,
+                        ..word
+                    })
+                }
+                _ => flush_right(line, width_of(state)),
+            };
         }
         if matches!(lead, NoteLead::Reply | NoteLead::Blank) {
-            cells.reply = Some(cells.reply.map_or(line, |reply| reply.union(line)));
+            // From the arrow rather than from the content origin: the answer is
+            // indented under the enclosure's stem, and an effect over it should
+            // not reach the blank columns beside it.
+            let indent = u16::try_from(REPLY_INDENT).unwrap_or(u16::MAX);
+            let answer = Rect {
+                x: line.x.saturating_add(indent),
+                width: line.width.saturating_sub(indent),
+                ..line
+            };
+            cells.reply = Some(cells.reply.map_or(answer, |reply| reply.union(answer)));
         }
     }
     out
@@ -4320,6 +4349,12 @@ impl Painter<'_> {
         // The frame takes the state's ink, so `note_frame` means only the box
         // being typed in.
         let rounded = !matches!(self.glyphs, Glyphs::Block);
+        // A row with no room for the frame draws none of it, the way the box
+        // being typed in does. The walk hands the bar rung down here instead, so
+        // this is a floor under a caller rather than a rung a reader meets.
+        if matches!(lead, NoteLead::Top | NoteLead::Body | NoteLead::Bottom) && room <= BOX_FRAME {
+            return;
+        }
         match lead {
             NoteLead::Top => {
                 let corners = if rounded {
@@ -4327,11 +4362,21 @@ impl Painter<'_> {
                 } else {
                     ('┌', '┐')
                 };
-                self.box_edge(x, glyphs.y, room, corners, "", state.add_modifier(dim));
+                self.box_edge(
+                    x,
+                    glyphs.y,
+                    room,
+                    corners,
+                    ("", ""),
+                    state.add_modifier(dim),
+                );
                 return;
             }
             NoteLead::Body => {
-                let inner = room - BOX_FRAME;
+                // Saturating, and the sides drawn last: a row narrower than the
+                // frame it is asked for is a caller's mistake, and this pane
+                // aborts on a panic, so it is drawn cramped rather than fatally.
+                let inner = room.saturating_sub(BOX_FRAME);
                 let frame = state.add_modifier(dim);
                 self.put(x, glyphs.y, "│ ", 2, frame);
                 self.put(
@@ -4341,7 +4386,8 @@ impl Painter<'_> {
                     inner,
                     self.theme.chrome.add_modifier(dim),
                 );
-                self.put(x + (room - 2) as u16, glyphs.y, " │", 2, frame);
+                let right = x.saturating_add(room.saturating_sub(2) as u16);
+                self.put(right, glyphs.y, " │", 2, frame);
                 return;
             }
             NoteLead::Bottom => {
@@ -4350,10 +4396,27 @@ impl Painter<'_> {
                 } else {
                     ('└', '┘')
                 };
-                // The stem rides the label, so the edge is drawn once and the
-                // answer below lines up under it.
-                let label = format!("{RULE}┬{RULE} {state_word} ", state_word = text);
-                self.box_edge(x, glyphs.y, room, corners, &label, state.add_modifier(dim));
+                // The stem stands where the answer's arrow will, so the two line
+                // up down the pane; the word rides the far end of the same edge,
+                // set in from the corner so it reads as a label on the frame
+                // rather than as the frame running out.
+                let mut stem = String::with_capacity(REPLY_INDENT);
+                for _ in 0..REPLY_INDENT.saturating_sub(1) {
+                    stem.push(RULE);
+                }
+                stem.push(STEM);
+                let mut tail = format!(" {text} ");
+                for _ in 0..WORD_INSET {
+                    tail.push(RULE);
+                }
+                self.box_edge(
+                    x,
+                    glyphs.y,
+                    room,
+                    corners,
+                    (&stem, &tail),
+                    state.add_modifier(dim),
+                );
                 return;
             }
             NoteLead::Bar | NoteLead::Reply | NoteLead::Blank => (),
@@ -4445,7 +4508,7 @@ impl Painter<'_> {
                 } else {
                     format!(" {} ", elide_head(label, inner - 2))
                 };
-                self.box_edge(x, glyphs.y, room, corners, &title, frame);
+                self.box_edge(x, glyphs.y, room, corners, (&title, ""), frame);
             }
             BoxPart::Body { text, caret } => {
                 let inner = room - BOX_FRAME;
@@ -4472,27 +4535,31 @@ impl Painter<'_> {
                 };
                 let inner = room - 2;
                 let hint = widest_fitting_or_last(&BOX_HINT_RUNGS, inner);
-                self.box_edge(x, glyphs.y, room, corners, hint, frame);
+                self.box_edge(x, glyphs.y, room, corners, (hint, ""), frame);
             }
         }
     }
 
-    /// One edge of the box: a corner, a label, the rule to the far corner.
+    /// One edge of a box: a corner, a label, the rule, and a second label
+    /// against the far corner, which is where a committed note's word rides.
     fn box_edge(
         &mut self,
         x: u16,
         y: u16,
         room: usize,
         corners: (char, char),
-        label: &str,
+        labels: (&str, &str),
         frame: Style,
     ) {
+        let (label, tail) = labels;
         let mut edge = String::with_capacity(room * 3);
         edge.push(corners.0);
         edge.push_str(label);
-        for _ in 0..(room - 2).saturating_sub(width_of(label)) {
+        let spent = width_of(label) + width_of(tail);
+        for _ in 0..room.saturating_sub(2).saturating_sub(spent) {
             edge.push(RULE);
         }
+        edge.push_str(tail);
         edge.push(corners.1);
         self.put(x, y, &edge, room, frame);
     }

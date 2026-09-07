@@ -57,18 +57,63 @@ fn drawn_of(buf: &Buffer, theme: &Theme) -> (usize, usize) {
     (ring, lit)
 }
 
+/// The shade blocks an evolve draws on its way in.
+const SHADES: [&str; 4] = ["░", "▒", "▓", "█"];
+
+/// Cells inside the box holding a shade block rather than what the renderer left.
+fn shading(buf: &Buffer) -> usize {
+    let mut shaded = 0;
+    for y in BOX.top()..BOX.bottom() {
+        for x in BOX.left()..BOX.right() {
+            shaded += usize::from(SHADES.contains(&buf[(x, y)].symbol()));
+        }
+    }
+    shaded
+}
+
+/// Cells of the box still holding a glyph.
+fn glyphs(buf: &Buffer) -> usize {
+    let mut drawn = 0;
+    for y in BOX.top()..BOX.bottom() {
+        for x in BOX.left()..BOX.right() {
+            drawn += usize::from(buf[(x, y)].symbol() != " ");
+        }
+    }
+    drawn
+}
+
+/// Cells of the box's left half and right half that have been cleared away.
+fn cleared(buf: &Buffer) -> (usize, usize) {
+    let middle = BOX.left() + BOX.width / 2;
+    let (mut left, mut right) = (0, 0);
+    for y in BOX.top()..BOX.bottom() {
+        for x in BOX.left()..BOX.right() {
+            let gone = usize::from(buf[(x, y)].symbol() == " ");
+            if x < middle {
+                left += gone;
+            } else {
+                right += gone;
+            }
+        }
+    }
+    (left, right)
+}
+
 /// `SPEC.md` §11.2 B21: the box arrives through `tachyonfx` under §5.3's
 /// licence, armed by the click and done when done, over what a changed file
-/// takes; Esc plays it backwards. The border draws itself in from the
-/// anchor's corner and the text fades up behind it.
+/// takes; Esc sweeps it away over the same length.
+///
+/// The evolve needs no second ink, which is why the entrance is checked on the
+/// symbols rather than on the colours: it is the one arrival on this surface
+/// that a palette with no colour at all still shows.
 #[test]
-fn the_box_entrance_ends_inside_its_duration_and_esc_plays_it_backwards() {
+fn the_box_evolves_in_and_esc_sweeps_it_away() {
     let theme = Theme::default();
     let ring = 2 * (usize::from(BOX.width) + usize::from(BOX.height)) - 4;
     let inner = usize::from(BOX.width - 2) * usize::from(BOX.height - 2);
 
-    // In: nothing of the ring at the start, all of it at the end, and the text
-    // lit only once the fade has run.
+    // In: nothing of the box at the start, shade blocks part way through, and
+    // the box exactly as the renderer drew it at the end.
     let mut entrance = box_entrance(&theme);
     let mut buf = boxed(&theme);
     entrance.process(FxDuration::ZERO, &mut buf, BOX);
@@ -78,19 +123,21 @@ fn the_box_entrance_ends_inside_its_duration_and_esc_plays_it_backwards() {
         "the box is drawn whole on the frame that opened it"
     );
     let mut spent = std::time::Duration::ZERO;
-    let mut grew = false;
+    let mut shaded = false;
     while spent + ARRIVING_FRAME < BOX_ARRIVING {
         let mut buf = boxed(&theme);
         entrance.process(FxDuration::from(ARRIVING_FRAME), &mut buf, BOX);
         spent += ARRIVING_FRAME;
-        let (drawn, _) = drawn_of(&buf, &theme);
-        grew |= drawn > 0 && drawn < ring;
+        shaded |= shading(&buf) > 0;
         assert!(
             !entrance.done(),
             "the entrance reported itself done at {spent:?}, inside its {BOX_ARRIVING:?}"
         );
     }
-    assert!(grew, "the border never drew part way in: it snapped");
+    assert!(
+        shaded,
+        "the box never drew a shade block on its way in: it snapped"
+    );
     let mut buf = boxed(&theme);
     entrance.process(
         FxDuration::from(BOX_ARRIVING - spent + ARRIVING_FRAME),
@@ -107,18 +154,30 @@ fn the_box_entrance_ends_inside_its_duration_and_esc_plays_it_backwards() {
         "the entrance did not end on the box as drawn"
     );
 
-    // Out: the mirror image, ending on a blank ring and dim text.
-    let mut exit = box_exit(&theme);
+    // Out: swept away, and the sweep runs left to right, so the half it starts
+    // on is the emptier one throughout.
+    let mut exit = box_exit();
     let mut buf = boxed(&theme);
     exit.process(FxDuration::ZERO, &mut buf, BOX);
-    assert_eq!(drawn_of(&buf, &theme), (ring, inner));
+    assert_eq!(
+        glyphs(&buf),
+        ring + inner,
+        "the box left before Esc was pressed"
+    );
     let mut spent = std::time::Duration::ZERO;
+    let mut lead = 0;
     while spent + ARRIVING_FRAME < BOX_ARRIVING {
         let mut buf = boxed(&theme);
         exit.process(FxDuration::from(ARRIVING_FRAME), &mut buf, BOX);
         spent += ARRIVING_FRAME;
+        let (left, right) = cleared(&buf);
+        lead = lead.max(left.saturating_sub(right));
         assert!(!exit.done(), "the exit reported itself done at {spent:?}");
     }
+    assert!(
+        lead > usize::from(BOX.height),
+        "the sweep never cleared the box's left half ahead of its right, so it          is not travelling left to right: it led by {lead} cells at most"
+    );
     let mut buf = boxed(&theme);
     exit.process(
         FxDuration::from(BOX_ARRIVING - spent + ARRIVING_FRAME),
@@ -126,11 +185,9 @@ fn the_box_entrance_ends_inside_its_duration_and_esc_plays_it_backwards() {
         BOX,
     );
     assert!(exit.done(), "the exit is still running past its length");
-    assert_eq!(
-        drawn_of(&buf, &theme),
-        (0, 0),
-        "the exit did not end on the box gone"
-    );
+    // On the glyphs rather than the inks: a sweep clears the cell's symbol and
+    // leaves its colour, and the frame after this one drops the rows anyway.
+    assert_eq!(glyphs(&buf), 0, "the exit did not end on the box gone");
 }
 
 /// A buffer with text in it, standing in for what `render` leaves behind.

@@ -415,11 +415,28 @@ fn every_row_kind() -> View {
                 "        for change in self.changes() {",
             ),
             line(LineKind::Added, 260, "        for change in self.walk() {"),
-            // B21's rows under the line above: the reader's note and the agent's line.
+            // B21's rows under the line above: the reader's note, enclosed, and
+            // the agent's line descending from its bottom edge.
             Row::Note {
                 id: String::new(),
-                lead: NoteLead::Bar,
+                lead: NoteLead::Top,
+                text: String::new(),
+                state: "open",
+                last: false,
+                faded: false,
+            },
+            Row::Note {
+                id: String::new(),
+                lead: NoteLead::Body,
                 text: "walk() re-reads the index on every frame; cache it".to_owned(),
+                state: "open",
+                last: false,
+                faded: false,
+            },
+            Row::Note {
+                id: String::new(),
+                lead: NoteLead::Bottom,
+                text: "open".to_owned(),
                 state: "open",
                 last: true,
                 faded: false,
@@ -510,8 +527,11 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
     let mut drawn: Vec<u16> = Vec::new();
     for width in WIDTHS {
         let rows = rows_at(width, 24, &view, &chrome);
+        // From the bottom: a committed note is enclosed in the same corners,
+        // and the fixture draws one above the box being typed in.
         let Some(top) = rows
             .iter()
+            .rev()
             .find(|row| row.contains("note ·") || row.contains(['┌', '╭']))
         else {
             continue;
@@ -543,6 +563,7 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
         // down to, including the one that spells nothing at all.
         let bottom = rows
             .iter()
+            .rev()
             .find(|row| row.contains(['└', '╰']))
             .unwrap_or_else(|| panic!("at {width} columns the box has no bottom edge"))
             .trim_end();

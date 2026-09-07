@@ -325,15 +325,13 @@ pub enum Row {
 /// What a note row draws at the content origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteLead {
-    /// The top edge of the enclosure around the reader's own rows.
+    /// The enclosure's top edge.
     Top,
-    /// One row of the reader's words, between the enclosure's two sides.
+    /// The reader's words, between its two sides.
     Body,
-    /// The bottom edge, carrying the status word and the stem the answer
-    /// descends through.
+    /// The bottom edge: the word, and the stem the answer descends through.
     Bottom,
-    /// The bar down the reader's own rows, which is the rung below the
-    /// enclosure on a pane too narrow to hold one.
+    /// The rung below the enclosure, on a pane too narrow to hold one.
     Bar,
     /// The arrow on the first row of the agent's line.
     Reply,
@@ -430,12 +428,11 @@ pub struct Noted {
 /// Columns a note row spends before its text: the lead and its gap.
 const NOTE_LEAD: usize = 2;
 
-/// Columns the answer is indented by, so it lines up under the stem in the
-/// enclosure's bottom edge rather than at the content origin.
+/// Columns the answer is indented by, so it descends from the stem.
 pub const REPLY_INDENT: usize = 2;
 
-/// What the bottom edge spends on its stem and the blanks around the word,
-/// beside the two corners `BOX_FRAME` already counts.
+/// What the bottom edge spends beside the corners `BOX_FRAME` counts: the stem,
+/// the blanks around the word, and the rules that set it in from its corner.
 const STEM_ROOM: usize = 4;
 
 /// Body rows the note box grows to before it scrolls inside itself.
@@ -602,22 +599,21 @@ impl Pin {
     /// The display rows this note takes under a content width of `content`.
     fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
-        // The enclosure needs its two sides, a column of text, and a bottom edge
-        // wide enough to carry the word and the stem beside its corners. Below
-        // that it draws nothing at all, which is worse than the bar it replaced,
-        // so the bar is the rung under it.
+        // Under the width the bottom edge needs a box draws nothing at all, and
+        // a note that vanishes is worse than one drawn on the narrower rung.
         let boxed = content > BOX_FRAME + self.word.len() + STEM_ROOM;
         let inner = content.saturating_sub(BOX_FRAME);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
         if !self.resolved || self.reply.is_none() {
+            // `last` marks the row the word is drawn on: the bottom edge here.
             let mut row = |lead, text: String| {
                 rows.push(Row::Note {
                     id: self.id.clone(),
                     lead,
                     text,
                     state: self.word,
-                    last: false,
+                    last: matches!(lead, NoteLead::Bottom),
                     faded: self.faded,
                 });
             };
@@ -626,15 +622,11 @@ impl Pin {
                 for text in prose_rows(&self.body, inner) {
                     row(NoteLead::Body, text);
                 }
-                // The bottom edge carries the word, so `text` is the word here
-                // and the drawer spells it into the edge's label.
                 row(NoteLead::Bottom, self.word.to_owned());
             } else {
                 let mut body = pieces(&self.body);
-                // The word takes a row of its own when the last piece leaves it no
-                // room and a row can hold it, with a blank between them where the
-                // piece has width: the reader's words are never cut to fit a
-                // status, and a blank row buys nothing where no row holds the word.
+                // Here the word shares the last row, and takes one of its own
+                // where that row has no room: the reader's words are never cut.
                 let last = body
                     .last()
                     .map_or(0, |piece| crate::render::width_of(piece));
