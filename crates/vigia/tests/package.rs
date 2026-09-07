@@ -1582,36 +1582,54 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
 
-/// `SPEC.md` names every key the config file accepts.
+/// How many keys the config file accepts, as the prose spells it.
 ///
-/// A count in prose has nothing holding it to the list it counts, so the document
-/// said five for as long as it took two more keys to land. The paragraph is found
-/// by the path it names rather than by a section number, which moves.
+/// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
+/// here fails against the document, and the wrong word there fails against this.
+const CONFIG_KEYS_SPELLED: &str = "Seven";
+
+/// `SPEC.md` names every key the config file accepts, and counts them right.
+///
+/// The count is checked as well as the list because the count is what went wrong:
+/// the document said five for as long as it took two more keys to land, with every
+/// one of the five it named still true. A gate over the names alone stays green
+/// through exactly that.
+///
+/// The names are checked in one direction only. That paragraph spells `on` and
+/// `off` in the same grammar, so walking its backticks back to the array would
+/// need a stop-list, and a stop-list goes stale the way the count did.
 #[test]
 fn the_spec_names_every_key_the_config_file_accepts() {
     let spec = repo_file("SPEC.md");
-    let spelt = |line: &str| {
-        vigia::config::KEYS
-            .into_iter()
-            .filter(|key| line.contains(&format!("`{key}`")))
-            .count()
+    let paragraph = |anchor: &str| {
+        spec.lines()
+            .find(|line| line.contains(anchor))
+            .unwrap_or_else(|| panic!("SPEC.md carries the paragraph beginning {anchor:?}"))
     };
-    let named = spec
-        .lines()
-        .filter(|line| line.contains("~/.config/vigia/config"))
-        .max_by_key(|line| spelt(line))
-        .expect("SPEC.md names the config file at all");
+    // Two paragraphs carry the count and only one carries the names: §11.1
+    // describes the file and §11.2 B6 rules on it.
+    let describes = paragraph("The view toggles are a preference too");
+    let rules = paragraph("and `follow` is excluded on purpose");
 
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
-        .filter(|key| !named.contains(&format!("`{key}`")))
+        .filter(|key| !describes.contains(&format!("`{key}`")))
         .collect();
     assert!(
         missing.is_empty(),
-        "the config file accepts {missing:?} and no paragraph of SPEC.md naming \
-         the file names them, so the document describes a surface the binary no \
-         longer has:\n{named}"
+        "the config file accepts {missing:?} and SPEC.md's paragraph for it does \
+         not name them, so the document describes a surface the binary no longer \
+         has:\n{describes}"
     );
+
+    for stated in [describes, rules] {
+        assert!(
+            stated.contains(CONFIG_KEYS_SPELLED),
+            "the config file accepts {} keys, which this file spells \
+             {CONFIG_KEYS_SPELLED:?}, and SPEC.md counts them otherwise:\n{stated}",
+            vigia::config::KEYS.len()
+        );
+    }
 }
 
 /// The graviola release whose `verify_cpu_features` the shell's guard mirrors.
