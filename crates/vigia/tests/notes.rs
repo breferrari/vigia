@@ -3507,6 +3507,13 @@ fn the_bar_is_the_rung_under_the_enclosure_and_keeps_the_word() {
                 edge.contains("open"),
                 "at {width} columns the enclosure lost the word: {edge:?}"
             );
+            // And the edge closes. This is where the rung's boundary is pinned:
+            // one column narrower than the word and its frame need, the corner
+            // is what the row runs out of room for.
+            assert!(
+                edge.trim_end().ends_with(['┘', '╯']),
+                "at {width} columns the enclosure's bottom edge does not close: {edge:?}"
+            );
             continue;
         }
         rungs.1 += 1;
