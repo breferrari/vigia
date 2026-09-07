@@ -428,11 +428,11 @@ pub struct Noted {
 /// Columns a note row spends before its text: the lead and its gap.
 const NOTE_LEAD: usize = 2;
 
-/// Columns the answer is indented by, so it descends from the stem.
+/// Columns the answer is indented by, under the stem it descends from.
 pub const REPLY_INDENT: usize = 2;
 
 /// What the bottom edge spends beside the corners `BOX_FRAME` counts: the stem,
-/// the blanks around the word, and the rules that set it in from its corner.
+/// the word's two blanks, and the rules setting it in from its corner.
 const STEM_ROOM: usize = 4;
 
 /// Body rows the note box grows to before it scrolls inside itself.
@@ -595,38 +595,43 @@ fn box_rows(pin: &BoxPin, content: usize) -> (Vec<Row>, usize) {
     (rows, 1 + caret_row - top)
 }
 
+/// One row of `pin`'s; `last` marks where its status word is drawn.
+fn row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, text: String, last: bool) {
+    rows.push(Row::Note {
+        id: pin.id.clone(),
+        lead,
+        text,
+        state: pin.word,
+        last,
+        faded: pin.faded,
+    });
+}
+
 impl Pin {
     /// The display rows this note takes under a content width of `content`.
     fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
-        // Under the width the bottom edge needs a box draws nothing at all, and
-        // a note that vanishes is worse than one drawn on the narrower rung.
+        // A box under the width its bottom edge needs draws nothing at all.
         let boxed = content > BOX_FRAME + self.word.len() + STEM_ROOM;
         let inner = content.saturating_sub(BOX_FRAME);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
         if !self.resolved || self.reply.is_none() {
-            // `last` marks the row the word is drawn on: the bottom edge here.
-            let mut row = |lead, text: String| {
-                rows.push(Row::Note {
-                    id: self.id.clone(),
-                    lead,
-                    text,
-                    state: self.word,
-                    last: matches!(lead, NoteLead::Bottom),
-                    faded: self.faded,
-                });
-            };
             if boxed {
-                row(NoteLead::Top, String::new());
+                row(&mut rows, self, NoteLead::Top, String::new(), false);
                 for text in prose_rows(&self.body, inner) {
-                    row(NoteLead::Body, text);
+                    row(&mut rows, self, NoteLead::Body, text, false);
                 }
-                row(NoteLead::Bottom, self.word.to_owned());
+                row(
+                    &mut rows,
+                    self,
+                    NoteLead::Bottom,
+                    self.word.to_owned(),
+                    true,
+                );
             } else {
                 let mut body = pieces(&self.body);
-                // Here the word shares the last row, and takes one of its own
-                // where that row has no room: the reader's words are never cut.
+                // Here the word shares the last row, or takes one of its own.
                 let last = body
                     .last()
                     .map_or(0, |piece| crate::render::width_of(piece));
@@ -636,32 +641,19 @@ impl Pin {
                 }
                 let count = body.len();
                 for (piece, text) in body.into_iter().enumerate() {
-                    rows.push(Row::Note {
-                        id: self.id.clone(),
-                        lead: NoteLead::Bar,
-                        text,
-                        state: self.word,
-                        last: piece + 1 == count,
-                        faded: self.faded,
-                    });
+                    row(&mut rows, self, NoteLead::Bar, text, piece + 1 == count);
                 }
             }
         }
         if let Some(reply) = &self.reply {
             let under = room.saturating_sub(REPLY_INDENT);
             for (piece, text) in prose_rows(reply, under).into_iter().enumerate() {
-                rows.push(Row::Note {
-                    id: self.id.clone(),
-                    lead: if piece == 0 {
-                        NoteLead::Reply
-                    } else {
-                        NoteLead::Blank
-                    },
-                    text,
-                    state: self.word,
-                    last: false,
-                    faded: self.faded,
-                });
+                let lead = if piece == 0 {
+                    NoteLead::Reply
+                } else {
+                    NoteLead::Blank
+                };
+                row(&mut rows, self, lead, text, false);
             }
         }
         rows

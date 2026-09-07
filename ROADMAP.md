@@ -181,9 +181,9 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
-| ✅ | The agent's reply draws in the reader's own ink, and the arrow that separates them is grey too. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
-| ⬜ | The agent's reply draws code as prose, and the machinery to highlight it is already on the frame | [#452](https://github.com/breferrari/vigia/issues/452) |
-| ⬜ | vigia mcp finds its worktree by a Claude Code variable, so another agent's server serves a different store in silence | [#450](https://github.com/breferrari/vigia/issues/450) |
+| ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
+| ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
+| ⬜ | vigia mcp finds its worktree by an agent's own variable | [#450](https://github.com/breferrari/vigia/issues/450) |
 | ✅ | The footer's transition is too quick to see, and unreadable while it runs. **Reported from use** | [#410](https://github.com/breferrari/vigia/issues/410) |
 | ✅ | The footer's motions are on the channel that degrades, and too short to see. **Reported from use** | [#408](https://github.com/breferrari/vigia/issues/408) |
 | ✅ | The footer says everything in one red, and no notice arrives. **Reported from use** | [#405](https://github.com/breferrari/vigia/issues/405) |

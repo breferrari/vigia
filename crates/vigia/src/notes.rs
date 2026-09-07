@@ -14,13 +14,13 @@ use ratatui::crossterm::event::{
 use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui_textarea::{CursorMove, Input, TextArea};
-use tachyonfx::{Effect, Interpolation};
+use tachyonfx::Effect;
+use tachyonfx::pattern::AnyPattern;
 use vigia_core::{CONTEXT, Listing, Note, Origin, Result, Status, Store};
 
 use crate::input::Regions;
 use crate::motion::{
-    BOX_ARRIVING, LEAVING, Motion, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, SWEEP,
-    TRANSITION, Timed,
+    self, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Timed,
 };
 use crate::render::NoteCells;
 use crate::theme::{self, Theme};
@@ -346,33 +346,32 @@ pub fn around(workdir: &Path, path: &str, centre: u32) -> Vec<(u32, String)> {
         .collect()
 }
 
-/// How a note's cells arrive: shade blocks resolving into the text, thickening
-/// out of the middle, with the cells landing in their own order under it. The
-/// evolve needs no second ink, so unlike the crossfade it replaced this draws
-/// on a palette that has none.
-fn evolving(ink: Style, over: Duration) -> Motion {
-    Motion::evolve(over)
-        .ink(ink)
-        .with(Motion::coalesce(over))
-        .from_centre(TRANSITION)
+/// The radial edge's softness where a note's cells arrive, in cells.
+pub const TRANSITION: f32 = 10.0;
+
+/// Columns the sweep's leading edge is soft over as it clears a note away.
+pub const SWEEP: u32 = 35;
+
+/// How a note's cells arrive, and how they leave.
+fn evolving(ink: Style, over: Duration) -> Effect {
+    motion::evolving(ink, over, TRANSITION)
 }
 
-/// How they leave: swept away, left to right.
-fn sweeping(over: Duration) -> Motion {
-    Motion::sweep(over).across(SWEEP)
+fn sweeping(over: Duration) -> Effect {
+    motion::sweeping(over, SWEEP)
 }
 
 /// How the box arrives: the reader's words evolving in behind its frame's ink,
 /// over what a changed file takes.
 #[must_use]
 pub fn box_entrance(theme: &Theme) -> Effect {
-    evolving(theme.note_frame, BOX_ARRIVING).effect()
+    evolving(theme.note_frame, BOX_ARRIVING)
 }
 
 /// How the box leaves on Esc.
 #[must_use]
 pub fn box_exit() -> Effect {
-    sweeping(BOX_ARRIVING).effect()
+    sweeping(BOX_ARRIVING)
 }
 
 /// What the last listing had to say for itself, so the footer's alert is said
@@ -558,26 +557,37 @@ impl Ledger {
 /// the depth has flattened the two together, and then the word simply changes,
 /// which is the whole of what a crossfade says.
 #[must_use]
-pub fn word_arrival(theme: &Theme) -> Option<Motion> {
+pub fn word_arrival(theme: &Theme) -> Option<Effect> {
     let from = theme::contrast(theme.note, theme.chrome_dim)?;
-    Some(Motion::crossfade_in(from, RESOLVE_ARRIVING).eased(Interpolation::SineInOut))
+    Some(motion::fading(
+        from,
+        RESOLVE_ARRIVING,
+        AnyPattern::default(),
+        false,
+    ))
 }
 
 /// The departure a resolve runs: the agent's line arrives, holds a beat, and
 /// the rows are swept away. Its length is its own, which is what retires it.
+fn resolving(theme: &Theme) -> Effect {
+    motion::holding(
+        evolving(theme.note_reply, RESOLVE_ARRIVING),
+        RESOLVE_BEAT,
+        sweeping(LEAVING),
+    )
+}
+
+/// The same, as the effect the suite drives directly.
 #[must_use]
 pub fn resolve_departure(theme: &Theme) -> Effect {
-    evolving(theme.note_reply, RESOLVE_ARRIVING)
-        .hold(RESOLVE_BEAT)
-        .then(sweeping(LEAVING))
-        .effect()
+    resolving(theme)
 }
 
 /// The departure a withdrawal runs, and a note whose file vanished: the rows
 /// are swept away, with no line from the agent to show first.
 #[must_use]
 pub fn leaving() -> Effect {
-    sweeping(LEAVING).effect()
+    sweeping(LEAVING)
 }
 
 /// Which of a note's cells an effect runs over.
@@ -628,19 +638,13 @@ impl NoteEffect {
                 Target::Reply,
                 evolving(theme.note_reply, RESOLVE_ARRIVING),
             ),
-            Change::Resolved(id) => (
-                id,
-                Target::Rows,
-                evolving(theme.note_reply, RESOLVE_ARRIVING)
-                    .hold(RESOLVE_BEAT)
-                    .then(sweeping(LEAVING)),
-            ),
+            Change::Resolved(id) => (id, Target::Rows, resolving(theme)),
             Change::Left(id) => (id, Target::Rows, sweeping(LEAVING)),
         };
         Some(Self {
             id,
             target,
-            timed: motion.armed(now),
+            timed: Timed::armed(motion, now),
         })
     }
 }

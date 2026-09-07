@@ -1,13 +1,10 @@
-//! How this pane moves: the motions a surface can arm, composed rather than
-//! hand-built, and the two rules every armed effect here obeys.
+//! How this pane moves: its motions, written in `tachyonfx`'s own DSL, and the
+//! two rules the loop owes every effect it arms.
 //!
-//! A [`Motion`] carries its **length** as well as its effect, and that is the
-//! whole reason this is a type rather than a handful of constructors.
-//! [`Timed`] retires an effect by a clock as well as by the effect's own count,
-//! because an effect over cells that are off screen is never processed and
-//! never reports itself done; so every call site needs the duration it armed,
-//! and a composed one needs the sum. Composing the effect and adding the
-//! durations up by hand are two chances to disagree.
+//! A motion is a source string and the function that binds its names. The crate
+//! composes and times what it builds: a sequence reports its parts added up and
+//! a parallel the longer of them, which is what [`Timed`] retires on, so nothing
+//! here counts a duration the effect could be asked for.
 //!
 //! The durations are here for the reason the same table always is: copies
 //! drift. `SPEC.md` §5.1 and §11.1 rule what each one is.
@@ -17,9 +14,9 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use tachyonfx::fx::EvolveSymbolSet;
-use tachyonfx::pattern::{RadialPattern, SweepPattern};
-use tachyonfx::{Effect, Interpolation, fx};
+use tachyonfx::dsl::EffectDsl;
+use tachyonfx::pattern::AnyPattern;
+use tachyonfx::{Effect, fx};
 
 /// How long a change is drawn arriving. Under `HISTORY_SAMPLE`; see `SPEC.md` §5.1.
 pub const ARRIVING: Duration = Duration::from_millis(250);
@@ -70,299 +67,131 @@ pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
     .saturating_sub(RESOLVE_ARRIVING)
     .saturating_sub(LEAVING);
 
-/// Columns the colour's leading edge is soft over as it crosses a message.
-pub const TRAVEL: u16 = 12;
-
-/// The same, for the warning that resolves from both ends at once.
-pub const TRAVEL_IN: f32 = 10.0;
-
-/// The radial edge's softness where a note's cells arrive, in cells.
-pub const TRANSITION: f32 = 10.0;
-
-/// Columns the sweep's leading edge is soft over as it clears a note away.
-pub const SWEEP: u16 = 35;
-
-/// What a motion does to the cells it runs over.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Kind {
-    /// Shade blocks resolving into whatever the cells already hold.
-    Evolve,
-    /// Cells clearing away.
-    Sweep,
-    /// Cells landing, each in its own moment.
-    Coalesce,
-    /// The ink travelling from a colour into the one the cells are drawn in.
-    CrossfadeIn(Color),
-    /// The same journey back out.
-    CrossfadeOut(Color),
-    /// Nothing at all, for the beat between two motions.
-    Still,
-}
-
-/// Where a motion's edge is, and which way it travels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Spread {
-    /// Every cell at once.
-    Whole,
-    /// Out of the middle, soft over this many cells.
-    Centre(f32),
-    /// Across, soft over this many columns.
-    LeftToRight(u16),
-    /// The same, the other way.
-    RightToLeft(u16),
-}
-
-/// One motion, before it is composed with any other.
-#[derive(Debug, Clone, Copy)]
-struct One {
-    kind: Kind,
-    ink: Option<Style>,
-    spread: Spread,
-    ease: Interpolation,
-    over: Duration,
-}
-
-/// One motion, or several that run in order or at once.
-#[derive(Debug, Clone)]
-enum Shape {
-    One(One),
-    /// One after another.
-    Order(Vec<Motion>),
-    /// All at the same time.
-    Together(Vec<Motion>),
-}
-
-/// A motion this pane can arm: what it does, how its edge spreads, what ink it
-/// does it in, and how long the whole of it takes.
+/// A surface arriving: shade blocks resolving into what the renderer drew,
+/// thickening out of the middle, with the cells landing in their own order
+/// under them.
 ///
-/// Built by naming the motion, then the way it moves, then anything it runs
-/// with or after:
+/// Shade blocks rather than a crossfade because they are glyphs, so this is the
+/// one arrival on the note surface that still draws where the depth has
+/// flattened the palette and there are no two inks to travel between.
+pub const EVOLVING: &str = r#"
+    fx::parallel(&[
+        fx::evolve_into((EvolveSymbolSet::Shaded, ink), (over, Linear)),
+        fx::coalesce((over, Linear)),
+    ]).with_pattern(RadialPattern::with_transition((0.5, 0.5), softness))
+"#;
+
+/// A surface leaving: swept away, left to right.
+pub const SWEEPING: &str = r#"
+    fx::dissolve((over, Linear)).with_pattern(SweepPattern::left_to_right(span))
+"#;
+
+/// A departure that shows something first: it arrives, holds a beat, and goes.
+pub const HOLDING: &str = r#"
+    fx::sequence(&[arriving, fx::sleep((beat, Linear)), leaving])
+"#;
+
+/// A message's ink arriving from the colour it replaces, by the road its voice
+/// travels.
+pub const FADING_IN: &str = r#"
+    fx::fade_from_fg(ink, (over, SineInOut)).with_pattern(road)
+"#;
+
+/// The same ink leaving for that colour, by the road it came.
 ///
-/// ```ignore
-/// Motion::evolve(RESOLVE_ARRIVING)
-///     .ink(theme.note_reply)
-///     .from_centre(TRANSITION)
-///     .hold(RESOLVE_BEAT)
-///     .then(Motion::sweep(LEAVING).across(SWEEP))
-/// ```
-#[derive(Debug, Clone)]
-pub struct Motion {
-    shape: Shape,
-    length: Duration,
+/// Not [`FADING_IN`] reversed: `fade_from_fg` mirrors its timer, so reversing it
+/// flips the interpolation as well as the direction, and a voice would leave on
+/// a curve it did not arrive on.
+pub const FADING_OUT: &str = r#"
+    fx::fade_to_fg(ink, (over, SineInOut)).with_pattern(road)
+"#;
+
+/// A change arriving on the diff: the cells landing in their own order.
+pub const COALESCING: &str = r#"
+    fx::coalesce((over, QuadOut))
+"#;
+
+/// The compilers a source is read against.
+///
+/// Built per motion rather than kept: `EffectDsl` holds its compilers as boxed
+/// closures and is neither `Send` nor `Sync`, so a `static` cannot hold one, and
+/// registering them is 6.3us against the 12.7us the compile itself costs. A
+/// motion is compiled when it is armed, which is a press or a wake, never a
+/// frame.
+fn dsl() -> EffectDsl {
+    EffectDsl::new()
 }
 
-impl Motion {
-    /// Shade blocks resolving into the text, which is how this pane says a
-    /// surface has arrived. Unlike a crossfade it needs no second ink, so it
-    /// draws on a palette that has no colour at all.
-    #[must_use]
-    pub fn evolve(over: Duration) -> Self {
-        Self::one(Kind::Evolve, over)
-    }
-
-    /// Cells clearing away, which is how it says one has gone.
-    #[must_use]
-    pub fn sweep(over: Duration) -> Self {
-        Self::one(Kind::Sweep, over)
-    }
-
-    /// Cells landing, each in its own moment.
-    #[must_use]
-    pub fn coalesce(over: Duration) -> Self {
-        Self::one(Kind::Coalesce, over)
-    }
-
-    /// The ink arriving from `from` into whatever the cells are drawn in.
-    #[must_use]
-    pub fn crossfade_in(from: Color, over: Duration) -> Self {
-        Self::one(Kind::CrossfadeIn(from), over)
-    }
-
-    /// The ink leaving for `to`, which is the journey above run the other way.
-    ///
-    /// Not the arrival reversed: `fade_from_fg` mirrors its timer, so reversing
-    /// it flips the interpolation as well as the direction, and a voice would
-    /// leave on a different curve than it arrived on.
-    #[must_use]
-    pub fn crossfade_out(to: Color, over: Duration) -> Self {
-        Self::one(Kind::CrossfadeOut(to), over)
-    }
-
-    /// Nothing happening, for the beat a departure holds before it leaves.
-    #[must_use]
-    pub fn still(over: Duration) -> Self {
-        Self::one(Kind::Still, over)
-    }
-
-    /// The ink an evolve's shade blocks take. Every other motion reads the ink
-    /// the cells already carry.
-    #[must_use]
-    pub fn ink(mut self, style: Style) -> Self {
-        self.each(&|one| one.ink = Some(style));
-        self
-    }
-
-    /// Out of the middle, its edge soft over `softness` cells.
-    #[must_use]
-    pub fn from_centre(mut self, softness: f32) -> Self {
-        self.each(&|one| one.spread = Spread::Centre(softness));
-        self
-    }
-
-    /// Across, its edge soft over `span` columns.
-    #[must_use]
-    pub fn across(mut self, span: u16) -> Self {
-        self.each(&|one| one.spread = Spread::LeftToRight(span));
-        self
-    }
-
-    /// The same, the other way.
-    #[must_use]
-    pub fn back(mut self, span: u16) -> Self {
-        self.each(&|one| one.spread = Spread::RightToLeft(span));
-        self
-    }
-
-    /// The curve it runs on.
-    #[must_use]
-    pub fn eased(mut self, how: Interpolation) -> Self {
-        self.each(&|one| one.ease = how);
-        self
-    }
-
-    /// This, and then `next`. The length is the two added, which is what the
-    /// clock retiring them both needs.
-    #[must_use]
-    pub fn then(self, next: Self) -> Self {
-        let length = self.length.saturating_add(next.length);
-        let parts = match self.shape {
-            Shape::Order(mut parts) => {
-                parts.push(next);
-                parts
-            }
-            shape => vec![
-                Self {
-                    shape,
-                    length: self.length,
-                },
-                next,
-            ],
-        };
-        Self {
-            shape: Shape::Order(parts),
-            length,
-        }
-    }
-
-    /// This, then a pause of `beat` before whatever follows.
-    #[must_use]
-    pub fn hold(self, beat: Duration) -> Self {
-        self.then(Self::still(beat))
-    }
-
-    /// This and `other` over the same cells at once, the second drawn over the
-    /// first. The length is the longer of the two.
-    #[must_use]
-    pub fn with(self, other: Self) -> Self {
-        let length = self.length.max(other.length);
-        let parts = match self.shape {
-            Shape::Together(mut parts) => {
-                parts.push(other);
-                parts
-            }
-            shape => vec![
-                Self {
-                    shape,
-                    length: self.length,
-                },
-                other,
-            ],
-        };
-        Self {
-            shape: Shape::Together(parts),
-            length,
-        }
-    }
-
-    /// How long the whole of it takes.
-    #[must_use]
-    pub fn length(&self) -> Duration {
-        self.length
-    }
-
-    /// The effect it builds.
-    #[must_use]
-    pub fn effect(self) -> Effect {
-        match self.shape {
-            Shape::One(one) => one.effect(),
-            Shape::Order(parts) => fx::sequence(&Self::built(parts)),
-            Shape::Together(parts) => fx::parallel(&Self::built(parts)),
-        }
-    }
-
-    /// The effect, armed until its own length is up.
-    #[must_use]
-    pub fn armed(self, now: Instant) -> Timed {
-        let until = now + self.length;
-        Timed::new(self.effect(), until)
-    }
-
-    fn one(kind: Kind, over: Duration) -> Self {
-        Self {
-            shape: Shape::One(One {
-                kind,
-                ink: None,
-                spread: Spread::Whole,
-                ease: Interpolation::Linear,
-                over,
-            }),
-            length: over,
-        }
-    }
-
-    /// Apply `f` to every motion inside this one, so a spread or an ink named
-    /// after two are composed reaches both.
-    fn each(&mut self, f: &dyn Fn(&mut One)) {
-        match &mut self.shape {
-            Shape::One(one) => f(one),
-            Shape::Order(parts) | Shape::Together(parts) => {
-                for part in parts {
-                    part.each(f);
-                }
-            }
-        }
-    }
-
-    fn built(parts: Vec<Self>) -> Vec<Effect> {
-        parts.into_iter().map(Self::effect).collect()
-    }
+/// A surface arriving, in `ink`, its edge soft over `softness` cells.
+#[must_use]
+pub fn evolving(ink: Style, over: Duration, softness: f32) -> Effect {
+    compiled(
+        dsl()
+            .compiler()
+            .bind("ink", ink)
+            .bind("over", tachyonfx::Duration::from(over))
+            .bind("softness", softness)
+            .compile(EVOLVING),
+    )
 }
 
-impl One {
-    fn effect(self) -> Effect {
-        let timer = (tachyonfx::Duration::from(self.over), self.ease);
-        let effect = match self.kind {
-            // Into rather than plain: it stops overwriting at the end, so the
-            // cells' own content is what is left when it is done.
-            Kind::Evolve => match self.ink {
-                Some(style) => fx::evolve_into((EvolveSymbolSet::Shaded, style), timer),
-                None => fx::evolve_into(EvolveSymbolSet::Shaded, timer),
-            },
-            Kind::Sweep => fx::dissolve(timer),
-            Kind::Coalesce => fx::coalesce(timer),
-            Kind::CrossfadeIn(from) => fx::fade_from_fg(from, timer),
-            Kind::CrossfadeOut(to) => fx::fade_to_fg(to, timer),
-            Kind::Still => fx::sleep(timer),
-        };
-        match self.spread {
-            Spread::Whole => effect,
-            Spread::Centre(softness) => {
-                effect.with_pattern(RadialPattern::with_transition((0.5, 0.5), softness))
-            }
-            Spread::LeftToRight(span) => effect.with_pattern(SweepPattern::left_to_right(span)),
-            Spread::RightToLeft(span) => effect.with_pattern(SweepPattern::right_to_left(span)),
-        }
-    }
+/// A surface leaving, its edge soft over `span` columns.
+#[must_use]
+pub fn sweeping(over: Duration, span: u32) -> Effect {
+    compiled(
+        dsl()
+            .compiler()
+            .bind("over", tachyonfx::Duration::from(over))
+            .bind("span", span)
+            .compile(SWEEPING),
+    )
+}
+
+/// `arriving`, held for `beat`, then `leaving`.
+#[must_use]
+pub fn holding(arriving: Effect, beat: Duration, leaving: Effect) -> Effect {
+    compiled(
+        dsl()
+            .compiler()
+            .bind("arriving", arriving)
+            .bind("beat", tachyonfx::Duration::from(beat))
+            .bind("leaving", leaving)
+            .compile(HOLDING),
+    )
+}
+
+/// A message's ink arriving from `ink` by `road`, or leaving for it.
+#[must_use]
+pub fn fading(ink: Color, over: Duration, road: AnyPattern, out: bool) -> Effect {
+    compiled(
+        dsl()
+            .compiler()
+            .bind("ink", ink)
+            .bind("over", tachyonfx::Duration::from(over))
+            .bind("road", road)
+            .compile(if out { FADING_OUT } else { FADING_IN }),
+    )
+}
+
+/// A change arriving on the diff.
+#[must_use]
+pub fn coalescing(over: Duration) -> Effect {
+    compiled(
+        dsl()
+            .compiler()
+            .bind("over", tachyonfx::Duration::from(over))
+            .compile(COALESCING),
+    )
+}
+
+/// What a source compiles to, and what a source that does not compile draws.
+///
+/// Nothing, and the surface under it stands: this workspace aborts on a panic,
+/// so a dead monitor is the alternative. The sources are this repository's own
+/// and the suite compiles every one, so the second arm means a binary shipped
+/// with a motion nobody can see rather than a reader's mistake.
+fn compiled(built: Result<Effect, tachyonfx::dsl::DslParseError>) -> Effect {
+    built.unwrap_or_else(|_| fx::sleep(tachyonfx::Duration::from(Duration::ZERO)))
 }
 
 /// An effect and the moment it is retired at.
@@ -381,6 +210,14 @@ impl Timed {
         Self { effect, until }
     }
 
+    /// Arm `effect` for as long as it says it runs, which for a composed one is
+    /// its parts added up, or the longest of them, by the crate's own count.
+    #[must_use]
+    pub fn armed(effect: Effect, now: Instant) -> Self {
+        let until = now + length(&effect);
+        Self::new(effect, until)
+    }
+
     /// Whether it still has frames to draw, which keeps the frame clock armed.
     #[must_use]
     pub fn is_running(&self) -> bool {
@@ -397,6 +234,15 @@ impl Timed {
     pub fn draw(&mut self, since: Duration, buf: &mut Buffer, over: Rect) {
         self.effect.process(since.into(), buf, over);
     }
+}
+
+/// How long `effect` runs, as it reports itself; nothing at all for one that
+/// carries no timer, which retires it on the frame that armed it.
+#[must_use]
+pub fn length(effect: &Effect) -> Duration {
+    effect
+        .timer()
+        .map_or(Duration::ZERO, |timer| timer.duration().into())
 }
 
 /// The time an effect is told passed since the previous paint, given whether an

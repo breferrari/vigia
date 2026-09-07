@@ -17,7 +17,10 @@ mod input;
 /// over the notes store. Public because the suite drives it as the loop does.
 pub mod mcp;
 pub mod memory;
-mod motion;
+/// Public for [`theme`]'s reason, and because the pane's motions are its
+/// sources: the suite compiles every one, which is what makes a text motion
+/// safe to ship.
+pub mod motion;
 mod notes;
 /// `SPEC.md` §11.2 B21's send rung: what Enter puts on the agent session's
 /// socket. Public because the wire is the whole subject and no drawn cell shows
@@ -44,13 +47,14 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use motion::{
-    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, Motion,
+    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
     NOTICE_ARRIVING, NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
-    SAID_ARRIVING, SWEEP, TRANSITION, TRAVEL, TRAVEL_IN, Timed, effect_interval,
+    SAID_ARRIVING, Timed, effect_interval, length,
 };
 pub use notes::{
-    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, box_entrance, box_exit,
-    box_route, commit, has_room, leaving, opening, press_at, resolve_departure, word_arrival,
+    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, TRANSITION,
+    box_entrance, box_exit, box_route, commit, has_room, leaving, opening, press_at,
+    resolve_departure, word_arrival,
 };
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
@@ -76,7 +80,8 @@ use std::time::{Instant, SystemTime};
 
 use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
-use tachyonfx::{EffectManager, Interpolation};
+use tachyonfx::EffectManager;
+use tachyonfx::pattern::{AnyPattern, RadialPattern, SweepPattern};
 use vigia_core::{Highlighter, History, Note, Registry, Store, StoreWatch, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
@@ -535,12 +540,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // Armed here rather than in `App::follow`, because a change
                     // arrives whether or not the viewport moves to it.
                     for path in &paths {
-                        shell.effects.add_unique_effect(
-                            path.clone(),
-                            Motion::coalesce(ARRIVING)
-                                .eased(Interpolation::QuadOut)
-                                .effect(),
-                        );
+                        shell
+                            .effects
+                            .add_unique_effect(path.clone(), motion::coalescing(ARRIVING));
                     }
                     // A tick is the world changing, so a demand that could not be
                     // served a moment ago is worth offering again.
@@ -672,8 +674,12 @@ pub fn linger_for(voice: Voice) -> std::time::Duration {
 #[doc(hidden)]
 pub fn arrival(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
     let from = travels_from(voice, theme)?;
-    let fade = Motion::crossfade_in(from, duration_for(voice)).eased(Interpolation::SineInOut);
-    Some(travelling(voice, fade).effect())
+    Some(motion::fading(
+        from,
+        duration_for(voice),
+        travelling(voice),
+        false,
+    ))
 }
 
 /// How each voice leaves: back to the hints' colour, by the road it came. The
@@ -681,20 +687,32 @@ pub fn arrival(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
 #[doc(hidden)]
 pub fn departure(voice: Voice, theme: &Theme) -> Option<tachyonfx::Effect> {
     let to = travels_from(voice, theme)?;
-    let fade = Motion::crossfade_out(to, duration_for(voice)).eased(Interpolation::SineInOut);
-    Some(travelling(voice, fade).effect())
+    Some(motion::fading(
+        to,
+        duration_for(voice),
+        travelling(voice),
+        true,
+    ))
 }
 
 /// The road each voice's colour takes across the message: a receipt's from the
 /// end it was typed at, a warning's from both ends at once, an announcement's
 /// all at once, because it is the one nobody is watching arrive.
-fn travelling(voice: Voice, fade: Motion) -> Motion {
+fn travelling(voice: Voice) -> AnyPattern {
     match voice {
-        Voice::Said => fade.back(TRAVEL),
-        Voice::Arrived => fade,
-        Voice::Alert => fade.from_centre(TRAVEL_IN),
+        Voice::Said => SweepPattern::right_to_left(TRAVEL).into(),
+        Voice::Arrived => AnyPattern::default(),
+        Voice::Alert => RadialPattern::center()
+            .with_transition_width(TRAVEL_IN)
+            .into(),
     }
 }
+
+/// Columns the colour's leading edge is soft over as it crosses the message.
+const TRAVEL: u16 = 12;
+
+/// The same, for the warning that resolves from both ends at once.
+const TRAVEL_IN: f32 = 10.0;
 
 /// The colour a message travels from, and back to: the hints it replaces.
 fn travels_from(voice: Voice, theme: &Theme) -> Option<ratatui::style::Color> {
@@ -1005,10 +1023,7 @@ impl Shell {
         // note beside the first.
         let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
         self.app.open_box(anchor, existing.as_ref());
-        self.box_effect = Some(Timed::new(
-            notes::box_entrance(&self.theme),
-            now + motion::BOX_ARRIVING,
-        ));
+        self.box_effect = Some(Timed::armed(notes::box_entrance(&self.theme), now));
     }
 
     /// Enter: write what the box holds, close it at once, and read the store
@@ -1088,8 +1103,11 @@ impl Shell {
     /// Esc, or a press anywhere outside the box: the keys are the pane's again
     /// now, and the rows stay drawn while the entrance plays backwards.
     fn cancel_box(&mut self, now: Instant) {
-        self.app.close_box(now + motion::BOX_ARRIVING);
-        self.box_effect = Some(Timed::new(notes::box_exit(), now + motion::BOX_ARRIVING));
+        // The rows stand aside for as long as the sweep runs, which is the
+        // motion's own length rather than a constant read twice.
+        let exit = notes::box_exit();
+        self.app.close_box(now + length(&exit));
+        self.box_effect = Some(Timed::armed(exit, now));
     }
 
     /// Arm the watch over the store, so a write by the agent or another pane is
@@ -1774,9 +1792,9 @@ mod tests {
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`cancel_box` is gone");
         assert!(
-            cancel.contains("self.app.close_box(now + motion::BOX_ARRIVING)")
+            cancel.contains("self.app.close_box(now + length(&exit))")
                 && cancel.contains("notes::box_exit()"),
-            "`cancel_box` no longer sweeps the box away over what its arrival took"
+            "`cancel_box` no longer stands the rows aside for exactly as long as              the sweep it armed runs"
         );
         // Both refusals sit ahead of the open, and the pane's own is the one no
         // drawn screen can catch: without it a press on a pane too narrow to

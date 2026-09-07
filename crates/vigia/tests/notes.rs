@@ -67,21 +67,27 @@ fn in_both_runs(name: &str, staged: usize, text: &str) -> Scratch {
 /// The shade blocks an arriving surface evolves through.
 const SHADES: [&str; 4] = ["░", "▒", "▓", "█"];
 
-/// Cells under `y` holding a shade block rather than what the renderer drew.
-fn shading(painted: &Painted, y: u16) -> usize {
-    let width = painted.backend.buffer().area.width;
-    (y + 1..painted.after_notes(y))
-        .flat_map(|row| (0..width).map(move |x| (x, row)))
+/// Cells of `over` holding a shade block rather than what the renderer drew.
+fn shaded(painted: &Painted, over: Rect) -> usize {
+    (over.y..over.bottom())
+        .flat_map(|row| (over.x..over.right()).map(move |x| (x, row)))
         .filter(|(x, row)| SHADES.contains(&painted.cell(*x, *row).symbol()))
         .count()
 }
 
-/// Cells of `reply` holding a shade block.
-fn reply_shading(painted: &Painted, reply: Rect) -> usize {
-    (reply.y..reply.bottom())
-        .flat_map(|row| (reply.x..reply.right()).map(move |x| (x, row)))
-        .filter(|(x, row)| SHADES.contains(&painted.cell(*x, *row).symbol()))
-        .count()
+/// The same over every row a note drew under `y`, at any width.
+fn shading(painted: &Painted, y: u16) -> usize {
+    let width = painted.backend.buffer().area.width;
+    let under = y + 1;
+    shaded(
+        painted,
+        Rect::new(
+            0,
+            under,
+            width,
+            painted.after_notes(y).saturating_sub(under),
+        ),
+    )
 }
 
 /// Rows note `id` drew on `painted`, wherever in the frame they landed.
@@ -305,10 +311,7 @@ impl Rig {
             .expect("a note press resolved to no anchor");
         let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
         self.app.open_box(anchor, existing.as_ref());
-        self.box_effect = Some(Timed::new(
-            box_entrance(&self.theme),
-            self.clock + BOX_ARRIVING,
-        ));
+        self.box_effect = Some(Timed::armed(box_entrance(&self.theme), self.clock));
         self.advance(BOX_ARRIVING + ARRIVING_FRAME);
         // The entrance was spent by the clock and never drawn, so the next paint
         // tells whatever it arms nothing of that spell, as the shell's
@@ -387,7 +390,7 @@ impl Rig {
     /// rows stay drawn while the box is swept away.
     fn esc(&mut self) {
         self.app.close_box(self.clock + BOX_ARRIVING);
-        self.box_effect = Some(Timed::new(box_exit(), self.clock + BOX_ARRIVING));
+        self.box_effect = Some(Timed::armed(box_exit(), self.clock));
     }
 }
 
@@ -435,19 +438,13 @@ impl Painted {
     /// hold an enclosure. Drawn cells rather than the row model, so a word that
     /// stopped being painted fails here rather than passing.
     fn note_word(&self, y: u16) -> String {
-        let mut row = y + 1;
         let mut last = String::new();
-        while row < self.laid.diff.top + self.laid.diff.rows {
-            let lead = match self.view.rows.get(usize::from(row - self.laid.diff.top)) {
-                Some(Row::Note { lead, .. }) => *lead,
-                _ => break,
-            };
-            match lead {
-                NoteLead::Bottom => return self.text(row).trim_end().to_owned(),
-                NoteLead::Bar => last = self.text(row).trim_end().to_owned(),
+        for row in y + 1..self.after_notes(y) {
+            match self.lead_at(row) {
+                Some(NoteLead::Bottom) => return self.text(row).trim_end().to_owned(),
+                Some(NoteLead::Bar) => last = self.text(row).trim_end().to_owned(),
                 _ => {}
             }
-            row += 1;
         }
         last
     }
@@ -458,7 +455,8 @@ impl Painted {
     /// wrap, so an offset from the noted line is an off-by-one waiting for the
     /// next fixture whose body is a word longer.
     fn reply_row(&self, y: u16) -> u16 {
-        self.note_row_where(y, |lead| lead == NoteLead::Reply)
+        (y + 1..self.after_notes(y))
+            .find(|row| self.lead_at(*row) == Some(NoteLead::Reply))
             .unwrap_or_else(|| {
                 panic!(
                     "no answer under row {y}:
@@ -474,24 +472,18 @@ impl Painted {
     /// The first row under `y` that is not one of its note's, which is where
     /// the diff picks up again.
     fn after_notes(&self, y: u16) -> u16 {
-        let mut row = y + 1;
-        while row < self.laid.diff.top + self.laid.diff.rows {
-            match self.view.rows.get(usize::from(row - self.laid.diff.top)) {
-                Some(Row::Note { .. }) => row += 1,
-                _ => break,
-            }
-        }
-        row
+        let floor = self.laid.diff.top + self.laid.diff.rows;
+        (y + 1..floor)
+            .find(|row| self.lead_at(*row).is_none())
+            .unwrap_or(floor)
     }
 
-    /// The first row under `y` whose lead `wanted` accepts.
-    fn note_row_where(&self, y: u16, wanted: impl Fn(NoteLead) -> bool) -> Option<u16> {
-        (y + 1..self.after_notes(y)).find(|row| {
-            matches!(
-                self.view.rows.get(usize::from(row - self.laid.diff.top)),
-                Some(Row::Note { lead, .. }) if wanted(*lead)
-            )
-        })
+    /// What `row` of the diff region draws, when a note drew it.
+    fn lead_at(&self, row: u16) -> Option<NoteLead> {
+        match self.view.rows.get(usize::from(row - self.laid.diff.top)) {
+            Some(Row::Note { lead, .. }) => Some(*lead),
+            _ => None,
+        }
     }
 
     /// What a note says under `y`: the reader's own words and the agent's, with
@@ -504,12 +496,10 @@ impl Painted {
     fn notes_under(&self, y: u16) -> Vec<String> {
         let (_, _, origin) = self.gutter();
         let mut out = Vec::new();
-        let mut row = y + 1;
-        while row < self.laid.diff.top + self.laid.diff.rows {
+        for row in y + 1..self.after_notes(y) {
             let text = self.text(row);
-            let lead = match self.view.rows.get(usize::from(row - self.laid.diff.top)) {
-                Some(Row::Note { lead, .. }) => *lead,
-                _ => break,
+            let Some(lead) = self.lead_at(row) else {
+                break;
             };
             let skip = usize::from(origin)
                 + match lead {
@@ -529,7 +519,6 @@ impl Painted {
                     out.push(text.chars().skip(skip).collect::<String>());
                 }
             }
-            row += 1;
         }
         out
     }
@@ -3767,8 +3756,10 @@ fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
         cleared(&dissolving, origin, middle) > cleared(&dissolving, middle, width),
         "the sweep did not clear the rows' left half ahead of their right:
 {}",
-        dissolving.rows().join("
-")
+        dissolving.rows().join(
+            "
+"
+        )
     );
     assert!(
         dissolving
@@ -4193,7 +4184,7 @@ fn a_reply_landing_on_an_open_note_evolves_in() {
     let cells = note_cells(&arriving.laid, &arriving.view);
     let reply = cells[0].reply.expect("the reply's cells");
     assert!(
-        reply_shading(&arriving, reply) > 0,
+        shaded(&arriving, reply) > 0,
         "halfway in, the agent's line is drawn rather than evolving:
 {}",
         arriving.rows().join(
@@ -4204,7 +4195,7 @@ fn a_reply_landing_on_an_open_note_evolves_in() {
     // The note's own rows do not move: only the answer's cells are the
     // effect's, which is what the reply's rect is for.
     assert_eq!(arriving.fg(origin + 2, y + 2), rig.theme.chrome.fg);
-    assert_eq!(shading(&arriving, y), reply_shading(&arriving, reply));
+    assert_eq!(shading(&arriving, y), shaded(&arriving, reply));
 
     rig.advance(RESOLVE_ARRIVING);
     let settled = rig.paint(&mut frame, PANE, Pointing::default());

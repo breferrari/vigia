@@ -44,12 +44,31 @@ const NOTE_ICON: char = '✎';
 /// The bar down the left of a note's rows. `▌` is the recorded stand-in.
 const NOTE_BAR: char = '▎';
 
-/// Where the answer leaves the enclosure: the notch in its bottom edge, above
-/// the arrow that follows it.
-const STEM: char = '┬';
+/// The rule and the notch the enclosure's bottom edge opens with, which puts
+/// the notch over the column the answer's arrow stands in.
+///
+/// Spelled rather than built from [`REPLY_INDENT`], and the two lining up is
+/// gated where it can be seen: on the drawn row, against the arrow's own column.
+const STEM: &str = "─┬";
 
 /// Rules between the status word and the corner it rides in from.
 pub const WORD_INSET: usize = 3;
+
+/// What the enclosure's bottom edge carries at its far end: the status word
+/// between two blanks, set in from the corner by the rules after it.
+///
+/// The drawer writes this and [`note_cells`] measures it, so the cells an
+/// effect runs over cannot drift from the cells the word was drawn in.
+fn word_tail(word: &str) -> String {
+    let mut tail = String::with_capacity(word.len() + WORD_INSET + 2);
+    tail.push(' ');
+    tail.push_str(word);
+    tail.push(' ');
+    for _ in 0..WORD_INSET {
+        tail.push(RULE);
+    }
+    tail
+}
 
 /// The footer's left-hand side when there is nothing wrong, widest rung first.
 const HINT_RUNGS: [&str; 4] = [
@@ -1881,13 +1900,14 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
             // The word rides the enclosure's bottom edge set in from the corner,
             // and sits flush right on the bar rung under it.
             cells.word = match lead {
+                // Inside the tail the drawer writes, which the far corner
+                // follows: past the tail's leading blank is the word itself.
                 NoteLead::Bottom => {
-                    // Past the corner, the rules that set the word in, and the
-                    // blank between them.
-                    let after = WORD_INSET + 2;
-                    flush_right(line, width_of(state) + after).map(|word| Rect {
-                        width: word.width - after as u16,
-                        ..word
+                    let tail = width_of(&word_tail(state)) + 1;
+                    flush_right(line, tail).map(|edge| Rect {
+                        x: edge.x + 1,
+                        width: width_of(state) as u16,
+                        ..edge
                     })
                 }
                 _ => flush_right(line, width_of(state)),
@@ -4340,15 +4360,8 @@ impl Painter<'_> {
         } else {
             Modifier::empty()
         };
-        let ink = self.theme.chrome_dim.add_modifier(dim);
-        let reply = self.theme.note_reply.add_modifier(dim);
         let word = last.then_some(state);
         let state = self.theme.note_ink(state);
-        // The enclosure the reader ruled: an edge, the body between two sides,
-        // and an edge carrying the word and the stem the answer descends through.
-        // The frame takes the state's ink, so `note_frame` means only the box
-        // being typed in.
-        let rounded = !matches!(self.glyphs, Glyphs::Block);
         // A row with no room for the frame draws none of it, the way the box
         // being typed in does. The walk hands the bar rung down here instead, so
         // this is a floor under a caller rather than a rung a reader meets.
@@ -4357,11 +4370,7 @@ impl Painter<'_> {
         }
         match lead {
             NoteLead::Top => {
-                let corners = if rounded {
-                    ('╭', '╮')
-                } else {
-                    ('┌', '┐')
-                };
+                let corners = self.corners(true);
                 self.box_edge(
                     x,
                     glyphs.y,
@@ -4391,30 +4400,16 @@ impl Painter<'_> {
                 return;
             }
             NoteLead::Bottom => {
-                let corners = if rounded {
-                    ('╰', '╯')
-                } else {
-                    ('└', '┘')
-                };
-                // The stem stands where the answer's arrow will, so the two line
-                // up down the pane; the word rides the far end of the same edge,
-                // set in from the corner so it reads as a label on the frame
-                // rather than as the frame running out.
-                let mut stem = String::with_capacity(REPLY_INDENT);
-                for _ in 0..REPLY_INDENT.saturating_sub(1) {
-                    stem.push(RULE);
-                }
-                stem.push(STEM);
-                let mut tail = format!(" {text} ");
-                for _ in 0..WORD_INSET {
-                    tail.push(RULE);
-                }
+                let corners = self.corners(false);
+                // The word rides the far end of the edge the stem opens, set in
+                // from the corner so it reads as a label on the frame rather
+                // than as the frame running out.
                 self.box_edge(
                     x,
                     glyphs.y,
                     room,
                     corners,
-                    (&stem, &tail),
+                    (STEM, &word_tail(text)),
                     state.add_modifier(dim),
                 );
                 return;
@@ -4434,15 +4429,11 @@ impl Painter<'_> {
             return;
         }
 
-        // Unreachable for the three above, which return; drawn as the bar rather
-        // than asserted, because this workspace aborts on a panic and a dead
-        // monitor is a worse answer than a mark in the wrong ink.
+        let reply = self.theme.note_reply.add_modifier(dim);
         let (glyph, glyph_ink) = match lead {
             NoteLead::Reply => (WRAPPED, reply),
             NoteLead::Blank => (' ', reply),
-            NoteLead::Bar | NoteLead::Top | NoteLead::Body | NoteLead::Bottom => {
-                (NOTE_BAR, state.add_modifier(dim))
-            }
+            _ => (NOTE_BAR, state.add_modifier(dim)),
         };
         // The word first, at the right edge, so the lead and the text are both
         // bounded by what it leaves.
@@ -4463,7 +4454,7 @@ impl Painter<'_> {
         let spent = usize::from(next - x);
         let body = match lead {
             NoteLead::Reply | NoteLead::Blank => reply,
-            _ => ink,
+            _ => self.theme.chrome_dim.add_modifier(dim),
         };
         self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), body);
     }
@@ -4487,14 +4478,9 @@ impl Painter<'_> {
         }
         let x = glyphs.x.saturating_add(origin as u16);
         let frame = self.theme.note_frame;
-        let rounded = !matches!(self.glyphs, Glyphs::Block);
         match part {
             BoxPart::Top { label } => {
-                let corners = if rounded {
-                    ('╭', '╮')
-                } else {
-                    ('┌', '┐')
-                };
+                let corners = self.corners(true);
                 // The label between the corners, with a rule after it: the whole
                 // anchor, then the anchor alone, then the anchor's tail marked
                 // the way a heading's path is, down to the mark by itself.
@@ -4528,15 +4514,21 @@ impl Painter<'_> {
                 }
             }
             BoxPart::Bottom => {
-                let corners = if rounded {
-                    ('╰', '╯')
-                } else {
-                    ('└', '┘')
-                };
+                let corners = self.corners(false);
                 let inner = room - 2;
                 let hint = widest_fitting_or_last(&BOX_HINT_RUNGS, inner);
                 self.box_edge(x, glyphs.y, room, corners, (hint, ""), frame);
             }
+        }
+    }
+
+    /// The corners a framed surface draws, rounded where the font carries them.
+    fn corners(&self, top: bool) -> (char, char) {
+        match (matches!(self.glyphs, Glyphs::Block), top) {
+            (true, true) => ('┌', '┐'),
+            (true, false) => ('└', '┘'),
+            (false, true) => ('╭', '╮'),
+            (false, false) => ('╰', '╯'),
         }
     }
 

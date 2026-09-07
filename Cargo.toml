@@ -71,7 +71,7 @@ tinyvec = ">=1.12, <1.13"
 # false` drops the DSL, and with it `anpa`. It adds `bon` and `micromath` and no
 # C toolchain; `compact_str` and `unicode-width` are already here beneath
 # ratatui-core, and `thiserror` beneath gix. See `SPEC.md` §6.
-tachyonfx = { version = "0.25", default-features = false, features = ["std"] }
+tachyonfx = { version = "0.25", default-features = false, features = ["std", "dsl"] }
 # The note box's editor, SPEC.md section 11.2 B21: the text, the caret, the
 # editing keys and undo. Under the `ratatui` organisation like tachyonfx above.
 # The shell draws its cells itself, so the widget half of the crate is unused
