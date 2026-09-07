@@ -1574,17 +1574,10 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-<<<<<<< HEAD
-    ("SPEC.md", 391134),
-    ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 93108),
-    ("RULINGS.md", 98835),
-=======
-    ("SPEC.md", 390958),
+    ("SPEC.md", 391059),
     ("REVOCATIONS.md", 6560),
     ("ROADMAP.md", 93038),
-    ("RULINGS.md", 98840),
->>>>>>> d7374b6 (Both documents stop claiming what a prompting session does with a note)
+    ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
