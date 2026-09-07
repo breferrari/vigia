@@ -2512,7 +2512,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     let capacity = usize::from(body).saturating_sub(SHEET_FRAME);
     // The floor, stated once and early rather than folded into the rung sequence. Below
     // it no rung fits on the height axis at all, and not only the paged ones: the
-    // shortest rung above them is the two-column one, which is many times it.
+    // shortest rung above them is the two-column one, which is many times as tall.
     if capacity < SHEET_KEEP {
         return None;
     }
