@@ -1582,6 +1582,38 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
 
+/// `SPEC.md` names every key the config file accepts.
+///
+/// A count in prose has nothing holding it to the list it counts, so the document
+/// said five for as long as it took two more keys to land. The paragraph is found
+/// by the path it names rather than by a section number, which moves.
+#[test]
+fn the_spec_names_every_key_the_config_file_accepts() {
+    let spec = repo_file("SPEC.md");
+    let spelt = |line: &str| {
+        vigia::config::KEYS
+            .into_iter()
+            .filter(|key| line.contains(&format!("`{key}`")))
+            .count()
+    };
+    let named = spec
+        .lines()
+        .filter(|line| line.contains("~/.config/vigia/config"))
+        .max_by_key(|line| spelt(line))
+        .expect("SPEC.md names the config file at all");
+
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
+        .filter(|key| !named.contains(&format!("`{key}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the config file accepts {missing:?} and no paragraph of SPEC.md naming \
+         the file names them, so the document describes a surface the binary no \
+         longer has:\n{named}"
+    );
+}
+
 /// The graviola release whose `verify_cpu_features` the shell's guard mirrors.
 ///
 /// Bumping this means re-reading `low/x86_64/cpu.rs` and `low/aarch64/cpu.rs`
