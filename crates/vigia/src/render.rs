@@ -2085,8 +2085,7 @@ const KEYBOARD: [Gesture; 17] = [
         keys: ["c", "c"],
         verb: ["show or hide the note rows", "the note rows"],
     },
-    // The box's own keys, which reach nothing while it is closed and are the whole
-    // keymap while it is open. Both cells sit inside the field maxima above.
+    // Reach nothing while the box is closed, and are the whole keymap while it is open.
     Gesture {
         keys: ["Enter  Esc", "Enter  Esc"],
         verb: ["send the note, or cancel", "send the note"],
@@ -2106,10 +2105,10 @@ const KEYBOARD: [Gesture; 17] = [
 /// The order the height ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
 ///
-/// The box's keys rank second, behind the row the hint bar spells on every frame,
-/// so that adding them took no gesture off a narrow pane: they are the widest keys
-/// cell of the rows a dropping rung keeps, and ranking them anywhere later moves
-/// the sets a 30 and a 32 column pane reach.
+/// The box's keys rank second for the reason `q` ranks first: the box writes
+/// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
+/// pressed is the moment they are on screen. They are also the widest keys cell a
+/// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
 const DROP_ORDER: [usize; KEYBOARD.len()] =
     [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 15];
 
@@ -2148,11 +2147,11 @@ const MOUSE: [Gesture; 10] = [
         keys: ["drag the diff", "drag the diff"],
         verb: ["copy those rows", "copy rows"],
     },
-    // The tight spelling names the mark rather than the target, as `click  ✕` and
-    // `click  ▲ ▼` do: `click a number` is fourteen columns and the tight keys field
-    // is thirteen, so spelling it out would move every rung's width.
+    // Both spellings name the number, not the icon: the glyph cells above earn theirs by
+    // being on screen at rest, where the icon exists only under a pointer. The article is
+    // what comes out, at fourteen columns to a tight keys field of thirteen.
     Gesture {
-        keys: ["click a line number", "click  ✎"],
+        keys: ["click a line number", "click number"],
         verb: ["open a note there", "open a note"],
     },
     // The tail is the three rows this table most easily omits, and `README.md`'s Mouse

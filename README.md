@@ -149,7 +149,7 @@ It is scaled **across every tracked file**, not against the row's own maximum, a
 
 The dot marks the file named by the newest tick, and it lasts exactly one tick, so it **cuts rather than fades**. The path's own brightness is the same signal, slower: the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
 
-The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered when you move away, no row becomes special, and the next key means exactly what it would have meant. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone.
+The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered because you looked at it, no row becomes special by being pointed at, and the next key means exactly what it would have meant, unless you have a note box open, which is the one thing here you are inside until you leave it. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone. A line you left a note on stays marked, and that is not a selection either: you put it there, it outlives the pane, and it goes when the note does.
 
 The counters lend colour only where it says something: a `-0` stays grey, because a zero is not reporting a removal.
 
@@ -530,13 +530,14 @@ Same shape as the theme file: one key per line, `#` for a comment, and a key it 
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what "no polling timer" requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
 | [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a change can be seen arriving. It schedules nothing, which is what keeps "no polling timer" this program's own rule to keep |
+| [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text model, its caret and its undo. The shell draws the cells itself, so the box wraps by the same rule the note rows do |
 | [two-face](https://codeberg.org/CosmicHarper/two-face) | The grammars: [bat](https://github.com/sharkdp/bat)'s curated set, packaged for `syntect`. It builds the dump the binary carries and is itself absent from every shipped graph |
 
 Everything is pure Rust on purpose: a genuinely static Linux binary needs no cross toolchain, and macOS and Windows are plain tier-1 targets.
 
 ## 🗺️ Status
 
-`🚧` **Early, and released.** The install lines above are live. The surface is one optional path and `--version`, on purpose, and look and feel is where the work is.
+`🚧` **Early, and released.** The install lines above are live. The surface is one optional path, `--version`, and the word `mcp` for the notes server, on purpose, and look and feel is where the work is.
 
 | | Phase | |
 |---|---|---|
