@@ -132,7 +132,9 @@ pub struct Note {
     pub body: String,
     /// Where it stands.
     pub status: Status,
-    /// The agent's line on a resolve, shown once as the note departs.
+    /// The agent's line: on a resolve, shown once as the note departs, and on
+    /// a `reply`, which answers without resolving and leaves the note waiting
+    /// on the reader.
     pub reply: Option<String>,
     /// When the reader pressed Enter, to the second.
     pub written: SystemTime,

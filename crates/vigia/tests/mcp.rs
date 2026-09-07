@@ -14,11 +14,11 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use vigia::mcp::{
-    Hooked, PROJECT_VAR, PROTOCOL_VERSIONS, RESOURCE_URI, SOCKET_VAR, Server, TOKEN_VAR,
-    hook_payload, hooked, pending_line,
+    Hooked, PROJECT_VAR, PROTOCOL_VERSIONS, Pending, RESOURCE_URI, SOCKET_VAR, Server, TOKEN_VAR,
+    hook_payload, hooked, pending_line, pending_of,
 };
 use vigia::{VERSION, state_root};
-use vigia_core::{Note, Registry, Side, Status, Store};
+use vigia_core::{Listing, Note, Registry, Side, Status, Store};
 
 use support::{Scratch, TempDir, budget, files_in, note, numbered_lines};
 
@@ -1333,14 +1333,63 @@ fn a_hook_with_nothing_to_do_is_silent_rather_than_failing() {
     }
 }
 
+/// A listing of notes in the states given, which is all `pending_of` reads.
+fn listing_of(states: &[(Status, Option<&str>)]) -> Listing {
+    let notes = states
+        .iter()
+        .enumerate()
+        .map(|(n, (status, reply))| {
+            let mut note = note(&format!("n{n}"), 5, "a line", "a body");
+            note.status = *status;
+            note.reply = reply.map(str::to_owned);
+            note
+        })
+        .collect();
+    Listing {
+        notes,
+        skipped: Vec::new(),
+    }
+}
+
+#[test]
+fn the_pending_count_splits_by_what_each_note_waits_on() {
+    // The half of this that lived inside `pending`, where no test could reach
+    // it, which is why the count and the word for it drifted apart.
+    let listing = listing_of(&[
+        (Status::Open, None),
+        (Status::Seen, None),
+        (Status::Seen, Some("which of the two callers did you mean?")),
+        (Status::Resolved, Some("done")),
+    ]);
+    assert_eq!(
+        pending_of(&listing),
+        Pending {
+            open: 1,
+            read: 1,
+            replied: 1
+        },
+        "a resolved note is not pending, and the other three are waiting on \
+         different people"
+    );
+    assert_eq!(pending_of(&listing_of(&[])), Pending::default());
+}
+
 #[test]
 fn the_pending_line_counts_notes_and_says_nothing_about_none() {
     // The line a `UserPromptSubmit` hook puts in front of the agent. An empty
     // store costs the reader's next prompt nothing at all.
-    assert_eq!(pending_line(0), None);
-    let one = pending_line(1).expect("one note is a line");
+    assert_eq!(pending_line(Pending::default()), None);
+    let one = pending_line(Pending {
+        open: 1,
+        ..Pending::default()
+    })
+    .expect("one note is a line");
     assert!(one.starts_with("1 open note in vigia"), "{one}");
-    let many = pending_line(4).expect("four notes are a line");
+    let many = pending_line(Pending {
+        open: 4,
+        ..Pending::default()
+    })
+    .expect("four notes are a line");
     assert!(many.starts_with("4 open notes in vigia"), "{many}");
     for line in [&one, &many] {
         assert!(
@@ -1348,6 +1397,69 @@ fn the_pending_line_counts_notes_and_says_nothing_about_none() {
             "the line does not name the tool that reads them: {line}"
         );
     }
+}
+
+#[test]
+fn a_note_the_agent_has_already_read_is_not_called_open() {
+    // The defect reported from use: every prompt until a resolve asked the
+    // agent to read what it had read, and called a `Seen` note `open`.
+    let line = pending_line(Pending {
+        read: 1,
+        ..Pending::default()
+    })
+    .expect("a read note is a line");
+    assert!(
+        !line.contains("open"),
+        "a note the agent has listed is still called open: {line}"
+    );
+    assert!(
+        !line.contains("tool to read"),
+        "the line asks for a read the agent has already done: {line}"
+    );
+    assert!(
+        line.contains("resolve"),
+        "the line does not say what is actually owed: {line}"
+    );
+}
+
+#[test]
+fn a_note_the_agent_answered_says_it_waits_on_the_reader() {
+    // `reply` answers without resolving, for a question back to the reader, so
+    // this is the one state where the agent owes nothing at all. It is also the
+    // state the report says the old line nagged hardest.
+    let line = pending_line(Pending {
+        replied: 1,
+        ..Pending::default()
+    })
+    .expect("a replied note is a line");
+    assert!(
+        line.contains("waiting on the reader"),
+        "the line does not say who the note waits on: {line}"
+    );
+    for owed in ["open", "tool to read", "Resolve"] {
+        assert!(
+            !line.contains(owed),
+            "an answered note is told it owes {owed:?}: {line}"
+        );
+    }
+}
+
+#[test]
+fn a_store_in_every_state_names_each_of_them_once() {
+    // The mixed store, which a fix that branched on only one state would pass.
+    let line = pending_line(Pending {
+        open: 2,
+        read: 1,
+        replied: 3,
+    })
+    .expect("seven notes are a line");
+    for part in ["2 open notes", "1 note", "3 notes"] {
+        assert!(line.contains(part), "{part:?} is not in the line: {line}");
+    }
+    assert!(
+        line.contains("waiting on the reader") && line.contains("resolve"),
+        "the mixed line drops one of the three things a reader can be owed: {line}"
+    );
 }
 
 /// Run `vigia mcp <word>` the way a hook runs it: the payload on stdin, the
