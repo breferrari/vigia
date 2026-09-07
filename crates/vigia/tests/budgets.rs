@@ -1974,7 +1974,7 @@ fn a_frame_with_fifty_notes_on_screen_holds_the_frame_budget() {
     let placed = |word: &str| {
         view.rows
             .iter()
-            .filter(|row| matches!(row, Row::Note { word: Some(w), .. } if *w == word))
+            .filter(|row| matches!(row, Row::Note { state, last: true, .. } if *state == word))
             .count()
     };
     assert!(

@@ -690,16 +690,17 @@ fn a_press_on_the_gutter_opens_the_box_and_writes_nothing() {
             .contains(Modifier::REVERSED),
         "no caret in the empty box"
     );
-    // The frame and its labels in the chrome's dim, so nothing reads as code.
-    let dim = Theme::default().chrome_dim.fg;
-    assert_eq!(opened.fg(origin, y + 1), dim);
-    assert_eq!(opened.fg(origin + 3, y + 3), dim);
+    // The frame and its labels in the note's own ink, so nothing reads as code
+    // and a palette can colour the surface without moving the pane's furniture.
+    let frame = Theme::default().note_frame.fg;
+    assert_eq!(opened.fg(origin, y + 1), frame);
+    assert_eq!(opened.fg(origin + 3, y + 3), frame);
     // The line keeps the note's ink while the box is open, so the box can be
     // traced to it from across the pane.
     let five = (left..origin)
         .find(|x| opened.cell(*x, y).symbol() == "5")
         .expect("the anchored line's number");
-    assert_eq!(opened.fg(five, y), Theme::default().bar_hover.fg);
+    assert_eq!(opened.fg(five, y), Theme::default().note_line.fg);
     assert!(
         opened
             .cell(five, y)
@@ -902,7 +903,7 @@ fn a_press_on_a_noted_line_reopens_the_box_with_its_text_and_an_emptied_box_with
     let five = (left..reopened.gutter().2)
         .find(|x| reopened.cell(*x, y).symbol() == "5")
         .expect("the anchored line's number");
-    assert_eq!(reopened.fg(five, y), Theme::default().bar_hover.fg);
+    assert_eq!(reopened.fg(five, y), Theme::default().note_line.fg);
 
     // Emptied and sent, the note is withdrawn: one open note per line, and
     // this is how the reader takes it back.
@@ -1496,7 +1497,7 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
     let five = (left..origin)
         .find(|x| painted.cell(*x, y).symbol() == "5")
         .unwrap_or_else(|| panic!("the number was replaced:\n{}", painted.text(y)));
-    assert_eq!(painted.fg(five, y), theme.bar_hover.fg);
+    assert_eq!(painted.fg(five, y), theme.note_line.fg);
 
     // Two rows under it: the bar at the content origin with a blank gutter behind
     // it, the body in the chrome's dim ink, and the word on the last row.
@@ -1511,8 +1512,8 @@ fn a_note_draws_under_its_line_with_a_bar_the_body_and_the_word() {
         assert_eq!(text.chars().nth(usize::from(origin)), Some('▎'));
         assert_eq!(
             painted.fg(origin, row),
-            theme.bar_hover.fg,
-            "the bar is not in the note's ink"
+            theme.note_open.fg,
+            "the bar is not in the open state's ink"
         );
         assert_eq!(
             painted.fg(origin + 2, row),
@@ -2265,7 +2266,7 @@ fn c_hides_the_rows_and_keeps_the_mark() {
     let five = (left..origin)
         .find(|x| hidden.cell(*x, y).symbol() == "5")
         .expect("the number");
-    assert_eq!(hidden.fg(five, y), Theme::default().bar_hover.fg);
+    assert_eq!(hidden.fg(five, y), Theme::default().note_line.fg);
     assert_eq!(
         hidden.view.marked_at(usize::from(y - hidden.laid.diff.top)),
         vec!["n1"]
@@ -2798,7 +2799,7 @@ fn a_persisted_mark_is_bold_where_the_pointers_is_not() {
             .add_modifier
             .contains(Modifier::BOLD)
     );
-    assert_eq!(noted.fg(icon, y), rig.theme.bar_hover.fg);
+    assert_eq!(noted.fg(icon, y), rig.theme.note_line.fg);
     // And the noted number differs from a plain one by more than colour, which is
     // what a palette with no colour is left with.
     assert_ne!(
@@ -3083,7 +3084,9 @@ fn a_note_rows_lead_never_overwrites_its_word() {
         );
         for (offset, row) in painted.view.rows.iter().enumerate() {
             let Row::Note {
-                word: Some(word), ..
+                state: word,
+                last: true,
+                ..
             } = row
             else {
                 continue;
@@ -3216,8 +3219,8 @@ fn a_seen_landing_from_another_handle_crossfades_the_word() {
     rig.advance(RESOLVE_ARRIVING);
     let settled = rig.paint(&mut frame, PANE, Pointing::default());
     assert!(
-        (word.x..word.right()).all(|x| settled.fg(x, word.y) == Some(dim)),
-        "the crossfade ran its length and the word did not settle on the chrome's dim"
+        (word.x..word.right()).all(|x| settled.fg(x, word.y) == rig.theme.note_seen.fg),
+        "the crossfade ran its length and the word did not settle on the seen state's ink"
     );
     assert!(
         !rig.effects.is_running(),
@@ -3938,4 +3941,152 @@ fn a_note_that_replies_and_resolves_in_one_wake_departs_once() {
         now,
     );
     assert_eq!(changes, vec![Change::Resolved("n1".to_owned())]);
+}
+
+/// The ink the word `needle` is drawn in on `painted`, read from the cell its
+/// last character stands in.
+fn word_ink(painted: &Painted, needle: &str) -> Option<Color> {
+    let diff = painted.laid.diff;
+    for y in diff.top..diff.top + diff.rows {
+        let row: Vec<char> = painted.text(y).chars().collect();
+        let want: Vec<char> = needle.chars().collect();
+        // By character rather than by byte: the row carries `▎`, which is three.
+        if let Some(at) = row
+            .windows(want.len())
+            .position(|run| run == want.as_slice())
+        {
+            let last = at + want.len() - 1;
+            return painted.fg(u16::try_from(last).expect("a sane column"), y);
+        }
+    }
+    panic!("no row draws {needle:?}:\n{}", painted.rows().join("\n"));
+}
+
+#[test]
+fn the_four_states_draw_their_word_and_their_bar_in_four_different_inks() {
+    // One fixture per state, since a state is a fact about the note and the diff
+    // together and no one frame holds all four.
+    let mut inks: Vec<(&str, Option<Color>, Option<Color>)> = Vec::new();
+
+    for (word, status) in [("open", Status::Open), ("seen", Status::Seen)] {
+        let scratch = fixture(&format!("notes-ink-{word}"));
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut rig = Rig::open(&scratch);
+        rig.store
+            .put(&left_as("n1", "the reader's words", status, None))
+            .expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        let y = painted.row_of(EDITED);
+        let (_, _, origin) = painted.gutter();
+        inks.push((word, word_ink(&painted, word), painted.fg(origin, y + 1)));
+    }
+
+    // The line is edited under the note, so its stored text is no longer there.
+    {
+        let scratch = fixture("notes-ink-changed");
+        scratch.edit_line(PATH, 4, "edited out from under the note");
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut rig = Rig::open(&scratch);
+        rig.store
+            .put(&note("n1", 5, EDITED, "the reader's words"))
+            .expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        let y = painted.row_of("edited out from under the note");
+        let (_, _, origin) = painted.gutter();
+        inks.push((
+            "changed",
+            word_ink(&painted, "changed"),
+            painted.fg(origin, y + 1),
+        ));
+    }
+
+    // The file leaves the diff entirely, so the note draws under the heading.
+    {
+        let scratch = fixture("notes-ink-gone");
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut rig = Rig::open(&scratch);
+        rig.store
+            .put(&note("n1", 5, EDITED, "the reader's words"))
+            .expect("put");
+        rig.reload();
+        scratch.remove(PATH);
+        frame.advance().expect("advance after the delete");
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        let heading = painted.row_of("watch.rs");
+        let (_, _, origin) = painted.gutter();
+        inks.push((
+            "gone",
+            word_ink(&painted, "gone"),
+            painted.fg(origin, heading + 1),
+        ));
+    }
+
+    assert_eq!(inks.len(), 4);
+    for (word, ink, bar) in &inks {
+        assert!(ink.is_some(), "{word} drew its word in no ink at all");
+        assert_eq!(
+            ink, bar,
+            "{word} draws its word and its bar in different inks, so the bar says \
+             nothing the word does not"
+        );
+    }
+    for (at, (first, ink, _)) in inks.iter().enumerate() {
+        for (second, other, _) in inks.iter().skip(at + 1) {
+            assert_ne!(
+                ink, other,
+                "{first} and {second} draw in one ink on the pane, so a reader has to \
+                 read the word to tell them apart"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_box_frame_takes_the_notes_own_ink_and_not_the_chromes() {
+    // The frame is one of the four things the report named, and it drew in the
+    // key that paints every other piece of furniture on the pane.
+    let scratch = fixture("notes-frame-ink");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let (left, _, origin) = painted.gutter();
+    assert!(rig.press_opens(&painted, left + 1, y));
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+
+    let edge = opened
+        .view
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                Row::Box {
+                    part: BoxPart::Top { .. }
+                }
+            )
+        })
+        .expect("the box's top edge");
+    let at = opened.laid.diff.top + u16::try_from(edge).expect("a sane row");
+    assert_eq!(
+        opened.fg(origin, at),
+        rig.theme.note_frame.fg,
+        "the box's frame is not in the note's own ink:\n{}",
+        opened.rows().join("\n")
+    );
+    assert_ne!(
+        rig.theme.note_frame.fg, rig.theme.chrome_dim.fg,
+        "the palette draws the note's frame in the chrome's dim, so this gate \
+         cannot tell the two apart"
+    );
 }

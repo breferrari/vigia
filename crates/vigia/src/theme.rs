@@ -162,6 +162,28 @@ palette! {
     /// Something that is not diff content: a binary file, a conflict, and the
     /// footer's word when it has news rather than a problem.
     note,
+
+    /// The note box's border and both its labels. The surface's own rather than
+    /// the chrome's, so a palette can colour what carries state without
+    /// repainting every piece of furniture on the pane.
+    note_frame,
+    /// The number of a line carrying a note, drawn over the gutter's own and
+    /// bold. Bold is what survives a palette with no colour, and it is what
+    /// keeps a persisted mark brighter than a pointer resting on it.
+    note_line,
+    /// A note the agent has not read yet, on the `▎` and the status word
+    /// together. The four state inks are the one part of this surface a reader
+    /// takes in without reading it, which is why they are keyed by state.
+    note_open,
+    /// A note the agent has read, and one it has resolved for as long as that
+    /// departure draws: the same fact one step on, and already leaving.
+    note_seen,
+    /// A note whose line was edited under it, so the anchor no longer carries
+    /// the text it was pinned to.
+    note_changed,
+    /// A note whose line has left the diff, drawn under the file's heading.
+    note_gone,
+
     /// Something went wrong and the reader should know.
     alert,
 
@@ -218,6 +240,24 @@ impl Theme {
             out.selection = out.selection.add_modifier(Modifier::REVERSED);
         }
         out
+    }
+
+    /// The ink a note's `▎` and its status word both take, chosen by the word
+    /// the walk placed there.
+    ///
+    /// `resolved` shares `note_seen`: it is the same fact one step further on,
+    /// and a resolving note is already leaving. A word this does not know falls
+    /// back to the frame's ink, so a state added without one still reads as the
+    /// note's rather than as furniture; `palette.rs` gates that none exists.
+    #[must_use]
+    pub fn note_ink(&self, word: &str) -> Style {
+        match word {
+            "open" => self.note_open,
+            "seen" | "resolved" => self.note_seen,
+            "changed" => self.note_changed,
+            "gone" => self.note_gone,
+            _ => self.note_frame,
+        }
     }
 
     /// The style a file heading is drawn in at `recency`.
@@ -407,6 +447,24 @@ impl Theme {
             // terminal's own scheme put there, so it is visible on both.
             selection: Style::new().add_modifier(Modifier::REVERSED),
             note: fg(Color::Magenta),
+            // Magenta, which `note` already spends on the agent's own announcement,
+            // so the surface and the thing that answers it agree. Seen takes blue
+            // rather than the second magenta: two stops of one hue is what sixteen
+            // names hold, and these four need four. The frame takes the note's hue
+            // too: grey would leave the box the colour it was reported as, and it never
+            // shares a screen with an open note's word, since the box stands in for the
+            // rows of the note it holds.
+            note_frame: fg(Color::Magenta),
+            note_line: fg(Color::LightMagenta),
+            note_open: fg(Color::Magenta),
+            note_seen: fg(Color::Blue),
+            // Yellow rather than a third magenta this palette does not have, and it
+            // is the hue `heat_mixed` already spends on changed rather than added or
+            // removed, which is what this word means.
+            note_changed: fg(Color::Yellow),
+            // Grey, so a note whose line has gone steps back rather than competing
+            // with a live one for the eye.
+            note_gone: fg(Color::Gray),
             alert: fg(Color::Red).add_modifier(Modifier::BOLD),
             // The mockup's hues, mapped onto the sixteen names every terminal resolves.
             keyword: fg(Color::LightRed),
@@ -489,6 +547,19 @@ impl Theme {
             // worse off than the diff already leaves it.
             selection: Style::new().bg(Color::Rgb(0x2c, 0x36, 0x4e)),
             note: rgb(0xd2, 0xa8, 0xff),
+            // `note`'s own purple for a note nobody has read, cooling to blue once
+            // one has: a dimmer purple quantises onto the loud one at sixteen colours,
+            // which is where these four have to stay apart. The frame sits at the
+            // chrome's dim weight in the note's hue, so the box reads as the note's.
+            note_frame: rgb(0x9c, 0x8b, 0xb8),
+            note_line: rgb(0xd2, 0xa8, 0xff),
+            note_open: rgb(0xd2, 0xa8, 0xff),
+            note_seen: rgb(0x79, 0xc0, 0xff),
+            // The amber `type_name` already carries, for the same reason `ansi`
+            // reaches for yellow: changed is neither added nor removed.
+            note_changed: rgb(0xff, 0xa6, 0x57),
+            // The chrome's own dim, so a gone note recedes into the furniture.
+            note_gone: rgb(0x8b, 0x94, 0x9e),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
             type_name: rgb(0xff, 0xa6, 0x57),
@@ -565,6 +636,14 @@ impl Theme {
             // every other pair here is.
             selection: Style::new().bg(Color::Rgb(0xcf, 0xe0, 0xf7)),
             note: rgb(0x82, 0x50, 0xdf),
+            // The dark palette's scheme re-picked at light-background luminance, as
+            // every other pair here is.
+            note_frame: rgb(0x6e, 0x5a, 0x8f),
+            note_line: rgb(0x82, 0x50, 0xdf),
+            note_open: rgb(0x82, 0x50, 0xdf),
+            note_seen: rgb(0x09, 0x69, 0xda),
+            note_changed: rgb(0x95, 0x38, 0x00),
+            note_gone: rgb(0x59, 0x63, 0x6e),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),
             keyword: rgb(0xcf, 0x22, 0x2e),
             type_name: rgb(0x95, 0x38, 0x00),
