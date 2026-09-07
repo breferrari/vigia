@@ -1574,9 +1574,9 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 391033),
+    ("SPEC.md", 391060),
     ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 93111),
+    ("ROADMAP.md", 93108),
     ("RULINGS.md", 98840),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
