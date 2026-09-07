@@ -59,8 +59,14 @@ fi
 # The list is tuned against the 143 subjects this repository had at 0.38.0 and
 # is a heuristic, not a rule: it will pass something internal through, and the
 # cost of that is one odd line in a release note rather than a broken release.
+#
+# `token` is bounded the long way round rather than with `\b`, which is a GNU
+# extension that POSIX ERE does not define. The release runs this on one runner
+# whose grep has it, but the test that drives the filter is `cfg(unix)` and so
+# runs wherever the suite does. Unbounded, the word would swallow `tokenizer`,
+# which in a syntax highlighter is a subject a reader can see.
 internal_prefix='^(roadmap|spec|docs?|ci|chore|deps?|take-next|skill|test|refactor|perf|style|build|process|steering|mockup|harden|release|vault writes)(\([^)]*\))?: '
-internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|written layer|phase [0-9]|the shelf|shelved|readme|claude\.md|clippy|cargo doc|ci complete|workflow|pre-flight|version raise|release note|the release |the bump |\btokens?\b|take-next|the skill|the harness|the record|budget table|mutation|audit|ceiling|proposal|declined|adopted|review agent|assertion|the mockup|funding|\.yml|§|^track the |^#[0-9]|^b[0-9]+[ :]|^[0-9]+\.[0-9]+,)'
+internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|written layer|phase [0-9]|the shelf|shelved|readme|claude\.md|clippy|cargo doc|ci complete|workflow|pre-flight|version raise|release note|the release |the bump |(^|[^a-zA-Z])tokens?([^a-zA-Z]|$)|take-next|the skill|the harness|the record|budget table|mutation|audit|ceiling|proposal|declined|adopted|review agent|assertion|the mockup|funding|\.yml|§|^track the |^#[0-9]|^b[0-9]+[ :]|^[0-9]+\.[0-9]+,)'
 
 # `|| true` on both greps, because grep exits 1 when it filters everything out
 # and `set -e` would kill the script on the assignment rather than let the
