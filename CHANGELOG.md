@@ -4,6 +4,12 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.39.0] - 2026-09-07
+
+- The note is enclosed, its answer descends from it, and the pane's motions move to the DSL
+- The guard reads a release's notes, and stops refusing their path
+- A release says what changed, and CHANGELOG.md lists every version
+
 ## [0.38.0] - 2026-09-07
 
 ### Changed
