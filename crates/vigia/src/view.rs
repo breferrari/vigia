@@ -1193,27 +1193,6 @@ impl View {
                 .filter(|note| runs_of.get(note.path.as_str()).is_none_or(Vec::is_empty))
                 .count();
         }
-        // A file staged and then edited further is a diff in each run and the note
-        // belongs under one: the run its line resolves best in, the earlier index on a
-        // tie, which is the unstaged one since `Frame::advance` lays that run down
-        // first. `vigia mcp` places by the same rule; only a path in both runs pays.
-        let mut chosen: HashMap<&str, usize> = HashMap::new();
-        for (path, indices) in &runs_of {
-            if indices.len() < 2 {
-                continue;
-            }
-            if let Some(here) = by_path.get(*path) {
-                for (note, at) in here.iter().zip(run_of(frame, indices, here)) {
-                    chosen.insert(note.id.as_str(), at);
-                }
-            }
-        }
-        // The box takes the same decision, and needs it twice over: its assignment in
-        // [`Self::take_file`] is unconditional, so a later entry would take it there.
-        let boxed_run = draft.as_ref().and_then(|standing| {
-            let indices = runs_of.get(standing.note.path.as_str())?;
-            (indices.len() > 1).then(|| run_of(frame, indices, &[&standing.note])[0])
-        });
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.
             view.top.row = 0;
@@ -1235,6 +1214,29 @@ impl View {
         } else {
             (0, files)
         };
+
+        // A file staged and then edited further is a diff in each run and the note
+        // belongs under one: the run its line resolves best in, the earlier index on a
+        // tie. Resolving it costs the entry the walk was not going to read, so it is
+        // asked only of a path the walk can still reach, which is one file in `single`.
+        let reachable = view.top.file..stop;
+        let mut chosen: HashMap<&str, usize> = HashMap::new();
+        let mut boxed_run = None;
+        for (path, indices) in &runs_of {
+            if indices.len() < 2 || !indices.iter().any(|at| reachable.contains(at)) {
+                continue;
+            }
+            if let Some(here) = by_path.get(*path) {
+                for (note, at) in here.iter().zip(crate::notes::run_of(frame, indices, here)) {
+                    chosen.insert(note.id.as_str(), at);
+                }
+            }
+            // Its assignment in [`Self::take_file`] is unconditional, so without this a
+            // later entry answering to the same path would take the box off its line.
+            if let Some(standing) = draft.as_ref().filter(|held| held.note.path == **path) {
+                boxed_run = Some(crate::notes::run_of(frame, indices, &[&standing.note])[0]);
+            }
+        }
 
         let mut index = view.top.file;
         let mut skip = position.row;
@@ -2128,34 +2130,6 @@ fn place_box(
         lines: stand_in.lines.to_vec(),
         cursor: stand_in.cursor,
     })
-}
-
-/// The entry of `indices` each of `notes` draws under: the one its line resolves
-/// best in, the earliest index on a tie.
-///
-/// A diff the frame cannot read ranks there as a missing line rather than ending
-/// the frame: this reaches entries the walk never would, so a failure here is not
-/// one the screen was going to meet.
-fn run_of(frame: &mut Frame, indices: &[usize], notes: &[&Note]) -> Vec<usize> {
-    let mut best = vec![(0u8, indices[0]); notes.len()];
-    for &index in indices {
-        let Ok((_, diff)) = frame.diff(index) else {
-            continue;
-        };
-        let mut on_new: Option<Vec<(u32, &str)>> = None;
-        let mut on_old: Option<Vec<(u32, &str)>> = None;
-        for (held, note) in best.iter_mut().zip(notes) {
-            let rows = match note.side {
-                Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
-                Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
-            };
-            let rank = resolve(note, rows).rank();
-            if rank > held.0 {
-                *held = (rank, index);
-            }
-        }
-    }
-    best.into_iter().map(|(_, index)| index).collect()
 }
 
 /// Place each of a file's notes on the logical row that draws its line, or on

@@ -374,25 +374,22 @@ impl Site {
             };
             return Placed::adrift(context);
         }
-        let mut best: Option<Placed> = None;
-        for &index in &indices {
-            let Ok((change, diff)) = frame.diff(index) else {
-                continue;
-            };
-            let placed = self.placed_in(change.path.clone(), diff, note);
-            if best.as_ref().is_none_or(|held| placed.rank() > held.rank()) {
-                best = Some(placed);
+        let at = notes::run_of(frame, &indices, &[note])[0];
+        match frame.diff(at) {
+            Ok((change, diff)) => {
+                let path = change.path.clone();
+                self.placed_in(path, diff, note)
             }
+            // A diff the frame cannot read is still a file in the diff, which the
+            // pane draws with its reason and the note under its heading as gone.
+            Err(_) => Placed {
+                placement: Some(Placement::Gone),
+                current_line: None,
+                current_text: None,
+                current_path: Some(frame.files()[at].path.clone()),
+                context: Vec::new(),
+            },
         }
-        // A diff the frame cannot read is still a file in the diff, which the
-        // pane draws with its reason and the note under its heading as gone.
-        best.unwrap_or_else(|| Placed {
-            placement: Some(Placement::Gone),
-            current_line: None,
-            current_text: None,
-            current_path: Some(frame.files()[indices[0]].path.clone()),
-            context: Vec::new(),
-        })
     }
 
     /// The note placed against one file's diff, listed under `current_path`.
@@ -523,13 +520,6 @@ impl Placed {
             current_path: None,
             context,
         }
-    }
-
-    /// How well the line was found, for choosing between two runs of one path.
-    /// A diff the frame could not read placed the note nowhere, which ranks
-    /// with the run that does not hold its line.
-    fn rank(&self) -> u8 {
-        self.placement.map_or(0, Placement::rank)
     }
 }
 
