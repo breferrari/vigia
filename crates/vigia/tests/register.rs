@@ -565,6 +565,16 @@ fn no_table_row_is_missing_a_cell() {
             } else if want.is_none() && lines.get(n + 1).is_some_and(|next| is_rule(next)) {
                 want = Some(cells(line));
                 n += 1;
+            } else if want.is_none() {
+                // A row with no table above it. Prose between two rows ends the
+                // first table, and the rows under it are then lazy continuation
+                // of that paragraph: they render as literal pipes rather than as
+                // a row, and every gate over the key they document still finds
+                // it, because the text is all still there.
+                broken.push(format!(
+                    "  {name}:{} is a table row with no header above it",
+                    n + 1
+                ));
             } else if want.is_some_and(|width| cells(line) != width) {
                 broken.push(format!(
                     "  {name}:{} has {} cells, its table has {}",
