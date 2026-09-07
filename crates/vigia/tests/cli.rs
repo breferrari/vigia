@@ -1,4 +1,5 @@
-//! The whole CLI surface, which is one positional path and one flag.
+//! The whole CLI surface: one positional path, one flag, and the word `mcp` with
+//! its own two.
 
 use std::ffi::OsString;
 use std::process::Command;
