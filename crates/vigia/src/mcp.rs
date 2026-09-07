@@ -772,14 +772,6 @@ pub struct Pending {
     pub replied: usize,
 }
 
-impl Pending {
-    /// Notes in any of the three states.
-    #[must_use]
-    pub fn total(self) -> usize {
-        self.open + self.read + self.replied
-    }
-}
-
 /// What a listing is waiting on, which is the half of this that no test could
 /// reach while it lived inside [`pending`].
 #[must_use]

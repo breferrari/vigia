@@ -1417,8 +1417,8 @@ fn a_note_the_agent_has_already_read_is_not_called_open() {
         "the line asks for a read the agent has already done: {line}"
     );
     assert!(
-        line.contains("resolve"),
-        "the line does not say what is actually owed: {line}"
+        line.contains("Resolve it with the resolve tool"),
+        "the line describes the state and never asks for the resolve: {line}"
     );
 }
 
@@ -1446,19 +1446,23 @@ fn a_note_the_agent_answered_says_it_waits_on_the_reader() {
 
 #[test]
 fn a_store_in_every_state_names_each_of_them_once() {
-    // The mixed store, which a fix that branched on only one state would pass.
+    // The mixed store, which a fix branching on one state would pass, and the
+    // only place the plural of each arm is drawn. Whole string rather than
+    // substrings: the order the three are joined in is part of what ships, and
+    // a swap of two arms reads the same to any `contains`.
     let line = pending_line(Pending {
         open: 2,
-        read: 1,
+        read: 2,
         replied: 3,
     })
     .expect("seven notes are a line");
-    for part in ["2 open notes", "1 note", "3 notes"] {
-        assert!(line.contains(part), "{part:?} is not in the line: {line}");
-    }
-    assert!(
-        line.contains("waiting on the reader") && line.contains("resolve"),
-        "the mixed line drops one of the three things a reader can be owed: {line}"
+    assert_eq!(
+        line,
+        "2 open notes in vigia. Call the vigia MCP server's notes tool to read them. \
+         2 notes in vigia are read and not resolved. Resolve each with the resolve tool \
+         when its work is done. \
+         3 notes in vigia are waiting on the reader after your replies.",
+        "the mixed line is not what ships"
     );
 }
 
@@ -1557,7 +1561,7 @@ fn the_hook_words_register_count_and_clear() {
         !out.contains("open") && !out.contains("tool to read"),
         "a note the agent has listed is still asked for a read: {out:?}"
     );
-    assert!(out.contains("resolve"), "{out:?}");
+    assert!(out.contains("Resolve it with the resolve tool"), "{out:?}");
 
     pinned.reply = Some("which of the two callers did you mean?".to_owned());
     store.put(&pinned).expect("put it back as answered");
