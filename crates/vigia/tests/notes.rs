@@ -2166,6 +2166,61 @@ fn a_note_whose_path_a_rename_carried_into_the_other_run_goes_with_its_line() {
 }
 
 #[test]
+fn a_note_the_box_holds_stands_aside_in_the_run_the_box_is_not_drawn_in() {
+    // The box is opened on the unstaged run's line 8 and the reader then scrolls
+    // into the staged run, which draws the same line. The box has gone off screen
+    // with the row it is anchored to, and the note it holds does not take the
+    // chance to draw itself in the run that is left.
+    let scratch = in_both_runs("notes-runs-box-scrolled", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "held by the box"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    let y = both_occurrences(&painted, "line 8")[0];
+    let (left, _, _) = painted.gutter();
+    assert!(rig.press_opens(&painted, left + 1, y));
+    assert_eq!(rig.app.note_box().expect("the box").over(), Some("n1"));
+
+    let height = body_layout(
+        TALL,
+        &rig.app.chrome("fixture", None, Pointing::default(), 0, ""),
+        2,
+        2,
+    )
+    .diff;
+    rig.app
+        .apply(Action::Scroll(500), &mut frame, height)
+        .expect("scroll into the staged run");
+    let scrolled = rig.paint(&mut frame, TALL, Pointing::default());
+    assert!(
+        scrolled.rows().iter().any(|row| row.contains("staged six")),
+        "the scroll did not reach the staged run:
+{}",
+        scrolled.rows().join(
+            "
+"
+        )
+    );
+    assert_eq!(
+        note_rows(&scrolled, "n1"),
+        0,
+        "the note the box holds drew itself in the other run:
+{}",
+        scrolled.rows().join(
+            "
+"
+        )
+    );
+}
+
+#[test]
 fn a_deleted_file_draws_its_note_under_the_heading() {
     let scratch = fixture("notes-deleted");
     let worktree = scratch.worktree();
