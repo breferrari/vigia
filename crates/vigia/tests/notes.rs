@@ -3745,6 +3745,24 @@ fn a_withdrawal_departs_without_the_agents_line_and_leaves_no_file() {
         leaving.text(y + 1),
         "halfway through the dissolve the reader's words are drawn whole"
     );
+    // And it travels: halfway through, the half the sweep started on is the
+    // emptier one. Without this the gate holds for a dissolve in any direction,
+    // or none.
+    let width = dissolving.text(y + 2).chars().count() as u16;
+    let middle = (origin + width) / 2;
+    let cleared = |painted: &Painted, from: u16, to: u16| {
+        (y + 1..painted.after_notes(y))
+            .flat_map(|row| (from..to).map(move |x| (x, row)))
+            .filter(|(x, row)| painted.cell(*x, *row).symbol() == " ")
+            .count()
+    };
+    assert!(
+        cleared(&dissolving, origin, middle) > cleared(&dissolving, middle, width),
+        "the sweep did not clear the rows' left half ahead of their right:
+{}",
+        dissolving.rows().join("
+")
+    );
     assert!(
         dissolving
             .text(dissolving.after_notes(y))
