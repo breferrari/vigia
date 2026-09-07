@@ -1541,10 +1541,47 @@ fn the_hook_words_register_count_and_clear() {
     assert!(out.is_empty(), "an empty store put a line up: {out:?}");
 
     let store = Store::open(&state, scratch.root()).expect("store");
-    store.put(&note("n1", 1, "one", "look here")).expect("put");
+    let mut pinned = note("n1", 1, "one", "look here");
+    store.put(&pinned).expect("put");
     let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
     assert_eq!(code, Some(0));
     assert!(out.starts_with("1 open note in vigia"), "{out:?}");
+
+    // Through the real binary, because the reported defect was in the wiring
+    // between the counter and the words and each half was right on its own.
+    pinned.status = Status::Seen;
+    store.put(&pinned).expect("put it back as seen");
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(
+        !out.contains("open") && !out.contains("tool to read"),
+        "a note the agent has listed is still asked for a read: {out:?}"
+    );
+    assert!(out.contains("resolve"), "{out:?}");
+
+    pinned.reply = Some("which of the two callers did you mean?".to_owned());
+    store.put(&pinned).expect("put it back as answered");
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(
+        out.contains("waiting on the reader"),
+        "an answered note does not say who it waits on: {out:?}"
+    );
+
+    pinned.status = Status::Resolved;
+    store.put(&pinned).expect("put it back as resolved");
+    let (code, out, _) = hook_run("pending", scratch.root(), root.path(), "", &[]);
+    assert_eq!(code, Some(0));
+    assert!(
+        out.is_empty(),
+        "a resolved note still costs a prompt: {out:?}"
+    );
+
+    pinned.status = Status::Open;
+    pinned.reply = None;
+    store
+        .put(&pinned)
+        .expect("restore the note the rest of this test expects");
 
     let ended =
         json!({"session_id": "aaaa-1111", "hook_event_name": "SessionEnd", "reason": "other"})
