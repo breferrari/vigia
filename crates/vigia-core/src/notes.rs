@@ -283,6 +283,10 @@ fn os_bytes(path: &std::ffi::OsStr) -> Vec<u8> {
 /// cannot give one file two names; and not a Windows device name, which is a
 /// device whatever extension follows it, refused on every platform so the
 /// store stays one rule.
+///
+/// Public under [`names_a_record`] because a caller holding a name from outside
+/// this crate, a hook's session id among them, has to be able to ask before it
+/// attempts a write it cannot finish and has to report.
 pub(crate) fn is_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= ID_MAX
@@ -290,6 +294,13 @@ pub(crate) fn is_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !is_device(id)
+}
+
+/// Whether the store and the registry can name a file after `id`, for a caller
+/// that has to decide whether there is anything it can do before it tries.
+#[must_use]
+pub fn names_a_record(id: &str) -> bool {
+    is_id(id)
 }
 
 fn is_device(id: &str) -> bool {

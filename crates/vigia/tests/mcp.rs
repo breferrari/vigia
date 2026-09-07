@@ -1632,3 +1632,62 @@ fn a_hook_with_no_socket_or_no_repository_writes_nothing_and_says_nothing() {
     assert_eq!(code, Some(0), "outside a repository the hook failed: {err}");
     assert!(registry.list().expect("list").is_empty());
 }
+
+/// `all` is the one argument on this surface whose default is destructive:
+/// `false` deletes every resolved file. Nothing checks the type, so a client
+/// that sends the schema's boolean as a string takes the deleting branch while
+/// asking for the reading one, and the notes it meant to read are gone. What
+/// the server does with a bad type is its own to decide; taking it as a request
+/// to delete is the one answer it may not give.
+#[test]
+fn an_all_that_is_not_a_boolean_prunes_nothing() {
+    let rig = Rig::new("mcp-all-coerced");
+    rig.store
+        .put(&note("open-1", 5, EDITED, "one"))
+        .expect("put");
+    let mut server = rig.server();
+    call(
+        &mut server,
+        "resolve",
+        json!({ "id": "open-1", "note": "done" }),
+    );
+
+    let answer = call(&mut server, "notes", json!({ "all": "true" }));
+    assert_eq!(
+        files_in(rig.store.dir()),
+        ["open-1.note"],
+        "a string `all` was read as false, so the resolved note was deleted \
+         rather than listed: {answer}"
+    );
+}
+
+/// A session id the registry cannot name a file after leaves the hook nothing
+/// to record, which is [`register`]'s silent-and-successful case rather than
+/// its reported one: the reported one is a write it attempted and could not
+/// finish. A hook a reader installs once runs at the start of every session in
+/// every project they open, so a line on stderr here is a line on all of them.
+#[test]
+fn a_session_id_the_registry_cannot_name_is_silent_rather_than_reported() {
+    let scratch = Scratch::new("mcp-register-unnameable");
+    let root = TempDir::new("mcp-register-unnameable-state");
+    let payload = json!({
+        "session_id": "AAAA-1111",
+        "hook_event_name": "SessionStart",
+        "cwd": ".",
+    })
+    .to_string();
+
+    let (code, out, err) = hook_run(
+        "register",
+        scratch.root(),
+        root.path(),
+        &payload,
+        &[(SOCKET_VAR, r"\\.\pipe\LOCAL\cc-msg-abc"), (TOKEN_VAR, "t")],
+    );
+    assert_eq!(code, Some(0), "the hook failed the session start: {err}");
+    assert!(
+        out.is_empty() && err.is_empty(),
+        "it said something on a session start it could do nothing about: \
+         {out:?} {err:?}"
+    );
+}

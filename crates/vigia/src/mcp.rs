@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 use vigia_core::{
     CONTEXT, FileDiff, Frame, Hunk, LineKind, Listing, Note, Placement, Registration, Side, Status,
-    Store, StoreWatch, Worktree, resolve, run_of,
+    Store, StoreWatch, Worktree, names_a_record, resolve, run_of,
 };
 
 use crate::config::{self, Config};
@@ -199,7 +199,21 @@ impl Server {
         Ok(match (name, &self.site) {
             ("notes" | "resolve" | "reply", Err(why)) => failed(why),
             ("notes", Ok(site)) => {
-                let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
+                // The one argument on this surface whose default destroys:
+                // `true` reads the resolved notes and `false` removes them, so
+                // a value that is neither is refused rather than folded into
+                // the removing one. Absent is the default and says nothing.
+                let all = match args.get("all") {
+                    None | Some(Value::Null) => false,
+                    Some(Value::Bool(all)) => *all,
+                    Some(other) => {
+                        return Ok(failed(&format!(
+                            "notes takes all as a boolean and {other} is not one; leave it out \
+                             to list the open notes and prune the resolved ones, or pass true to \
+                             read the resolved ones and prune nothing"
+                        )));
+                    }
+                };
                 match site.listing(all) {
                     Ok(document) => answer(pretty(&document), document),
                     Err(why) => failed(&why),
@@ -691,6 +705,14 @@ pub fn hook_payload(text: &str) -> Value {
 #[must_use]
 pub fn hooked(hook: &Value, env: impl Fn(&str) -> Option<String>) -> Option<Hooked> {
     let session = hook.get("session_id").and_then(Value::as_str)?;
+    // A session the registry could not name a file after leaves nothing to
+    // record and nothing to clear, which is this function's `None` rather than
+    // a write attempted and reported: a hook installed once runs at the start
+    // and end of every session in every project the reader opens, so a line on
+    // stderr here is a line on all of them.
+    if !names_a_record(session) {
+        return None;
+    }
     if hook.get("hook_event_name").and_then(Value::as_str) == Some("SessionEnd") {
         return Some(Hooked::Clear(session.to_owned()));
     }
