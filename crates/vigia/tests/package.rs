@@ -1574,13 +1574,63 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 391134),
+    ("SPEC.md", 391059),
     ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 93108),
+    ("ROADMAP.md", 93038),
     ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
+
+/// How many keys the config file accepts, as the prose spells it.
+///
+/// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
+/// here fails against the document, and the wrong word there fails against this.
+const CONFIG_KEYS_SPELLED: &str = "Seven keys";
+
+/// `SPEC.md` names every key the config file accepts, and counts them right.
+///
+/// The count is checked as well as the list because the count is what went wrong:
+/// the document said five for as long as it took two more keys to land, with every
+/// one of the five it named still true. A gate over the names alone stays green
+/// through exactly that.
+///
+/// The names are checked in one direction only. That paragraph spells `on` and
+/// `off` in the same grammar, so walking its backticks back to the array would
+/// need a stop-list, and a stop-list goes stale the way the count did.
+#[test]
+fn the_spec_names_every_key_the_config_file_accepts() {
+    let spec = repo_file("SPEC.md");
+    let paragraph = |anchor: &str| {
+        spec.lines()
+            .find(|line| line.contains(anchor))
+            .unwrap_or_else(|| panic!("SPEC.md carries the paragraph beginning {anchor:?}"))
+    };
+    // Two paragraphs carry the count and only one carries the names: §11.1
+    // describes the file and §11.2 B6 rules on it.
+    let describes = paragraph("The view toggles are a preference too");
+    let rules = paragraph("and `follow` is excluded on purpose");
+
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
+        .filter(|key| !describes.contains(&format!("`{key}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the config file accepts {missing:?} and SPEC.md's paragraph for it does \
+         not name them, so the document describes a surface the binary no longer \
+         has:\n{describes}"
+    );
+
+    for stated in [describes, rules] {
+        assert!(
+            stated.contains(CONFIG_KEYS_SPELLED),
+            "the config file accepts {} keys, which this file spells \
+             {CONFIG_KEYS_SPELLED:?}, and SPEC.md counts them otherwise:\n{stated}",
+            vigia::config::KEYS.len()
+        );
+    }
+}
 
 /// The graviola release whose `verify_cpu_features` the shell's guard mirrors.
 ///

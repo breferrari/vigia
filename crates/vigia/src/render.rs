@@ -2018,7 +2018,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 16] = [
+const KEYBOARD: [Gesture; 17] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2085,6 +2085,11 @@ const KEYBOARD: [Gesture; 16] = [
         keys: ["c", "c"],
         verb: ["show or hide the note rows", "the note rows"],
     },
+    // Reach nothing while the box is closed, and are the whole keymap while it is open.
+    Gesture {
+        keys: ["Enter  Esc", "Enter  Esc"],
+        verb: ["send the note, or cancel", "send the note"],
+    },
     Gesture {
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
@@ -2097,9 +2102,15 @@ const KEYBOARD: [Gesture; 16] = [
     },
 ];
 
-/// The order the height ladder gives keyboard rows up, first to go, as indices
+/// The order the width ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
-const DROP_ORDER: [usize; KEYBOARD.len()] = [15, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 14];
+///
+/// The box's keys rank second for the reason `q` ranks first: the box writes
+/// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
+/// pressed is the moment they are on screen. They are also the widest keys cell a
+/// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
+const DROP_ORDER: [usize; KEYBOARD.len()] =
+    [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 15];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2110,8 +2121,8 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
         .map(|(_, row)| row)
 }
 
-/// The mouse half, which is the first gesture the height ladder drops.
-const MOUSE: [Gesture; 9] = [
+/// The mouse half, which is the first thing the width ladder drops.
+const MOUSE: [Gesture; 10] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -2135,6 +2146,13 @@ const MOUSE: [Gesture; 9] = [
     Gesture {
         keys: ["drag the diff", "drag the diff"],
         verb: ["copy those rows", "copy rows"],
+    },
+    // Both spellings name the number, not the icon: the glyph cells above earn theirs by
+    // being on screen at rest, where the icon exists only under a pointer. The article is
+    // what comes out, at fourteen columns to a tight keys field of thirteen.
+    Gesture {
+        keys: ["click a line number", "click number"],
+        verb: ["open a note there", "open a note"],
     },
     // The tail is the three rows this table most easily omits, and `README.md`'s Mouse
     // table is the other place each is named; a gate holds the two against each other.
@@ -2191,7 +2209,7 @@ struct Section {
 }
 
 /// The reader's own sections, in the order the roomy rung's mock draws them.
-const SECTIONS: [Section; 5] = [
+const SECTIONS: [Section; 6] = [
     Section {
         label: "moving",
         rows: Rows::Keyboard { from: 0, to: 3 },
@@ -2202,7 +2220,11 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 14 },
+        rows: Rows::Keyboard { from: 7, to: 13 },
+    },
+    Section {
+        label: "notes",
+        rows: Rows::Keyboard { from: 13, to: 15 },
     },
     Section {
         label: "mouse",
@@ -2210,7 +2232,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 14, to: 16 },
+        rows: Rows::Keyboard { from: 15, to: 17 },
     },
 ];
 
@@ -2490,7 +2512,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     let capacity = usize::from(body).saturating_sub(SHEET_FRAME);
     // The floor, stated once and early rather than folded into the rung sequence. Below
     // it no rung fits on the height axis at all, and not only the paged ones: the
-    // shortest rung above them is the two-column one at sixteen rows.
+    // shortest rung above them is the two-column one, which is many times as tall.
     if capacity < SHEET_KEEP {
         return None;
     }

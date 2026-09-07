@@ -751,8 +751,8 @@ pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
     }
 }
 
-/// It takes the key and nothing else, and that is what makes "not a mode" structural
-/// rather than a claim.
+/// It takes the key and nothing else, which is what makes "not a mode" structural
+/// rather than a claim. The box is the exception, and only because its keys never reach it.
 fn key_action(key: &KeyEvent) -> Option<Action> {
     // Windows reports press *and* release; Unix terminals report press only.
     // Acting on both would double every keystroke on one platform and not the

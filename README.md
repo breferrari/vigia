@@ -24,7 +24,7 @@ An agent edits **fast**, **wide**, and while you are reading something else. The
 |---|---|
 | 🤖 **Built for the pane beside the agent** | Zero input required. It follows the newest change and scrolls to it on its own |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle, under 5% memory drift over 24 hours |
-| 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging *actions*. No modes either: `vigia` has toggles, but no key ever changes meaning, so there is never a state you have to be in or get out of |
+| 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging *actions*. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
 
 > [!NOTE]
@@ -149,7 +149,7 @@ It is scaled **across every tracked file**, not against the row's own maximum, a
 
 The dot marks the file named by the newest tick, and it lasts exactly one tick, so it **cuts rather than fades**. The path's own brightness is the same signal, slower: the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
 
-The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered when you move away, no row becomes special, and the next key means exactly what it would have meant. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone.
+The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered because you looked at it, no row becomes special by being pointed at, and the next key means exactly what it would have meant, unless you have a note box open, which is the one thing here you are inside until you leave it. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone. A line you left a note on stays marked, and that is not a selection either: you put it there, it outlives the pane, and it goes when the note does.
 
 The counters lend colour only where it says something: a `-0` stays grey, because a zero is not reporting a removal.
 
@@ -240,6 +240,8 @@ The blank above the band is the row the header keeps between itself and the list
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
 | `w` | wrap a long line onto the row below, or clip it |
+| `c` | show or hide the note rows |
+| `Enter` `Esc` | in the note box: send the note, or close it and send nothing |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 
@@ -255,6 +257,7 @@ The blank above the band is the row the header keeps between itself and the list
 | click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
 | drag the diff | copy those rows: let go and they are sent |
+| click a line number | open a note there, for the agent in the other pane |
 | click `✕` | close the sheet |
 | just point | it marks itself |
 | `Shift`+drag | select text, the terminal's own way |
@@ -279,6 +282,83 @@ The blank above the band is the row the header keeps between itself and the list
 The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
 
 It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. `a` adds what is *staged* beside it, as a second run, so an agent that stages its own work does not empty the pane. With nothing to show it says so, and says where the work went if it went to the index.
+
+</details>
+
+---
+
+## ✍️ Notes to the agent
+
+Point at a line number in the diff and it becomes a pencil `✎`. Click it, and a small box opens under the line. Type one sentence, press `Enter`, and it goes to the agent in the other pane, anchored to that file and that line.
+
+That is the whole of it. `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
+
+**After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks.
+
+**When the agent resolves one**, its answer arrives on a row under the note, holds for three seconds, and the note leaves. That is the only way a note goes away that you did not empty yourself.
+
+**Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`. A monitor that wrote where it watches would wake itself, and the pane puts nothing in that directory but the notes you make.
+
+### Give the agent the server
+
+`vigia mcp` is an MCP server over stdio, and it belongs to **you** rather than to any one repository. Register it once:
+
+```sh
+claude mcp add --scope user vigia -- vigia mcp
+```
+
+That covers every project you open from now on. Claude Code tells the server which project the session is in, so one registration finds whichever worktree you are watching, and the notes are kept per worktree, so two repositories never see each other's.
+
+The agent gets three tools and one resource. `notes` lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen`. `reply` writes a line under a note and leaves it unresolved. `resolve` closes one, and its line is required, because that line is what you watch arrive. The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
+
+**`--scope project` is the other shape, and it is a decision about your team rather than about you.** It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
+
+```json
+{
+  "mcpServers": {
+    "vigia": { "command": "vigia", "args": ["mcp"] }
+  }
+}
+```
+
+Right when the whole team watches its diffs this way, and only then. If it is just you, take the line above.
+
+### And reach the session already running
+
+With the server alone your note waits until the agent next looks. Two hooks make it arrive instead, and they go in `~/.claude/settings.json` for the same reason the server does: write them once, and every repository you open is covered.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "vigia mcp register" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "vigia mcp register" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "vigia mcp pending" }] }
+    ]
+  }
+}
+```
+
+`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is registered. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
+
+`vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying how many notes are open, and prints nothing when there are none.
+
+<details>
+<summary><b>The small print on the hooks</b></summary>
+
+<br>
+
+Both commands are safe to install once and forget, which is what makes them worth putting in your user settings at all: outside a repository, with no store, or with nothing open, they do nothing and say nothing, and a hook installed there runs in every project you open.
+
+The socket is Claude Code's own, exported to hooks from v2.1.224, and v2.1.234 on native Windows. Below those the registration finds nothing to record and `Enter` still writes the note to the store, where the server and the `pending` line both reach it.
+
+A user-scoped server is started from your own config directory rather than from the repository, so what tells it where to look is the project Claude Code names for it. That has been dependable since v2.1.238. On anything older it falls back to its working directory, which for a user-scoped server is not your worktree, and `--scope project` is the shape that works there.
+
+`vigia` is not the session's child and nothing comes back down the socket, so whether the session acted on your note, held it behind a permission prompt or dropped it is not something the pane can tell you. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
 
 </details>
 
@@ -450,13 +530,14 @@ Same shape as the theme file: one key per line, `#` for a comment, and a key it 
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what "no polling timer" requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
 | [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a change can be seen arriving. It schedules nothing, which is what keeps "no polling timer" this program's own rule to keep |
+| [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text model, its caret and its undo. The shell draws the cells itself, so the box wraps by the same rule the note rows do |
 | [two-face](https://codeberg.org/CosmicHarper/two-face) | The grammars: [bat](https://github.com/sharkdp/bat)'s curated set, packaged for `syntect`. It builds the dump the binary carries and is itself absent from every shipped graph |
 
 Everything is pure Rust on purpose: a genuinely static Linux binary needs no cross toolchain, and macOS and Windows are plain tier-1 targets.
 
 ## 🗺️ Status
 
-`🚧` **Early, and released.** The install lines above are live. The surface is one optional path and `--version`, on purpose, and look and feel is where the work is.
+`🚧` **Early, and released.** The install lines above are live. The surface is one optional path, `--version`, and the word `mcp` for the notes server, on purpose, and look and feel is where the work is.
 
 | | Phase | |
 |---|---|---|
