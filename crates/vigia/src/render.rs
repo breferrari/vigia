@@ -2018,7 +2018,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 16] = [
+const KEYBOARD: [Gesture; 17] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2085,6 +2085,12 @@ const KEYBOARD: [Gesture; 16] = [
         keys: ["c", "c"],
         verb: ["show or hide the note rows", "the note rows"],
     },
+    // The box's own keys, which reach nothing while it is closed and are the whole
+    // keymap while it is open. Both cells sit inside the field maxima above.
+    Gesture {
+        keys: ["Enter  Esc", "Enter  Esc"],
+        verb: ["send the note, or cancel", "send the note"],
+    },
     Gesture {
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
@@ -2099,7 +2105,13 @@ const KEYBOARD: [Gesture; 16] = [
 
 /// The order the height ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
-const DROP_ORDER: [usize; KEYBOARD.len()] = [15, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 14];
+///
+/// The box's keys rank second, behind the row the hint bar spells on every frame,
+/// so that adding them took no gesture off a narrow pane: they are the widest keys
+/// cell of the rows a dropping rung keeps, and ranking them anywhere later moves
+/// the sets a 30 and a 32 column pane reach.
+const DROP_ORDER: [usize; KEYBOARD.len()] =
+    [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 15];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2111,7 +2123,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 }
 
 /// The mouse half, which is the first gesture the height ladder drops.
-const MOUSE: [Gesture; 9] = [
+const MOUSE: [Gesture; 10] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -2135,6 +2147,13 @@ const MOUSE: [Gesture; 9] = [
     Gesture {
         keys: ["drag the diff", "drag the diff"],
         verb: ["copy those rows", "copy rows"],
+    },
+    // The tight spelling names the mark rather than the target, as `click  ✕` and
+    // `click  ▲ ▼` do: `click a number` is fourteen columns and the tight keys field
+    // is thirteen, so spelling it out would move every rung's width.
+    Gesture {
+        keys: ["click a line number", "click  ✎"],
+        verb: ["open a note there", "open a note"],
     },
     // The tail is the three rows this table most easily omits, and `README.md`'s Mouse
     // table is the other place each is named; a gate holds the two against each other.
@@ -2191,7 +2210,7 @@ struct Section {
 }
 
 /// The reader's own sections, in the order the roomy rung's mock draws them.
-const SECTIONS: [Section; 5] = [
+const SECTIONS: [Section; 6] = [
     Section {
         label: "moving",
         rows: Rows::Keyboard { from: 0, to: 3 },
@@ -2202,7 +2221,11 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 14 },
+        rows: Rows::Keyboard { from: 7, to: 13 },
+    },
+    Section {
+        label: "notes",
+        rows: Rows::Keyboard { from: 13, to: 15 },
     },
     Section {
         label: "mouse",
@@ -2210,7 +2233,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 14, to: 16 },
+        rows: Rows::Keyboard { from: 15, to: 17 },
     },
 ];
 
