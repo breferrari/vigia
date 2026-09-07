@@ -1173,9 +1173,8 @@ impl View {
         }
         // The box is placed the way a note is, against the same anchor.
         let draft = note_box.map(crate::notes::NoteBox::stand_in);
-        // Which entries answer to each anchored path, which is a fact about the changed
-        // set rather than the screen and so is answered for every note, drawn or not:
-        // no entry means adrift, and two mean the two runs both hold the file.
+        // Which entries answer to each anchored path, a fact about the changed set rather
+        // than the screen: no entry means adrift, and two mean both runs hold the file.
         let mut runs_of: HashMap<&str, Vec<usize>> = HashMap::new();
         for path in by_path
             .keys()
@@ -1235,19 +1234,25 @@ impl View {
                     chosen.insert(note.id.as_str(), at);
                 }
             }
-            // The box belongs to the row the reader pressed, and both runs can draw
-            // that line with the same number and the same text, so resolving it the
-            // way a note is resolved would answer the tie for the wrong one. The
-            // fall back is for a run the changed set no longer holds.
+            // The box belongs to the row the reader pressed, and both runs can draw that
+            // line identically, so the note's own rule would answer the tie for the wrong
+            // one. The path goes with the run: a rename can put two entries in one run.
             if let Some(standing) = draft.as_ref().filter(|held| held.note.path == **path) {
-                let pressed = indices
-                    .iter()
-                    .copied()
-                    .find(|&at| frame.files()[at].origin == standing.origin);
-                boxed_run = Some(match pressed {
-                    Some(at) => at,
-                    None => run_of(frame, indices, &[&standing.note])[0],
+                let pressed = indices.iter().copied().find(|&at| {
+                    let change = &frame.files()[at];
+                    change.origin == standing.origin && change.path == standing.note.path
                 });
+                let at = match pressed {
+                    Some(at) => at,
+                    // Left when the run the press was in is no longer in the changed set.
+                    None => run_of(frame, indices, &[&standing.note])[0],
+                };
+                boxed_run = Some(at);
+                // The box stands in for the note it holds, so that note goes where the box
+                // is: an edit under an open box moves the rank without moving the box.
+                if let Some(over) = standing.over {
+                    chosen.insert(over, at);
+                }
             }
         }
 

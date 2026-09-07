@@ -2,7 +2,8 @@
 //! holds them between the two processes (`SPEC.md` §11.2 B21).
 //!
 //! Headless: nothing here draws, and nothing here decides which rows are on
-//! screen. The pane hands [`resolve`] the rows it drew; the store is one
+//! screen. The pane hands [`resolve`] the rows it drew and [`run_of`] the entries
+//! a path answers to; the store is one
 //! directory per worktree under a root the shell resolves, one file per note,
 //! and every write is a temp-and-rename so a reader lists whole files or none.
 
@@ -209,8 +210,9 @@ pub fn resolve(note: &Note, rows: &[(u32, &str)]) -> Placement {
 ///
 /// # Panics
 ///
-/// If `indices` is empty. Every caller has found the path in the changed set
-/// already, so an entry is what it holds.
+/// If `indices` is empty and `notes` is not. Every caller has found the path in
+/// the changed set already, so an entry is what it holds.
+#[must_use]
 pub fn run_of(frame: &mut Frame, indices: &[usize], notes: &[&Note]) -> Vec<usize> {
     let mut best: Vec<Option<(u8, usize)>> = vec![None; notes.len()];
     for &index in indices {

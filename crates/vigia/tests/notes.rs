@@ -2016,6 +2016,61 @@ fn the_box_opens_under_whichever_run_was_pressed() {
 }
 
 #[test]
+fn the_box_keeps_the_note_it_holds_when_a_later_edit_moves_the_rank() {
+    // Line 8 is context in both hunks, so the note ties and takes the unstaged
+    // run, and the reader reopens it there. The agent then edits line 8 in the
+    // working tree: the note's stored text stops resolving in the unstaged run
+    // and still resolves in the staged one, so its rank moves while the box
+    // stays where the reader is typing.
+    let scratch = in_both_runs("notes-runs-box-rank", 5, "staged six");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 8, "line 8", "reopened here"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    let y = both_occurrences(&painted, "line 8")[0];
+    let (left, _, _) = painted.gutter();
+    assert_eq!(
+        painted
+            .view
+            .marked_at(usize::from(y - painted.laid.diff.top)),
+        ["n1"]
+    );
+    assert!(rig.press_opens(&painted, left + 1, y));
+    assert_eq!(rig.app.note_box().expect("the box").over(), Some("n1"));
+
+    scratch.edit_line(PATH, 7, "the agent edited eight");
+    frame.advance().expect("advance after the edit");
+    let after = rig.paint(&mut frame, TALL, Pointing::default());
+    assert_eq!(
+        note_rows(&after, "n1"),
+        0,
+        "the note the box holds drew its rows in the other run:\n{}",
+        after.rows().join("\n")
+    );
+    let tops = after
+        .view
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row,
+                Row::Box {
+                    part: BoxPart::Top { .. }
+                }
+            )
+        })
+        .count();
+    assert_eq!(tops, 1, "{}", after.rows().join("\n"));
+}
+
+#[test]
 fn the_box_on_a_line_both_runs_hold_opens_under_the_run_pressed() {
     let scratch = in_both_runs("notes-runs-box", 5, "staged six");
     let worktree = scratch.worktree();
