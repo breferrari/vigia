@@ -1586,7 +1586,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
-const CONFIG_KEYS_SPELLED: &str = "Seven";
+const CONFIG_KEYS_SPELLED: &str = "Seven keys";
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///

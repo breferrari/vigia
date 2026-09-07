@@ -1852,7 +1852,7 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // The other axis, and the one no gate walked.
     let arrival;
     sweep!("sheet-roomy-height", |paint| {
-        arrival = arrival_height_of(&mut paint, "moving", 24..=45, 100);
+        arrival = arrival_height_of(&mut paint, "moving", 24..=48, 100);
     });
     assert_eq!(
         arrival,
@@ -2466,7 +2466,7 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
         (120, 30, 2, 26, "one column"),
         // The roomy rung's own columns, which are its own: keys five in and verbs
         // thirty-five in, against two and twenty-six at every other rung.
-        (ROOMY_PANE.width, ROOMY_PANE.height, 5, 39, "roomy"),
+        (ROOMY_PANE.width, ROOMY_PANE.height, 5, 35, "roomy"),
     ] {
         let at = Rect::new(0, 0, w, h);
         let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
