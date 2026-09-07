@@ -2462,8 +2462,8 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
     toggle(&mut app, &mut frame);
 
     for (w, h, keys_at, verb_at, spelling) in [
-        (120u16, 22u16, 2u16, 26u16, "two columns"),
-        (120, 30, 2, 26, "one column"),
+        (120u16, 23u16, 2u16, 26u16, "two columns"),
+        (120, 34, 2, 26, "one column"),
         // The roomy rung's own columns, which are its own: keys five in and verbs
         // thirty-five in, against two and twenty-six at every other rung.
         (ROOMY_PANE.width, ROOMY_PANE.height, 5, 35, "roomy"),
@@ -2474,11 +2474,22 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
         // The roomy rung's first gesture row is one lower: air, then a heading,
         // then the row. Non-vacuity below asserts the rung this case is named for.
         let row = sheet.top + if spelling == "roomy" { 3 } else { 2 };
-        let (_, drawn) = read_sheet(&buf, &laid);
+        let (count, drawn) = read_sheet(&buf, &laid);
+        // `moving` heads the roomy rung alone and `keyboard` the two-column rung
+        // alone, so a case that names neither is the one column that draws every
+        // gesture. Each is asserted rather than only the roomy one, which is what
+        // let the two-column case go on passing from the rung below it.
+        let (roomy, beside) = (drawn.contains("moving"), drawn.contains("keyboard"));
+        let seen = match (roomy, beside) {
+            (true, _) => "roomy",
+            (_, true) => "two columns",
+            _ if count == GESTURES.len() => "one column",
+            _ => "dropping",
+        };
         assert_eq!(
-            drawn.contains("moving"),
-            spelling == "roomy",
-            "the {w}x{h} case is not the {spelling} rung:\n{drawn}"
+            seen, spelling,
+            "the {w}x{h} case draws the {seen} rung, not the {spelling} one, so \
+             every colour this gate reads below is another rung's:\n{drawn}"
         );
         // A cell has to hold something before its colour means anything, and the whole
         // of this gate reads colours at fixed columns.
