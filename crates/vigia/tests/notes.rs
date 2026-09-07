@@ -4785,7 +4785,9 @@ fn the_pane_draws_a_resolve_before_it_takes_the_file() {
     assert_eq!(files_in(rig.store.dir()), ["n1.note"]);
 
     // The pane wakes whenever it wakes, and the line is still there to draw.
+    // It arrives over its own length, so the beat after is where it reads.
     rig.reload();
+    rig.advance(RESOLVE_ARRIVING + ARRIVING_FRAME);
     let departing = rig.paint(&mut frame, PANE, Pointing::default());
     let under = departing.notes_under(y);
     assert!(

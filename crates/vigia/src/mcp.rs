@@ -199,18 +199,17 @@ impl Server {
         Ok(match (name, &self.site) {
             ("notes" | "resolve" | "reply", Err(why)) => failed(why),
             ("notes", Ok(site)) => {
-                // The one argument on this surface whose default destroys:
-                // `true` reads the resolved notes and `false` removes them, so
-                // a value that is neither is refused rather than folded into
-                // the removing one. Absent is the default and says nothing.
+                // Refused rather than coerced: the two answers differ by
+                // whether the resolved notes are read or passed over, and a
+                // client that meant one and was given the other has no way to
+                // tell. Absent is the default and says nothing.
                 let all = match args.get("all") {
                     None | Some(Value::Null) => false,
                     Some(Value::Bool(all)) => *all,
                     Some(other) => {
                         return Ok(failed(&format!(
                             "notes takes all as a boolean and {other} is not one; leave it out \
-                             to list the open notes and prune the resolved ones, or pass true to \
-                             read the resolved ones and prune nothing"
+                             to list the open notes, or pass true to list the resolved ones too"
                         )));
                     }
                 };
