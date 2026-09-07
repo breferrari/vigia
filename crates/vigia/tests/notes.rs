@@ -2119,11 +2119,7 @@ fn a_note_whose_path_a_rename_carried_into_the_other_run_goes_with_its_line() {
     scratch.git(&["mv", "src/a.rs", "src/b.rs"]);
     scratch.edit_line("src/b.rs", 7, "staged eight");
     scratch.git(&["add", "src/b.rs"]);
-    scratch.write(
-        "src/a.rs",
-        "a brand new file that took the old name
-",
-    );
+    scratch.write("src/a.rs", "a brand new file that took the old name\n");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.show_staged(true);
@@ -2150,10 +2146,7 @@ fn a_note_whose_path_a_rename_carried_into_the_other_run_goes_with_its_line() {
         note_rows(&painted, "n1"),
         1,
         "{}",
-        painted.rows().join(
-            "
-"
-        )
+        painted.rows().join("\n")
     );
     let y = painted.row_of("line 5");
     let under = painted.notes_under(y);
@@ -2201,22 +2194,14 @@ fn a_note_the_box_holds_stands_aside_in_the_run_the_box_is_not_drawn_in() {
     let scrolled = rig.paint(&mut frame, TALL, Pointing::default());
     assert!(
         scrolled.rows().iter().any(|row| row.contains("staged six")),
-        "the scroll did not reach the staged run:
-{}",
-        scrolled.rows().join(
-            "
-"
-        )
+        "the scroll did not reach the staged run:\n{}",
+        scrolled.rows().join("\n")
     );
     assert_eq!(
         note_rows(&scrolled, "n1"),
         0,
-        "the note the box holds drew itself in the other run:
-{}",
-        scrolled.rows().join(
-            "
-"
-        )
+        "the note the box holds drew itself in the other run:\n{}",
+        scrolled.rows().join("\n")
     );
 }
 
