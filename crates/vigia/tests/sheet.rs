@@ -266,7 +266,7 @@ fn the_sheet_moves_no_content() {
     }
 }
 
-/// A pane the roomy rung fits on: a room of 68 columns and a body of 31 rows.
+/// The shortest pane the roomy rung fits on, at the width it needs.
 const ROOMY_PANE: Rect = Rect::new(0, 0, 120, 45);
 
 #[test]
@@ -1954,8 +1954,9 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
         assert_eq!(
             drawn,
             SECTIONS.to_vec(),
-            "the roomy rung does not draw all five sections in Mock A's \
-             order:\n{sheet}"
+            "the roomy rung does not draw all {} sections in Mock A's \
+             order:\n{sheet}",
+            SECTIONS.len()
         );
     });
 }
@@ -2244,9 +2245,9 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
     sweep!("sheet-origin", |paint| {
         for (w, h, want) in [
             (120u16, 33u16, (32u16, 1u16, 56u16, 30u16)),
-            // The roomy rung, at the head of the ladder. A pane this tall takes
-            // the nineteen-row sheet at (22, 10, 56, 19) without it, and the row
-            // it loses to air it has spare.
+            // The roomy rung, at the head of the ladder. A pane this tall would take
+            // the one-column sheet without it, and the rows it loses to air it has
+            // spare.
             (100, 45, (16, 1, 68, 42)),
             (120, 23, (8, 1, 104, 20)),
             // The tight two-column rung, five columns narrower for the shortened tight
