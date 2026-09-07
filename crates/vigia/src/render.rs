@@ -14,7 +14,8 @@ use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
 use crate::view::{
-    BOX_FRAME, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View,
+    BOX_FRAME, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, REPLY_INDENT, Row,
+    Scale, View,
 };
 
 /// Columns a tab advances to the next multiple of.
@@ -4311,12 +4312,74 @@ impl Painter<'_> {
             Modifier::empty()
         };
         let ink = self.theme.chrome_dim.add_modifier(dim);
+        let reply = self.theme.note_reply.add_modifier(dim);
         let word = last.then_some(state);
         let state = self.theme.note_ink(state);
+        // The enclosure the reader ruled: an edge, the body between two sides,
+        // and an edge carrying the word and the stem the answer descends through.
+        // The frame takes the state's ink, so `note_frame` means only the box
+        // being typed in.
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
+        match lead {
+            NoteLead::Top => {
+                let corners = if rounded {
+                    ('╭', '╮')
+                } else {
+                    ('┌', '┐')
+                };
+                self.box_edge(x, glyphs.y, room, corners, "", state.add_modifier(dim));
+                return;
+            }
+            NoteLead::Body => {
+                let inner = room - BOX_FRAME;
+                let frame = state.add_modifier(dim);
+                self.put(x, glyphs.y, "│ ", 2, frame);
+                self.put(
+                    x + 2,
+                    glyphs.y,
+                    text,
+                    inner,
+                    self.theme.chrome.add_modifier(dim),
+                );
+                self.put(x + (room - 2) as u16, glyphs.y, " │", 2, frame);
+                return;
+            }
+            NoteLead::Bottom => {
+                let corners = if rounded {
+                    ('╰', '╯')
+                } else {
+                    ('└', '┘')
+                };
+                // The stem rides the label, so the edge is drawn once and the
+                // answer below lines up under it.
+                let label = format!("{RULE}┬{RULE} {state_word} ", state_word = text);
+                self.box_edge(x, glyphs.y, room, corners, &label, state.add_modifier(dim));
+                return;
+            }
+            NoteLead::Bar | NoteLead::Reply | NoteLead::Blank => (),
+        }
+
+        // The answer sits under the stem rather than at the content origin.
+        let (x, room) = match lead {
+            NoteLead::Reply | NoteLead::Blank => (
+                x.saturating_add(REPLY_INDENT as u16),
+                room.saturating_sub(REPLY_INDENT),
+            ),
+            _ => (x, room),
+        };
+        if room == 0 {
+            return;
+        }
+
+        // Unreachable for the three above, which return; drawn as the bar rather
+        // than asserted, because this workspace aborts on a panic and a dead
+        // monitor is a worse answer than a mark in the wrong ink.
         let (glyph, glyph_ink) = match lead {
-            NoteLead::Bar => (NOTE_BAR, state.add_modifier(dim)),
-            NoteLead::Reply => (WRAPPED, ink),
-            NoteLead::Blank => (' ', ink),
+            NoteLead::Reply => (WRAPPED, reply),
+            NoteLead::Blank => (' ', reply),
+            NoteLead::Bar | NoteLead::Top | NoteLead::Body | NoteLead::Bottom => {
+                (NOTE_BAR, state.add_modifier(dim))
+            }
         };
         // The word first, at the right edge, so the lead and the text are both
         // bounded by what it leaves.
@@ -4335,7 +4398,11 @@ impl Painter<'_> {
         let left = room.saturating_sub(taken);
         let next = self.put(x, glyphs.y, &format!("{glyph} "), left, glyph_ink);
         let spent = usize::from(next - x);
-        self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), ink);
+        let body = match lead {
+            NoteLead::Reply | NoteLead::Blank => reply,
+            _ => ink,
+        };
+        self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), body);
     }
 
     /// ```text

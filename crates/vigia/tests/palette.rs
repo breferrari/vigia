@@ -356,6 +356,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         note_seen,
         note_changed,
         note_gone,
+        note_reply,
         alert,
         comment,
 
@@ -435,6 +436,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("note_seen", note_seen),
         ("note_changed", note_changed),
         ("note_gone", note_gone),
+        ("note_reply", note_reply),
         ("alert", alert),
         ("context", context),
         ("comment", comment),
@@ -1745,7 +1747,7 @@ fn the_selection_survives_every_colour_depth() {
 /// The four states are what a reader takes in without reading the word, so one
 /// ink for two of them is the failure this key set exists to remove.
 #[test]
-fn the_four_note_states_draw_in_four_different_inks() {
+fn the_note_states_and_the_reply_draw_in_different_inks() {
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -1758,6 +1760,9 @@ fn the_four_note_states_draw_in_four_different_inks() {
                 ("seen", theme.note_seen.fg),
                 ("changed", theme.note_changed.fg),
                 ("gone", theme.note_gone.fg),
+                // The answer draws directly under the frame that carries the
+                // state, so it has to differ from all four as well.
+                ("reply", theme.note_reply.fg),
             ];
             for (at, (first, ink)) in inks.iter().enumerate() {
                 for (second, other) in inks.iter().skip(at + 1) {

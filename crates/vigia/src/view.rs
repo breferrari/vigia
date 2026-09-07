@@ -325,7 +325,15 @@ pub enum Row {
 /// What a note row draws at the content origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteLead {
-    /// The bar down the reader's own rows.
+    /// The top edge of the enclosure around the reader's own rows.
+    Top,
+    /// One row of the reader's words, between the enclosure's two sides.
+    Body,
+    /// The bottom edge, carrying the status word and the stem the answer
+    /// descends through.
+    Bottom,
+    /// The bar down the reader's own rows, which is the rung below the
+    /// enclosure on a pane too narrow to hold one.
     Bar,
     /// The arrow on the first row of the agent's line.
     Reply,
@@ -421,6 +429,14 @@ pub struct Noted {
 
 /// Columns a note row spends before its text: the lead and its gap.
 const NOTE_LEAD: usize = 2;
+
+/// Columns the answer is indented by, so it lines up under the stem in the
+/// enclosure's bottom edge rather than at the content origin.
+pub const REPLY_INDENT: usize = 2;
+
+/// What the bottom edge spends on its stem and the blanks around the word,
+/// beside the two corners `BOX_FRAME` already counts.
+const STEM_ROOM: usize = 4;
 
 /// Body rows the note box grows to before it scrolls inside itself.
 pub const BOX_ROWS: usize = 4;
@@ -586,35 +602,62 @@ impl Pin {
     /// The display rows this note takes under a content width of `content`.
     fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
+        // The enclosure needs its two sides, a column of text, and a bottom edge
+        // wide enough to carry the word and the stem beside its corners. Below
+        // that it draws nothing at all, which is worse than the bar it replaced,
+        // so the bar is the rung under it.
+        let boxed = content > BOX_FRAME + self.word.len() + STEM_ROOM;
+        let inner = content.saturating_sub(BOX_FRAME);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
         if !self.resolved || self.reply.is_none() {
-            let mut body = pieces(&self.body);
-            // The word takes a row of its own when the last piece leaves it no room
-            // and a row can hold it, with a blank between them where the piece has
-            // width: the reader's words are never cut to fit a status, and a blank
-            // row buys nothing where no row holds the word.
-            let last = body
-                .last()
-                .map_or(0, |piece| crate::render::width_of(piece));
-            let gap = usize::from(last > 0);
-            if self.word.len() <= room && last + gap + self.word.len() > room {
-                body.push(String::new());
-            }
-            let count = body.len();
-            for (piece, text) in body.into_iter().enumerate() {
+            let mut row = |lead, text: String| {
                 rows.push(Row::Note {
                     id: self.id.clone(),
-                    lead: NoteLead::Bar,
+                    lead,
                     text,
                     state: self.word,
-                    last: piece + 1 == count,
+                    last: false,
                     faded: self.faded,
                 });
+            };
+            if boxed {
+                row(NoteLead::Top, String::new());
+                for text in prose_rows(&self.body, inner) {
+                    row(NoteLead::Body, text);
+                }
+                // The bottom edge carries the word, so `text` is the word here
+                // and the drawer spells it into the edge's label.
+                row(NoteLead::Bottom, self.word.to_owned());
+            } else {
+                let mut body = pieces(&self.body);
+                // The word takes a row of its own when the last piece leaves it no
+                // room and a row can hold it, with a blank between them where the
+                // piece has width: the reader's words are never cut to fit a
+                // status, and a blank row buys nothing where no row holds the word.
+                let last = body
+                    .last()
+                    .map_or(0, |piece| crate::render::width_of(piece));
+                let gap = usize::from(last > 0);
+                if self.word.len() <= room && last + gap + self.word.len() > room {
+                    body.push(String::new());
+                }
+                let count = body.len();
+                for (piece, text) in body.into_iter().enumerate() {
+                    rows.push(Row::Note {
+                        id: self.id.clone(),
+                        lead: NoteLead::Bar,
+                        text,
+                        state: self.word,
+                        last: piece + 1 == count,
+                        faded: self.faded,
+                    });
+                }
             }
         }
         if let Some(reply) = &self.reply {
-            for (piece, text) in pieces(reply).into_iter().enumerate() {
+            let under = room.saturating_sub(REPLY_INDENT);
+            for (piece, text) in prose_rows(reply, under).into_iter().enumerate() {
                 rows.push(Row::Note {
                     id: self.id.clone(),
                     lead: if piece == 0 {

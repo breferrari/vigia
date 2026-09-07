@@ -60,8 +60,8 @@ pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
     Anchor, BOX_FRAME, BOX_ROWS, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Marked,
-    NoteLead, Noted, Position, Row, Scale, Slot, View, Viewport, block_rows, diff_rows, file_at,
-    last_top, list_plan, list_rows_wanted, rows_in, rows_of, span_in,
+    NoteLead, Noted, Position, REPLY_INDENT, Row, Scale, Slot, View, Viewport, block_rows,
+    diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
