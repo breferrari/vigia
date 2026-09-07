@@ -240,6 +240,8 @@ The blank above the band is the row the header keeps between itself and the list
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
 | `w` | wrap a long line onto the row below, or clip it |
+| `c` | show or hide the note rows |
+| `Enter` `Esc` | in the note box: send the note, or close it and send nothing |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 
@@ -255,6 +257,7 @@ The blank above the band is the row the header keeps between itself and the list
 | click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
 | drag the diff | copy those rows: let go and they are sent |
+| click a line number | open a note there, for the agent in the other pane |
 | click `✕` | close the sheet |
 | just point | it marks itself |
 | `Shift`+drag | select text, the terminal's own way |
@@ -279,6 +282,77 @@ The blank above the band is the row the header keeps between itself and the list
 The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
 
 It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. `a` adds what is *staged* beside it, as a second run, so an agent that stages its own work does not empty the pane. With nothing to show it says so, and says where the work went if it went to the index.
+
+</details>
+
+---
+
+## ✍️ Notes to the agent
+
+Point at a line number in the diff and it becomes a pencil `✎`. Click it, and a small box opens under the line. Type one sentence, press `Enter`, and it goes to the agent in the other pane, anchored to that file and that line.
+
+That is the whole of it. `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
+
+**After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks.
+
+**When the agent resolves one**, its answer arrives on a row under the note, holds for three seconds, and the note leaves. That is the only way a note goes away that you did not empty yourself.
+
+**Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`. A monitor that wrote where it watches would wake itself, and outside your gesture this program writes nothing at all.
+
+### Give the agent the server
+
+`vigia mcp` is an MCP server over stdio. It serves the notes for one worktree, so it belongs to the project rather than to your account:
+
+```sh
+claude mcp add --scope project vigia -- vigia mcp
+```
+
+That writes `.mcp.json` at the root of the repository, which is three lines you can write yourself:
+
+```json
+{
+  "mcpServers": {
+    "vigia": { "command": "vigia", "args": ["mcp"] }
+  }
+}
+```
+
+The agent gets three tools and one resource. `notes` lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen`. `reply` writes a line under a note and leaves it open. `resolve` closes one, and its line is required, because that line is what you watch arrive. The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
+
+### And reach the session already running
+
+With the server alone your note waits until the agent next looks. Two hooks in `.claude/settings.json` make it arrive instead:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "vigia mcp register" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "vigia mcp register" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "vigia mcp pending" }] }
+    ]
+  }
+}
+```
+
+`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is registered. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
+
+`vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying how many notes are open, and prints nothing when there are none.
+
+<details>
+<summary><b>The small print on the hooks</b></summary>
+
+<br>
+
+Both commands are safe to install once and forget. Outside a repository, with no store, or with nothing open, they do nothing and say nothing, which matters because a hook you installed in one project runs in every project you open.
+
+The socket is Claude Code's own, exported to hooks from v2.1.224, and v2.1.234 on native Windows. Below those the registration finds nothing to record and `Enter` still writes the note to the store, where the server and the `pending` line both reach it.
+
+`vigia` is not the session's child, so a session that asks you before it acts may hold the note for approval rather than starting on it. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
 
 </details>
 
