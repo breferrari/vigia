@@ -52,6 +52,13 @@ expect leak-guard.mjs 2 "a publish whose body carries the trailer is blocked" "g
 expect leak-guard.mjs 2 "a publish whose body carries a session URL is blocked" "gh issue comment 1 --body-file $FIXW/url.md"
 expect leak-guard.mjs 2 "an inline body with a session URL is blocked" 'gh pr comment 1 --body "see https://claude.ai/code/session_01abc"'
 expect leak-guard.mjs 0 "a body-file path under the profile is not a leak" 'gh pr create --title t --body-file "C:\Users\someone\AppData\Local\Temp\x\body.md"'
+# A release takes its body through --notes-file, which is a different flag and
+# not a suffix of --file. Both directions are cases, because the omission broke
+# both: the body went unread, and its path was read as a leak.
+expect leak-guard.mjs 0 "a release with a clean notes file is allowed" "gh release edit v0.1.0 --notes-file $FIXW/clean.md"
+expect leak-guard.mjs 2 "a release whose notes carry a session URL is blocked" "gh release edit v0.1.0 --notes-file $FIXW/url.md"
+expect leak-guard.mjs 2 "a new release whose notes carry the trailer is blocked" "gh release create v0.1.0 --notes-file $FIXW/trailer.md"
+expect leak-guard.mjs 0 "a notes-file path under the profile is not a leak" 'gh release edit v0.1.0 --notes-file "C:\Users\someone\AppData\Local\Temp\x\notes.md"'
 expect leak-guard.mjs 2 "a commit message carrying the trailer is blocked" 'git commit -m "subject" -m "Claude-Session: https://claude.ai/code/session_01abc"'
 expect leak-guard.mjs 2 "a commit message file carrying the trailer is blocked" "git commit -F $FIXW/trailer.md"
 expect leak-guard.mjs 0 "a clean commit is allowed" 'git commit -m "The version raise counts only the lines it moved"'

@@ -13,9 +13,19 @@
 //   - a --body-file whose newlines were destroyed (PowerShell array-join
 //     flattening: one giant line where a document should be)
 //
-// The path handed to --body-file, --file or -F is dropped from the inline scan
-// first: it says where the body sits and never lands in it, and a scratch
-// directory under the user's profile is exactly the shape the path class matches.
+// The path handed to --body-file, --notes-file, --file or -F is dropped from
+// the inline scan first: it says where the body sits and never lands in it, and
+// a scratch directory under the user's profile is exactly the shape the path
+// class matches.
+//
+// --notes-file is the flag `gh release create|edit` takes, and it is a separate
+// alternative rather than a suffix of --file, which it does not contain: the
+// hyphens fall as `notes-file`, so an alternation of --file never reaches it.
+// Missing it cost both halves at once. A body published that way was never read,
+// so the classes above went unchecked on the one surface a user reads most; and
+// its path stayed in the inline scan, so an ordinary Windows path under the
+// profile was blocked as a leak. A guard that skips the body and refuses the
+// path is wrong in both directions from one omission.
 
 import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
@@ -54,7 +64,7 @@ const block = (what, hits) => {
 	process.exit(2);
 };
 
-const m = /(?:--body-file|--file|-F)[= ]\s*(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(command);
+const m = /(?:--body-file|--notes-file|--file|-F)[= ]\s*(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(command);
 const bodyFile = m ? (m[1] ?? m[2] ?? m[3]) : null;
 const inline = m ? command.replace(m[0], " ") : command;
 
