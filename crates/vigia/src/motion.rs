@@ -80,15 +80,15 @@ pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
 /// flattened the palette and there are no two inks to travel between.
 const EVOLVING: &str = r#"
     fx::parallel(&[
-        fx::evolve_into((EvolveSymbolSet::Shaded, ink), (over, Linear))
+        fx::evolve_into((EvolveSymbolSet::Shaded, ink), (over, SineInOut))
             .with_pattern(RadialPattern::with_transition((0.5, 0.5), softness)),
-        fx::coalesce((over, Linear)),
+        fx::coalesce((over, SineInOut)),
     ])
 "#;
 
 /// A surface leaving: swept away, left to right.
 const SWEEPING: &str = r#"
-    fx::dissolve((over, Linear)).with_pattern(SweepPattern::left_to_right(span))
+    fx::dissolve((over, SineInOut)).with_pattern(SweepPattern::left_to_right(span))
 "#;
 
 /// A departure that shows something first: it arrives, holds a beat, and goes.

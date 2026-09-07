@@ -176,37 +176,74 @@ fn a_motion_armed_after_a_quiet_spell_starts_at_its_beginning() {
 #[test]
 fn an_arrival_comes_out_of_the_middle() {
     // The pattern is what makes an arrival a movement rather than a switch, and
-    // it is named on each part of the pair: `Shader::set_pattern` does nothing
-    // by default and no container overrides it, so a pattern named on the pair
-    // is dropped in silence and every cell lands at once. This is what tells
-    // the two apart, since both end on the same frame.
+    // it is named on the part it belongs to rather than on the pair:
+    // `Shader::set_pattern` does nothing by default and no container overrides
+    // it, so a pattern named on a `parallel` is dropped in silence and every
+    // cell lands at once. Only the order tells the two apart, since both shade
+    // and both settle on the same frame.
     let ink = Style::default().fg(Color::Cyan);
     let mut evolve = motion::evolving(ink, RESOLVE_ARRIVING, 10.0);
-    let settled = drawn();
-    let middle = (PANE.width / 2, PANE.height / 2);
-    let corner = (0, 0);
-    let landed =
-        |buf: &Buffer, (x, y): (u16, u16)| buf[(x, y)].symbol() == settled[(x, y)].symbol();
-    let (mut middle_at, mut corner_at) = (None, None);
-    let mut spent = Duration::ZERO;
-    while spent < RESOLVE_ARRIVING {
-        let mut buf = drawn();
-        evolve.process(ARRIVING_FRAME.into(), &mut buf, PANE);
-        spent += ARRIVING_FRAME;
-        if middle_at.is_none() && landed(&buf, middle) {
-            middle_at = Some(spent);
+    // Every cell drawn, rather than the diff row the other gates use: the
+    // middle of the pane has to be the middle of the content, or the halves
+    // below are split about a point outside what is being measured.
+    let whole = Rect::new(0, 0, 40, 24);
+    let filled = || {
+        let mut buf = Buffer::empty(whole);
+        for y in 0..whole.height {
+            for x in 0..whole.width {
+                buf[(x, y)].set_symbol("x");
+            }
         }
-        if corner_at.is_none() && landed(&buf, corner) {
-            corner_at = Some(spent);
+        buf
+    };
+    let settled = filled();
+
+    // The frame each cell first holds what the renderer drew in it.
+    let cells: Vec<(u16, u16)> = (0..whole.height)
+        .flat_map(|y| (0..whole.width).map(move |x| (x, y)))
+        .collect();
+    let mut landed: Vec<Option<usize>> = vec![None; cells.len()];
+    let (mut frames, mut spent) = (0usize, Duration::ZERO);
+    while spent < RESOLVE_ARRIVING {
+        let mut buf = filled();
+        evolve.process(ARRIVING_FRAME.into(), &mut buf, whole);
+        spent += ARRIVING_FRAME;
+        frames += 1;
+        for (at, (x, y)) in cells.iter().enumerate() {
+            if landed[at].is_none() && buf[(*x, *y)].symbol() == settled[(*x, *y)].symbol() {
+                landed[at] = Some(frames);
+            }
         }
     }
-    let (middle_at, corner_at) = (
-        middle_at.expect("the middle never arrived"),
-        corner_at.expect("the corner never arrived"),
-    );
+
+    // Halved by distance from the middle, in the metric the pattern uses: a
+    // terminal cell is about twice as tall as it is wide. Two cells are not
+    // enough to compare, because the cells land in their own order under the
+    // shading and that order is a draw per cell, which can carry one cell of
+    // the middle past one of the edge; over half the pane each it cannot.
+    let far = |x: u16, y: u16| {
+        let dx = f64::from(x) - f64::from(whole.width) / 2.0;
+        let dy = (f64::from(y) - f64::from(whole.height) / 2.0) * 2.0;
+        dx.mul_add(dx, dy * dy).sqrt()
+    };
+    let mut order: Vec<(f64, usize)> = cells
+        .iter()
+        .enumerate()
+        .map(|(at, (x, y))| (far(*x, *y), landed[at].unwrap_or(frames)))
+        .collect();
+    order.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("a distance"));
+    let mean = |half: &[(f64, usize)]| {
+        half.iter().map(|(_, at)| *at as f64).sum::<f64>() / half.len() as f64
+    };
+    let (inner, outer) = order.split_at(order.len() / 2);
+    let (inner, outer) = (mean(inner), mean(outer));
+    // Halfway between the two answers rather than just under the good one: a
+    // dropped pattern reads 0.00 frames of difference, this reads 2.7 to 3.05,
+    // and a threshold set against the animation would make the gate the thing
+    // that decides how the animation is allowed to look.
     assert!(
-        middle_at < corner_at,
-        "the middle landed at {middle_at:?} and the corner at {corner_at:?}, so          the arrival is not coming out of the middle"
+        inner + 1.5 < outer,
+        "the middle half of the pane landed on frame {inner:.1} and the outer          half on {outer:.1}, so the arrival is not coming out of the middle"
     );
 }
 
