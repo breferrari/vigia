@@ -172,7 +172,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 | ✅ | The pane wakes when the agent writes to the store | [#418](https://github.com/breferrari/vigia/issues/418) |
 | ✅ | A bordered box under the line takes the note | [#419](https://github.com/breferrari/vigia/issues/419) |
 | ✅ | Enter posts the note into the running session's socket | [#420](https://github.com/breferrari/vigia/issues/420) |
-| ⬜ | The README, the sheet and the spec carry the note | [#421](https://github.com/breferrari/vigia/issues/421) |
+| ✅ | The README, the sheet and the spec carry the note | [#421](https://github.com/breferrari/vigia/issues/421) |
 | ✅ | A note on a file in both runs draws under both headings. **Found by #417's audit** | [#434](https://github.com/breferrari/vigia/issues/434) |
 
 ## Phase 8 — look and feel
