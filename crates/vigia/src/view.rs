@@ -329,7 +329,7 @@ pub enum NoteLead {
     Top,
     /// The reader's words, between its two sides.
     Body,
-    /// The bottom edge: the word, and the stem the answer descends through.
+    /// The bottom edge, carrying the word and the answer's stem.
     Bottom,
     /// The rung below the enclosure, on a pane too narrow to hold one.
     Bar,
@@ -428,11 +428,10 @@ pub struct Noted {
 /// Columns a note row spends before its text: the lead and its gap.
 const NOTE_LEAD: usize = 2;
 
-/// Columns the answer is indented by, under the stem it descends from.
+/// Columns the answer is indented by, under the stem it leaves through.
 pub const REPLY_INDENT: usize = 2;
 
-/// What the bottom edge spends beside the corners `BOX_FRAME` counts: the stem,
-/// the word's two blanks, and the rules setting it in from its corner.
+/// What the bottom edge spends past its corners: the stem, and the word set in.
 const STEM_ROOM: usize = 4;
 
 /// Body rows the note box grows to before it scrolls inside itself.
@@ -631,7 +630,8 @@ impl Pin {
                 );
             } else {
                 let mut body = pieces(&self.body);
-                // Here the word shares the last row, or takes one of its own.
+                // The word shares the last row, or takes one of its own where
+                // that row has none: the reader's words are never cut to fit it.
                 let last = body
                     .last()
                     .map_or(0, |piece| crate::render::width_of(piece));

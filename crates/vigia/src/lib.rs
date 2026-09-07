@@ -1794,7 +1794,7 @@ mod tests {
         assert!(
             cancel.contains("self.app.close_box(now + length(&exit))")
                 && cancel.contains("notes::box_exit()"),
-            "`cancel_box` no longer stands the rows aside for exactly as long as              the sweep it armed runs"
+            "`cancel_box` no longer stands the rows aside for exactly as long              as the sweep it armed runs"
         );
         // Both refusals sit ahead of the open, and the pane's own is the one no
         // drawn screen can catch: without it a press on a pane too narrow to

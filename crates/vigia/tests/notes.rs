@@ -3491,6 +3491,93 @@ fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
 }
 
 #[test]
+fn on_the_bar_rung_a_full_row_pushes_the_word_onto_its_own() {
+    // The rung under the enclosure keeps the behaviour the enclosure made
+    // unnecessary: there the word shares the reader's last row, so a body that
+    // fills that row would either be cut or push the word off the edge. Neither
+    // happens; the word moves down, and the body keeps every character.
+    let scratch = fixture("notes-bar-word-row");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    // Narrow enough that the enclosure gives way to the bar.
+    let narrow = Rect::new(0, 0, 14, 24);
+    // By the rows rather than by the line's text, which this pane cuts.
+    let noted = |painted: &Painted| {
+        let first = painted
+            .view
+            .rows
+            .iter()
+            .position(|row| matches!(row, Row::Note { .. }))
+            .expect("a note row");
+        painted.laid.diff.top + first as u16 - 1
+    };
+
+    // The body grows a character at a time until the word gives up the row.
+    // Measured rather than derived, so the fixture follows the layout.
+    let rows_at = |rig: &mut Rig, frame: &mut Frame, body: &str| {
+        rig.store.put(&note("n1", 5, EDITED, body)).expect("put");
+        rig.reload();
+        rig.advance(RESOLVE_ARRIVING);
+        let painted = rig.paint(frame, narrow, Pointing::default());
+        let y = noted(&painted);
+        (painted.notes_under(y), painted.note_word(y), painted)
+    };
+    let mut moved = None;
+    for len in 1..40usize {
+        let body = "y".repeat(len);
+        let (under, _, painted) = rows_at(&mut rig, &mut frame, &body);
+        assert_eq!(
+            painted.lead_at(noted(&painted) + 1),
+            Some(NoteLead::Bar),
+            "the pane drew an enclosure, so this gate is not on the rung it is              named for:
+{}",
+            painted.rows().join("
+")
+        );
+        if under.len() > 1 {
+            moved = Some(len);
+            break;
+        }
+        assert!(
+            under[0].starts_with(&body),
+            "the body was cut to fit the word: {:?}",
+            under[0]
+        );
+    }
+    let moved = moved.expect("no body up to forty characters moved the word down");
+
+    // At that length the word is alone on the row under the body, and the body
+    // is whole; one character shorter and they share a row.
+    let full = "y".repeat(moved);
+    let (under, word, _) = rows_at(&mut rig, &mut frame, &full);
+    assert_eq!(under.len(), 2, "{under:?}");
+    assert_eq!(
+        under[0].trim_end(),
+        full,
+        "the body gave up a character to the word it no longer shares a row with"
+    );
+    assert_eq!(
+        under[1].trim(),
+        "open",
+        "the word did not take a row of its own"
+    );
+    assert!(word.ends_with("open"), "{word:?}");
+
+    let short = "y".repeat(moved - 1);
+    let (under, word, _) = rows_at(&mut rig, &mut frame, &short);
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(
+        under[0].starts_with(&short) && under[0].trim_end().ends_with("open"),
+        "one column short of the boundary the word left the row: {:?}",
+        under[0]
+    );
+    assert!(word.ends_with("open"), "{word:?}");
+}
+
+#[test]
 fn a_body_that_fills_the_enclosure_is_not_cut_by_the_word() {
     // The reader's words are never cut to fit a status: the word has an edge of
     // its own, so a body filling its row to the column keeps every character.

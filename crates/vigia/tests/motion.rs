@@ -174,6 +174,43 @@ fn a_motion_armed_after_a_quiet_spell_starts_at_its_beginning() {
 }
 
 #[test]
+fn an_arrival_comes_out_of_the_middle() {
+    // The pattern is what makes an arrival a movement rather than a switch, and
+    // it is named on each part of the pair: `Shader::set_pattern` does nothing
+    // by default and no container overrides it, so a pattern named on the pair
+    // is dropped in silence and every cell lands at once. This is what tells
+    // the two apart, since both end on the same frame.
+    let ink = Style::default().fg(Color::Cyan);
+    let mut evolve = motion::evolving(ink, RESOLVE_ARRIVING, 10.0);
+    let settled = drawn();
+    let middle = (PANE.width / 2, PANE.height / 2);
+    let corner = (0, 0);
+    let landed =
+        |buf: &Buffer, (x, y): (u16, u16)| buf[(x, y)].symbol() == settled[(x, y)].symbol();
+    let (mut middle_at, mut corner_at) = (None, None);
+    let mut spent = Duration::ZERO;
+    while spent < RESOLVE_ARRIVING {
+        let mut buf = drawn();
+        evolve.process(ARRIVING_FRAME.into(), &mut buf, PANE);
+        spent += ARRIVING_FRAME;
+        if middle_at.is_none() && landed(&buf, middle) {
+            middle_at = Some(spent);
+        }
+        if corner_at.is_none() && landed(&buf, corner) {
+            corner_at = Some(spent);
+        }
+    }
+    let (middle_at, corner_at) = (
+        middle_at.expect("the middle never arrived"),
+        corner_at.expect("the corner never arrived"),
+    );
+    assert!(
+        middle_at < corner_at,
+        "the middle landed at {middle_at:?} and the corner at {corner_at:?}, so          the arrival is not coming out of the middle"
+    );
+}
+
+#[test]
 fn an_evolve_draws_where_a_crossfade_has_no_two_inks_to_travel_between() {
     // The reason this surface evolves rather than fades: a crossfade needs a
     // colour to travel from, and a palette with no colour at all has none, so
@@ -182,18 +219,29 @@ fn an_evolve_draws_where_a_crossfade_has_no_two_inks_to_travel_between() {
     let flat = vigia::Theme::ansi();
     let mut evolve = motion::evolving(flat.chrome_dim, RESOLVE_ARRIVING, 10.0);
     let settled = drawn();
-    let mut buf = drawn();
-    evolve.process(Duration::from_millis(200).into(), &mut buf, PANE);
-    let shading = (0..PANE.height)
-        .flat_map(|y| (0..PANE.width).map(move |x| (x, y)))
-        .filter(|(x, y)| SHADES.contains(&buf[(*x, *y)].symbol()))
-        .count();
-    assert!(shading > 0, "the evolve drew no shade block:\n{buf:?}");
+    // Over the frames of the arrival rather than at one instant: the cells land
+    // in their own order under the shading, so a single frame holds only the
+    // band that is between blank and drawn on it.
+    let mut shaded = 0;
+    let mut spent = Duration::ZERO;
+    while spent < RESOLVE_ARRIVING {
+        let mut buf = drawn();
+        evolve.process(ARRIVING_FRAME.into(), &mut buf, PANE);
+        spent += ARRIVING_FRAME;
+        shaded += (0..PANE.height)
+            .flat_map(|y| (0..PANE.width).map(move |x| (x, y)))
+            .filter(|(x, y)| SHADES.contains(&buf[(*x, *y)].symbol()))
+            .count();
+    }
+    assert!(
+        shaded > 0,
+        "no frame of the arrival drew a shade block, so it does not evolve"
+    );
 
     // On the frame the renderer drew next, as the pane paints it: an effect
     // that is done leaves the buffer it is handed alone.
     let mut buf = drawn();
-    evolve.process(RESOLVE_ARRIVING.into(), &mut buf, PANE);
+    evolve.process(ARRIVING_FRAME.into(), &mut buf, PANE);
     assert!(evolve.done());
     assert_eq!(
         buf, settled,

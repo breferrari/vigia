@@ -71,14 +71,19 @@ pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
 /// thickening out of the middle, with the cells landing in their own order
 /// under them.
 ///
+/// The pattern is named on each part and not on the pair. `Shader::set_pattern`
+/// defaults to doing nothing and the containers do not override it, so a
+/// pattern on a `parallel` is dropped in silence and every cell arrives at once.
+///
 /// Shade blocks rather than a crossfade because they are glyphs, so this is the
 /// one arrival on the note surface that still draws where the depth has
 /// flattened the palette and there are no two inks to travel between.
 const EVOLVING: &str = r#"
     fx::parallel(&[
-        fx::evolve_into((EvolveSymbolSet::Shaded, ink), (over, Linear)),
+        fx::evolve_into((EvolveSymbolSet::Shaded, ink), (over, Linear))
+            .with_pattern(RadialPattern::with_transition((0.5, 0.5), softness)),
         fx::coalesce((over, Linear)),
-    ]).with_pattern(RadialPattern::with_transition((0.5, 0.5), softness))
+    ])
 "#;
 
 /// A surface leaving: swept away, left to right.
@@ -269,7 +274,7 @@ mod tests {
         assert_eq!(
             length(&effect),
             Duration::ZERO,
-            "a source that will not compile armed an effect with a length, so the              cells under it are held for a motion that never draws"
+            "a source that will not compile armed an effect with a length, so              the cells under it are held for a motion that never draws"
         );
 
         // And it changes nothing, so the surface the renderer drew stands.
