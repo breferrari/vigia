@@ -5566,9 +5566,9 @@ fn an_old_side_note_answers_a_removed_line_and_not_the_addition_beside_it() {
     //
     // A note reaches that shape by going stale: it was pinned to a removed line,
     // the agent edited under it, and its stored number now names a line the index
-    // still has and the diff no longer removes. Twelve lines over twelve slices is
-    // one line each, so the two answers are one slice apart and tell each other
-    // from the drawn row.
+    // still has and the diff no longer removes. What catches it is the stale note
+    // tinting nothing at all; through the addition it would tint the very slice
+    // the genuine note below tints, so position alone cannot tell them apart.
     let scratch = Scratch::new("notes-mark-phantom");
     scratch.write(PATH, numbered_lines(12));
     scratch.commit_all("baseline");
@@ -5652,50 +5652,56 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
     let notes = vec![note("n1", 8, "line 8", "context in both")];
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let viewport = Viewport {
-        position: vigia::Position {
-            file: pinned,
-            row: 0,
-        },
-        anchored: false,
-        diff_rows: 12,
-        width: 80,
-        wrap: false,
-        list_top: 0,
-        list_rows: 6,
-        list_follows: false,
-        measured: true,
-        landing: false,
-        highlight: false,
-        // The pin, which is what narrows the walk to one file.
-        single: true,
-    };
-    let view = View::collect_noted(
-        &mut frame,
-        &mut highlighter,
-        &history,
-        viewport,
-        &notes,
-        true,
-        None,
-    )
-    .expect("collect");
 
-    let listed: Vec<&vigia::FileEntry> =
-        view.list.iter().filter_map(vigia::ListRow::entry).collect();
-    assert_eq!(
-        listed.iter().filter(|entry| entry.path == PATH).count(),
-        2,
-        "the list did not draw both entries of the path, so nothing below is \
-         measured"
-    );
-    assert_eq!(
-        listed
-            .iter()
-            .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
-            .count(),
-        1,
-        "one note marked both entries of a path in both runs while the pane was \
-         pinned to another file"
-    );
+    // Both a top this file count can honour and one it cannot. The request
+    // outlives a frame, so a reader who scrolled a long list and then watched the
+    // worktree shrink arrives here asking for a row past the end, and a window
+    // taken from the request rather than from the clamp is disjoint from the rows
+    // the list actually draws.
+    for top in [0, 15] {
+        let viewport = Viewport {
+            position: vigia::Position {
+                file: pinned,
+                row: 0,
+            },
+            anchored: false,
+            diff_rows: 12,
+            width: 80,
+            wrap: false,
+            list_top: top,
+            list_rows: 6,
+            list_follows: false,
+            measured: true,
+            landing: false,
+            highlight: false,
+            // The pin, which is what narrows the walk to one file.
+            single: true,
+        };
+        let view = View::collect_noted(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            viewport,
+            &notes,
+            true,
+            None,
+        )
+        .expect("collect");
+
+        let listed: Vec<&vigia::FileEntry> =
+            view.list.iter().filter_map(vigia::ListRow::entry).collect();
+        assert_eq!(
+            listed.iter().filter(|entry| entry.path == PATH).count(),
+            2,
+            "asking for row {top} did not list both entries of the path, so nothing below is measured"
+        );
+        assert_eq!(
+            listed
+                .iter()
+                .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
+                .count(),
+            1,
+            "asking for row {top}, one note marked both entries of a path in both runs while the pane was pinned elsewhere"
+        );
+    }
 }

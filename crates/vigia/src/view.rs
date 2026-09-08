@@ -1368,9 +1368,11 @@ impl View {
         // tie. Resolving it costs the entry the walk was not going to read, so it is
         // asked only of a path the walk can still reach, which is one file in `single`.
         let reachable = view.top.file..stop;
-        // And the list's window, which scrolls independently: both rows of a path
-        // in both runs can be drawn while the walk reaches neither and the tie stands.
-        let listed = view.list_top..view.list_top.saturating_add(list_rows);
+        // And the list's window, which scrolls independently: both rows of a path in
+        // both runs can be drawn while the walk reaches neither and the tie stands.
+        // Clamped as `take_list` will: the request outlives a worktree that shrank.
+        let listed = view.list_top.min(last_top(frame.files(), list_rows.max(1)));
+        let listed = listed..listed.saturating_add(list_rows);
         let mut chosen: HashMap<&str, usize> = HashMap::new();
         let mut boxed_run = None;
         for (path, indices) in &runs_of {
