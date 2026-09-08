@@ -1809,9 +1809,9 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 392221),
+    ("SPEC.md", 392398),
     ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 92033),
+    ("ROADMAP.md", 91866),
     ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -1865,6 +1865,49 @@ fn the_spec_names_every_key_the_config_file_accepts() {
             vigia::config::KEYS.len()
         );
     }
+}
+
+/// The length `SPEC.md` gives the box's arrival is the length the pane runs it over.
+///
+/// The number is the whole of the ruling. The box answers a gutter the reader
+/// pressed a moment earlier, so it takes a receipt's length rather than the
+/// diff's, and the two are three hundred milliseconds apart. Nothing about what
+/// is drawn changes with the number, so no assertion over the effect can see a
+/// constant re-borrowed from the wrong one: the whole `arriving` suite stays
+/// green with the box back at the diff's 250ms.
+#[test]
+fn the_box_arrives_over_the_length_the_spec_gives_it() {
+    let spec = repo_file("SPEC.md");
+    let ruled = spec
+        .lines()
+        .find(|line| line.contains("The box arrives over the "))
+        .expect("SPEC.md rules how long the box takes to arrive");
+    let stated: u128 = ruled
+        .split_once("The box arrives over the ")
+        .and_then(|(_, rest)| rest.split_once("ms "))
+        .and_then(|(figure, _)| figure.parse().ok())
+        .expect("that ruling states the length in whole milliseconds");
+
+    assert_eq!(
+        stated,
+        vigia::BOX_ARRIVING.as_millis(),
+        "SPEC.md gives the box {stated}ms to arrive and it is drawn over {}ms",
+        vigia::BOX_ARRIVING.as_millis()
+    );
+    // Against the voice table rather than against `SAID_ARRIVING`: the constant
+    // is defined as that one, so an assertion between them holds by spelling
+    // and says nothing about the ruling, which is that this box is a receipt.
+    let voiced: u128 = spec
+        .lines()
+        .find(|line| line.trim_start().starts_with("| Said |"))
+        .and_then(|row| row.rsplit('|').nth(1))
+        .and_then(|cell| cell.trim().strip_suffix("ms"))
+        .and_then(|figure| figure.parse().ok())
+        .expect("SPEC.md's voice table gives Said a length in whole milliseconds");
+    assert_eq!(
+        stated, voiced,
+        "the box is given {stated}ms and a receipt takes {voiced}ms. It answers a gesture and finds the reader looking, so the two are one number"
+    );
 }
 
 /// The graviola release whose `verify_cpu_features` the shell's guard mirrors.

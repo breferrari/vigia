@@ -329,8 +329,11 @@ pub enum NoteLead {
     Top,
     /// The reader's words, between its two sides.
     Body,
-    /// The bottom edge, carrying the word and the answer's stem.
-    Bottom,
+    /// The bottom edge, carrying the word, and the answer's stem when answered.
+    Bottom {
+        /// Whether the agent has answered, which is what the stem promises.
+        answered: bool,
+    },
     /// The rung below the enclosure, on a pane too narrow to hold one.
     Bar,
     /// The arrow on the first row of the agent's line.
@@ -432,6 +435,7 @@ const NOTE_LEAD: usize = 2;
 pub const REPLY_INDENT: usize = 2;
 
 /// What the bottom edge spends past its corners: the stem, and the word set in.
+/// Reserved on every note, so an answer arriving cannot collapse the enclosure.
 const STEM_ROOM: usize = 4;
 
 /// Body rows the note box grows to before it scrolls inside itself.
@@ -612,7 +616,6 @@ impl Pin {
     /// The display rows this note takes under a content width of `content`.
     fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
-        // A box under the width its bottom edge needs draws nothing at all.
         let boxed = content > BOX_FRAME + self.word.len() + STEM_ROOM;
         let inner = content.saturating_sub(BOX_FRAME);
         let pieces = |text: &str| prose_rows(text, room);
@@ -626,7 +629,9 @@ impl Pin {
                 row(
                     &mut rows,
                     self,
-                    NoteLead::Bottom,
+                    NoteLead::Bottom {
+                        answered: self.reply.is_some(),
+                    },
                     self.word.to_owned(),
                     true,
                 );
