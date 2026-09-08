@@ -2777,6 +2777,172 @@ fn the_answers_arrow_stands_in_the_enclosures_own_rule() {
     );
 }
 
+/// The answer degrades with the note rather than before it.
+///
+/// Down the whole ladder the arrow and the bar are drawn together or not at
+/// all: an answer that leaves first says the note is unanswered, which is the
+/// one thing this surface cannot say wrongly, and it leaves on the narrow panes
+/// nobody reads a pane at.
+#[test]
+fn the_answer_is_drawn_wherever_the_note_itself_is() {
+    let scratch = fixture("notes-ladder");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut seen = note("n1", 5, EDITED, "hm");
+    seen.status = Status::Seen;
+    seen.reply = Some("ok".to_owned());
+    rig.store.put(&seen).expect("put");
+    rig.reload();
+
+    let mut blank = 0;
+    let mut drawn = 0;
+    for width in 1..=12u16 {
+        let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 40), Pointing::default());
+        let mut rows = painted
+            .view
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(at, row)| {
+                let Row::Note { lead, .. } = row else {
+                    return None;
+                };
+                let text = painted.text(painted.laid.diff.top + at as u16);
+                Some((*lead, text.trim_end().is_empty()))
+            });
+        let answer = rows
+            .clone()
+            .find(|(lead, _)| matches!(lead, NoteLead::Reply))
+            .map(|(_, empty)| empty);
+        let note = rows
+            .find(|(lead, _)| !matches!(lead, NoteLead::Reply | NoteLead::Blank))
+            .map(|(_, empty)| empty);
+        assert_eq!(
+            answer, note,
+            "at {width} columns the answer and the note it belongs to are not \
+             drawn together"
+        );
+        match note {
+            Some(true) => blank += 1,
+            Some(false) => drawn += 1,
+            None => panic!("at {width} columns the note drew no row at all"),
+        }
+    }
+    assert!(
+        blank > 0 && drawn > 0,
+        "the sweep never crossed the floor: {blank} blank against {drawn} drawn"
+    );
+}
+
+/// The widest word a note carries still fits the edge it rides.
+///
+/// `resolved` is wider than `changed`, and only a note the agent closed without
+/// writing a line carries it while its rows are still drawn, which is why the
+/// sweep over a note that stays on screen cannot reach it.
+#[test]
+fn the_widest_word_still_fits_the_edge_it_rides() {
+    let scratch = fixture("notes-widest-edge");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut resolved = note("n1", 5, EDITED, "hm");
+    resolved.status = Status::Resolved;
+    rig.store.put(&resolved).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+
+    let mut enclosed = 0;
+    let mut barred = 0;
+    for width in 10..=40u16 {
+        let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 40), Pointing::default());
+        let Some(bottom) = painted.view.rows.iter().position(|row| {
+            matches!(
+                row,
+                Row::Note {
+                    lead: NoteLead::Bottom,
+                    ..
+                }
+            )
+        }) else {
+            barred += 1;
+            continue;
+        };
+        enclosed += 1;
+        let edge = painted.text(painted.laid.diff.top + bottom as u16);
+        let edge = edge.trim_end();
+        assert!(
+            edge.contains("resolved") && edge.ends_with(['┘', '╯']),
+            "at {width} columns the widest word did not fit its edge: {edge:?}"
+        );
+    }
+    assert!(
+        enclosed > 0 && barred > 0,
+        "the sweep did not cross the boundary for the widest word: {enclosed} \
+         enclosed against {barred} barred"
+    );
+}
+
+/// The answer's own wrap counts columns, and it wraps where the body does.
+///
+/// Its width moved with the arrow, so this holds the reply's wrap rather than
+/// the body's: a double-width glyph counted as one column would carry a row
+/// past the enclosure the answer hangs from.
+#[test]
+fn a_wide_answer_wraps_in_the_column_the_body_does() {
+    let scratch = fixture("notes-wide-answer");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut seen = note("n1", 5, EDITED, BODY);
+    seen.status = Status::Seen;
+    // Wide enough to wrap at the widest pane in the sweep, so every rung of it
+    // exercises a continuation rather than only the narrow ones.
+    seen.reply = Some("実装を共有する方法です".repeat(4));
+    rig.store.put(&seen).expect("put");
+    rig.reload();
+
+    for width in [80u16, 60, 40] {
+        let painted = rig.paint(&mut frame, Rect::new(0, 0, width, 40), Pointing::default());
+        let at = |want: NoteLead| {
+            painted
+                .view
+                .rows
+                .iter()
+                .position(|row| matches!(row, Row::Note { lead, .. } if *lead == want))
+                .map(|row| painted.text(painted.laid.diff.top + row as u16))
+        };
+        let edge = at(NoteLead::Bottom)
+            .expect("the bottom edge")
+            .trim_end()
+            .to_owned();
+        // The column itself rather than the first thing on the row: a wrapped
+        // answer's lead is a blank, so `where the words begin` and `where the
+        // ink begins` are the same question only on the rows that have a glyph.
+        let (_, _, origin) = painted.gutter();
+        let words = usize::from(origin) + 2;
+        for lead in [NoteLead::Body, NoteLead::Reply, NoteLead::Blank] {
+            let Some(row) = at(lead) else { continue };
+            assert!(
+                row.chars().nth(words).is_some_and(|c| !c.is_whitespace()),
+                "at {width} columns a row's words do not begin in column {words}: {row:?}"
+            );
+            assert!(
+                row.trim_end().chars().count() <= edge.chars().count(),
+                "at {width} columns a wide answer runs past the enclosure: {row:?}"
+            );
+        }
+        assert!(
+            at(NoteLead::Blank).is_some(),
+            "at {width} columns the answer did not wrap, so its continuation is \
+             not exercised"
+        );
+    }
+}
+
 #[test]
 fn a_resolved_note_without_a_reply_draws_its_body_and_the_word() {
     // The store's reply block is optional, so a note can be resolved with no
