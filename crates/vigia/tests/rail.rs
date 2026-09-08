@@ -645,6 +645,53 @@ fn the_rail_is_monotone_in_pane_height() {
 
 /// Both regions grow with the pane, and the rail draws the pictured complement
 /// at every width it is drawn at.
+/// The pane at which the rail stops being its floor and becomes a share of the
+/// width, which `SPEC.md` §11.1 states as a number and nothing held.
+const THE_SHARE: u16 = 219;
+
+/// The floor itself, which that width is a function of.
+const THE_FLOOR: u16 = 72;
+
+#[test]
+fn the_rail_is_its_floor_until_a_third_of_the_pane_is_wider() {
+    // §11.1 says the rail is seventy-two columns until the pane reaches two
+    // hundred and nineteen and a third of it after that. Both halves were prose
+    // with no gate: the floor moved with the note mark's column, and the width it
+    // turns at moved with the floor, and a run would have said neither.
+    let view = beside();
+    for width in first_rail()..=PAST_THE_CLIMB {
+        let area = Rect::new(0, 0, width, TALL);
+        let rail = body_layout(area, &chrome(), view.files, view.files)
+            .clamped_to(view.list.len())
+            .areas(area)
+            .list
+            .width;
+        if width < THE_SHARE {
+            assert_eq!(
+                rail, THE_FLOOR,
+                "at {width} columns the rail is {rail} where its floor is \
+                 {THE_FLOOR}"
+            );
+        } else {
+            assert_eq!(
+                rail,
+                width / 3,
+                "at {width} columns the rail is {rail} where a third of the pane \
+                 is {}",
+                width / 3
+            );
+        }
+    }
+
+    // Non-vacuity in both directions: the sweep has to cross the turn, or one of
+    // the two arms above never runs and the width it names is unheld again.
+    assert!(
+        first_rail() < THE_SHARE && THE_SHARE < PAST_THE_CLIMB,
+        "the sweep runs {}..={PAST_THE_CLIMB} and does not cross {THE_SHARE}",
+        first_rail()
+    );
+}
+
 #[test]
 fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
     let view = beside();

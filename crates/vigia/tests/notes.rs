@@ -5653,12 +5653,11 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    // Both a top this file count can honour and one it cannot. The request
-    // outlives a frame, so a reader who scrolled a long list and then watched the
-    // worktree shrink arrives here asking for a row past the end, and a window
-    // taken from the request rather than from the clamp is disjoint from the rows
-    // the list actually draws.
-    for top in [0, 15] {
+    // Swept over both a top this file count can honour and one it cannot, and over
+    // both answers to whether the list is following the diff. Each of those moves
+    // the window the list actually draws, and the rule has to hold wherever it
+    // lands rather than wherever a window computed beside it guessed.
+    for (top, follows) in [(0, false), (15, false), (0, true), (15, true)] {
         let viewport = Viewport {
             position: vigia::Position {
                 file: pinned,
@@ -5670,7 +5669,7 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
             wrap: false,
             list_top: top,
             list_rows: 6,
-            list_follows: false,
+            list_follows: follows,
             measured: true,
             landing: false,
             highlight: false,
@@ -5693,7 +5692,7 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
         assert_eq!(
             listed.iter().filter(|entry| entry.path == PATH).count(),
             2,
-            "asking for row {top} did not list both entries of the path, so nothing below is measured"
+            "at row {top} following {follows}, the list did not draw both entries of the path, so nothing below is measured"
         );
         assert_eq!(
             listed
@@ -5701,7 +5700,7 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
                 .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
                 .count(),
             1,
-            "asking for row {top}, one note marked both entries of a path in both runs while the pane was pinned elsewhere"
+            "at row {top} following {follows}, one note marked both entries of a path in both runs while the pane was pinned elsewhere"
         );
     }
 }

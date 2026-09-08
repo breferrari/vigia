@@ -1365,22 +1365,13 @@ impl View {
 
         // A file staged and then edited further is a diff in each run and the note
         // belongs under one: the run its line resolves best in, the earlier index on a
-        // tie. Resolving it costs the entry the walk was not going to read, so it is
-        // asked only of a path the walk can still reach, which is one file in `single`.
-        let reachable = view.top.file..stop;
-        // And the list's window, which scrolls independently: both rows of a path in
-        // both runs can be drawn while the walk reaches neither and the tie stands.
-        // Clamped as `take_list` will: the request outlives a worktree that shrank.
-        let listed = view.list_top.min(last_top(frame.files(), list_rows.max(1)));
-        let listed = listed..listed.saturating_add(list_rows);
+        // tie. Asked of every such path and not only one the walk reaches, because the
+        // list draws entries the walk never will and an unresolved tie marks the file
+        // twice for one note. Those diffs are I4's second exception.
         let mut chosen: HashMap<&str, usize> = HashMap::new();
         let mut boxed_run = None;
         for (path, indices) in &runs_of {
-            if indices.len() < 2
-                || !indices
-                    .iter()
-                    .any(|at| reachable.contains(at) || listed.contains(at))
-            {
+            if indices.len() < 2 {
                 continue;
             }
             if let Some(here) = by_path.get(*path) {
