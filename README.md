@@ -478,6 +478,37 @@ set -ga terminal-overrides ",*:Tc"
 
 </details>
 
+<details>
+<summary><b>📋 Where a copied row actually goes</b></summary>
+
+<br>
+
+**Dragging the diff tries three ways to reach a clipboard and stops at the first that works.**
+
+1. **Your machine's own clipboard tool**, which is `pbcopy` on macOS, `wl-copy` or `xclip` or `xsel` on Linux and `clip` on Windows. It needs nothing of your terminal and nothing of tmux, so on the machine you are sitting at it simply works.
+2. **`tmux load-buffer -w -`**, when `$TMUX` says you are in a pane. The escape below reaches nothing there: `set-clipboard` has defaulted to `external` since tmux 2.6, and `external` lets tmux set the clipboard while forbidding the applications inside it. Handing the rows to tmux makes tmux the one setting it. `-w` arrived in **tmux 3.2**; an older one refuses and the next route is tried.
+3. **OSC 52**, the escape, written straight to the terminal. It is the only one that crosses `ssh`, and it is the one every pane has.
+
+**Over `ssh` the first is skipped**, because it would set a clipboard on the far machine that you cannot see, and succeed at doing it, which would stop the chain before the escape that crosses back to you.
+
+Each tool is fed on standard input, so nothing in a copied row is ever read as an argument, and each gets a second to answer before the next is tried, because the loop carrying your copy is the loop drawing the pane.
+
+**If the clipboard still does not change**, you are on the third route and your terminal is ignoring OSC 52. It has no reply, so nothing here can tell you: the footer says `sent` and means the bytes went. Two settings decide it, and neither is `vigia`'s:
+
+```sh
+tmux show -sv set-clipboard        # `off` swallows it whichever way it goes
+tmux info | grep -i 'Ms:'          # empty means tmux cannot tell your terminal
+```
+
+```sh
+# ~/.tmux.conf
+set -ga terminal-features ",*:clipboard"
+```
+
+`Shift`+drag is the way round all of it: that is your terminal's own selection and its own clipboard.
+
+</details>
+
 ### 🪟 The pane you want, every time
 
 `r`, `s`, `a` and `w` change what the body is made of, and all four start off. If you always want one of them, say so once:

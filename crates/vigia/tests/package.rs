@@ -1809,9 +1809,9 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 384234),
+    ("SPEC.md", 384894),
     ("REVOCATIONS.md", 10220),
-    ("ROADMAP.md", 95743),
+    ("ROADMAP.md", 95873),
     ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -2036,13 +2036,15 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
 ///
-/// Raised 316 bytes on 2026-09-08, session, and the reason is the one #374 names
-/// rather than a new one: a defect fix has to state what the code now does, and
-/// the pass that merged an hour earlier had already spent the gap to five bytes.
-/// The alternative was deleting live contract prose to pay for live contract
-/// prose, which is the ritual #374 was filed to end. It stays a session ruling
-/// and the question is still the reader's.
-const WRITTEN_LAYER_TOTAL: usize = 632154;
+/// Raised twice on 2026-09-08, session, by 316 and then 790 bytes, for the reason
+/// the bullet above already names rather than a new one: a defect fix has to state
+/// what the code now does, and a filed issue has to take a roadmap row. Three
+/// passes that day each needed contract prose and none added a paragraph anyone
+/// could decline, so there was never a trade to make, and the remedy this rule
+/// prescribes would have been deleting live contract prose to pay for live
+/// contract prose. Two raises in one day is the measurement the open question has
+/// been waiting for. It stays a session ruling and the question is the reader's.
+const WRITTEN_LAYER_TOTAL: usize = 632944;
 
 /// Each document weighs no more than its budget.
 #[test]
