@@ -90,14 +90,31 @@ fn shading(painted: &Painted, y: u16) -> usize {
     )
 }
 
+/// Whether `row` is one of note `id`'s own.
+fn is_note(row: &Row, id: &str) -> bool {
+    matches!(row, Row::Note { id: at, .. } if at == id)
+}
+
 /// Rows note `id` drew on `painted`, wherever in the frame they landed.
 fn note_rows(painted: &Painted, id: &str) -> usize {
     painted
         .view
         .rows
         .iter()
-        .filter(|row| matches!(row, Row::Note { id: at, .. } if at == id))
+        .filter(|row| is_note(row, id))
         .count()
+}
+
+/// The same rows by screen row, for a gate that presses one of them.
+fn side_rows(painted: &Painted, id: &str) -> Vec<u16> {
+    painted
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| is_note(row, id))
+        .map(|(offset, _)| painted.laid.diff.top + offset as u16)
+        .collect()
 }
 
 /// How many times note `id` is drawn on `painted`.
@@ -107,7 +124,7 @@ fn note_rows(painted: &Painted, id: &str) -> usize {
 /// every caller is asking is whether the note was placed once, twice or not at
 /// all.
 fn note_blocks(painted: &Painted, id: &str) -> usize {
-    let drawn = |row: Option<&Row>| matches!(row, Some(Row::Note { id: at, .. }) if at == id);
+    let drawn = |row: Option<&Row>| row.is_some_and(|row| is_note(row, id));
     painted
         .view
         .rows
@@ -5812,18 +5829,6 @@ fn a_screen_opening_inside_a_note_counts_no_line_for_it() {
             .count(),
         "the screenful counted a line for a note whose own line is wholly above it"
     );
-}
-
-/// The rows note `id` drew, by screen row, on a painted frame.
-fn side_rows(painted: &Painted, id: &str) -> Vec<u16> {
-    painted
-        .view
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| matches!(row, Row::Note { id: at, .. } if at == id))
-        .map(|(offset, _)| painted.laid.diff.top + offset as u16)
-        .collect()
 }
 
 #[test]

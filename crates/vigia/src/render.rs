@@ -50,7 +50,7 @@ const NOTE_BAR: char = '▎';
 
 /// What a control draws where pressing it takes the thing away: the sheet's close,
 /// and the cell of a note's left side the pointer rests on. One promise, one glyph.
-const DISMISS: char = '✕';
+const DISMISS: &str = "✕";
 
 /// Rules between the status word and the corner it rides in from.
 pub const WORD_INSET: usize = 3;
@@ -3419,7 +3419,7 @@ impl Painter<'_> {
         // pointer.
         let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
         let control = if hovered { self.theme.bar_hover } else { lit };
-        self.put(plan.close.0, plan.close.1, &DISMISS.to_string(), 1, control);
+        self.put(plan.close.0, plan.close.1, DISMISS, 1, control);
 
         match plan.shape {
             Shape::Roomy { group } => self.sheet_roomy(plan, group),
@@ -4389,7 +4389,7 @@ impl Painter<'_> {
             self.put(
                 x,
                 glyphs.y,
-                &DISMISS.to_string(),
+                DISMISS,
                 1,
                 self.theme.bar_hover.add_modifier(dim),
             );

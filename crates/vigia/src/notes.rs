@@ -30,15 +30,21 @@ use crate::view::{Anchor, View};
 /// selection, which is B20 and B21 sharing no cell.
 #[must_use]
 pub fn press_at(view: &View, regions: Regions, event: &Event) -> Option<usize> {
-    let Event::Mouse(mouse) = event else {
-        return None;
-    };
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return None;
-    }
-    let row = regions.gutter_at(mouse.column, mouse.row)?;
+    let (column, row) = pressed(event)?;
+    let row = regions.gutter_at(column, row)?;
     let offset = usize::from(row.saturating_sub(regions.diff.top));
     view.anchor_at(offset).map(|_| offset)
+}
+
+/// The cell a left button went down on, or `None` for any other event. Both of
+/// B21's gestures begin here, and neither answers a move or a release.
+fn pressed(event: &Event) -> Option<(u16, u16)> {
+    match event {
+        Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+            Some((mouse.column, mouse.row))
+        }
+        _ => None,
+    }
 }
 
 /// The note a press on a note's left side landed on, by id, or `None` for any
@@ -48,13 +54,8 @@ pub fn press_at(view: &View, regions: Regions, event: &Event) -> Option<usize> {
 /// B21 sharing no cell for the second time.
 #[must_use]
 pub fn edge_at(view: &View, regions: Regions, event: &Event) -> Option<String> {
-    let Event::Mouse(mouse) = event else {
-        return None;
-    };
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return None;
-    }
-    let row = regions.note_edge_at(mouse.column, mouse.row)?;
+    let (column, row) = pressed(event)?;
+    let row = regions.note_edge_at(column, row)?;
     let offset = usize::from(row.saturating_sub(regions.diff.top));
     view.note_at(offset).map(str::to_owned)
 }
@@ -324,8 +325,8 @@ pub fn withdraw(store: &Store, id: &str) -> Result<bool> {
 /// keep, so nothing the reader typed is lost with it.
 pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
     let body = open.body();
-    let standing = open.over.as_deref().and_then(|id| standing(store, id));
-    match (standing, body.is_empty()) {
+    let held = open.over.as_deref().and_then(|id| standing(store, id));
+    match (held, body.is_empty()) {
         (Some(note), true) => {
             store.remove(&note.id)?;
             Ok(Committed::Withdrawn(note.id))
