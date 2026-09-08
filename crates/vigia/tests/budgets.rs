@@ -2090,7 +2090,8 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
     // effect's length, so a frame path that grew fast enough would leave the
     // flag where it started and time the arrival twice, at a p50 that looks the
     // same and with every other assertion here still green.
-    let armed = std::cell::Cell::new((0usize, 0usize));
+    let arrivals = std::cell::Cell::new(0usize);
+    let sweeps = std::cell::Cell::new(0usize);
     let mut next_frame = |frame: &mut Frame,
                           app: &mut App,
                           highlighter: &mut Highlighter,
@@ -2111,12 +2112,8 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             effects.settle(Instant::now());
             if !effects.is_running() {
                 effects.arm(departures(arriving), &theme, Instant::now());
-                let (arrivals, sweeps) = armed.get();
-                armed.set(if arriving {
-                    (arrivals + 1, sweeps)
-                } else {
-                    (arrivals, sweeps + 1)
-                });
+                let counted = if arriving { &arrivals } else { &sweeps };
+                counted.set(counted.get() + 1);
                 arriving = !arriving;
             }
             running.set(running.get() + usize::from(effects.is_running()));
@@ -2157,7 +2154,8 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         }
     }
     running.set(0);
-    armed.set((0, 0));
+    arrivals.set(0);
+    sweeps.set(0);
     let (mut departing, mut still) = (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
     for _ in 0..SAMPLED_FRAMES {
         for with in [true, false] {
@@ -2187,11 +2185,12 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
          this gate is named for was timed without its departures",
         running.get()
     );
-    let (arrivals, sweeps) = armed.get();
     assert!(
-        arrivals > 0 && sweeps > 0,
-        "the timed window armed {arrivals} arrivals and {sweeps} sweeps, so this \
-         gate measured one half of a departure twice and the other never"
+        arrivals.get() > 0 && sweeps.get() > 0,
+        "the timed window armed {} arrivals and {} sweeps, so this gate measured \
+         one half of a departure twice and the other never",
+        arrivals.get(),
+        sweeps.get()
     );
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let view = app
