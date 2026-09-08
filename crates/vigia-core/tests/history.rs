@@ -376,13 +376,16 @@ fn a_drawn_bucket_saturates_rather_than_wrapping() {
     let now = base();
     let mut history = History::starting_at(now);
 
-    // One path written far past what a `u32` sample can hold, twice inside one
-    // second so the bucket has two of them to add. `wrote` floors a first
-    // sighting at one, so a baseline write comes before each range.
-    for _ in 0..2 {
-        history.record_sized([("src/a.rs", Some(0))], now);
-        history.record_sized([("src/a.rs", Some(u64::from(u32::MAX)))], now);
-    }
+    // Two samples of one bucket, each holding a little over half of what a `u32`
+    // can, so neither saturates on its own and their sum has to. Writing them
+    // into the same sample would exercise `Track::bump`'s add and never the fold
+    // across samples that a drawn bucket is. `wrote` floors a first sighting at
+    // one, so a baseline write sets the size the next one is weighed against,
+    // and a shrink weighs what it removed.
+    let half = u64::from(u32::MAX) / 2 + 1;
+    history.record_sized([("src/a.rs", Some(0))], now);
+    history.record_sized([("src/a.rs", Some(half))], now);
+    history.record_sized([("src/a.rs", Some(0))], now + HISTORY_SAMPLE);
 
     let newest = history.churn("src/a.rs").expect("a tracked path")[HISTORY_BUCKETS - 1];
     assert_eq!(
