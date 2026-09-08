@@ -38,7 +38,7 @@ pub mod update;
 mod view;
 
 pub use app::{App, Sending, Voice};
-pub use clipboard::{Carrier, Route, put, route, tmux_command};
+pub use clipboard::{Carrier, Route, plan, put, remote, system_tools, tmux_command};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
@@ -1221,8 +1221,11 @@ impl Shell {
     fn settle_send(&mut self, now: Instant) {
         if let Some(sending) = self.app.take_sending() {
             let said = sending.said;
-            let route = clipboard::route(std::env::var_os("TMUX").as_deref());
-            let (told, voice) = match clipboard::put(&mut self.session, &sending.text, route) {
+            let plan = clipboard::plan(
+                std::env::var_os("TMUX").as_deref(),
+                clipboard::remote(|name| std::env::var_os(name).is_some()),
+            );
+            let (told, voice) = match clipboard::put(&mut self.session, &sending.text, &plan) {
                 Ok(()) => (format!("sent {said} to the clipboard"), Voice::Said),
                 Err(e) => (format!("could not send {said}: {e}"), Voice::Alert),
             };

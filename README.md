@@ -479,29 +479,33 @@ set -ga terminal-overrides ",*:Tc"
 </details>
 
 <details>
-<summary><b>📋 Copying inside tmux, and why your clipboard might not change</b></summary>
+<summary><b>📋 Where a copied row actually goes</b></summary>
 
 <br>
 
-**Dragging the diff copies through `tmux` when `vigia` is inside it**, because the escape it would otherwise write is one `tmux` throws away. `set-clipboard` has defaulted to `external` since tmux 2.6, and `external` means tmux may set the terminal's clipboard while the applications inside it may not. So the rows are handed to `tmux load-buffer -w -` and tmux is the one that sets it, which is what that default allows.
+**Dragging the diff tries three ways to reach a clipboard and stops at the first that works.**
 
-`-w` arrived in **tmux 3.2**. On anything older the handoff is refused and the escape is written instead, which is what shipped before this existed: no worse, and no better. `tmux -V` says which you have.
+1. **Your machine's own clipboard tool**, which is `pbcopy` on macOS, `wl-copy` or `xclip` or `xsel` on Linux and `clip` on Windows. It needs nothing of your terminal and nothing of tmux, so on the machine you are sitting at it simply works.
+2. **`tmux load-buffer -w -`**, when `$TMUX` says you are in a pane. The escape below reaches nothing there: `set-clipboard` has defaulted to `external` since tmux 2.6, and `external` lets tmux set the clipboard while forbidding the applications inside it. Handing the rows to tmux makes tmux the one setting it. `-w` arrived in **tmux 3.2**; an older one refuses and the next route is tried.
+3. **OSC 52**, the escape, written straight to the terminal. It is the only one that crosses `ssh`, and it is the one every pane has.
 
-Two things still sit under it, and neither is `vigia`'s to set:
+**Over `ssh` the first is skipped**, because it would set a clipboard on the far machine that you cannot see, and succeed at doing it, which would stop the chain before the escape that crosses back to you.
+
+Each tool is fed on standard input, so nothing in a copied row is ever read as an argument, and each gets a second to answer before the next is tried, because the loop carrying your copy is the loop drawing the pane.
+
+**If the clipboard still does not change**, you are on the third route and your terminal is ignoring OSC 52. It has no reply, so nothing here can tell you: the footer says `sent` and means the bytes went. Two settings decide it, and neither is `vigia`'s:
 
 ```sh
 tmux show -sv set-clipboard        # `off` swallows it whichever way it goes
 tmux info | grep -i 'Ms:'          # empty means tmux cannot tell your terminal
 ```
 
-`set-clipboard off` stops tmux writing outward at all. And tmux only writes outward if it believes the outer terminal speaks OSC 52, which is the `Ms` capability, declared with `terminal-features` on tmux 3.2 and later:
-
 ```sh
 # ~/.tmux.conf
 set -ga terminal-features ",*:clipboard"
 ```
 
-**The footer says `sent` and it means it differently on each route.** Through tmux there is an exit status, so a refusal is reported. Through the escape there is no reply at all, and a terminal that ignores OSC 52 leaves you holding whatever was in the clipboard before, with nothing able to say so. `Shift`+drag is the way round all of it: that is your terminal's own selection and its own clipboard.
+`Shift`+drag is the way round all of it: that is your terminal's own selection and its own clipboard.
 
 </details>
 

@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use vigia::{
-    App, Carrier, NOTICE_LINGER, Pointing, Route, View, Voice, body_layout, put, route, settled,
-    tmux_command,
+    App, Carrier, NOTICE_LINGER, Pointing, Route, View, Voice, body_layout, plan, put, remote,
+    settled, system_tools, tmux_command,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -242,56 +242,111 @@ fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
 }
 
 // ---------------------------------------------------------------------------
-// Which way a copy leaves the pane. Inside tmux the escape is discarded,
-// so the text goes to tmux and tmux is the one that sets the clipboard.
+// Which way a copy leaves the pane. The escape alone reaches nothing inside
+// tmux, and the machine's own clipboard reaches the wrong machine over ssh, so
+// what matters is the order the routes are tried in.
 // ---------------------------------------------------------------------------
 
-/// A carrier that records what it was asked to do and answers as told.
+/// A carrier that records what it was asked and answers as it was told to.
 #[derive(Default)]
 struct Fake {
-    /// The text handed to tmux, in order.
-    tmux: Vec<String>,
-    /// The sequences written to the terminal, in order.
-    terminal: Vec<String>,
-    /// Whether tmux refuses.
-    tmux_refuses: bool,
-    /// Whether the terminal refuses.
-    terminal_refuses: bool,
+    /// What each route was handed, in the order the routes were tried.
+    tried: Vec<(&'static str, String)>,
+    /// Which routes refuse.
+    refuse: Vec<&'static str>,
+}
+
+impl Fake {
+    fn take(&mut self, route: &'static str, text: &str) -> std::io::Result<()> {
+        self.tried.push((route, text.to_owned()));
+        if self.refuse.contains(&route) {
+            return Err(std::io::Error::other(format!("{route} refused it")));
+        }
+        Ok(())
+    }
+
+    /// The routes it was asked, in order.
+    fn order(&self) -> Vec<&'static str> {
+        self.tried.iter().map(|(route, _)| *route).collect()
+    }
 }
 
 impl Carrier for Fake {
+    fn to_system(&mut self, text: &str) -> std::io::Result<()> {
+        self.take("system", text)
+    }
+
     fn to_tmux(&mut self, text: &str) -> std::io::Result<()> {
-        self.tmux.push(text.to_owned());
-        if self.tmux_refuses {
-            return Err(std::io::Error::other("tmux refused it, exit status: 1"));
-        }
-        Ok(())
+        self.take("tmux", text)
     }
 
     fn to_terminal(&mut self, sequence: &str) -> std::io::Result<()> {
-        self.terminal.push(sequence.to_owned());
-        if self.terminal_refuses {
-            return Err(std::io::Error::other("the pipe is gone"));
-        }
-        Ok(())
+        self.take("escape", sequence)
     }
 }
 
-/// Outside tmux nothing changes: the escape is the route, as it has been.
+/// A reader sitting at the machine gets its own clipboard first, which needs
+/// nothing of the terminal and nothing of tmux.
 #[test]
-fn the_route_outside_tmux_is_the_escape() {
-    assert_eq!(route(None), Route::Escape);
-    // A pane that has left tmux carries the variable emptied rather than unset,
-    // and an empty value is not a pane.
-    assert_eq!(route(Some(OsStr::new(""))), Route::Escape);
+fn the_plan_at_the_machine_tries_its_own_clipboard_first() {
+    assert_eq!(plan(None, false), [Route::System, Route::Escape]);
 }
 
-/// Inside one it is tmux, because tmux discards what an application writes.
+/// **The ordering this is all for.** Over `ssh` the machine's own clipboard is
+/// on the far end, where nobody can see it, and it would succeed at being set:
+/// the chain would end there and the escape that crosses back would never go.
 #[test]
-fn the_route_inside_tmux_is_tmux() {
+fn the_plan_over_ssh_never_tries_the_machines_clipboard() {
+    assert_eq!(plan(None, true), [Route::Escape]);
     assert_eq!(
-        route(Some(OsStr::new("/tmp/tmux-1000/default,3412,0"))),
-        Route::Tmux
+        plan(Some(OsStr::new("/tmp/tmux-1000/default,3412,0")), true),
+        [Route::Tmux, Route::Escape],
+        "a remote pane inside tmux still has tmux to pass it on"
+    );
+}
+
+/// Inside tmux the escape is discarded, so tmux goes between the two.
+#[test]
+fn the_plan_inside_tmux_puts_tmux_before_the_escape() {
+    assert_eq!(
+        plan(Some(OsStr::new("/tmp/tmux-1000/default,3412,0")), false),
+        [Route::System, Route::Tmux, Route::Escape]
+    );
+    // The variable survives a shell clearing it, and an empty one is not a pane.
+    assert_eq!(
+        plan(Some(OsStr::new("")), false),
+        [Route::System, Route::Escape]
+    );
+}
+
+/// The escape is last on every plan, because it is the one route every pane has.
+#[test]
+fn the_escape_ends_every_plan() {
+    for tmux in [None, Some(OsStr::new("x"))] {
+        for remote in [true, false] {
+            let made = plan(tmux, remote);
+            assert_eq!(
+                made.last(),
+                Some(&Route::Escape),
+                "a plan ended somewhere else: {made:?}"
+            );
+        }
+    }
+}
+
+/// Which of the three the daemon sets depends on how the session was opened, so
+/// any of them is enough to say the reader is elsewhere.
+#[test]
+fn an_ssh_session_is_any_of_the_three_variables() {
+    for one in ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] {
+        assert!(
+            remote(|name| name == one),
+            "{one} did not say so on its own"
+        );
+    }
+    assert!(
+        !remote(|_| false),
+        "a session with none of them read as remote"
     );
 }
 
@@ -312,64 +367,76 @@ fn the_tmux_command_hands_the_text_over_and_asks_for_the_clipboard() {
     );
 }
 
-/// On the tmux route the text goes to tmux whole, and no escape follows it.
+/// Every tool is fed on standard input, so nothing in a copy can be read as an
+/// argument, and a headless Unix offers none rather than a broken one.
 #[test]
-fn a_copy_inside_tmux_goes_through_tmux_and_writes_no_escape() {
-    let mut fake = Fake::default();
-    put(&mut fake, "one\ntwo", Route::Tmux).expect("carried");
-    assert_eq!(fake.tmux, ["one\ntwo"]);
-    assert!(
-        fake.terminal.is_empty(),
-        "the escape went out as well, and tmux would take the copy twice"
-    );
+fn the_machines_tools_are_fed_on_standard_input() {
+    for (wayland, x11) in [(true, false), (false, true), (true, true)] {
+        let tools = system_tools(wayland, x11);
+        assert!(
+            !tools.is_empty(),
+            "a display was set and no tool was offered for it"
+        );
+        for (program, args) in tools {
+            assert!(
+                !args.contains(&"-"),
+                "{program} was given the text as an argument rather than on its input"
+            );
+        }
+    }
+    if cfg!(not(any(target_os = "macos", windows))) {
+        assert!(
+            system_tools(false, false).is_empty(),
+            "a Unix with no display offered a clipboard tool for a clipboard it has not got"
+        );
+    }
 }
 
-/// A tmux that refuses leaves the reader where they were rather than worse: the
-/// escape is what shipped before this route, and `-w` is younger than tmux 3.2.
+/// The first route that carries it is the last one asked.
 #[test]
-fn a_refused_tmux_write_falls_back_to_the_escape() {
-    let mut fake = Fake {
-        tmux_refuses: true,
-        ..Fake::default()
-    };
-    put(&mut fake, "one\ntwo", Route::Tmux).expect("the escape carried it");
-    assert_eq!(fake.tmux, ["one\ntwo"], "tmux was never asked");
+fn the_first_route_that_carries_it_ends_the_chain() {
+    let mut fake = Fake::default();
+    put(&mut fake, "one\ntwo", &plan(Some(OsStr::new("x")), false)).expect("carried");
     assert_eq!(
-        fake.terminal.len(),
-        1,
-        "the escape did not follow the refusal"
+        fake.order(),
+        ["system"],
+        "the chain went on past a route that took it"
     );
-    assert!(
-        fake.terminal[0].starts_with("\x1b]52;c;") && fake.terminal[0].ends_with("\x1b\\"),
-        "what followed was not the escape: {:?}",
-        fake.terminal[0]
+    assert_eq!(
+        fake.tried[0].1, "one\ntwo",
+        "the text was changed on the way"
     );
 }
 
-/// Both routes refusing is the one case the reader is told about, and until this
-/// route existed no test could reach that arm at all.
+/// A route that refuses falls through to the next, and the escape is what the
+/// last of them writes.
 #[test]
-fn a_copy_neither_route_could_carry_is_an_error() {
+fn a_route_that_refuses_falls_through_to_the_next() {
     let mut fake = Fake {
-        tmux_refuses: true,
-        terminal_refuses: true,
+        refuse: vec!["system", "tmux"],
         ..Fake::default()
     };
-    let refused = put(&mut fake, "one", Route::Tmux).expect_err("something carried it");
+    put(&mut fake, "one", &plan(Some(OsStr::new("x")), false)).expect("the escape carried it");
+    assert_eq!(fake.order(), ["system", "tmux", "escape"]);
+    let (_, wrote) = fake.tried.last().expect("nothing was written");
     assert!(
-        refused.to_string().contains("pipe"),
-        "the error is not the escape's, which is the one every pane has: {refused}"
+        wrote.starts_with("\u{1b}]52;c;") && wrote.ends_with("\u{1b}\\"),
+        "what the escape route wrote was not the escape: {wrote:?}"
     );
 }
 
-/// The escape route still writes the escape and nothing else.
+/// Every route refusing is the one case the reader is told about, and until
+/// these routes existed no test could reach that arm at all.
 #[test]
-fn a_copy_outside_tmux_writes_the_escape_alone() {
-    let mut fake = Fake::default();
-    put(&mut fake, "one", Route::Escape).expect("carried");
+fn a_copy_no_route_could_carry_is_an_error() {
+    let mut fake = Fake {
+        refuse: vec!["system", "tmux", "escape"],
+        ..Fake::default()
+    };
+    let refused = put(&mut fake, "one", &plan(Some(OsStr::new("x")), false))
+        .expect_err("something carried it");
     assert!(
-        fake.tmux.is_empty(),
-        "a pane outside tmux asked tmux to carry its copy"
+        refused.to_string().contains("escape"),
+        "the error is not the last route's, which is the one that speaks for the rest: {refused}"
     );
-    assert_eq!(fake.terminal.len(), 1);
 }
