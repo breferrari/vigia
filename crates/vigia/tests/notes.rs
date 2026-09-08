@@ -4028,6 +4028,15 @@ fn the_beat_between_a_resolve_and_its_sweep_runs_no_effect() {
         "an effect is still running once the agent's line has arrived, so the \
          beat is paid for at one frame every {ARRIVING_FRAME:?}"
     );
+    // And what the loop is offered instead: the sweep's own moment, rather than
+    // the frame an effect would have asked for.
+    let sweeps = rig.clock + RESOLVE_BEAT;
+    assert_eq!(
+        rig.ledger.ends_in(),
+        Some(sweeps),
+        "the ledger offers the loop something other than the beat's end, so the \
+         pane wakes through a stretch nothing is drawing"
+    );
 
     // Three quarters of the way through the beat, still quiet and still drawn.
     rig.advance(RESOLVE_BEAT * 3 / 4);
@@ -4038,6 +4047,7 @@ fn the_beat_between_a_resolve_and_its_sweep_runs_no_effect() {
         late.notes_under(y)
     );
     assert!(!rig.effects.is_running(), "the beat armed an effect");
+    assert_eq!(rig.ledger.ends_in(), Some(sweeps), "the beat's end moved");
 
     // The beat's end is the deadline the loop waits on, and it arms the sweep.
     rig.advance(RESOLVE_BEAT / 4);
@@ -4069,6 +4079,44 @@ fn the_beat_between_a_resolve_and_its_sweep_runs_no_effect() {
         "the departure ended and something was left drawn"
     );
     assert!(!rig.effects.is_running());
+}
+
+#[test]
+fn a_beat_that_has_run_names_its_sweep_once_however_often_the_pane_settles() {
+    // On the ledger rather than through a paint, because the effects cannot see
+    // this: `arm` replaces the effect over a note's rows rather than stacking on
+    // it, so a sweep re-armed on every frame keeps the count at one and restarts
+    // its own dissolve, and the reader watches the rows leave and come back.
+    let now = Instant::now();
+    let mut ledger = Ledger::default();
+    ledger.reload(vec![note("n1", 5, EDITED, "short")], now);
+    ledger.reload(
+        vec![left_as("n1", "short", Status::Resolved, Some(REPLY))],
+        now,
+    );
+
+    // Through the beat the loop is offered its end, and settling inside it
+    // sweeps nothing.
+    let sweeps = now + RESOLVED_DEPARTURE - LEAVING;
+    assert_eq!(ledger.ends_in(), Some(sweeps));
+    assert!(
+        ledger.settle(now + RESOLVE_ARRIVING).sweeping.is_empty(),
+        "the rows were swept while the agent's line was still being read"
+    );
+
+    // The turn that meets the end names the note, and no turn after it does.
+    assert_eq!(ledger.settle(sweeps).sweeping, vec!["n1".to_owned()]);
+    for again in 1..=4 {
+        assert!(
+            ledger.settle(sweeps).sweeping.is_empty(),
+            "settle {again} turns past the beat's end named the sweep again"
+        );
+    }
+    assert_eq!(
+        ledger.ends_in(),
+        Some(now + RESOLVED_DEPARTURE),
+        "the rows are dropped at something other than the departure's own end"
+    );
 }
 
 #[test]

@@ -1159,11 +1159,8 @@ impl Shell {
         if settled.changed {
             self.publish_notes();
         }
-        // The sweep is armed here rather than where the resolve was read,
-        // because the beat between the agent's line arriving and the rows going
-        // is a deadline this loop waits on rather than a sleep inside an effect:
-        // an effect that has not finished asks for a frame every
-        // `ARRIVING_FRAME`, and this beat is a minute long.
+        // A wake later than the one that read the resolve, because `RESOLVE_BEAT`
+        // separates them and the ledger is what holds the clock across it.
         self.note_effects.arm(
             settled.sweeping.into_iter().map(Change::Swept).collect(),
             &self.theme,

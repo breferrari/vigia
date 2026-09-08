@@ -112,14 +112,14 @@ fn a_departure_is_as_long_as_its_three_parts() {
     // the gap between them: shorter and the rows sit blank, longer and they are
     // taken away mid-sweep. The beat is the departure less its two ends and is
     // run by no effect, which is what lets it be a minute.
+    // On the effects the pane builds rather than on the constants they were
+    // given, which is what `arriving.rs` already holds: a motion that reports a
+    // length other than the one it was compiled with is what this can see and
+    // that gate cannot.
     let ink = Style::default().fg(Color::Cyan);
     assert_eq!(
         length(&motion::evolving(ink, RESOLVE_ARRIVING, 10.0)) + RESOLVE_BEAT,
         RESOLVED_DEPARTURE - length(&motion::sweeping(LEAVING, 35)),
-    );
-    assert_eq!(
-        RESOLVE_ARRIVING + RESOLVE_BEAT + LEAVING,
-        RESOLVED_DEPARTURE
     );
 }
 

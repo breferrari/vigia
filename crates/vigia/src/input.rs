@@ -452,9 +452,9 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
     (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
 }
 
-/// Whether a scroll's direction mark has outlived its burst.
-pub fn settled(linger: Option<Instant>, now: Instant) -> bool {
-    linger.is_some_and(|until| now >= until)
+/// Whether a deadline a caller is holding has come due; nothing held is nothing due.
+pub fn settled(held: Option<Instant>, now: Instant) -> bool {
+    held.is_some_and(|until| now >= until)
 }
 
 /// Every deadline the loop owns. Named: they fold to a minimum, so a value in the

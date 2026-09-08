@@ -18,7 +18,7 @@ use tachyonfx::Effect;
 use tachyonfx::pattern::AnyPattern;
 use vigia_core::{CONTEXT, Listing, Note, Origin, Result, Status, Store};
 
-use crate::input::Regions;
+use crate::input::{Regions, settled};
 use crate::motion::{self, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVED_DEPARTURE, Timed};
 use crate::render::NoteCells;
 use crate::theme::{self, Theme};
@@ -424,8 +424,9 @@ impl Alerts {
     }
 }
 
-/// What a reload of the store found had moved, each naming the note's id, for
-/// the effect that draws it moving.
+/// What one turn of the ledger found had moved, a reload of the store or a
+/// settle of its clocks, each naming the note's id, for the effect that draws it
+/// moving.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     /// The reader pressed Enter, so the note's rows are new under its line.
@@ -453,12 +454,8 @@ struct Departing {
     note: Note,
     /// When the sweep over its rows is armed, while a resolve is still holding
     /// the agent's line; `None` once it has been armed, and from the start for a
-    /// departure with no line to show first.
-    ///
-    /// The beat is a deadline rather than a `sleep` inside the effect because an
-    /// effect that has not finished keeps the loop asking for a frame every
-    /// `ARRIVING_FRAME`: a minute held inside one motion is a minute of paints
-    /// of a surface that is not moving.
+    /// departure with no line to show first. `RESOLVE_BEAT` is why it is a
+    /// deadline here rather than a sleep inside the effect.
     holds: Option<Instant>,
     /// When its rows are dropped and the diff below closes up.
     ends: Instant,
@@ -571,7 +568,7 @@ impl Ledger {
         // departure, or one that met the resolve already older than it.
         let mut sweeping = Vec::new();
         for gone in &mut self.departing {
-            if gone.holds.is_some_and(|until| now >= until) {
+            if settled(gone.holds, now) {
                 gone.holds = None;
                 sweeping.push(gone.note.id.clone());
             }
@@ -634,9 +631,9 @@ pub fn resolve_arrival(theme: &Theme) -> Effect {
     evolving(theme.note_reply, RESOLVE_ARRIVING)
 }
 
-/// How a note's rows leave: swept away, with no line from the agent to show
-/// first. A resolve's own sweep, once its beat has run, and the whole of a
-/// withdrawal's departure and of one whose file vanished.
+/// How a note's rows leave, whichever way the note went: swept away. The end of
+/// a resolve's departure, once its beat has run, and the whole of a withdrawal's
+/// and of one whose file vanished, which have no line to show first.
 #[must_use]
 pub fn leaving() -> Effect {
     sweeping(LEAVING)

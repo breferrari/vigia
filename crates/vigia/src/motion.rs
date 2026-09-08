@@ -73,9 +73,12 @@ pub const LEAVING: Duration = NOTICE_ARRIVING;
 /// gesture and finds them looking.
 pub const RESOLVED_DEPARTURE: Duration = ARRIVED_LINGER;
 
-/// How long a resolve's line holds between arriving and leaving, with no effect
-/// running over it: the pane owns one deadline for this and asks for no frame
-/// until it comes due.
+/// How long a resolve's line holds between arriving and leaving.
+///
+/// It is a deadline the pane waits on rather than a sleep inside a composed
+/// effect, and at this length that is the difference between one wake and
+/// [`ARRIVED_LINGER`] divided by [`ARRIVING_FRAME`] paints of a surface nothing
+/// is moving.
 pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
     .saturating_sub(RESOLVE_ARRIVING)
     .saturating_sub(LEAVING);
