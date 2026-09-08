@@ -5546,3 +5546,156 @@ fn a_file_holding_two_notes_draws_the_worse_of_them() {
         "a resolved note outranked a waiting one"
     );
 }
+
+/// Which slices of the heading's strip carry the note's ink.
+fn tinted(painted: &Painted, tint: Option<Color>) -> Vec<usize> {
+    strip_on(painted, painted.row_of(PATH))
+        .iter()
+        .enumerate()
+        .filter(|(_, ink)| **ink == tint)
+        .map(|(at, _)| at)
+        .collect()
+}
+
+#[test]
+fn an_old_side_note_answers_a_removed_line_and_not_the_addition_beside_it() {
+    // `Hunk::positions` advances `old` only on a line the index side has, so the
+    // addition in a rewritten block carries the index number of the context line
+    // that follows it, and the walk emits it first. A lookup that does not ask the
+    // kind therefore answers with the addition.
+    //
+    // A note reaches that shape by going stale: it was pinned to a removed line,
+    // the agent edited under it, and its stored number now names a line the index
+    // still has and the diff no longer removes. Twelve lines over twelve slices is
+    // one line each, so the two answers are one slice apart and tell each other
+    // from the drawn row.
+    let scratch = Scratch::new("notes-mark-phantom");
+    scratch.write(PATH, numbered_lines(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, "rewritten five");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let tint = rig.theme.heat_note.fg;
+
+    // The stale note alone. Index line six is a context line, and the addition
+    // above it answers to six with a working-tree position of five.
+    let mut stale = note("n2", 6, "line 6", BODY);
+    stale.side = Side::Old;
+    rig.store.put(&stale).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        tinted(&painted, tint),
+        Vec::<usize>::new(),
+        "the stale note tinted a slice, so it answered through the addition that \
+         carries index line six rather than through a line the index removed"
+    );
+
+    // Added rather than swapped, because removing one starts a departure that
+    // keeps drawing. Index line five is the line the rewrite removed and it sits
+    // at working-tree line five: twelve lines over twelve slices puts it in slice
+    // four, which is the slice the stale note would have taken.
+    let mut removed = note("n1", 5, "line 5", BODY);
+    removed.side = Side::Old;
+    rig.store.put(&removed).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        tinted(&painted, tint),
+        vec![4],
+        "a note on the line the rewrite removed did not tint its own slice, so the \
+         assertion above passes on a strip that cannot draw one at all"
+    );
+
+    assert_eq!(mark_on(&painted, painted.row_of(PATH)), Some('\u{270e}'));
+}
+
+#[test]
+fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewhere() {
+    // Which run owns a note is resolved over the entries the diff walk can reach,
+    // and unpinned that is every entry from the viewport down, so the tie always
+    // resolves. Pinned, the walk reaches exactly one file, and a path in both runs
+    // that is not the pinned one has neither of its entries in that range. The
+    // list draws them both anyway, so an unresolved tie marks the file twice for
+    // one note while the footer says one.
+    //
+    // Read off the collected entries rather than the drawn rows, because the list
+    // region is sized from the file count and cannot draw every row of a grouped
+    // three-entry fixture at once. The rule is about the entries.
+    let scratch = in_both_runs("notes-mark-pinned", 5, "staged six");
+    scratch.write("src/other.rs", numbered_lines(6));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let pinned = frame
+        .files()
+        .iter()
+        .position(|change| change.paths().any(|path| path == "src/other.rs"))
+        .expect("the second file is not in the changed set");
+    let runs: Vec<usize> = frame
+        .files()
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change.paths().any(|path| path == PATH))
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(runs.len(), 2, "the fixture is not a path in both runs");
+    assert!(
+        !runs.contains(&pinned),
+        "the pinned file is one of the two runs, so the walk reaches the tie"
+    );
+
+    let notes = vec![note("n1", 8, "line 8", "context in both")];
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let viewport = Viewport {
+        position: vigia::Position {
+            file: pinned,
+            row: 0,
+        },
+        anchored: false,
+        diff_rows: 12,
+        width: 80,
+        wrap: false,
+        list_top: 0,
+        list_rows: 6,
+        list_follows: false,
+        measured: true,
+        landing: false,
+        highlight: false,
+        // The pin, which is what narrows the walk to one file.
+        single: true,
+    };
+    let view = View::collect_noted(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        viewport,
+        &notes,
+        true,
+        None,
+    )
+    .expect("collect");
+
+    let listed: Vec<&vigia::FileEntry> =
+        view.list.iter().filter_map(vigia::ListRow::entry).collect();
+    assert_eq!(
+        listed.iter().filter(|entry| entry.path == PATH).count(),
+        2,
+        "the list did not draw both entries of the path, so nothing below is \
+         measured"
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
+            .count(),
+        1,
+        "one note marked both entries of a path in both runs while the pane was \
+         pinned to another file"
+    );
+}

@@ -795,6 +795,8 @@ fn notes_of(diff: &FileDiff, notes: &[&Note]) -> FileNotes {
 
 /// The slice the line `note` is pinned to falls in. An old-side note is numbered by
 /// the index and the strip is the working tree's, so it walks [`heat_of`]'s own.
+/// The kind is part of the match: `positions` leaves `old` where it is on an
+/// addition, so an addition carries the number of the index line it sits before.
 fn slice_of(diff: &FileDiff, note: &Note) -> Option<usize> {
     let line = match note.side {
         Side::New => note.line,
@@ -802,7 +804,7 @@ fn slice_of(diff: &FileDiff, note: &Note) -> Option<usize> {
             .hunks
             .iter()
             .flat_map(Hunk::positions)
-            .find(|(old, _, _)| *old == note.line)
+            .find(|(old, _, line)| *old == note.line && line.kind == LineKind::Removed)
             .map(|(_, new, _)| new)?,
     };
     bucket_of(line, diff.lines)
@@ -1366,10 +1368,17 @@ impl View {
         // tie. Resolving it costs the entry the walk was not going to read, so it is
         // asked only of a path the walk can still reach, which is one file in `single`.
         let reachable = view.top.file..stop;
+        // And the list's window, which scrolls independently: both rows of a path
+        // in both runs can be drawn while the walk reaches neither and the tie stands.
+        let listed = view.list_top..view.list_top.saturating_add(list_rows);
         let mut chosen: HashMap<&str, usize> = HashMap::new();
         let mut boxed_run = None;
         for (path, indices) in &runs_of {
-            if indices.len() < 2 || !indices.iter().any(|at| reachable.contains(at)) {
+            if indices.len() < 2
+                || !indices
+                    .iter()
+                    .any(|at| reachable.contains(at) || listed.contains(at))
+            {
                 continue;
             }
             if let Some(here) = by_path.get(*path) {

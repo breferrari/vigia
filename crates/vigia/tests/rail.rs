@@ -53,12 +53,12 @@ const PICTURED_PANE: u16 = 109;
 /// than the rungs that happen to be reachable.
 const WIDEST: u16 = 240;
 
-/// Past the width at which the rail's own ladder would climb off the settled
-/// rung, which is a pane of about four hundred.
-const PAST_THE_CLIMB: u16 = 420;
+/// Past the width at which the rail's own ladder climbs off the settled rung,
+/// with room for the boundary to move without the sweep stopping short of it.
+const PAST_THE_CLIMB: u16 = 440;
 
 /// The pane at which the rail's own glance ladder leaves the settled rung.
-const THE_CLIMB: u16 = 402;
+const THE_CLIMB: u16 = 417;
 
 /// A pane tall enough that neither region is the thing giving way.
 const TALL: u16 = 24;
@@ -660,7 +660,7 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
         )
     };
 
-    let mut climbed = false;
+    let mut climbed: Option<u16> = None;
     let mut previous: Option<(u16, u16, u16)> = None;
     for width in first_rail()..=PAST_THE_CLIMB {
         let area = Rect::new(0, 0, width, TALL);
@@ -694,15 +694,20 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
                 "at {width} columns the rail drew {heat} and {spark}, under the \
                  complement it kept one column narrower"
             );
-            climbed |= heat > pictured.1 || spark > pictured.2;
+            if heat > pictured.1 || spark > pictured.2 {
+                climbed.get_or_insert(width);
+            }
         }
     }
 
-    // The ceiling is a pinned width, not a phrase.
-    assert!(
+    // The width itself, not merely somewhere under the sweep's ceiling: the
+    // one-sided form passed for any boundary between THE_CLIMB and the ceiling,
+    // so the constant could go stale without a run ever saying so.
+    assert_eq!(
         climbed,
-        "the rail never left the pictured complement by {PAST_THE_CLIMB} columns, \
-         so THE_CLIMB is not where the ladder actually turns"
+        Some(THE_CLIMB),
+        "the rail left the pictured complement at {climbed:?} rather than at the \
+         {THE_CLIMB} columns its own share and floor put it at"
     );
 }
 
