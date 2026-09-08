@@ -5726,3 +5726,64 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() 
          two rows to choose between"
     );
 }
+
+/// A screen that opens inside a note counts no diff line for it. A continuation
+/// is the one display row the screenful still counts, since part of its line's
+/// text is drawn there; a note leaves the line it hangs under wholly above.
+#[test]
+fn a_screen_opening_inside_a_note_counts_no_line_for_it() {
+    let scratch = fixture("shown-inside-a-note");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let short = Rect::new(0, 0, 60, 12);
+    // Long enough that its rows outlast the line they hang under as the window
+    // moves down over them.
+    let long = "checked_mul on a Duration cannot overflow here, so the unwrap_or \
+                is unreachable and saturating_mul is what this wants instead.";
+    rig.store.put(&note("n1", 5, EDITED, long)).expect("put");
+    rig.reload();
+
+    let height = body_layout(
+        short,
+        &rig.app.chrome("fixture", None, Pointing::default(), 0, ""),
+        1,
+        1,
+    )
+    .diff;
+    // Down until the window opens inside the note. Found by moving rather than
+    // by naming a row, because how many rows the note takes is the pane's to
+    // decide and a number here would be a second copy of that arithmetic.
+    let mut opened = None;
+    for _ in 0..12 {
+        let painted = rig.paint(&mut frame, short, Pointing::default());
+        if matches!(painted.view.rows.first(), Some(Row::Note { .. })) {
+            opened = Some(painted);
+            break;
+        }
+        rig.app
+            .apply(Action::Scroll(1), &mut frame, height)
+            .expect("scroll");
+    }
+    let opened = opened.expect("the window never opened inside the note");
+    assert!(
+        !opened
+            .view
+            .rows
+            .iter()
+            .any(|row| matches!(row, Row::Line { text, .. } if text == EDITED)),
+        "the pinned line is still drawn, so this is not a screen that opens \
+         inside the note and the count below proves nothing"
+    );
+    assert_eq!(
+        opened.view.shown(),
+        opened
+            .view
+            .rows
+            .iter()
+            .filter(|row| !row.is_display())
+            .count(),
+        "the screenful counted a line for a note whose own line is wholly above it"
+    );
+}

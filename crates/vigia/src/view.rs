@@ -324,6 +324,13 @@ pub enum Row {
     Gap,
 }
 
+/// Which of a note's two texts a row is part of, and so where one line ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoteVoice {
+    Reader,
+    Agent,
+}
+
 /// What a note row draws at the content origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteLead {
@@ -339,6 +346,18 @@ pub enum NoteLead {
     Reply,
     /// Nothing, under a continued arrow.
     Blank,
+}
+
+impl NoteLead {
+    /// Which text this row is part of; `None` on the rows drawing the frame.
+    fn voice(self) -> Option<NoteVoice> {
+        match self {
+            // The enclosure's body and the narrow rung's are one text at two widths.
+            Self::Body | Self::Bar => Some(NoteVoice::Reader),
+            Self::Reply | Self::Blank => Some(NoteVoice::Agent),
+            Self::Top | Self::Bottom => None,
+        }
+    }
 }
 
 /// One row of the note box.
@@ -367,7 +386,8 @@ impl Row {
     }
 
     /// Whether this is a display row the bar does not count: a continuation, a
-    /// note row or a row of the box, each belonging to the line above it.
+    /// note row or a row of the box. The bar's question and not the copy's: a
+    /// `Wrap` is the line above it cut, and a `Note` is not that line at all.
     pub fn is_display(&self) -> bool {
         matches!(
             self,
@@ -375,10 +395,44 @@ impl Row {
         )
     }
 
+    /// Whether this row carries text of its own: a note's edges draw its frame
+    /// and its status word, and a box is a draft that is not a line yet.
+    fn owns_text(&self) -> bool {
+        !matches!(
+            self,
+            Self::Note {
+                lead: NoteLead::Top | NoteLead::Bottom,
+                ..
+            } | Self::Box { .. }
+        )
+    }
+
     /// A file heading row.
     pub fn file(entry: FileEntry) -> Self {
         Self::File(Box::new(entry))
     }
+}
+
+/// Whether `row` is a later piece of the text `above` began. Apart from [`View`]
+/// because the layout asks it while it is still building the rows.
+fn continues(row: &Row, above: Option<&Row>) -> bool {
+    if row.is_wrap() {
+        return true;
+    }
+    // A note continues only itself, and neither field alone cuts the run: two
+    // notes share a line, and the answer sits under the words inside one note.
+    let (
+        Row::Note { id, lead, .. },
+        Some(Row::Note {
+            id: over,
+            lead: before,
+            ..
+        }),
+    ) = (row, above)
+    else {
+        return false;
+    };
+    id == over && lead.voice().is_some() && lead.voice() == before.voice()
 }
 
 /// Where a note is pinned: what a press read off the row it landed on.
@@ -908,7 +962,7 @@ impl Default for Viewport {
 /// A screenful of rows, plus what the chrome needs to describe it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
-    /// A wrapped line's whole text, by the row its first drawn piece sits on: the
+    /// A wrapped line's or a note's whole text, by the row its first piece sits on: the
     /// walk emits only the pieces that fit, so the rows cannot say what it was.
     pub whole: Vec<(usize, String)>,
     /// The rows to draw, top to bottom.
@@ -1867,6 +1921,10 @@ impl View {
             from += 1;
         }
 
+        let texts: HashMap<&str, (&str, Option<&str>)> = pins
+            .iter()
+            .map(|pin| (pin.id.as_str(), (pin.body.as_str(), pin.reply.as_deref())))
+            .collect();
         // [`Self::top`] is not moved, and that is what makes the end of the
         // diff a place a reader can leave.
         let mut out: Vec<Row> = Vec::with_capacity(height);
@@ -1943,7 +2001,11 @@ impl View {
                         }
                         start = cut;
                     }
-                    whole.push((head, text));
+                    // A line the window skipped whole owns no row here, and an
+                    // entry at its index would answer for the note that took it.
+                    if out.len() > head {
+                        whole.push((head, text));
+                    }
                 }
                 row => {
                     if skip > 0 {
@@ -1961,6 +2023,19 @@ impl View {
                 if skip > 0 {
                     skip -= 1;
                     continue;
+                }
+                // Recorded as a wrapped line's is: the rows hold prose broken at
+                // blanks drawn on neither side, so rejoining them spaces it wrong.
+                if !continues(&note_row, out.last())
+                    && let Row::Note { id, lead, .. } = &note_row
+                    && let Some(voice) = lead.voice()
+                    && let Some((body, reply)) = texts.get(id.as_str())
+                    && let Some(text) = match voice {
+                        NoteVoice::Reader => Some((*body).to_owned()),
+                        NoteVoice::Agent => reply.map(str::to_owned),
+                    }
+                {
+                    whole.push((out.len(), text));
                 }
                 out.push(note_row);
             }
@@ -2003,9 +2078,10 @@ impl View {
     }
 
     /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed
-    /// bottom opens inside counted so this is the trim's exact complement.
+    /// bottom opens inside counted so this is the trim's exact complement. Only a
+    /// continuation counts: a note over the top edge leaves its line wholly above.
     pub fn shown(&self) -> usize {
-        let opens_inside = self.rows.first().is_some_and(Row::is_display);
+        let opens_inside = self.rows.first().is_some_and(Row::is_wrap);
         self.rows.iter().filter(|row| !row.is_display()).count() + usize::from(opens_inside)
     }
 
@@ -2016,7 +2092,7 @@ impl View {
     }
 
     /// The lines the rows `span` covers, inclusive: §11.2 B20's own strings, so a
-    /// clipped line arrives whole.
+    /// clipped line arrives whole and a note spanning rows arrives once.
     pub fn lines_in(&self, span: (usize, usize)) -> Option<Vec<String>> {
         let (from, to) = span;
         let last = self.rows.len().checked_sub(1)?;
@@ -2024,15 +2100,33 @@ impl View {
             return None;
         }
         let mut out: Vec<String> = Vec::new();
+        let mut taken: Option<usize> = None;
         for at in from..=to.min(last) {
-            // Only the first row reaches back; later ones belong to heads taken here.
-            if at == from {
-                out.push(self.line_at(self.head_of(from)));
-            } else if !self.rows[at].is_display() {
-                out.push(self.line_at(at));
+            // The edges carry the frame and the status word, not what the reader
+            // wrote. Runs are contiguous, so the last head taken is enough.
+            let Some(head) = self.text_head_of(at) else {
+                continue;
+            };
+            if taken == Some(head) {
+                continue;
             }
+            taken = Some(head);
+            out.push(self.line_at(head));
         }
         Some(out)
+    }
+
+    /// The row whose text `at` is part of, `None` where it is part of none. Not
+    /// [`Self::head_of`], which answers which diff line a row hangs under.
+    fn text_head_of(&self, at: usize) -> Option<usize> {
+        if !self.rows.get(at)?.owns_text() {
+            return None;
+        }
+        let mut head = at;
+        while head > 0 && continues(&self.rows[head], self.rows.get(head - 1)) {
+            head -= 1;
+        }
+        Some(head)
     }
 
     /// The row a display row belongs to; none only above a scrolled head.

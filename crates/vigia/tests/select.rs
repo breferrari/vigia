@@ -13,12 +13,12 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Glyphs, Pointing, Region, Regions, Selection, Theme, body_layout, render,
-    selection_after,
+    Action, App, Glyphs, NoteLead, Pointing, Region, Regions, Row, Selection, Theme, body_layout,
+    render, selection_after,
 };
 use vigia_core::{Frame, Highlighter, History};
 
-use support::{Scratch, materialise};
+use support::{Scratch, materialise, note, numbered_lines};
 
 /// Wide enough that nothing wraps by accident, narrow enough that the line below
 /// cannot fit.
@@ -945,5 +945,368 @@ fn a_span_the_walk_had_no_rows_for_holds_no_selection() {
         !app.holds_a_selection(),
         "a span the walk had no rows for still counts as a selection, so a click on \
          an empty pane goes on swallowing `Esc`"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// B21's rows under B20's gesture. A note is the reader's own words, not a piece
+// of the line it hangs under, so the copy takes it and not that line.
+// ---------------------------------------------------------------------------
+
+/// The path the note fixture pins to.
+const NOTED: &str = "src/watch.rs";
+/// The edited line the note hangs under, long enough to be recognisable.
+const EDITED: &str = "    margin.checked_mul(2).unwrap_or(margin)";
+/// A body that fits one row at [`PANE`]'s width, so a gate about placement is
+/// not also a gate about wrapping.
+const SHORT: &str = "use saturating_mul here.";
+
+/// One committed file with one edited line, which is the shape a note pins to.
+fn noted(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(NOTED, numbered_lines(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line(NOTED, 4, EDITED);
+    scratch
+}
+
+/// The rows one collect produces, so a gate finds the note's own rows rather
+/// than assuming where they landed.
+fn view_rows(app: &mut App, frame: &mut Frame) -> Vec<Row> {
+    view_rows_on(app, frame, PANE)
+}
+
+/// The same, on a pane of a named size.
+fn view_rows_on(app: &mut App, frame: &mut Frame, pane: Rect) -> Vec<Row> {
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let body = body_layout(pane, &chrome, 1, 1);
+    app.view(frame, &mut highlighter, &history, body)
+        .expect("view")
+        .rows
+        .clone()
+}
+
+/// Every row of `rows` drawing part of a note, by the lead it carries.
+fn note_rows(rows: &[Row], want: NoteLead) -> Vec<usize> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::Note { lead, .. } if *lead == want))
+        .map(|(at, _)| at)
+        .collect()
+}
+
+/// The one row of `rows` holding `text`, which is how a gate names a line
+/// without knowing where the walk put it.
+fn row_of(rows: &[Row], text: &str) -> usize {
+    rows.iter()
+        .position(|row| matches!(row, Row::Line { text: had, .. } if had == text))
+        .unwrap_or_else(|| panic!("no row drew {text:?}"))
+}
+
+/// **The reported defect.** A drag that begins on a note's own row sends the
+/// note and not the line it hangs under.
+#[test]
+fn a_drag_on_a_note_sends_the_note_and_not_the_line_it_is_pinned_to() {
+    let scratch = noted("select-note-body");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
+
+    let rows = view_rows(&mut app, &mut frame);
+    let body = note_rows(&rows, NoteLead::Body);
+    assert_eq!(
+        body.len(),
+        1,
+        "the fixture drew {} body rows, so this gate is not the case it is named for",
+        body.len()
+    );
+    let at = body[0];
+    assert!(
+        at > row_of(&rows, EDITED),
+        "the note did not land under the line it is pinned to"
+    );
+
+    assert_eq!(
+        sent(&mut app, &mut frame, (at, at), false).as_deref(),
+        Some(SHORT),
+        "a drag on the note sent something other than the note"
+    );
+}
+
+/// A drag across a note sends the note between the lines it sits between, so a
+/// span that washes its rows carries them.
+#[test]
+fn a_drag_across_a_note_sends_the_note_between_the_lines_around_it() {
+    let scratch = noted("select-note-across");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
+
+    let rows = view_rows(&mut app, &mut frame);
+    let from = row_of(&rows, "line 5");
+    let to = row_of(&rows, "line 6");
+    assert!(
+        (from..=to).any(|at| matches!(rows[at], Row::Note { .. })),
+        "no note row between the two lines, so this gate spans no note"
+    );
+
+    assert_eq!(
+        sent(&mut app, &mut frame, (from, to), false).as_deref(),
+        Some(format!("line 5\n{EDITED}\n{SHORT}\nline 6").as_str()),
+        "the note was dropped from a span that washed its rows"
+    );
+}
+
+/// A note wrapped over rows is one line out, which is what B20 already rules for
+/// a wrapped line of the diff. Rejoining the drawn rows cannot do this: prose
+/// breaks at a blank that is drawn on neither row.
+#[test]
+fn a_note_wrapped_over_rows_is_sent_once_and_whole() {
+    let scratch = noted("select-note-wrapped");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let long = "checked_mul on a Duration cannot overflow here, so the unwrap_or is unreachable; use saturating_mul and drop it entirely.";
+    app.set_notes(vec![note("one", 5, EDITED, long)]);
+
+    let rows = view_rows(&mut app, &mut frame);
+    let body = note_rows(&rows, NoteLead::Body);
+    assert!(
+        body.len() > 1,
+        "the note drew {} row(s), so nothing here is wrapped and the gate proves nothing",
+        body.len()
+    );
+
+    for at in &body {
+        assert_eq!(
+            sent(&mut app, &mut frame, (*at, *at), false).as_deref(),
+            Some(long),
+            "row {at} of the note sent a piece rather than the note"
+        );
+    }
+    assert_eq!(
+        sent(&mut app, &mut frame, (body[0], body[body.len() - 1]), false).as_deref(),
+        Some(long),
+        "a span over every row of one note sent it more than once"
+    );
+}
+
+/// The agent's answer is its own line, so a drag on it sends the reply and not
+/// the reader's words above it.
+#[test]
+fn a_drag_on_the_agents_reply_sends_the_reply() {
+    let scratch = noted("select-note-reply");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let answered = "done, it is saturating_mul now.";
+    let mut pinned = note("one", 5, EDITED, SHORT);
+    pinned.reply = Some(answered.to_owned());
+    app.set_notes(vec![pinned]);
+
+    let rows = view_rows(&mut app, &mut frame);
+    let reply = note_rows(&rows, NoteLead::Reply);
+    assert_eq!(
+        reply.len(),
+        1,
+        "the fixture drew no single reply row, so this gate is not its case"
+    );
+    let body = note_rows(&rows, NoteLead::Body);
+    assert_eq!(body.len(), 1, "the body moved, so the span below is wrong");
+
+    assert_eq!(
+        sent(&mut app, &mut frame, (reply[0], reply[0]), false).as_deref(),
+        Some(answered),
+        "a drag on the reply sent something other than the reply"
+    );
+    assert_eq!(
+        sent(&mut app, &mut frame, (body[0], reply[0]), false).as_deref(),
+        Some(format!("{SHORT}\n{answered}").as_str()),
+        "the note and the answer are two lines, and a span over both said otherwise"
+    );
+}
+
+/// A note's frame and its status word are not text the reader wrote, so the rows
+/// that draw them send nothing of their own.
+#[test]
+fn a_notes_edges_send_nothing_of_their_own() {
+    let scratch = noted("select-note-edges");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
+
+    let rows = view_rows(&mut app, &mut frame);
+    for lead in [NoteLead::Top, NoteLead::Bottom] {
+        let edge = note_rows(&rows, lead);
+        assert_eq!(
+            edge.len(),
+            1,
+            "the fixture drew no {lead:?} edge, so this gate is not its case"
+        );
+        assert_eq!(
+            sent(&mut app, &mut frame, (edge[0], edge[0]), false),
+            None,
+            "the {lead:?} edge sent something, and an empty write clears what the reader had"
+        );
+    }
+}
+
+/// The meaning that did not move. `Row::is_display` still answers the bar, and a
+/// note's rows are still not rows the bar counts: the split is the copy's alone.
+#[test]
+fn the_bar_still_counts_no_note_row() {
+    let scratch = noted("select-note-bar");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    let bare = view_rows(&mut app, &mut frame)
+        .iter()
+        .filter(|row| !row.is_display())
+        .count();
+    app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
+    let rows = view_rows(&mut app, &mut frame);
+    assert!(
+        rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the note drew no rows, so the count below cannot have changed either way"
+    );
+    assert_eq!(
+        rows.iter().filter(|row| !row.is_display()).count(),
+        bare,
+        "a note's rows joined the count the bar takes its travel from"
+    );
+}
+
+/// The widest pane that draws no enclosure. Measured rather than reasoned: the
+/// enclosure gives way to the rung below fifteen columns.
+const RUNG: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 14,
+    height: 24,
+};
+
+/// Below the width the enclosure needs, where a note has no edges to draw
+/// and its words ride the rung instead. The rows are a different shape and the
+/// status word rides the last of them, so the copy has its own way to go wrong
+/// here and no gate above reaches this width.
+#[test]
+fn a_drag_on_a_note_at_the_narrow_width_sends_it_whole() {
+    let scratch = noted("select-note-narrow");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
+
+    let rows = view_rows_on(&mut app, &mut frame, RUNG);
+    let bar = note_rows(&rows, NoteLead::Bar);
+    assert!(
+        !bar.is_empty(),
+        "the note drew no rung at this width, so this gate is not the narrow case"
+    );
+    assert!(
+        note_rows(&rows, NoteLead::Top).is_empty(),
+        "the note drew its enclosure, so this is the width the gates above cover"
+    );
+
+    for at in &bar {
+        assert_eq!(
+            sent_on(&mut app, &mut frame, (*at, *at), false, RUNG).as_deref(),
+            Some(SHORT),
+            "rung row {at} sent a piece rather than the note"
+        );
+    }
+    // The word rides the last rung row and is drawn from the note's state rather
+    // than from that row's text, so it must not travel with the words.
+    let whole = sent_on(
+        &mut app,
+        &mut frame,
+        (bar[0], bar[bar.len() - 1]),
+        false,
+        RUNG,
+    )
+    .expect("the rung sent nothing");
+    assert_eq!(
+        whole, SHORT,
+        "the status word travelled with the reader's words"
+    );
+}
+
+/// A note whose line has scrolled wholly above the top edge still sends itself.
+///
+/// The window can open inside a note's rows, and with wrapping on the line above
+/// them contributes none of its own. Its whole text is recorded against the row
+/// its first drawn piece takes, and where it drew no piece at all that row is the
+/// note's, so the two would answer to the same index.
+#[test]
+fn a_drag_on_a_note_whose_wrapped_line_scrolled_off_sends_the_note() {
+    // Long enough to take several rows at this width, so skipping it whole is
+    // what puts the note's own row first.
+    let long = "    let margin = base.checked_mul(2).unwrap_or(base).saturating_add(padding).clamp(lower, upper); // tail";
+    let scratch = Scratch::new("select-note-scrolled-off");
+    scratch.write("src/watch.rs", numbered_lines(20));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/watch.rs", 17, long);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let body = "the note body, which is what a drag on any row of it has to send, however far the line above it has gone";
+    app.set_notes(vec![note("one", 18, long, body)]);
+
+    let pane = Rect {
+        x: 0,
+        y: 0,
+        width: 50,
+        height: 10,
+    };
+    // Turned on once here rather than through `sent_on`, which toggles.
+    app.apply(Action::ToggleWrap, &mut frame, pane.height as usize)
+        .expect("wrap on");
+    // Read on the way down, since at the end the line is above the window, which
+    // is the whole of what this gate is for.
+    let wrapped = (0..12).any(|_| {
+        let seen = view_rows_on(&mut app, &mut frame, pane)
+            .iter()
+            .any(Row::is_wrap);
+        app.apply(Action::Scroll(1), &mut frame, pane.height as usize)
+            .expect("down");
+        seen
+    });
+    assert!(
+        wrapped,
+        "nothing wrapped, so the branch this gate is named for is never taken"
+    );
+    app.apply(Action::Scroll(500), &mut frame, pane.height as usize)
+        .expect("scroll to the end");
+    let rows = view_rows_on(&mut app, &mut frame, pane);
+    let body_rows = note_rows(&rows, NoteLead::Body);
+    assert_eq!(
+        body_rows.first(),
+        Some(&0),
+        "the window did not open on a row of the note's body, so this is not the case"
+    );
+    assert!(
+        !rows.iter().any(|row| row.is_wrap()
+            || matches!(row, Row::Line { text, .. } if text.starts_with("    let margin"))),
+        "the line is still drawing, so it is not wholly above and the gate proves nothing"
+    );
+
+    assert_eq!(
+        sent_on(&mut app, &mut frame, (0, 0), false, pane).as_deref(),
+        Some(body),
+        "a drag on the note sent the line that had scrolled off above it"
     );
 }
