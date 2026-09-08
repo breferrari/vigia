@@ -87,8 +87,6 @@ pub struct App {
     resolved: bool,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
-    /// Whether the masthead is drawn, which `m` toggles.
-    masthead: bool,
     /// Whether listed paths carry a file-type icon. Config only; no gesture.
     icons: bool,
     /// Whether listed paths are OSC 8 hyperlinks. Config only; on by default.
@@ -161,7 +159,6 @@ impl Default for App {
             selecting: None,
             resolved: false,
             following: false,
-            masthead: false,
             rail: false,
             single: false,
             staged: false,
@@ -203,7 +200,6 @@ impl App {
     /// [`App::new`] with the view toggles a reader's config file asked for.
     pub fn configured(config: crate::Config) -> Self {
         Self {
-            masthead: config.masthead,
             rail: config.rail,
             single: config.single,
             wrap: config.wrap,
@@ -452,7 +448,6 @@ impl App {
             notice: self.notice().map(str::to_owned),
             voice: self.voice(),
             following: self.following,
-            masthead: self.masthead,
             rail: self.rail,
             icons: self.icons,
             links: self.links,
@@ -541,8 +536,6 @@ impl App {
             }
             // No jump, unlike follow. Re-engaging follow is a move as well as a state
             // change because a reader asking to follow is asking to see what changed.
-            Action::ToggleMasthead => self.masthead = !self.masthead,
-            // The same answer one region over.
             Action::ToggleRail => self.rail = !self.rail,
             // No jump and no clamp here, which is the arm doing the least of the four
             // and is deliberate.
@@ -562,9 +555,8 @@ impl App {
                     self.warn(e.to_string());
                 }
             }
-            // No jump and no move at all, which is one better than the masthead: that
-            // toggle resizes the diff's region, and this one draws over rows the diff
-            // keeps.
+            // No jump and no move at all, and unlike the toggles above it does not
+            // even resize a region: it draws over rows the diff keeps.
             Action::ToggleSheet => {
                 self.sheet = match self.sheet {
                     None => Some(0),

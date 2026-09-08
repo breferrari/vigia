@@ -1790,7 +1790,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 20),
+        (104, 19),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -1820,7 +1820,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 42),
+        (68, 41),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,

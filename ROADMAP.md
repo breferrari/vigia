@@ -216,7 +216,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The heat strip draws one bar where the picture draws twelve slices, and the sparkline is flat where it ramps | [#196](https://github.com/breferrari/vigia/issues/196) |
 | ✅ | The store samples at the sparkline's width, so a wide graph has eight points to draw | [#198](https://github.com/breferrari/vigia/issues/198) |
 | ✅ | The worktree churn graph: the hero element nothing draws | [#158](https://github.com/breferrari/vigia/issues/158) |
-| ✅ | The masthead starts drawn, and the reader who asked for the toggle wants it hidden | [#204](https://github.com/breferrari/vigia/issues/204) |
+| ✅ | The masthead starts drawn, and the reader who asked for the toggle wants it hidden. **Revoked by [#457](https://github.com/breferrari/vigia/issues/457)** | [#204](https://github.com/breferrari/vigia/issues/204) |
 | ✅ | Braille resolution as a glyph rung above the block ramp | [#159](https://github.com/breferrari/vigia/issues/159) |
 | ✅ | Support every modern language: the bundled grammar set is a Sublime Text 3 snapshot | [#235](https://github.com/breferrari/vigia/issues/235) |
 | ✅ | The list keeps six rows on a fifty-row pane, so the map is void where it could be | [#160](https://github.com/breferrari/vigia/issues/160) |
@@ -264,7 +264,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
 | ✅ | The pointer's mark is the loudest weight in the list, and the file the diff is inside has none | [#193](https://github.com/breferrari/vigia/issues/193) |
 | ✅ | The scrollbar cuts a one-column hole through every washed row | [#239](https://github.com/breferrari/vigia/issues/239) |
-| ⬜ | A wide pane repeats the band's samples rather than resolving them | [#241](https://github.com/breferrari/vigia/issues/241) |
+| ✅ | A wide pane repeats the band's samples rather than resolving them. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#241](https://github.com/breferrari/vigia/issues/241) |
 | ✅ | The glance elements draw spikes where the picture draws a wave | [#242](https://github.com/breferrari/vigia/issues/242) |
 | ✅ | The pane draws with a fraction of the vocabulary its own font guarantees | [#318](https://github.com/breferrari/vigia/issues/318) |
 | ✅ | Every hue is a theme key, and the default theme is the showcase | [#320](https://github.com/breferrari/vigia/issues/320) |
@@ -279,6 +279,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
 | ✅ | The staged mark spends a gutter column on every row of both runs to mark the rows of one | [#316](https://github.com/breferrari/vigia/issues/316) |
 | ✅ | Side-by-side regions at real width: the list becomes a left rail | [#162](https://github.com/breferrari/vigia/issues/162) |
+| ✅ | Remove the masthead, and revoke the ruling that kept it. **Reported from use** | [#457](https://github.com/breferrari/vigia/issues/457) |
 
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
@@ -340,7 +341,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | The wheel ignores the pointer, and the thumb it draws cannot be grabbed | [#79](https://github.com/breferrari/vigia/issues/79) |
 | ✅ | A washed row may be reaching the scrollbar column, or the terminal is | [#81](https://github.com/breferrari/vigia/issues/81) |
 | ⬜ | The row's two fixed runs allocate a byte each, per content row per frame | [#171](https://github.com/breferrari/vigia/issues/171) |
-| ⬜ | A steady worktree saturates half the band, because the factor above the mean was never measured on this signal | [#281](https://github.com/breferrari/vigia/issues/281) |
+| ✅ | A steady worktree saturates half the band, because the factor above the mean was never measured on this signal. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#281](https://github.com/breferrari/vigia/issues/281) |
 | ⬜ | A wider pane can take a row off the body, and the diff pays it | [#283](https://github.com/breferrari/vigia/issues/283) |
 | ⬜ | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ✅ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
@@ -378,7 +379,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
 | ⬜ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
 | ⬜ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
-| ⬜ | The churn band measures how many files were written, not how much changed | [#232](https://github.com/breferrari/vigia/issues/232) |
+| ✅ | The churn band measures how many files were written, not how much changed. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#232](https://github.com/breferrari/vigia/issues/232) |
 | ✅ | A screenful of one-line-paragraph prose costs 117ms with every pattern already compiled | [#261](https://github.com/breferrari/vigia/issues/261) |
 | ⬜ | `watch.rs` takes budget slack and CI never gives it any | [#263](https://github.com/breferrari/vigia/issues/263) |
 | ⬜ | A fenced code block costs 32 to 60ms of parse, and #261's guard does not reach it | [#264](https://github.com/breferrari/vigia/issues/264) |
@@ -429,7 +430,7 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | The residual after #261 is a diffuse Markdown parse cost, largest single term an email auto-link at 94us a call ([#265](https://github.com/breferrari/vigia/issues/265)) | #261, 2026-08-22 | Shelf | **Not a breach on any platform measured, and shelved for that reason rather than for cost.** After #261's guard the worst 24-line screenful of **prose** in this repository is `ROADMAP.md` at 10.03ms and `SPEC.md` at 8.81ms, both inside I9's 16ms with room, so nothing here is something a reader can feel. |
 | A draft PR shows a red `ci complete`, and a draft-era run can cancel the real one | #267, 2026-08-23 | Shelf, taken | Instrument work, and the same `cancel-in-progress` grouping #301 records from the other direction. Closed by [#274](https://github.com/breferrari/vigia/issues/274). |
 | ci complete fails on every draft PR, because its legs skip and it treats skipped as failure ([#267](https://github.com/breferrari/vigia/issues/267)) | #266, 2026-08-22 | Shelf | **An instrument finding, so it is shelved rather than filed into a phase**, which is this file's own rule about a queue that serves the product and the mirror equally. |
-| A steady worktree saturates half the band, because the factor above the mean was never measured on this signal ([#281](https://github.com/breferrari/vigia/issues/281)) | #256, 2026-08-22 | Shelf | Measured while sweeping #256: on a flat fixture the band puts **40 of 76 columns at full height** at eighty columns, and a saturated column carries one bit. |
+| A steady worktree saturates half the band, because the factor above the mean was never measured on this signal ([#281](https://github.com/breferrari/vigia/issues/281)) | #256, 2026-08-22 | Shelf, closed by #457 | Measured while sweeping #256: on a flat fixture the band puts **40 of 76 columns at full height** at eighty columns, and a saturated column carries one bit. |
 | A wider pane can take a row off the body, and the diff pays it ([#283](https://github.com/breferrari/vigia/issues/283)) | #252, 2026-08-23 | Shelf | Found by a width sweep written for the rail and **not caused by it**: it reproduces at eight columns, in `Footer::plan`, on `main`, where the rail is gated on 134. |
 | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier ([#284](https://github.com/breferrari/vigia/issues/284)) | #252, 2026-08-23 | Shelf | Found in #252's fourth audit round. The rail arrives at 134 because that is the one width below 328 where splitting the pane costs neither region a glance rung, and `Columns::plan` takes the glyph rung: a braille or octant cell draws two buckets per column, so the stacked ladder climbs at a 119-column pane and is already past the settled rung by 133. |
 | A two-face bump with no xtask rerun leaves the committed dump stale and every gate green ([#268](https://github.com/breferrari/vigia/issues/268)) | #266, 2026-08-22 | Shelf | **An instrument finding that predates the PR that found it**, so it is shelved rather than filed into a phase. |

@@ -4,8 +4,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
-    HISTORY_WINDOW, History, PULSE_SAMPLES, Recency, SPARK_GROUPS, scale_of,
+    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_WINDOW, History,
+    PULSE_SAMPLES, Recency, SPARK_GROUPS, scale_of,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -85,17 +85,11 @@ fn a_window_of_silence_empties_the_store() {
     assert!(history.stats().evicted_by_window >= HISTORY_PATHS as u64);
     assert_eq!(history.scale(), 0, "the shared scale outlived its samples");
 
-    // Every figure, not only the finest, and the band's series with them.
+    // Every figure, not only the finest.
     assert_eq!(
         history.scales(),
         [0; SPARK_GROUPS.len()],
         "a rung's figure outlived its samples"
-    );
-    assert_eq!(
-        history.worktree_churn(),
-        Churn::default(),
-        "the band's series survived a whole window of silence, so an emptied \
-         store still draws the graph it had"
     );
 }
 
@@ -376,26 +370,26 @@ fn two_large_writes_of_different_sizes_do_not_both_peg() {
     assert_eq!((small, large), (1 + 100_000, 1 + 300_000));
 }
 
-/// The worktree sum saturates rather than wrapping.
+/// A drawn bucket saturates rather than wrapping.
 #[test]
-fn the_worktree_sum_saturates_rather_than_wrapping() {
+fn a_drawn_bucket_saturates_rather_than_wrapping() {
     let now = base();
     let mut history = History::starting_at(now);
 
-    // Two paths, each written far past what a `u32` sample can hold, in one
-    // second. `wrote` floors a first sighting at one, so each takes two writes:
-    // one to set the baseline and one to move it by the whole range.
-    for path in ["src/a.rs", "src/b.rs"] {
-        history.record_sized([(path, Some(0))], now);
-        history.record_sized([(path, Some(u64::from(u32::MAX)))], now);
+    // One path written far past what a `u32` sample can hold, twice inside one
+    // second so the bucket has two of them to add. `wrote` floors a first
+    // sighting at one, so a baseline write comes before each range.
+    for _ in 0..2 {
+        history.record_sized([("src/a.rs", Some(0))], now);
+        history.record_sized([("src/a.rs", Some(u64::from(u32::MAX)))], now);
     }
 
-    let newest = history.worktree_churn().0[HISTORY_SAMPLES - 1];
+    let newest = history.churn("src/a.rs").expect("a tracked path")[HISTORY_BUCKETS - 1];
     assert_eq!(
         newest,
         u32::MAX,
-        "the worktree sum wrapped instead of topping out, so the busiest second \
-         this store has ever held draws as one of its quietest"
+        "a bucket wrapped instead of topping out, so the busiest second this \
+         store has ever held draws as one of its quietest"
     );
 }
 
@@ -474,8 +468,8 @@ fn a_window_with_no_outlier_scales_as_it_always_did() {
     }
 
     // A four-to-one series, which is a legitimate dynamic range rather than a
-    // tail: `masthead.rs`'s `QUARTERED` is this shape and is what binds the
-    // constant's lower end.
+    // tail, and is what binds the constant's lower end: a cut that reached down
+    // this far would drop half of an honest signal as an outlier.
     let quartered: Vec<u32> = (0..24).map(|at| if at < 12 { 16 } else { 4 }).collect();
     // A ramp of everything from one to the cut itself.
     let spread: Vec<u32> = (1..=OUTLIER).map(|step| step * 7).collect();
@@ -622,65 +616,6 @@ fn a_coarser_rung_is_never_measured_against_less() {
     }
 }
 
-/// A projection returns exactly the width it was asked for.
-#[test]
-fn a_projection_returns_the_width_it_was_asked_for() {
-    let mut samples = [0u32; HISTORY_SAMPLES];
-    samples[0] = 5;
-    samples[HISTORY_SAMPLES - 1] = 7;
-    let churn = Churn(samples);
-
-    for width in [
-        1usize,
-        7,
-        HISTORY_SAMPLES - 1,
-        HISTORY_SAMPLES,
-        HISTORY_SAMPLES * 2 + 3,
-    ] {
-        let drawn = churn.projected(width);
-        assert_eq!(
-            drawn.len(),
-            width,
-            "a projection onto {width} was not {width} wide"
-        );
-    }
-
-    // Below the sample count every sample's weight lands inside the columns that
-    // cover it, so the total is conserved whether or not the width divides the
-    // window.
-    let exact: u32 = churn.projected(HISTORY_SAMPLES).iter().sum();
-    assert_eq!(
-        exact, 12,
-        "a projection at the sample count lost or invented churn"
-    );
-    let narrow: u32 = churn.projected(10).iter().sum();
-    assert_eq!(narrow, 12, "a narrower projection lost or invented churn");
-
-    // The oldest value stays oldest however wide the ask, which is what stops a
-    // wide pane drawing the window mirrored. Above the sample count a column is
-    // a fraction of a sample rather than a whole repeated one, so what carries
-    // the claim is which end the weight is at, not what it weighs there.
-    let wide = churn.projected(HISTORY_SAMPLES * 2);
-    let (head, tail) = (
-        wide.first().copied().expect("a column"),
-        wide.last().copied().expect("a column"),
-    );
-    assert!(
-        head > 0 && tail > 0,
-        "a wide projection lost both ends: {wide:?}"
-    );
-    assert!(
-        head < tail,
-        "the oldest sample weighs 5 and the newest 7, and they came out {head} \
-         and {tail}, so a wide pane draws the window mirrored: {wide:?}"
-    );
-    assert!(
-        wide[1..wide.len() - 1].iter().all(|value| *value <= tail),
-        "a wide projection put weight where the window has none: {wide:?}"
-    );
-}
-
-/// A deletion weighs what it removed, and the file after it weighs itself.
 #[test]
 fn deleting_a_file_weighs_what_it_removed() {
     let now = base();
@@ -925,7 +860,7 @@ fn a_tick_that_moves_nothing_does_no_work() {
     // pair: the deleted `assert_eq!` above it could not fail, and proving the
     // walk *does* happen when it should is a different claim from proving it
     // does not when it should not.
-    let churn = history.worktree_churn();
+    let levels = history.level("src/a.rs");
     let walked = history.stats().repeaks;
 
     // Inside the same sample, naming nothing: the wake a held button produces
@@ -937,8 +872,8 @@ fn a_tick_that_moves_nothing_does_no_work() {
         "a timeout inside one sample walked every track, which is the 150µs a \
          held scrollbar button would pay for it nineteen times a second"
     );
-    // Read through `recency`, which is sample-granular, rather than through `scales`
-    // and `worktree_churn`, which `repeak` caches.
+    // Read through `recency`, which is sample-granular, rather than through
+    // `scales`, which `repeak` caches.
     assert_eq!(
         history.recency("src/a.rs"),
         Recency::Pulse,
@@ -957,17 +892,17 @@ fn a_tick_that_moves_nothing_does_no_work() {
          frozen against live data"
     );
     assert_ne!(
-        history.worktree_churn(),
-        churn,
+        history.level("src/a.rs"),
+        levels,
         "a write inside the current sample did not reach the projection, so the \
          guard skipped a walk that had work to do"
     );
 
     // And crossing a boundary with nothing named still rolls.
-    let rolled = history.worktree_churn();
+    let rolled = history.level("src/a.rs");
     history.record_sized([], start + HISTORY_SAMPLE * 2);
     assert_ne!(
-        history.worktree_churn(),
+        history.level("src/a.rs"),
         rolled,
         "a timeout that crossed a sample boundary left the window where it was, \
          which is the freeze #243 exists to fix"
@@ -1232,21 +1167,33 @@ fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
          a bounded history exists to refuse"
     );
 }
-
-/// One write in an empty window, as a series rather than through a store.
-fn lone_write(bytes: u32) -> Churn {
-    let mut samples = [0u32; HISTORY_SAMPLES];
-    samples[HISTORY_SAMPLES / 2] = bytes;
-    Churn(samples)
+/// One write of `bytes` in an otherwise quiet window, as the levelled buckets a
+/// sparkline is drawn from.
+///
+/// A path's first sighting weighs `Track::bump`'s floor whatever the file is, so
+/// the baseline write that makes the next one weigh `bytes` is put far enough
+/// back that the window has rolled past it. Otherwise every series below carries
+/// two writes and the second one's level is what is being measured.
+fn lone_write(bytes: u64) -> [u32; HISTORY_BUCKETS] {
+    let now = base();
+    let mut history = History::starting_at(now);
+    history.record_sized([("src/a.rs", Some(0))], now);
+    history.record_sized([("src/a.rs", Some(bytes))], now + HISTORY_SAMPLE * 100);
+    // A tick that names nothing, only to carry the window past the baseline.
+    history.record_sized([], now + HISTORY_SAMPLE * 130);
+    history
+        .level("src/a.rs")
+        .expect("a path written twice is tracked")
 }
 
-/// Samples of a level that carry anything at all.
-fn lit(churn: &Churn) -> usize {
-    churn
-        .levels(HISTORY_SAMPLES)
+/// Buckets of a level that carry anything at all.
+fn lit(level: &[u32; HISTORY_BUCKETS]) -> Vec<usize> {
+    level
         .iter()
-        .filter(|level| **level > 0)
-        .count()
+        .enumerate()
+        .filter(|(_, value)| **value > 0)
+        .map(|(bucket, _)| bucket)
+        .collect()
 }
 
 /// A level says *when* a write happened. Its width must not say *how much*.
@@ -1255,74 +1202,41 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
     // Named rather than counted, and spanning six orders of magnitude: a kernel
     // whose reach follows the write's size holds this at any single size and
     // fails across them, so one size proves nothing.
-    let sizes = [1u32, 100, 9_000, 127_000, 5_000_000];
-    let widths: Vec<usize> = sizes.iter().map(|bytes| lit(&lone_write(*bytes))).collect();
+    let sizes = [1u64, 100, 9_000, 127_000, 5_000_000];
+    let drawn: Vec<Vec<usize>> = sizes.iter().map(|bytes| lit(&lone_write(*bytes))).collect();
 
-    // At every width a pane produces, not only at the sample count, where the
-    // projection is the identity and cannot lose the small end of a level. Both
-    // rungs of the glyph ladder, so the dense one's doubled sub-columns are here.
-    for width in [46usize, 60, 80, 109, 134, 218, 268] {
-        let drawn: Vec<usize> = sizes
-            .iter()
-            .map(|bytes| {
-                lone_write(*bytes)
-                    .levels(width)
-                    .iter()
-                    .filter(|level| **level > 0)
-                    .count()
-            })
-            .collect();
-        assert!(
-            drawn.iter().all(|lit| *lit == drawn[0]),
-            "projected onto {width} columns the same kernel drew {drawn:?} for {sizes:?} bytes, so the write's size is back in its drawn width"
-        );
-    }
-
-    let first = widths[0];
     assert!(
-        first > 1,
-        "a write of one byte, which is what `bump`'s floor weighs, lit {first} \
-         sample of the window, so the level is a mark rather than a level"
+        drawn[0].len() > 1,
+        "a write of one byte, which is what `bump`'s floor weighs, lit {} bucket \
+         of the window, so the level is a mark rather than a level",
+        drawn[0].len()
     );
     assert!(
-        widths.iter().all(|width| *width == first),
-        "the same kernel drew {widths:?} samples for {sizes:?} bytes, so a \
-         level's width reports the size of the write rather than when it landed"
+        drawn.iter().all(|buckets| *buckets == drawn[0]),
+        "the same kernel lit {drawn:?} for {sizes:?} bytes, so a level's width \
+         reports the size of the write rather than when it landed"
     );
 
-    // And it reaches equally both ways, which the count above cannot see: a
-    // kernel bounded on one side draws the same number of samples for every
-    // magnitude too, and leans every one of them to one side of the write.
-    let at = HISTORY_SAMPLES / 2;
-    let levels = lone_write(9_000).levels(HISTORY_SAMPLES);
-    let span: Vec<usize> = levels
-        .iter()
-        .enumerate()
-        .filter(|(_, level)| **level > 0)
-        .map(|(sample, _)| sample)
-        .collect();
-    let (back, forward) = (at - span[0], span[span.len() - 1] - at);
-    assert_eq!(
-        back, forward,
-        "the level reaches {back} back from the write and {forward} forward, so the kernel is bounded on one side: {levels:?}"
+    // And it reaches both ways, which the comparison above cannot see: a kernel
+    // bounded on one side lights the same buckets for every magnitude too, and
+    // leans every one of them to one side of the write.
+    let at = lit(&{
+        let now = base();
+        let mut history = History::starting_at(now);
+        history.record_sized([("src/a.rs", Some(0))], now);
+        history.record_sized([("src/a.rs", Some(9_000))], now + HISTORY_SAMPLE * 100);
+        history.record_sized([], now + HISTORY_SAMPLE * 130);
+        // The bucket the write itself landed in, isolated by asking for the
+        // events rather than the level.
+        history.churn("src/a.rs").expect("a tracked path")
+    });
+    let written = *at.last().expect("the write lit a bucket");
+    let span = &drawn[2];
+    assert!(
+        span[0] < written && span[span.len() - 1] > written,
+        "a write in bucket {written} levelled to {span:?}, which does not \
+         straddle it, so the kernel is bounded on one side"
     );
-}
-
-/// The axis is the half of the band a flooded window cannot draw.
-#[test]
-fn a_large_burst_leaves_both_ends_of_the_window_on_the_axis() {
-    // Sizes a formatter, a lockfile rewrite or a generated file reaches on an
-    // ordinary afternoon, which is where §11.1's floor has the most to lose:
-    // a level reaching the window's ends leaves no quiet stretch to draw.
-    for bytes in [127_000u32, 500_000, 5_000_000] {
-        let levels = lone_write(bytes).levels(HISTORY_SAMPLES);
-        assert_eq!(
-            (levels[0], levels[HISTORY_SAMPLES - 1]),
-            (0, 0),
-            "a single write of {bytes} bytes in the middle of the window lit \
-             both far ends, so a quiet stretch has no axis to draw: {levels:?}"
-        );
-    }
 }
 
 /// The ordinary case: a write whose size did not move weighs `bump`'s floor.
@@ -1336,48 +1250,18 @@ fn a_floor_weight_write_draws_a_shape_rather_than_a_mark() {
     history.record_sized([("src/a.rs", Some(4_096))], now);
     history.record_sized([("src/a.rs", Some(4_096))], now + HISTORY_SAMPLE);
 
-    let levels = history.worktree_churn().levels(HISTORY_SAMPLES);
-    let mut distinct: Vec<u32> = levels.iter().copied().filter(|level| *level > 0).collect();
+    let level = history.level("src/a.rs").expect("a tracked path");
+    let mut distinct: Vec<u32> = level.iter().copied().filter(|value| *value > 0).collect();
     distinct.sort_unstable();
     distinct.dedup();
 
     assert!(
         distinct.len() > 1,
         "a floor-weight write levelled to {} distinct value(s), so every \
-         non-empty column is the same height, the yardstick equals it, and the \
-         band has only the axis and the ceiling to draw: {levels:?}",
+         non-empty bucket of its sparkline is the same height and the strip has \
+         only the floor and the ceiling to draw: {level:?}",
         distinct.len()
     );
-}
-
-/// Every drawn column has to cover the same slice of the window.
-#[test]
-fn a_projection_covers_the_same_span_in_every_column() {
-    // A signal that never moves. Anything but a level projection here is the
-    // arithmetic rather than the data.
-    let flat = Churn([600; HISTORY_SAMPLES]);
-
-    // Named individually: none of them divides `HISTORY_SAMPLES`, which is the
-    // only case where whole-sample columns come out uneven, and a width that
-    // divides it would pass against the shape this gate exists to refuse.
-    for width in [46usize, 80, 109, 134] {
-        assert!(
-            !HISTORY_SAMPLES.is_multiple_of(width),
-            "{width} divides the window, so it cannot tell an even projection \
-             from an uneven one"
-        );
-        let drawn = flat.projected(width);
-        let (low, high) = (
-            drawn.iter().min().copied().expect("a column"),
-            drawn.iter().max().copied().expect("a column"),
-        );
-        assert_eq!(
-            low, high,
-            "a series that never moved projected onto {width} columns between \
-             {low} and {high}, so neighbouring columns carry different amounts \
-             of time and a steady worktree draws as a comb: {drawn:?}"
-        );
-    }
 }
 
 /// A level is carried in a fraction of a byte, so it saturates far below what a
@@ -1385,28 +1269,27 @@ fn a_projection_covers_the_same_span_in_every_column() {
 /// with the unit and with the kernel's own decay, and nothing else would notice.
 #[test]
 fn a_level_saturates_rather_than_wrapping_and_keeps_its_reach() {
-    // Bracketing the measured threshold at the position tested, so the pair
+    // Bracketing the threshold, bisected at 54,659,293 bytes, so the pair
     // reddens whether the unit rises or falls.
-    let under = lone_write(200_000_000);
+    let under = lone_write(54_000_000);
     assert!(
-        under
-            .levels(HISTORY_SAMPLES)
-            .iter()
-            .all(|level| *level < u32::MAX),
-        "two hundred megabytes in one sample already saturates, so the store represents less of a burst than it did"
+        under.iter().all(|value| *value < u32::MAX),
+        "fifty-four megabytes in one sample already saturates a bucket, so the \
+         store represents less of a burst than it did: {under:?}"
     );
 
     // Past it, the level pins at the ceiling rather than wrapping to nothing,
     // and the reach is still the kernel's.
-    let over = lone_write(210_000_000);
-    let levels = over.levels(HISTORY_SAMPLES);
+    let over = lone_write(56_000_000);
     assert!(
-        levels.contains(&u32::MAX),
-        "the largest sample a store can hold did not reach the ceiling, so the arithmetic wrapped somewhere: {levels:?}"
+        over.contains(&u32::MAX),
+        "the largest sample a store can hold did not reach the ceiling, so the \
+         arithmetic wrapped somewhere: {over:?}"
     );
     assert_eq!(
         lit(&over),
         lit(&lone_write(9_000)),
-        "a saturating write drew a different width from an ordinary one, so saturation costs the reach as well as the magnitude"
+        "a saturating write lit different buckets from an ordinary one, so \
+         saturation costs the reach as well as the magnitude"
     );
 }

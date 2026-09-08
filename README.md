@@ -81,9 +81,6 @@ cargo install --git https://github.com/breferrari/vigia vigia
 ```
    header  │  my-repo · 3 changed                                     watching
            │
- masthead  │           ▂▃▅▇▅▃▂                       ← press m for this
-      (m)  │      ▁▂▃▅███████████▅▃▂▁
-           │
      list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
            │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3
            │    M Cargo.toml               ■■■■■■■■■■■■  ________    +2    -0
@@ -188,34 +185,6 @@ The pairing is bounded on purpose. A removed line and the added line under it ar
 
 All three are backgrounds, so they need 24-bit colour and they leave together below it. What is left there is what was always there: the `+` and `-` column, and the left bar beside it.
 
-### 📈 And the masthead, which is the whole tree
-
-Every signal above is about **one file**. Press `m` and the **masthead** opens under the header: the same two-minute window, summed across **every** file at once.
-
-Two names for one thing, and both are used: **masthead** is the block at the top of the page, in the newspaper sense, and **churn band** is the graph drawn in it.
-
-```
-                 ▂▃▅▇▅▃▂
-            ▁▂▃▅███████████▅▃▂▁
-   └─────────────────────────────────┘
-   two minutes ago                 now
-```
-
-Two rows, stacked, growing upward from a drawn baseline, and the same level the sparklines draw. A quiet stretch is a floor rather than a gap, which is what makes a burst read as a spike on a graph instead of a block floating in the dark. That resolution is the point: it answers a question no file row can, which is *is anything happening at all right now, and was it busier a minute ago.* A tall block that has been collapsing for thirty seconds is an agent that has finished.
-
-It is drawn the way a system monitor draws one. Three things come with that: one value per sub-column, so where your font carries braille the band resolves twice the detail it does in blocks; the axis, so a lone spike stands on something; and a scale set above the ordinary write rather than at the window's peak, because one `cargo build` rewriting a lock file is two orders of magnitude above an ordinary save, and against *that* denominator every edit for the next two minutes draws one level high. That scale leaves an outlier out of its own reckoning, so a test run rewriting thousands of bytes saturates instead of pressing the edits around it onto the floor.
-
-It starts **hidden**, because it costs three rows of diff and is not wanted on every pane. Press `m` again and the rows go straight back to the diff.
-
-<details>
-<summary>Why three rows and not four</summary>
-
-<br>
-
-The blank above the band is the row the header keeps between itself and the list whether the band is drawn or not. So turning the band on takes the two rows of graph and the one blank under it, and nothing else on the pane moves.
-
-</details>
-
 ---
 
 ## ⌨️ Drive it
@@ -235,7 +204,6 @@ The blank above the band is the row the header keeps between itself and the list
 | `1` to `6` | jump to that list row |
 | `J` `K` | scroll the pinned list |
 | `f` | follow the newest change, or stop |
-| `m` | show or hide the masthead |
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
@@ -500,11 +468,10 @@ set -ga terminal-overrides ",*:Tc"
 
 ### 🪟 The pane you want, every time
 
-`m`, `r`, `s`, `a` and `w` change what the body is made of, and all five start off. If you always want one of them, say so once:
+`r`, `s`, `a` and `w` change what the body is made of, and all four start off. If you always want one of them, say so once:
 
 ```sh
 # ~/.config/vigia/config
-masthead = on     # the churn band at the top
 rail     = on     # the file list beside the diff, from 134 columns
 single   = on     # one file at a time
 staged   = on     # what is staged, beside what is not

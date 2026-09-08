@@ -9,8 +9,6 @@ pub const CONFIG_FILE: &str = ".config/vigia/config";
 /// The state a pane starts in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
-    /// Draw the churn band at the top. `m`.
-    pub masthead: bool,
     /// Ask for the pinned list beside the diff. `r`.
     pub rail: bool,
     /// Pin the diff to one file. `s`.
@@ -29,7 +27,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            masthead: false,
             rail: false,
             single: false,
             staged: false,
@@ -41,15 +38,12 @@ impl Default for Config {
 }
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
-pub const KEYS: [&str; 7] = [
-    "masthead", "rail", "single", "staged", "wrap", "icons", "links",
-];
+pub const KEYS: [&str; 6] = ["rail", "single", "staged", "wrap", "icons", "links"];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
     fn set(&mut self, key: &str, on: bool) -> bool {
         match key {
-            "masthead" => self.masthead = on,
             "rail" => self.rail = on,
             "single" => self.single = on,
             "staged" => self.staged = on,
@@ -148,7 +142,6 @@ impl std::error::Error for ConfigError {}
 ///
 /// ```text
 /// # the pane I want
-/// masthead = on
 /// rail     = on    # from 134 columns
 /// single   = off
 /// staged   = on    # both runs, every session

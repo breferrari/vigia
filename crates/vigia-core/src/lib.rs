@@ -49,7 +49,7 @@ pub use highlight::{
     WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport, Warmed,
 };
 pub use history::{
-    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
+    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
     HISTORY_WINDOW, History, HistoryStats, PULSE_SAMPLES, Recency, SPARK_GROUPS, scale_of,
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};

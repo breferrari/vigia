@@ -48,21 +48,20 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 }
 
 /// What a config file can reach on the chrome, read off a drawn one.
-fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
+fn chrome_of(app: &App) -> (bool, bool, Option<usize>) {
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
+    (chrome.rail, chrome.following, chrome.sheet)
 }
 
 #[test]
 fn each_key_sets_the_state_the_pane_starts_in() {
-    // One key at a time, so a parser that set the wrong field would be caught by the
-    // two it should not have touched rather than only by the one it should.
+    // One key at a time, so a parser that set the wrong field would be caught by
+    // the one it should not have touched rather than only by the one it should.
     for (key, chrome) in [
-        ("masthead", (true, false, true, None)),
-        ("rail", (false, true, true, None)),
-        // `single` is not on the chrome, so its row asserts the two that are stay
-        // off: a mapping that sent it to `masthead` shows up there.
-        ("single", (false, false, true, None)),
+        ("rail", (true, true, None)),
+        // `single` is not on the chrome, so its row asserts the one that is stays
+        // off: a mapping that sent it to `rail` shows up there.
+        ("single", (false, true, None)),
     ] {
         let home = home_with(&format!("app-{key}"), Some(&format!("{key} = on\n")));
         let config = config::from_env(home_env(&home)).expect("a config");
@@ -74,13 +73,6 @@ fn each_key_sets_the_state_the_pane_starts_in() {
     }
 
     for (key, want) in [
-        (
-            "masthead",
-            Config {
-                masthead: true,
-                ..Config::default()
-            },
-        ),
         (
             "rail",
             Config {
@@ -101,12 +93,11 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         assert_eq!(got, want, "{key} = on did not set {key} and only {key}");
     }
 
-    // And all three together, which is the file a reader who wants the lot writes.
-    let home = home_with("all", Some("masthead = on\nrail = on\nsingle = on\n"));
+    // And both together, which is the file a reader who wants the lot writes.
+    let home = home_with("all", Some("rail = on\nsingle = on\n"));
     assert_eq!(
         config::from_env(home_env(&home)).expect("a config"),
         Config {
-            masthead: true,
             rail: true,
             single: true,
             staged: false,
@@ -131,7 +122,6 @@ fn the_key_still_toggles_from_the_configured_state() {
     // A setting is a starting point rather than a decision, which is the sentence the
     // README makes and the one a reader would notice broken.
     let config = Config {
-        masthead: true,
         rail: true,
         single: true,
         staged: false,
@@ -141,11 +131,8 @@ fn the_key_still_toggles_from_the_configured_state() {
     };
     let mut app = App::configured(config);
 
-    let (masthead, rail, following, _) = chrome_of(&app);
-    assert!(
-        masthead && rail,
-        "the configured shell did not start configured"
-    );
+    let (rail, following, _) = chrome_of(&app);
+    assert!(rail, "the configured shell did not start configured");
     assert!(
         following,
         "a config file turned follow off, which is I5 and no key of this file"
@@ -156,20 +143,17 @@ fn the_key_still_toggles_from_the_configured_state() {
     let mut frame = worktree.frame();
     support::materialise(&mut frame);
 
-    app.apply(Action::ToggleMasthead, &mut frame, 0)
-        .expect("apply");
     app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
-    let (masthead, rail, following, _) = chrome_of(&app);
+    let (rail, following, _) = chrome_of(&app);
     assert!(
-        !masthead && !rail,
-        "the keys did not toggle away from what the file asked for"
+        !rail,
+        "the key did not toggle away from what the file asked for"
     );
     assert!(following, "toggling a view key disengaged follow");
 
-    app.apply(Action::ToggleMasthead, &mut frame, 0)
-        .expect("apply");
-    let (masthead, _, _, _) = chrome_of(&app);
-    assert!(masthead, "the key did not toggle back");
+    app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
+    let (rail, _, _) = chrome_of(&app);
+    assert!(rail, "the key did not toggle back");
 }
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
@@ -181,7 +165,7 @@ fn a_key_this_file_does_not_have_names_its_line_and_refuses() {
     // theme parser's reason: a silently dropped key is a setting that does
     // nothing, and "it was discarded" is the one explanation a reader cannot
     // arrive at by looking at their screen.
-    let err = config::parse("masthead = on\nsidebar = on\n").expect_err("an unknown key");
+    let err = config::parse("rail = on\nsidebar = on\n").expect_err("an unknown key");
     assert_eq!(
         err,
         ConfigError::UnknownKey {
@@ -240,10 +224,10 @@ fn a_value_that_is_neither_on_nor_off_names_its_line_and_its_key() {
 #[test]
 fn a_missing_separator_and_a_missing_value_each_name_their_line() {
     assert_eq!(
-        config::parse("masthead on\n").expect_err("no `=`"),
+        config::parse("single on\n").expect_err("no `=`"),
         ConfigError::MissingSeparator {
             line: 1,
-            text: "masthead on".to_owned()
+            text: "single on".to_owned()
         }
     );
     assert_eq!(
@@ -285,12 +269,12 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
     // The three the theme parser's own header calls out, gated here because the
     // grammar is shared and a copy that dropped one of them would be a file that
     // works everywhere except on the machine that writes a BOM.
-    let source = "\u{FEFF}# the pane I want\n\n  masthead = on   # the churn band\n\nsingle = on\n";
+    let source =
+        "\u{FEFF}# the pane I want\n\n  rail = on   # the list beside the diff\n\nsingle = on\n";
     assert_eq!(
         config::parse(source).expect("a config"),
         Config {
-            masthead: true,
-            rail: false,
+            rail: true,
             single: true,
             staged: false,
             wrap: false,
@@ -412,16 +396,11 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     support::materialise(&mut frame);
 
     let mut pressed = App::new();
-    for action in [
-        Action::ToggleMasthead,
-        Action::ToggleRail,
-        Action::ToggleSingle,
-    ] {
+    for action in [Action::ToggleRail, Action::ToggleSingle] {
         pressed.apply(action, &mut frame, 0).expect("apply");
     }
 
     let mut configured = App::configured(Config {
-        masthead: true,
         rail: true,
         single: true,
         staged: true,
@@ -434,7 +413,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // identically broken shells agree with each other perfectly.
     assert_eq!(
         chrome_of(&configured),
-        (true, true, true, None),
+        (true, true, None),
         "the configured shell is not configured, so the comparison below is \
          between two shells that both did nothing"
     );
@@ -480,7 +459,6 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
     assert_eq!(
         config::parse(&source).expect("every key in KEYS parses"),
         Config {
-            masthead: true,
             rail: true,
             single: true,
             staged: true,
