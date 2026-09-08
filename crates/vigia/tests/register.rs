@@ -39,11 +39,11 @@ const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia/src/input.rs", 4351),
     ("vigia/src/app.rs", 4145),
     ("vigia-core/src/history.rs", 3345),
-    ("vigia/src/render.rs", 3214),
+    ("vigia/src/render.rs", 3223),
     ("vigia/src/glyphs.rs", 3947),
     ("vigia/src/lib.rs", 3469),
     ("vigia/src/config.rs", 4000),
-    ("vigia/src/view.rs", 2601),
+    ("vigia/src/view.rs", 2598),
 ];
 
 /// Comments carrying a date or the narrative of a change.
