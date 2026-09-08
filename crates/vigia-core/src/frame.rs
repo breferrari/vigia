@@ -523,9 +523,13 @@ impl<'w> Frame<'w> {
 
     /// What the whole run changed, or `None` while any changed file is unmeasured.
     ///
-    /// The `None` is the load-bearing half: a sum over the files that happen to be
-    /// cached is a total for part of the run wearing the whole run's clothes, and
-    /// there is no way to tell the two apart by looking.
+    /// The `None` guards against a sum over the files that happen to be cached,
+    /// which is a total for part of the run wearing the whole run's clothes and
+    /// cannot be told from the real one by looking. Filling every span below is
+    /// what keeps it from firing: a file inside the settle margin is deferred and
+    /// keeps the span that was last true of it, so the total holds rather than
+    /// blanks. The guard is what stops a later change to the fill from turning
+    /// that into a partial answer nothing would report.
     ///
     /// It fills the spans itself rather than reading what [`Self::height`] left,
     /// because the run's total is a fact about the run and the height walk answers
@@ -545,8 +549,7 @@ impl<'w> Frame<'w> {
         for index in 0..self.files.len() {
             self.fill_span(index, now)?;
             let change = &self.files[index];
-            // A file still being written is deferred rather than answered, and a
-            // total short one file is not this run's total.
+            // A total short one file is not this run's total.
             let Some(measured) = self.spans.get(change).filter(|held| held.answered) else {
                 return Ok(None);
             };

@@ -665,6 +665,49 @@ fn the_headers_total_is_the_rows_summed() {
 }
 
 #[test]
+fn a_run_still_being_written_holds_its_last_answer() {
+    // A file inside the settle margin is deferred rather than re-read, and its span
+    // stays answered at the last value that was true of it. So the header holds the
+    // total it had instead of blanking, which is what the height does one field over.
+    let scratch = Scratch::large_diff("shell-rows-total-unsettled", 6, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    support::settle_spans(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let viewport = Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        wrap: false,
+        width: 0,
+        diff_rows: ALL_ROWS,
+        ..Viewport::default()
+    };
+
+    let settled = View::collect(&mut frame, &mut highlighter, &history, viewport).expect("view");
+    let before = settled.churn.expect("the settled pass answered no total");
+
+    // `arm_settle` rewrites and ticks until the walk actually lands inside the
+    // margin, because a burst whose walk landed late proves nothing.
+    let mut mid_write = None;
+    support::arm_settle(&scratch, &mut frame, 6, 80, |frame| {
+        mid_write = View::collect(frame, &mut highlighter, &history, viewport)
+            .expect("view")
+            .churn;
+    });
+
+    let held = mid_write.expect("a tick inside the margin blanked the total");
+    assert!(
+        held.added > 0 && held.removed > 0,
+        "the held total is empty, so the header would draw the mode word over a          run that has one: {held:?}"
+    );
+    assert_eq!(
+        held.binary, before.binary,
+        "the count of what the total leaves out moved while nothing settled"
+    );
+}
+
+#[test]
 fn a_binary_file_adds_nothing_and_says_nothing() {
     // It is counted among the changed files and has no lines to contribute, and a
     // file with no counts must not take the whole total away either.
@@ -832,6 +875,9 @@ fn the_total_holds_when_the_reader_pins_one_file() {
     }
     scratch.commit_all("baseline");
     for name in ["a", "b", "c", "d", "e", "f"] {
+        // Two lines longer and one line different: `+3 -1`, so added and removed
+        // are told apart by the numbers rather than only by the field they sit in.
+        scratch.write(&format!("src/{name}.rs"), unique(name, 14));
         scratch.edit_line(&format!("src/{name}.rs"), 3, "changed");
     }
 
@@ -862,7 +908,7 @@ fn the_total_holds_when_the_reader_pins_one_file() {
         View::collect(&mut frame, &mut highlighter, &history, viewport(true)).expect("view");
     assert_eq!(
         claimed(&pinned),
-        Some((6, 6)),
+        Some((18, 6)),
         "pinning one file took the run's total off the header"
     );
 
@@ -870,7 +916,7 @@ fn the_total_holds_when_the_reader_pins_one_file() {
         View::collect(&mut frame, &mut highlighter, &history, viewport(false)).expect("view");
     assert_eq!(
         claimed(&whole),
-        Some((6, 6)),
-        "the fixture is not six files of +1 -1"
+        Some((18, 6)),
+        "the fixture is not six files of +3 -1"
     );
 }
