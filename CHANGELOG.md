@@ -6,7 +6,8 @@ Before 1.0, a minor release can change behaviour. Anything that moves a key, a g
 
 ## [0.42.0] - 2026-09-08
 
-- Internal changes only. Nothing a user of the pane can see moved.
+- The masthead is removed. The churn band, the `m` key that showed it and the `masthead` setting in `~/.config/vigia/config` are all gone, and the rows the band took go back to the diff. The per-file sparkline and heat strip are unchanged.
+- `vigia-core` drops `Churn`, `History::worktree_churn` and `View::worktree_churn` from its public API, which is why this is a minor rather than a patch.
 
 ## [0.41.0] - 2026-09-08
 
