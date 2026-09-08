@@ -12,8 +12,8 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing, Position,
-    Regions, Row, Theme, View, action_for, body_layout, regions, render,
+    Action, App, Chrome, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing,
+    Position, Regions, Row, Theme, View, action_for, body_layout, regions, render,
 };
 
 /// A key event, spelled once.
@@ -89,6 +89,7 @@ fn entry(path: &str) -> FileEntry {
         ],
         recency: Recency::Pulse,
         newest: true,
+        notes: FileNotes::default(),
         heat: {
             let mut buckets = [HeatBucket::default(); HEAT_BUCKETS];
             for (at, bucket) in buckets.iter_mut().enumerate() {

@@ -14,7 +14,8 @@ use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
 use crate::view::{
-    BOX_FRAME, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View,
+    BOX_FRAME, BoxPart, FileEntry, FileNotes, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead,
+    NoteMark, Row, Scale, View,
 };
 
 /// Columns a tab advances to the next multiple of.
@@ -39,6 +40,10 @@ const WRAPPED: char = '↳';
 /// What the gutter draws under the pointer, and on a line carrying a note with
 /// no body. `SPEC.md` §10 records `»` as its CP437 stand-in.
 const NOTE_ICON: char = '✎';
+
+/// What a file row draws for a note the agent has resolved, for as long as the
+/// departure under the line does.
+const RESOLVED_ICON: char = '✓';
 
 /// The bar down the left of a note's rows. `▌` is the recorded stand-in.
 const NOTE_BAR: char = '▎';
@@ -153,6 +158,11 @@ const _: () = {
 
 /// The pulse, widest rung first.
 const PULSE_RUNGS: [&str; 2] = ["●", ""];
+
+/// The note mark's slot, widest rung first. Columns and not a glyph, because all
+/// three of the glyphs [`mark_glyph`] chooses between are one column and which
+/// one is drawn is the file's business rather than the layout's.
+const MARK_RUNGS: [usize; 2] = [1, 0];
 
 /// One slice of a file, whatever it holds.
 const HEAT_SLICE: char = '■';
@@ -347,7 +357,7 @@ fn glyph_span(area: Rect, pane: Rect, margins: (u16, u16)) -> Rect {
 
 /// The pane width from which the pinned list may become a left rail beside
 /// the diff rather than a strip above it. `SPEC.md` §11.2 B14.
-const RAIL_FROM: u16 = 134;
+const RAIL_FROM: u16 = 139;
 
 /// Path columns the rail keeps beside a settled glance cluster.
 const RAIL_PATH: usize = MIN_PATH_WIDTH * 2;
@@ -726,6 +736,8 @@ struct Heading<'r> {
     /// Whether the newest burst named this file, which is what carries the `●`.
     newest: bool,
     heat: &'r [HeatBucket; HEAT_BUCKETS],
+    /// What this file's notes put on the row and inside its strip.
+    notes: FileNotes,
 }
 
 impl<'r> Heading<'r> {
@@ -741,6 +753,7 @@ impl<'r> Heading<'r> {
             recency: entry.recency,
             newest: entry.newest,
             heat: &entry.heat,
+            notes: entry.notes,
         }
     }
 }
@@ -842,6 +855,19 @@ fn past(right: &mut Rect, width: usize) {
     right.width = right.width.saturating_sub(reserved(width) as u16);
 }
 
+/// The glyph a file row's note mark draws for each state.
+///
+/// `↳` is [`WRAPPED`], the same glyph that opens the agent's answer under the
+/// line it answers, so a row points at the surface it is about rather than
+/// inventing a second vocabulary for it.
+const fn mark_glyph(mark: NoteMark) -> char {
+    match mark {
+        NoteMark::Waiting => NOTE_ICON,
+        NoteMark::Replied => WRAPPED,
+        NoteMark::Resolved => RESOLVED_ICON,
+    }
+}
+
 /// Whether this file has any heat strip to draw at all.
 fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
     buckets.iter().any(|bucket| bucket.total() > 0)
@@ -851,41 +877,82 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
 const COUNT_CELL: usize = 5;
 
 /// Every shape a file row's right-hand side may take, widest first.
-const ROW_LAYOUTS: [Columns; 9] = [
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[1]),
+const ROW_LAYOUTS: [Columns; 10] = [
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[0],
+        SPARK_RUNGS[0],
+        MARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[0],
+        SPARK_RUNGS[1],
+        MARK_RUNGS[0],
+    ),
     SETTLED,
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[1],
+        SPARK_RUNGS[2],
+        MARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[2],
+        SPARK_RUNGS[2],
+        MARK_RUNGS[0],
+    ),
     Columns::new(
         COUNT_CELL,
         PULSE_RUNGS[0],
         HEAT_RUNGS[2],
         SPARK_RUNGS[SPARK_NONE],
+        MARK_RUNGS[0],
     ),
     Columns::new(
         COUNT_CELL,
         PULSE_RUNGS[0],
         HEAT_RUNGS[3],
         SPARK_RUNGS[SPARK_NONE],
+        MARK_RUNGS[0],
     ),
     Columns::new(
         COUNT_CELL,
         PULSE_RUNGS[1],
         HEAT_RUNGS[3],
         SPARK_RUNGS[SPARK_NONE],
+        MARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[3],
+        SPARK_RUNGS[SPARK_NONE],
+        MARK_RUNGS[1],
     ),
     Columns::NOTHING,
 ];
 
 /// The widest layout below the rung above it.
-const SETTLED: Columns = Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]);
+const SETTLED: Columns = Columns::new(
+    COUNT_CELL,
+    PULSE_RUNGS[0],
+    HEAT_RUNGS[1],
+    SPARK_RUNGS[1],
+    MARK_RUNGS[0],
+);
 
 /// [`SETTLED`]'s own width, at the glyph rung where it is widest.
 const SETTLED_CELLS: usize = reserved(counts_width(COUNT_CELL))
     + reserved(1)
     + reserved(HEAT_RUNGS[1])
-    + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block));
+    + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block))
+    + reserved(MARK_RUNGS[0]);
 
 /// The share of a row the glance elements may take, above the settled ladder.
 const GLANCE_NUMER: usize = 2;
@@ -974,18 +1041,21 @@ struct Columns {
     heat: usize,
     /// Sparkline buckets drawn on every row.
     spark: usize,
+    /// Columns the note mark is reserved on every row, or zero when none fits.
+    mark: usize,
 }
 
 impl Columns {
     /// A row with no room for anything but its path.
-    const NOTHING: Self = Self::new(0, "", 0, 0);
+    const NOTHING: Self = Self::new(0, "", 0, 0, 0);
 
-    const fn new(cell: usize, pulse: &'static str, heat: usize, spark: usize) -> Self {
+    const fn new(cell: usize, pulse: &'static str, heat: usize, spark: usize, mark: usize) -> Self {
         Self {
             cell,
             pulse,
             heat,
             spark,
+            mark,
         }
     }
 
@@ -1011,6 +1081,7 @@ impl Columns {
             + reserved(width_of(self.pulse))
             + reserved(self.heat)
             + reserved(spark_cells(self.spark, glyphs))
+            + reserved(self.mark)
     }
 }
 
@@ -1055,36 +1126,61 @@ impl Band {
     }
 }
 
+/// One drawn slice of the heat strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Slice {
+    /// What changed in this part of the file.
+    heat: Heat,
+    /// Whether an unresolved note is pinned inside it. The cell keeps its glyph
+    /// and changes ink, because substituting the block would make one slice lie
+    /// about its own magnitude.
+    noted: bool,
+}
+
 /// Re-project a heat map onto `width` slices and classify each one.
-fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
+///
+/// `noted` is folded by presence across a chunk the way the counts are folded by
+/// sum: a slice at a narrow rung covers several source buckets and a note in any
+/// of them is a note in the slice.
+fn heat_at(
+    buckets: &[HeatBucket; HEAT_BUCKETS],
+    noted: &[bool; HEAT_BUCKETS],
+    width: usize,
+) -> Vec<Slice> {
     if width == 0 || !has_heat(buckets) {
         return Vec::new();
     }
 
     // Saturating, because a projection must not be able to kill the pane.
     let group = HEAT_BUCKETS / width;
-    let summed: Vec<HeatBucket> = buckets
+    let summed: Vec<(HeatBucket, bool)> = buckets
         .chunks(group)
-        .map(|chunk| {
-            chunk
+        .zip(noted.chunks(group))
+        .map(|(chunk, marks)| {
+            let total = chunk
                 .iter()
                 .fold(HeatBucket::default(), |sum, bucket| HeatBucket {
                     added: sum.added.saturating_add(bucket.added),
                     removed: sum.removed.saturating_add(bucket.removed),
-                })
+                });
+            (total, marks.iter().any(|held| *held))
         })
         .collect();
 
-    let busiest = summed.iter().map(|b| b.total()).max().unwrap_or(0);
+    let busiest = summed.iter().map(|(b, _)| b.total()).max().unwrap_or(0);
     summed
         .iter()
-        .map(|bucket| {
+        .map(|(bucket, noted)| {
             let band = Band::of(bucket.total(), busiest);
-            match (bucket.added > 0, bucket.removed > 0) {
+            let heat = match (bucket.added > 0, bucket.removed > 0) {
                 (false, false) => Heat::Cool,
                 (true, false) => Heat::Added(band),
                 (false, true) => Heat::Removed(band),
                 (true, true) => Heat::Mixed(band),
+            };
+            Slice {
+                heat,
+                noted: *noted,
             }
         })
         .collect()
@@ -3803,7 +3899,7 @@ impl Painter<'_> {
 
         // Unguarded, because `heat_at` opens by returning nothing for a zero
         // width, so an outer `if` would be the same precondition twice.
-        let heat = heat_at(heading.heat, columns.heat);
+        let heat = heat_at(heading.heat, &heading.notes.at, columns.heat);
         if !heat.is_empty() {
             // Cell by cell rather than as one string: every slice is the same
             // glyph and only the style differs, which is the whole design.
@@ -3811,9 +3907,14 @@ impl Painter<'_> {
             let glyph = HEAT_SLICE.encode_utf8(&mut glyph);
             let x = right.x + right.width - heat.len() as u16;
             for (offset, slice) in heat.iter().enumerate() {
+                let ink = if slice.noted {
+                    self.theme.heat_note
+                } else {
+                    self.theme.heat(slice.heat)
+                };
                 // `cell_mut` rather than `Index`.
                 if let Some(cell) = self.buf.cell_mut((x + offset as u16, right.y)) {
-                    cell.set_symbol(glyph).set_style(self.theme.heat(*slice));
+                    cell.set_symbol(glyph).set_style(ink);
                 }
             }
         }
@@ -3833,6 +3934,18 @@ impl Painter<'_> {
             );
         }
         past(&mut right, width_of(columns.pulse));
+        // Leftmost of the cluster, which is why its arrival moved nothing already on
+        // the row: every slot outside it is right-anchored and unchanged. One cell
+        // written directly, for the reason the heat strip's loop gives, and reserved
+        // whether or not this file has a note to put in it.
+        if let Some(mark) = heading.notes.mark.filter(|_| columns.mark > 0)
+            && let Some(x) = right.width.checked_sub(columns.mark as u16)
+            && let Some(cell) = self.buf.cell_mut((right.x + x, right.y))
+        {
+            cell.set_char(mark_glyph(mark))
+                .set_style(self.theme.note_mark(mark));
+        }
+        past(&mut right, columns.mark);
 
         let mut room = usize::from(right.width);
         let at = area.x;

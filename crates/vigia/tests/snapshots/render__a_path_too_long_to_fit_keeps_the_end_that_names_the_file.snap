@@ -3,6 +3,6 @@ source: crates/vigia/tests/render.rs
 expression: "screen(40, 4, &view, &chrome())"
 ---
 "vigia · 1 changed               watching"
-"M …odule/frame.rs            +12    -3  "
+"M …ule/frame.rs              +12    -3  "
 "                                        "
 "q quit · f follow · ? keys           1/1"

@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Modifier, Style};
 use vigia::{
-    Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Scale, Theme,
-    View, render,
+    Chrome, Depth, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row,
+    Scale, Theme, View, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency, Status};
 
@@ -91,6 +91,7 @@ fn three_kinds() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Hunk {
@@ -355,6 +356,12 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         note_changed,
         note_gone,
         note_reply,
+        // A glyph rather than a word, and here rather than among the marks below:
+        // its whole job is to be found on a row at a glance, and colour 8 is the
+        // one value that hides a thing instead of colouring it.
+        note_mark,
+        note_mark_reply,
+        note_mark_resolved,
         alert,
         comment,
 
@@ -391,6 +398,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         heat_mixed: _,
         heat_mixed_warm: _,
         heat_mixed_hot: _,
+        // Exempt with the nine above it: a slice of the strip is a fill, and this
+        // one differs from them only in what it means.
+        heat_note: _,
         added: _,
         removed: _,
         added_row: _,
@@ -435,6 +445,11 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("note_changed", note_changed),
         ("note_gone", note_gone),
         ("note_reply", note_reply),
+        // The three states of a file row's note mark, which a reader finds by
+        // colour once the glyph has told them there is something to find.
+        ("note_mark", note_mark),
+        ("note_mark_reply", note_mark_reply),
+        ("note_mark_resolved", note_mark_resolved),
         ("alert", alert),
         ("context", context),
         ("comment", comment),
@@ -577,6 +592,7 @@ fn graded_heat() -> View {
             recency: Recency::Cold,
             newest: false,
             heat,
+            notes: FileNotes::default(),
         })],
         files: 1,
         top: Position::default(),
@@ -681,6 +697,7 @@ fn climbing() -> View {
             ],
             recency: Recency::Cold,
             newest: false,
+            notes: FileNotes::default(),
             heat: [HeatBucket::default(); HEAT_BUCKETS],
         })],
         files: 1,

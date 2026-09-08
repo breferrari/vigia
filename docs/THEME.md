@@ -58,8 +58,13 @@ The four state keys are what tells one note's state from another's at a glance, 
 | `path_cold` | a path nothing has written since watching began |
 | `path_hover` | a listed path the pointer rests on; the pointer's own colour, underlined |
 | `pulse` | the `●` marking a file that moved in the last tick |
+| `note_mark` | the `✎` marking a file whose note the agent has not answered |
+| `note_mark_reply` | the `↳` marking one the agent has answered and nobody has resolved |
+| `note_mark_resolved` | the `✓` marking one just resolved, for as long as its departure draws |
 | `kind` | the letter naming what happened to a file |
 | `staged` | the kind letter and run label of a staged change; git's own green |
+
+The three mark keys share a single reserved column and are told apart by their glyph before their colour, so the state survives a palette with no colour at all. They default to the inks the note surface itself uses, and are separate keys because a mark beside the pulse and a bar under a diff line are different roles on different backgrounds.
 
 ### The sparkline
 
@@ -84,6 +89,9 @@ The four state keys are what tells one note's state from another's at a glance, 
 | `heat_mixed` | a slice holding both |
 | `heat_mixed_warm` | the same, busier |
 | `heat_mixed_hot` | the same, in the file's busiest band |
+| `heat_note` | a slice holding an unresolved note, whatever else changed in it |
+
+`heat_note` says a conversation is in this part of the file and not which state it is in, because a slice already carries magnitude and a second meaning in the same cell is where a busy slice stops being distinguishable from a noted one. The row's own mark carries the state.
 
 ### The scrollbar
 

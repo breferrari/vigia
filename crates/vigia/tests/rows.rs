@@ -509,7 +509,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 #[test]
 fn every_rung_draws_from_the_stores_own_figures() {
     /// A pane per rung, widest first, with the buckets that rung must draw.
-    const RUNGS: [(u16, usize); 3] = [(164, 24), (80, 12), (45, 6)];
+    const RUNGS: [(u16, usize); 3] = [(169, 24), (80, 12), (47, 6)];
 
     let scratch = Scratch::new("shell-rows-every-rung");
     scratch.write("src/lib.rs", numbered(12));

@@ -9,9 +9,9 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Body, BoxPart, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow,
-    Marked, Mode, NoteLead, Noted, Position, Regions, Row, Scale, Theme, View, body_layout,
-    diff_height, regions, render,
+    Body, BoxPart, Chrome, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket,
+    ListRow, Marked, Mode, NoteLead, Noted, Position, Regions, Row, Scale, Theme, View,
+    body_layout, diff_height, regions, render,
 };
 
 /// The anchor the sweep's box carries: long enough to lose its head at most widths.
@@ -398,6 +398,7 @@ fn every_row_kind() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Hunk {
@@ -456,6 +457,7 @@ fn every_row_kind() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Reason("binary".to_owned()),
@@ -468,6 +470,7 @@ fn every_row_kind() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Hunk {
@@ -615,6 +618,7 @@ fn awkward() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
@@ -690,6 +694,7 @@ fn entry(path: &str) -> FileEntry {
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
         newest: false,
+        notes: FileNotes::default(),
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     }
 }
@@ -884,6 +889,7 @@ fn glancing() -> View {
                 ],
                 recency: Recency::Pulse,
                 newest: true,
+                notes: FileNotes::default(),
                 heat: ENDS_CHANGED,
             }),
             Row::file(FileEntry {
@@ -897,6 +903,7 @@ fn glancing() -> View {
                 ],
                 recency: Recency::Live,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: ENDS_CHANGED,
             }),
             Row::file(FileEntry {
@@ -908,6 +915,7 @@ fn glancing() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],
@@ -1434,124 +1442,111 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
 
 #[test]
 fn the_glance_columns_collapse_in_one_order() {
-    // The glance ladder. The columns are decided once for a region, so the
-    // order
-    // they give way in is a property of the region rather than of a row, and it
-    // is the one `SPEC.md` §11.1 records: counts, then the pulse, then heat,
-    // then sparkline.
+    // The glance ladder. The columns are decided once for a region, so the order
+    // they give way in is a property of the region rather than of a row, and it is
+    // the one `SPEC.md` §11.1 records: counts, then the pulse, then heat, then
+    // sparkline, with the note mark between the pulse and the counts.
     //
-    // Swept rather than sampled, because a ladder is only ever wrong at the
-    // widths where it changes rung, and those move with the fixture's counts.
+    // Swept rather than sampled, because a ladder is only ever wrong at the widths
+    // where it changes rung, and those move with the fixture's counts.
     //
     // Read off the drawn row by colour and glyph together, for the reason the
-    // renderer's own doc gives: the heat strip and a full sparkline bucket draw
-    // the same block, and the pulse shares a foreground with the sparkline.
-    // The first width each state is drawn at, and `(counts, heat slices,
-    // sparkline buckets)`. The widths are pinned as well as the order,
-    // because a sequence alone is a weak gate: removing the gap the heat strip
-    // reserves shifts every boundary below it by a column and leaves the walk
-    // itself identical, and that mutation survived this test until the widths
-    // went in.
+    // renderer's own doc gives: the heat strip and a full sparkline bucket draw the
+    // same block, and the pulse shares a foreground with the sparkline.
     //
-    // Derived rather than recorded from a run, because a number copied out
-    // of a failure message agrees with the renderer by construction and gates
-    // nothing. Each boundary is `ROW_FLOOR` plus `BAR_WIDTH` plus the layout's
-    // own width, and a layout's width is each slot plus the one column of gap
-    // `reserved` adds:
+    // The first width each state is drawn at, and `(counts, heat slices, sparkline
+    // buckets)`. The widths are pinned as well as the order, because a sequence
+    // alone is a weak gate: removing the gap the heat strip reserves shifts every
+    // boundary below it by a column and leaves the walk itself identical, and that
+    // mutation survived this test until the widths went in.
     //
-    // | Layout | counts | pulse | heat | spark | width | from |
-    // |---|---|---|---|---|---|---|
-    // | 5 | 12 | 0 | 0 | 0 | 12 | 28 |
-    // | 4 | 12 | 2 | 0 | 0 | 14 | 30 |
-    // | 3 | 12 | 2 | 7 | 0 | 21 | 37 |
-    // | 2 | 12 | 2 | 7 | 5 | 26 | 42 |
-    // | 1 | 12 | 2 | 13 | 5 | 32 | 49 |
-    // | 0 | 12 | 2 | 13 | 9 | 36 | 53 |
+    // Derived rather than recorded from a run, because a number copied out of a
+    // failure message agrees with the renderer by construction and gates nothing.
+    // Each boundary is `ROW_FLOOR` plus `BAR_WIDTH` plus the layout's own width,
+    // and a layout's width is each slot plus the one column of gap `reserved`
+    // adds:
     //
-    // The `from` column is the narrowest pane whose `ROW_FLOOR + BAR_WIDTH +
-    // inset + width` fits: a region is planned against the pane less a scrollbar
-    // column whether or not one is drawn, because whether one is drawn is a
-    // fact about the contents and the layout is not allowed to be. That is the
-    // whole of `planning_width`.
+    // | Layout | counts | pulse | heat | spark | mark | width | from |
+    // |---|---|---|---|---|---|---|---|
+    // | 8 | 12 | 0 | 0 | 0 | 0 | 12 | 28 |
+    // | 7 | 12 | 0 | 0 | 0 | 2 | 14 | 30 |
+    // | 6 | 12 | 2 | 0 | 0 | 2 | 16 | 32 |
+    // | 5 | 12 | 2 | 7 | 0 | 2 | 23 | 39 |
+    // | 4 | 12 | 2 | 7 | 5 | 2 | 30 | 47 |
+    // | 3 | 12 | 2 | 13 | 5 | 2 | 36 | 53 |
+    // | 2 | 12 | 2 | 13 | 9 | 2 | 42 | 59 |
     //
-    // The `inset` term is the margin's, and solving for the pane rather than
-    // adding to it is why the last two rows read 49 and 53. The pane keeps
-    // blank
-    // columns between its edge and any glyph, on a ladder of its own: none below
-    // 44 columns, one from 44, two from 80. The first four boundaries here sit
-    // under 44 and are therefore untouched. The last two sit inside the
-    // one-column rung, and the term is not simply `+1` on each: at 48 columns the
-    // inset is already being charged, so 48 leaves 45 planning columns where
-    // layout 1 needs 46, and the boundary is the first width that clears it.
+    // The `from` column is the narrowest pane whose `ROW_FLOOR + BAR_WIDTH + inset
+    // + width` fits: a region is planned against the pane less a scrollbar column
+    // whether or not one is drawn, because whether one is drawn is a fact about the
+    // contents and the layout is not allowed to be. That is the whole of
+    // `planning_width`.
     //
-    // Both were predicted from this table before the change was run, and both
-    // came out exactly. That is the check the ladder owes here, and it is
-    // worth more
-    // than the numbers: because the layouts are a written-out table rather than a
-    // greedy allocation, which boundaries move is decidable by reading, so a
-    // derivation that had missed would have meant the hand table and the constant
-    // table disagree, which no green run would have said.
+    // The `inset` term is the margin's, and solving for the pane rather than adding
+    // to it is why the last three rows read 47, 53 and 59. The pane keeps blank
+    // columns between its edge and any glyph, on a ladder of its own: none below 44
+    // columns, one from 44, two from 80. The first four boundaries here sit under
+    // 44 and are therefore untouched. The last three sit inside the one-column
+    // rung, and the term is not simply `+1` on each: at 46 columns the inset is
+    // already being charged, so 46 leaves 43 planning columns where layout 4 needs
+    // 44, and the boundary is the first width that clears it.
     //
-    // Layout 4 is absent below because it changes nothing this test can see: it
-    // differs from 5 only by the pulse mark, and the pulse is read by neither of
-    // the two counts.
+    // Layouts 7 and 6 are absent below because they change nothing this test can
+    // see: they differ from 8 by the mark and the pulse, and neither is read by
+    // either of the two counts.
     //
-    // The table has six layouts and not seven, which is the check the pulse
-    // ruling owes this test. A seventh above layout 0 would carry
-    // `● just changed`, fourteen columns of text and fifteen of slot once
-    // `reserved` adds its gap, reading `15` in the pulse column from 65 columns
-    // up. It went with the label along
-    // with the only rung that column ever had. Every `width` here is the sum of one
-    // layout's own slots, so dropping the widest one cannot shift the five below
-    // it, and the boundaries below are unchanged rather than re-derived.
+    // The walk has moved four times and every move is recorded, because every one
+    // of them cost something visible:
     //
-    // The walk has moved twice on this branch and both moves are recorded
-    // because both cost something visible:
-    //
-    // - Four columns up when the counts cell stopped degrading (22, 31, 36
-    //   became 26, 35, 40), which is both halves going from three columns to
-    //   five. It bought a cell that never draws `+0k` for a 250-line change.
-    // - Two more when the scrollbar column became unconditional (26, 35, 40
-    //   became 28, 37, 42). It bought a layout that cannot be moved by a seventh
-    //   changed file appearing.
-    //
-    // The bill for both lands on the sparkline, which needs 42 columns rather
-    // than 36. §11.1 carries the argument.
-    //
-    // - One more on the top two rungs only when the pane takes the margin's
-    //   inset
+    // - Four columns up when the counts cell stopped degrading (22, 31, 36 became
+    //   26, 35, 40), which is both halves going from three columns to five. It
+    //   bought a cell that never draws `+0k` for a 250-line change.
+    // - Two more when the scrollbar column became unconditional (26, 35, 40 became
+    //   28, 37, 42). It bought a layout that cannot be moved by a seventh changed
+    //   file appearing.
+    // - One more on the top two rungs only when the pane takes the margin's inset
     //   (48, 52 became 49, 53). Nothing under 44 columns moved, because the
     //   ladder's own floor is what buys I6's forty-column pane its columns back.
+    // - Two on every rung when the note mark took a slot of its own (37, 45, 51,
+    //   57, 134, 164 became 39, 47, 53, 59, 139, 169). Every boundary here is the
+    //   sum of one layout's own slots, so adding a slot to all but the narrowest
+    //   moves all but the narrowest by exactly what it costs, and 28 is unmoved
+    //   because layout 8 is the rung that gives the mark up.
     //
-    // Swept over `GENEROUS_WIDTHS`, and the last two entries are what that
-    // buys. A hundred and twenty columns cannot reach
-    // either rung above the settled ladder, so the walk pinned six of eight
-    // states and reported the ladder sound while its top was unreachable at every
-    // width it looked at. Both new boundaries are derived from the table rather
-    // than read off a failure, on the rule this gate already states:
+    // The bill lands on the sparkline every time, which needs 47 columns rather
+    // than the 36 it began at: four for the counts cell, two for the scrollbar,
+    // three for the inset, two for the mark. §11.1 carries the argument.
     //
-    // | Layout | counts | pulse | heat | spark | width | from |
-    // |---|---|---|---|---|---|---|
-    // | 1 | 12 | 2 | 25 | 13 | 52 | 134 |
-    // | 0 | 12 | 2 | 25 | 25 | 64 | 164 |
+    // Swept over `GENEROUS_WIDTHS`, and the last two entries are what that buys. A
+    // hundred and twenty columns cannot reach either rung above the settled ladder,
+    // so the walk pinned six of eight states and reported the ladder sound while
+    // its top was unreachable at every width it looked at. Both are derived from
+    // the table rather than read off a failure, on the rule this gate already
+    // states:
+    //
+    // | Layout | counts | pulse | heat | spark | mark | width | from |
+    // |---|---|---|---|---|---|---|---|
+    // | 1 | 12 | 2 | 25 | 13 | 2 | 54 | 139 |
+    // | 0 | 12 | 2 | 25 | 25 | 2 | 66 | 169 |
     //
     // The `from` column is a different rule for these two, and that is the share
-    // clamp rather than an inconsistency: below the settled ladder a layout
-    // arrives when the row can *survive* it, `ROW_FLOOR + width <= planning`, and
-    // above it when the row can *spare* it, `width * 5 <= planning * 2`. The
-    // share is what binds here, so 134 is the first pane with 130 planning
-    // columns and 164 the first with 160. Both were predicted before the change
-    // was run and both came out exactly; 134 is also the boundary
-    // `the_widest_strip_waits_until_the_path_keeps_the_row` derives independently.
+    // clamp rather than an inconsistency: below the settled ladder a layout arrives
+    // when the row can *survive* it, `ROW_FLOOR + width <= planning`, and above it
+    // when the row can *spare* it, `width * 5 <= planning * 2`. The share is what
+    // binds here, so 139 is the first pane with 135 planning columns and 169 the
+    // first with 165. Both were predicted from this table before the change was run
+    // and both came out exactly; 139 is also the boundary
+    // `the_widest_strip_waits_until_the_path_keeps_the_row` derives independently,
+    // and the width from which `SPEC.md` §11.2 B14 offers the rail.
     const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
         (1, (false, 0, 0)),
         (28, (true, 0, 0)),
-        (37, (true, 6, 0)),
-        (45, (true, 6, 6)),
-        (51, (true, 12, 6)),
-        (57, (true, 12, 12)),
-        (134, (true, 24, 12)),
-        (164, (true, 24, 24)),
+        (39, (true, 6, 0)),
+        (47, (true, 6, 6)),
+        (53, (true, 12, 6)),
+        (59, (true, 12, 12)),
+        (139, (true, 24, 12)),
+        (169, (true, 24, 24)),
     ];
     let theme = theme();
     let heats = support::heat_colours(&theme);
@@ -2876,6 +2871,7 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
     // that read the renderer's own numbers would agree with them by construction.
     const COUNT_HALF: usize = 5;
     const PULSE_CELLS: usize = 1;
+    const MARK_CELLS: usize = 1;
     const GLANCE_NUMER: usize = 2;
     const GLANCE_DENOM: usize = 5;
 
@@ -2889,7 +2885,8 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
     let widest = reserved(COUNT_HALF * 2 + 1)
         + reserved(PULSE_CELLS)
         + reserved(HEAT_RUNGS[0])
-        + reserved(SPARK_RUNGS[1]);
+        + reserved(SPARK_RUNGS[1])
+        + reserved(MARK_CELLS);
     let boundary = GENEROUS_WIDTHS
         .clone()
         .find(|pane| {
@@ -4088,6 +4085,7 @@ fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
             spark,
             recency: Recency::Live,
             newest: false,
+            notes: FileNotes::default(),
             heat: ENDS_CHANGED,
         })],
         ..glancing()

@@ -3,7 +3,7 @@ source: crates/vigia/tests/render.rs
 expression: "screen(40, 5, &glancing(), &chrome())"
 ---
 "vigia · 3 changed               watching"
-"M …ngine/watch.rs ● ■■■■■■   +42    -7  "
-"M …ender/frame.rs   ■■■■■■   +11    -3  "
+"M …ine/watch.rs   ● ■■■■■■   +42    -7  "
+"M …der/frame.rs     ■■■■■■   +11    -3  "
 "────────────────────────────────────────"
 "q quit · f follow · ? keys           1/3"

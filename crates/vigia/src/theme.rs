@@ -8,6 +8,7 @@ use vigia_core::{Class, Recency};
 
 use crate::colour::Depth;
 use crate::render::{Band, Heat};
+use crate::view::NoteMark;
 
 /// The foreground a fade starts `from`, when it differs from the one it settles
 /// `into`; `None` where the depth has flattened the two together, since there is
@@ -117,6 +118,11 @@ palette! {
     heat_mixed_warm,
     /// The same, in this file's busiest band.
     heat_mixed_hot,
+    /// A heat-strip slice holding an unresolved note. One key and not three:
+    /// the slice says a conversation is in this part of the file, and which
+    /// state it is in is read off the row's own glyph rather than off a second
+    /// meaning loaded onto a cell that already carries magnitude.
+    heat_note,
 
     /// The letter naming what happened to a file.
     kind,
@@ -188,6 +194,19 @@ palette! {
     /// enclosure above already carries the state and this key exists to tell
     /// two speakers apart rather than two states.
     note_reply,
+
+    /// The `✎` a file row carries while the reader is waiting on the agent.
+    ///
+    /// Its own key rather than `note_open`'s, because this draws on a file row
+    /// beside the pulse and that draws on the note's own bar: one hue today and
+    /// two roles, which is the rule the staged mark already follows.
+    note_mark,
+    /// The `↳` a file row carries once the agent has answered and the note is
+    /// still open.
+    note_mark_reply,
+    /// The `✓` a file row carries for as long as a resolved note's departure
+    /// draws. Follows `note_ink`'s rule that resolved is `seen` one step on.
+    note_mark_resolved,
 
     /// Something went wrong and the reader should know.
     alert,
@@ -262,6 +281,19 @@ impl Theme {
             "changed" => self.note_changed,
             "gone" => self.note_gone,
             _ => self.note_frame,
+        }
+    }
+
+    /// The ink and glyph a file row's note mark takes.
+    ///
+    /// One place decides both, so a state added to [`NoteMark`] fails to compile
+    /// here rather than falling through to a colour that says the wrong thing.
+    #[must_use]
+    pub fn note_mark(&self, mark: NoteMark) -> Style {
+        match mark {
+            NoteMark::Waiting => self.note_mark,
+            NoteMark::Replied => self.note_mark_reply,
+            NoteMark::Resolved => self.note_mark_resolved,
         }
     }
 
@@ -422,6 +454,7 @@ impl Theme {
             heat_mixed: fg(Color::Yellow),
             heat_mixed_warm: fg(Color::Yellow),
             heat_mixed_hot: fg(Color::LightYellow),
+            heat_note: fg(Color::Magenta),
             kind: fg(Color::Yellow),
             staged: fg(Color::Green),
             hunk: fg(Color::Blue),
@@ -471,6 +504,9 @@ impl Theme {
             // with a live one for the eye.
             note_gone: fg(Color::Gray),
             note_reply: fg(Color::Cyan),
+            note_mark: fg(Color::Magenta),
+            note_mark_reply: fg(Color::Cyan),
+            note_mark_resolved: fg(Color::Blue),
             alert: fg(Color::Red).add_modifier(Modifier::BOLD),
             // The mockup's hues, mapped onto the sixteen names every terminal resolves.
             keyword: fg(Color::LightRed),
@@ -525,6 +561,7 @@ impl Theme {
             heat_mixed: rgb(0xbb, 0x80, 0x09),
             heat_mixed_warm: rgb(0xe3, 0xb3, 0x41),
             heat_mixed_hot: rgb(0xf2, 0xcc, 0x60),
+            heat_note: rgb(0xd2, 0xa8, 0xff),
             kind: rgb(0xe3, 0xb3, 0x41),
             // The dark palette's own green, which `added` also takes: one hue for
             // the idea of *this is in*, spent in two places that never share a row.
@@ -571,6 +608,9 @@ impl Theme {
             // `note_seen` already lands on LightCyan there, so a brighter teal
             // collapses onto it at sixteen colours.
             note_reply: rgb(0x39, 0xb3, 0xbf),
+            note_mark: rgb(0xd2, 0xa8, 0xff),
+            note_mark_reply: rgb(0x39, 0xb3, 0xbf),
+            note_mark_resolved: rgb(0x79, 0xc0, 0xff),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
             type_name: rgb(0xff, 0xa6, 0x57),
@@ -620,6 +660,7 @@ impl Theme {
             heat_mixed: rgb(0xd4, 0xa7, 0x2c),
             heat_mixed_warm: rgb(0xbf, 0x87, 0x00),
             heat_mixed_hot: rgb(0x7d, 0x4e, 0x00),
+            heat_note: rgb(0x82, 0x50, 0xdf),
             kind: rgb(0xbf, 0x87, 0x00),
             staged: rgb(0x1a, 0x7f, 0x37),
             hunk: rgb(0x05, 0x50, 0xae),
@@ -656,6 +697,9 @@ impl Theme {
             note_changed: rgb(0x95, 0x38, 0x00),
             note_gone: rgb(0x59, 0x63, 0x6e),
             note_reply: rgb(0x1b, 0x7c, 0x83),
+            note_mark: rgb(0x82, 0x50, 0xdf),
+            note_mark_reply: rgb(0x1b, 0x7c, 0x83),
+            note_mark_resolved: rgb(0x09, 0x69, 0xda),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),
             keyword: rgb(0xcf, 0x22, 0x2e),
             type_name: rgb(0x95, 0x38, 0x00),

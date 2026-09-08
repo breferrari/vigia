@@ -5329,3 +5329,181 @@ fn a_tabbed_note_wraps_as_the_columns_its_tabs_are_drawn_in() {
          to:\n{tabbed:?}\n{spelled:?}"
     );
 }
+
+/// A file three lines longer than its committed form, with old line nine
+/// rewritten, so a note on the index side is numbered nine and sits at
+/// working-tree line twelve. The two numbers fall in different slices of the
+/// strip, which is the only shape that can tell the walk from reading the stored
+/// number straight.
+fn shifted(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(PATH, numbered_lines(12));
+    scratch.commit_all("baseline");
+    let mut lines: Vec<String> = ["new a", "new b", "new c"]
+        .iter()
+        .map(|&s| s.to_owned())
+        .chain((1..=12).map(|i| format!("line {i}")))
+        .collect();
+    lines[11] = "rewritten nine".to_owned();
+    scratch.write(PATH, format!("{}\n", lines.join("\n")));
+    scratch
+}
+
+/// The heat strip's inks on the row `y`, in column order.
+fn strip_on(painted: &Painted, y: u16) -> Vec<Option<Color>> {
+    let width = painted.backend.buffer().area.width;
+    (0..width)
+        .map(|x| painted.cell(x, y))
+        .filter(|cell| cell.symbol() == "\u{25a0}")
+        .map(|cell| cell.style().fg)
+        .collect()
+}
+
+/// The one mark glyph on row `y`, or `None` where the slot is blank.
+fn mark_on(painted: &Painted, y: u16) -> Option<char> {
+    let width = painted.backend.buffer().area.width;
+    let found: Vec<char> = (0..width)
+        .map(|x| painted.cell(x, y))
+        .filter_map(|cell| cell.symbol().chars().next())
+        .filter(|glyph| ['\u{270e}', '\u{21b3}', '\u{2713}'].contains(glyph))
+        .collect();
+    assert!(found.len() <= 1, "row {y} drew {found:?}");
+    found.into_iter().next()
+}
+
+/// The heading row of the file the fixture changed, which is where both regions
+/// draw the same row through the same drawer.
+fn heading(painted: &Painted) -> u16 {
+    let diff = painted.laid.diff;
+    (diff.top..diff.top + diff.rows)
+        .find(|y| painted.text(*y).contains("watch.rs"))
+        .expect("no heading row")
+}
+
+#[test]
+fn a_note_marks_its_file_in_the_list_and_in_the_diff() {
+    // Both regions draw a file row through one drawer, so the mark has to reach
+    // both or the map and the thing it maps disagree.
+    let scratch = fixture("notes-mark-both");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert_eq!(mark_on(&painted, heading(&painted)), Some('\u{270e}'));
+    assert!(
+        painted.laid.list.rows > 0,
+        "the fixture drew no list region"
+    );
+    assert_eq!(mark_on(&painted, painted.laid.list.top), Some('\u{270e}'));
+}
+
+#[test]
+fn an_answered_note_takes_the_reply_glyph_and_a_resolved_one_takes_its_own() {
+    let scratch = fixture("notes-mark-states");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    for (status, reply, glyph) in [
+        (Status::Open, None, '\u{270e}'),
+        (Status::Seen, None, '\u{270e}'),
+        (Status::Seen, Some("which margin?"), '\u{21b3}'),
+        (Status::Resolved, Some("fixed"), '\u{2713}'),
+    ] {
+        rig.store
+            .put(&left_as("n1", "short", status, reply))
+            .expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        assert_eq!(
+            mark_on(&painted, heading(&painted)),
+            Some(glyph),
+            "{status:?} with reply {reply:?}"
+        );
+    }
+}
+
+#[test]
+fn a_resolved_note_keeps_the_rows_mark_and_lets_go_of_the_strip() {
+    // The one place the two surfaces are deliberately out of step: the row says a
+    // conversation just ended here, and the strip says where an outstanding one
+    // is, which a resolved note is not.
+    let scratch = fixture("notes-mark-resolved");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let tint = rig.theme.heat_note.fg;
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, None))
+        .expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let inked = strip_on(&open, heading(&open))
+        .into_iter()
+        .filter(|ink| *ink == tint)
+        .count();
+    assert_eq!(
+        inked, 1,
+        "an open note tinted no slice, so the gate below \
+                          cannot tell a resolve from a fixture that never worked"
+    );
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Resolved, Some("fixed")))
+        .expect("put");
+    rig.reload();
+    let done = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = heading(&done);
+    assert_eq!(mark_on(&done, y), Some('\u{2713}'), "the row lost its mark");
+    assert_eq!(
+        strip_on(&done, y)
+            .into_iter()
+            .filter(|ink| *ink == tint)
+            .count(),
+        0,
+        "a resolved note is still tinting a slice"
+    );
+}
+
+#[test]
+fn a_note_on_a_removed_line_lands_in_the_slice_its_line_sits_in() {
+    // An old-side note is numbered by the index while the strip is projected onto
+    // the working tree's length. Here the two numbers are nine and twelve, which
+    // fall in different slices: a fixture where they agree cannot tell the walk
+    // from reading the stored number straight.
+    let scratch = shifted("notes-mark-old-side");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let tint = rig.theme.heat_note.fg;
+
+    let mut old_side = note("n1", 9, "line 9", BODY);
+    old_side.side = Side::Old;
+    rig.store.put(&old_side).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let inks = strip_on(&painted, heading(&painted));
+    let noted: Vec<usize> = inks
+        .iter()
+        .enumerate()
+        .filter(|(_, ink)| **ink == tint)
+        .map(|(at, _)| at)
+        .collect();
+
+    // Twenty-four source buckets over a fifteen-line file, halved onto twelve
+    // slices: working-tree line twelve is slice eight and the stored nine is six.
+    assert_eq!(
+        noted,
+        vec![8],
+        "the old-side note landed on {noted:?}; slice six is the stored number \
+         used straight and slice eight is the line it sits on"
+    );
+}
