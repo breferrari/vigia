@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    ARRIVING_FRAME, Action, App, BOX_ROWS, Body, Change, Glyphs, Input, Key, NoteEffects,
+    ARRIVING_FRAME, Action, App, BOX_ROWS, Body, Change, Glyphs, Input, Key, LEAVING, NoteEffects,
     PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout, box_cells, box_entrance,
     note_cells, opening, regions, render,
 };
@@ -2007,8 +2007,8 @@ fn a_frame_full_of_notes_holds_the_frame_budget() {
     );
 }
 
-/// I9 with fifty notes departing at once: every note's rows drawn and a
-/// resolve's departure run over each of them, which is the dearest thing
+/// I9 with fifty notes departing at once: every note's rows drawn, and both
+/// halves of a resolve's departure run over them in turn, which is the most
 /// `SPEC.md` §11.2 B21 lets a frame do with the notes. Interleaved with the same
 /// fifty standing still, so a loaded machine moves both arms.
 #[test]
@@ -2062,18 +2062,36 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         "the first file's diff has fewer than fifty lines"
     );
     app.set_notes(notes.clone());
-    let departures = || {
+    // Both halves of a departure, because they are two effects now and each is
+    // fifty of the same: whichever is dearer is the one the budget has to hold,
+    // and a gate that only ever armed the arrival would not know which that is.
+    let departures = |arriving: bool| {
         notes
             .iter()
-            .map(|note| Change::Resolved(note.id.clone()))
+            .map(|note| {
+                let id = note.id.clone();
+                if arriving {
+                    Change::Resolved(id)
+                } else {
+                    Change::Swept(id)
+                }
+            })
             .collect::<Vec<_>>()
     };
 
     let mut effects = NoteEffects::default();
+    let mut arriving = true;
     let mut edits = 0usize;
     // Cells rather than plain counters, because the sampler outlives the reader
     // and the probe at the end draws into its own buffer.
     let running = std::cell::Cell::new(0usize);
+    // How many of each half were armed inside the window that was timed. The
+    // alternation reaches the second half only if the sampled loop outlives one
+    // effect's length, so a frame path that grew fast enough would leave the
+    // flag where it started and time the arrival twice, at a p50 that looks the
+    // same and with every other assertion here still green.
+    let arrivals = std::cell::Cell::new(0usize);
+    let sweeps = std::cell::Cell::new(0usize);
     let mut next_frame = |frame: &mut Frame,
                           app: &mut App,
                           highlighter: &mut Highlighter,
@@ -2086,12 +2104,17 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
         );
         edits += 1;
-        // Re-armed the moment a departure has run its length, so every departing
-        // frame timed below has fifty effects live on it.
+        // Re-armed the moment one half has run its length, alternating, so every
+        // departing frame timed below has fifty effects live on it and the run
+        // as a whole times both. Arming sits outside `time_cpu`, so how often it
+        // happens is not in the measurement.
         if with {
             effects.settle(Instant::now());
             if !effects.is_running() {
-                effects.arm(departures(), &theme, Instant::now());
+                effects.arm(departures(arriving), &theme, Instant::now());
+                let counted = if arriving { &arrivals } else { &sweeps };
+                counted.set(counted.get() + 1);
+                arriving = !arriving;
             }
             running.set(running.get() + usize::from(effects.is_running()));
         }
@@ -2131,6 +2154,8 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         }
     }
     running.set(0);
+    arrivals.set(0);
+    sweeps.set(0);
     let (mut departing, mut still) = (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
     for _ in 0..SAMPLED_FRAMES {
         for with in [true, false] {
@@ -2150,14 +2175,22 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         }
     }
 
-    // Non-vacuity, three ways: the effects were live on every departing frame
-    // timed, the fifty notes were on the screen, and the effects change cells.
+    // Non-vacuity, four ways: the effects were live on every departing frame
+    // timed, both halves were among them, the fifty notes were on the screen,
+    // and the effects change cells.
     assert_eq!(
         running.get(),
         SAMPLED_FRAMES,
         "effects were live on {} of {SAMPLED_FRAMES} departing frames, so the arm \
          this gate is named for was timed without its departures",
         running.get()
+    );
+    assert!(
+        arrivals.get() > 0 && sweeps.get() > 0,
+        "the timed window armed {} arrivals and {} sweeps, so this gate measured \
+         one half of a departure twice and the other never",
+        arrivals.get(),
+        sweeps.get()
     );
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let view = app
@@ -2189,14 +2222,22 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         &chrome,
     );
     let drawn = probe.clone();
-    let mut fresh = NoteEffects::default();
-    fresh.arm(departures(), &theme, Instant::now());
-    fresh.draw(ARRIVING_FRAME, &mut probe, &cells);
-    assert_ne!(
-        probe, drawn,
-        "fifty departures one frame in left every cell as the renderer drew it, \
-         so this gate timed effects nobody can see"
-    );
+    // Both halves, each at a moment it is moving: the arrival is off the mark on
+    // its first frame, and the sweep's edge is soft over `SWEEP` columns and
+    // eased at both ends, so one frame in it has not reached the first cell.
+    for (half, at) in [(true, ARRIVING_FRAME), (false, LEAVING / 2)] {
+        probe = drawn.clone();
+        let mut fresh = NoteEffects::default();
+        fresh.arm(departures(half), &theme, Instant::now());
+        fresh.draw(at, &mut probe, &cells);
+        assert_ne!(
+            probe,
+            drawn,
+            "fifty departures left every cell as the renderer drew it {at:?} into \
+             their {} half, so this gate timed effects nobody can see",
+            if half { "arriving" } else { "leaving" }
+        );
+    }
 
     let with = departing.percentile(0.5).expect("a sampled frame");
     let without = still.percentile(0.5).expect("a sampled frame");

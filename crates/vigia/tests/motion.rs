@@ -58,16 +58,6 @@ fn every_motion() -> Vec<(&'static str, tachyonfx::Effect, Duration, Duration)> 
             LEAVING / 2,
         ),
         (
-            "holding",
-            motion::holding(
-                motion::evolving(ink, RESOLVE_ARRIVING, 10.0),
-                RESOLVE_BEAT,
-                motion::sweeping(LEAVING, 35),
-            ),
-            RESOLVED_DEPARTURE,
-            RESOLVE_ARRIVING / 2,
-        ),
-        (
             "fading in",
             motion::fading(Color::Blue, ARRIVING, AnyPattern::default(), false),
             ARRIVING,
@@ -117,19 +107,19 @@ fn every_source_compiles_and_runs_for_the_length_it_was_given() {
 
 #[test]
 fn a_departure_is_as_long_as_its_three_parts() {
-    // The ledger drops a resolved note's rows at `RESOLVED_DEPARTURE`, so the
-    // effect over them has to end at the same moment: earlier and the rows sit
-    // blank, later and they are taken away mid-sweep.
+    // The ledger arms the sweep at `RESOLVED_DEPARTURE - LEAVING` and drops the
+    // rows at `RESOLVED_DEPARTURE`, so the sweep has to be exactly as long as
+    // the gap between them: shorter and the rows sit blank, longer and they are
+    // taken away mid-sweep. The beat is the departure less its two ends and is
+    // run by no effect, which is what lets it be a minute.
+    // On the effects the pane builds rather than on the constants they were
+    // given, which is what `arriving.rs` already holds: a motion that reports a
+    // length other than the one it was compiled with is what this can see and
+    // that gate cannot.
     let ink = Style::default().fg(Color::Cyan);
-    let departure = motion::holding(
-        motion::evolving(ink, RESOLVE_ARRIVING, 10.0),
-        RESOLVE_BEAT,
-        motion::sweeping(LEAVING, 35),
-    );
-    assert_eq!(length(&departure), RESOLVED_DEPARTURE);
     assert_eq!(
-        length(&departure),
-        RESOLVE_ARRIVING + RESOLVE_BEAT + LEAVING
+        length(&motion::evolving(ink, RESOLVE_ARRIVING, 10.0)) + RESOLVE_BEAT,
+        RESOLVED_DEPARTURE - length(&motion::sweeping(LEAVING, 35)),
     );
 }
 
@@ -156,19 +146,16 @@ fn a_motion_armed_after_a_quiet_spell_starts_at_its_beginning() {
     assert_eq!(effect_interval(false, spell), Duration::ZERO);
     assert_eq!(effect_interval(true, ARRIVING_FRAME), ARRIVING_FRAME);
 
-    // And what it prevents, on a composed motion: told the spell, the whole
-    // departure is over inside one frame and the reader sees none of it.
-    let ink = Style::default().fg(Color::Cyan);
-    let mut departure = motion::holding(
-        motion::evolving(ink, RESOLVE_ARRIVING, 10.0),
-        RESOLVE_BEAT,
-        motion::sweeping(LEAVING, 35),
-    );
+    // And what it prevents, on the motion a resolve's beat ends in: told the
+    // spell, the sweep is over inside one frame and the reader sees none of it.
+    // That motion is the one this rule is load-bearing for, because the beat
+    // before it is exactly a stretch with nothing drawing.
+    let mut sweep = motion::sweeping(LEAVING, 35);
     let mut buf = drawn();
-    departure.process(spell.into(), &mut buf, PANE);
+    sweep.process(spell.into(), &mut buf, PANE);
     assert!(
-        departure.done(),
-        "a departure survived an interval longer than itself, so the rule above \
+        sweep.done(),
+        "a sweep survived an interval longer than itself, so the rule above \
          guards nothing"
     );
 }

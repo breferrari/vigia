@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use tachyonfx::{Duration as FxDuration, EffectManager, Interpolation, fx};
 use vigia::{
     ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT,
-    RESOLVED_DEPARTURE, Theme, box_entrance, box_exit, effect_interval, leaving, resolve_departure,
+    RESOLVED_DEPARTURE, Theme, box_entrance, box_exit, effect_interval, leaving, resolve_arrival,
 };
 
 /// The pane every gate here draws on.
@@ -381,24 +381,35 @@ fn an_effect_armed_after_a_quiet_spell_starts_at_its_beginning() {
         ARRIVING_FRAME,
         "an effect that was drawing is not told the frame that passed"
     );
-    // And what the rule prevents, on the effect itself: told the spell, a
-    // departure ends inside its first frame and the reader sees none of it.
-    let mut effect = resolve_departure(&Theme::default());
-    let mut buf = drawn();
-    effect.process(FxDuration::from(spell), &mut buf, PANE);
-    assert!(
-        effect.done(),
-        "a departure survives an interval longer than itself, so the rule above \
-         guards nothing"
-    );
+    // And what the rule prevents, on the effects themselves: told the spell,
+    // each half of a departure ends inside its first frame and the reader sees
+    // none of it.
+    for (name, mut effect) in [
+        (
+            "the agent's line arriving",
+            resolve_arrival(&Theme::default()),
+        ),
+        ("the sweep that takes the rows", leaving()),
+    ] {
+        let mut buf = drawn();
+        effect.process(FxDuration::from(spell), &mut buf, PANE);
+        assert!(
+            effect.done(),
+            "{name} survives an interval longer than itself, so the rule above \
+             guards nothing"
+        );
+    }
 }
 
 #[test]
 fn a_departure_ends_inside_its_own_length() {
-    // `SPEC.md` §11.2 B21: a resolve's departure is armed by the wake that
-    // brought the resolve and ends inside its duration, which is the licence I1
-    // grants every effect. The ledger drops the rows at `RESOLVED_DEPARTURE`, so
-    // the effect has to be done by then or the rows leave mid-dissolve.
+    // `SPEC.md` §11.2 B21: every effect a departure runs is armed by a wake and
+    // ends inside its own duration, which is the licence I1 grants every effect.
+    // The beat between the two carries no effect at all, so the pane asks for no
+    // frame while the agent's line is simply being read; `tests/notes.rs` holds
+    // that half. What is left here is that neither effect outlives its slot: the
+    // ledger arms the sweep at `RESOLVED_DEPARTURE - LEAVING` and drops the rows
+    // at `RESOLVED_DEPARTURE`.
     assert_eq!(
         RESOLVED_DEPARTURE,
         RESOLVE_ARRIVING + RESOLVE_BEAT + LEAVING,
@@ -407,9 +418,9 @@ fn a_departure_ends_inside_its_own_length() {
     );
     for (name, mut effect, length) in [
         (
-            "a resolve",
-            resolve_departure(&Theme::default()),
-            RESOLVED_DEPARTURE,
+            "a resolve's line",
+            resolve_arrival(&Theme::default()),
+            RESOLVE_ARRIVING,
         ),
         ("a withdrawal", leaving(), LEAVING),
     ] {
@@ -420,8 +431,8 @@ fn a_departure_ends_inside_its_own_length() {
             spent += ARRIVING_FRAME;
             assert!(
                 !effect.done(),
-                "{name}'s departure reported itself done at {spent:?}, inside its \
-                 {length:?}, so the rows are blank before the ledger drops them"
+                "{name} reported itself done at {spent:?}, inside its {length:?}, \
+                 so the rows are blank before the ledger reaches them"
             );
         }
         let mut buf = drawn();
@@ -432,8 +443,8 @@ fn a_departure_ends_inside_its_own_length() {
         );
         assert!(
             effect.done(),
-            "{name}'s departure is still running a frame past its {length:?}, so \
-             it would hold the clock after the rows are gone"
+            "{name} is still running a frame past its {length:?}, so it would \
+             hold the clock through the beat, or after the rows are gone"
         );
     }
 }
@@ -445,30 +456,42 @@ fn a_departure_changes_the_cells_it_covers_and_leaves_them_blank() {
     // end on nothing, because the frame after it drops the rows and a glyph the
     // dissolve left would be seen leaving twice.
     let settled = drawn();
-    let mut effect = resolve_departure(&Theme::default());
+    let mut arrival = resolve_arrival(&Theme::default());
     let mut buf = drawn();
-    effect.process(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
+    arrival.process(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
     assert_ne!(
         buf, settled,
         "one frame into a resolve's departure every cell is as the renderer left \
          it, so the agent's line arrives without arriving"
     );
-    // Through the beat, where the line holds, stopping short of the dissolve.
-    let held = RESOLVE_ARRIVING + RESOLVE_BEAT;
-    let mut spent = ARRIVING_FRAME;
-    while spent + ARRIVING_FRAME <= held {
-        buf = drawn();
-        effect.process(FxDuration::from(ARRIVING_FRAME), &mut buf, PANE);
-        spent += ARRIVING_FRAME;
-    }
+    // Run out, the line stands where the renderer drew it, and it is what the
+    // reader looks at for the whole beat with no effect over it.
+    buf = drawn();
+    arrival.process(FxDuration::from(RESOLVE_ARRIVING), &mut buf, PANE);
     assert_eq!(
         symbols(&buf),
         symbols(&settled),
-        "the beat moved a glyph, so the agent's line is not readable while it holds"
+        "the arrival ended on a glyph of its own, so the agent's line is not \
+         readable while it holds"
     );
-    // The rest of the beat and the whole dissolve, in one step.
+
+    // Then the sweep, which has to end on nothing. Halfway rather than one frame
+    // in: its edge is soft over `SWEEP` columns and eased at both ends, so the
+    // first frame has not reached the first cell yet.
+    let mut sweep = leaving();
     buf = drawn();
-    effect.process(FxDuration::from(held - spent + LEAVING), &mut buf, PANE);
+    sweep.process(FxDuration::from(LEAVING / 2), &mut buf, PANE);
+    assert_ne!(
+        buf, settled,
+        "halfway through the sweep every cell is as the renderer left it, so the \
+         rows leave without leaving"
+    );
+    buf = drawn();
+    sweep.process(
+        FxDuration::from(LEAVING / 2 + ARRIVING_FRAME),
+        &mut buf,
+        PANE,
+    );
     assert!(
         symbols(&buf).iter().all(|cell| cell == " "),
         "a dissolve run for its whole length left glyphs behind, which the frame \

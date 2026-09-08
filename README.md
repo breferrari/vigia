@@ -263,7 +263,7 @@ That is the whole of it. `vigia` calls no model, summarises nothing and judges n
 
 **After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks.
 
-**When the agent resolves one**, its answer arrives on a row under the note, holds for three seconds, and the note leaves. That is the only way a note goes away that you did not empty yourself.
+**When the agent resolves one**, its answer arrives on a row under the note, holds for a minute, and the note leaves. That is the only way a note goes away that you did not empty yourself.
 
 **Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`. A monitor that wrote where it watches would wake itself, and the pane puts nothing in that directory but the notes you make.
 

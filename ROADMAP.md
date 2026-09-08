@@ -182,7 +182,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | | Task | Issue |
 |---|---|---|
 | ✅ | A reply shifts the note box and leaves the arrow off the rule it should hang from. **Reported from use** | [#466](https://github.com/breferrari/vigia/issues/466) |
-| ⬜ | The resolve line is required so the reader can read it, and it leaves before they can. **Reported from use** | [#465](https://github.com/breferrari/vigia/issues/465) |
+| ✅ | The resolve line is required so the reader can read it, and it leaves before they can. **Reported from use** | [#465](https://github.com/breferrari/vigia/issues/465) |
 | ⬜ | Dragging over a note copies the diff line above it. **Reported from use** | [#468](https://github.com/breferrari/vigia/issues/468) |
 | ⬜ | A note can be written but never removed. **Reported from use** | [#469](https://github.com/breferrari/vigia/issues/469) |
 | ⬜ | The file list never says which file holds a note. **Reported from use** | [#471](https://github.com/breferrari/vigia/issues/471) |

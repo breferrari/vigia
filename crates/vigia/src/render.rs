@@ -4397,7 +4397,7 @@ impl Mark {
 /// footer counts beside the position.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoteCount {
-    /// Every note the store listed.
+    /// Every note the pane draws, the ones leaving with it: the rows, not the store.
     pub total: usize,
     /// Those whose file is not in the diff, drawn nowhere.
     pub adrift: usize,
