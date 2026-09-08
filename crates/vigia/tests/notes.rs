@@ -5353,9 +5353,8 @@ fn shifted(name: &str) -> Scratch {
 fn strip_on(painted: &Painted, y: u16) -> Vec<Option<Color>> {
     let width = painted.backend.buffer().area.width;
     (0..width)
-        .map(|x| painted.cell(x, y))
-        .filter(|cell| cell.symbol() == "\u{25a0}")
-        .map(|cell| cell.style().fg)
+        .filter(|x| painted.cell(*x, y).symbol() == "\u{25a0}")
+        .map(|x| painted.fg(x, y))
         .collect()
 }
 
@@ -5371,15 +5370,6 @@ fn mark_on(painted: &Painted, y: u16) -> Option<char> {
     found.into_iter().next()
 }
 
-/// The heading row of the file the fixture changed, which is where both regions
-/// draw the same row through the same drawer.
-fn heading(painted: &Painted) -> u16 {
-    let diff = painted.laid.diff;
-    (diff.top..diff.top + diff.rows)
-        .find(|y| painted.text(*y).contains("watch.rs"))
-        .expect("no heading row")
-}
-
 #[test]
 fn a_note_marks_its_file_in_the_list_and_in_the_diff() {
     // Both regions draw a file row through one drawer, so the mark has to reach
@@ -5393,7 +5383,7 @@ fn a_note_marks_its_file_in_the_list_and_in_the_diff() {
     rig.reload();
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
 
-    assert_eq!(mark_on(&painted, heading(&painted)), Some('\u{270e}'));
+    assert_eq!(mark_on(&painted, painted.row_of(PATH)), Some('\u{270e}'));
     assert!(
         painted.laid.list.rows > 0,
         "the fixture drew no list region"
@@ -5421,7 +5411,7 @@ fn an_answered_note_takes_the_reply_glyph_and_a_resolved_one_takes_its_own() {
         rig.reload();
         let painted = rig.paint(&mut frame, PANE, Pointing::default());
         assert_eq!(
-            mark_on(&painted, heading(&painted)),
+            mark_on(&painted, painted.row_of(PATH)),
             Some(glyph),
             "{status:?} with reply {reply:?}"
         );
@@ -5445,7 +5435,7 @@ fn a_resolved_note_keeps_the_rows_mark_and_lets_go_of_the_strip() {
         .expect("put");
     rig.reload();
     let open = rig.paint(&mut frame, PANE, Pointing::default());
-    let inked = strip_on(&open, heading(&open))
+    let inked = strip_on(&open, open.row_of(PATH))
         .into_iter()
         .filter(|ink| *ink == tint)
         .count();
@@ -5460,7 +5450,7 @@ fn a_resolved_note_keeps_the_rows_mark_and_lets_go_of_the_strip() {
         .expect("put");
     rig.reload();
     let done = rig.paint(&mut frame, PANE, Pointing::default());
-    let y = heading(&done);
+    let y = done.row_of(PATH);
     assert_eq!(mark_on(&done, y), Some('\u{2713}'), "the row lost its mark");
     assert_eq!(
         strip_on(&done, y)
@@ -5490,7 +5480,7 @@ fn a_note_on_a_removed_line_lands_in_the_slice_its_line_sits_in() {
     rig.store.put(&old_side).expect("put");
     rig.reload();
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
-    let inks = strip_on(&painted, heading(&painted));
+    let inks = strip_on(&painted, painted.row_of(PATH));
     let noted: Vec<usize> = inks
         .iter()
         .enumerate()
@@ -5525,16 +5515,14 @@ fn a_file_holding_two_notes_draws_the_worse_of_them() {
         for id in ["n1", "n2"] {
             let _ = rig.store.remove(id);
         }
-        let mut waiting = left_as(first, "waiting", Status::Seen, None);
-        waiting.id = first.to_owned();
-        let mut answered = left_as(second, "answered", Status::Seen, Some("which margin?"));
-        answered.id = second.to_owned();
+        let waiting = left_as(first, "waiting", Status::Seen, None);
+        let answered = left_as(second, "answered", Status::Seen, Some("which margin?"));
         rig.store.put(&waiting).expect("put");
         rig.store.put(&answered).expect("put");
         rig.reload();
         let painted = rig.paint(&mut frame, PANE, Pointing::default());
         assert_eq!(
-            mark_on(&painted, heading(&painted)),
+            mark_on(&painted, painted.row_of(PATH)),
             Some('\u{21b3}'),
             "a waiting note and an answered one, written {first} then {second}, \
              drew something other than the answer"
@@ -5546,16 +5534,14 @@ fn a_file_holding_two_notes_draws_the_worse_of_them() {
     for id in ["n1", "n2"] {
         let _ = rig.store.remove(id);
     }
-    let mut waiting = left_as("n1", "waiting", Status::Seen, None);
-    waiting.id = "n1".to_owned();
-    let mut done = left_as("n2", "done", Status::Resolved, Some("fixed"));
-    done.id = "n2".to_owned();
+    let waiting = left_as("n1", "waiting", Status::Seen, None);
+    let done = left_as("n2", "done", Status::Resolved, Some("fixed"));
     rig.store.put(&waiting).expect("put");
     rig.store.put(&done).expect("put");
     rig.reload();
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
-        mark_on(&painted, heading(&painted)),
+        mark_on(&painted, painted.row_of(PATH)),
         Some('\u{270e}'),
         "a resolved note outranked a waiting one"
     );

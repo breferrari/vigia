@@ -707,9 +707,9 @@ impl HeatBucket {
 
 /// The maps a file's mark is resolved through: every note by the path it was
 /// written on, and the entry [`run_of`] gave each note whose path is in two runs.
-struct Pinned<'a, 'n> {
-    by_path: &'a HashMap<&'n str, Vec<&'n Note>>,
-    chosen: &'a HashMap<&'n str, usize>,
+struct Pinned<'n> {
+    by_path: &'n HashMap<&'n str, Vec<&'n Note>>,
+    chosen: &'n HashMap<&'n str, usize>,
 }
 
 /// Every note the entry at `index` holds, less the ones [`run_of`] gave to another
@@ -717,7 +717,7 @@ struct Pinned<'a, 'n> {
 fn notes_at<'n>(
     change: &vigia_core::FileChange,
     index: usize,
-    pinned: &Pinned<'_, 'n>,
+    pinned: &Pinned<'n>,
 ) -> Vec<&'n Note> {
     if pinned.by_path.is_empty() {
         return Vec::new();
@@ -1339,15 +1339,13 @@ impl View {
             view.list_top = 0;
             return Ok(view);
         }
-        // Above the exit below, where there is a list and no diff: nothing has
-        // chosen there, so a path in both runs is marked in both.
-        let mut chosen: HashMap<&str, usize> = HashMap::new();
-
         if height == 0 {
-            // The list still resolves.
+            // The list still resolves, and with no diff nothing has chosen between
+            // two runs of one path, so a file in both is marked in both.
+            let none = HashMap::new();
             let pinned = Pinned {
                 by_path: &by_path,
-                chosen: &chosen,
+                chosen: &none,
             };
             view.take_list(frame, history, list_rows, list_follows, &[], &pinned)?;
             return Ok(view);
@@ -1368,6 +1366,7 @@ impl View {
         // tie. Resolving it costs the entry the walk was not going to read, so it is
         // asked only of a path the walk can still reach, which is one file in `single`.
         let reachable = view.top.file..stop;
+        let mut chosen: HashMap<&str, usize> = HashMap::new();
         let mut boxed_run = None;
         for (path, indices) in &runs_of {
             if indices.len() < 2 || !indices.iter().any(|at| reachable.contains(at)) {
@@ -1399,6 +1398,11 @@ impl View {
                 }
             }
         }
+
+        let pinned = Pinned {
+            by_path: &by_path,
+            chosen: &chosen,
+        };
 
         let mut index = view.top.file;
         let mut skip = position.row;
@@ -1472,14 +1476,7 @@ impl View {
                 // not that it consumed it.
                 let before = view.rows.len();
                 let asked = skip.min(span);
-                let mut file_notes = notes_at(
-                    change,
-                    index,
-                    &Pinned {
-                        by_path: &by_path,
-                        chosen: &chosen,
-                    },
-                );
+                let mut file_notes = notes_at(change, index, &pinned);
                 // Before the retain below: a note being retyped is still one.
                 let marks = notes_of(diff, &file_notes);
                 let boxed = draft
@@ -1585,10 +1582,7 @@ impl View {
             list_rows,
             list_follows,
             &walked.drawn,
-            &Pinned {
-                by_path: &by_path,
-                chosen: &chosen,
-            },
+            &pinned,
         )?;
         view.measure(frame, measured, single, trimmed)?;
 
@@ -1678,7 +1672,7 @@ impl View {
         rows: usize,
         follows: bool,
         drawn: &[(usize, FileEntry)],
-        pinned: &Pinned<'_, '_>,
+        pinned: &Pinned<'_>,
     ) -> Result<()> {
         // A pane with no region resolved nothing, so it says nothing.
         if rows == 0 {

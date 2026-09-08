@@ -880,79 +880,82 @@ const COUNT_CELL: usize = 5;
 const ROW_LAYOUTS: [Columns; 10] = [
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[0],
         SPARK_RUNGS[0],
-        MARK_RUNGS[0],
     ),
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[0],
         SPARK_RUNGS[1],
-        MARK_RUNGS[0],
     ),
     SETTLED,
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[1],
         SPARK_RUNGS[2],
-        MARK_RUNGS[0],
     ),
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[2],
         SPARK_RUNGS[2],
-        MARK_RUNGS[0],
     ),
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[2],
-        SPARK_RUNGS[SPARK_NONE],
-        MARK_RUNGS[0],
+        SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[3],
-        SPARK_RUNGS[SPARK_NONE],
-        MARK_RUNGS[0],
+        SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
+        MARK_RUNGS[0],
         PULSE_RUNGS[1],
         HEAT_RUNGS[3],
-        SPARK_RUNGS[SPARK_NONE],
-        MARK_RUNGS[0],
+        SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[3],
-        SPARK_RUNGS[SPARK_NONE],
         MARK_RUNGS[1],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[3],
+        SPARK_NO,
     ),
     Columns::NOTHING,
 ];
 
+/// The rung that draws no sparkline, named so the table's rows stay one line.
+const SPARK_NO: usize = SPARK_RUNGS[SPARK_NONE];
+
 /// The widest layout below the rung above it.
 const SETTLED: Columns = Columns::new(
     COUNT_CELL,
+    MARK_RUNGS[0],
     PULSE_RUNGS[0],
     HEAT_RUNGS[1],
     SPARK_RUNGS[1],
-    MARK_RUNGS[0],
 );
 
 /// [`SETTLED`]'s own width, at the glyph rung where it is widest.
 const SETTLED_CELLS: usize = reserved(counts_width(COUNT_CELL))
+    + reserved(MARK_RUNGS[0])
     + reserved(1)
     + reserved(HEAT_RUNGS[1])
-    + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block))
-    + reserved(MARK_RUNGS[0]);
+    + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block));
 
 /// The share of a row the glance elements may take, above the settled ladder.
 const GLANCE_NUMER: usize = 2;
@@ -1035,27 +1038,29 @@ struct Columns {
     /// does not fit at all. The two halves stand or fall together, because `+42`
     /// with no `-7` beside it reads as a total rather than as half a pair.
     cell: usize,
+    /// Columns the note mark is reserved on every row, or zero when none fits.
+    mark: usize,
     /// The pulse rung reserved on every row, or empty when none fits.
     pulse: &'static str,
     /// Heat buckets drawn on every row.
     heat: usize,
     /// Sparkline buckets drawn on every row.
     spark: usize,
-    /// Columns the note mark is reserved on every row, or zero when none fits.
-    mark: usize,
 }
 
 impl Columns {
     /// A row with no room for anything but its path.
-    const NOTHING: Self = Self::new(0, "", 0, 0, 0);
+    const NOTHING: Self = Self::new(0, 0, "", 0, 0);
 
-    const fn new(cell: usize, pulse: &'static str, heat: usize, spark: usize, mark: usize) -> Self {
+    /// Written in the order §11.1 gives the slots, which is priority and not the
+    /// order they are drawn in.
+    const fn new(cell: usize, mark: usize, pulse: &'static str, heat: usize, spark: usize) -> Self {
         Self {
             cell,
+            mark,
             pulse,
             heat,
             spark,
-            mark,
         }
     }
 
@@ -1078,10 +1083,10 @@ impl Columns {
     /// Columns this layout needs, every gap included.
     fn width(&self, glyphs: Glyphs) -> usize {
         reserved(counts_width(self.cell))
+            + reserved(self.mark)
             + reserved(width_of(self.pulse))
             + reserved(self.heat)
             + reserved(spark_cells(self.spark, glyphs))
-            + reserved(self.mark)
     }
 }
 
@@ -3934,10 +3939,8 @@ impl Painter<'_> {
             );
         }
         past(&mut right, width_of(columns.pulse));
-        // Leftmost of the cluster, which is why its arrival moved nothing already on
-        // the row: every slot outside it is right-anchored and unchanged. One cell
-        // written directly, for the reason the heat strip's loop gives, and reserved
-        // whether or not this file has a note to put in it.
+        // Leftmost of the cluster, which is why its arrival moved nothing already
+        // on the row, and reserved whether or not this file has a note for it.
         if let Some(mark) = heading.notes.mark.filter(|_| columns.mark > 0)
             && let Some(x) = right.width.checked_sub(columns.mark as u16)
             && let Some(cell) = self.buf.cell_mut((right.x + x, right.y))

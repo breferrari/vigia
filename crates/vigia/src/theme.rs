@@ -284,10 +284,13 @@ impl Theme {
         }
     }
 
-    /// The ink and glyph a file row's note mark takes.
+    /// The ink a file row's note mark takes. Its glyph is `render::mark_glyph`,
+    /// which sits beside the drawer that writes it, where every glyph this pane
+    /// draws lives.
     ///
-    /// One place decides both, so a state added to [`NoteMark`] fails to compile
-    /// here rather than falling through to a colour that says the wrong thing.
+    /// A match rather than a lookup, so a state added to [`NoteMark`] fails to
+    /// compile here rather than falling through to a colour saying the wrong
+    /// thing.
     #[must_use]
     pub fn note_mark(&self, mark: NoteMark) -> Style {
         match mark {

@@ -821,6 +821,21 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     }
 }
 
+/// Every value `Theme::heat` maps, so a stop added to that mapping is covered
+/// here rather than needing this list edited too.
+const HEAT_STOPS: [Heat; 10] = [
+    Heat::Cool,
+    Heat::Added(Band::Low),
+    Heat::Added(Band::Warm),
+    Heat::Added(Band::Hot),
+    Heat::Removed(Band::Low),
+    Heat::Removed(Band::Warm),
+    Heat::Removed(Band::Hot),
+    Heat::Mixed(Band::Low),
+    Heat::Mixed(Band::Warm),
+    Heat::Mixed(Band::Hot),
+];
+
 #[test]
 fn a_noted_slice_is_never_the_colour_of_a_slice_beside_it() {
     // The strip's cells all draw the same block, so ink is the only channel a
@@ -839,26 +854,12 @@ fn a_noted_slice_is_never_the_colour_of_a_slice_beside_it() {
             // fixture's drawn strip: a fixture reaches the stops its own counts
             // reach, so `heat_stops` returns a subset and a collision with a stop
             // outside it is invisible. Watched surviving exactly that way.
-            for kind in [
-                Heat::Cool,
-                Heat::Added(Band::Low),
-                Heat::Removed(Band::Low),
-                Heat::Mixed(Band::Low),
-            ] {
-                for band in [Band::Low, Band::Warm, Band::Hot] {
-                    let stop = match kind {
-                        Heat::Cool => Heat::Cool,
-                        Heat::Added(_) => Heat::Added(band),
-                        Heat::Removed(_) => Heat::Removed(band),
-                        Heat::Mixed(_) => Heat::Mixed(band),
-                    };
-                    assert_ne!(
-                        theme.heat_note.fg,
-                        theme.heat(stop).fg,
-                        "{name} at {depth:?} tints a noted slice in {stop:?}'s own \
-                         colour"
-                    );
-                }
+            for stop in HEAT_STOPS {
+                assert_ne!(
+                    theme.heat_note.fg,
+                    theme.heat(stop).fg,
+                    "{name} at {depth:?} tints a noted slice in {stop:?}'s own colour"
+                );
             }
         }
     }

@@ -147,6 +147,15 @@ fn strip(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
         .collect()
 }
 
+/// Which slices of the strip carry the note's ink.
+fn noted_slices(inks: &[Option<Color>], theme: &Theme) -> Vec<usize> {
+    inks.iter()
+        .enumerate()
+        .filter(|(_, ink)| **ink == theme.heat_note.fg)
+        .map(|(at, _)| at)
+        .collect()
+}
+
 /// The full row as text.
 fn row(backend: &TestBackend, y: u16) -> String {
     let buffer = backend.buffer();
@@ -315,12 +324,7 @@ fn a_slice_holding_a_note_takes_the_notes_ink_and_keeps_its_glyph() {
         "the strip drew {} slices with a note in it",
         inks.len()
     );
-    let noted: Vec<usize> = inks
-        .iter()
-        .enumerate()
-        .filter(|(_, ink)| **ink == theme.heat_note.fg)
-        .map(|(at, _)| at)
-        .collect();
+    let noted = noted_slices(&inks, &theme);
     assert_eq!(
         noted,
         vec![5],
@@ -343,12 +347,7 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
     notes.at[1] = true;
     notes.at[11] = true;
     let inks = strip(&drawn(WIDE, &one_file(notes, false), &theme), FIRST);
-    let noted: Vec<usize> = inks
-        .iter()
-        .enumerate()
-        .filter(|(_, ink)| **ink == theme.heat_note.fg)
-        .map(|(at, _)| at)
-        .collect();
+    let noted = noted_slices(&inks, &theme);
     assert_eq!(noted, vec![1, 11]);
 }
 
@@ -365,12 +364,7 @@ fn a_notes_slice_folds_into_the_rung_the_strip_degrades_to() {
         HEAT_BUCKETS / 2,
         "109 columns is meant to be the twelve-slice rung"
     );
-    let noted: Vec<usize> = inks
-        .iter()
-        .enumerate()
-        .filter(|(_, ink)| **ink == theme.heat_note.fg)
-        .map(|(at, _)| at)
-        .collect();
+    let noted = noted_slices(&inks, &theme);
     assert_eq!(noted, vec![1]);
 }
 
