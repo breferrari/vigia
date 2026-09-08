@@ -584,6 +584,120 @@ fn every_rung_draws_from_the_stores_own_figures() {
     }
 }
 
+/// Every drawn file row's counts, which is the header total's oracle.
+fn drawn_counts(view: &View) -> (u32, u32) {
+    view.rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::File(entry) => entry.churn,
+            _ => None,
+        })
+        .fold((0, 0), |(added, removed), (a, r)| (added + a, removed + r))
+}
+
+#[test]
+fn the_headers_total_is_the_rows_summed() {
+    // Four files whose lines are unique to each, so nothing here is paired as a
+    // rename and every count is the edit that produced it.
+    let scratch = Scratch::new("shell-rows-total");
+    for (name, lines) in [("a", 12), ("b", 12), ("d", 4)] {
+        scratch.write(&format!("src/{name}.rs"), unique(name, lines));
+    }
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/a.rs", 3, "a changed");
+    scratch.edit_line("src/b.rs", 3, "b changed");
+    scratch.edit_line("src/b.rs", 7, "b changed again");
+    scratch.write("src/c.rs", unique("c", 5));
+    scratch.remove("src/d.rs");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let viewport = |diff_rows: usize| Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        wrap: false,
+        width: 0,
+        diff_rows,
+        ..Viewport::default()
+    };
+
+    let whole =
+        View::collect(&mut frame, &mut highlighter, &history, viewport(ALL_ROWS)).expect("view");
+    let summed = drawn_counts(&whole);
+    assert_eq!(
+        whole
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::File(_)))
+            .count(),
+        4,
+        "the fixture did not draw its four changed files"
+    );
+    assert_eq!(
+        whole.churn,
+        Some(summed),
+        "the header total does not equal the rows it sits over"
+    );
+
+    // The claim the fold exists for: a pane too short to draw them all still counts
+    // them all, so a total taken over the drawn entries fails here rather than
+    // agreeing with itself.
+    let window = View::collect(&mut frame, &mut highlighter, &history, viewport(3)).expect("view");
+    assert!(
+        drawn_counts(&window) != summed,
+        "the short pane drew every file, so it proves nothing about the undrawn ones"
+    );
+    assert_eq!(
+        window.churn,
+        Some(summed),
+        "a pane drawing one file reported the run as {:?}",
+        window.churn
+    );
+}
+
+#[test]
+fn a_binary_file_adds_nothing_and_says_nothing() {
+    // It is counted among the changed files and has no lines to contribute, and a
+    // file with no counts must not take the whole total away either.
+    let scratch = Scratch::new("shell-rows-total-binary");
+    scratch.write("src/a.rs", unique("a", 12));
+    scratch.write("assets/blob.bin", [0u8, 1, 2, 3, 0, 5]);
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/a.rs", 3, "a changed");
+    scratch.write("assets/blob.bin", [0u8, 9, 9, 9, 0, 9]);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let view = View::collect(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Viewport {
+            position: Position { file: 0, row: 0 },
+            anchored: false,
+            wrap: false,
+            width: 0,
+            diff_rows: ALL_ROWS,
+            ..Viewport::default()
+        },
+    )
+    .expect("view");
+
+    assert_eq!(frame.files().len(), 2, "the fixture lost one of its files");
+    assert_eq!(
+        view.churn,
+        Some((1, 1)),
+        "the binary file moved the total off the one line that changed"
+    );
+}
+
 #[test]
 fn a_binary_file_gets_a_reason_instead_of_hunks() {
     // Otherwise it draws as a heading with nothing under it, which reads as a

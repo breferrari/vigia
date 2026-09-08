@@ -507,6 +507,27 @@ impl<'w> Frame<'w> {
         Ok(total)
     }
 
+    /// What the whole run adds and removes, or `None` while any changed file is
+    /// unmeasured.
+    ///
+    /// A fold over spans [`Self::height`] has already filled, so it reads nothing
+    /// and walks nothing. The `None` is the load-bearing half: a sum over the
+    /// files that happen to be cached is a total for part of the run wearing the
+    /// whole run's clothes, and there is no way to tell the two apart by looking.
+    ///
+    /// A file with no line diff contributes nothing, the same silence its own row
+    /// keeps by drawing no counters.
+    #[must_use]
+    pub fn churn(&self) -> Option<(u32, u32)> {
+        let mut total = (0u32, 0u32);
+        for change in &self.files {
+            let measured = self.spans.get(change).filter(|held| held.answered)?;
+            total.0 = total.0.saturating_add(measured.span.added);
+            total.1 = total.1.saturating_add(measured.span.removed);
+        }
+        Some(total)
+    }
+
     /// How many rows one file occupies, from its span.
     ///
     /// # Errors

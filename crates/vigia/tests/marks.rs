@@ -78,6 +78,7 @@ fn one_file(notes: FileNotes, newest: bool) -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![Row::file(FileEntry {

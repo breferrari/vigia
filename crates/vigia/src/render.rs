@@ -632,6 +632,35 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
     rungs
 }
 
+/// What the header's right-hand side holds in `room` columns, and the order the
+/// three contend in.
+///
+/// One slot. A dead watch takes it whatever else is true, since a total that
+/// cannot update is a number going stale in front of the reader; then the run's
+/// total, which is the one figure no amount of looking at the rows adds up; then
+/// the word, so the side is never blank. A total of nothing is not a total, which
+/// is what leaves an empty tree the word rather than `+0 -0`, and a total wider
+/// than the room falls to the word rather than to nothing, so a pane too narrow
+/// to count still says whether it is live.
+fn header_right(view: &View, chrome: &Chrome, theme: &Theme, room: usize) -> Vec<(String, Style)> {
+    let word = |style: Style| vec![(chrome.mode.word().to_owned(), style)];
+    if chrome.mode == Mode::Lost {
+        return word(theme.alert);
+    }
+    let Some((added, removed)) = view.churn.filter(|&(a, r)| a > 0 || r > 0) else {
+        return word(theme.chrome_dim);
+    };
+    let total = vec![
+        (format!("+{added}"), theme.added),
+        (" ".to_owned(), theme.chrome_dim),
+        (format!("-{removed}"), theme.removed),
+    ];
+    if total.iter().map(|(text, _)| width_of(text)).sum::<usize>() > room {
+        return word(theme.chrome_dim);
+    }
+    total
+}
+
 /// `N changed`, or nothing at all when there is no diff to count.
 fn count_of(files: usize, staged: Option<usize>) -> String {
     let changed = match files {
@@ -2907,6 +2936,24 @@ impl Painter<'_> {
         width + 1
     }
 
+    /// Write `parts` flush right in order, each in its own ink, and answer what the
+    /// whole cost including the gap [`Painter::put_right`] adds. One write per
+    /// part, because the header's total is a green half and a red half.
+    fn put_parts_right(&mut self, area: Rect, parts: &[(String, Style)]) -> usize {
+        let width: usize = parts.iter().map(|(text, _)| width_of(text)).sum();
+        let Some(at) = flush_right(area, width) else {
+            return 0;
+        };
+        let mut x = at.x;
+        for (text, style) in parts {
+            let drawn = width_of(text);
+            self.buf.set_stringn(x, at.y, text, drawn, *style);
+            x = x.saturating_add(drawn as u16);
+        }
+        // The same gap `put_right` keeps, and for the same reason.
+        width + 1
+    }
+
     /// One line of chrome: a ladder on the left, one token on the right, and the
     /// right-hand side wins the space.
     fn status_line<S: AsRef<str>>(
@@ -2914,15 +2961,14 @@ impl Painter<'_> {
         area: Rect,
         left: &[S],
         style: Style,
-        right: &str,
-        right_style: Style,
+        right: &[(String, Style)],
     ) {
         // The wash takes the whole row and the text takes the inset one,
         // which is §5.3's furniture rule and the reason these two lines address
         // different rectangles. See [`Painter::text_area`].
         self.buf.set_style(area, self.theme.chrome_dim);
         let text = self.text_area(area);
-        let taken = self.put_right(text, right, right_style);
+        let taken = self.put_parts_right(text, right);
         let room = usize::from(text.width).saturating_sub(taken);
         let rung = widest_fitting_or_last(left, room);
         self.put_marked(text.x, text.y, rung, room, style);
@@ -2989,14 +3035,12 @@ impl Painter<'_> {
         // from `assets/preview.svg` on purpose: a title bar reading `vigia` spends six
         // of forty columns telling the reader which program they started, and what they
         // cannot tell by looking is which *tree*.
-        let right = chrome.mode.word();
-        // A dead watch has to be visible, not merely present. Drawn in the header's dim
-        // grey, `not watching` is a word a reader has to go looking for, and a monitor
-        // whose failure state looks exactly like its working one has failed twice.
-        let right_style = match chrome.mode {
-            Mode::Watching => self.theme.chrome_dim,
-            Mode::Lost => self.theme.alert,
-        };
+        let right = header_right(
+            view,
+            chrome,
+            self.theme,
+            self.text_area(area).width as usize,
+        );
         // One style across both facts on the left, and that is a ruling. Drawing the
         // count in the mode word's dim grey gives one clause two weights, telling the
         // reader in colour that these are separate claims.
@@ -3006,7 +3050,7 @@ impl Painter<'_> {
             view.files,
             chrome.staged,
         );
-        self.status_line(area, &rungs, self.theme.chrome, right, right_style);
+        self.status_line(area, &rungs, self.theme.chrome, &right);
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -3050,15 +3094,19 @@ impl Painter<'_> {
                 upper,
                 &[""],
                 self.theme.chrome_dim,
-                &right,
-                self.theme.chrome_dim,
+                &[(right.clone(), self.theme.chrome_dim)],
             );
             // The inset row for the reason `placed` uses one: the walk is bounded
             // by its `row`'s right edge, and the text's edge is not the pane's.
             self.tint_readouts(Rect { y: upper.y, ..text }, placed, readouts);
-            self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
+            self.status_line(bottom, &[footer.left], style, &[]);
         } else {
-            self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
+            self.status_line(
+                bottom,
+                &[footer.left],
+                style,
+                &[(right, self.theme.chrome_dim)],
+            );
             self.tint_readouts(text, placed, readouts);
         }
     }

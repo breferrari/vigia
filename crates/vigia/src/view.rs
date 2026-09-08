@@ -983,6 +983,9 @@ pub struct View {
     pub current_span: usize,
     /// Rows the whole diff is, every changed file counted.
     pub total_rows: usize,
+    /// What the whole run adds and removes, or `None` while a changed file is
+    /// unmeasured. On the view, since the chrome is built before this collect.
+    pub churn: Option<(u32, u32)>,
     /// Rows of the whole diff above this screen's top row.
     pub rows_above: usize,
     /// Changed files in the whole worktree, not just the visible ones.
@@ -1302,6 +1305,21 @@ impl View {
         rows: bool,
         note_box: Option<&crate::notes::NoteBox>,
     ) -> Result<Self> {
+        let mut view =
+            Self::collect_rows(frame, highlighter, history, viewport, notes, rows, note_box)?;
+        view.churn = frame.churn();
+        Ok(view)
+    }
+
+    fn collect_rows(
+        frame: &mut Frame,
+        highlighter: &mut Highlighter,
+        history: &History,
+        viewport: Viewport,
+        notes: &[Note],
+        rows: bool,
+        note_box: Option<&crate::notes::NoteBox>,
+    ) -> Result<Self> {
         let Viewport {
             position,
             anchored,
@@ -1343,6 +1361,7 @@ impl View {
             gutter: None,
             current_span: 0,
             total_rows: 0,
+            churn: None,
             rows_above: 0,
             files,
             // Until the walk below runs, the request is passed through with only its
