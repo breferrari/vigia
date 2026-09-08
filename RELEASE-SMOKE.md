@@ -74,6 +74,11 @@ prints the one-line refusal and exits non-zero, rather than reporting that `--co
 - [ ] A second argument: `vigia . --colour=never` says how many it got and
 exits non-zero, rather than watching `.` and dropping the flag. Both refusals go to stderr with nothing on stdout, so a script reading `vigia --version` is never handed an error message.
 
+- [ ] **Drag the diff, let go, and paste somewhere else.** On each platform the
+release builds for, because the tool that carries it is different on every one: `pbcopy` on macOS, `wl-copy` or `xclip` or `xsel` on Linux, `clip` on Windows. **Nothing in the suite reaches this.** Every route is driven through a carrier the tests implement, so what is proven is the order they are tried in and the shape of each command, and never that one of them set a clipboard.
+- [ ] **The same inside `tmux`, and again over `ssh`.** The two cases the routing
+exists for, and the two a local run cannot reach. Inside tmux at the machine you are sitting at, the machine's own tool should carry it and tmux should never be asked. Over `ssh` that tool is skipped on purpose, since it would set a clipboard on the far end and succeed at it, so the copy goes to tmux where there is a pane and to the escape otherwise. That last one is the path that depends on the reader's `set-clipboard` and on the outer terminal speaking OSC 52, which is what the README's block tells them to check. **A paste returning what was copied before the drag is this failing**, and it is exactly how [#477](https://github.com/breferrari/vigia/issues/477) was reported.
+
 Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are outside I8 on both platforms, because neither runs any code the process owns, and the release notes say that rather than implying more. A *second* kill is inside I8 as a by-choice exclusion (SPEC.md section 11.1: it takes the default disposition and restores nothing), and it is covered by `a_second_external_signal_kills_a_shell_that_ignored_the_first` rather than by a box that a working build can never tick.
 
 ## 4. The claims the README makes are the claims the evidence holds
