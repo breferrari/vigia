@@ -271,7 +271,6 @@ fn notes_on_an_empty_store_answers_an_empty_list_and_no_error() {
     assert_eq!(document["notes"], json!([]));
     assert_eq!(document["skipped"], json!([]));
     assert_eq!(document["warnings"], json!([]));
-    assert_eq!(document["pruned"], 0);
     assert_eq!(
         document["worktree"].as_str().map(Path::new),
         Some(rig.scratch.worktree().workdir())
@@ -537,7 +536,7 @@ fn resolve_without_a_note_is_refused() {
 }
 
 #[test]
-fn a_resolved_file_is_absent_from_the_default_listing_and_gone_after_the_next_one() {
+fn a_resolved_file_is_absent_from_the_default_listing_and_left_for_the_pane() {
     let rig = Rig::new("mcp-pruned");
     rig.store
         .put(&note("open-1", 5, EDITED, "one"))
@@ -553,24 +552,42 @@ fn a_resolved_file_is_absent_from_the_default_listing_and_gone_after_the_next_on
     );
     assert_eq!(files_in(rig.store.dir()), ["open-1.note", "open-2.note"]);
 
-    let document = document(&mut server, false);
-    let ids: Vec<&str> = document["notes"]
+    let listed = document(&mut server, false);
+    let ids: Vec<&str> = listed["notes"]
         .as_array()
         .expect("notes")
         .iter()
         .map(|note| note["id"].as_str().expect("id"))
         .collect();
     assert_eq!(ids, ["open-2"], "the resolved note is not listed");
-    assert_eq!(document["pruned"], 1);
     assert_eq!(
         files_in(rig.store.dir()),
-        ["open-2.note"],
-        "and its file is gone after the listing"
+        ["open-1.note", "open-2.note"],
+        "a listing took the resolved file the pane has not drawn yet"
+    );
+
+    // However often it is asked, and whichever way it is asked. B21 has the
+    // reader watch the agent's line arrive before the note leaves, and nothing
+    // reachable from here can see whether a pane has drawn it, or whether one
+    // was open at all while the agent worked.
+    for _ in 0..3 {
+        document(&mut server, false);
+        document(&mut server, true);
+        result(
+            &mut server,
+            "resources/read",
+            json!({ "uri": RESOURCE_URI }),
+        );
+    }
+    assert_eq!(
+        files_in(rig.store.dir()),
+        ["open-1.note", "open-2.note"],
+        "reading the store often enough took the resolved file"
     );
 }
 
 #[test]
-fn notes_all_lists_resolved_notes_and_prunes_nothing() {
+fn notes_all_lists_the_resolved_notes_the_default_listing_passes_over() {
     let rig = Rig::new("mcp-all");
     rig.store
         .put(&note("open-1", 5, EDITED, "one"))
@@ -585,7 +602,6 @@ fn notes_all_lists_resolved_notes_and_prunes_nothing() {
     let resolved = note_named(&document, "open-1");
     assert_eq!(resolved["status"], "resolved");
     assert_eq!(resolved["reply"], "done");
-    assert_eq!(document["pruned"], 0);
     assert_eq!(
         files_in(rig.store.dir()),
         ["open-1.note"],
@@ -616,7 +632,6 @@ fn reply_writes_the_line_without_resolving() {
     let document = document(&mut server, false);
     let note = note_named(&document, "open-1");
     assert_eq!(note["reply"], "which margin do you mean?");
-    assert_eq!(document["pruned"], 0, "an answered note stays");
 
     let refused = call(&mut server, "reply", json!({ "id": "open-1" }));
     assert_eq!(refused["isError"], true);
@@ -1631,4 +1646,63 @@ fn a_hook_with_no_socket_or_no_repository_writes_nothing_and_says_nothing() {
     );
     assert_eq!(code, Some(0), "outside a repository the hook failed: {err}");
     assert!(registry.list().expect("list").is_empty());
+}
+
+/// `all` is the one argument on this surface whose default is destructive:
+/// `false` deletes every resolved file. Nothing checks the type, so a client
+/// that sends the schema's boolean as a string takes the deleting branch while
+/// asking for the reading one, and the notes it meant to read are gone. What
+/// the server does with a bad type is its own to decide; taking it as a request
+/// to delete is the one answer it may not give.
+#[test]
+fn an_all_that_is_not_a_boolean_prunes_nothing() {
+    let rig = Rig::new("mcp-all-coerced");
+    rig.store
+        .put(&note("open-1", 5, EDITED, "one"))
+        .expect("put");
+    let mut server = rig.server();
+    call(
+        &mut server,
+        "resolve",
+        json!({ "id": "open-1", "note": "done" }),
+    );
+
+    let answer = call(&mut server, "notes", json!({ "all": "true" }));
+    assert_eq!(
+        files_in(rig.store.dir()),
+        ["open-1.note"],
+        "a string `all` was read as false, so the resolved note was deleted \
+         rather than listed: {answer}"
+    );
+}
+
+/// A session id the registry cannot name a file after leaves the hook nothing
+/// to record, which is [`register`]'s silent-and-successful case rather than
+/// its reported one: the reported one is a write it attempted and could not
+/// finish. A hook a reader installs once runs at the start of every session in
+/// every project they open, so a line on stderr here is a line on all of them.
+#[test]
+fn a_session_id_the_registry_cannot_name_is_silent_rather_than_reported() {
+    let scratch = Scratch::new("mcp-register-unnameable");
+    let root = TempDir::new("mcp-register-unnameable-state");
+    let payload = json!({
+        "session_id": "AAAA-1111",
+        "hook_event_name": "SessionStart",
+        "cwd": ".",
+    })
+    .to_string();
+
+    let (code, out, err) = hook_run(
+        "register",
+        scratch.root(),
+        root.path(),
+        &payload,
+        &[(SOCKET_VAR, r"\\.\pipe\LOCAL\cc-msg-abc"), (TOKEN_VAR, "t")],
+    );
+    assert_eq!(code, Some(0), "the hook failed the session start: {err}");
+    assert!(
+        out.is_empty() && err.is_empty(),
+        "it said something on a session start it could do nothing about: \
+         {out:?} {err:?}"
+    );
 }

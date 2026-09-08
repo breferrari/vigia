@@ -52,7 +52,7 @@ pub use motion::{
     SAID_ARRIVING, Timed, effect_interval, length,
 };
 pub use notes::{
-    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, TRANSITION,
+    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
     box_entrance, box_exit, box_route, commit, has_room, leaving, opening, press_at,
     resolve_departure, word_arrival,
 };
@@ -1154,9 +1154,11 @@ impl Shell {
         if std::mem::take(&mut self.notes_stale) {
             self.reload_notes(now);
         }
-        if self.ledger.settle(now) {
+        let settled = self.ledger.settle(now);
+        if settled.changed {
             self.publish_notes();
         }
+        self.prune_departed(&settled.prune, now);
         self.note_effects.settle(now);
         // A pane narrowed under an open box can no longer draw it, and the rule
         // that a mode is never invisible has to hold after the resize and not
@@ -1178,6 +1180,25 @@ impl Shell {
     /// Hand the next collect what the ledger says is drawn.
     fn publish_notes(&mut self) {
         self.app.set_notes(self.ledger.drawn());
+    }
+
+    /// Remove the files of the resolved notes whose departure has just run.
+    ///
+    /// The pane's, because only the pane knows the reader has watched the line
+    /// arrive, which the server cannot see from the other end. A removal that
+    /// fails is one footer alert and no more: the id is already remembered as
+    /// departed, so the file is never drawn or reached for again.
+    fn prune_departed(&mut self, ids: &[String], now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let refused: Vec<String> = ids
+            .iter()
+            .filter_map(|id| store.remove(id).err().map(|e| e.to_string()))
+            .collect();
+        for why in refused {
+            self.say(format!("could not remove a note: {why}"), Voice::Alert, now);
+        }
     }
 
     /// Write what a gesture asked for, and say so for `NOTICE_LINGER`, which is
