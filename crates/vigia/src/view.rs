@@ -398,7 +398,7 @@ impl Row {
 
     /// Whether this row carries text of its own: a note's edges draw its frame
     /// and its status word, and a box is a draft that is not a line yet.
-    pub fn owns_text(&self) -> bool {
+    fn owns_text(&self) -> bool {
         !matches!(
             self,
             Self::Note {
@@ -2101,8 +2101,8 @@ impl View {
         let mut out: Vec<String> = Vec::new();
         let mut taken: Option<usize> = None;
         for at in from..=to.min(last) {
-            // Passed over rather than sent as a blank, which would clear the
-            // clipboard on a span that is all frame.
+            // The edges carry the frame and the status word, not what the reader
+            // wrote. Runs are contiguous, so the last head taken is enough.
             let Some(head) = self.text_head_of(at) else {
                 continue;
             };
