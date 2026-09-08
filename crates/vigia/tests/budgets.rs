@@ -2085,6 +2085,12 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
     // Cells rather than plain counters, because the sampler outlives the reader
     // and the probe at the end draws into its own buffer.
     let running = std::cell::Cell::new(0usize);
+    // How many of each half were armed inside the window that was timed. The
+    // alternation reaches the second half only if the sampled loop outlives one
+    // effect's length, so a frame path that grew fast enough would leave the
+    // flag where it started and time the arrival twice, at a p50 that looks the
+    // same and with every other assertion here still green.
+    let armed = std::cell::Cell::new((0usize, 0usize));
     let mut next_frame = |frame: &mut Frame,
                           app: &mut App,
                           highlighter: &mut Highlighter,
@@ -2105,6 +2111,12 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             effects.settle(Instant::now());
             if !effects.is_running() {
                 effects.arm(departures(arriving), &theme, Instant::now());
+                let (arrivals, sweeps) = armed.get();
+                armed.set(if arriving {
+                    (arrivals + 1, sweeps)
+                } else {
+                    (arrivals, sweeps + 1)
+                });
                 arriving = !arriving;
             }
             running.set(running.get() + usize::from(effects.is_running()));
@@ -2145,6 +2157,7 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         }
     }
     running.set(0);
+    armed.set((0, 0));
     let (mut departing, mut still) = (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
     for _ in 0..SAMPLED_FRAMES {
         for with in [true, false] {
@@ -2164,14 +2177,21 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         }
     }
 
-    // Non-vacuity, three ways: the effects were live on every departing frame
-    // timed, the fifty notes were on the screen, and the effects change cells.
+    // Non-vacuity, four ways: the effects were live on every departing frame
+    // timed, both halves were among them, the fifty notes were on the screen,
+    // and the effects change cells.
     assert_eq!(
         running.get(),
         SAMPLED_FRAMES,
         "effects were live on {} of {SAMPLED_FRAMES} departing frames, so the arm \
          this gate is named for was timed without its departures",
         running.get()
+    );
+    let (arrivals, sweeps) = armed.get();
+    assert!(
+        arrivals > 0 && sweeps > 0,
+        "the timed window armed {arrivals} arrivals and {sweeps} sweeps, so this \
+         gate measured one half of a departure twice and the other never"
     );
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
     let view = app
