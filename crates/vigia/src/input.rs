@@ -57,6 +57,13 @@ impl Region {
         self.contains(row) && Self::within(column, self.gutter)
     }
 
+    /// Whether `column`, `row` is the column a display row's text opens at, which
+    /// is the one a note spends on its left side. Measured off the gutter's width.
+    fn on_content_origin(self, column: u16, row: u16) -> bool {
+        let (left, gutter) = self.gutter;
+        self.contains(row) && self.text > gutter && column == left.saturating_add(gutter)
+    }
+
     /// Whether `row` falls inside this region.
     fn contains(self, row: u16) -> bool {
         Self::within(row, (self.top, self.rows))
@@ -223,6 +230,15 @@ impl Regions {
         self.diff.on_gutter(column, row).then_some(row)
     }
 
+    /// The screen row a pointer at `column`, `row` rests on when it is on a note's
+    /// left side. Which rows are note rows is the screen's to say.
+    pub fn note_edge_at(self, column: u16, row: u16) -> Option<u16> {
+        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+            return None;
+        }
+        self.diff.on_content_origin(column, row).then_some(row)
+    }
+
     /// What a pointer at `column`, `row` is over, for the mark `SPEC.md`
     /// §11.2 B10 adopts.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
@@ -253,6 +269,10 @@ impl Regions {
         // as it goes, so a mark before it would be the second thing saying so.
         if let Some(row) = self.gutter_at(column, row) {
             return Some(Hovered::Gutter(row));
+        }
+        // Then the column a note spends on its left side, where the gutter ends.
+        if let Some(row) = self.note_edge_at(column, row) {
+            return Some(Hovered::NoteEdge(row));
         }
         self.over_list(column, row).then_some(Hovered::Row(row))
     }
@@ -362,6 +382,8 @@ pub enum Hovered {
     Row(u16),
     /// The diff's gutter, by the screen row; drawn only where that row is a line.
     Gutter(u16),
+    /// A note's left side, by the screen row; drawn only on a row of a note's own.
+    NoteEdge(u16),
 }
 
 /// The mark after `event`, given the one before it.

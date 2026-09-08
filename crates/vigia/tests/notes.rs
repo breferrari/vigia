@@ -21,8 +21,8 @@ use vigia::{
     Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
     Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
     Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit, box_route,
-    commit, count_cell, effect_interval, has_room, hover_after, note_cells, opening, press_at,
-    regions, render, repainted, selection_after,
+    commit, count_cell, edge_at, effect_interval, has_room, hover_after, note_cells, opening,
+    press_at, regions, render, repainted, selection_after, withdraw,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -350,6 +350,19 @@ impl Rig {
         true
     }
 
+    /// A press on a note's left side, routed the way the loop routes it and read
+    /// back through the store the way `Shell::withdraw_note` does. `None` where
+    /// the press landed on no note's side, `Some(false)` where the store no
+    /// longer held one for the reader to take back.
+    fn edge_press(&mut self, painted: &Painted, column: u16, row: u16) -> Option<bool> {
+        let id = edge_at(&painted.view, painted.laid, &press(column, row))?;
+        let went = withdraw(&self.store, &id).expect("the store refused the removal");
+        if went {
+            self.reload();
+        }
+        Some(went)
+    }
+
     /// One event into the open box, routed the way the loop routes it: with the
     /// cells the box drew on the frame `painted`, since a press is judged
     /// against them. `None` where no frame is in hand, which is a key's case.
@@ -607,8 +620,15 @@ fn the_gutter_of_a_content_row_answers_a_hover_and_content_does_not() {
     }
     assert_eq!(
         painted.laid.hover_at(origin, y),
-        None,
+        Some(Hovered::NoteEdge(y)),
         "the first content column answered as the gutter"
+    );
+    // And the column past it answers nothing at all: a drag says where it is
+    // going as it goes, so a mark before it would be the second thing saying so.
+    assert_eq!(
+        painted.laid.hover_at(origin + 1, y),
+        None,
+        "a content column the pointer only drags from answered"
     );
     // The gutter the pointer is told about is where the number is drawn.
     let digit = painted
@@ -3308,7 +3328,13 @@ fn below_the_gutters_floor_the_sigil_takes_the_mark() {
     for x in left..left + columns {
         assert_eq!(plain.laid.hover_at(x, y), Some(Hovered::Gutter(y)));
     }
-    assert_eq!(plain.laid.hover_at(left + columns, y), None);
+    // Past the target the content begins, and its first column is the one a
+    // note spends on its own left side.
+    assert_eq!(
+        plain.laid.hover_at(left + columns, y),
+        Some(Hovered::NoteEdge(y))
+    );
+    assert_eq!(plain.laid.hover_at(left + columns + 1, y), None);
 
     let hovering = rig.paint(
         &mut frame,
@@ -5785,5 +5811,317 @@ fn a_screen_opening_inside_a_note_counts_no_line_for_it() {
             .filter(|row| !row.is_display())
             .count(),
         "the screenful counted a line for a note whose own line is wholly above it"
+    );
+}
+
+/// The rows note `id` drew, by screen row, on a painted frame.
+fn side_rows(painted: &Painted, id: &str) -> Vec<u16> {
+    painted
+        .view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::Note { id: at, .. } if at == id))
+        .map(|(offset, _)| painted.laid.diff.top + offset as u16)
+        .collect()
+}
+
+#[test]
+fn a_press_on_a_notes_left_side_withdraws_it_and_its_rows_leave() {
+    let scratch = fixture("notes-side-withdraw");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (_, _, origin) = noted.gutter();
+    let rows = side_rows(&noted, "n1");
+    assert!(
+        rows.iter().all(|row| *row > y),
+        "the note is not drawn under its own line, so this gate presses elsewhere"
+    );
+
+    // A body row rather than the run's first, which is the one a press that
+    // ignored the row it landed on would reach anyway.
+    let side = *rows
+        .iter()
+        .find(|row| noted.lead_at(**row) == Some(NoteLead::Body))
+        .expect("a body row");
+    assert_eq!(
+        rig.edge_press(&noted, origin, side),
+        Some(true),
+        "the press on the note's left side took nothing back"
+    );
+    assert!(
+        files_in(rig.store.dir()).is_empty(),
+        "the file outlived the press"
+    );
+
+    // The rows leave over `LEAVING` and are dropped on the frame after, which is
+    // the departure a withdrawal already had.
+    rig.advance(LEAVING);
+    let clear = rig.paint(&mut frame, PANE, Pointing::default());
+    let plain = {
+        let mut bare = Rig::open(&scratch);
+        bare.paint(&mut frame, PANE, Pointing::default())
+    };
+    assert_eq!(
+        clear.rows(),
+        plain.rows(),
+        "the note taken back left something drawn"
+    );
+}
+
+#[test]
+fn a_pointer_on_a_notes_left_side_marks_the_cell_it_rests_on() {
+    let scratch = fixture("notes-side-mark");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = noted.row_of(EDITED);
+    let (_, _, origin) = noted.gutter();
+    let rows = side_rows(&noted, "n1");
+    let side = *rows
+        .iter()
+        .find(|row| noted.lead_at(**row) == Some(NoteLead::Body))
+        .expect("a body row");
+
+    let hovering = Pointing {
+        hovered: Some(Hovered::NoteEdge(side)),
+        ..Pointing::default()
+    };
+    let marked = rig.paint(&mut frame, PANE, hovering);
+    assert_eq!(
+        marked.cell(origin, side).symbol(),
+        "✕",
+        "the pointer's own cell is not marked:\n{}",
+        marked.rows().join("\n")
+    );
+    assert_eq!(
+        marked.fg(origin, side),
+        Theme::default().bar_hover.fg,
+        "the mark is not in the pointer's ink"
+    );
+    for row in &rows {
+        assert!(
+            *row == side || marked.cell(origin, *row).symbol() != "✕",
+            "row {row} of the note is marked and the pointer is not on it:\n{}",
+            marked.rows().join("\n")
+        );
+    }
+
+    // And a line of the diff is no target, which is what keeps this a mark on
+    // the note rather than one on the column the note happens to start in.
+    let over_line = rig.paint(
+        &mut frame,
+        PANE,
+        Pointing {
+            hovered: Some(Hovered::NoteEdge(y)),
+            ..Pointing::default()
+        },
+    );
+    assert_eq!(
+        over_line.text(y),
+        noted.text(y),
+        "the pointer marked a line of the diff"
+    );
+}
+
+#[test]
+fn a_press_on_the_side_of_a_note_resolved_since_the_paint_leaves_the_resolve_alone() {
+    let scratch = fixture("notes-side-stale");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "short")).expect("put");
+    rig.reload();
+    let marked = rig.paint(&mut frame, PANE, Pointing::default());
+    let (_, _, origin) = marked.gutter();
+    let side = side_rows(&marked, "n1")[0];
+
+    // The agent resolves it while the screen still shows it open, and the
+    // reader's press lands on that screen.
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    assert_eq!(
+        rig.edge_press(&marked, origin, side),
+        Some(false),
+        "the press took back a note the agent had already resolved"
+    );
+    assert_eq!(
+        files_in(rig.store.dir()).len(),
+        1,
+        "the press deleted the agent's resolve and its line"
+    );
+
+    // And a press on a note nobody resolved still takes it back, so the case
+    // above is the resolve being honoured rather than a press that removes
+    // nothing at all.
+    rig.store
+        .put(&note("n2", 6, "line 6", "short"))
+        .expect("put");
+    rig.reload();
+    let second = rig.paint(&mut frame, PANE, Pointing::default());
+    let live = side_rows(&second, "n2")[0];
+    assert_eq!(
+        rig.edge_press(&second, second.gutter().2, live),
+        Some(true),
+        "the press no longer takes back a note the agent has not touched"
+    );
+}
+
+#[test]
+fn the_left_side_takes_back_a_note_the_agent_replied_to_and_the_reply_goes_with_it() {
+    let scratch = fixture("notes-side-replied");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, Some(REPLY)))
+        .expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let answered = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = answered.row_of(EDITED);
+    let (_, _, origin) = answered.gutter();
+
+    // The answer's own row, which is the half of the exchange the agent wrote:
+    // the side runs its whole height, and the answer goes with the note.
+    let arrow = answered.reply_row(y);
+    assert_eq!(
+        answered.cell(origin, arrow).symbol(),
+        "↳",
+        "this gate is not pressing the answer's own row"
+    );
+    assert_eq!(
+        rig.edge_press(&answered, origin, arrow),
+        Some(true),
+        "a note the agent answered cannot be taken back"
+    );
+    assert!(
+        files_in(rig.store.dir()).is_empty(),
+        "the file outlived the press"
+    );
+    rig.advance(LEAVING);
+    let clear = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        !clear
+            .rows()
+            .iter()
+            .any(|row| row.contains("saturating_mul")),
+        "the agent's line is still drawn under a note that is gone:\n{}",
+        clear.rows().join("\n")
+    );
+}
+
+#[test]
+fn the_bar_rung_takes_the_mark_and_the_press_where_no_enclosure_fits() {
+    // The rung below the enclosure, where the note's whole left side is the one
+    // `▎` at the content origin.
+    let narrow = Rect::new(0, 0, 14, 24);
+    let scratch = fixture("notes-side-bar");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, "yyy")).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let painted = rig.paint(&mut frame, narrow, Pointing::default());
+    let side = side_rows(&painted, "n1")[0];
+    assert_eq!(
+        painted.lead_at(side),
+        Some(NoteLead::Bar),
+        "the pane drew an enclosure, so this gate is not on the rung it is named \
+         for:\n{}",
+        painted.rows().join("\n")
+    );
+
+    let origin = painted.gutter().2;
+    let marked = rig.paint(
+        &mut frame,
+        narrow,
+        Pointing {
+            hovered: Some(Hovered::NoteEdge(side)),
+            ..Pointing::default()
+        },
+    );
+    assert_eq!(
+        marked.cell(origin, side).symbol(),
+        "✕",
+        "the bar rung's own cell is not marked:\n{}",
+        marked.rows().join("\n")
+    );
+    assert_eq!(
+        rig.edge_press(&painted, origin, side),
+        Some(true),
+        "the rung below the enclosure has no press"
+    );
+    assert!(
+        files_in(rig.store.dir()).is_empty(),
+        "the file outlived the press"
+    );
+}
+
+#[test]
+fn a_press_on_the_left_side_begins_no_selection_and_the_body_beside_it_still_does() {
+    let scratch = fixture("notes-side-selection");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let noted = rig.paint(&mut frame, PANE, Pointing::default());
+    let (_, _, origin) = noted.gutter();
+    let side = *side_rows(&noted, "n1")
+        .iter()
+        .find(|row| noted.lead_at(**row) == Some(NoteLead::Body))
+        .expect("a body row");
+
+    // The loop answers the side and never reaches the wash with it, so the
+    // gate is that the side answers and the columns beside it do not.
+    assert!(
+        edge_at(&noted.view, noted.laid, &press(origin, side)).is_some(),
+        "the note's left side is not a press"
+    );
+    assert!(
+        edge_at(&noted.view, noted.laid, &press(origin + 2, side)).is_none(),
+        "the press reaches past the one column the side is"
+    );
+    assert!(
+        press_at(&noted.view, noted.laid, &press(origin, side)).is_none(),
+        "the gutter's press and this one share a cell"
+    );
+
+    // And the body beside it still begins a drag, so what changed is the one
+    // column and not the row.
+    let (standing, _) = selection_after(&press(origin + 2, side), noted.laid, None);
+    assert!(
+        standing.is_some(),
+        "the note's body no longer begins a selection"
+    );
+    let sent = noted
+        .view
+        .lines_in((
+            usize::from(side - noted.laid.diff.top),
+            usize::from(side - noted.laid.diff.top),
+        ))
+        .expect("the row resolves");
+    assert_eq!(
+        sent,
+        vec![BODY.to_owned()],
+        "a drag over the note's body no longer copies the note"
     );
 }

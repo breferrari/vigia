@@ -54,8 +54,8 @@ pub use motion::{
 };
 pub use notes::{
     Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
-    box_entrance, box_exit, box_route, commit, has_room, leaving, opening, press_at,
-    resolve_arrival, word_arrival,
+    box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
+    resolve_arrival, withdraw, word_arrival,
 };
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
@@ -470,6 +470,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // here and the wash below never sees it.
                     if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
                         shell.open_box(offset, Instant::now());
+                        continue;
+                    }
+                    // And a press on a note's own left side takes that note back,
+                    // answered here for the same reason and in the same place.
+                    if let Some(id) = notes::edge_at(&shell.screen, regions, &event) {
+                        shell.withdraw_note(&id, Instant::now());
                         continue;
                     }
                     // Before the event is interpreted, for the hold's reason: a press
@@ -1125,6 +1131,26 @@ impl Shell {
         }) {
             Ok(watch) => self.store_watch = watch,
             Err(e) => self.say(format!("not watching the notes: {e}"), Voice::Alert, now),
+        }
+    }
+
+    /// Take a note back: remove its file and read the store back, so the next
+    /// frame draws it leaving. A note the agent resolved between the frame this
+    /// press landed on and the press itself is left alone and nothing is said,
+    /// since the reader is being answered rather than refused. A removal the
+    /// store refuses is one footer alert, as every other write of B21's is.
+    fn withdraw_note(&mut self, id: &str, now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        match notes::withdraw(store, id) {
+            Ok(true) => self.reload_notes(now),
+            Ok(false) => {}
+            Err(e) => self.say(
+                format!("could not take the note back: {e}"),
+                Voice::Alert,
+                now,
+            ),
         }
     }
 

@@ -238,6 +238,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | click a file | jump the diff to it |
 | drag the diff | copy those rows: let go and they are sent |
 | click a line number | open a note there, for the agent in the other pane |
+| click a note's side | take that note back, reply and all |
 | click `✕` | close the sheet |
 | just point | it marks itself |
 | `Shift`+drag | select text, the terminal's own way |
@@ -275,7 +276,9 @@ That is the whole of it. `vigia` calls no model, summarises nothing and judges n
 
 **After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks. The file's own row in the list carries a mark too, `✎` while you are waiting on the agent and `↳` once it has answered, which is how you find the one note in a run of thirty files.
 
-**When the agent resolves one**, its answer arrives on a row under the note, holds for a minute, and the note leaves. That is the only way a note goes away that you did not empty yourself.
+**When the agent resolves one**, its answer arrives on a row under the note, holds for a minute, and the note leaves.
+
+**To take one back yourself**, point at the note's left side. The cell under your pointer becomes `✕`, and clicking it withdraws the note, whether or not the agent has answered it. Nothing is drawn there until you point, so a screen full of notes stays a screen full of notes. Emptying the box over a note and pressing `Enter` does the same thing, and a note the agent resolved in the meantime is left alone: its answer is on its way to you.
 
 **Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`. A monitor that wrote where it watches would wake itself, and the pane puts nothing in that directory but the notes you make.
 
