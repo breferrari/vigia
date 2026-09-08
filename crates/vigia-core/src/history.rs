@@ -823,4 +823,40 @@ mod tests {
         history.record(std::iter::empty(), now + HISTORY_BUCKET);
         assert_eq!(history.churn("a").unwrap()[HISTORY_BUCKETS - 2], 1);
     }
+
+    /// A level reaches equally either side of the write it came from.
+    ///
+    /// Here rather than beside the store's other gates, because a bucket is five
+    /// samples and the reach is eighteen: a kernel leaning by up to four samples
+    /// lights the same buckets as a symmetric one, so the skew is invisible to
+    /// every gate that reads [`History::level`].
+    #[test]
+    fn a_levels_reach_is_the_same_either_side_of_the_write() {
+        // Six orders of magnitude, because a kernel whose reach follows the
+        // write's size is symmetric at any single size.
+        for bytes in [1u32, 100, 9_000, 127_000, 5_000_000] {
+            let at = HISTORY_SAMPLES / 2;
+            let mut samples = [0u32; HISTORY_SAMPLES];
+            samples[at] = bytes;
+            let levels = levelled(&samples);
+            let lit: Vec<usize> = levels
+                .iter()
+                .enumerate()
+                .filter(|(_, level)| **level > 0)
+                .map(|(sample, _)| sample)
+                .collect();
+            let (back, forward) = (at - lit[0], lit[lit.len() - 1] - at);
+            assert_eq!(
+                back, forward,
+                "a write of {bytes} bytes reaches {back} samples back and \
+                 {forward} forward, so the kernel is bounded on one side: \
+                 {levels:?}"
+            );
+            assert!(
+                back > 0,
+                "a write of {bytes} bytes lit only its own sample, so there is \
+                 no reach to be symmetric about"
+            );
+        }
+    }
 }

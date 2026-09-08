@@ -3603,7 +3603,7 @@ fn path_column(row: &str) -> Option<usize> {
 
 /// The row a pinned list starts on, given its layout.
 fn list_top(split: &Body) -> usize {
-    1 + split.above_list()
+    1 + split.lead
 }
 
 /// Where each region's first file row is drawn, on a pane that draws both.

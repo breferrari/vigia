@@ -1506,17 +1506,12 @@ impl Body {
         }
     }
 
-    /// Every row between the header and the list.
-    pub fn above_list(&self) -> usize {
-        self.lead
-    }
-
     /// Every row the body holds, across every region it has.
     pub fn rows(&self) -> usize {
         if self.rail {
-            return self.above_list() + self.diff;
+            return self.lead + self.diff;
         }
-        self.above_list() + self.list + usize::from(self.rule) + self.diff
+        self.lead + self.list + usize::from(self.rule) + self.diff
     }
 
     /// Shrink the list to the rows a view actually carries, giving the rest back
@@ -1592,7 +1587,7 @@ impl Body {
 
         // The header's row, then the lead blank.
         let top = area.y.saturating_add(1);
-        let under_lead = top.saturating_add(self.above_list() as u16);
+        let under_lead = top.saturating_add(self.lead as u16);
 
         // The rail, where the two regions share a `y` range and differ in `x`.
         if self.rail {

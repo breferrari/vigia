@@ -1174,7 +1174,7 @@ fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
 /// the baseline write that makes the next one weigh `bytes` is put far enough
 /// back that the window has rolled past it. Otherwise every series below carries
 /// two writes and the second one's level is what is being measured.
-fn lone_write(bytes: u64) -> [u32; HISTORY_BUCKETS] {
+fn lone_write_store(bytes: u64) -> History {
     let now = base();
     let mut history = History::starting_at(now);
     history.record_sized([("src/a.rs", Some(0))], now);
@@ -1182,6 +1182,11 @@ fn lone_write(bytes: u64) -> [u32; HISTORY_BUCKETS] {
     // A tick that names nothing, only to carry the window past the baseline.
     history.record_sized([], now + HISTORY_SAMPLE * 130);
     history
+}
+
+/// [`lone_write_store`] read as the level a sparkline is drawn from.
+fn lone_write(bytes: u64) -> [u32; HISTORY_BUCKETS] {
+    lone_write_store(bytes)
         .level("src/a.rs")
         .expect("a path written twice is tracked")
 }
@@ -1220,16 +1225,11 @@ fn a_levels_reach_is_the_kernels_rather_than_the_writes() {
     // And it reaches both ways, which the comparison above cannot see: a kernel
     // bounded on one side lights the same buckets for every magnitude too, and
     // leans every one of them to one side of the write.
-    let at = lit(&{
-        let now = base();
-        let mut history = History::starting_at(now);
-        history.record_sized([("src/a.rs", Some(0))], now);
-        history.record_sized([("src/a.rs", Some(9_000))], now + HISTORY_SAMPLE * 100);
-        history.record_sized([], now + HISTORY_SAMPLE * 130);
-        // The bucket the write itself landed in, isolated by asking for the
-        // events rather than the level.
-        history.churn("src/a.rs").expect("a tracked path")
-    });
+    // The bucket the write itself landed in, isolated by asking the same store
+    // for the events rather than the level.
+    let at = lit(&lone_write_store(sizes[2])
+        .churn("src/a.rs")
+        .expect("a tracked path"));
     let written = *at.last().expect("the write lit a bucket");
     let span = &drawn[2];
     assert!(

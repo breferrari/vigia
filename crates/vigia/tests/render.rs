@@ -5572,6 +5572,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         );
     }
 }
+
 #[test]
 fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
     // The seam the separator's guard exists against, reached from a new direction.

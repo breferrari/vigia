@@ -741,8 +741,6 @@ Where this disagrees with the code, the code is the bug.
 
 **Toggling it settles rather than restoring, and the ruling says so out loud.** From a screen already inside one file, pinning and unpinning is identity. From a screen straddling two it cannot be: the pin rests the pinned file's last row on the bottom, which is a pager's answer and the one a reader was already looking at most of, and that rewrites the position. What is promised is that every pair after the first is identity, so the gesture is a toggle rather than a ratchet walking a reader up the file one press at a time.
 
-**The band is the one thing both regions pay for, which is an exception to the clamp order rather than an oversight.** The rule is that the band gives way to both and is paid out of what is left, which the stacked layout keeps by sizing the list before the band is considered. Beside a rail it cannot: the band spans the pane above both columns, so its three rows are unavailable to the map as well as to the diff. The cost is one step, at the height the band arrives. The diff has always taken exactly that step at exactly that moment and `GRAPH_KEEP` bounds it; what is new is that the map takes it too. `tests/rail.rs::the_rail_is_monotone_in_pane_height` asserts both halves.
-
 **The horizontal rule is dissolved and no vertical one replaces it.** B11 ruled the rule between the regions stays bare, and `Body::split` makes the rule and the list coextensive, so there is no boundary here for a horizontal rule to sit on. A vertical rule was not added: the rail's scrollbar reserve and the diff's leading inset already leave the boundary blank, and a rule carrying no fact is chrome announcing a region, which is B11's argument one layout over.
 
 **Three rulings the vertical layout never had to make.** The **wash** follows the region and not the screen, which §5.3 carries as a law. The **margin** keeps its rung from the pane and is charged to each region's leading edge, so the pane stands back from its own two edges and the interior boundary gets the same inset. And the **caret** is afforded from the region rather than the pane, because the question it asks is whether *the row* still names its file after the marker has taken its column, and a 210-column pane says nothing about a 70-column rail. It still stands on the pane's own leading column, which in this layout is the rail's.
@@ -1267,12 +1265,12 @@ The wide spelling, at eighty columns:
 │ 1  to  6                jump to that row of the list │
 │ J  K  Shift+↑  Shift+↓  scroll the pinned file list  │
 │ f                       follow the newest change     │
-│ m                       show or hide the churn band  │
 │ r                       show or hide the left rail   │
 │ s                       one file, or the whole diff  │
 │ a                       show or hide staged changes  │
 │ w                       wrap a long line, or clip it │
-│ y                       copy rows or path            │
+│ c                       show or hide the note rows   │
+│ Enter  Esc              send the note, or cancel     │
 │ ?  Esc                  this sheet                   │
 │ q  Ctrl+C  Ctrl+D       quit                         │
 │ mouse ────────────────────────────────────────────── │
@@ -1281,7 +1279,8 @@ The wide spelling, at eighty columns:
 │ click a track           send that region there       │
 │ click  ▲ ▼              one row, and repeats held    │
 │ click a listed file     jump the diff to it          │
-│ drag the diff           select those rows            │
+│ drag the diff           copy those rows              │
+│ click a line number     open a note there            │
 │ click  ✕                close the sheet              │
 │ just point              it marks itself              │
 │ Shift+drag              the terminal selects text    │
@@ -1302,12 +1301,12 @@ The wide spelling, at eighty columns:
 │ 1  to  6       jump to a list row  │
 │ J  K           scroll the list     │
 │ f              follow the newest   │
-│ m              the churn band      │
 │ r              the left rail       │
 │ s              one file only       │
 │ a              staged changes      │
 │ w              wrap long lines     │
-│ y              copy rows/path      │
+│ c              the note rows       │
+│ Enter  Esc     send the note       │
 │ ?  Esc         this sheet          │
 │ q              quit                │
 │ mouse ──────────────────────────── │
@@ -1316,7 +1315,8 @@ The wide spelling, at eighty columns:
 │ click a track  send it there       │
 │ click  ▲ ▼     a row, held repeats │
 │ click a file   jump the diff to it │
-│ drag the diff  select rows         │
+│ drag the diff  copy rows           │
+│ click number   open a note         │
 │ click  ✕       close the sheet     │
 │ just point     it marks itself     │
 │ Shift+drag     select text         │
@@ -1369,7 +1369,7 @@ Every page of a pane is one box, with the tail blank inside the frame, which is 
 **The branch not taken: leave it automatic and add an opt-out.** Rejected because it inverts the cost. The reader who has not thought about it is the one whose diff goes from 129 columns to 60, and the discovery path is the same gestures sheet either way. If the sheet is how a reader learns the gesture whichever direction it points, the default should be the one that changes nothing.
 
 
-**`r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and `SHEET_KEEP` keeps three**, so one of the four has to go first. `r` is given up at rank eight of `DROP_ORDER`. **The reason first written for that was false and is corrected here**: the rank that would drop it needs a width below thirty, and below thirty no sheet is drawn, so the reorder is **unreachable on every pane that draws**. What it is is a defensive ordering — `sheet_tables` asserts the keep-set is `f`, `m` and `?`, the untouched order would have dropped `f`, and if a future rung ever reaches that depth `r` is the right one to lose, because it is the only one of the four that needs 134 columns.
+**`r` is a fourth gesture a reader cannot guess at, beside `a`, `f` and `?`, and `SHEET_KEEP` keeps three**, so one of the four has to go first. `r` is given up at rank eight of `DROP_ORDER`. **The reason first written for that was false and is corrected here**: the rank that would drop it needs a width below thirty, and below thirty no sheet is drawn, so the reorder is **unreachable on every pane that draws**. What it is is a defensive ordering — `sheet_tables` asserts the keep-set is `a`, `f` and `?`, the untouched order would have dropped `f`, and if a future rung ever reaches that depth `r` is the right one to lose, because it is the only one of the four that needs 134 columns.
 
 
 **B15 — whether the left and right arrows move between changed files.** *Ruled 2026-08-24, session: yes, as aliases of `n` and `p`. Shipped the same day. See §11.1.* ([#296](https://github.com/breferrari/vigia/issues/296).) The capability already existed and this is a naming fix: `Action::File` already moved the caret, and a reader who reached for an arrow got `Shift+↑`'s list scroll instead. Vertical keys move inside the diff, horizontal keys move between files. One action, one arm, so the two directions cannot drift.
