@@ -537,7 +537,7 @@ impl App {
             // No jump, unlike follow. Re-engaging follow is a move as well as a state
             // change because a reader asking to follow is asking to see what changed.
             Action::ToggleRail => self.rail = !self.rail,
-            // No jump and no clamp here, which is the arm doing the least of the four
+            // No jump and no clamp here, which is the arm doing the least of the three
             // and is deliberate.
             Action::ToggleSingle => self.single = !self.single,
             // The reflow changes what a screenful is; see [`Self::screenful`].

@@ -389,7 +389,7 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
 #[test]
 fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // The claim the whole amendment rests on, and the one no unit test of the parser
-    // reaches: a file and three keystrokes have to arrive at the same shell.
+    // reaches: a file and two keystrokes have to arrive at the same shell.
     let scratch = support::Scratch::large_diff("config-equivalent", 6, 10);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
