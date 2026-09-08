@@ -62,12 +62,9 @@ fn word_tail(word: &str) -> String {
     tail
 }
 
-/// What the enclosure's bottom edge needs: its two corners, and the tail the
-/// word rides in.
-///
-/// Measured off the tail the drawer writes rather than spelled again from its
-/// parts, so the width the walk decides the enclosure on cannot drift from the
-/// width the edge is drawn in.
+/// What the enclosure's bottom edge needs, measured off the tail the drawer
+/// writes rather than spelled again from its parts: the width the walk decides
+/// the enclosure on cannot drift from the width the edge is drawn in.
 pub(crate) fn edge_width(word: &str) -> usize {
     2 + width_of(&word_tail(word))
 }
