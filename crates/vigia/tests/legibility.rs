@@ -435,7 +435,7 @@ fn every_row_kind() -> View {
             },
             Row::Note {
                 id: String::new(),
-                lead: NoteLead::Bottom,
+                lead: NoteLead::Bottom { answered: true },
                 text: "open".to_owned(),
                 state: "open",
                 last: true,

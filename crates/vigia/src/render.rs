@@ -1902,7 +1902,7 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
             cells.word = match lead {
                 // Inside the tail the drawer writes, which the far corner
                 // follows: past the tail's leading blank is the word itself.
-                NoteLead::Bottom => {
+                NoteLead::Bottom { .. } => {
                     let tail = width_of(&word_tail(state)) + 1;
                     flush_right(line, tail).map(|edge| Rect {
                         x: edge.x + 1,
@@ -4365,7 +4365,11 @@ impl Painter<'_> {
         // A row with no room for the frame draws none of it, the way the box
         // being typed in does. The walk hands the bar rung down here instead, so
         // this is a floor under a caller rather than a rung a reader meets.
-        if matches!(lead, NoteLead::Top | NoteLead::Body | NoteLead::Bottom) && room <= BOX_FRAME {
+        if matches!(
+            lead,
+            NoteLead::Top | NoteLead::Body | NoteLead::Bottom { .. }
+        ) && room <= BOX_FRAME
+        {
             return;
         }
         match lead {
@@ -4399,17 +4403,20 @@ impl Painter<'_> {
                 self.put(right, glyphs.y, " │", 2, frame);
                 return;
             }
-            NoteLead::Bottom => {
+            NoteLead::Bottom { answered } => {
                 let corners = self.corners(false);
-                // The word rides the far end of the edge the stem opens, set in
-                // from the corner so it reads as a label on the frame rather
-                // than as the frame running out.
+                // The word rides the far end of the edge, set in from the corner
+                // so it reads as a label on the frame rather than as the frame
+                // running out. The stem before it opens only where an answer
+                // descends through it: on a note nobody has answered, it
+                // promises one is coming.
+                let opening = if answered { STEM } else { "" };
                 self.box_edge(
                     x,
                     glyphs.y,
                     room,
                     corners,
-                    (STEM, &word_tail(text)),
+                    (opening, &word_tail(text)),
                     state.add_modifier(dim),
                 );
                 return;

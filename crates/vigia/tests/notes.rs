@@ -448,7 +448,7 @@ impl Painted {
         let mut last = String::new();
         for row in y + 1..self.after_notes(y) {
             match self.lead_at(row) {
-                Some(NoteLead::Bottom) => return self.text(row).trim_end().to_owned(),
+                Some(NoteLead::Bottom { .. }) => return self.text(row).trim_end().to_owned(),
                 Some(NoteLead::Bar) => last = self.text(row).trim_end().to_owned(),
                 _ => {}
             }
@@ -515,7 +515,7 @@ impl Painted {
                 };
             match lead {
                 // The edges carry no words of anyone's.
-                NoteLead::Top | NoteLead::Bottom => {}
+                NoteLead::Top | NoteLead::Bottom { .. } => {}
                 NoteLead::Body => {
                     // Between the two sides, and the trailing one goes with the
                     // padding it stands in.
@@ -1684,8 +1684,8 @@ fn a_note_draws_under_its_line_enclosed_with_the_word_on_the_bottom_edge() {
     assert_eq!(bottom.chars().nth(at), Some('└'), "{bottom:?}");
     assert_eq!(
         bottom.chars().nth(at + REPLY_INDENT),
-        Some('┬'),
-        "the stem is not where the answer's arrow goes: {bottom:?}"
+        Some('─'),
+        "nothing has answered this note and its edge still opens a stem: {bottom:?}"
     );
     assert!(bottom.trim_end().ends_with('┘'), "{bottom:?}");
     assert!(
@@ -2660,6 +2660,15 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
         Some('↳'),
         "the answer does not descend from the stem in the enclosure's bottom edge"
     );
+    assert_eq!(
+        painted
+            .text(arrow - 1)
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT),
+        Some('┬'),
+        "the answer descends from a closed edge: {:?}",
+        painted.text(arrow - 1)
+    );
     assert!(
         under[1].starts_with("swapped for saturating_mul"),
         "{:?}",
@@ -2679,6 +2688,56 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
     let under = departing.notes_under(departing.row_of(EDITED));
     assert_eq!(under.len(), 1, "{under:?}");
     assert!(under[0].starts_with("swapped for"), "{:?}", under[0]);
+}
+
+/// `SPEC.md` §11.1: the stem is drawn only where there is an answer to descend
+/// through it.
+///
+/// Both directions on one note, because the answer arrives while the note is on
+/// screen. A stem under an unanswered note promises a reply is coming, or that
+/// one arrived and is not being drawn, on the one surface whose whole value is
+/// that its states are honest.
+#[test]
+fn the_answers_stem_is_drawn_only_when_there_is_an_answer() {
+    let scratch = fixture("notes-stem");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let open = note("n1", 5, EDITED, "short");
+    rig.store.put(&open).expect("put");
+    rig.reload();
+
+    // The cell the arrow would descend from, on the edge that would open for it.
+    fn stem_of(painted: &Painted) -> Option<char> {
+        let y = painted.row_of(EDITED);
+        let (_, _, origin) = painted.gutter();
+        let bottom = (y + 1..painted.after_notes(y))
+            .find(|row| matches!(painted.lead_at(*row), Some(NoteLead::Bottom { .. })))
+            .expect("the enclosure's bottom edge");
+        painted
+            .text(bottom)
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT)
+    }
+
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        stem_of(&painted),
+        Some('─'),
+        "an unanswered note opens a stem toward an answer that may never come"
+    );
+
+    let mut answered = open.clone();
+    answered.reply = Some("swapped for saturating_mul".to_owned());
+    rig.store.put(&answered).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        stem_of(&painted),
+        Some('┬'),
+        "the answer landed and the edge it descends through did not open"
+    );
 }
 
 #[test]
@@ -3445,7 +3504,7 @@ fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
                 matches!(
                     row,
                     Row::Note {
-                        lead: NoteLead::Bottom,
+                        lead: NoteLead::Bottom { .. },
                         ..
                     }
                 )
@@ -3677,7 +3736,11 @@ fn the_bar_is_the_rung_under_the_enclosure_and_keeps_the_word() {
             // sides, and the edge that carries the word.
             assert_eq!(
                 leads,
-                vec![NoteLead::Top, NoteLead::Body, NoteLead::Bottom],
+                vec![
+                    NoteLead::Top,
+                    NoteLead::Body,
+                    NoteLead::Bottom { answered: false },
+                ],
                 "at {width} columns the enclosure is not three rows"
             );
             let bottom = painted
@@ -3688,7 +3751,7 @@ fn the_bar_is_the_rung_under_the_enclosure_and_keeps_the_word() {
                     matches!(
                         row,
                         Row::Note {
-                            lead: NoteLead::Bottom,
+                            lead: NoteLead::Bottom { .. },
                             ..
                         }
                     )
