@@ -38,6 +38,7 @@ pub mod update;
 mod view;
 
 pub use app::{App, Sending, Voice};
+pub use clipboard::{Carrier, Route, put, route, tmux_command};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
@@ -1212,14 +1213,16 @@ impl Shell {
     /// Write what a gesture asked for, and say so for `NOTICE_LINGER`, which is
     /// what a receipt gets.
     ///
-    /// It says **sent** rather than copied, which is honest and not modest: OSC 52
-    /// has no reply and several terminals ship it disabled.
+    /// It says **sent** rather than copied, which is honest and not modest on the
+    /// escape's route: OSC 52 has no reply and several terminals ship it disabled.
+    /// The tmux route has an exit status, so there the word is checked.
     /// A failed write is reported rather than propagated: a draw that fails has taken
     /// the pane with it, but a copy is one a reader can go on watching without.
     fn settle_send(&mut self, now: Instant) {
         if let Some(sending) = self.app.take_sending() {
             let said = sending.said;
-            let (told, voice) = match self.session.send(&clipboard::copy(&sending.text)) {
+            let route = clipboard::route(std::env::var_os("TMUX").as_deref());
+            let (told, voice) = match clipboard::put(&mut self.session, &sending.text, route) {
                 Ok(()) => (format!("sent {said} to the clipboard"), Voice::Said),
                 Err(e) => (format!("could not send {said}: {e}"), Voice::Alert),
             };

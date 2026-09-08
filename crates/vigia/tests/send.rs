@@ -7,10 +7,14 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::ffi::OsStr;
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
-use vigia::{App, NOTICE_LINGER, Pointing, View, Voice, body_layout, settled};
+use vigia::{
+    App, Carrier, NOTICE_LINGER, Pointing, Route, View, Voice, body_layout, put, route, settled,
+    tmux_command,
+};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -235,4 +239,137 @@ fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
         "the chrome carries a different notice than the accessor reports, so the \
          reader is told one thing and shown another"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Which way a copy leaves the pane. Inside tmux the escape is discarded,
+// so the text goes to tmux and tmux is the one that sets the clipboard.
+// ---------------------------------------------------------------------------
+
+/// A carrier that records what it was asked to do and answers as told.
+#[derive(Default)]
+struct Fake {
+    /// The text handed to tmux, in order.
+    tmux: Vec<String>,
+    /// The sequences written to the terminal, in order.
+    terminal: Vec<String>,
+    /// Whether tmux refuses.
+    tmux_refuses: bool,
+    /// Whether the terminal refuses.
+    terminal_refuses: bool,
+}
+
+impl Carrier for Fake {
+    fn to_tmux(&mut self, text: &str) -> std::io::Result<()> {
+        self.tmux.push(text.to_owned());
+        if self.tmux_refuses {
+            return Err(std::io::Error::other("tmux refused it, exit status: 1"));
+        }
+        Ok(())
+    }
+
+    fn to_terminal(&mut self, sequence: &str) -> std::io::Result<()> {
+        self.terminal.push(sequence.to_owned());
+        if self.terminal_refuses {
+            return Err(std::io::Error::other("the pipe is gone"));
+        }
+        Ok(())
+    }
+}
+
+/// Outside tmux nothing changes: the escape is the route, as it has been.
+#[test]
+fn the_route_outside_tmux_is_the_escape() {
+    assert_eq!(route(None), Route::Escape);
+    // A pane that has left tmux carries the variable emptied rather than unset,
+    // and an empty value is not a pane.
+    assert_eq!(route(Some(OsStr::new(""))), Route::Escape);
+}
+
+/// Inside one it is tmux, because tmux discards what an application writes.
+#[test]
+fn the_route_inside_tmux_is_tmux() {
+    assert_eq!(
+        route(Some(OsStr::new("/tmp/tmux-1000/default,3412,0"))),
+        Route::Tmux
+    );
+}
+
+/// The command is the one that makes tmux write the clipboard outward, rather
+/// than only filling a buffer of its own.
+#[test]
+fn the_tmux_command_hands_the_text_over_and_asks_for_the_clipboard() {
+    let command = tmux_command();
+    assert_eq!(command.get_program(), "tmux");
+    let args: Vec<&str> = command
+        .get_args()
+        .map(|arg| arg.to_str().expect("ascii"))
+        .collect();
+    assert_eq!(
+        args,
+        ["load-buffer", "-w", "-"],
+        "`-w` is what reaches the clipboard and `-` is what reads standard input"
+    );
+}
+
+/// On the tmux route the text goes to tmux whole, and no escape follows it.
+#[test]
+fn a_copy_inside_tmux_goes_through_tmux_and_writes_no_escape() {
+    let mut fake = Fake::default();
+    put(&mut fake, "one\ntwo", Route::Tmux).expect("carried");
+    assert_eq!(fake.tmux, ["one\ntwo"]);
+    assert!(
+        fake.terminal.is_empty(),
+        "the escape went out as well, and tmux would take the copy twice"
+    );
+}
+
+/// A tmux that refuses leaves the reader where they were rather than worse: the
+/// escape is what shipped before this route, and `-w` is younger than tmux 3.2.
+#[test]
+fn a_refused_tmux_write_falls_back_to_the_escape() {
+    let mut fake = Fake {
+        tmux_refuses: true,
+        ..Fake::default()
+    };
+    put(&mut fake, "one\ntwo", Route::Tmux).expect("the escape carried it");
+    assert_eq!(fake.tmux, ["one\ntwo"], "tmux was never asked");
+    assert_eq!(
+        fake.terminal.len(),
+        1,
+        "the escape did not follow the refusal"
+    );
+    assert!(
+        fake.terminal[0].starts_with("\x1b]52;c;") && fake.terminal[0].ends_with("\x1b\\"),
+        "what followed was not the escape: {:?}",
+        fake.terminal[0]
+    );
+}
+
+/// Both routes refusing is the one case the reader is told about, and until this
+/// route existed no test could reach that arm at all.
+#[test]
+fn a_copy_neither_route_could_carry_is_an_error() {
+    let mut fake = Fake {
+        tmux_refuses: true,
+        terminal_refuses: true,
+        ..Fake::default()
+    };
+    let refused = put(&mut fake, "one", Route::Tmux).expect_err("something carried it");
+    assert!(
+        refused.to_string().contains("pipe"),
+        "the error is not the escape's, which is the one every pane has: {refused}"
+    );
+}
+
+/// The escape route still writes the escape and nothing else.
+#[test]
+fn a_copy_outside_tmux_writes_the_escape_alone() {
+    let mut fake = Fake::default();
+    put(&mut fake, "one", Route::Escape).expect("carried");
+    assert!(
+        fake.tmux.is_empty(),
+        "a pane outside tmux asked tmux to carry its copy"
+    );
+    assert_eq!(fake.terminal.len(), 1);
 }

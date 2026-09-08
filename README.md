@@ -478,6 +478,33 @@ set -ga terminal-overrides ",*:Tc"
 
 </details>
 
+<details>
+<summary><b>📋 Copying inside tmux, and why your clipboard might not change</b></summary>
+
+<br>
+
+**Dragging the diff copies through `tmux` when `vigia` is inside it**, because the escape it would otherwise write is one `tmux` throws away. `set-clipboard` has defaulted to `external` since tmux 2.6, and `external` means tmux may set the terminal's clipboard while the applications inside it may not. So the rows are handed to `tmux load-buffer -w -` and tmux is the one that sets it, which is what that default allows.
+
+`-w` arrived in **tmux 3.2**. On anything older the handoff is refused and the escape is written instead, which is what shipped before this existed: no worse, and no better. `tmux -V` says which you have.
+
+Two things still sit under it, and neither is `vigia`'s to set:
+
+```sh
+tmux show -sv set-clipboard        # `off` swallows it whichever way it goes
+tmux info | grep -i 'Ms:'          # empty means tmux cannot tell your terminal
+```
+
+`set-clipboard off` stops tmux writing outward at all. And tmux only writes outward if it believes the outer terminal speaks OSC 52, which is the `Ms` capability, declared with `terminal-features` on tmux 3.2 and later:
+
+```sh
+# ~/.tmux.conf
+set -ga terminal-features ",*:clipboard"
+```
+
+**The footer says `sent` and it means it differently on each route.** Through tmux there is an exit status, so a refusal is reported. Through the escape there is no reply at all, and a terminal that ignores OSC 52 leaves you holding whatever was in the clipboard before, with nothing able to say so. `Shift`+drag is the way round all of it: that is your terminal's own selection and its own clipboard.
+
+</details>
+
 ### 🪟 The pane you want, every time
 
 `r`, `s`, `a` and `w` change what the body is made of, and all four start off. If you always want one of them, say so once:
