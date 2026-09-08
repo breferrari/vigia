@@ -100,8 +100,8 @@ fn cleared(buf: &Buffer) -> (usize, usize) {
 }
 
 /// `SPEC.md` §11.2 B21: the box arrives through `tachyonfx` under §5.3's
-/// licence, armed by the click and done when done, over what a changed file
-/// takes; Esc sweeps it away over the same length.
+/// licence, armed by the click and done when done, over what a receipt takes;
+/// Esc sweeps it away over the same length.
 ///
 /// The evolve needs no second ink, which is why the entrance is checked on the
 /// symbols rather than on the colours: it is the one arrival on this surface

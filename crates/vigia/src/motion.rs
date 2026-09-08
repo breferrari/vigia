@@ -46,9 +46,15 @@ pub const NOTICE_LINGER: Duration = Duration::from_millis(4500);
 /// was read.
 pub const ARRIVED_LINGER: Duration = Duration::from_secs(60);
 
-/// How long the box takes to arrive, and to leave on Esc: what a changed file
-/// takes.
-pub const BOX_ARRIVING: Duration = ARRIVING;
+/// How long the box takes to arrive, and to leave on Esc: a receipt's own
+/// length rather than [`ARRIVING`], which is the diff's.
+///
+/// The box answers a gutter the reader pressed one moment earlier, so it is the
+/// one surface here that is certainly being looked at directly. [`ARRIVING`] is
+/// sized for a change that lands while they are reading the other pane, and at
+/// [`ARRIVING_FRAME`] it gives this effect fifteen frames, which is too few to
+/// read a radial resolve as anything but a pop.
+pub const BOX_ARRIVING: Duration = SAID_ARRIVING;
 
 /// How long a note's rows and the agent's line take to arrive: an
 /// announcement's own arrival, since that is what they are.

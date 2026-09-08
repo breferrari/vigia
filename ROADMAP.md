@@ -183,6 +183,9 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 |---|---|---|
 | ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
 | ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
+| ⬜ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
+| ⬜ | A note with no reply still draws the answer's stem. **Reported from use** | [#459](https://github.com/breferrari/vigia/issues/459) |
+| ⬜ | Remove the masthead, and revoke the ruling that kept it | [#457](https://github.com/breferrari/vigia/issues/457) |
 | ⬜ | vigia mcp finds its worktree by an agent's own variable | [#450](https://github.com/breferrari/vigia/issues/450) |
 | ✅ | The footer's transition is too quick to see, and unreadable while it runs. **Reported from use** | [#410](https://github.com/breferrari/vigia/issues/410) |
 | ✅ | The footer's motions are on the channel that degrades, and too short to see. **Reported from use** | [#408](https://github.com/breferrari/vigia/issues/408) |
@@ -303,6 +306,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | `cargo install` cannot replace the binary while a registered `vigia mcp` holds it open on Windows | [#458](https://github.com/breferrari/vigia/issues/458) |
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
 | ✅ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
@@ -400,7 +404,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 
 **[#191](https://github.com/breferrari/vigia/issues/191) is here because two review agents reached the same verdict independently: real churn, not a real hazard.** `App::chrome` takes four pointer marks positionally, all of which belong to `Shell` and none of which `App` reads, and [#186](https://github.com/breferrari/vigia/issues/186) threaded a fourth through about thirty call sites in thirteen files. What keeps it off a phase is that transposition is **compiler-caught**, since the four are distinct types, so the cost is legibility and churn rather than a defect waiting to happen. What keeps it out of #186 is that folding it in would re-churn those same thirty sites during an audit, which is where a pass manufactures the findings it then discovers. It is an instrument finding by this file's own rule, so it waits for a product pass to be blocked by it.
 
-The other three stay. [#77](https://github.com/breferrari/vigia/issues/77) and [#78](https://github.com/breferrari/vigia/issues/78) are claims about the picture and belong with their siblings in Phase 4, and [#80](https://github.com/breferrari/vigia/issues/80) is a ruling nobody has made rather than a defect anybody can fix. **That last clause expired on 2026-08-15 and #80 is in Phase 8 now**, which is [#76](https://github.com/breferrari/vigia/issues/76)'s rule arriving in the only way it can until something automates it: a reader looked at the footer and asked why the new keys were not on it. #80 was written about the **arrows** and about `jk`/`JK` spending eleven columns on a case distinction, and both of those really are rulings, because an arrow is the key everybody guesses. Phase 8 then added five gestures and not one of them is an arrow: `d` and `u` ([#121](https://github.com/breferrari/vigia/issues/121)), `n`, `p` and the digits ([#122](https://github.com/breferrari/vigia/issues/122)). Those are the opposite of an arrow, they are exactly the class §11.1's own argument says earns a slot, and #122's whole case for the digits was **reach**. A reach key nobody can discover has not shipped the reach it was built for, so the defect half exists now and the shelf entry's own sentence is what says it should leave.
+**[#458](https://github.com/breferrari/vigia/issues/458) is here because what settles it is a ruling rather than a patch.** Windows refuses to replace a running executable and `README.md` teaches user-scope registration, so every open agent session holds a `vigia mcp` on `vigia.exe` and `cargo install vigia` fails naming neither. No CI leg can reach it, since on macOS and Linux the inode outlives the handle. What it waits for is whether the installer, the server or the documentation carries the fix; `Get-Process vigia | Stop-Process -Force` clears it meanwhile.
 
 ---
 
