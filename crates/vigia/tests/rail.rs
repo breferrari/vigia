@@ -974,8 +974,8 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
 
 #[test]
 fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
-    // `m`'s own behaviour one region over: a pane that cannot carry the thing
-    // draws nothing different, and the request is still kept, so a reader who
+    // A pane that cannot carry the thing draws nothing different, and the request
+    // is still kept, so a reader who
     // narrows a railed pane and widens it again gets the rail back rather than the
     // question.
     let arrives = first_rail();

@@ -113,7 +113,8 @@ impl fmt::Display for ConfigError {
             }
             Self::UnknownKey { line, key } => write!(
                 f,
-                "line {line}: {key:?} is not a view setting. There are three: {}",
+                "line {line}: {key:?} is not a view setting. There are {}: {}",
+                KEYS.len(),
                 KEYS.join(", ")
             ),
             Self::UnknownValue { line, key, value } => write!(

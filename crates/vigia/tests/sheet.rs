@@ -39,7 +39,7 @@ const SHEET_CLOSE: char = '✕';
 const RULE: char = '─';
 
 /// Keyboard rows the height ladder may never drop, restated for [`TITLE`]'s
-/// reason. `SPEC.md` §11.1 names the three: `f`, `m` and `?`.
+/// reason. `SPEC.md` §11.1 names the three: `a`, `f` and `?`.
 const KEEP: usize = 3;
 
 fn area() -> Rect {
@@ -799,7 +799,7 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     );
 
     // Below the floor nothing is drawn, the state stays true, and no gesture is
-    // eaten, which is what `m` does on a pane that cannot carry the band.
+    // eaten, which is what `r` does on a pane too narrow for a rail.
     let tiny_at = Rect::new(0, 0, 12, 6);
     let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, tiny_at);
     assert!(
@@ -1235,8 +1235,8 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     assert!(
         !drawn.contains("moving"),
         "this gate searches for bare one-character keys and the pane drew section \
-         headings, so `m`, `f`, `g` and `n` are satisfied by `moving`, `files` \
-         and `view` rather than by the rows:\n{drawn}"
+         headings, so `f` and `n` are satisfied by `files` and `moving` rather \
+         than by the rows:\n{drawn}"
     );
 
     // The keys column of the gesture rows alone, because a bare token finds anything.
@@ -3479,8 +3479,8 @@ fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
     assert_eq!(chrome(&app).sheet, Some(3), "four presses is not page four");
 
     // Twenty-eight columns: under the floor, so nothing is drawn and the state
-    // stays true, which is §11.1's own ruling and is what `m` does on a pane that
-    // cannot carry the band.
+    // stays true, which is §11.1's own ruling and is what `r` does on a pane too
+    // narrow for a rail.
     let narrow = Rect::new(0, 0, 28, 8);
     let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, narrow);
     assert!(
