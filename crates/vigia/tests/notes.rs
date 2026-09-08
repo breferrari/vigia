@@ -5613,29 +5613,27 @@ fn an_old_side_note_answers_a_removed_line_and_not_the_addition_beside_it() {
 }
 
 #[test]
-fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewhere() {
-    // Which run owns a note is resolved over the entries the diff walk can reach,
-    // and unpinned that is every entry from the viewport down, so the tie always
-    // resolves. Pinned, the walk reaches exactly one file, and a path in both runs
-    // that is not the pinned one has neither of its entries in that range. The
-    // list draws them both anyway, so an unresolved tie marks the file twice for
-    // one note while the footer says one.
+fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() {
+    // Which run owns a note is resolved for every path in both runs that holds
+    // one, rather than only for a path the diff walk reaches. Pinned, the walk
+    // reaches one file, and a path in both runs that is not the pinned one has
+    // neither entry in that range, so a rule asked only there leaves one note
+    // marking the file twice while the footer says one. The answer cannot depend
+    // on where either region is looking, and this sweep is what says so.
     //
-    // Read off the collected entries rather than the drawn rows, because the list
-    // region is sized from the file count and cannot draw every row of a grouped
-    // three-entry fixture at once. The rule is about the entries.
+    // The windows have to genuinely differ or the sweep is one fixture run four
+    // times: with few enough files the list draws every row at once, `last_top` is
+    // zero, and `following_top` returns its argument, so every request converges
+    // on the same window. The filler files below are what stop that.
     let scratch = in_both_runs("notes-mark-pinned", 5, "staged six");
-    scratch.write("src/other.rs", numbered_lines(6));
+    for at in 0..7 {
+        scratch.write(&format!("src/filler{at}.rs"), numbered_lines(6));
+    }
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.show_staged(true);
     frame.advance().expect("advance");
 
-    let pinned = frame
-        .files()
-        .iter()
-        .position(|change| change.paths().any(|path| path == "src/other.rs"))
-        .expect("the second file is not in the changed set");
     let runs: Vec<usize> = frame
         .files()
         .iter()
@@ -5644,20 +5642,21 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
         .map(|(at, _)| at)
         .collect();
     assert_eq!(runs.len(), 2, "the fixture is not a path in both runs");
-    assert!(
-        !runs.contains(&pinned),
-        "the pinned file is one of the two runs, so the walk reaches the tie"
-    );
+    let pinned = (0..frame.files().len())
+        .find(|at| !runs.contains(at))
+        .expect("no file to pin that is not one of the two runs");
 
     let notes = vec![note("n1", 8, "line 8", "context in both")];
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    // Swept over both a top this file count can honour and one it cannot, and over
-    // both answers to whether the list is following the diff. Each of those moves
-    // the window the list actually draws, and the rule has to hold wherever it
-    // lands rather than wherever a window computed beside it guessed.
-    for (top, follows) in [(0, false), (15, false), (0, true), (15, true)] {
+    // Four windows that are four windows: a request the file count can honour and
+    // one it cannot, each with the list following the diff and not following it.
+    // `list_rows` is under what the rows would want, so the clamp and the snap
+    // both have somewhere to move the answer to.
+    let mut both_drawn = 0;
+    let mut windows: Vec<(Option<String>, usize)> = Vec::new();
+    for (top, follows) in [(0, false), (9, false), (0, true), (9, true)] {
         let viewport = Viewport {
             position: vigia::Position {
                 file: pinned,
@@ -5668,12 +5667,12 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
             width: 80,
             wrap: false,
             list_top: top,
-            list_rows: 6,
+            list_rows: 4,
             list_follows: follows,
             measured: true,
             landing: false,
             highlight: false,
-            // The pin, which is what narrows the walk to one file.
+            // The pin, which is what narrowed the walk to one file.
             single: true,
         };
         let view = View::collect_noted(
@@ -5689,18 +5688,41 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_while_the_pane_is_pinned_elsewh
 
         let listed: Vec<&vigia::FileEntry> =
             view.list.iter().filter_map(vigia::ListRow::entry).collect();
-        assert_eq!(
-            listed.iter().filter(|entry| entry.path == PATH).count(),
-            2,
-            "at row {top} following {follows}, the list did not draw both entries of the path, so nothing below is measured"
+        windows.push((listed.first().map(|entry| entry.path.clone()), listed.len()));
+        let drawn = listed.iter().filter(|entry| entry.path == PATH).count();
+        let marked = listed
+            .iter()
+            .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
+            .count();
+
+        // Holds in every window, drawn whole or not: one note, one entry.
+        assert!(
+            marked <= 1,
+            "at row {top} following {follows}, one note marked {marked} entries of \
+             a path in both runs while the pane was pinned elsewhere"
         );
-        assert_eq!(
-            listed
-                .iter()
-                .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
-                .count(),
-            1,
-            "at row {top} following {follows}, one note marked both entries of a path in both runs while the pane was pinned elsewhere"
-        );
+        if drawn == 2 {
+            both_drawn += 1;
+            assert_eq!(
+                marked, 1,
+                "at row {top} following {follows}, both entries were drawn and \
+                 {marked} carried the note"
+            );
+        }
     }
+
+    // Non-vacuity, both halves. The sweep has to reach a window that draws both
+    // entries, or `marked <= 1` is satisfied by drawing neither; and the four
+    // requests have to land on more than one window, or this is one fixture run
+    // four times.
+    windows.dedup();
+    assert!(
+        windows.len() > 1,
+        "every request landed on one window, so neither the clamp nor the snap was exercised: {windows:?}"
+    );
+    assert!(
+        both_drawn > 0,
+        "no window in the sweep drew both entries, so the count above never had \
+         two rows to choose between"
+    );
 }

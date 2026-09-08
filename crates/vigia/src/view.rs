@@ -1341,28 +1341,6 @@ impl View {
             view.list_top = 0;
             return Ok(view);
         }
-        if height == 0 {
-            // The list still resolves, and with no diff nothing has chosen between
-            // two runs of one path, so a file in both is marked in both.
-            let none = HashMap::new();
-            let pinned = Pinned {
-                by_path: &by_path,
-                chosen: &none,
-            };
-            view.take_list(frame, history, list_rows, list_follows, &[], &pinned)?;
-            return Ok(view);
-        }
-
-        let mut walked = Walked::default();
-
-        // The one bound the pin costs, and every use of it below reads this rather than
-        // `files`.
-        let (first, stop) = if single {
-            (view.top.file, view.top.file + 1)
-        } else {
-            (0, files)
-        };
-
         // A file staged and then edited further is a diff in each run and the note
         // belongs under one: the run its line resolves best in, the earlier index on a
         // tie. Asked of every such path and not only one the walk reaches, because the
@@ -1404,6 +1382,22 @@ impl View {
         let pinned = Pinned {
             by_path: &by_path,
             chosen: &chosen,
+        };
+
+        if height == 0 {
+            // The list still resolves, and the tie above it already has.
+            view.take_list(frame, history, list_rows, list_follows, &[], &pinned)?;
+            return Ok(view);
+        }
+
+        let mut walked = Walked::default();
+
+        // The one bound the pin costs, and every use of it below reads this rather than
+        // `files`.
+        let (first, stop) = if single {
+            (view.top.file, view.top.file + 1)
+        } else {
+            (0, files)
         };
 
         let mut index = view.top.file;

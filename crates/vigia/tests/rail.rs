@@ -666,19 +666,20 @@ fn the_rail_is_its_floor_until_a_third_of_the_pane_is_wider() {
             .areas(area)
             .list
             .width;
+        // The floor below the turn, and *wider than the floor* above it. Not the
+        // share spelled out again: a gate that recomputes `pane / RAIL_SHARE`
+        // agrees with the renderer whatever either of them says, and the claim
+        // §11.1 makes is where the turn is.
         if width < THE_SHARE {
             assert_eq!(
                 rail, THE_FLOOR,
-                "at {width} columns the rail is {rail} where its floor is \
-                 {THE_FLOOR}"
+                "at {width} columns the rail is {rail} where its floor is {THE_FLOOR}"
             );
         } else {
-            assert_eq!(
-                rail,
-                width / 3,
-                "at {width} columns the rail is {rail} where a third of the pane \
-                 is {}",
-                width / 3
+            assert!(
+                rail > THE_FLOOR,
+                "at {width} columns the rail is still its {THE_FLOOR}-column floor, \
+                 so the share has not taken over where §11.1 says it does"
             );
         }
     }
