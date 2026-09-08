@@ -2281,3 +2281,52 @@ fn an_effect_arms_the_loop_and_gives_the_clock_back_when_it_finishes() {
          is guaranteed"
     );
 }
+
+#[test]
+fn the_note_edge_is_one_column_at_the_content_origin_and_the_sheet_swallows_it() {
+    // The gutter's own width is what says where content begins, so the target
+    // and the drawn cell cannot drift.
+    let gutter = (2u16, 5u16);
+    let regions = Regions {
+        diff: Region {
+            gutter,
+            text: 40,
+            ..two_regions().diff
+        },
+        ..two_regions()
+    };
+    let origin = gutter.0 + gutter.1;
+    assert_eq!(regions.note_edge_at(origin, 9), Some(9));
+    assert_eq!(
+        regions.note_edge_at(origin - 1, 9),
+        None,
+        "the gutter's last column answered as the note's side"
+    );
+    assert_eq!(
+        regions.note_edge_at(origin + 1, 9),
+        None,
+        "the side is wider than the one column a note spends on it"
+    );
+    assert_eq!(
+        regions.note_edge_at(origin, 4),
+        None,
+        "a row above the diff answered"
+    );
+
+    // A region drawing no rows publishes no gutter and owns no such column, so
+    // the arithmetic cannot resolve to column zero.
+    assert_eq!(two_regions().note_edge_at(0, 9), None);
+
+    // And the sheet swallows what lands on it, as it does for every other target.
+    let covered = Regions {
+        sheet: Some(Sheet {
+            left: 0,
+            top: 0,
+            width: 80,
+            height: 20,
+            close: (78, 0),
+        }),
+        ..regions
+    };
+    assert_eq!(covered.note_edge_at(origin, 9), None);
+}

@@ -54,8 +54,8 @@ pub use motion::{
 };
 pub use notes::{
     Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
-    box_entrance, box_exit, box_route, commit, has_room, leaving, opening, press_at,
-    resolve_arrival, word_arrival,
+    box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
+    resolve_arrival, withdraw, word_arrival,
 };
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
@@ -470,6 +470,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // here and the wash below never sees it.
                     if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
                         shell.open_box(offset, Instant::now());
+                        continue;
+                    }
+                    // And a press on a note's own left side takes that note back,
+                    // answered here for the same reason and in the same place.
+                    if let Some(id) = notes::edge_at(&shell.screen, regions, &event) {
+                        shell.withdraw_note(&id, Instant::now());
                         continue;
                     }
                     // Before the event is interpreted, for the hold's reason: a press
@@ -1128,6 +1134,26 @@ impl Shell {
         }
     }
 
+    /// Take a note back: remove its file and read the store back, so the next
+    /// frame draws it leaving. A note the agent resolved between the frame this
+    /// press landed on and the press itself is left alone and nothing is said,
+    /// since the reader is being answered rather than refused. A removal the
+    /// store refuses is one footer alert, as every other write of B21's is.
+    fn withdraw_note(&mut self, id: &str, now: Instant) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        match notes::withdraw(store, id) {
+            Ok(true) => self.reload_notes(now),
+            Ok(false) => {}
+            Err(e) => self.say(
+                format!("could not take the note back: {e}"),
+                Voice::Alert,
+                now,
+            ),
+        }
+    }
+
     /// Read the store, arm an effect for whatever moved, and hand the notes to
     /// the next collect. A file the store cannot read is skipped, and a store
     /// that cannot be read is left as it was; either is said when it changes,
@@ -1769,6 +1795,45 @@ mod tests {
                 "`{said}` is gone, so the footer claims something OSC 52 cannot promise"
             );
         }
+    }
+
+    /// A press on a note's left side takes the note back before the wash can see
+    /// it, and acts on the store rather than on the screen it landed on. Both live
+    /// inside methods that own a terminal, so they are read here.
+    #[test]
+    fn a_press_on_a_notes_side_withdraws_before_the_wash_and_goes_through_the_store() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let press = shipped
+            .find("notes::edge_at(&shell.screen, regions, &event)")
+            .expect("the input arm no longer routes a press on a note's left side");
+        let wash = shipped
+            .find("selection_after(&event, regions, shell.selected)")
+            .expect("the input arm no longer opens a wash");
+        assert!(
+            press < wash,
+            "a press on a note's left side also begins a selection, so B20 and B21              share a cell"
+        );
+        let withdraw = shipped
+            .split("fn withdraw_note(&mut self, id: &str, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(
+                    "
+    }
+",
+                )
+                .next()
+            })
+            .expect("`withdraw_note` is gone");
+        assert!(
+            withdraw.contains("notes::withdraw(store, id)"),
+            "`withdraw_note` no longer goes through the store's own read-back, so a              resolve that landed since the frame is deleted with the note"
+        );
+        assert!(
+            withdraw.contains("Ok(true) => self.reload_notes(now)"),
+            "`withdraw_note` no longer reads the store back, so the rows of a note              it took stay drawn"
+        );
     }
 
     /// A press on a content row's gutter goes to the store before the wash can

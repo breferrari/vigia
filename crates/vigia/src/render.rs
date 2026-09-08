@@ -48,6 +48,10 @@ const RESOLVED_ICON: char = '✓';
 /// The bar down the left of a note's rows. `▌` is the recorded stand-in.
 const NOTE_BAR: char = '▎';
 
+/// What a control draws where pressing it takes the thing away: the sheet's close,
+/// and the cell of a note's left side the pointer rests on. One promise, one glyph.
+const DISMISS: &str = "✕";
+
 /// Rules between the status word and the corner it rides in from.
 pub const WORD_INSET: usize = 3;
 
@@ -2179,7 +2183,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 }
 
 /// The mouse half, which is the first thing the width ladder drops.
-const MOUSE: [Gesture; 10] = [
+const MOUSE: [Gesture; 11] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -2210,6 +2214,12 @@ const MOUSE: [Gesture; 10] = [
     Gesture {
         keys: ["click a line number", "click number"],
         verb: ["open a note there", "open a note"],
+    },
+    // Nineteen columns because `click a listed file` set that maximum and a twentieth
+    // widens every rung, so `left` is the document's word and not this cell's.
+    Gesture {
+        keys: ["click a note's side", "click a note"],
+        verb: ["take it back", "take it back"],
     },
     // The tail is the three rows this table most easily omits, and `README.md`'s Mouse
     // table is the other place each is named; a gate holds the two against each other.
@@ -2361,9 +2371,6 @@ const SHEET_MOUSE_LABEL: &str = " mouse ";
 /// What the keyboard group's heading spells, and it is drawn only on the
 /// two-column rung.
 const SHEET_KEYBOARD_LABEL: &str = " keyboard ";
-
-/// The close control, which is the pane's first.
-const SHEET_CLOSE: char = '✕';
 
 /// The widest keys cell and the widest verb over a group, at one spelling.
 fn fields_of<'a>(rows: impl IntoIterator<Item = &'a Gesture>, level: usize) -> (usize, usize) {
@@ -3412,13 +3419,7 @@ impl Painter<'_> {
         // pointer.
         let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
         let control = if hovered { self.theme.bar_hover } else { lit };
-        self.put(
-            plan.close.0,
-            plan.close.1,
-            &SHEET_CLOSE.to_string(),
-            1,
-            control,
-        );
+        self.put(plan.close.0, plan.close.1, DISMISS, 1, control);
 
         match plan.shape {
             Shape::Roomy { group } => self.sheet_roomy(plan, group),
@@ -3626,6 +3627,14 @@ impl Painter<'_> {
             }
             _ => None,
         };
+        // And the note row the pointer's left side is on: only a note spends that column.
+        let edged = match self.hovered {
+            Some(Hovered::NoteEdge(y)) if y >= area.y => {
+                let offset = usize::from(y - area.y);
+                view.note_at(offset).map(|_| offset)
+            }
+            _ => None,
+        };
         // The rows carrying a note's mark, and whether the note is the anchor alone.
         // Built only for a screen that has one, so a pane with no notes allocates
         // nothing for them.
@@ -3747,6 +3756,7 @@ impl Painter<'_> {
                         state,
                         *last,
                         *faded,
+                        edged == Some(offset),
                     );
                 }
                 Row::Box { part } => {
@@ -4270,6 +4280,7 @@ impl Painter<'_> {
     ///
     /// At the content origin, so the gutter runs on unbroken above and below it,
     /// in the chrome's dim weight so it never reads as a line of the diff.
+    #[allow(clippy::too_many_arguments)]
     fn note_row(
         &mut self,
         glyphs: Rect,
@@ -4278,6 +4289,7 @@ impl Painter<'_> {
         state: &str,
         last: bool,
         faded: bool,
+        edged: bool,
     ) {
         let origin = line_origin(self.gutter);
         let room = usize::from(glyphs.width).saturating_sub(origin);
@@ -4309,7 +4321,6 @@ impl Painter<'_> {
                     ("", ""),
                     state.add_modifier(dim),
                 );
-                return;
             }
             NoteLead::Body => {
                 // Saturating, and the sides drawn last: a row narrower than the
@@ -4327,7 +4338,6 @@ impl Painter<'_> {
                 );
                 let right = x.saturating_add(room.saturating_sub(2) as u16);
                 self.put(right, glyphs.y, " │", 2, frame);
-                return;
             }
             NoteLead::Bottom => {
                 let corners = self.corners(false);
@@ -4342,39 +4352,48 @@ impl Painter<'_> {
                     ("", &word_tail(text)),
                     state.add_modifier(dim),
                 );
-                return;
             }
-            NoteLead::Bar | NoteLead::Reply | NoteLead::Blank => (),
+            NoteLead::Bar | NoteLead::Reply | NoteLead::Blank => {
+                let reply = self.theme.note_reply.add_modifier(dim);
+                let (glyph, glyph_ink) = match lead {
+                    NoteLead::Reply => (WRAPPED, reply),
+                    NoteLead::Blank => (' ', reply),
+                    _ => (NOTE_BAR, state.add_modifier(dim)),
+                };
+                // The word first, so the lead and the text are bounded by what it leaves.
+                let taken = match word {
+                    Some(word) => self.put_right(
+                        Rect {
+                            x,
+                            width: room as u16,
+                            ..glyphs
+                        },
+                        word,
+                        state.add_modifier(dim),
+                    ),
+                    None => 0,
+                };
+                let left = room.saturating_sub(taken);
+                let next = self.put(x, glyphs.y, &format!("{glyph} "), left, glyph_ink);
+                let spent = usize::from(next - x);
+                let body = match lead {
+                    NoteLead::Reply | NoteLead::Blank => reply,
+                    _ => self.theme.chrome_dim.add_modifier(dim),
+                };
+                self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), body);
+            }
         }
-
-        let reply = self.theme.note_reply.add_modifier(dim);
-        let (glyph, glyph_ink) = match lead {
-            NoteLead::Reply => (WRAPPED, reply),
-            NoteLead::Blank => (' ', reply),
-            _ => (NOTE_BAR, state.add_modifier(dim)),
-        };
-        // The word first, at the right edge, so the lead and the text are both
-        // bounded by what it leaves.
-        let taken = match word {
-            Some(word) => self.put_right(
-                Rect {
-                    x,
-                    width: room as u16,
-                    ..glyphs
-                },
-                word,
-                state.add_modifier(dim),
-            ),
-            None => 0,
-        };
-        let left = room.saturating_sub(taken);
-        let next = self.put(x, glyphs.y, &format!("{glyph} "), left, glyph_ink);
-        let spent = usize::from(next - x);
-        let body = match lead {
-            NoteLead::Reply | NoteLead::Blank => reply,
-            _ => self.theme.chrome_dim.add_modifier(dim),
-        };
-        self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), body);
+        // Over whatever the lead drew there, since the mark is what the pointer
+        // is promising and the frame beneath it is not on offer.
+        if edged {
+            self.put(
+                x,
+                glyphs.y,
+                DISMISS,
+                1,
+                self.theme.bar_hover.add_modifier(dim),
+            );
+        }
     }
 
     /// ```text

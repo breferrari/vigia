@@ -30,15 +30,34 @@ use crate::view::{Anchor, View};
 /// selection, which is B20 and B21 sharing no cell.
 #[must_use]
 pub fn press_at(view: &View, regions: Regions, event: &Event) -> Option<usize> {
-    let Event::Mouse(mouse) = event else {
-        return None;
-    };
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return None;
-    }
-    let row = regions.gutter_at(mouse.column, mouse.row)?;
+    let (column, row) = pressed(event)?;
+    let row = regions.gutter_at(column, row)?;
     let offset = usize::from(row.saturating_sub(regions.diff.top));
     view.anchor_at(offset).map(|_| offset)
+}
+
+/// The cell a left button went down on, or `None` for any other event. Both of
+/// B21's gestures begin here, and neither answers a move or a release.
+fn pressed(event: &Event) -> Option<(u16, u16)> {
+    match event {
+        Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+            Some((mouse.column, mouse.row))
+        }
+        _ => None,
+    }
+}
+
+/// The note a press on a note's left side landed on, by id, or `None` for any
+/// other event: `regions` says the pointer is in the column a note draws that
+/// side in, and `view` says whether the row is one of a note's own. A press this
+/// answers takes the note back and never begins a selection, which is B20 and
+/// B21 sharing no cell for the second time.
+#[must_use]
+pub fn edge_at(view: &View, regions: Regions, event: &Event) -> Option<String> {
+    let (column, row) = pressed(event)?;
+    let row = regions.note_edge_at(column, row)?;
+    let offset = usize::from(row.saturating_sub(regions.diff.top));
+    view.note_at(offset).map(str::to_owned)
 }
 
 /// Whether the pane leaves a content row room for the box between its two
@@ -263,6 +282,38 @@ pub enum Committed {
     Nothing,
 }
 
+/// The note `id` names as the store holds it *now*, when it is still the
+/// reader's to act on.
+///
+/// The screen a press landed on may be a frame behind the store: a resolve that
+/// landed since answers the old text and keeps its file, so both roads to a
+/// withdrawal read the note back here before they touch it. The read sits as
+/// close to its caller's write as it can, and the two are still not one act: a
+/// resolve landing between them is lost, which is the window the store's own
+/// rewrite names and no portable primitive closes.
+fn standing(store: &Store, id: &str) -> Option<Note> {
+    match store.get(id) {
+        Ok(Some(note)) if note.status != Status::Resolved => Some(note),
+        _ => None,
+    }
+}
+
+/// Take the note `id` names out of the store, which is what a press on its left
+/// side asks for. `false` where the store no longer holds a note the reader may
+/// take back, which is a race with the agent rather than a fault and says
+/// nothing.
+///
+/// # Errors
+///
+/// The store could not remove the file.
+pub fn withdraw(store: &Store, id: &str) -> Result<bool> {
+    let Some(note) = standing(store, id) else {
+        return Ok(false);
+    };
+    store.remove(&note.id)?;
+    Ok(true)
+}
+
 /// Write what the box holds: a new note under its anchor, the reopened note
 /// rewritten with the new text and its status back to open so the agent reads
 /// it again, or that note withdrawn when the box was emptied. Empty text over
@@ -274,17 +325,8 @@ pub enum Committed {
 /// keep, so nothing the reader typed is lost with it.
 pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
     let body = open.body();
-    // The screen the press landed on may be a frame behind the store: a resolve
-    // that landed since answers the old text and keeps its file, so the new text
-    // goes down beside it as a new note rather than over it. The read sits as
-    // close to the write below as it can, and the two are still not one act:
-    // a resolve landing between them is overwritten, which is the window the
-    // store's own rewrite names and no portable primitive closes.
-    let standing = open.over.as_deref().and_then(|id| match store.get(id) {
-        Ok(Some(note)) if note.status != Status::Resolved => Some(note),
-        _ => None,
-    });
-    match (standing, body.is_empty()) {
+    let held = open.over.as_deref().and_then(|id| standing(store, id));
+    match (held, body.is_empty()) {
         (Some(note), true) => {
             store.remove(&note.id)?;
             Ok(Committed::Withdrawn(note.id))

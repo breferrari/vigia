@@ -1682,6 +1682,15 @@ impl View {
             .collect()
     }
 
+    /// The note row `offset` is a row of, by id, and `None` on every other row.
+    /// Not [`Self::marked_at`], which answers for the line a note hangs under.
+    pub fn note_at(&self, offset: usize) -> Option<&str> {
+        match self.rows.get(offset)? {
+            Row::Note { id, .. } => Some(id.as_str()),
+            _ => None,
+        }
+    }
+
     /// Total the diff's rows, and how many are above this screen, the bottom
     /// clamp's `trimmed` rows counted in so this names the first row *drawn*.
     fn measure(
