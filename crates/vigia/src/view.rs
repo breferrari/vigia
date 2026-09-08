@@ -420,8 +420,8 @@ fn continues(row: &Row, above: Option<&Row>) -> bool {
     if row.is_wrap() {
         return true;
     }
-    // A note continues only itself: two notes can share a line, and the answer
-    // sits under the words inside one note, so neither field alone cuts the run.
+    // A note continues only itself, and neither field alone cuts the run: two
+    // notes share a line, and the answer sits under the words inside one note.
     let (
         Row::Note { id, lead, .. },
         Some(Row::Note {
@@ -1922,7 +1922,6 @@ impl View {
             from += 1;
         }
 
-        // Each note's two texts by id, so the emission below need not rescan `pins`.
         let texts: HashMap<&str, (&str, Option<&str>)> = pins
             .iter()
             .map(|pin| (pin.id.as_str(), (pin.body.as_str(), pin.reply.as_deref())))
@@ -2003,7 +2002,11 @@ impl View {
                         }
                         start = cut;
                     }
-                    whole.push((head, text));
+                    // A line the window skipped whole owns no row here, and an
+                    // entry at its index would answer for the note that took it.
+                    if out.len() > head {
+                        whole.push((head, text));
+                    }
                 }
                 row => {
                     if skip > 0 {
@@ -2022,9 +2025,8 @@ impl View {
                     skip -= 1;
                     continue;
                 }
-                // Recorded as a wrapped line's is, at the first row drawn. The
-                // rows hold prose broken at blanks drawn on neither side, so
-                // rejoining them spaces the note wrong in both directions.
+                // Recorded as a wrapped line's is: the rows hold prose broken at
+                // blanks drawn on neither side, so rejoining them spaces it wrong.
                 if !continues(&note_row, out.last())
                     && let Row::Note { id, lead, .. } = &note_row
                     && let Some(voice) = lead.voice()

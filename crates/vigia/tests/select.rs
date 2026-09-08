@@ -973,10 +973,15 @@ fn noted(name: &str) -> Scratch {
 /// The rows one collect produces, so a gate finds the note's own rows rather
 /// than assuming where they landed.
 fn view_rows(app: &mut App, frame: &mut Frame) -> Vec<Row> {
+    view_rows_on(app, frame, PANE)
+}
+
+/// The same, on a pane of a named size.
+fn view_rows_on(app: &mut App, frame: &mut Frame, pane: Rect) -> Vec<Row> {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    let body = body_layout(PANE, &chrome, 1, 1);
+    let body = body_layout(pane, &chrome, 1, 1);
     app.view(frame, &mut highlighter, &history, body)
         .expect("view")
         .rows
@@ -1180,5 +1185,119 @@ fn the_bar_still_counts_no_note_row() {
         rows.iter().filter(|row| !row.is_display()).count(),
         bare,
         "a note's rows joined the count the bar takes its travel from"
+    );
+}
+
+/// The widest pane that draws no enclosure. Measured rather than reasoned: the
+/// enclosure gives way to the rung below fifteen columns.
+const RUNG: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 14,
+    height: 24,
+};
+
+/// Below the width the enclosure needs, where a note has no edges to draw
+/// and its words ride the rung instead. The rows are a different shape and the
+/// status word rides the last of them, so the copy has its own way to go wrong
+/// here and no gate above reaches this width.
+#[test]
+fn a_drag_on_a_note_at_the_narrow_width_sends_it_whole() {
+    let scratch = noted("select-note-narrow");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
+
+    let rows = view_rows_on(&mut app, &mut frame, RUNG);
+    let bar = note_rows(&rows, NoteLead::Bar);
+    assert!(
+        !bar.is_empty(),
+        "the note drew no rung at this width, so this gate is not the narrow case"
+    );
+    assert!(
+        note_rows(&rows, NoteLead::Top).is_empty(),
+        "the note drew its enclosure, so this is the width the gates above cover"
+    );
+
+    for at in &bar {
+        assert_eq!(
+            sent_on(&mut app, &mut frame, (*at, *at), false, RUNG).as_deref(),
+            Some(SHORT),
+            "rung row {at} sent a piece rather than the note"
+        );
+    }
+    // The word rides the last rung row and is drawn from the note's state rather
+    // than from that row's text, so it must not travel with the words.
+    let whole = sent_on(&mut app, &mut frame, (bar[0], bar[bar.len() - 1]), false, RUNG)
+        .expect("the rung sent nothing");
+    assert_eq!(whole, SHORT, "the status word travelled with the reader's words");
+}
+
+/// A note whose line has scrolled wholly above the top edge still sends itself.
+///
+/// The window can open inside a note's rows, and with wrapping on the line above
+/// them contributes none of its own. Its whole text is recorded against the row
+/// its first drawn piece takes, and where it drew no piece at all that row is the
+/// note's, so the two would answer to the same index.
+#[test]
+fn a_drag_on_a_note_whose_wrapped_line_scrolled_off_sends_the_note() {
+    // Long enough to take several rows at this width, so skipping it whole is
+    // what puts the note's own row first.
+    let long = "    let margin = base.checked_mul(2).unwrap_or(base).saturating_add(padding).clamp(lower, upper); // tail";
+    let scratch = Scratch::new("select-note-scrolled-off");
+    scratch.write("src/watch.rs", numbered_lines(20));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/watch.rs", 17, long);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let body = "the note body, which is what a drag on any row of it has to send, however far the line above it has gone";
+    app.set_notes(vec![note("one", 18, long, body)]);
+
+    let pane = Rect {
+        x: 0,
+        y: 0,
+        width: 50,
+        height: 10,
+    };
+    // Turned on once here rather than through `sent_on`, which toggles.
+    app.apply(Action::ToggleWrap, &mut frame, pane.height as usize)
+        .expect("wrap on");
+    // Read on the way down, since at the end the line is above the window, which
+    // is the whole of what this gate is for.
+    let wrapped = (0..12).any(|_| {
+        let seen = view_rows_on(&mut app, &mut frame, pane)
+            .iter()
+            .any(Row::is_wrap);
+        app.apply(Action::Scroll(1), &mut frame, pane.height as usize)
+            .expect("down");
+        seen
+    });
+    assert!(
+        wrapped,
+        "nothing wrapped, so the branch this gate is named for is never taken"
+    );
+    app.apply(Action::Scroll(500), &mut frame, pane.height as usize)
+        .expect("scroll to the end");
+    let rows = view_rows_on(&mut app, &mut frame, pane);
+    let body_rows = note_rows(&rows, NoteLead::Body);
+    assert_eq!(
+        body_rows.first(),
+        Some(&0),
+        "the window did not open on a row of the note's body, so this is not the case"
+    );
+    assert!(
+        !rows.iter().any(|row| row.is_wrap()
+            || matches!(row, Row::Line { text, .. } if text.starts_with("    let margin"))),
+        "the line is still drawing, so it is not wholly above and the gate proves nothing"
+    );
+
+    assert_eq!(
+        sent_on(&mut app, &mut frame, (0, 0), false, pane).as_deref(),
+        Some(body),
+        "a drag on the note sent the line that had scrolled off above it"
     );
 }
