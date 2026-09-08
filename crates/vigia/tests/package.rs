@@ -11,10 +11,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 27;
+const ESCAPING_FILES: usize = 26;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-seven";
+const ESCAPING_FILES_SPELLED: &str = "twenty-six";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1809,9 +1809,9 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 392398),
-    ("REVOCATIONS.md", 6560),
-    ("ROADMAP.md", 91866),
+    ("SPEC.md", 383935),
+    ("REVOCATIONS.md", 8851),
+    ("ROADMAP.md", 92937),
     ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -1821,7 +1821,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
-const CONFIG_KEYS_SPELLED: &str = "Seven keys";
+const CONFIG_KEYS_SPELLED: &str = "Six keys";
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///
@@ -1963,7 +1963,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 ///
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
-const WRITTEN_LAYER_TOTAL: usize = 632780;
+const WRITTEN_LAYER_TOTAL: usize = 627675;
 
 /// Each document weighs no more than its budget.
 #[test]

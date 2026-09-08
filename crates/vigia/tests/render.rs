@@ -43,7 +43,7 @@ const BAR_GLYPHS: [char; 4] = ['│', '█', '▲', '▼'];
 /// The mark on the row the diff is inside.
 const CARET: &str = "▸";
 
-/// The row a pinned list starts on, on a pane with no room for the masthead.
+/// The row a pinned list starts on, under the header and the body's lead blank.
 const LIST_TOP: u16 = 2;
 
 /// Whether a cell's symbol is one of [`BAR_GLYPHS`].
@@ -178,7 +178,6 @@ fn chrome() -> Chrome {
         notice: None,
         voice: None,
         following: false,
-        masthead: true,
         rail: false,
         sheet: None,
         // The first paint's chrome: no frame has completed, so there is no p99 to draw.
@@ -221,7 +220,6 @@ fn following_chrome() -> Chrome {
         gripped: None,
         scrolling: None,
         following: true,
-        masthead: true,
         ..chrome()
     }
 }
@@ -278,7 +276,6 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -365,7 +362,6 @@ fn one_file() -> View {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -509,7 +505,6 @@ fn nothing_changed() -> View {
         read: 0,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -705,7 +700,6 @@ fn ragged_counts() -> View {
         read: 1,
         scale: Scale::spread(12),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -1625,7 +1619,6 @@ fn a_file_with_no_line_diff_says_why() {
         read: 3,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
@@ -1657,7 +1650,6 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
@@ -1694,7 +1686,6 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
@@ -1915,7 +1906,6 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
@@ -1952,7 +1942,6 @@ fn a_double_width_character_is_never_cut_in_half() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
 
@@ -2006,7 +1995,6 @@ fn the_gutter_gives_way_before_the_text_does() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
 
@@ -2081,7 +2069,6 @@ fn hostile_content_never_panics_at_any_pane_size() {
         read: 1,
         scale: Scale::flat(u32::MAX),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
 
@@ -2510,7 +2497,6 @@ fn glancing() -> View {
         read: 3,
         scale: Scale::spread(12),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -3072,7 +3058,6 @@ fn two_regions_at(current: usize, row: usize) -> View {
         read: 4,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -3458,7 +3443,6 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         read: 2,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -3470,7 +3454,7 @@ fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
     // position fills the bottom row exactly as the first fills the top.
     let width = 64u16;
     let shown = 6usize;
-    // The list's own rows, from the layout: the masthead sits above them.
+    // The list's own rows, from the layout: the header and a blank sit above them.
     let region = {
         let laid = regions(
             Rect::new(0, 0, width, 24),
@@ -4555,8 +4539,8 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         let backend = screen(width, 24, &view, &chrome());
         let buffer = backend.buffer();
 
-        // The list's first row, from the layout: row one is masthead air on
-        // any pane that affords a band, and the band draws no caret.
+        // The list's first row, from the layout: row one is the body's lead
+        // blank, which draws no caret.
         let laid = regions(Rect::new(0, 0, width, 24), &chrome(), &view);
         let row: String = (0..width)
             .map(|x| buffer[(x, laid.list.top)].symbol())
@@ -5587,140 +5571,6 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
              together at {rung} columns, which is a boundary of the margin ladder"
         );
     }
-}
-
-#[test]
-fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
-    // Monotone in height, which is the property a reader feels rather than
-    // sees: a pane dragged taller must not lose an element it had, and a
-    // threshold written as two comparisons is exactly where that breaks.
-    let width = 80u16;
-    let view = a_list_of(3, 3, 0);
-    let mut arrived: Option<u16> = None;
-
-    for height in 1..=80u16 {
-        let body = body_layout(
-            Rect::new(0, 0, width, height),
-            &chrome(),
-            view.files,
-            view.files,
-        )
-        .clamped_to(view.list.len());
-        match (arrived, body.graph > 0) {
-            (None, true) => arrived = Some(height),
-            (Some(at), false) => panic!(
-                "the band arrived at {at} rows and was gone again by {height}, so a taller pane lost an element a shorter one had"
-            ),
-            _ => {}
-        }
-    }
-
-    // The height, not merely that one exists.
-    assert_eq!(
-        arrived,
-        Some(21),
-        "the band arrived at {arrived:?} rather than where the floors add up to"
-    );
-}
-
-#[test]
-fn the_band_never_takes_the_diff_below_a_whole_hunk() {
-    // The clamp order, from the diff's side.
-    let width = 80u16;
-    for files in [1usize, 3, 6, 30] {
-        for height in 1..=80u16 {
-            let body = body_layout(Rect::new(0, 0, width, height), &chrome(), files, files);
-            if body.graph == 0 {
-                continue;
-            }
-            assert!(
-                body.diff >= 10,
-                "at {width}x{height} over {files} files the band left {} diff rows, under the whole hunk it must not take the pane below:                  {body:?}",
-                body.diff
-            );
-        }
-    }
-}
-
-#[test]
-fn an_empty_window_draws_no_band_at_all() {
-    // The track does not reach the band, and this is the gate that says so.
-    let width = 80u16;
-    let height = 24u16;
-    let view = a_list_of(3, 3, 0);
-    let backend = screen(width, height, &view, &chrome());
-    let body = body_layout(
-        Rect::new(0, 0, width, height),
-        &chrome(),
-        view.files,
-        view.files,
-    )
-    .clamped_to(view.list.len());
-    assert!(body.graph > 0, "the fixture reserved no band");
-
-    // Asked of the layout rather than counted, which is this branch's own
-    // lesson: `regions` publishes where the list starts, and everything above it
-    // is the masthead.
-    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-    let buffer = backend.buffer();
-    for y in 1..laid.list.top {
-        let drawn: String = (0..width)
-            .map(|x| buffer[(x, y)].symbol())
-            .collect::<String>()
-            .trim()
-            .to_owned();
-        assert!(
-            drawn.is_empty(),
-            "an empty window drew {drawn:?} on masthead row {y}, so the band draws furniture where it has no data"
-        );
-    }
-}
-
-#[test]
-fn hiding_the_masthead_gives_its_rows_to_the_diff() {
-    // Reported from use: *"can we add a shortcut to hide and display this thing at the
-    // top? I see it is not always needed"*.
-    let width = 80u16;
-    let height = 24u16;
-    let view = a_list_of(3, 3, 0);
-    let shown = body_layout(
-        Rect::new(0, 0, width, height),
-        &chrome(),
-        view.files,
-        view.files,
-    );
-    let hidden = body_layout(
-        Rect::new(0, 0, width, height),
-        &Chrome {
-            masthead: false,
-            ..chrome()
-        },
-        view.files,
-        view.files,
-    );
-
-    assert!(shown.graph > 0, "the fixture drew no masthead to hide");
-    assert_eq!(hidden.graph, 0, "hiding the masthead left the band drawn");
-    assert_eq!(
-        hidden.air, 0,
-        "hiding the masthead left its blank row behind"
-    );
-    // The lead blank is not the masthead's to give.
-    assert_eq!(
-        (hidden.lead, shown.lead),
-        (1, 1),
-        "the lead blank moved with the masthead, so the header lost its air"
-    );
-    assert_eq!(
-        hidden.diff,
-        shown.diff + shown.band_rows(),
-        "the masthead's rows went somewhere other than the diff"
-    );
-    assert_eq!(
-        (hidden.list, hidden.rule),
-        (shown.list, shown.rule),
-        "hiding the masthead moved the list, which is not what was asked"
-    );
 }
 
 #[test]

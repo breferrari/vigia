@@ -227,29 +227,8 @@ pub(crate) const fn line_origin(gutter: usize) -> usize {
     }
 }
 
-/// Rows the worktree churn band takes when it is drawn at all.
-const GRAPH_ROWS: usize = 2;
-
-/// Rows the band leaves blank below itself.
-const GRAPH_AIR: usize = 1;
-
 /// Rows of air the body opens with, under the header.
 const LEAD_ROWS: usize = 1;
-
-/// Rows the stacked layout spends before the band can have any: the narrowest
-/// pinned list and the rule under it.
-const LIST_FLOOR_ROWS: usize = 1 + 1;
-
-/// Diff rows the band may not take the pane below.
-const GRAPH_KEEP: usize = 10;
-
-/// The narrowest band that can draw every sample it holds.
-const GRAPH_FLOOR: usize = 8;
-
-/// Whether a pane this wide can carry the band at all.
-const fn band_fits(pane: u16) -> bool {
-    planning_width(pane, pane, 0) as usize >= GRAPH_FLOOR
-}
 
 /// The smallest body a second footer line may leave behind.
 const MIN_BODY: u16 = 2;
@@ -515,8 +494,6 @@ pub struct Chrome {
     pub voice: Option<Voice>,
     /// Whether the viewport is moving itself to what just changed.
     pub following: bool,
-    /// Whether the masthead is drawn at all, which `m` toggles.
-    pub masthead: bool,
     /// Whether the reader has asked for the pinned list beside the diff, which `r`
     /// toggles.
     pub rail: bool,
@@ -1409,10 +1386,6 @@ pub fn notice_area(area: Rect, chrome: &Chrome, view: &View) -> Option<Rect> {
 pub struct Body {
     /// Blank rows between the header and whatever the body opens with.
     pub lead: usize,
-    /// Rows the worktree churn band takes, zero when the pane cannot spare them.
-    pub graph: usize,
-    /// The blank row under the band, zero whenever the band is.
-    pub air: usize,
     /// Rows the pinned file list takes, zero when there is no room for one.
     pub list: usize,
     /// Whether the rule under the list is drawn, which is exactly when there is
@@ -1436,8 +1409,6 @@ impl Body {
     pub fn diff_only(rows: usize) -> Self {
         Self {
             lead: 0,
-            graph: 0,
-            air: 0,
             list: 0,
             rule: false,
             diff: rows,
@@ -1475,12 +1446,11 @@ impl Body {
         list_rows: usize,
         chrome: &Chrome,
     ) -> Self {
-        let masthead = chrome.masthead;
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // The rail is decided before the row clamps, because it removes two of them.
         if chrome.rail && affords_rail(area.width) && files > 0 {
-            return Self::beside(body, area.width, list_rows, masthead);
+            return Self::beside(body, list_rows);
         }
 
         // The rule costs a row and [`LEAD_ROWS`] costs another, so the diff needs
@@ -1495,15 +1465,11 @@ impl Body {
         }
         let after = body - LEAD_ROWS - list - 1;
 
-        // The band is last in the clamp order and that is the ruling.
-        let (graph, air) = Self::band_rows_of(masthead, area.width, after);
         Self {
             lead: LEAD_ROWS,
-            graph,
-            air,
             list,
             rule: true,
-            diff: after - graph - air,
+            diff: after,
             diff_width: 0,
             rail: false,
             // Attached by `body_layout`, which is the only caller with the pane.
@@ -1511,36 +1477,18 @@ impl Body {
         }
     }
 
-    /// The rows the band takes out of `after`, drawn and blank, or zero twice.
-    fn band_rows_of(masthead: bool, width: u16, after: usize) -> (usize, usize) {
-        let framed = GRAPH_ROWS + GRAPH_AIR;
-        if masthead && band_fits(width) && after >= framed + GRAPH_KEEP {
-            (GRAPH_ROWS, GRAPH_AIR)
-        } else {
-            (0, 0)
-        }
-    }
-
     /// The same body, laid out as a rail beside the diff rather than a strip
     /// above it.
-    fn beside(body: usize, width: u16, list_rows: usize, masthead: bool) -> Self {
+    fn beside(body: usize, list_rows: usize) -> Self {
         // The rail is drawn only where a list would have been drawn at all, and that is
         // [`Body::split`]'s own `affordable` test rather than a floor of this layout's
         // own.
         if body <= LEAD_ROWS + usize::from(MIN_BODY) + 1 {
             return Self::diff_only(body);
         }
-        let after = body - LEAD_ROWS;
-
-        // The same question [`Body::split`] asks, asked through the same function and
-        // against the rows that layout would have left.
-        let (graph, air) =
-            Self::band_rows_of(masthead, width, after.saturating_sub(LIST_FLOOR_ROWS));
-        let rows = after - graph - air;
+        let rows = body - LEAD_ROWS;
         Self {
             lead: LEAD_ROWS,
-            graph,
-            air,
             // `list_rows` rather than `files`, for the reason [`Body::split`]'s stacked
             // branch takes it: a grouped list draws a separator per run and a region
             // sized from the files alone is short by exactly those rows, so the last
@@ -1558,22 +1506,12 @@ impl Body {
         }
     }
 
-    /// Every row the band occupies, drawn and blank together.
-    pub fn band_rows(&self) -> usize {
-        self.graph + self.air
-    }
-
-    /// Every row between the header and the list.
-    pub fn above_list(&self) -> usize {
-        self.lead + self.band_rows()
-    }
-
     /// Every row the body holds, across every region it has.
     pub fn rows(&self) -> usize {
         if self.rail {
-            return self.above_list() + self.diff;
+            return self.lead + self.diff;
         }
-        self.above_list() + self.list + usize::from(self.rule) + self.diff
+        self.lead + self.list + usize::from(self.rule) + self.diff
     }
 
     /// Shrink the list to the rows a view actually carries, giving the rest back
@@ -1596,25 +1534,18 @@ impl Body {
             };
         }
         let list = self.list.min(have);
-        // The band and the lead blank go with the list, for `Body::split`'s
-        // own reason: the three are one region saying what the worktree is doing,
-        // and a stale view with no entries draws B3's sentence rather than a graph
-        // over blank rows under a blank row.
-        let (lead, graph, air) = if list > 0 {
-            (self.lead, self.graph, self.air)
-        } else {
-            (0, 0, 0)
-        };
+        // The lead blank goes with the list, for `Body::split`'s own reason: the two
+        // are one region saying what the worktree is doing, and a stale view with no
+        // entries draws B3's sentence rather than a blank row over nothing.
+        let lead = if list > 0 { self.lead } else { 0 };
         // The diff takes what is left of the body, rather than a give-back term per
         // field.
         let rule = list > 0;
         Self {
             lead,
-            graph,
-            air,
             list,
             rule,
-            diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
+            diff: self.rows() - (lead + list + usize::from(rule)),
             // Carried, for [`Body::sheet_pages`]' reason two fields down.
             diff_width: self.diff_width,
             rail: false,
@@ -1629,8 +1560,6 @@ impl Body {
 /// Where each part of the body sits inside a pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Areas {
-    /// The worktree churn band, empty when the pane cannot spare it.
-    pub band: Rect,
     /// The pinned file list, empty when there is no room for one.
     pub list: Rect,
     /// The rule under the list, empty when there is no list to put it under.
@@ -1658,36 +1587,30 @@ impl Body {
 
         // The header's row, then the lead blank.
         let top = area.y.saturating_add(1);
-        let band = Rect {
-            y: top.saturating_add(self.lead as u16),
-            height: self.graph as u16,
-            ..area
-        };
-        let under_band = top.saturating_add(self.above_list() as u16);
+        let under_lead = top.saturating_add(self.lead as u16);
 
         // The rail, where the two regions share a `y` range and differ in `x`.
         if self.rail {
             let columns = rail_of(area.width);
             let list = Rect {
-                y: under_band,
+                y: under_lead,
                 height: self.list as u16,
                 width: columns.min(area.width),
                 ..area
             };
             let diff = Rect {
                 x: area.x.saturating_add(list.width),
-                y: under_band,
+                y: under_lead,
                 width: area.width.saturating_sub(list.width),
                 height: self.diff as u16,
             };
             return Areas {
-                band,
                 list,
                 // Zero height *and* zero width, so a consumer that asks either question
                 // gets the same answer.
                 rule: Rect {
                     x: area.x,
-                    y: under_band,
+                    y: under_lead,
                     width: 0,
                     height: 0,
                 },
@@ -1696,7 +1619,7 @@ impl Body {
         }
 
         let list = Rect {
-            y: under_band,
+            y: under_lead,
             height: self.list as u16,
             ..area
         };
@@ -1710,12 +1633,7 @@ impl Body {
             height: self.diff as u16,
             ..area
         };
-        Areas {
-            band,
-            list,
-            rule,
-            diff,
-        }
+        Areas { list, rule, diff }
     }
 }
 
@@ -1988,10 +1906,6 @@ pub fn render(
     // declined to draw.
     let (list_bars, diff_bars) = areas.bars();
 
-    if areas.band.height > 0 {
-        painter.band(areas.band, view);
-    }
-
     if body.list > 0 {
         let region = areas.list;
         // Counted in files, which is exactly what this region shows.
@@ -2075,7 +1989,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 17] = [
+const KEYBOARD: [Gesture; 16] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2109,10 +2023,6 @@ const KEYBOARD: [Gesture; 17] = [
     Gesture {
         keys: ["f", "f"],
         verb: ["follow the newest change", "follow the newest"],
-    },
-    Gesture {
-        keys: ["m", "m"],
-        verb: ["show or hide the churn band", "the churn band"],
     },
     Gesture {
         keys: ["r", "r"],
@@ -2166,8 +2076,7 @@ const KEYBOARD: [Gesture; 17] = [
 /// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
 /// pressed is the moment they are on screen. They are also the widest keys cell a
 /// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
-const DROP_ORDER: [usize; KEYBOARD.len()] =
-    [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 9, 10, 12, 11, 7, 8, 15];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [15, 13, 0, 1, 2, 3, 4, 5, 6, 12, 8, 9, 11, 10, 7, 14];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2277,11 +2186,11 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 13 },
+        rows: Rows::Keyboard { from: 7, to: 12 },
     },
     Section {
         label: "notes",
-        rows: Rows::Keyboard { from: 13, to: 15 },
+        rows: Rows::Keyboard { from: 12, to: 14 },
     },
     Section {
         label: "mouse",
@@ -2289,7 +2198,7 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 15, to: 17 },
+        rows: Rows::Keyboard { from: 14, to: 16 },
     },
 ];
 
@@ -2342,7 +2251,7 @@ const ROOMY_HEADING_INSET: usize = 2;
 /// Blank columns between a roomy row's keys cell and its verb.
 const ROOMY_GAP: usize = 8;
 
-/// Keyboard rows the ladder may never drop: `f`, `m` and `?`.
+/// Keyboard rows the ladder may never drop: `a`, `f` and `?`.
 const SHEET_KEEP: usize = 3;
 // It names two things and only one of them is a keep-set.
 
@@ -3100,91 +3009,6 @@ impl Painter<'_> {
         }
     }
 
-    /// Draw the worktree churn band, `SPEC.md` §11.1's masthead.
-    fn band(&mut self, area: Rect, view: &View) {
-        // The precondition, checked rather than assumed: `Body::split` owns
-        // this decision and hands down zero rows when it says no, so reaching
-        // here on a pane too narrow would mean the two had come apart.
-        debug_assert!(
-            band_fits(area.width),
-            "the band was given {} columns, under the floor the layout applies",
-            area.width
-        );
-        if !band_fits(area.width) || area.height == 0 {
-            return;
-        }
-        let left_edge = area.x.saturating_add(self.inset);
-        let width = usize::from(planning_width(area.width, area.width, 0));
-
-        // One value per sub-column, and a zero draws the baseline, which is the settled
-        // answer to this exact signal
-        // ([#232](https://github.com/breferrari/vigia/issues/232)).
-        let rung = self.glyphs;
-        let density = rung.density();
-        // The pane can ask for more sub-columns than the window holds samples, and then
-        // values repeat rather than run out.
-        let slots = width * density;
-        // The level, not the events. `assets/preview.svg` draws this as a wave and a
-        // write is a point event, so the raw series is zero almost everywhere and an
-        // area chart of it is a spike train.
-        let series = view.worktree_churn.levels(slots);
-
-        // `Churn::scale_at`, the same rule the sparkline divides by. It lived here
-        // while the band was the only element that had it, which is exactly how the
-        // sparkline was left dividing by a maximum over the same byte samples.
-        let scale = view.worktree_churn.scale_at(slots);
-        // No data, no axis, which is what keeps the reported defect fixed while the
-        // axis exists at all.
-        if scale == 0 {
-            return;
-        }
-        let rows = usize::from(area.height);
-        // Levels one row carries. The block ramp gives eight, a 2x4 cell gives
-        // its dot rows less the baseline, and [`Glyphs::glyph`] already spells
-        // both, floor included: level zero is the axis rather than nothing.
-        let levels = rung.levels();
-        // The ramp's top row index, invariant across every cell and row of
-        // this band rather than recomputed inside both loops.
-        let top = rows.saturating_sub(1).max(1);
-
-        for cell in 0..width {
-            // A dense cell carries two sub-columns, left older than right, which is
-            // `Glyphs::glyph`'s own order and the sparkline's. At the block rung the
-            // density is one and the right half is never read.
-            let at = |sub: usize| series[cell * density + sub];
-            let (older, newer) = (at(0), at(density - 1));
-            let full = |total: u32| level_to(total, scale, rows * levels);
-            let (left, right) = (full(older), full(newer));
-            // Against the same denominator the heights are scaled from, so
-            // colour and shape say one thing at one scale.
-            let band = Band::of(older.max(newer), scale);
-            for row in 0..rows {
-                // Drawn bottom up, so `row` counts from the baseline and the
-                // buffer's `y` counts down from the top.
-                let y = area.y + (rows - 1 - row) as u16;
-                let fill = |level: usize| level.saturating_sub(row * levels).min(levels);
-                let (low, high) = (fill(left), fill(right));
-                // Sky above the bar is left alone; the baseline row is not. A graph's
-                // empty upper rows are background, and painting them would draw a solid
-                // block the height of the band on every column.
-                if row > 0 && low == 0 && high == 0 {
-                    continue;
-                }
-                let glyph = rung.glyph(low, high);
-                let x = left_edge.saturating_add(cell as u16);
-                // Multi-row graphs colour per row against the vertical axis, btop's own
-                // rule: the baseline draws the quiet stop and the top row the hot one,
-                // one style per row, so the graph reads hotter as it climbs while
-                // costing one lookup.
-                let mut ink = self.theme.spark_at(band);
-                if let Some(ramp) = self.spark_ramp.as_ref() {
-                    ink = ink.fg(ramp[(row * 7 / top).min(7)]);
-                }
-                self.bar_cell(x, y, glyph, ink);
-            }
-        }
-    }
-
     /// Draw the pinned file list, `SPEC.md` §11.1's upper region.
     fn list(&mut self, area: Rect, available: u16, view: &View, pane: u16) {
         // Against this region's full width rather than the rect it was handed: `area`
@@ -3668,7 +3492,7 @@ impl Painter<'_> {
         );
     }
 
-    /// Draw the body: the masthead, the pinned list, the rule and the diff.
+    /// Draw the body: the pinned list, the rule and the diff.
     fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect, empty: &str) {
         // Two rects, because this region draws both roles.
         let washed = full.width;
@@ -5097,7 +4921,7 @@ mod sheet_tables {
             .collect();
         assert_eq!(
             kept,
-            vec!["f", "m", "?  Esc"],
+            vec!["a", "f", "?  Esc"],
             "the rows the ladder keeps longest are not the three §11.1 names"
         );
     }
@@ -5192,9 +5016,9 @@ mod sheet_tables {
         }
     }
     #[test]
-    fn the_rows_given_up_before_the_keep_set_are_the_rail_then_the_pin() {
+    fn the_rows_given_up_before_the_keep_set_are_the_notes_then_the_rail() {
         // Addressed by the cell it draws, not by its index.
-        const EXPECTED: [&str; 4] = ["r", "s", "w", "a"];
+        const EXPECTED: [&str; 4] = ["c", "r", "s", "w"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
@@ -5203,7 +5027,7 @@ mod sheet_tables {
         assert_eq!(
             outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail, then the pin, then the wrap, then the staged run, so a pane at \
+             note rows, then the rail, then the pin, then the wrap, so a pane at \
              the floor is spending it on a gesture that could have fired there"
         );
     }

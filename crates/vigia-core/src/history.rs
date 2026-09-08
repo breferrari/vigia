@@ -100,10 +100,6 @@ pub struct HistoryStats {
     pub repeaks: u64,
 }
 
-/// Every tracked path's churn added together, oldest sample first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Churn(pub [u32; HISTORY_SAMPLES]);
-
 /// How far a write's weight is spread when the series is read as a level.
 pub const HISTORY_LEVEL: Duration = Duration::from_secs(6);
 
@@ -112,7 +108,7 @@ const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_n
 
 /// How far from a write a level may reach, in samples. Without it the rounding in
 /// [`levelled`] is what ends a level, so a write's drawn width reports its size
-/// rather than when it landed. `SPEC.md` §11.1 carries the sweep and the band.
+/// rather than when it landed.
 const LEVEL_REACH: usize = 3 * (HISTORY_LEVEL.as_nanos() / HISTORY_SAMPLE.as_nanos()) as usize;
 
 const _: () = assert!(
@@ -190,76 +186,6 @@ fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
     out
 }
 
-impl Default for Churn {
-    fn default() -> Self {
-        Self([0; HISTORY_SAMPLES])
-    }
-}
-
-impl Churn {
-    /// The series re-projected onto `width` columns, oldest first.
-    pub fn projected(&self, width: usize) -> Vec<u32> {
-        if width == 0 {
-            return Vec::new();
-        }
-        // Every column covers the same span, counted in one width-th of a sample
-        // so the boundaries are exact: taking whole samples gave neighbours one
-        // and two, so a signal that never moved drew as a comb.
-        (0..width)
-            .map(|column| {
-                let (from, to) = (column * HISTORY_SAMPLES, (column + 1) * HISTORY_SAMPLES);
-                let covered = self.0[..]
-                    .iter()
-                    .enumerate()
-                    .take(to.div_ceil(width))
-                    .skip(from / width)
-                    .fold(0u64, |covered, (at, sample)| {
-                        let (lower, upper) = ((at * width).max(from), ((at + 1) * width).min(to));
-                        covered
-                            .saturating_add(u64::from(*sample) * upper.saturating_sub(lower) as u64)
-                    });
-                // One is the floor wherever a column overlaps a write, which is
-                // [`levelled`]'s own rule one layer down: a column narrower than a
-                // sample holds a fraction of it, so flooring rounds the small end of
-                // a level away and puts the write's magnitude back into its width.
-                let value = covered / width as u64;
-                if value == 0 && covered > 0 {
-                    1
-                } else {
-                    u32::try_from(value).unwrap_or(u32::MAX)
-                }
-            })
-            .collect()
-    }
-
-    /// The series read as a level, re-projected onto `width` columns.
-    pub fn levels(&self, width: usize) -> Vec<u32> {
-        Churn(levelled(&self.0)).projected(width)
-    }
-
-    /// What [`Self::levels`] at this width is measured against.
-    pub fn scale_at(&self, width: usize) -> u32 {
-        let levelled = levelled(&self.0);
-        let mut busy: Vec<u32> = levelled.iter().copied().filter(|v| *v > 0).collect();
-        let Some(cut) = outlier_cut(&mut busy) else {
-            return 0;
-        };
-        let kept = Churn(std::array::from_fn(|at| {
-            let sample = levelled[at];
-            if u64::from(sample) <= cut { sample } else { 0 }
-        }));
-        let (sum, count) = kept
-            .projected(width)
-            .into_iter()
-            .map(u64::from)
-            .filter(|column| *column > 0)
-            .fold((0u64, 0u64), |(sum, count), column| {
-                (sum + column, count + 1)
-            });
-        scale_from(sum, count)
-    }
-}
-
 /// What a churn height is measured against: above the ordinary write, not at the
 /// largest one, and not dragged up by a burst either.
 pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
@@ -297,7 +223,6 @@ fn outlier_cut(busy: &mut [u32]) -> Option<u64> {
 /// Thirteen tenths of the mean of what the cut kept.
 fn scale_from(sum: u64, kept: u64) -> u32 {
     if kept == 0 {
-        // Nothing to average.
         return 0;
     }
     // Thirteen tenths: above the mean, so an ordinary write does not sit at the
@@ -356,9 +281,7 @@ impl Track {
         bucketed(&self.samples)
     }
 
-    /// [`Track::drawn`] read as a level rather than as the writes that made
-    /// it. See [`levelled`] for the kernel and [`HISTORY_LEVEL`] for its
-    /// constant.
+    /// [`Track::drawn`] read as a level rather than as the writes that made it.
     fn levelled(&self) -> [u32; HISTORY_BUCKETS] {
         bucketed(&levelled(&self.samples))
     }
@@ -428,9 +351,6 @@ pub struct History {
     /// The non-empty members of [`Self::scratch`], which is the population the
     /// median is taken over.
     busy: Vec<u32>,
-    /// Every tracked path added together, kept current by the walk that finds
-    /// the peak. See [`History::worktree_churn`].
-    worktree: Churn,
     stats: HistoryStats,
 }
 
@@ -449,7 +369,6 @@ impl History {
             scales: [0; SPARK_GROUPS.len()],
             scratch: Vec::new(),
             busy: Vec::new(),
-            worktree: Churn::default(),
             stats: HistoryStats::default(),
         }
     }
@@ -527,8 +446,6 @@ impl History {
     /// Which rung of the recency ladder this path is on.
     pub fn recency(&self, path: &str) -> Recency {
         match self.tracks.get(path) {
-            // `self.tick` is zero until something is recorded and no track can exist
-            // before then, so this never reads a pulse out of an empty store.
             Some(track)
                 if track.named_by(self.tick)
                     && track.samples[HISTORY_SAMPLES - PULSE_SAMPLES..]
@@ -579,7 +496,7 @@ impl History {
             self.stats.evicted_by_window += self.tracks.len() as u64;
             self.tracks.clear();
             self.opened = now;
-            // `repeak` owns both derived fields, so neither is zeroed here.
+            // `repeak` owns `scales`, so it is not zeroed here.
             return steps;
         }
 
@@ -626,22 +543,8 @@ impl History {
         Some((self.opened + HISTORY_SAMPLE).saturating_duration_since(now))
     }
 
-    /// Every tracked path's churn added together, oldest sample first.
-    pub fn worktree_churn(&self) -> Churn {
-        self.worktree
-    }
-
-    /// Recompute the busiest source bucket and the worktree series, in one walk.
+    /// Recompute what every sparkline rung divides by, in one walk.
     fn repeak(&mut self) {
-        let mut worktree = [0u32; HISTORY_SAMPLES];
-        for track in self.tracks.values() {
-            for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
-                // Saturating, like every other add on this path: a sample is a `u32`
-                // of bytes, so two large writes in one second would otherwise panic in
-                // debug and wrap in release.
-                *total = total.saturating_add(count);
-            }
-        }
         // Collected rather than streamed.
         self.scratch.clear();
         self.scratch
@@ -660,7 +563,6 @@ impl History {
             // Nothing tracked, or a window that holds only empties. Every figure
             // is zero, which every caller reads as "no scale yet".
             self.scales = [0; SPARK_GROUPS.len()];
-            self.worktree = Churn(worktree);
             return;
         };
         let mut parts = [(0u64, 0u64); SPARK_GROUPS.len()];
@@ -681,7 +583,6 @@ impl History {
             }
         }
         self.scales = std::array::from_fn(|at| scale_from(parts[at].0, parts[at].1));
-        self.worktree = Churn(worktree);
     }
 }
 
@@ -921,5 +822,41 @@ mod tests {
 
         history.record(std::iter::empty(), now + HISTORY_BUCKET);
         assert_eq!(history.churn("a").unwrap()[HISTORY_BUCKETS - 2], 1);
+    }
+
+    /// A level reaches equally either side of the write it came from.
+    ///
+    /// Here rather than beside the store's other gates, because a bucket is five
+    /// samples and the reach is eighteen: a kernel leaning by up to four samples
+    /// lights the same buckets as a symmetric one, so the skew is invisible to
+    /// every gate that reads [`History::level`].
+    #[test]
+    fn a_levels_reach_is_the_same_either_side_of_the_write() {
+        // Six orders of magnitude, because a kernel whose reach follows the
+        // write's size is symmetric at any single size.
+        for bytes in [1u32, 100, 9_000, 127_000, 5_000_000] {
+            let at = HISTORY_SAMPLES / 2;
+            let mut samples = [0u32; HISTORY_SAMPLES];
+            samples[at] = bytes;
+            let levels = levelled(&samples);
+            let lit: Vec<usize> = levels
+                .iter()
+                .enumerate()
+                .filter(|(_, level)| **level > 0)
+                .map(|(sample, _)| sample)
+                .collect();
+            let (back, forward) = (at - lit[0], lit[lit.len() - 1] - at);
+            assert_eq!(
+                back, forward,
+                "a write of {bytes} bytes reaches {back} samples back and \
+                 {forward} forward, so the kernel is bounded on one side: \
+                 {levels:?}"
+            );
+            assert!(
+                back > 0,
+                "a write of {bytes} bytes lit only its own sample, so there is \
+                 no reach to be symmetric about"
+            );
+        }
     }
 }

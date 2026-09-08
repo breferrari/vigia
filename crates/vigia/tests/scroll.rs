@@ -654,7 +654,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 19;
+const VARIANTS: usize = 18;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -668,19 +668,18 @@ fn tag(action: Action) -> usize {
         Action::Top => 6,
         Action::Bottom => 7,
         Action::ToggleFollow => 8,
-        Action::ToggleMasthead => 9,
-        Action::ToggleRail => 10,
-        Action::ToggleSingle => 11,
+        Action::ToggleRail => 9,
+        Action::ToggleSingle => 10,
         Action::ToggleStaged => 111,
         Action::ToggleWrap => 112,
         Action::ToggleNotes => 113,
-        Action::ToggleSheet => 12,
-        Action::CloseSheet => 13,
-        Action::ListTo(_) => 14,
-        Action::ListRow(_) => 15,
-        Action::DiffTo(_) => 16,
-        Action::Redraw => 17,
-        Action::Escape => 18,
+        Action::ToggleSheet => 11,
+        Action::CloseSheet => 12,
+        Action::ListTo(_) => 13,
+        Action::ListRow(_) => 14,
+        Action::DiffTo(_) => 15,
+        Action::Redraw => 16,
+        Action::Escape => 17,
     }
 }
 
@@ -713,7 +712,6 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::Top,
         Action::Bottom,
         Action::ToggleFollow,
-        Action::ToggleMasthead,
         Action::ToggleRail,
         // The pin itself, which moves no viewport and so must not be told a
         // height.

@@ -308,7 +308,6 @@ fn chrome() -> Chrome {
         notice: None,
         voice: None,
         following: false,
-        masthead: true,
         rail: false,
         sheet: None,
         // Absent in the base fixture, so every sweep that inherits it keeps measuring
@@ -338,7 +337,6 @@ fn following() -> Chrome {
         gripped: None,
         scrolling: None,
         following: true,
-        masthead: true,
         ..chrome()
     }
 }
@@ -501,7 +499,6 @@ fn every_row_kind() -> View {
         read: 3,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         // The added line carries the note's mark, so every sweep draws a marked
         // number beside the note rows.
         notes: Noted {
@@ -628,7 +625,6 @@ fn awkward() -> View {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -651,7 +647,6 @@ fn empty() -> View {
         read: 0,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -680,7 +675,6 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -753,7 +747,6 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
                 gripped: None,
                 scrolling: None,
                 following: true,
-                masthead: true,
                 ..on_a_branch()
             },
         ),
@@ -923,7 +916,6 @@ fn glancing() -> View {
         read: 3,
         scale: Scale::spread(12),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -1315,8 +1307,8 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 /// The body's parts tile the pane: no gap, no overlap, nothing outside it.
 #[test]
 fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
-    // A view that carries a list, because `clamped_to` gives the band and the lead
-    // blank back whenever the list has no entries.
+    // A view that carries a list, because `clamped_to` gives the lead blank back
+    // whenever the list has no entries.
     let view = pinned_and_streamed();
     // Railed, because this gate is about tiling and the rail is one of the two shapes
     // the body tiles in.
@@ -1324,7 +1316,6 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
         rail: true,
         ..chrome()
     };
-    let mut saw_band = false;
     let mut saw_rule = false;
     let mut saw_rail = false;
 
@@ -1338,7 +1329,6 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
                 body_layout(area, &chrome, view.files, view.files).clamped_to(view.list.len());
             let areas = body.areas(area);
             let drawn: Vec<(&str, Rect)> = [
-                ("band", areas.band),
                 ("list", areas.list),
                 ("rule", areas.rule),
                 ("diff", areas.diff),
@@ -1346,7 +1336,6 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
             .into_iter()
             .filter(|(_, rect)| rect.height > 0 && rect.width > 0)
             .collect();
-            saw_band |= areas.band.height > 0;
             saw_rule |= areas.rule.height > 0;
             saw_rail |= body.rail;
 
@@ -1434,12 +1423,12 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
         }
     }
 
-    // Or the sweep never reached a pane with a masthead or a rule on it, and the
-    // overlap rule above is being asserted about two rectangles.
+    // Or the sweep never reached a pane with a rule on it, and the overlap rule
+    // above is being asserted about two rectangles.
     assert!(
-        saw_band && saw_rule && saw_rail,
-        "the sweep drew a band at some size = {saw_band}, a rule = {saw_rule} and \
-         a rail = {saw_rail}, so it did not cover the parts it is about"
+        saw_rule && saw_rail,
+        "the sweep drew a rule at some size = {saw_rule} and a rail = \
+         {saw_rail}, so it did not cover the parts it is about"
     );
 }
 
@@ -2346,7 +2335,6 @@ fn a_label_cut_at_the_right_edge_says_so() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
     let long_name = Chrome {
@@ -2475,7 +2463,6 @@ fn a_clipped_content_line_says_it_continues() {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     };
 
@@ -2667,7 +2654,7 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
              sweep is not reading a full region"
         );
 
-        // Skipped past the masthead as well as the header, which sits between them.
+        // Skipped past the header and the body's lead blank under it.
         let split = body_layout(
             Rect::new(0, 0, width, tall),
             &chrome,
@@ -3100,7 +3087,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         let bare = rows_at(width, 24, &without_bar, &chrome());
 
         // Where each side's list actually starts, asked of the layout per side because
-        // the two differ in file count and the masthead is decided from the same split.
+        // the two differ in file count and the list's depth follows it.
         let first = |files: usize| {
             let split =
                 body_layout(Rect::new(0, 0, width, 24), &chrome(), files, files).clamped_to(3);
@@ -3479,7 +3466,6 @@ fn overlong(rows: usize) -> View {
         read: 1,
         scale: Scale::flat(0),
         gutter: None,
-        worktree_churn: Default::default(),
         notes: Default::default(),
     }
 }
@@ -3617,7 +3603,7 @@ fn path_column(row: &str) -> Option<usize> {
 
 /// The row a pinned list starts on, given its layout.
 fn list_top(split: &Body) -> usize {
-    1 + split.above_list()
+    1 + split.lead
 }
 
 /// Where each region's first file row is drawn, on a pane that draws both.
@@ -3872,70 +3858,6 @@ fn the_body_opens_with_one_blank_row_under_the_header() {
         separated > 0 && joined > 0,
         "the sweep saw {separated} screens with a list and {joined} without, so \
          it never exercised both sides of the rule"
-    );
-}
-
-/// What the whole of the separator's design rests on, and what no snapshot in
-/// this repository states.
-#[test]
-fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
-    /// Rows a band pane keeps between the header and the list: two of band with a
-    /// blank either side. Restated rather than imported, and it is the number
-    /// that shipped before the header had a separator at all.
-    const BAND_AND_AIR: usize = 4;
-
-    let view = pinned_and_streamed();
-    let with = Chrome {
-        masthead: true,
-        ..chrome()
-    };
-    let without = Chrome {
-        masthead: false,
-        ..chrome()
-    };
-    let mut banded = 0usize;
-
-    for height in 2..=40u16 {
-        for width in [40u16, 64, 80, 120] {
-            let area = Rect::new(0, 0, width, height);
-            let shown =
-                body_layout(area, &with, view.files, view.files).clamped_to(view.list.len());
-            if shown.graph == 0 {
-                continue;
-            }
-
-            assert_eq!(
-                shown.above_list(),
-                BAND_AND_AIR,
-                "at {width}x{height} a band pane keeps {} rows between its header \
-                 and its list rather than the {BAND_AND_AIR} it kept before the \
-                 header gained a separator, so the band grew a row nobody asked \
-                 it for",
-                shown.above_list()
-            );
-            assert_eq!(
-                shown.lead, 1,
-                "at {width}x{height} the band swallowed the header's own blank, \
-                 so hiding the band would put the header back against the list"
-            );
-
-            // And the trade is one-directional: hiding the band gives back the band and
-            // its own air, never the lead.
-            let hidden =
-                body_layout(area, &without, view.files, view.files).clamped_to(view.list.len());
-            assert_eq!(
-                hidden.lead, shown.lead,
-                "at {width}x{height} turning the masthead off took the header's \
-                 separator with it"
-            );
-
-            banded += 1;
-        }
-    }
-
-    assert!(
-        banded > 0,
-        "no pane in the sweep drew a band, so this gate asserts nothing"
     );
 }
 

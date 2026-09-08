@@ -527,8 +527,9 @@ fn the_band_follows_the_rung_the_pane_detects() {
                 Glyphs::Block => 8,
                 Glyphs::Braille | Glyphs::Octant => 6,
             },
-            "{pane:?} changed what a cell carries, so the band's own gates in \
-             masthead.rs need re-deriving rather than this one relaxing"
+            "{pane:?} changed what a cell carries, so every sparkline gate that \
+             derives a ceiling from it needs re-deriving rather than this one \
+             relaxing"
         );
     }
 }

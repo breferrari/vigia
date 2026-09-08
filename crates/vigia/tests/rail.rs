@@ -364,11 +364,6 @@ fn the_two_regions_are_two_regions() {
         (0, 0),
         "a rule was drawn between regions that are side by side"
     );
-    assert_eq!(
-        areas.band.width, area.width,
-        "the band stopped following the pane once the regions split"
-    );
-
     // A view tall enough to overflow neither region reports no bar, so the two
     // assertions below are about a drawn bar rather than a field that is always
     // `Some`. `beside` holds three files and three rows against a pane of TALL.
@@ -552,81 +547,50 @@ fn a_hover_in_the_rail_does_not_light_the_diff() {
 fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     let arrives = first_rail();
     let mut heights = 0usize;
-    let mut banded = 0usize;
+    let chrome = chrome();
 
-    // Both masthead settings, every file count that changes the answer, and every
-    // height to two hundred rows.
-    for masthead in [false, true] {
-        let chrome = Chrome {
-            masthead,
-            ..chrome()
-        };
-        for files in [0usize, 1, 2, 3, 5, 6, 7, 12, 40, 200, 5000] {
-            for height in 1..=200u16 {
-                let stacked =
-                    body_layout(Rect::new(0, 0, arrives - 1, height), &chrome, files, files);
-                let rail = body_layout(Rect::new(0, 0, arrives, height), &chrome, files, files);
-                assert!(
-                    !stacked.rail,
-                    "the width below the arrival already draws a rail at {height} rows"
-                );
-                assert!(
-                    rail.diff >= stacked.diff,
-                    "with masthead {masthead} over {files} files at {height} rows, \
-                     widening from {} to {arrives} columns took the diff from {} \
-                     rows to {}",
-                    arrives - 1,
-                    stacked.diff,
-                    rail.diff
-                );
+    // Every file count that changes the answer, and every height to two hundred
+    // rows.
+    for files in [0usize, 1, 2, 3, 5, 6, 7, 12, 40, 200, 5000] {
+        for height in 1..=200u16 {
+            let stacked = body_layout(Rect::new(0, 0, arrives - 1, height), &chrome, files, files);
+            let rail = body_layout(Rect::new(0, 0, arrives, height), &chrome, files, files);
+            assert!(
+                !stacked.rail,
+                "the width below the arrival already draws a rail at {height} rows"
+            );
+            assert!(
+                rail.diff >= stacked.diff,
+                "over {files} files at {height} rows, widening from {} to \
+                 {arrives} columns took the diff from {} rows to {}",
+                arrives - 1,
+                stacked.diff,
+                rail.diff
+            );
 
-                // The map's own crossing, which nothing asserted until the exhaustive
-                // sweep went looking for it.
-                assert!(
-                    rail.list >= stacked.list,
-                    "with masthead {masthead} over {files} files at {height} rows, \
-                     widening from {} to {arrives} columns took the map from {} \
-                     rows to {}",
-                    arrives - 1,
-                    stacked.list,
-                    rail.list
-                );
+            // The map's own crossing, which nothing asserted until the exhaustive
+            // sweep went looking for it.
+            assert!(
+                rail.list >= stacked.list,
+                "over {files} files at {height} rows, widening from {} to \
+                 {arrives} columns took the map from {} rows to {}",
+                arrives - 1,
+                stacked.list,
+                rail.list
+            );
 
-                // And the same failure mirrored.
-                assert!(
-                    !(stacked.graph > 0 && rail.rail && rail.graph == 0),
-                    "with masthead {masthead} over {files} files at {height} rows, \
-                     the stacked layout draws a band and the rail one column wider \
-                     does not, so narrowing the pane would gain one"
-                );
-
-                if rail.rail {
-                    heights += 1;
-                }
-                if rail.graph > 0 || stacked.graph > 0 {
-                    banded += 1;
-                }
+            if rail.rail {
+                heights += 1;
             }
         }
     }
 
-    // Or the sweep never drew a band and the axis this gate was widened for was
-    // never reached.
-    assert!(
-        banded > 20,
-        "a band was drawn at {banded} of the sizes swept, too few for the \
-         masthead axis to be under test"
-    );
-
-    let bare = Chrome {
-        masthead: false,
-        ..chrome()
-    };
+    let bare = chrome;
 
     // Or the crossing was never drawn as a rail and every comparison above was
     // between two stacked layouts.
     assert!(
-        heights > 1000,
+        heights > 500,
         "the arrival width drew a rail at {heights} of the sizes swept, which is \
          too few to be about the boundary"
     );
@@ -651,18 +615,11 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     }
 }
 
-/// The rail deepens with the pane and falls only where the band arrives.
+/// The rail deepens with the pane and never shallows.
 #[test]
 fn the_rail_is_monotone_in_pane_height() {
     let width = first_rail();
-    let bare = Chrome {
-        masthead: false,
-        ..chrome()
-    };
-    let shown = Chrome {
-        masthead: true,
-        ..chrome()
-    };
+    let bare = chrome();
     // More files than any height in the sweep can draw, so the pane is always the
     // thing deciding and never the changed-file count.
     let files = 500;
@@ -672,49 +629,16 @@ fn the_rail_is_monotone_in_pane_height() {
         let body = body_layout(Rect::new(0, 0, width, height), &bare, files, files);
         assert!(
             body.list >= previous,
-            "with no masthead, a pane grown to {height} rows drew {} files where \
-             the row below drew {previous}",
+            "a pane grown to {height} rows drew {} files where the row below \
+             drew {previous}",
             body.list
         );
         previous = body.list;
     }
     assert!(
         previous > 60,
-        "the masthead-off sweep topped out at {previous} files, so it never \
-         reached the depths this layout is for"
-    );
-
-    let (mut previous, mut falls) = (0usize, 0usize);
-    let mut band_rows = 0usize;
-    for height in 1..=80u16 {
-        let body = body_layout(Rect::new(0, 0, width, height), &shown, files, files);
-        if body.list < previous {
-            falls += 1;
-            let took = body.graph + body.air;
-            assert!(
-                took > 0 && previous - body.list <= took,
-                "with the masthead on, a pane grown to {height} rows drew {} files \
-                 where the row below drew {previous}, a fall of {} against the \
-                 band's own {took} rows",
-                body.list,
-                previous - body.list
-            );
-        }
-        band_rows = band_rows.max(body.graph + body.air);
-        previous = body.list;
-    }
-
-    // Exactly one fall, and it is the band's arrival. More than one would mean
-    // the band comes and goes; none would mean the sweep never drew a band and
-    // the loop above asserted nothing.
-    assert_eq!(
-        falls, 1,
-        "the map fell {falls} times across the height sweep; the band arrives once"
-    );
-    assert!(
-        band_rows > 0,
-        "no height in the sweep drew a band, so the fall this gate is about was \
-         never reachable"
+        "the sweep topped out at {previous} files, so it never reached the \
+         depths this layout is for"
     );
 }
 
@@ -1050,8 +974,8 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
 
 #[test]
 fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
-    // `m`'s own behaviour one region over: a pane that cannot carry the thing
-    // draws nothing different, and the request is still kept, so a reader who
+    // A pane that cannot carry the thing draws nothing different, and the request
+    // is still kept, so a reader who
     // narrows a railed pane and widens it again gets the rail back rather than the
     // question.
     let arrives = first_rail();
@@ -1096,9 +1020,8 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
 
 #[test]
 fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
-    // `ToggleMasthead`'s own promise one region over, and the half the gesture gate
-    // above does not reach: a reader asking where the map goes is not asking to be
-    // moved inside the diff.
+    // The half the gesture gate above does not reach: a reader asking where the map
+    // goes is not asking to be moved inside the diff.
     let scratch = repo::Scratch::large_diff("rail-keeps-the-row", 3, 200);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

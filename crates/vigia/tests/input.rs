@@ -95,7 +95,6 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
         with(KeyModifiers::SHIFT, KeyCode::Down),
         with(KeyModifiers::SHIFT, KeyCode::Up),
         press(KeyCode::Char('f')),
-        press(KeyCode::Char('m')),
         press(KeyCode::Char('r')),
         press(KeyCode::Char('s')),
         press(KeyCode::Char('a')),

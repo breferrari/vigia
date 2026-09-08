@@ -851,8 +851,6 @@ pub struct View {
     /// The busiest bucket any tracked file holds, which every sparkline on this
     /// screen is drawn against.
     pub scale: Scale,
-    /// The whole worktree's churn over the window, oldest sample first.
-    pub worktree_churn: vigia_core::Churn,
     /// The reader's notes, as this screen placed them.
     pub notes: Noted,
 }
@@ -1199,7 +1197,6 @@ impl View {
             read: 0,
             recorded: 0,
             scale: Scale(history.scales()),
-            worktree_churn: history.worktree_churn(),
             notes: Noted::default(),
         };
         // Keyed by path, so a file the walk draws costs one probe for its notes

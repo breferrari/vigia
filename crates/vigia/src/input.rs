@@ -438,7 +438,6 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ListTo(_)
         | Action::DiffTo(_)
         | Action::ToggleFollow
-        | Action::ToggleMasthead
         | Action::ToggleRail
         | Action::ToggleSingle
         | Action::ToggleStaged
@@ -598,8 +597,6 @@ pub enum Action {
     Bottom,
     /// Engage follow mode, or disengage it.
     ToggleFollow,
-    /// Draw the masthead, or stop drawing it.
-    ToggleMasthead,
     /// Put the pinned list beside the diff as a left rail, or back above it.
     ToggleRail,
     /// Pin the diff to the file the viewport is inside, or unpin it.
@@ -647,7 +644,6 @@ impl Action {
             | Self::ListTo(_)
             | Self::DiffTo(_)
             | Self::ToggleFollow
-            | Self::ToggleMasthead
             | Self::ToggleRail
             | Self::ToggleSingle
             | Self::ToggleStaged
@@ -682,13 +678,12 @@ impl Action {
             | Self::Escape
             | Self::Redraw
             | Self::ToggleFollow
-            // Showing or hiding the masthead resizes the diff's region and does not
+            // Moving the list beside the diff resizes the diff's region and does not
             // move the reader inside it, which is a resize by another name and the same
             // answer §11.1 gives one: a resize expresses no intent about what the diff
             // should show.
             | Self::ToggleRail
-            | Self::ToggleMasthead
-            // And a pin is the one of the three that can move the viewport, and still
+            // And a pin is the one of the two that can move the viewport, and still
             // expresses no intent about where it should be.
             | Self::ToggleSingle
             | Self::ToggleStaged
@@ -727,7 +722,6 @@ impl Action {
             | Self::Escape
             | Self::Redraw
             | Self::ToggleFollow
-            | Self::ToggleMasthead
             | Self::ToggleRail
             | Self::ToggleSingle
             | Self::ToggleStaged
@@ -812,12 +806,10 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Char(digit @ '1'..='6') => Some(Action::ListRow(row_of(digit))),
         // Lower case only, and `G` above is why.
         KeyCode::Char('f') => Some(Action::ToggleFollow),
-        // `m` for masthead, and it was free.
-        KeyCode::Char('m') => Some(Action::ToggleMasthead),
         KeyCode::Char('r') => Some(Action::ToggleRail),
-        // `s` for single, unbound and in the same lowercase family as `f`, `m`
-        // and `r`: the keys that change what the body is made of rather than
-        // where in it the reader is. B16.
+        // `s` for single, unbound and in the same lowercase family as `f` and
+        // `r`: the keys that change what the body is made of rather than where
+        // in it the reader is. B16.
         KeyCode::Char('s') => Some(Action::ToggleSingle),
         KeyCode::Char('a') => Some(Action::ToggleStaged),
         // `w`, and it is the reflex rather than what was free. `ov` binds `[w]`, `[W]`

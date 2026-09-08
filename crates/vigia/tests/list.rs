@@ -197,38 +197,6 @@ fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
     );
 }
 
-/// A taller pane never costs the masthead its band.
-#[test]
-fn a_taller_pane_never_costs_the_band_its_rows() {
-    let raised = vigia::Chrome {
-        masthead: true,
-        ..chrome(&App::new())
-    };
-
-    let mut had_a_band = false;
-    let mut saw_it_arrive = false;
-
-    for height in 1..=TALLEST {
-        let body = body_layout(Rect::new(0, 0, WIDE, height), &raised, MANY, MANY);
-        let band = body.graph > 0;
-
-        if band && !had_a_band {
-            saw_it_arrive = true;
-        }
-        assert!(
-            band || !had_a_band,
-            "at {WIDE}x{height} the band was undrawn on a pane taller than one \
-             that drew it, so the list took a row the band was keeping"
-        );
-        had_a_band |= band;
-    }
-
-    assert!(
-        saw_it_arrive,
-        "no height in the sweep ever drew a band, so the gate proves nothing"
-    );
-}
-
 #[test]
 fn the_list_region_gives_way_before_the_diff_falls_below_min_body() {
     // The ordering rule. The list is what shrinks, and it shrinks to nothing
