@@ -229,8 +229,11 @@ impl Rig {
         self.clock += by;
         self.elapsed += by;
         // Read before the settle, because the settle is what arms the sweep and
-        // the question is what was drawing before it did.
-        let ran = self.effects.is_running();
+        // the question is what was drawing before it did. Everything the shell
+        // counts as drawing, the box included, or a sweep armed beside a box
+        // still leaving is told the whole beat passed and ends in one frame.
+        let ran =
+            self.effects.is_running() || self.box_effect.as_ref().is_some_and(Timed::is_running);
         let settled = self.ledger.settle(self.clock);
         if settled.changed {
             self.app.set_notes(self.ledger.drawn());

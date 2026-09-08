@@ -2268,6 +2268,19 @@ mod tests {
             );
         }
 
+        // The list above is presence and says nothing about order, which is right
+        // for steps that do not depend on each other. These two do: the settle is
+        // what names the beats that have run, so arming ahead of it arms nothing
+        // and the sweep waits a frame that never comes.
+        let ran = body.find("self.ledger.settle(now)").expect("checked above");
+        let armed = body
+            .find("settled.sweeping.into_iter()")
+            .expect("checked above");
+        assert!(
+            ran < armed,
+            "`settle_notes` arms the sweep before the settle that names it"
+        );
+
         // And the paint asks the interval rule with what the previous paint
         // recorded, and records for the next one after the effects have drawn.
         let paint = code.find("fn paint(\n").expect("`Shell::paint` is gone");
