@@ -12,7 +12,7 @@
 
 </div>
 
-<img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
+<img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a note mark, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
 
 ---
 
@@ -94,7 +94,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
    status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
-The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 134 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 134 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
+The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 139 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 139 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
 
 Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
 
@@ -108,12 +108,24 @@ Every file gets the same row in both regions:
 | `M` | **kind** | modified, added, deleted, renamed |
 | `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
 | `●` | **pulse** | ⚡ it changed on the newest tick |
+| `✎` `↳` `✓` | **note mark** | 📝 your note is here, and where it stands |
 | green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
 | `__▁▂▆█` | **sparkline** | ⏱️ **when** it changed, over the last two minutes |
 | `+42 -7` | **counters** | 📊 **how much**, in lines |
 
 They exist separately because a glance can only ask one question. You read the one you came for and ignore the rest.
+
+<details>
+<summary><b>📝 The note mark is <i>whose turn it is</i></b></summary>
+
+`✎` is a note you left that the agent has not answered. `↳` is one it has answered and you have not resolved, and it is the only one of the three that means the pane is waiting on **you**: it draws the same arrow the agent's reply draws under your line. `✓` is one just resolved, and it stays for as long as the note's departure does.
+
+A file with several notes shows the one that matters most, so an answer beats a note still waiting and a resolved one never hides either. The shape is what carries the state, not the colour, so all three still read on a terminal with `NO_COLOR` set. And the slice of the heat strip the note sits in is tinted, so on a long file you can see roughly where in it the conversation is without opening it.
+
+The column is kept on every row whether or not the file has a note, so nothing slides sideways when one arrives. It is the last thing dropped before the counters as the pane narrows, which puts it ahead of the pulse: a file that just changed says so in three other ways, and a file holding a conversation says so in one.
+
+</details>
 
 <details>
 <summary><b>🗺️ The heat strip is <i>where</i></b></summary>
@@ -261,7 +273,7 @@ Point at a line number in the diff and it becomes a pencil `✎`. Click it, and 
 
 That is the whole of it. `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
 
-**After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks.
+**After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks. The file's own row in the list carries a mark too, `✎` while you are waiting on the agent and `↳` once it has answered, which is how you find the one note in a run of thirty files.
 
 **When the agent resolves one**, its answer arrives on a row under the note, holds for a minute, and the note leaves. That is the only way a note goes away that you did not empty yourself.
 
@@ -472,7 +484,7 @@ set -ga terminal-overrides ",*:Tc"
 
 ```sh
 # ~/.config/vigia/config
-rail     = on     # the file list beside the diff, from 134 columns
+rail     = on     # the file list beside the diff, from 139 columns
 single   = on     # one file at a time
 staged   = on     # what is staged, beside what is not
 wrap     = on     # a long line continues on the row below

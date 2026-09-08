@@ -185,7 +185,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The resolve line is required so the reader can read it, and it leaves before they can. **Reported from use** | [#465](https://github.com/breferrari/vigia/issues/465) |
 | ⬜ | Dragging over a note copies the diff line above it. **Reported from use** | [#468](https://github.com/breferrari/vigia/issues/468) |
 | ⬜ | A note can be written but never removed. **Reported from use** | [#469](https://github.com/breferrari/vigia/issues/469) |
-| ⬜ | The file list never says which file holds a note. **Reported from use** | [#471](https://github.com/breferrari/vigia/issues/471) |
+| ✅ | The file list never says which file holds a note. **Reported from use** | [#471](https://github.com/breferrari/vigia/issues/471) |
 | ⬜ | The header counts files but never lines. **Reported from use** | [#472](https://github.com/breferrari/vigia/issues/472) |
 | ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
 | ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |

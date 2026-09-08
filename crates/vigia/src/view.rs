@@ -28,6 +28,8 @@ pub struct FileEntry {
     pub newest: bool,
     /// Where in this file the change is, as counts per slice of its length.
     pub heat: [HeatBucket; HEAT_BUCKETS],
+    /// What the reader's notes on this file put on its row and its heat strip.
+    pub notes: FileNotes,
 }
 
 /// One row of the pinned list's window.
@@ -703,6 +705,111 @@ impl HeatBucket {
     }
 }
 
+/// The maps a file's mark is resolved through: every note by the path it was
+/// written on, and the entry [`run_of`] gave each note whose path is in two runs.
+struct Pinned<'n> {
+    by_path: &'n HashMap<&'n str, Vec<&'n Note>>,
+    chosen: &'n HashMap<&'n str, usize>,
+}
+
+/// Every note the entry at `index` holds, less the ones [`run_of`] gave to another
+/// entry. Shared, because a rename answers to two paths and a run to two entries.
+fn notes_at<'n>(
+    change: &vigia_core::FileChange,
+    index: usize,
+    pinned: &Pinned<'n>,
+) -> Vec<&'n Note> {
+    if pinned.by_path.is_empty() {
+        return Vec::new();
+    }
+    let mut held: Vec<&Note> = Vec::new();
+    for path in change.paths() {
+        if let Some(found) = pinned.by_path.get(path) {
+            held.extend(found.iter().copied());
+        }
+    }
+    if !pinned.chosen.is_empty() {
+        held.retain(|note| {
+            pinned
+                .chosen
+                .get(note.id.as_str())
+                .is_none_or(|&at| at == index)
+        });
+    }
+    held
+}
+
+/// What one file's notes say about it. Ordered weakest to strongest, so
+/// [`Self::worse`] is a `max` and the ordering itself is the precedence rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NoteMark {
+    /// Drawn only for as long as the note's departure is.
+    Resolved,
+    /// Written, and the agent has not answered it.
+    Waiting,
+    /// The one state that asks the reader for something rather than the agent.
+    Replied,
+}
+
+impl NoteMark {
+    fn of(note: &Note) -> Self {
+        match (note.status, note.reply.is_some()) {
+            (Status::Resolved, _) => Self::Resolved,
+            (_, true) => Self::Replied,
+            (_, false) => Self::Waiting,
+        }
+    }
+
+    /// What a file holding two of them draws.
+    #[must_use]
+    pub fn worse(self, other: Self) -> Self {
+        self.max(other)
+    }
+}
+
+/// What the reader's notes on one file put on its row and on its heat strip.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileNotes {
+    /// `None` where the file holds no note at all.
+    pub mark: Option<NoteMark>,
+    /// Which slices hold an unresolved one; presence and not state, per §11.1.
+    pub at: [bool; HEAT_BUCKETS],
+}
+
+/// What `notes` put on `diff`'s file. The **stored** line is used and not the pane's
+/// placement: a line that moved moved by at most `NEAR` rows, one slice at any rung.
+fn notes_of(diff: &FileDiff, notes: &[&Note]) -> FileNotes {
+    let mut held = FileNotes::default();
+    for note in notes {
+        let mark = NoteMark::of(note);
+        held.mark = Some(held.mark.map_or(mark, |worst| worst.worse(mark)));
+        // The strip answers where the outstanding conversation is, and this is not.
+        if mark != NoteMark::Resolved
+            && let Some(at) = slice_of(diff, note)
+        {
+            held.at[at] = true;
+        }
+    }
+    held
+}
+
+/// The slice the line `note` is pinned to falls in. An old-side note is numbered by
+/// the index and the strip is the working tree's, so it walks [`heat_of`]'s own.
+/// The kind is part of the match: `positions` leaves `old` where it is on an
+/// addition, so an addition carries the number of the index line it sits before.
+fn slice_of(diff: &FileDiff, note: &Note) -> Option<usize> {
+    let line = match note.side {
+        Side::New => note.line,
+        Side::Old => diff
+            .hunks
+            .iter()
+            .flat_map(Hunk::positions)
+            .find(|(old, _, line)| *old == note.line && line.kind == LineKind::Removed)
+            .map(|(_, new, _)| new)?,
+    };
+    bucket_of(line, diff.lines)
+}
+
 /// Where a working-tree line sits, as a bucket index.
 fn bucket_of(line: u32, lines: u32) -> Option<usize> {
     if lines == 0 {
@@ -1027,15 +1134,24 @@ struct Changed<'f> {
     /// Whether the pane has a pinned list at all.
     listed: bool,
     /// The reader's notes on this file, by its path and by the path it was
-    /// renamed from.
+    /// renamed from, as the rows to draw under their lines.
     notes: Vec<&'f Note>,
+    /// The same, as the row's mark, resolved before [`Self::notes`] drops the
+    /// one an open box holds.
+    marks: FileNotes,
     /// The note box, as the anchor it is open on, when that anchor is in this
     /// file.
     boxed: Option<&'f crate::notes::Standing<'f>>,
 }
 
 /// Everything a row about this file needs, for either region.
-fn entry_of(kind: &ChangeKind, origin: Origin, diff: &FileDiff, history: &History) -> FileEntry {
+fn entry_of(
+    kind: &ChangeKind,
+    origin: Origin,
+    diff: &FileDiff,
+    history: &History,
+    notes: FileNotes,
+) -> FileEntry {
     FileEntry {
         path: diff.path.clone(),
         origin,
@@ -1046,6 +1162,7 @@ fn entry_of(kind: &ChangeKind, origin: Origin, diff: &FileDiff, history: &Histor
         recency: history.recency(&diff.path),
         newest: history.newest(&diff.path),
         heat: heat_of(diff),
+        notes,
     }
 }
 
@@ -1224,31 +1341,15 @@ impl View {
             view.list_top = 0;
             return Ok(view);
         }
-        if height == 0 {
-            // The list still resolves.
-            view.take_list(frame, history, list_rows, list_follows, &[])?;
-            return Ok(view);
-        }
-
-        let mut walked = Walked::default();
-
-        // The one bound the pin costs, and every use of it below reads this rather than
-        // `files`.
-        let (first, stop) = if single {
-            (view.top.file, view.top.file + 1)
-        } else {
-            (0, files)
-        };
-
         // A file staged and then edited further is a diff in each run and the note
         // belongs under one: the run its line resolves best in, the earlier index on a
-        // tie. Resolving it costs the entry the walk was not going to read, so it is
-        // asked only of a path the walk can still reach, which is one file in `single`.
-        let reachable = view.top.file..stop;
+        // tie. Asked of every such path and not only one the walk reaches, because the
+        // list draws entries the walk never will and an unresolved tie marks the file
+        // twice for one note. Those diffs are I4's second exception.
         let mut chosen: HashMap<&str, usize> = HashMap::new();
         let mut boxed_run = None;
         for (path, indices) in &runs_of {
-            if indices.len() < 2 || !indices.iter().any(|at| reachable.contains(at)) {
+            if indices.len() < 2 {
                 continue;
             }
             if let Some(here) = by_path.get(*path) {
@@ -1277,6 +1378,27 @@ impl View {
                 }
             }
         }
+
+        let pinned = Pinned {
+            by_path: &by_path,
+            chosen: &chosen,
+        };
+
+        if height == 0 {
+            // The list still resolves, and the tie above it already has.
+            view.take_list(frame, history, list_rows, list_follows, &[], &pinned)?;
+            return Ok(view);
+        }
+
+        let mut walked = Walked::default();
+
+        // The one bound the pin costs, and every use of it below reads this rather than
+        // `files`.
+        let (first, stop) = if single {
+            (view.top.file, view.top.file + 1)
+        } else {
+            (0, files)
+        };
 
         let mut index = view.top.file;
         let mut skip = position.row;
@@ -1350,19 +1472,9 @@ impl View {
                 // not that it consumed it.
                 let before = view.rows.len();
                 let asked = skip.min(span);
-                let mut file_notes: Vec<&Note> = Vec::new();
-                if !by_path.is_empty() {
-                    for path in change.paths() {
-                        if let Some(found) = by_path.get(path) {
-                            file_notes.extend(found.iter().copied());
-                        }
-                    }
-                    if !chosen.is_empty() {
-                        file_notes.retain(|note| {
-                            chosen.get(note.id.as_str()).is_none_or(|&at| at == index)
-                        });
-                    }
-                }
+                let mut file_notes = notes_at(change, index, &pinned);
+                // Before the retain below: a note being retyped is still one.
+                let marks = notes_of(diff, &file_notes);
                 let boxed = draft
                     .as_ref()
                     .filter(|standing| change.paths().any(|path| path == standing.note.path))
@@ -1380,6 +1492,7 @@ impl View {
                         closes: gap_rows(index, stop) > 0,
                         listed: list_rows > 0,
                         notes: file_notes,
+                        marks,
                         boxed,
                     },
                     // The pass is taken whatever this frame does with it, so the sweep
@@ -1459,7 +1572,14 @@ impl View {
         let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked, rows);
 
         // After the walk, because only the walk knows where the diff landed.
-        view.take_list(frame, history, list_rows, list_follows, &walked.drawn)?;
+        view.take_list(
+            frame,
+            history,
+            list_rows,
+            list_follows,
+            &walked.drawn,
+            &pinned,
+        )?;
         view.measure(frame, measured, single, trimmed)?;
 
         Ok(view)
@@ -1548,6 +1668,7 @@ impl View {
         rows: usize,
         follows: bool,
         drawn: &[(usize, FileEntry)],
+        pinned: &Pinned<'_>,
     ) -> Result<()> {
         // A pane with no region resolved nothing, so it says nothing.
         if rows == 0 {
@@ -1585,7 +1706,8 @@ impl View {
                 Some((_, entry)) => self.list.push(ListRow::from(entry.clone())),
                 None => {
                     let (change, diff) = frame.diff(index)?;
-                    let entry = entry_of(&change.kind, change.origin, diff, history);
+                    let notes = notes_of(diff, &notes_at(change, index, pinned));
+                    let entry = entry_of(&change.kind, change.origin, diff, history, notes);
                     self.list.push(ListRow::from(entry));
                 }
             }
@@ -2006,6 +2128,7 @@ impl View {
             closes,
             listed,
             notes,
+            marks,
             boxed,
         } = file;
         let mut n = 0usize;
@@ -2019,14 +2142,14 @@ impl View {
         // Built for the row when the heading fits, and recorded when it does not and a
         // list exists to read the record.
         if n >= skip {
-            let entry = entry_of(kind, origin, diff, history);
+            let entry = entry_of(kind, origin, diff, history, marks);
             drawn.push((index, entry.clone()));
             heading = Some(self.rows.len());
             self.rows.push(Row::file(entry));
         } else if listed {
             self.recorded += 1;
             // Moved rather than cloned, because there is no row to draw it in.
-            drawn.push((index, entry_of(kind, origin, diff, history)));
+            drawn.push((index, entry_of(kind, origin, diff, history, marks)));
         }
         n += 1;
 

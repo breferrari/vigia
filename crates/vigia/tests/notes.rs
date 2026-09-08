@@ -5329,3 +5329,400 @@ fn a_tabbed_note_wraps_as_the_columns_its_tabs_are_drawn_in() {
          to:\n{tabbed:?}\n{spelled:?}"
     );
 }
+
+/// A file three lines longer than its committed form, with old line nine
+/// rewritten, so a note on the index side is numbered nine and sits at
+/// working-tree line twelve. The two numbers fall in different slices of the
+/// strip, which is the only shape that can tell the walk from reading the stored
+/// number straight.
+fn shifted(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(PATH, numbered_lines(12));
+    scratch.commit_all("baseline");
+    let mut lines: Vec<String> = ["new a", "new b", "new c"]
+        .iter()
+        .map(|&s| s.to_owned())
+        .chain((1..=12).map(|i| format!("line {i}")))
+        .collect();
+    lines[11] = "rewritten nine".to_owned();
+    scratch.write(PATH, format!("{}\n", lines.join("\n")));
+    scratch
+}
+
+/// The heat strip's inks on the row `y`, in column order.
+fn strip_on(painted: &Painted, y: u16) -> Vec<Option<Color>> {
+    let width = painted.backend.buffer().area.width;
+    (0..width)
+        .filter(|x| painted.cell(*x, y).symbol() == "\u{25a0}")
+        .map(|x| painted.fg(x, y))
+        .collect()
+}
+
+/// The one mark glyph on row `y`, or `None` where the slot is blank.
+fn mark_on(painted: &Painted, y: u16) -> Option<char> {
+    let width = painted.backend.buffer().area.width;
+    let found: Vec<char> = (0..width)
+        .map(|x| painted.cell(x, y))
+        .filter_map(|cell| cell.symbol().chars().next())
+        .filter(|glyph| ['\u{270e}', '\u{21b3}', '\u{2713}'].contains(glyph))
+        .collect();
+    assert!(found.len() <= 1, "row {y} drew {found:?}");
+    found.into_iter().next()
+}
+
+#[test]
+fn a_note_marks_its_file_in_the_list_and_in_the_diff() {
+    // Both regions draw a file row through one drawer, so the mark has to reach
+    // both or the map and the thing it maps disagree.
+    let scratch = fixture("notes-mark-both");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert_eq!(mark_on(&painted, painted.row_of(PATH)), Some('\u{270e}'));
+    assert!(
+        painted.laid.list.rows > 0,
+        "the fixture drew no list region"
+    );
+    assert_eq!(mark_on(&painted, painted.laid.list.top), Some('\u{270e}'));
+}
+
+#[test]
+fn an_answered_note_takes_the_reply_glyph_and_a_resolved_one_takes_its_own() {
+    let scratch = fixture("notes-mark-states");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    for (status, reply, glyph) in [
+        (Status::Open, None, '\u{270e}'),
+        (Status::Seen, None, '\u{270e}'),
+        (Status::Seen, Some("which margin?"), '\u{21b3}'),
+        (Status::Resolved, Some("fixed"), '\u{2713}'),
+    ] {
+        rig.store
+            .put(&left_as("n1", "short", status, reply))
+            .expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        assert_eq!(
+            mark_on(&painted, painted.row_of(PATH)),
+            Some(glyph),
+            "{status:?} with reply {reply:?}"
+        );
+    }
+}
+
+#[test]
+fn a_resolved_note_keeps_the_rows_mark_and_lets_go_of_the_strip() {
+    // The one place the two surfaces are deliberately out of step: the row says a
+    // conversation just ended here, and the strip says where an outstanding one
+    // is, which a resolved note is not.
+    let scratch = fixture("notes-mark-resolved");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let tint = rig.theme.heat_note.fg;
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, None))
+        .expect("put");
+    rig.reload();
+    let open = rig.paint(&mut frame, PANE, Pointing::default());
+    let inked = strip_on(&open, open.row_of(PATH))
+        .into_iter()
+        .filter(|ink| *ink == tint)
+        .count();
+    assert_eq!(
+        inked, 1,
+        "an open note tinted no slice, so the gate below \
+                          cannot tell a resolve from a fixture that never worked"
+    );
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Resolved, Some("fixed")))
+        .expect("put");
+    rig.reload();
+    let done = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = done.row_of(PATH);
+    assert_eq!(mark_on(&done, y), Some('\u{2713}'), "the row lost its mark");
+    assert_eq!(
+        strip_on(&done, y)
+            .into_iter()
+            .filter(|ink| *ink == tint)
+            .count(),
+        0,
+        "a resolved note is still tinting a slice"
+    );
+}
+
+#[test]
+fn a_note_on_a_removed_line_lands_in_the_slice_its_line_sits_in() {
+    // An old-side note is numbered by the index while the strip is projected onto
+    // the working tree's length. Here the two numbers are nine and twelve, which
+    // fall in different slices: a fixture where they agree cannot tell the walk
+    // from reading the stored number straight.
+    let scratch = shifted("notes-mark-old-side");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let tint = rig.theme.heat_note.fg;
+
+    let mut old_side = note("n1", 9, "line 9", BODY);
+    old_side.side = Side::Old;
+    rig.store.put(&old_side).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let inks = strip_on(&painted, painted.row_of(PATH));
+    let noted: Vec<usize> = inks
+        .iter()
+        .enumerate()
+        .filter(|(_, ink)| **ink == tint)
+        .map(|(at, _)| at)
+        .collect();
+
+    // Twenty-four source buckets over a fifteen-line file, halved onto twelve
+    // slices: working-tree line twelve is slice eight and the stored nine is six.
+    assert_eq!(
+        noted,
+        vec![8],
+        "the old-side note landed on {noted:?}; slice six is the stored number \
+         used straight and slice eight is the line it sits on"
+    );
+}
+
+#[test]
+fn a_file_holding_two_notes_draws_the_worse_of_them() {
+    // The fold no single-note fixture can see: with one note every precedence
+    // rule draws the same row, so a `worse` that returned its receiver, or the
+    // milder of the two, would pass every other gate here.
+    let scratch = fixture("notes-mark-precedence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    // Written in both orders, because a fold that keeps whichever it met first
+    // is right half the time and this is the half that would hide it.
+    for (first, second) in [("n1", "n2"), ("n2", "n1")] {
+        for id in ["n1", "n2"] {
+            let _ = rig.store.remove(id);
+        }
+        let waiting = left_as(first, "waiting", Status::Seen, None);
+        let answered = left_as(second, "answered", Status::Seen, Some("which margin?"));
+        rig.store.put(&waiting).expect("put");
+        rig.store.put(&answered).expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        assert_eq!(
+            mark_on(&painted, painted.row_of(PATH)),
+            Some('\u{21b3}'),
+            "a waiting note and an answered one, written {first} then {second}, \
+             drew something other than the answer"
+        );
+    }
+
+    // And resolved is the mildest of the three: a file still holding an
+    // unanswered note says so rather than announcing the departure.
+    for id in ["n1", "n2"] {
+        let _ = rig.store.remove(id);
+    }
+    let waiting = left_as("n1", "waiting", Status::Seen, None);
+    let done = left_as("n2", "done", Status::Resolved, Some("fixed"));
+    rig.store.put(&waiting).expect("put");
+    rig.store.put(&done).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        mark_on(&painted, painted.row_of(PATH)),
+        Some('\u{270e}'),
+        "a resolved note outranked a waiting one"
+    );
+}
+
+/// Which slices of the heading's strip carry the note's ink.
+fn tinted(painted: &Painted, tint: Option<Color>) -> Vec<usize> {
+    strip_on(painted, painted.row_of(PATH))
+        .iter()
+        .enumerate()
+        .filter(|(_, ink)| **ink == tint)
+        .map(|(at, _)| at)
+        .collect()
+}
+
+#[test]
+fn an_old_side_note_answers_a_removed_line_and_not_the_addition_beside_it() {
+    // `Hunk::positions` advances `old` only on a line the index side has, so the
+    // addition in a rewritten block carries the index number of the context line
+    // that follows it, and the walk emits it first. A lookup that does not ask the
+    // kind therefore answers with the addition.
+    //
+    // A note reaches that shape by going stale: it was pinned to a removed line,
+    // the agent edited under it, and its stored number now names a line the index
+    // still has and the diff no longer removes. What catches it is the stale note
+    // tinting nothing at all; through the addition it would tint the very slice
+    // the genuine note below tints, so position alone cannot tell them apart.
+    let scratch = Scratch::new("notes-mark-phantom");
+    scratch.write(PATH, numbered_lines(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, "rewritten five");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let tint = rig.theme.heat_note.fg;
+
+    // The stale note alone. Index line six is a context line, and the addition
+    // above it answers to six with a working-tree position of five.
+    let mut stale = note("n2", 6, "line 6", BODY);
+    stale.side = Side::Old;
+    rig.store.put(&stale).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        tinted(&painted, tint),
+        Vec::<usize>::new(),
+        "the stale note tinted a slice, so it answered through the addition that \
+         carries index line six rather than through a line the index removed"
+    );
+
+    // Added rather than swapped, because removing one starts a departure that
+    // keeps drawing. Index line five is the line the rewrite removed and it sits
+    // at working-tree line five: twelve lines over twelve slices puts it in slice
+    // four, which is the slice the stale note would have taken.
+    let mut removed = note("n1", 5, "line 5", BODY);
+    removed.side = Side::Old;
+    rig.store.put(&removed).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        tinted(&painted, tint),
+        vec![4],
+        "a note on the line the rewrite removed did not tint its own slice, so the \
+         assertion above passes on a strip that cannot draw one at all"
+    );
+
+    assert_eq!(mark_on(&painted, painted.row_of(PATH)), Some('\u{270e}'));
+}
+
+#[test]
+fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() {
+    // Which run owns a note is resolved for every path in both runs that holds
+    // one, rather than only for a path the diff walk reaches. Pinned, the walk
+    // reaches one file, and a path in both runs that is not the pinned one has
+    // neither entry in that range, so a rule asked only there leaves one note
+    // marking the file twice while the footer says one. The answer cannot depend
+    // on where either region is looking, and this sweep is what says so.
+    //
+    // The windows have to genuinely differ or the sweep is one fixture run four
+    // times: with few enough files the list draws every row at once, `last_top` is
+    // zero, and `following_top` returns its argument, so every request converges
+    // on the same window. The filler files below are what stop that.
+    let scratch = in_both_runs("notes-mark-pinned", 5, "staged six");
+    for at in 0..7 {
+        scratch.write(&format!("src/filler{at}.rs"), numbered_lines(6));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let runs: Vec<usize> = frame
+        .files()
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change.paths().any(|path| path == PATH))
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(runs.len(), 2, "the fixture is not a path in both runs");
+    let pinned = (0..frame.files().len())
+        .find(|at| !runs.contains(at))
+        .expect("no file to pin that is not one of the two runs");
+
+    let notes = vec![note("n1", 8, "line 8", "context in both")];
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // Four windows that are four windows: a request the file count can honour and
+    // one it cannot, each with the list following the diff and not following it.
+    // `list_rows` is under what the rows would want, so the clamp and the snap
+    // both have somewhere to move the answer to.
+    let mut both_drawn = 0;
+    let mut windows: Vec<(Option<String>, usize)> = Vec::new();
+    for (top, follows) in [(0, false), (9, false), (0, true), (9, true)] {
+        let viewport = Viewport {
+            position: vigia::Position {
+                file: pinned,
+                row: 0,
+            },
+            anchored: false,
+            diff_rows: 12,
+            width: 80,
+            wrap: false,
+            list_top: top,
+            list_rows: 4,
+            list_follows: follows,
+            measured: true,
+            landing: false,
+            highlight: false,
+            // The pin, which is what narrowed the walk to one file.
+            single: true,
+        };
+        let view = View::collect_noted(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            viewport,
+            &notes,
+            true,
+            None,
+        )
+        .expect("collect");
+
+        let listed: Vec<&vigia::FileEntry> =
+            view.list.iter().filter_map(vigia::ListRow::entry).collect();
+        windows.push((listed.first().map(|entry| entry.path.clone()), listed.len()));
+        let drawn = listed.iter().filter(|entry| entry.path == PATH).count();
+        let marked = listed
+            .iter()
+            .filter(|entry| entry.path == PATH && entry.notes.mark.is_some())
+            .count();
+
+        // Holds in every window, drawn whole or not: one note, one entry.
+        assert!(
+            marked <= 1,
+            "at row {top} following {follows}, one note marked {marked} entries of \
+             a path in both runs while the pane was pinned elsewhere"
+        );
+        if drawn == 2 {
+            both_drawn += 1;
+            assert_eq!(
+                marked, 1,
+                "at row {top} following {follows}, both entries were drawn and \
+                 {marked} carried the note"
+            );
+        }
+    }
+
+    // Non-vacuity, both halves. The sweep has to reach a window that draws both
+    // entries, or `marked <= 1` is satisfied by drawing neither; and the four
+    // requests have to land on more than one window, or this is one fixture run
+    // four times.
+    windows.dedup();
+    assert!(
+        windows.len() > 1,
+        "every request landed on one window, so neither the clamp nor the snap was exercised: {windows:?}"
+    );
+    assert!(
+        both_drawn > 0,
+        "no window in the sweep drew both entries, so the count above never had \
+         two rows to choose between"
+    );
+}

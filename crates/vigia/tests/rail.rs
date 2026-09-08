@@ -12,8 +12,8 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing, Position,
-    Regions, Row, Theme, View, action_for, body_layout, regions, render,
+    Action, App, Chrome, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing,
+    Position, Regions, Row, Theme, View, action_for, body_layout, regions, render,
 };
 
 /// A key event, spelled once.
@@ -53,12 +53,12 @@ const PICTURED_PANE: u16 = 109;
 /// than the rungs that happen to be reachable.
 const WIDEST: u16 = 240;
 
-/// Past the width at which the rail's own ladder would climb off the settled
-/// rung, which is a pane of about four hundred.
-const PAST_THE_CLIMB: u16 = 420;
+/// Past the width at which the rail's own ladder climbs off the settled rung,
+/// with room for the boundary to move without the sweep stopping short of it.
+const PAST_THE_CLIMB: u16 = 440;
 
 /// The pane at which the rail's own glance ladder leaves the settled rung.
-const THE_CLIMB: u16 = 402;
+const THE_CLIMB: u16 = 417;
 
 /// A pane tall enough that neither region is the thing giving way.
 const TALL: u16 = 24;
@@ -89,6 +89,7 @@ fn entry(path: &str) -> FileEntry {
         ],
         recency: Recency::Pulse,
         newest: true,
+        notes: FileNotes::default(),
         heat: {
             let mut buckets = [HeatBucket::default(); HEAT_BUCKETS];
             for (at, bucket) in buckets.iter_mut().enumerate() {
@@ -644,6 +645,54 @@ fn the_rail_is_monotone_in_pane_height() {
 
 /// Both regions grow with the pane, and the rail draws the pictured complement
 /// at every width it is drawn at.
+/// The pane at which the rail stops being its floor and becomes a share of the
+/// width, which `SPEC.md` §11.1 states as a number and nothing held.
+const THE_SHARE: u16 = 219;
+
+/// The floor itself, which that width is a function of.
+const THE_FLOOR: u16 = 72;
+
+#[test]
+fn the_rail_is_its_floor_until_a_third_of_the_pane_is_wider() {
+    // §11.1 says the rail is seventy-two columns until the pane reaches two
+    // hundred and nineteen and a third of it after that. Both halves were prose
+    // with no gate: the floor moved with the note mark's column, and the width it
+    // turns at moved with the floor, and a run would have said neither.
+    let view = beside();
+    for width in first_rail()..=PAST_THE_CLIMB {
+        let area = Rect::new(0, 0, width, TALL);
+        let rail = body_layout(area, &chrome(), view.files, view.files)
+            .clamped_to(view.list.len())
+            .areas(area)
+            .list
+            .width;
+        // The floor below the turn, and *wider than the floor* above it. Not the
+        // share spelled out again: a gate that recomputes `pane / RAIL_SHARE`
+        // agrees with the renderer whatever either of them says, and the claim
+        // §11.1 makes is where the turn is.
+        if width < THE_SHARE {
+            assert_eq!(
+                rail, THE_FLOOR,
+                "at {width} columns the rail is {rail} where its floor is {THE_FLOOR}"
+            );
+        } else {
+            assert!(
+                rail > THE_FLOOR,
+                "at {width} columns the rail is still its {THE_FLOOR}-column floor, \
+                 so the share has not taken over where §11.1 says it does"
+            );
+        }
+    }
+
+    // Non-vacuity in both directions: the sweep has to cross the turn, or one of
+    // the two arms above never runs and the width it names is unheld again.
+    assert!(
+        first_rail() < THE_SHARE && THE_SHARE < PAST_THE_CLIMB,
+        "the sweep runs {}..={PAST_THE_CLIMB} and does not cross {THE_SHARE}",
+        first_rail()
+    );
+}
+
 #[test]
 fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
     let view = beside();
@@ -659,7 +708,7 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
         )
     };
 
-    let mut climbed = false;
+    let mut climbed: Option<u16> = None;
     let mut previous: Option<(u16, u16, u16)> = None;
     for width in first_rail()..=PAST_THE_CLIMB {
         let area = Rect::new(0, 0, width, TALL);
@@ -693,15 +742,20 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
                 "at {width} columns the rail drew {heat} and {spark}, under the \
                  complement it kept one column narrower"
             );
-            climbed |= heat > pictured.1 || spark > pictured.2;
+            if heat > pictured.1 || spark > pictured.2 {
+                climbed.get_or_insert(width);
+            }
         }
     }
 
-    // The ceiling is a pinned width, not a phrase.
-    assert!(
+    // The width itself, not merely somewhere under the sweep's ceiling: the
+    // one-sided form passed for any boundary between THE_CLIMB and the ceiling,
+    // so the constant could go stale without a run ever saying so.
+    assert_eq!(
         climbed,
-        "the rail never left the pictured complement by {PAST_THE_CLIMB} columns, \
-         so THE_CLIMB is not where the ladder actually turns"
+        Some(THE_CLIMB),
+        "the rail left the pictured complement at {climbed:?} rather than at the \
+         {THE_CLIMB} columns its own share and floor put it at"
     );
 }
 

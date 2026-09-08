@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Modifier, Style};
 use vigia::{
-    Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Scale, Theme,
-    View, render,
+    Band, Chrome, Depth, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, Heat, HeatBucket, Mode,
+    Position, Row, Scale, Theme, View, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency, Status};
 
@@ -91,6 +91,7 @@ fn three_kinds() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Hunk {
@@ -355,6 +356,12 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         note_changed,
         note_gone,
         note_reply,
+        // A glyph rather than a word, and here rather than among the marks below:
+        // its whole job is to be found on a row at a glance, and colour 8 is the
+        // one value that hides a thing instead of colouring it.
+        note_mark,
+        note_mark_reply,
+        note_mark_resolved,
         alert,
         comment,
 
@@ -391,6 +398,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         heat_mixed: _,
         heat_mixed_warm: _,
         heat_mixed_hot: _,
+        // Exempt with the nine above it: a slice of the strip is a fill, and this
+        // one differs from them only in what it means.
+        heat_note: _,
         added: _,
         removed: _,
         added_row: _,
@@ -435,6 +445,11 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("note_changed", note_changed),
         ("note_gone", note_gone),
         ("note_reply", note_reply),
+        // The three states of a file row's note mark, which a reader finds by
+        // colour once the glyph has told them there is something to find.
+        ("note_mark", note_mark),
+        ("note_mark_reply", note_mark_reply),
+        ("note_mark_resolved", note_mark_resolved),
         ("alert", alert),
         ("context", context),
         ("comment", comment),
@@ -577,6 +592,7 @@ fn graded_heat() -> View {
             recency: Recency::Cold,
             newest: false,
             heat,
+            notes: FileNotes::default(),
         })],
         files: 1,
         top: Position::default(),
@@ -681,6 +697,7 @@ fn climbing() -> View {
             ],
             recency: Recency::Cold,
             newest: false,
+            notes: FileNotes::default(),
             heat: [HeatBucket::default(); HEAT_BUCKETS],
         })],
         files: 1,
@@ -800,6 +817,80 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
                 theme.spark_track.fg, theme.chrome_dim.fg,
                 "{name} at {depth:?} draws the track in the chrome's dim grey"
             );
+        }
+    }
+}
+
+/// Every value `Theme::heat` maps, so a stop added to that mapping is covered
+/// here rather than needing this list edited too.
+const HEAT_STOPS: [Heat; 10] = [
+    Heat::Cool,
+    Heat::Added(Band::Low),
+    Heat::Added(Band::Warm),
+    Heat::Added(Band::Hot),
+    Heat::Removed(Band::Low),
+    Heat::Removed(Band::Warm),
+    Heat::Removed(Band::Hot),
+    Heat::Mixed(Band::Low),
+    Heat::Mixed(Band::Warm),
+    Heat::Mixed(Band::Hot),
+];
+
+#[test]
+fn a_noted_slice_is_never_the_colour_of_a_slice_beside_it() {
+    // The strip's cells all draw the same block, so ink is the only channel a
+    // noted slice has, and it is spent inside a ten-value ramp. Quantisation is
+    // where that goes wrong: a hue that is plainly its own at 24 bits can land on
+    // a ramp stop at sixteen colours, and then the mark says "busy" instead of
+    // "there is a conversation here" with nothing on screen to argue with.
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            // Through `Theme::heat` over every value it maps rather than off a
+            // fixture's drawn strip: a fixture reaches the stops its own counts
+            // reach, so `heat_stops` returns a subset and a collision with a stop
+            // outside it is invisible. Watched surviving exactly that way.
+            for stop in HEAT_STOPS {
+                assert_ne!(
+                    theme.heat_note.fg,
+                    theme.heat(stop).fg,
+                    "{name} at {depth:?} tints a noted slice in {stop:?}'s own colour"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_three_note_marks_are_three_colours_at_every_depth_that_has_any() {
+    // The glyph carries the state, so this is not what keeps the three legible;
+    // it is what keeps the ink from claiming a channel it does not have. Three
+    // keys that quantise together are one key with three names, and a palette
+    // author moving one would silently move all three.
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            let marks = [
+                ("note_mark", theme.note_mark.fg),
+                ("note_mark_reply", theme.note_mark_reply.fg),
+                ("note_mark_resolved", theme.note_mark_resolved.fg),
+            ];
+            for (at, (first, one)) in marks.iter().enumerate() {
+                for (second, two) in &marks[at + 1..] {
+                    assert_ne!(
+                        one, two,
+                        "{name} at {depth:?} draws {first} and {second} in one colour"
+                    );
+                }
+            }
         }
     }
 }

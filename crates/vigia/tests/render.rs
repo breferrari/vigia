@@ -11,8 +11,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
-    Chrome, FileEntry, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow, Mode, Position,
-    Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
+    Chrome, FileEntry, FileNotes, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow,
+    Mode, Position, Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
 
@@ -310,6 +310,7 @@ fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
         newest: false,
+        notes: FileNotes::default(),
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     }
 }
@@ -672,6 +673,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
         ],
         recency: Recency::Cold,
         newest: false,
+        notes: FileNotes::default(),
         heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
     }
 }
@@ -1587,6 +1589,7 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Reason("binary".to_owned()),
@@ -1599,6 +1602,7 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Reason("unresolved conflict".to_owned()),
@@ -1611,6 +1615,7 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],
@@ -2047,6 +2052,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         spark: [u32::MAX; HISTORY_BUCKETS],
         recency: Recency::Pulse,
         newest: true,
+        notes: FileNotes::default(),
         heat: [HeatBucket {
             added: u16::MAX,
             removed: u16::MAX,
@@ -2096,6 +2102,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
         newest: false,
+        notes: FileNotes::default(),
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     let view = View {
@@ -2465,6 +2472,7 @@ fn glancing() -> View {
                 // Additions at the head, a mixed slice in the middle, removals
                 // at the tail. One row carrying all three kinds plus the track,
                 // which is what the colour gate below reads.
+                notes: FileNotes::default(),
                 heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
             }),
             Row::file(FileEntry {
@@ -2478,6 +2486,7 @@ fn glancing() -> View {
                 ],
                 recency: Recency::Live,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: heat(&[(3, 2, 1)]),
             }),
             Row::file(FileEntry {
@@ -2489,6 +2498,7 @@ fn glancing() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 newest: false,
+                notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],
@@ -2797,7 +2807,7 @@ fn a_narrowed_sparkline_covers_the_whole_window_rather_than_its_tail() {
             entry.spark[at] = 9;
         }
     }
-    let backend = screen(45, 5, &view, &chrome());
+    let backend = screen(47, 5, &view, &chrome());
 
     let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
         .into_iter()
@@ -2809,7 +2819,7 @@ fn a_narrowed_sparkline_covers_the_whole_window_rather_than_its_tail() {
     assert_eq!(
         slot.len(),
         DRAWN_BUCKETS / 2,
-        "45 columns is meant to be the six-bucket rung, so this fixture is no \
+        "47 columns is meant to be the six-bucket rung, so this fixture is no \
          longer exercising a narrowed strip at all: {slot:?}"
     );
     let drawn: String = slot.iter().map(|&(_, class)| class).collect();
@@ -6237,13 +6247,13 @@ fn a_linked_path_is_one_cell_carrying_the_uri() {
     shown.links = true;
     shown.root = "/home/reader/tree".to_owned();
     let theme = vigia::Theme::dark();
-    let backend = themed_screen(64, 18, &view, &shown, &theme);
+    let backend = themed_screen(66, 18, &view, &shown, &theme);
     let buffer = backend.buffer();
 
     let row = (0..18u16)
-        .find(|y| (0..64u16).any(|x| buffer[(x, *y)].symbol().contains("watch.rs")))
+        .find(|y| (0..66u16).any(|x| buffer[(x, *y)].symbol().contains("watch.rs")))
         .expect("the linked path was not drawn");
-    let (x, cell) = (0..64u16)
+    let (x, cell) = (0..66u16)
         .map(|x| (x, &buffer[(x, row)]))
         .find(|(_, c)| c.symbol().contains("watch.rs"))
         .expect("fixture");

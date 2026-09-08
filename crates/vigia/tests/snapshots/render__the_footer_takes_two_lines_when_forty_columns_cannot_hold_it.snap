@@ -3,7 +3,7 @@ source: crates/vigia/tests/render.rs
 expression: "screen(40, 6, &view, &following_chrome())"
 ---
 "vigia · 1 changed               watching"
-"M …e/src/frame.rs             +3    -1  "
+"M …src/frame.rs               +3    -1  "
 "@@ -258,7 +258,9 @@                     "
 "────────────────────────────────────────"
 "                           follow ▶  1/1"
