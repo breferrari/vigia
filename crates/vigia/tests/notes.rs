@@ -2760,6 +2760,21 @@ fn the_answers_arrow_stands_in_the_enclosures_own_rule() {
         words(y + 2),
         "the answer does not stand in the column the words it answers do"
     );
+
+    // And nothing on the edge above claims to carry the answer instead. A mark
+    // there points at a column the arrow does not stand in, which is the defect
+    // this replaced, and the enclosure staying the same either way cannot see
+    // it: a mark drawn in both states is a mark that never changes.
+    let edge = painted.text(answer - 1);
+    let bare = edge.trim_end().replacen(" seen ", "", 1);
+    let stray = bare
+        .chars()
+        .skip(at)
+        .find(|c| !matches!(c, '└' | '┘' | '╰' | '╯' | '─'));
+    assert_eq!(
+        stray, None,
+        "the bottom edge carries a mark beside its corners, its rule and its word: {edge:?}"
+    );
 }
 
 #[test]
