@@ -1374,10 +1374,10 @@ fn a_tick_recounts_the_height_and_a_redraw_does_not() {
 }
 
 #[test]
-fn a_pinned_frame_counts_no_height_at_all() {
-    // The one place `SPEC.md` §11.2 B16 makes the frame path cheaper, and it
-    // is worth a gate rather than a sentence because it is the opposite direction
-    // to every other feature that has been added to this pane.
+fn a_pinned_frame_counts_no_height_it_has_already_counted() {
+    // Pinning scales the bar to one file, so the bar needs no whole-worktree walk.
+    // The header's total does, in every mode, so the walk still happens: what the
+    // pin must not buy is a *second* one, per frame instead of per tick.
     let scratch = Scratch::large_diff("shell-reads-pinned", FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1418,11 +1418,22 @@ fn a_pinned_frame_counts_no_height_at_all() {
         .expect("view");
     let cost = delta(before, pinned_frame.stats());
 
+    assert!(
+        cost.measured > 0,
+        "the pinned frame answered no spans, so the run's total has nothing to \
+         fold and the header would fall back to the mode word"
+    );
+
+    // The claim: once answered, never again, so the walk is per tick and not per
+    // frame. Without this the gate would pass on a pin that recounts every frame.
+    let before = pinned_frame.stats();
+    app.view(&mut pinned_frame, &mut highlighter, &history, layout())
+        .expect("view");
+    let idle = delta(before, pinned_frame.stats());
     assert_eq!(
-        cost.measured, 0,
-        "a pinned frame counted {} files' heights for a total it can read off the \
-         file it is pinned to",
-        cost.measured
+        idle.measured, 0,
+        "an idle pinned redraw counted {} files again, so the walk is per frame",
+        idle.measured
     );
     assert!(
         pinned.total_rows > 0,

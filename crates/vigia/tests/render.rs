@@ -14,7 +14,7 @@ use vigia::{
     Chrome, FileEntry, FileNotes, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow,
     Mode, Position, Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
+use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
 
 /// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
 fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
@@ -582,7 +582,11 @@ fn inks_of(backend: &TestBackend, y: u16, needle: &str) -> Option<Vec<Option<Col
 /// A header fixture whose right-hand side is the only thing that varies.
 fn totalled(churn: Option<(u32, u32)>) -> View {
     View {
-        churn,
+        churn: churn.map(|(added, removed)| Churn {
+            added,
+            removed,
+            binary: 0,
+        }),
         ..one_file()
     }
 }
@@ -632,6 +636,70 @@ fn the_right_hand_side_is_the_total_and_the_word_only_where_there_is_none() {
             "with {why} the word is not in the chrome's dim grey: {header:?}"
         );
     }
+}
+
+/// A header fixture carrying a run that includes `binary` files with no lines.
+fn with_binary(files: usize, binary: usize) -> View {
+    View {
+        files,
+        churn: Some(Churn {
+            added: 1204,
+            removed: 318,
+            binary,
+        }),
+        ..one_file()
+    }
+}
+
+#[test]
+fn the_binary_count_rides_on_the_left_and_leaves_the_total_where_it_was() {
+    // The total is the one thing on this row a reader compares against the rows
+    // below, so nothing may push it off the edge it is measured from. The count of
+    // what the total leaves out is a fact about the tree, and the tree is the left.
+    let plain = row_text(&screen(80, 6, &with_binary(28, 0), &chrome()), 0);
+    let counted = row_text(&screen(80, 6, &with_binary(28, 2), &chrome()), 0);
+
+    assert!(
+        plain.contains("28 changed") && !plain.contains("binary"),
+        "a run with no binary files still said something about them: {plain:?}"
+    );
+    assert!(
+        counted.contains(&format!("28 changed{FACT_JOIN}2 binary")),
+        "the binary count is not beside the count it qualifies: {counted:?}"
+    );
+    assert_eq!(
+        plain.len() - plain.trim_end().len(),
+        counted.len() - counted.trim_end().len(),
+        "the binary count moved the total: {plain:?} against {counted:?}"
+    );
+    for header in [&plain, &counted] {
+        assert!(
+            header.trim_end().ends_with("+1204 -318"),
+            "the total left the right-hand edge: {header:?}"
+        );
+    }
+}
+
+#[test]
+fn the_binary_count_is_the_first_fact_a_narrowing_header_gives_up_after_staged() {
+    // It qualifies the count, so it goes before the count does, and after the
+    // staged total, which is about the other run rather than about this one.
+    let view = with_binary(28, 2);
+    let staged = Chrome {
+        staged: Some(3),
+        ..chrome()
+    };
+    let rungs: Vec<String> = (30..=80)
+        .map(|width| row_text(&screen(width, 6, &view, &staged), 0))
+        .collect();
+
+    let holds = |needle: &str| rungs.iter().filter(|row| row.contains(needle)).count();
+    let (changed, binary, staged_count) =
+        (holds("28 changed"), holds("2 binary"), holds("3 staged"));
+    assert!(
+        changed > binary && binary > staged_count && staged_count > 0,
+        "the facts do not drop rightmost first across 30..=80 columns:          changed on {changed}, binary on {binary}, staged on {staged_count}"
+    );
 }
 
 #[test]
@@ -697,16 +765,29 @@ fn a_total_too_wide_for_the_row_falls_to_the_word() {
 }
 
 #[test]
-fn the_total_is_drawn_whole_rather_than_abbreviated() {
-    // The rows abbreviate past their five-column cell, `+12k` for twelve thousand.
-    // The header has no cell to fit and precision is the whole point of a total.
-    let header = row_text(
-        &screen(120, 6, &totalled(Some((104_233, 98_100))), &chrome()),
-        0,
-    );
+fn the_total_is_drawn_whole_where_a_row_would_abbreviate() {
+    // The claim is the difference between the two, not the header alone. A row's
+    // counts cell is five columns and abbreviates past them; the header has no cell
+    // to fit, and precision is the whole point of a total.
+    let mut view = ragged_counts();
+    view.churn = Some(Churn {
+        added: 104_233,
+        removed: 98_100,
+        binary: 0,
+    });
+    listed_mut(&mut view, 0).churn = Some((104_233, 98_100));
+
+    let drawn = screen(120, 8, &view, &chrome());
+    let header = row_text(&drawn, 0);
+    let row = row_text(&drawn, LIST_TOP);
+
     assert!(
         header.trim_end().ends_with("+104233 -98100"),
         "the header abbreviated its total: {header:?}"
+    );
+    assert!(
+        row.contains("+104k") && !row.contains("+104233"),
+        "the row drew its counts whole, so the header has nothing to differ from:          {row:?}"
     );
 }
 
@@ -1325,7 +1406,6 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
             .map(Row::file)
             .collect(),
         files,
-        churn: None,
         total_rows: files,
         ..ragged_counts()
     };
@@ -1360,13 +1440,11 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
     // count. A separate fixture pair, because nothing about the list can make
     // the stream's bar appear.
     let short = View {
-        churn: None,
         total_rows: 2,
         rows_above: 0,
         ..view_of(2)
     };
     let tall = View {
-        churn: None,
         total_rows: 4_000,
         rows_above: 0,
         ..view_of(2)
@@ -3398,7 +3476,6 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     let mut lengths = Vec::new();
     for total in [rows * 2, rows * 4, rows * 8] {
         let view = View {
-            churn: None,
             total_rows: total,
             rows_above: 0,
             rows: full.clone(),
@@ -3425,7 +3502,6 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     let mut firsts = Vec::new();
     for above in [0, total / 4, total / 2, total - rows] {
         let view = View {
-            churn: None,
             total_rows: total,
             rows_above: above,
             rows: full.clone(),
@@ -3678,7 +3754,6 @@ fn has_bar(backend: &TestBackend, region: Region) -> bool {
 /// diff far taller than any pane.
 fn a_stepped_screen() -> View {
     View {
-        churn: None,
         total_rows: 4_000,
         rows_above: 0,
         ..a_list_of(30, 6, 0)
@@ -4420,7 +4495,6 @@ fn the_painted_track_is_the_track_the_pointer_is_told_about() {
                 ..a_list_of(30, 6, list_top)
             };
             let view = View {
-                churn: None,
                 total_rows: 4_000,
                 ..view
             };
@@ -4521,7 +4595,6 @@ fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
     // Three listed rows over thirty files: a bar, and a region one row short of
     // the floor.
     let view = View {
-        churn: None,
         total_rows: 4_000,
         rows_above: 0,
         ..a_list_of(30, (STEP_FLOOR - 1) as usize, 0)
@@ -4745,7 +4818,6 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         // Nothing to be inside, so the diff bar is told a whole of zero.
         View {
             current_span: 0,
-            churn: None,
             total_rows: 0,
             rows_above: 0,
             ..a_list_of(9, 3, 0)
@@ -4922,7 +4994,6 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
 
     for (what, rows) in fixtures {
         let view = View {
-            churn: None,
             total_rows: 400,
             rows_above: 40,
             rows,
@@ -5470,7 +5541,6 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                 ],
                 rows: vec![Row::file(listed("src/engine/watch.rs", 42, 7))],
                 files: 40,
-                churn: None,
                 total_rows: 4_000,
                 ..ragged_counts()
             },
@@ -5663,7 +5733,6 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         // glyph is the edge rather than the end of its text.
         let long = "    let stale = self.pending.take(); ".repeat(12);
         let view = View {
-            churn: None,
             total_rows: 4000,
             rows_above: 40,
             rows: vec![

@@ -323,6 +323,20 @@ pub struct Frame<'w> {
     settles_at: Option<SystemTime>,
 }
 
+/// What a whole run changed, as one answer, because the header draws two parts of
+/// it and a partial answer to either is not an answer to the run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Churn {
+    /// Lines the working-tree side adds, over every changed file.
+    pub added: u32,
+    /// Lines the index side loses.
+    pub removed: u32,
+    /// Changed files sniffed as binary. They have no lines to give, so the total
+    /// describes fewer files than the count beside it, and a total that does not
+    /// say so is one a reader has no way to distrust.
+    pub binary: usize,
+}
+
 impl<'w> Frame<'w> {
     pub(crate) fn new(worktree: &'w Worktree) -> Self {
         Self {
@@ -507,25 +521,40 @@ impl<'w> Frame<'w> {
         Ok(total)
     }
 
-    /// What the whole run adds and removes, or `None` while any changed file is
-    /// unmeasured.
+    /// What the whole run changed, or `None` while any changed file is unmeasured.
     ///
-    /// A fold over spans [`Self::height`] has already filled, so it reads nothing
-    /// and walks nothing. The `None` is the load-bearing half: a sum over the
-    /// files that happen to be cached is a total for part of the run wearing the
-    /// whole run's clothes, and there is no way to tell the two apart by looking.
+    /// The `None` is the load-bearing half: a sum over the files that happen to be
+    /// cached is a total for part of the run wearing the whole run's clothes, and
+    /// there is no way to tell the two apart by looking.
     ///
-    /// A file with no line diff contributes nothing, the same silence its own row
-    /// keeps by drawing no counters.
-    #[must_use]
-    pub fn churn(&self) -> Option<(u32, u32)> {
-        let mut total = (0u32, 0u32);
-        for change in &self.files {
-            let measured = self.spans.get(change).filter(|held| held.answered)?;
-            total.0 = total.0.saturating_add(measured.span.added);
-            total.1 = total.1.saturating_add(measured.span.removed);
+    /// It fills the spans itself rather than reading what [`Self::height`] left,
+    /// because the run's total is a fact about the run and the height walk answers
+    /// to the pane: a reader pinned to one file needs no whole-worktree height and
+    /// does not stop having a diff. Filling is idempotent and a span already
+    /// answered short-circuits, so on the ordinary path this costs the lookups it
+    /// would have cost anyway.
+    ///
+    /// # Errors
+    ///
+    /// A measure fails in a way that is not one file's, which [`Self::height`]
+    /// propagates for the same reason.
+    pub fn churn(&mut self) -> Result<Option<Churn>> {
+        // One clock for the walk, for [`Frame::height`]'s reason.
+        let now = SystemTime::now();
+        let mut total = Churn::default();
+        for index in 0..self.files.len() {
+            self.fill_span(index, now)?;
+            let change = &self.files[index];
+            // A file still being written is deferred rather than answered, and a
+            // total short one file is not this run's total.
+            let Some(measured) = self.spans.get(change).filter(|held| held.answered) else {
+                return Ok(None);
+            };
+            total.added = total.added.saturating_add(measured.span.added);
+            total.removed = total.removed.saturating_add(measured.span.removed);
+            total.binary += usize::from(measured.span.binary);
         }
-        Some(total)
+        Ok(Some(total))
     }
 
     /// How many rows one file occupies, from its span.

@@ -262,14 +262,12 @@ pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
     };
     for group in groups(diff.hunks()) {
         let (old_start, old_end, _, _) = bounds(&group, before_len, after_len);
-        let added: u32 = group
-            .iter()
-            .map(|raw| raw.after.end - raw.after.start)
-            .sum();
-        let removed: u32 = group
-            .iter()
-            .map(|raw| raw.before.end - raw.before.start)
-            .sum();
+        let (added, removed) = group.iter().fold((0u32, 0u32), |(added, removed), raw| {
+            (
+                added + (raw.after.end - raw.after.start),
+                removed + (raw.before.end - raw.before.start),
+            )
+        });
         span.hunks += 1;
         // The rows a reader sees: every index-side row of the group, context and
         // removals alike, and every added row under them.

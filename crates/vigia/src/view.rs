@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 
 use vigia_core::{
-    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Note,
-    Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve, run_of,
+    ChangeKind, Churn, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
+    Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
+    run_of,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -983,9 +984,9 @@ pub struct View {
     pub current_span: usize,
     /// Rows the whole diff is, every changed file counted.
     pub total_rows: usize,
-    /// What the whole run adds and removes, or `None` while a changed file is
-    /// unmeasured. On the view, since the chrome is built before this collect.
-    pub churn: Option<(u32, u32)>,
+    /// What the whole run changed, or `None` while a changed file is unmeasured.
+    /// On the view, since the chrome is built before this collect.
+    pub churn: Option<Churn>,
     /// Rows of the whole diff above this screen's top row.
     pub rows_above: usize,
     /// Changed files in the whole worktree, not just the visible ones.
@@ -1307,7 +1308,7 @@ impl View {
     ) -> Result<Self> {
         let mut view =
             Self::collect_rows(frame, highlighter, history, viewport, notes, rows, note_box)?;
-        view.churn = frame.churn();
+        view.churn = frame.churn()?;
         Ok(view)
     }
 

@@ -729,7 +729,6 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
-        churn: None,
         total_rows: 0,
         rows_above: 0,
         files: 100,
@@ -3301,7 +3300,6 @@ fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
     let long = "        for change in self.changes() { ".repeat(8);
     let view = View {
         // No total reported, so `scrollable` is false and no bar is drawn at any width.
-        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![

@@ -7,7 +7,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
+use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
 
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
@@ -647,7 +647,9 @@ fn header_right(view: &View, chrome: &Chrome, theme: &Theme, room: usize) -> Vec
     if chrome.mode == Mode::Lost {
         return word(theme.alert);
     }
-    let Some((added, removed)) = view.churn.filter(|&(a, r)| a > 0 || r > 0) else {
+    let Some(Churn { added, removed, .. }) =
+        view.churn.filter(|run| run.added > 0 || run.removed > 0)
+    else {
         return word(theme.chrome_dim);
     };
     let total = vec![
@@ -661,18 +663,23 @@ fn header_right(view: &View, chrome: &Chrome, theme: &Theme, room: usize) -> Vec
     total
 }
 
-/// `N changed`, or nothing at all when there is no diff to count.
-fn count_of(files: usize, staged: Option<usize>) -> String {
-    let changed = match files {
-        0 => String::new(),
-        n => format!("{n} changed"),
-    };
-    // The staged total is a second fact and is owed whenever the run is on, including
-    // at zero.
-    match (changed.is_empty(), staged) {
-        (false, Some(staged)) => format!("{changed}{FACT_SEPARATOR}{staged} staged"),
-        _ => changed,
+/// The facts about the tree, in the order a narrowing header gives them up.
+///
+/// `N binary` says how much of the run the header's total leaves out, and draws
+/// only where there is some; the staged total is owed whenever the run is on,
+/// zero included, which is why it is the one here that draws its own nothing.
+fn facts_of(files: usize, binary: usize, staged: Option<usize>) -> Vec<String> {
+    if files == 0 {
+        return Vec::new();
     }
+    let mut facts = vec![format!("{files} changed")];
+    if binary > 0 {
+        facts.push(format!("{binary} binary"));
+    }
+    if let Some(staged) = staged {
+        facts.push(format!("{staged} staged"));
+    }
+    facts
 }
 
 /// The header's left-hand side, widest rung first.
@@ -700,10 +707,11 @@ fn header_left(
     worktree: &str,
     branch: Option<&str>,
     files: usize,
+    binary: usize,
     staged: Option<usize>,
 ) -> Vec<String> {
-    let mut rungs = Vec::with_capacity(4);
-    let count = count_of(files, staged);
+    let facts = facts_of(files, binary, staged);
+    let mut rungs = Vec::with_capacity(facts.len() + 2);
 
     // The branch is drawn always, rather than on the empty state alone.
     let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
@@ -715,29 +723,25 @@ fn header_left(
     // would head the pane with a leading separator.
     let visible = worktree.trim().replace(|c: char| c.is_control(), "");
     let name = (width_of(&visible) != 0).then_some(worktree);
-    let join = |facts: [Option<&str>; 3]| {
-        facts
-            .into_iter()
-            .flatten()
+    let join = |kept: &[&str]| {
+        name.into_iter()
+            .chain(named)
+            .chain(kept.iter().copied())
             .filter(|fact| !fact.is_empty())
             .collect::<Vec<_>>()
             .join(FACT_SEPARATOR)
     };
 
-    // Widest first, dropping one fact per rung in the order §11.1 rules: the
-    // count goes before the branch because the list below repeats it, and the
-    // branch before the name because B3's empty state leans on the name to say
-    // which repository this is.
-    if !count.is_empty() {
-        rungs.push(join([name, named, Some(&count)]));
-    }
-    // The staged total is the first thing a narrowing header gives up, one rung above
-    // the count it rides on.
-    if staged.is_some() && files > 0 {
-        rungs.push(join([name, named, Some(&count_of(files, None))]));
+    // Widest first, dropping one fact per rung in the order §11.1 rules: the facts
+    // go rightmost first, because each qualifies the one before it, then the branch,
+    // then the name, because B3's empty state leans on the name to say which
+    // repository this is.
+    let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
+    for end in (1..=kept.len()).rev() {
+        rungs.push(join(&kept[..end]));
     }
     if named.is_some() {
-        rungs.push(join([name, named, None]));
+        rungs.push(join(&[]));
     }
     rungs.push(worktree.to_owned());
     rungs
@@ -2926,20 +2930,16 @@ impl Painter<'_> {
 
     /// Write `text` so that it ends at the right edge of `area`.
     fn put_right(&mut self, area: Rect, text: &str, style: Style) -> usize {
-        let width = width_of(text);
-        let Some(at) = flush_right(area, width) else {
-            return 0;
-        };
-        self.buf.set_stringn(at.x, at.y, text, width, style);
-        // The gap keeps the right-hand text from touching whatever is drawn from
-        // the left, which at forty columns happens constantly.
-        width + 1
+        self.put_right_parts(area, &[(text, style)])
     }
 
     /// Write `parts` flush right in order, each in its own ink, and answer what the
-    /// whole cost including the gap [`Painter::put_right`] adds. One write per
-    /// part, because the header's total is a green half and a red half.
-    fn put_parts_right(&mut self, area: Rect, parts: &[(String, Style)]) -> usize {
+    /// whole cost including the gap comes to.
+    ///
+    /// One write per part, because the header's total is a green half and a red
+    /// half and no single style carries both. Borrowed rather than owned, since
+    /// the one-part case draws every list row's counters.
+    fn put_right_parts(&mut self, area: Rect, parts: &[(&str, Style)]) -> usize {
         let width: usize = parts.iter().map(|(text, _)| width_of(text)).sum();
         let Some(at) = flush_right(area, width) else {
             return 0;
@@ -2950,7 +2950,8 @@ impl Painter<'_> {
             self.buf.set_stringn(x, at.y, text, drawn, *style);
             x = x.saturating_add(drawn as u16);
         }
-        // The same gap `put_right` keeps, and for the same reason.
+        // The gap keeps the right-hand text from touching whatever is drawn from
+        // the left, which at forty columns happens constantly.
         width + 1
     }
 
@@ -2961,14 +2962,14 @@ impl Painter<'_> {
         area: Rect,
         left: &[S],
         style: Style,
-        right: &[(String, Style)],
+        right: &[(&str, Style)],
     ) {
         // The wash takes the whole row and the text takes the inset one,
         // which is §5.3's furniture rule and the reason these two lines address
         // different rectangles. See [`Painter::text_area`].
         self.buf.set_style(area, self.theme.chrome_dim);
         let text = self.text_area(area);
-        let taken = self.put_parts_right(text, right);
+        let taken = self.put_right_parts(text, right);
         let room = usize::from(text.width).saturating_sub(taken);
         let rung = widest_fitting_or_last(left, room);
         self.put_marked(text.x, text.y, rung, room, style);
@@ -3035,12 +3036,16 @@ impl Painter<'_> {
         // from `assets/preview.svg` on purpose: a title bar reading `vigia` spends six
         // of forty columns telling the reader which program they started, and what they
         // cannot tell by looking is which *tree*.
-        let right = header_right(
+        let owned = header_right(
             view,
             chrome,
             self.theme,
             self.text_area(area).width as usize,
         );
+        let right: Vec<(&str, Style)> = owned
+            .iter()
+            .map(|(text, ink)| (text.as_str(), *ink))
+            .collect();
         // One style across both facts on the left, and that is a ruling. Drawing the
         // count in the mode word's dim grey gives one clause two weights, telling the
         // reader in colour that these are separate claims.
@@ -3048,6 +3053,7 @@ impl Painter<'_> {
             &chrome.worktree,
             chrome.branch.as_deref(),
             view.files,
+            view.churn.map_or(0, |run| run.binary),
             chrome.staged,
         );
         self.status_line(area, &rungs, self.theme.chrome, &right);
@@ -3094,7 +3100,7 @@ impl Painter<'_> {
                 upper,
                 &[""],
                 self.theme.chrome_dim,
-                &[(right.clone(), self.theme.chrome_dim)],
+                &[(right.as_str(), self.theme.chrome_dim)],
             );
             // The inset row for the reason `placed` uses one: the walk is bounded
             // by its `row`'s right edge, and the text's edge is not the pane's.
@@ -3105,7 +3111,7 @@ impl Painter<'_> {
                 bottom,
                 &[footer.left],
                 style,
-                &[(right, self.theme.chrome_dim)],
+                &[(right.as_str(), self.theme.chrome_dim)],
             );
             self.tint_readouts(text, placed, readouts);
         }

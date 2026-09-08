@@ -106,7 +106,6 @@ fn each_region_reports_its_own_bar_column() {
     // a bar is decided from the rows on screen against the total.
     let bare = View {
         rows: vec![Row::Gap],
-        churn: None,
         total_rows: 1,
         ..View::default()
     };

@@ -126,7 +126,6 @@ fn beside() -> View {
             Row::file(entry("Cargo.toml")),
             Row::file(entry("src/main.rs")),
         ],
-        churn: None,
         total_rows: 3,
         rows_above: 0,
         current_span: 3,
