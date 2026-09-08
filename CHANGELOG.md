@@ -4,6 +4,10 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.41.0] - 2026-09-08
+
+- The box arrives in a receipt's time, and the answer's stem waits for an answer
+
 ## [0.40.0] - 2026-09-08
 
 - A resolved note shows the agent's line before it leaves, and a tab wraps where it draws
