@@ -1797,6 +1797,45 @@ mod tests {
         }
     }
 
+    /// A press on a note's left side takes the note back before the wash can see
+    /// it, and acts on the store rather than on the screen it landed on. Both live
+    /// inside methods that own a terminal, so they are read here.
+    #[test]
+    fn a_press_on_a_notes_side_withdraws_before_the_wash_and_goes_through_the_store() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let press = shipped
+            .find("notes::edge_at(&shell.screen, regions, &event)")
+            .expect("the input arm no longer routes a press on a note's left side");
+        let wash = shipped
+            .find("selection_after(&event, regions, shell.selected)")
+            .expect("the input arm no longer opens a wash");
+        assert!(
+            press < wash,
+            "a press on a note's left side also begins a selection, so B20 and B21              share a cell"
+        );
+        let withdraw = shipped
+            .split("fn withdraw_note(&mut self, id: &str, now: Instant) {")
+            .nth(1)
+            .and_then(|rest| {
+                rest.split(
+                    "
+    }
+",
+                )
+                .next()
+            })
+            .expect("`withdraw_note` is gone");
+        assert!(
+            withdraw.contains("notes::withdraw(store, id)"),
+            "`withdraw_note` no longer goes through the store's own read-back, so a              resolve that landed since the frame is deleted with the note"
+        );
+        assert!(
+            withdraw.contains("Ok(true) => self.reload_notes(now)"),
+            "`withdraw_note` no longer reads the store back, so the rows of a note              it took stay drawn"
+        );
+    }
+
     /// A press on a content row's gutter goes to the store before the wash can
     /// see it, and the store is read back whatever the write answered. Both live
     /// inside methods that own a terminal, so they are read here.
