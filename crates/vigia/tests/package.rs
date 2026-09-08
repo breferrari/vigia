@@ -1809,9 +1809,9 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 383935),
+    ("SPEC.md", 383209),
     ("REVOCATIONS.md", 8851),
-    ("ROADMAP.md", 93612),
+    ("ROADMAP.md", 94329),
     ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -1907,6 +1907,57 @@ fn the_box_arrives_over_the_length_the_spec_gives_it() {
     assert_eq!(
         stated, voiced,
         "the box is given {stated}ms and a receipt takes {voiced}ms. It answers a gesture and finds the reader looking, so the two are one number"
+    );
+}
+
+/// A resolve holds the agent's line for as long as `SPEC.md` gives it.
+///
+/// The same shape as the box's gate above and for the same reason: the number is
+/// the whole of the ruling, and nothing drawn changes with it, so no assertion
+/// over the effect can see it. Every gate inside the behaviour asks the ledger
+/// or the effect for its own length and stays green at any value.
+///
+/// The two sentences are read rather than the two constants compared, because
+/// `RESOLVED_DEPARTURE` is defined as `ARRIVED_LINGER` and an assertion between
+/// them would hold by spelling. What is being checked is the ruling: a resolve
+/// lands while the reader is in the other pane, which is an announcement's case.
+#[test]
+fn a_resolve_holds_the_line_for_the_length_the_spec_gives_it() {
+    let spec = repo_file("SPEC.md");
+    let phrase = |line: Option<&str>, after: &str, upto: char| {
+        line.and_then(|line| line.split_once(after))
+            .and_then(|(_, rest)| rest.split_once(upto))
+            .map(|(phrase, _)| phrase.to_owned())
+    };
+    // §11.1 B21's own sentence, and the §5.1 rule the length comes from.
+    let held = phrase(
+        spec.lines()
+            .find(|line| line.contains("A resolve is a departure")),
+        "it holds ",
+        ',',
+    )
+    .expect("SPEC.md rules how long a resolve holds the agent's line");
+    let stays = phrase(
+        spec.lines()
+            .find(|line| line.contains("**An announcement stays ")),
+        "**An announcement stays ",
+        '*',
+    )
+    .expect("SPEC.md rules how long an announcement stays");
+    assert_eq!(
+        held, stays,
+        "a resolve is given {held:?} and an announcement stays {stays:?}. The \
+         agent answers minutes after the note was written, so the line lands \
+         while the reader is reading the other pane, and the two are one length"
+    );
+
+    let minute = std::time::Duration::from_secs(60);
+    assert_eq!(held, "a minute", "the length above is no longer a minute");
+    assert_eq!(
+        vigia::RESOLVED_DEPARTURE,
+        minute,
+        "SPEC.md gives a resolve {held} and the pane departs after {:?}",
+        vigia::RESOLVED_DEPARTURE
     );
 }
 

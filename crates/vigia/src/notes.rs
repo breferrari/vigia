@@ -19,9 +19,7 @@ use tachyonfx::pattern::AnyPattern;
 use vigia_core::{CONTEXT, Listing, Note, Origin, Result, Status, Store};
 
 use crate::input::Regions;
-use crate::motion::{
-    self, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Timed,
-};
+use crate::motion::{self, BOX_ARRIVING, LEAVING, RESOLVE_ARRIVING, RESOLVED_DEPARTURE, Timed};
 use crate::render::NoteCells;
 use crate::theme::{self, Theme};
 use crate::view::{Anchor, View};
@@ -437,8 +435,11 @@ pub enum Change {
     /// The agent answered without closing the note, so its line is new or has
     /// changed.
     Replied(String),
-    /// The agent resolved it: it departs with the agent's line.
+    /// The agent resolved it: the agent's line arrives over the rows, which
+    /// then hold it until [`Change::Swept`].
     Resolved(String),
+    /// A resolve's beat has run and its rows are going.
+    Swept(String),
     /// It is leaving without the agent's line: its file is gone from the store,
     /// by the reader's press here, another pane's, or the server's prune before
     /// this pane saw it resolved.
@@ -450,17 +451,28 @@ pub enum Change {
 struct Departing {
     /// The note as it draws while it goes.
     note: Note,
+    /// When the sweep over its rows is armed, while a resolve is still holding
+    /// the agent's line; `None` once it has been armed, and from the start for a
+    /// departure with no line to show first.
+    ///
+    /// The beat is a deadline rather than a `sleep` inside the effect because an
+    /// effect that has not finished keeps the loop asking for a frame every
+    /// `ARRIVING_FRAME`: a minute held inside one motion is a minute of paints
+    /// of a surface that is not moving.
+    holds: Option<Instant>,
     /// When its rows are dropped and the diff below closes up.
     ends: Instant,
 }
 
-/// What one settle came to: whether the rows the next collect places moved, and
-/// the resolved notes whose departure has run and whose files the caller now
-/// owns the removal of.
+/// What one settle came to: whether the rows the next collect places moved, the
+/// resolves whose beat has run, and the resolved notes whose departure has run
+/// and whose files the caller now owns the removal of.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Settled {
     /// A departure ended, so the drawn set is not what it was.
     pub changed: bool,
+    /// Ids whose beat ended this turn, so the sweep over their rows is armed.
+    pub sweeping: Vec<String>,
     /// Resolved ids whose files are to be removed, in the order they ended.
     pub prune: Vec<String>,
 }
@@ -494,8 +506,11 @@ impl Ledger {
             }
             if note.status == Status::Resolved {
                 changes.push(Change::Resolved(note.id.clone()));
+                // The sweep comes out of the departure rather than after it,
+                // which is the rule the footer's linger keeps too.
                 self.departing.push(Departing {
                     note,
+                    holds: Some(now + RESOLVED_DEPARTURE - LEAVING),
                     ends: now + RESOLVED_DEPARTURE,
                 });
                 continue;
@@ -519,6 +534,7 @@ impl Ledger {
             changes.push(Change::Left(gone.id.clone()));
             self.departing.push(Departing {
                 note: gone,
+                holds: None,
                 ends: now + LEAVING,
             });
         }
@@ -526,8 +542,8 @@ impl Ledger {
         changes
     }
 
-    /// Drop every departure that has ended, and name the resolved ones whose
-    /// files are now the caller's to remove.
+    /// End every beat that has run, drop every departure that has ended, and
+    /// name the resolved ones whose files are now the caller's to remove.
     ///
     /// The pane is what knows a resolve has been drawn, so the pane is what
     /// prunes: the server leaves a resolved file where it is precisely because
@@ -548,18 +564,34 @@ impl Ledger {
             }
             false
         });
+        // After the drop and not before it, so a turn that finds both deadlines
+        // spent takes the rows away rather than arming a sweep over rows that
+        // are no longer drawn. The loop is offered the beat's end as its own
+        // deadline, so that turn is a pane which was blocked past the whole
+        // departure, or one that met the resolve already older than it.
+        let mut sweeping = Vec::new();
+        for gone in &mut self.departing {
+            if gone.holds.is_some_and(|until| now >= until) {
+                gone.holds = None;
+                sweeping.push(gone.note.id.clone());
+            }
+        }
         Settled {
             changed: self.departing.len() != before,
+            sweeping,
             prune,
         }
     }
 
-    /// When the next departure ends, which is the next frame something here
-    /// changes on its own; `None` with nothing leaving, so an idle pane owns no
-    /// clock for this.
+    /// When a beat next runs out or a departure next ends, which is the next
+    /// frame something here changes on its own; `None` with nothing leaving, so
+    /// an idle pane owns no clock for this.
     #[must_use]
     pub fn ends_in(&self) -> Option<Instant> {
-        self.departing.iter().map(|gone| gone.ends).min()
+        self.departing
+            .iter()
+            .map(|gone| gone.holds.unwrap_or(gone.ends))
+            .min()
     }
 
     /// Every note the next collect places: the ones listed and the ones still
@@ -593,24 +625,18 @@ pub fn word_arrival(theme: &Theme) -> Option<Effect> {
     ))
 }
 
-/// The departure a resolve runs: the agent's line arrives, holds a beat, and
-/// the rows are swept away. Its length is its own, which is what retires it.
-fn resolving(theme: &Theme) -> Effect {
-    motion::holding(
-        evolving(theme.note_reply, RESOLVE_ARRIVING),
-        RESOLVE_BEAT,
-        sweeping(LEAVING),
-    )
-}
-
-/// The same, as the effect the suite drives directly.
+/// How a resolve's departure begins: the agent's line arriving over the rows.
+///
+/// The beat after it and the sweep that ends it are the ledger's, not this
+/// effect's, so the pane runs no motion while the line is simply being read.
 #[must_use]
-pub fn resolve_departure(theme: &Theme) -> Effect {
-    resolving(theme)
+pub fn resolve_arrival(theme: &Theme) -> Effect {
+    evolving(theme.note_reply, RESOLVE_ARRIVING)
 }
 
-/// The departure a withdrawal runs, and a note whose file vanished: the rows
-/// are swept away, with no line from the agent to show first.
+/// How a note's rows leave: swept away, with no line from the agent to show
+/// first. A resolve's own sweep, once its beat has run, and the whole of a
+/// withdrawal's departure and of one whose file vanished.
 #[must_use]
 pub fn leaving() -> Effect {
     sweeping(LEAVING)
@@ -664,8 +690,8 @@ impl NoteEffect {
                 Target::Reply,
                 evolving(theme.note_reply, RESOLVE_ARRIVING),
             ),
-            Change::Resolved(id) => (id, Target::Rows, resolving(theme)),
-            Change::Left(id) => (id, Target::Rows, sweeping(LEAVING)),
+            Change::Resolved(id) => (id, Target::Rows, resolve_arrival(theme)),
+            Change::Swept(id) | Change::Left(id) => (id, Target::Rows, leaving()),
         };
         Some(Self {
             id,

@@ -2007,8 +2007,8 @@ fn a_frame_full_of_notes_holds_the_frame_budget() {
     );
 }
 
-/// I9 with fifty notes departing at once: every note's rows drawn and a
-/// resolve's departure run over each of them, which is the dearest thing
+/// I9 with fifty notes departing at once: every note's rows drawn and the
+/// agent's line arriving over each of them, which is the dearest thing
 /// `SPEC.md` §11.2 B21 lets a frame do with the notes. Interleaved with the same
 /// fifty standing still, so a loaded machine moves both arms.
 #[test]
@@ -2086,8 +2086,9 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
         );
         edits += 1;
-        // Re-armed the moment a departure has run its length, so every departing
-        // frame timed below has fifty effects live on it.
+        // Re-armed the moment the arrival has run its length, so every departing
+        // frame timed below has fifty effects live on it. Arming sits outside
+        // `time_cpu`, so how often it happens is not in the measurement.
         if with {
             effects.settle(Instant::now());
             if !effects.is_running() {

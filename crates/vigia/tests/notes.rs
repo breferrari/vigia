@@ -223,13 +223,29 @@ impl Rig {
     }
 
     /// Move the clock by `by` and take the notes through the frame the shell
-    /// would: departures that ended are dropped and spent effects retired.
+    /// would: beats that ran out arm their sweep, departures that ended are
+    /// dropped and spent effects retired.
     fn advance(&mut self, by: Duration) {
         self.clock += by;
         self.elapsed += by;
         let settled = self.ledger.settle(self.clock);
         if settled.changed {
             self.app.set_notes(self.ledger.drawn());
+        }
+        if !settled.sweeping.is_empty() {
+            self.effects.arm(
+                settled
+                    .sweeping
+                    .into_iter()
+                    .map(Change::Swept)
+                    .collect::<Vec<_>>(),
+                &self.theme,
+                self.clock,
+            );
+            // `effect_interval`'s rule, in this rig's terms: nothing was drawing
+            // through the beat, so a sweep armed at its end has lived through
+            // none of it and the next paint tells it nothing passed.
+            self.elapsed = Duration::ZERO;
         }
         // The shell's own prune: a resolved file is the pane's to remove once
         // the departure it drew has run, and a refusal is an alert there rather
@@ -3927,9 +3943,10 @@ fn a_resolve_runs_the_departure_once_and_the_rows_are_gone_after_it() {
     assert_ne!(holding.fg(stem, arrow), Some(dim));
     assert!(holding.text(holding.after_notes(y)).contains("line 6"));
 
-    // The dissolve: halfway through, the line is going and the diff has not
-    // closed up yet.
-    rig.advance(RESOLVE_BEAT + LEAVING / 2);
+    // The beat, held with no motion over it, and then the dissolve: halfway
+    // through, the line is going and the diff has not closed up yet.
+    rig.advance(RESOLVE_BEAT);
+    rig.advance(LEAVING / 2);
     let dissolving = rig.paint(&mut frame, PANE, Pointing::default());
     assert_ne!(
         dissolving.text(arrow),
@@ -3969,6 +3986,88 @@ fn a_resolve_runs_the_departure_once_and_the_rows_are_gone_after_it() {
     rig.reload();
     let again = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(again.rows(), plain.rows(), "a resolved note departed twice");
+    assert!(!rig.effects.is_running());
+}
+
+#[test]
+fn the_beat_between_a_resolve_and_its_sweep_runs_no_effect() {
+    // What makes the hold affordable, and the only thing that does. `patience`
+    // asks for a frame every `ARRIVING_FRAME` while any effect is running, so a
+    // beat spent inside one effect is the beat's length divided by 16ms in
+    // paints of a surface that is not moving. The line arrives, the pane goes
+    // quiet holding it, and the sweep is armed by the deadline that ends the
+    // beat.
+    let scratch = fixture("notes-resolve-beat");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+
+    rig.store
+        .put(&left_as("n1", "short", Status::Seen, None))
+        .expect("put");
+    rig.reload();
+    rig.agent()
+        .rewrite(&left_as("n1", "short", Status::Resolved, Some(REPLY)))
+        .expect("rewrite");
+    rig.reload();
+
+    // The arrival, and then nothing: the effect over the rows is retired at its
+    // own length rather than at the departure's.
+    rig.advance(RESOLVE_ARRIVING);
+    let held = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        held.notes_under(y)[0].starts_with("swapped for"),
+        "the agent's line is not drawn once its arrival has run: {:?}",
+        held.notes_under(y)
+    );
+    assert!(
+        !rig.effects.is_running(),
+        "an effect is still running once the agent's line has arrived, so the \
+         beat is paid for at one frame every {ARRIVING_FRAME:?}"
+    );
+
+    // Three quarters of the way through the beat, still quiet and still drawn.
+    rig.advance(RESOLVE_BEAT * 3 / 4);
+    let late = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        late.notes_under(y)[0].starts_with("swapped for"),
+        "the agent's line left inside the beat: {:?}",
+        late.notes_under(y)
+    );
+    assert!(!rig.effects.is_running(), "the beat armed an effect");
+
+    // The beat's end is the deadline the loop waits on, and it arms the sweep.
+    rig.advance(RESOLVE_BEAT / 4);
+    assert!(
+        rig.effects.is_running(),
+        "the beat ran out and nothing swept the rows away"
+    );
+    let armed = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        armed.notes_under(y),
+        late.notes_under(y),
+        "the frame that arms the sweep has already run some of it, so the line \
+         starts leaving before it was ever drawn settled"
+    );
+    rig.advance(LEAVING / 2);
+    let dissolving = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_ne!(
+        dissolving.notes_under(y),
+        late.notes_under(y),
+        "halfway through the sweep the rows are drawn whole"
+    );
+
+    // And the rows are dropped on the frame after it, as they always were.
+    rig.advance(LEAVING / 2);
+    let gone = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        gone.rows(),
+        plain.rows(),
+        "the departure ended and something was left drawn"
+    );
     assert!(!rig.effects.is_running());
 }
 

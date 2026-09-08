@@ -54,7 +54,7 @@ pub use motion::{
 pub use notes::{
     Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
     box_entrance, box_exit, box_route, commit, has_room, leaving, opening, press_at,
-    resolve_departure, word_arrival,
+    resolve_arrival, word_arrival,
 };
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
@@ -1147,9 +1147,10 @@ impl Shell {
     }
 
     /// Take the notes through one frame: read the store back if a wake said it
-    /// changed, drop the departures that have ended, and retire the effects that
-    /// have run their length. On every path to a paint, so a departure's end is
-    /// consumed on the turn that finds it and not on a timeout.
+    /// changed, sweep the resolves whose beat has run, drop the departures that
+    /// have ended, and retire the effects that have run their length. On every
+    /// path to a paint, so a departure's end is consumed on the turn that finds
+    /// it and not on a timeout.
     fn settle_notes(&mut self, now: Instant) {
         if std::mem::take(&mut self.notes_stale) {
             self.reload_notes(now);
@@ -1158,6 +1159,16 @@ impl Shell {
         if settled.changed {
             self.publish_notes();
         }
+        // The sweep is armed here rather than where the resolve was read,
+        // because the beat between the agent's line arriving and the rows going
+        // is a deadline this loop waits on rather than a sleep inside an effect:
+        // an effect that has not finished asks for a frame every
+        // `ARRIVING_FRAME`, and this beat is a minute long.
+        self.note_effects.arm(
+            settled.sweeping.into_iter().map(Change::Swept).collect(),
+            &self.theme,
+            now,
+        );
         self.prune_departed(&settled.prune, now);
         self.note_effects.settle(now);
         // A pane narrowed under an open box can no longer draw it, and the rule
@@ -2244,6 +2255,9 @@ mod tests {
             "if std::mem::take(&mut self.notes_stale) {",
             "self.reload_notes(now)",
             "self.ledger.settle(now)",
+            // Whole to the `collect`, so an adapter dropping ids on the way is a
+            // red rather than a sweep nothing on screen ever runs.
+            "settled.sweeping.into_iter().map(Change::Swept).collect(),",
             "self.note_effects.settle(now)",
             "self.app.settle_box(now)",
             "self.box_effect.take_if(|armed| armed.spent(now))",
@@ -2251,9 +2265,9 @@ mod tests {
         ] {
             assert!(
                 body.contains(step),
-                "`settle_notes` no longer runs `{step}`, so one of a stale store, an \
-                 ended departure, a spent effect and the box's own end outlives the \
-                 frame that should have settled it"
+                "`settle_notes` no longer runs `{step}`, so one of a stale store, a \
+                 beat that has run, an ended departure, a spent effect and the box's \
+                 own end outlives the frame that should have settled it"
             );
         }
 

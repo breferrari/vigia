@@ -63,12 +63,19 @@ pub const RESOLVE_ARRIVING: Duration = NOTICE_ARRIVING;
 /// How long a note's rows take to leave, whichever way the note goes.
 pub const LEAVING: Duration = NOTICE_ARRIVING;
 
-/// The whole of a resolve's departure, after which the rows are dropped: one
-/// notice's time on the footer, its two ends included. One table with the
+/// The whole of a resolve's departure, after which the rows are dropped: an
+/// announcement's time on the footer, its two ends included. One table with the
 /// footer's, so the pane keeps one rhythm.
-pub const RESOLVED_DEPARTURE: Duration = NOTICE_LINGER;
+///
+/// An announcement's rather than [`NOTICE_LINGER`] for the reason that table
+/// gives: the agent answers minutes after the note was written, so the line
+/// lands while the reader is reading the other pane, where a receipt answers a
+/// gesture and finds them looking.
+pub const RESOLVED_DEPARTURE: Duration = ARRIVED_LINGER;
 
-/// How long a resolve's line holds between arriving and leaving.
+/// How long a resolve's line holds between arriving and leaving, with no effect
+/// running over it: the pane owns one deadline for this and asks for no frame
+/// until it comes due.
 pub const RESOLVE_BEAT: Duration = RESOLVED_DEPARTURE
     .saturating_sub(RESOLVE_ARRIVING)
     .saturating_sub(LEAVING);
@@ -95,11 +102,6 @@ const EVOLVING: &str = r#"
 /// A surface leaving: swept away, left to right.
 const SWEEPING: &str = r#"
     fx::dissolve((over, SineInOut)).with_pattern(SweepPattern::left_to_right(span))
-"#;
-
-/// A departure that shows something first: it arrives, holds a beat, and goes.
-const HOLDING: &str = r#"
-    fx::sequence(&[arriving, fx::sleep((beat, Linear)), leaving])
 "#;
 
 /// A message's ink arriving from the colour it replaces, by the road its voice
@@ -155,19 +157,6 @@ pub fn sweeping(over: Duration, span: u32) -> Effect {
             .bind("over", tachyonfx::Duration::from(over))
             .bind("span", span)
             .compile(SWEEPING),
-    )
-}
-
-/// `arriving`, held for `beat`, then `leaving`.
-#[must_use]
-pub fn holding(arriving: Effect, beat: Duration, leaving: Effect) -> Effect {
-    compiled(
-        dsl()
-            .compiler()
-            .bind("arriving", arriving)
-            .bind("beat", tachyonfx::Duration::from(beat))
-            .bind("leaving", leaving)
-            .compile(HOLDING),
     )
 }
 

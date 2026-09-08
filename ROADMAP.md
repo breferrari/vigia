@@ -181,6 +181,12 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
+| 🔨 | The resolve line leaves before the reader can read it. **Reported from use** | [#465](https://github.com/breferrari/vigia/issues/465) |
+| ⬜ | The header counts files but never lines | [#472](https://github.com/breferrari/vigia/issues/472) |
+| ⬜ | The file list never says which file holds a note | [#471](https://github.com/breferrari/vigia/issues/471) |
+| ⬜ | A note can be written but never removed | [#469](https://github.com/breferrari/vigia/issues/469) |
+| ⬜ | Dragging over a note copies the diff line above it | [#468](https://github.com/breferrari/vigia/issues/468) |
+| ⬜ | A reply shifts the box and leaves its arrow off the rule | [#466](https://github.com/breferrari/vigia/issues/466) |
 | ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
 | ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
 | ✅ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
