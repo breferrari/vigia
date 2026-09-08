@@ -1917,10 +1917,14 @@ fn the_box_arrives_over_the_length_the_spec_gives_it() {
 /// over the effect can see it. Every gate inside the behaviour asks the ledger
 /// or the effect for its own length and stays green at any value.
 ///
-/// The two sentences are read rather than the two constants compared, because
+/// The sentences are read rather than the two constants compared, because
 /// `RESOLVED_DEPARTURE` is defined as `ARRIVED_LINGER` and an assertion between
 /// them would hold by spelling. What is being checked is the ruling: a resolve
 /// lands while the reader is in the other pane, which is an announcement's case.
+///
+/// `README.md` is read beside the spec because it is the copy nothing else
+/// gates, and it is the one that went on telling a reader three seconds after
+/// the pane had stopped meaning it.
 #[test]
 fn a_resolve_holds_the_line_for_the_length_the_spec_gives_it() {
     let spec = repo_file("SPEC.md");
@@ -1949,6 +1953,20 @@ fn a_resolve_holds_the_line_for_the_length_the_spec_gives_it() {
         "a resolve is given {held:?} and an announcement stays {stays:?}. The \
          agent answers minutes after the note was written, so the line lands \
          while the reader is reading the other pane, and the two are one length"
+    );
+
+    let told = phrase(
+        repo_file("README.md")
+            .lines()
+            .find(|line| line.contains("**When the agent resolves one**")),
+        "holds for ",
+        ',',
+    )
+    .expect("README.md tells a reader how long the answer holds");
+    assert_eq!(
+        told, held,
+        "README.md tells a reader the answer holds {told:?} and SPEC.md gives it \
+         {held:?}"
     );
 
     let minute = std::time::Duration::from_secs(60);

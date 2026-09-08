@@ -21,8 +21,8 @@ use vigia::{
     Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
     Pointing, REPLY_INDENT, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions,
     Row, Theme, Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit,
-    box_route, commit, count_cell, has_room, hover_after, note_cells, opening, press_at, regions,
-    render, repainted, selection_after,
+    box_route, commit, count_cell, effect_interval, has_room, hover_after, note_cells, opening,
+    press_at, regions, render, repainted, selection_after,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -228,6 +228,9 @@ impl Rig {
     fn advance(&mut self, by: Duration) {
         self.clock += by;
         self.elapsed += by;
+        // Read before the settle, because the settle is what arms the sweep and
+        // the question is what was drawing before it did.
+        let ran = self.effects.is_running();
         let settled = self.ledger.settle(self.clock);
         if settled.changed {
             self.app.set_notes(self.ledger.drawn());
@@ -242,10 +245,11 @@ impl Rig {
                 &self.theme,
                 self.clock,
             );
-            // `effect_interval`'s rule, in this rig's terms: nothing was drawing
-            // through the beat, so a sweep armed at its end has lived through
-            // none of it and the next paint tells it nothing passed.
-            self.elapsed = Duration::ZERO;
+            // `effect_interval`'s rule, in this rig's terms. The beat is a
+            // stretch with nothing drawing, so a sweep armed at its end has
+            // lived through none of it; with something else still running the
+            // pane was painting at its cadence and the interval is real.
+            self.elapsed = effect_interval(ran, self.elapsed);
         }
         // The shell's own prune: a resolved file is the pane's to remove once
         // the departure it drew has run, and a refusal is an alert there rather
@@ -4116,6 +4120,69 @@ fn a_beat_that_has_run_names_its_sweep_once_however_often_the_pane_settles() {
         ledger.ends_in(),
         Some(now + RESOLVED_DEPARTURE),
         "the rows are dropped at something other than the departure's own end"
+    );
+}
+
+#[test]
+fn departures_in_different_phases_each_keep_their_own_clock() {
+    // One ledger holding a resolve mid-beat, a resolve already sweeping and a
+    // withdrawal, which is every phase a `Departing` has. `ends_in` folds them to
+    // the earliest, so a note in one phase must not be able to move another's
+    // moment, and a settle must name only what is due on it.
+    let now = Instant::now();
+    let mut ledger = Ledger::default();
+    ledger.reload(
+        vec![
+            note("n1", 5, EDITED, "first"),
+            note("n2", 6, "line 6", "second"),
+        ],
+        now,
+    );
+
+    // n1 resolves, and a moment later n2 is withdrawn: two departures, two
+    // clocks, and the withdrawal's is the nearer one.
+    ledger.reload(
+        vec![
+            left_as("n1", "first", Status::Resolved, Some(REPLY)),
+            note("n2", 6, "line 6", "second"),
+        ],
+        now,
+    );
+    let withdrawn = now + RESOLVE_ARRIVING;
+    ledger.reload(
+        vec![left_as("n1", "first", Status::Resolved, Some(REPLY))],
+        withdrawn,
+    );
+    assert_eq!(
+        ledger.ends_in(),
+        Some(withdrawn + LEAVING),
+        "the ledger offers something other than the nearer of the two clocks"
+    );
+
+    // The withdrawal ends first and takes nothing of the resolve's with it.
+    let settled = ledger.settle(withdrawn + LEAVING);
+    assert!(settled.changed);
+    assert!(
+        settled.sweeping.is_empty() && settled.prune.is_empty(),
+        "a withdrawal ending swept or pruned the resolve still holding its line"
+    );
+    let sweeps = now + RESOLVED_DEPARTURE - LEAVING;
+    assert_eq!(
+        ledger.ends_in(),
+        Some(sweeps),
+        "the resolve's beat moved when the note beside it left"
+    );
+    assert_eq!(ledger.drawn().len(), 1, "{:?}", ledger.drawn());
+
+    // And the resolve runs its own course from there.
+    assert_eq!(ledger.settle(sweeps).sweeping, vec!["n1".to_owned()]);
+    assert_eq!(
+        ledger.settle(now + RESOLVED_DEPARTURE).prune,
+        vec!["n1".to_owned()]
+    );
+    assert!(
+        ledger.ends_in().is_none(),
+        "a clock outlived every departure"
     );
 }
 
