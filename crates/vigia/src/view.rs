@@ -602,17 +602,11 @@ fn row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, text: String, last: bool)
     });
 }
 
-/// What the enclosure's bottom edge needs: its two corners, and the word between
-/// its blanks with the rules that set it in from the far one.
-fn edge_width(word: &str) -> usize {
-    2 + 1 + word.len() + 1 + crate::render::WORD_INSET
-}
-
 impl Pin {
     /// The display rows this note takes under a content width of `content`.
     fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
-        let boxed = content >= edge_width(self.word);
+        let boxed = content >= crate::render::edge_width(self.word);
         let inner = content.saturating_sub(BOX_FRAME);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
