@@ -324,8 +324,7 @@ pub enum Row {
     Gap,
 }
 
-/// Which of a note's two texts a row is part of, which is where one line out
-/// ends and the next begins.
+/// Which of a note's two texts a row is part of, and so where one line ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NoteVoice {
     Reader,
@@ -2118,8 +2117,7 @@ impl View {
     }
 
     /// The row whose text `at` is part of, `None` where it is part of none. Not
-    /// [`Self::head_of`], which answers which line of the diff a row hangs under:
-    /// a note's anchor and its mark want that, and the copy must not have it.
+    /// [`Self::head_of`], which answers which diff line a row hangs under.
     fn text_head_of(&self, at: usize) -> Option<usize> {
         if !self.rows.get(at)?.owns_text() {
             return None;
