@@ -1230,9 +1230,18 @@ fn a_drag_on_a_note_at_the_narrow_width_sends_it_whole() {
     }
     // The word rides the last rung row and is drawn from the note's state rather
     // than from that row's text, so it must not travel with the words.
-    let whole = sent_on(&mut app, &mut frame, (bar[0], bar[bar.len() - 1]), false, RUNG)
-        .expect("the rung sent nothing");
-    assert_eq!(whole, SHORT, "the status word travelled with the reader's words");
+    let whole = sent_on(
+        &mut app,
+        &mut frame,
+        (bar[0], bar[bar.len() - 1]),
+        false,
+        RUNG,
+    )
+    .expect("the rung sent nothing");
+    assert_eq!(
+        whole, SHORT,
+        "the status word travelled with the reader's words"
+    );
 }
 
 /// A note whose line has scrolled wholly above the top edge still sends itself.
