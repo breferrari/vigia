@@ -185,7 +185,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
 | ✅ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
 | ✅ | A note with no reply still draws the answer's stem. **Reported from use** | [#459](https://github.com/breferrari/vigia/issues/459) |
-| ⬜ | Remove the masthead, and revoke the ruling that kept it | [#457](https://github.com/breferrari/vigia/issues/457) |
+| ✅ | Remove the masthead, and revoke the ruling that kept it. **Reported from use** | [#457](https://github.com/breferrari/vigia/issues/457) |
 | ⬜ | vigia mcp finds its worktree by an agent's own variable | [#450](https://github.com/breferrari/vigia/issues/450) |
 | ✅ | The footer's transition is too quick to see, and unreadable while it runs. **Reported from use** | [#410](https://github.com/breferrari/vigia/issues/410) |
 | ✅ | The footer's motions are on the channel that degrades, and too short to see. **Reported from use** | [#408](https://github.com/breferrari/vigia/issues/408) |
@@ -279,9 +279,6 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
 | ✅ | The staged mark spends a gutter column on every row of both runs to mark the rows of one | [#316](https://github.com/breferrari/vigia/issues/316) |
 | ✅ | Side-by-side regions at real width: the list becomes a left rail | [#162](https://github.com/breferrari/vigia/issues/162) |
-| ✅ | Remove the masthead, and revoke the ruling that kept it. **Reported from use** | [#457](https://github.com/breferrari/vigia/issues/457) |
-| ⬜ | A note with no reply still draws the answer's stem. **Reported from use** | [#459](https://github.com/breferrari/vigia/issues/459) |
-| ⬜ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
 
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
@@ -318,7 +315,6 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | No test can build a Shell, so a gesture's decisions must move out to be seen | [#441](https://github.com/breferrari/vigia/issues/441) |
 | ⬜ | What a prompting session does with a note posted into its socket is unobserved | [#444](https://github.com/breferrari/vigia/issues/444) |
 | ⬜ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
-| ⬜ | `cargo install` cannot replace the binary while a registered `vigia mcp` holds it open on Windows | [#458](https://github.com/breferrari/vigia/issues/458) |
 | ⬜ | `SHEET_KEEP` names two things, so removing a gesture reassigns the never-drop set by rank | [#464](https://github.com/breferrari/vigia/issues/464) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
