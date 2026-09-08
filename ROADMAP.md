@@ -76,7 +76,7 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
 | ✅ | Fast scrolling drops frames, and a drawn row costs its whole line | [#45](https://github.com/breferrari/vigia/issues/45) |
 | ✅ | Fast trackpad scrolling over a large diff falls behind the hand | [#54](https://github.com/breferrari/vigia/issues/54) |
-| ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
+| ✅ | The header's changed-line total, ruled out and since revoked | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
 | ✅ | On Windows every CRLF file read as a full rewrite | [#65](https://github.com/breferrari/vigia/issues/65) |
@@ -187,7 +187,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | A copy inside tmux reaches no clipboard. **Reported from use** | [#477](https://github.com/breferrari/vigia/issues/477) |
 | ✅ | A note can be written but never removed. **Reported from use** | [#469](https://github.com/breferrari/vigia/issues/469) |
 | ✅ | The file list never says which file holds a note. **Reported from use** | [#471](https://github.com/breferrari/vigia/issues/471) |
-| ⬜ | The header counts files but never lines. **Reported from use** | [#472](https://github.com/breferrari/vigia/issues/472) |
+| ✅ | The header counts files but never lines. **Reported from use** | [#472](https://github.com/breferrari/vigia/issues/472) |
 | ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
 | ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
 | ✅ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
