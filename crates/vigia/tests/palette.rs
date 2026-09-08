@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Modifier, Style};
 use vigia::{
-    Chrome, Depth, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row,
-    Scale, Theme, View, render,
+    Band, Chrome, Depth, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, Heat, HeatBucket, Mode,
+    Position, Row, Scale, Theme, View, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency, Status};
 
@@ -817,6 +817,79 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
                 theme.spark_track.fg, theme.chrome_dim.fg,
                 "{name} at {depth:?} draws the track in the chrome's dim grey"
             );
+        }
+    }
+}
+
+#[test]
+fn a_noted_slice_is_never_the_colour_of_a_slice_beside_it() {
+    // The strip's cells all draw the same block, so ink is the only channel a
+    // noted slice has, and it is spent inside a ten-value ramp. Quantisation is
+    // where that goes wrong: a hue that is plainly its own at 24 bits can land on
+    // a ramp stop at sixteen colours, and then the mark says "busy" instead of
+    // "there is a conversation here" with nothing on screen to argue with.
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            // Through `Theme::heat` over every value it maps rather than off a
+            // fixture's drawn strip: a fixture reaches the stops its own counts
+            // reach, so `heat_stops` returns a subset and a collision with a stop
+            // outside it is invisible. Watched surviving exactly that way.
+            for kind in [
+                Heat::Cool,
+                Heat::Added(Band::Low),
+                Heat::Removed(Band::Low),
+                Heat::Mixed(Band::Low),
+            ] {
+                for band in [Band::Low, Band::Warm, Band::Hot] {
+                    let stop = match kind {
+                        Heat::Cool => Heat::Cool,
+                        Heat::Added(_) => Heat::Added(band),
+                        Heat::Removed(_) => Heat::Removed(band),
+                        Heat::Mixed(_) => Heat::Mixed(band),
+                    };
+                    assert_ne!(
+                        theme.heat_note.fg,
+                        theme.heat(stop).fg,
+                        "{name} at {depth:?} tints a noted slice in {stop:?}'s own \
+                         colour"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_three_note_marks_are_three_colours_at_every_depth_that_has_any() {
+    // The glyph carries the state, so this is not what keeps the three legible;
+    // it is what keeps the ink from claiming a channel it does not have. Three
+    // keys that quantise together are one key with three names, and a palette
+    // author moving one would silently move all three.
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            let marks = [
+                ("note_mark", theme.note_mark.fg),
+                ("note_mark_reply", theme.note_mark_reply.fg),
+                ("note_mark_resolved", theme.note_mark_resolved.fg),
+            ];
+            for (at, (first, one)) in marks.iter().enumerate() {
+                for (second, two) in &marks[at + 1..] {
+                    assert_ne!(
+                        one, two,
+                        "{name} at {depth:?} draws {first} and {second} in one colour"
+                    );
+                }
+            }
         }
     }
 }

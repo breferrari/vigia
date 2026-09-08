@@ -5507,3 +5507,56 @@ fn a_note_on_a_removed_line_lands_in_the_slice_its_line_sits_in() {
          used straight and slice eight is the line it sits on"
     );
 }
+
+#[test]
+fn a_file_holding_two_notes_draws_the_worse_of_them() {
+    // The fold no single-note fixture can see: with one note every precedence
+    // rule draws the same row, so a `worse` that returned its receiver, or the
+    // milder of the two, would pass every other gate here.
+    let scratch = fixture("notes-mark-precedence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    // Written in both orders, because a fold that keeps whichever it met first
+    // is right half the time and this is the half that would hide it.
+    for (first, second) in [("n1", "n2"), ("n2", "n1")] {
+        for id in ["n1", "n2"] {
+            let _ = rig.store.remove(id);
+        }
+        let mut waiting = left_as(first, "waiting", Status::Seen, None);
+        waiting.id = first.to_owned();
+        let mut answered = left_as(second, "answered", Status::Seen, Some("which margin?"));
+        answered.id = second.to_owned();
+        rig.store.put(&waiting).expect("put");
+        rig.store.put(&answered).expect("put");
+        rig.reload();
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        assert_eq!(
+            mark_on(&painted, heading(&painted)),
+            Some('\u{21b3}'),
+            "a waiting note and an answered one, written {first} then {second}, \
+             drew something other than the answer"
+        );
+    }
+
+    // And resolved is the mildest of the three: a file still holding an
+    // unanswered note says so rather than announcing the departure.
+    for id in ["n1", "n2"] {
+        let _ = rig.store.remove(id);
+    }
+    let mut waiting = left_as("n1", "waiting", Status::Seen, None);
+    waiting.id = "n1".to_owned();
+    let mut done = left_as("n2", "done", Status::Resolved, Some("fixed"));
+    done.id = "n2".to_owned();
+    rig.store.put(&waiting).expect("put");
+    rig.store.put(&done).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        mark_on(&painted, heading(&painted)),
+        Some('\u{270e}'),
+        "a resolved note outranked a waiting one"
+    );
+}
