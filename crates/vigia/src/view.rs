@@ -963,7 +963,7 @@ impl Default for Viewport {
 /// A screenful of rows, plus what the chrome needs to describe it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
-    /// A wrapped line's whole text, by the row its first drawn piece sits on: the
+    /// A wrapped line's or a note's whole text, by the row its first piece sits on: the
     /// walk emits only the pieces that fit, so the rows cannot say what it was.
     pub whole: Vec<(usize, String)>,
     /// The rows to draw, top to bottom.
@@ -1922,6 +1922,11 @@ impl View {
             from += 1;
         }
 
+        // Each note's two texts by id, so the emission below need not rescan `pins`.
+        let texts: HashMap<&str, (&str, Option<&str>)> = pins
+            .iter()
+            .map(|pin| (pin.id.as_str(), (pin.body.as_str(), pin.reply.as_deref())))
+            .collect();
         // [`Self::top`] is not moved, and that is what makes the end of the
         // diff a place a reader can leave.
         let mut out: Vec<Row> = Vec::with_capacity(height);
@@ -2023,10 +2028,10 @@ impl View {
                 if !continues(&note_row, out.last())
                     && let Row::Note { id, lead, .. } = &note_row
                     && let Some(voice) = lead.voice()
-                    && let Some(pin) = pins.iter().find(|pin| pin.id == *id)
+                    && let Some((body, reply)) = texts.get(id.as_str())
                     && let Some(text) = match voice {
-                        NoteVoice::Reader => Some(pin.body.clone()),
-                        NoteVoice::Agent => pin.reply.clone(),
+                        NoteVoice::Reader => Some((*body).to_owned()),
+                        NoteVoice::Agent => reply.map(str::to_owned),
                     }
                 {
                     whole.push((out.len(), text));
@@ -2072,9 +2077,10 @@ impl View {
     }
 
     /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed
-    /// bottom opens inside counted so this is the trim's exact complement.
+    /// bottom opens inside counted so this is the trim's exact complement. Only a
+    /// continuation counts: a note over the top edge leaves its line wholly above.
     pub fn shown(&self) -> usize {
-        let opens_inside = self.rows.first().is_some_and(Row::is_display);
+        let opens_inside = self.rows.first().is_some_and(Row::is_wrap);
         self.rows.iter().filter(|row| !row.is_display()).count() + usize::from(opens_inside)
     }
 
@@ -2085,8 +2091,7 @@ impl View {
     }
 
     /// The lines the rows `span` covers, inclusive: §11.2 B20's own strings, so a
-    /// clipped line arrives whole. Every row resolves to the text it is part of
-    /// and the run is deduped, which is the rule a note needs.
+    /// clipped line arrives whole and a note spanning rows arrives once.
     pub fn lines_in(&self, span: (usize, usize)) -> Option<Vec<String>> {
         let (from, to) = span;
         let last = self.rows.len().checked_sub(1)?;
@@ -2118,18 +2123,10 @@ impl View {
             return None;
         }
         let mut head = at;
-        while head > 0 && self.continues_above(head) {
+        while head > 0 && continues(&self.rows[head], self.rows.get(head - 1)) {
             head -= 1;
         }
         Some(head)
-    }
-
-    /// Whether the row at `at` is a later piece of the text the row above began.
-    fn continues_above(&self, at: usize) -> bool {
-        let Some(row) = self.rows.get(at) else {
-            return false;
-        };
-        continues(row, at.checked_sub(1).and_then(|above| self.rows.get(above)))
     }
 
     /// The row a display row belongs to; none only above a scrolled head.

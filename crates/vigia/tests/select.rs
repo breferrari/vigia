@@ -972,7 +972,7 @@ fn noted(name: &str) -> Scratch {
 
 /// The rows one collect produces, so a gate finds the note's own rows rather
 /// than assuming where they landed.
-fn rows_of(app: &mut App, frame: &mut Frame) -> Vec<Row> {
+fn view_rows(app: &mut App, frame: &mut Frame) -> Vec<Row> {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
@@ -1011,7 +1011,7 @@ fn a_drag_on_a_note_sends_the_note_and_not_the_line_it_is_pinned_to() {
     let mut app = App::new();
     app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
 
-    let rows = rows_of(&mut app, &mut frame);
+    let rows = view_rows(&mut app, &mut frame);
     let body = note_rows(&rows, NoteLead::Body);
     assert_eq!(
         body.len(),
@@ -1043,7 +1043,7 @@ fn a_drag_across_a_note_sends_the_note_between_the_lines_around_it() {
     let mut app = App::new();
     app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
 
-    let rows = rows_of(&mut app, &mut frame);
+    let rows = view_rows(&mut app, &mut frame);
     let from = row_of(&rows, "line 5");
     let to = row_of(&rows, "line 6");
     assert!(
@@ -1071,7 +1071,7 @@ fn a_note_wrapped_over_rows_is_sent_once_and_whole() {
     let long = "checked_mul on a Duration cannot overflow here, so the unwrap_or is unreachable; use saturating_mul and drop it entirely.";
     app.set_notes(vec![note("one", 5, EDITED, long)]);
 
-    let rows = rows_of(&mut app, &mut frame);
+    let rows = view_rows(&mut app, &mut frame);
     let body = note_rows(&rows, NoteLead::Body);
     assert!(
         body.len() > 1,
@@ -1107,7 +1107,7 @@ fn a_drag_on_the_agents_reply_sends_the_reply() {
     pinned.reply = Some(answered.to_owned());
     app.set_notes(vec![pinned]);
 
-    let rows = rows_of(&mut app, &mut frame);
+    let rows = view_rows(&mut app, &mut frame);
     let reply = note_rows(&rows, NoteLead::Reply);
     assert_eq!(
         reply.len(),
@@ -1140,7 +1140,7 @@ fn a_notes_edges_send_nothing_of_their_own() {
     let mut app = App::new();
     app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
 
-    let rows = rows_of(&mut app, &mut frame);
+    let rows = view_rows(&mut app, &mut frame);
     for lead in [NoteLead::Top, NoteLead::Bottom] {
         let edge = note_rows(&rows, lead);
         assert_eq!(
@@ -1166,12 +1166,12 @@ fn the_bar_still_counts_no_note_row() {
     materialise(&mut frame);
     let mut app = App::new();
 
-    let bare = rows_of(&mut app, &mut frame)
+    let bare = view_rows(&mut app, &mut frame)
         .iter()
         .filter(|row| !row.is_display())
         .count();
     app.set_notes(vec![note("one", 5, EDITED, SHORT)]);
-    let rows = rows_of(&mut app, &mut frame);
+    let rows = view_rows(&mut app, &mut frame);
     assert!(
         rows.iter().any(|row| matches!(row, Row::Note { .. })),
         "the note drew no rows, so the count below cannot have changed either way"
