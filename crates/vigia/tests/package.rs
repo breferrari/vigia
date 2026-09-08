@@ -1873,7 +1873,8 @@ fn the_spec_names_every_key_the_config_file_accepts() {
 /// pressed a moment earlier, so it takes a receipt's length rather than the
 /// diff's, and the two are three hundred milliseconds apart. Nothing about what
 /// is drawn changes with the number, so no assertion over the effect can see a
-/// constant re-borrowed from the wrong one.
+/// constant re-borrowed from the wrong one: the whole `arriving` suite stays
+/// green with the box back at the diff's 250ms.
 #[test]
 fn the_box_arrives_over_the_length_the_spec_gives_it() {
     let spec = repo_file("SPEC.md");
@@ -1893,12 +1894,19 @@ fn the_box_arrives_over_the_length_the_spec_gives_it() {
         "SPEC.md gives the box {stated}ms to arrive and it is drawn over {}ms",
         vigia::BOX_ARRIVING.as_millis()
     );
+    // Against the voice table rather than against `SAID_ARRIVING`: the constant
+    // is defined as that one, so an assertion between them holds by spelling
+    // and says nothing about the ruling, which is that this box is a receipt.
+    let voiced: u128 = spec
+        .lines()
+        .find(|line| line.trim_start().starts_with("| Said |"))
+        .and_then(|row| row.rsplit('|').nth(1))
+        .and_then(|cell| cell.trim().strip_suffix("ms"))
+        .and_then(|figure| figure.parse().ok())
+        .expect("SPEC.md's voice table gives Said a length in whole milliseconds");
     assert_eq!(
-        vigia::BOX_ARRIVING,
-        vigia::SAID_ARRIVING,
-        "the box is drawn over {:?}, which is not what a receipt takes. It answers          a gesture and finds the reader looking, so its length is the Said voice's          {:?} and moves with it",
-        vigia::BOX_ARRIVING,
-        vigia::SAID_ARRIVING
+        stated, voiced,
+        "the box is given {stated}ms and a receipt takes {voiced}ms. It answers a gesture and finds the reader looking, so the two are one number"
     );
 }
 

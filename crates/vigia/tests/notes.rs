@@ -476,6 +476,20 @@ impl Painted {
             })
     }
 
+    /// The cell the answer's arrow descends from, on the edge that opens for it.
+    ///
+    /// Found rather than counted, for `reply_row`'s reason: the enclosure's
+    /// height follows the body's wrap.
+    fn stem_at(&self, y: u16) -> Option<char> {
+        let (_, _, origin) = self.gutter();
+        let bottom = (y + 1..self.after_notes(y))
+            .find(|row| matches!(self.lead_at(*row), Some(NoteLead::Bottom { .. })))
+            .expect("the enclosure's bottom edge");
+        self.text(bottom)
+            .chars()
+            .nth(usize::from(origin) + REPLY_INDENT)
+    }
+
     /// The first row under `y` that is not one of its note's, which is where
     /// the diff picks up again.
     fn after_notes(&self, y: u16) -> u16 {
@@ -1683,7 +1697,7 @@ fn a_note_draws_under_its_line_enclosed_with_the_word_on_the_bottom_edge() {
     let bottom = &rows[3];
     assert_eq!(bottom.chars().nth(at), Some('└'), "{bottom:?}");
     assert_eq!(
-        bottom.chars().nth(at + REPLY_INDENT),
+        painted.stem_at(y),
         Some('─'),
         "nothing has answered this note and its edge still opens a stem: {bottom:?}"
     );
@@ -2661,10 +2675,7 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
         "the answer does not descend from the stem in the enclosure's bottom edge"
     );
     assert_eq!(
-        painted
-            .text(arrow - 1)
-            .chars()
-            .nth(usize::from(origin) + REPLY_INDENT),
+        painted.stem_at(y),
         Some('┬'),
         "the answer descends from a closed edge: {:?}",
         painted.text(arrow - 1)
@@ -2708,22 +2719,9 @@ fn the_answers_stem_is_drawn_only_when_there_is_an_answer() {
     rig.store.put(&open).expect("put");
     rig.reload();
 
-    // The cell the arrow would descend from, on the edge that would open for it.
-    fn stem_of(painted: &Painted) -> Option<char> {
-        let y = painted.row_of(EDITED);
-        let (_, _, origin) = painted.gutter();
-        let bottom = (y + 1..painted.after_notes(y))
-            .find(|row| matches!(painted.lead_at(*row), Some(NoteLead::Bottom { .. })))
-            .expect("the enclosure's bottom edge");
-        painted
-            .text(bottom)
-            .chars()
-            .nth(usize::from(origin) + REPLY_INDENT)
-    }
-
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
-        stem_of(&painted),
+        painted.stem_at(painted.row_of(EDITED)),
         Some('─'),
         "an unanswered note opens a stem toward an answer that may never come"
     );
@@ -2734,7 +2732,7 @@ fn the_answers_stem_is_drawn_only_when_there_is_an_answer() {
     rig.reload();
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(
-        stem_of(&painted),
+        painted.stem_at(painted.row_of(EDITED)),
         Some('┬'),
         "the answer landed and the edge it descends through did not open"
     );
