@@ -619,6 +619,7 @@ fn a_coarser_rung_is_never_measured_against_less() {
     }
 }
 
+/// A deletion weighs what it removed, and the file after it weighs itself.
 #[test]
 fn deleting_a_file_weighs_what_it_removed() {
     let now = base();

@@ -683,7 +683,7 @@ impl Action {
             // answer §11.1 gives one: a resize expresses no intent about what the diff
             // should show.
             | Self::ToggleRail
-            // And a pin is the one of the three that can move the viewport, and still
+            // And a pin is the one of the two that can move the viewport, and still
             // expresses no intent about where it should be.
             | Self::ToggleSingle
             | Self::ToggleStaged
