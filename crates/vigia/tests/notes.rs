@@ -19,10 +19,10 @@ use ratatui::style::{Color, Modifier};
 use vigia::{
     ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxPart, BoxRoute,
     Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
-    Pointing, REPLY_INDENT, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions,
-    Row, Theme, Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit,
-    box_route, commit, count_cell, has_room, hover_after, note_cells, opening, press_at, regions,
-    render, repainted, selection_after,
+    Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
+    Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit, box_route,
+    commit, count_cell, has_room, hover_after, note_cells, opening, press_at, regions, render,
+    repainted, selection_after,
 };
 use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
@@ -448,7 +448,7 @@ impl Painted {
         let mut last = String::new();
         for row in y + 1..self.after_notes(y) {
             match self.lead_at(row) {
-                Some(NoteLead::Bottom { .. }) => return self.text(row).trim_end().to_owned(),
+                Some(NoteLead::Bottom) => return self.text(row).trim_end().to_owned(),
                 Some(NoteLead::Bar) => last = self.text(row).trim_end().to_owned(),
                 _ => {}
             }
@@ -474,20 +474,6 @@ impl Painted {
                     )
                 )
             })
-    }
-
-    /// The cell the answer's arrow descends from, on the edge that opens for it.
-    ///
-    /// Found rather than counted, for `reply_row`'s reason: the enclosure's
-    /// height follows the body's wrap.
-    fn stem_at(&self, y: u16) -> Option<char> {
-        let (_, _, origin) = self.gutter();
-        let bottom = (y + 1..self.after_notes(y))
-            .find(|row| matches!(self.lead_at(*row), Some(NoteLead::Bottom { .. })))
-            .expect("the enclosure's bottom edge");
-        self.text(bottom)
-            .chars()
-            .nth(usize::from(origin) + REPLY_INDENT)
     }
 
     /// The first row under `y` that is not one of its note's, which is where
@@ -522,14 +508,10 @@ impl Painted {
             let Some(lead) = self.lead_at(row) else {
                 break;
             };
-            let skip = usize::from(origin)
-                + match lead {
-                    NoteLead::Reply | NoteLead::Blank => REPLY_INDENT + 2,
-                    _ => 2,
-                };
+            let skip = usize::from(origin) + 2;
             match lead {
                 // The edges carry no words of anyone's.
-                NoteLead::Top | NoteLead::Bottom { .. } => {}
+                NoteLead::Top | NoteLead::Bottom => {}
                 NoteLead::Body => {
                     // Between the two sides, and the trailing one goes with the
                     // padding it stands in.
@@ -562,12 +544,8 @@ impl Painted {
 
     /// Whether any row draws the agent's arrow at the content `origin`.
     fn drew_reply(&self, origin: u16) -> bool {
-        (0..self.backend.buffer().area.height).any(|row| {
-            self.text(row)
-                .chars()
-                .nth(usize::from(origin) + REPLY_INDENT)
-                == Some('↳')
-        })
+        (0..self.backend.buffer().area.height)
+            .any(|row| self.text(row).chars().nth(usize::from(origin)) == Some('↳'))
     }
 
     /// The footer's bottom row.
@@ -1696,11 +1674,6 @@ fn a_note_draws_under_its_line_enclosed_with_the_word_on_the_bottom_edge() {
     }
     let bottom = &rows[3];
     assert_eq!(bottom.chars().nth(at), Some('└'), "{bottom:?}");
-    assert_eq!(
-        painted.stem_at(y),
-        Some('─'),
-        "nothing has answered this note and its edge still opens a stem: {bottom:?}"
-    );
     assert!(bottom.trim_end().ends_with('┘'), "{bottom:?}");
     assert!(
         painted.note_word(y).contains("open"),
@@ -1715,17 +1688,17 @@ fn a_note_draws_under_its_line_enclosed_with_the_word_on_the_bottom_edge() {
         "the first row broke inside a word: {first:?}"
     );
     assert_eq!(rejoined(&under, "open"), BODY);
-    // The word rides the bottom edge, set in from the corner and clear of the
-    // stem, so it reads as a label on the frame rather than the frame ending.
-    // Counted in characters: the rule and the corners are three bytes each.
+    // The word rides the bottom edge, set in from the corner, so it reads as a
+    // label on the frame rather than the frame ending. Counted in characters:
+    // the rule and the corners are three bytes each.
     let edge: Vec<char> = bottom.trim_end().chars().collect();
     let word_at = edge
         .windows(4)
         .position(|four| four.iter().copied().eq("open".chars()))
         .unwrap_or_else(|| panic!("the word is not on the bottom edge: {bottom:?}"));
     assert!(
-        word_at > at + REPLY_INDENT + 1 && word_at + 4 + WORD_INSET < edge.len(),
-        "the word does not ride the bottom edge between the stem and the corner: {bottom:?}"
+        word_at > at + 1 && word_at + 4 + WORD_INSET < edge.len(),
+        "the word does not ride the bottom edge clear of both corners: {bottom:?}"
     );
     assert!(
         painted.text(y + 5).contains("line 6"),
@@ -2535,8 +2508,8 @@ fn note_rows_are_display_rows_the_bar_does_not_count() {
 /// The reader's note is enclosed, and the answer descends from the enclosure.
 ///
 /// The enclosure is what tells the two speakers apart, so the answer carries no
-/// mark down its side: it leaves through a stem in the bottom edge, the arrow
-/// opens it once, and the rest is free indented text.
+/// mark down its side: the arrow opens it once in the enclosure's own rule, and
+/// the rest is free indented text.
 #[test]
 fn a_committed_note_is_enclosed_and_the_word_rides_the_bottom_edge() {
     let scratch = fixture("notes-enclosure");
@@ -2667,18 +2640,9 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
     );
     let arrow = painted.reply_row(y);
     assert_eq!(
-        painted
-            .text(arrow)
-            .chars()
-            .nth(usize::from(origin) + REPLY_INDENT),
+        painted.text(arrow).chars().nth(usize::from(origin)),
         Some('↳'),
-        "the answer does not descend from the stem in the enclosure's bottom edge"
-    );
-    assert_eq!(
-        painted.stem_at(y),
-        Some('┬'),
-        "the answer descends from a closed edge: {:?}",
-        painted.text(arrow - 1)
+        "the answer does not stand in the enclosure's own left rule"
     );
     assert!(
         under[1].starts_with("swapped for saturating_mul"),
@@ -2701,40 +2665,100 @@ fn a_reply_draws_under_the_note_with_the_arrow() {
     assert!(under[0].starts_with("swapped for"), "{:?}", under[0]);
 }
 
-/// `SPEC.md` §11.1: the stem is drawn only where there is an answer to descend
-/// through it.
+/// `SPEC.md` §11.1: the enclosure is the same whether or not there is an answer.
 ///
-/// Both directions on one note, because the answer arrives while the note is on
-/// screen. A stem under an unanswered note promises a reply is coming, or that
-/// one arrived and is not being drawn, on the one surface whose whole value is
-/// that its states are honest.
+/// The status word is held at `seen` across both frames, since a note is marked
+/// seen when the agent reads it and answered whenever it answers, so the word
+/// moving is the state being honest and the enclosure moving is not. Compared
+/// character for character, because what was reported is the surface
+/// restructuring under an answer rather than any one glyph.
 #[test]
-fn the_answers_stem_is_drawn_only_when_there_is_an_answer() {
-    let scratch = fixture("notes-stem");
+fn the_enclosure_does_not_change_when_the_agent_answers() {
+    let scratch = fixture("notes-steady");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
-    let open = note("n1", 5, EDITED, "short");
-    rig.store.put(&open).expect("put");
+    let mut seen = note("n1", 5, EDITED, BODY);
+    seen.status = Status::Seen;
+    rig.store.put(&seen).expect("put");
     rig.reload();
-
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
-    assert_eq!(
-        painted.stem_at(painted.row_of(EDITED)),
-        Some('─'),
-        "an unanswered note opens a stem toward an answer that may never come"
-    );
+    let y = painted.row_of(EDITED);
+    let enclosure: Vec<String> = (y + 1..painted.after_notes(y))
+        .map(|row| painted.text(row))
+        .collect();
 
-    let mut answered = open.clone();
+    let mut answered = seen.clone();
     answered.reply = Some("swapped for saturating_mul".to_owned());
     rig.store.put(&answered).expect("put");
     rig.reload();
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let answer = painted.reply_row(y);
+    let under: Vec<String> = (y + 1..answer).map(|row| painted.text(row)).collect();
+
     assert_eq!(
-        painted.stem_at(painted.row_of(EDITED)),
-        Some('┬'),
-        "the answer landed and the edge it descends through did not open"
+        under, enclosure,
+        "the answer restructured the enclosure it arrived under"
+    );
+}
+
+/// `SPEC.md` §11.1: the answer follows one `↳` in the enclosure's own left rule.
+///
+/// Three edges are asserted rather than one, because the rule is what the eye
+/// takes the arrow to hang from and the rule is drawn by three glyphs down the
+/// same column. The answer's text is asserted against the body's for the other
+/// half of the report: an answer set in past the words it answers is a third
+/// left edge in a stack that reads as one column.
+#[test]
+fn the_answers_arrow_stands_in_the_enclosures_own_rule() {
+    let scratch = fixture("notes-rule");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut seen = note("n1", 5, EDITED, BODY);
+    seen.status = Status::Seen;
+    seen.reply = Some("swapped for saturating_mul".to_owned());
+    rig.store.put(&seen).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of(EDITED);
+    let answer = painted.reply_row(y);
+    let column = |row: u16, glyph: char| {
+        painted
+            .text(row)
+            .chars()
+            .position(|c| c == glyph)
+            .unwrap_or_else(|| panic!("row {row} draws no {glyph}: {:?}", painted.text(row)))
+    };
+
+    let at = column(answer, '↳');
+    assert_eq!(at, column(y + 1, '┌'), "the arrow misses the rule's head");
+    assert_eq!(at, column(y + 2, '│'), "the arrow misses the rule itself");
+    assert_eq!(
+        at,
+        column(answer - 1, '└'),
+        "the arrow misses the corner it descends from"
+    );
+
+    // Past the lead glyph on each row, so what is compared is where the words
+    // start rather than what the lead is.
+    let words = |row: u16| {
+        painted
+            .text(row)
+            .chars()
+            .enumerate()
+            .skip(at + 1)
+            .find(|(_, c)| !c.is_whitespace())
+            .map(|(column, _)| column)
+            .unwrap_or_else(|| panic!("row {row} carries no words: {:?}", painted.text(row)))
+    };
+    assert_eq!(
+        words(answer),
+        words(y + 2),
+        "the answer does not stand in the column the words it answers do"
     );
 }
 
@@ -3502,7 +3526,7 @@ fn the_rung_boundary_follows_the_longest_word_and_a_wide_body_stays_inside() {
                 matches!(
                     row,
                     Row::Note {
-                        lead: NoteLead::Bottom { .. },
+                        lead: NoteLead::Bottom,
                         ..
                     }
                 )
@@ -3734,11 +3758,7 @@ fn the_bar_is_the_rung_under_the_enclosure_and_keeps_the_word() {
             // sides, and the edge that carries the word.
             assert_eq!(
                 leads,
-                vec![
-                    NoteLead::Top,
-                    NoteLead::Body,
-                    NoteLead::Bottom { answered: false },
-                ],
+                vec![NoteLead::Top, NoteLead::Body, NoteLead::Bottom,],
                 "at {width} columns the enclosure is not three rows"
             );
             let bottom = painted
@@ -3749,7 +3769,7 @@ fn the_bar_is_the_rung_under_the_enclosure_and_keeps_the_word() {
                     matches!(
                         row,
                         Row::Note {
-                            lead: NoteLead::Bottom { .. },
+                            lead: NoteLead::Bottom,
                             ..
                         }
                     )
@@ -3912,19 +3932,15 @@ fn a_resolve_runs_the_departure_once_and_the_rows_are_gone_after_it() {
     assert!(under[0].starts_with("swapped for"), "{:?}", under[0]);
     let arrow = holding.reply_row(y);
     assert_eq!(
-        holding
-            .text(arrow)
-            .chars()
-            .nth(usize::from(origin) + REPLY_INDENT),
+        holding.text(arrow).chars().nth(usize::from(origin)),
         Some('↳')
     );
-    let stem = origin + REPLY_INDENT as u16;
     assert_eq!(
-        holding.fg(stem, arrow),
+        holding.fg(origin, arrow),
         rig.theme.note_reply.fg,
         "the answer is not in the reply's ink once it has arrived"
     );
-    assert_ne!(holding.fg(stem, arrow), Some(dim));
+    assert_ne!(holding.fg(origin, arrow), Some(dim));
     assert!(holding.text(holding.after_notes(y)).contains("line 6"));
 
     // The dissolve: halfway through, the line is going and the diff has not
@@ -4168,7 +4184,7 @@ fn a_resolved_note_met_at_startup_runs_the_departure() {
         arriving
             .text(arriving.reply_row(y))
             .chars()
-            .nth(usize::from(origin) + REPLY_INDENT),
+            .nth(usize::from(origin)),
         Some('↳')
     );
     assert!(arriving.notes_under(y)[0].starts_with("swapped for"));
@@ -4220,7 +4236,7 @@ fn a_listing_cannot_bring_back_a_note_already_departing() {
         truth
             .text(truth.reply_row(y))
             .chars()
-            .nth(usize::from(origin) + REPLY_INDENT),
+            .nth(usize::from(origin)),
         Some('↳')
     );
 }
@@ -4529,7 +4545,7 @@ fn a_resolve_between_a_stale_view_and_an_emptied_box_survives() {
         departing
             .text(departing.reply_row(y))
             .chars()
-            .nth(usize::from(origin) + REPLY_INDENT),
+            .nth(usize::from(origin)),
         Some('↳'),
         "the resolve that landed first is not what the next frame shows"
     );

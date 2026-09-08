@@ -14,8 +14,7 @@ use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
 use crate::theme::Theme;
 use crate::view::{
-    BOX_FRAME, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, REPLY_INDENT, Row,
-    Scale, View,
+    BOX_FRAME, BoxPart, FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead, Row, Scale, View,
 };
 
 /// Columns a tab advances to the next multiple of.
@@ -43,13 +42,6 @@ const NOTE_ICON: char = '✎';
 
 /// The bar down the left of a note's rows. `▌` is the recorded stand-in.
 const NOTE_BAR: char = '▎';
-
-/// The rule and the notch the enclosure's bottom edge opens with, which puts
-/// the notch over the column the answer's arrow stands in.
-///
-/// Spelled rather than built from [`REPLY_INDENT`], and the two lining up is
-/// gated where it can be seen: on the drawn row, against the arrow's own column.
-const STEM: &str = "─┬";
 
 /// Rules between the status word and the corner it rides in from.
 pub const WORD_INSET: usize = 3;
@@ -1820,7 +1812,7 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
             cells.word = match lead {
                 // Inside the tail the drawer writes, which the far corner
                 // follows: past the tail's leading blank is the word itself.
-                NoteLead::Bottom { .. } => {
+                NoteLead::Bottom => {
                     let tail = width_of(&word_tail(state)) + 1;
                     flush_right(line, tail).map(|edge| Rect {
                         x: edge.x + 1,
@@ -1832,16 +1824,7 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
             };
         }
         if matches!(lead, NoteLead::Reply | NoteLead::Blank) {
-            // From the arrow rather than from the content origin: the answer is
-            // indented under the enclosure's stem, and an effect over it should
-            // not reach the blank columns beside it.
-            let indent = u16::try_from(REPLY_INDENT).unwrap_or(u16::MAX);
-            let answer = Rect {
-                x: line.x.saturating_add(indent),
-                width: line.width.saturating_sub(indent),
-                ..line
-            };
-            cells.reply = Some(cells.reply.map_or(answer, |reply| reply.union(answer)));
+            cells.reply = Some(cells.reply.map_or(line, |reply| reply.union(line)));
         }
     }
     out
@@ -4189,11 +4172,7 @@ impl Painter<'_> {
         // A row with no room for the frame draws none of it, the way the box
         // being typed in does. The walk hands the bar rung down here instead, so
         // this is a floor under a caller rather than a rung a reader meets.
-        if matches!(
-            lead,
-            NoteLead::Top | NoteLead::Body | NoteLead::Bottom { .. }
-        ) && room <= BOX_FRAME
-        {
+        if matches!(lead, NoteLead::Top | NoteLead::Body | NoteLead::Bottom) && room <= BOX_FRAME {
             return;
         }
         match lead {
@@ -4227,37 +4206,22 @@ impl Painter<'_> {
                 self.put(right, glyphs.y, " │", 2, frame);
                 return;
             }
-            NoteLead::Bottom { answered } => {
+            NoteLead::Bottom => {
                 let corners = self.corners(false);
                 // The word rides the far end of the edge, set in from the corner
                 // so it reads as a label on the frame rather than as the frame
-                // running out. The stem before it opens only where an answer
-                // descends through it: on a note nobody has answered, it
-                // promises one is coming.
-                let opening = if answered { STEM } else { "" };
+                // running out.
                 self.box_edge(
                     x,
                     glyphs.y,
                     room,
                     corners,
-                    (opening, &word_tail(text)),
+                    ("", &word_tail(text)),
                     state.add_modifier(dim),
                 );
                 return;
             }
             NoteLead::Bar | NoteLead::Reply | NoteLead::Blank => (),
-        }
-
-        // The answer sits under the stem rather than at the content origin.
-        let (x, room) = match lead {
-            NoteLead::Reply | NoteLead::Blank => (
-                x.saturating_add(REPLY_INDENT as u16),
-                room.saturating_sub(REPLY_INDENT),
-            ),
-            _ => (x, room),
-        };
-        if room == 0 {
-            return;
         }
 
         let reply = self.theme.note_reply.add_modifier(dim);

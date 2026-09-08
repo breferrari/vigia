@@ -329,11 +329,8 @@ pub enum NoteLead {
     Top,
     /// The reader's words, between its two sides.
     Body,
-    /// The bottom edge, carrying the word, and the answer's stem when answered.
-    Bottom {
-        /// Whether the agent has answered, which is what the stem promises.
-        answered: bool,
-    },
+    /// The bottom edge, carrying the word.
+    Bottom,
     /// The rung below the enclosure, on a pane too narrow to hold one.
     Bar,
     /// The arrow on the first row of the agent's line.
@@ -430,13 +427,6 @@ pub struct Noted {
 
 /// Columns a note row spends before its text: the lead and its gap.
 const NOTE_LEAD: usize = 2;
-
-/// Columns the answer is indented by, under the stem it leaves through.
-pub const REPLY_INDENT: usize = 2;
-
-/// What the bottom edge spends past its corners: the stem, and the word set in.
-/// Reserved on every note, so an answer arriving cannot collapse the enclosure.
-const STEM_ROOM: usize = 4;
 
 /// Body rows the note box grows to before it scrolls inside itself.
 pub const BOX_ROWS: usize = 4;
@@ -612,11 +602,17 @@ fn row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, text: String, last: bool)
     });
 }
 
+/// What the enclosure's bottom edge needs: its two corners, and the word between
+/// its blanks with the rules that set it in from the far one.
+fn edge_width(word: &str) -> usize {
+    2 + 1 + word.len() + 1 + crate::render::WORD_INSET
+}
+
 impl Pin {
     /// The display rows this note takes under a content width of `content`.
     fn rows(&self, content: usize) -> Vec<Row> {
         let room = content.saturating_sub(NOTE_LEAD);
-        let boxed = content > BOX_FRAME + self.word.len() + STEM_ROOM;
+        let boxed = content >= edge_width(self.word);
         let inner = content.saturating_sub(BOX_FRAME);
         let pieces = |text: &str| prose_rows(text, room);
         let mut rows = Vec::new();
@@ -629,9 +625,7 @@ impl Pin {
                 row(
                     &mut rows,
                     self,
-                    NoteLead::Bottom {
-                        answered: self.reply.is_some(),
-                    },
+                    NoteLead::Bottom,
                     self.word.to_owned(),
                     true,
                 );
@@ -653,8 +647,7 @@ impl Pin {
             }
         }
         if let Some(reply) = &self.reply {
-            let under = room.saturating_sub(REPLY_INDENT);
-            for (piece, text) in prose_rows(reply, under).into_iter().enumerate() {
+            for (piece, text) in prose_rows(reply, room).into_iter().enumerate() {
                 let lead = if piece == 0 {
                     NoteLead::Reply
                 } else {
