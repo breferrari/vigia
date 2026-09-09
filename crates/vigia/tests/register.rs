@@ -39,7 +39,7 @@ const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia/src/input.rs", 4351),
     ("vigia/src/app.rs", 4145),
     ("vigia-core/src/history.rs", 3327),
-    ("vigia/src/render.rs", 3219),
+    ("vigia/src/render.rs", 3213),
     ("vigia/src/glyphs.rs", 3947),
     ("vigia/src/lib.rs", 3469),
     ("vigia/src/config.rs", 4000),
