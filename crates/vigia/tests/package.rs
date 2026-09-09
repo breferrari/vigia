@@ -1708,9 +1708,17 @@ fn the_bump_writes_the_changelog_it_publishes() {
 }
 
 /// Drives the generator against fixed subjects, in a scratch directory of its
-/// own. Returns whether it passed and the file it left behind.
+/// own. Returns whether it passed, the file it left behind, and what it said.
+///
+/// Read to end rather than waited on, because with the log captured a `wait`
+/// would block on a pipe nothing is draining.
 #[cfg(unix)]
-fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -> (bool, String) {
+fn changelog_entry(
+    case: &str,
+    version: &str,
+    subjects: &str,
+    changelog: &str,
+) -> (bool, String, String) {
     use std::io::Write;
     use std::process::Stdio;
 
@@ -1726,6 +1734,7 @@ fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -
         .arg("2026-01-01")
         .arg(&path)
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
     child
@@ -1734,11 +1743,15 @@ fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -
         .expect("the child's stdin is a pipe")
         .write_all(subjects.as_bytes())
         .expect("the subjects reach the script");
-    let passed = child.wait().expect("the script exits").success();
+    let out = child.wait_with_output().expect("the script exits");
 
     let left = read(&path);
     let _ = std::fs::remove_dir_all(&dir);
-    (passed, left)
+    (
+        out.status.success(),
+        left,
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
 }
 
 /// The generator keeps what a reader of the pane can see and drops the rest.
@@ -1760,7 +1773,7 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
                     `Esc` closes the sheet, and the ruling that said otherwise is revoked (#394)\n\
                     `w` wraps a long line, capped at two (#272) (#344)\n\
                     The pane stops showing what is no longer there (#340) (#341)\n";
-    let (passed, left) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
+    let (passed, left, _) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
     assert!(
         passed,
         "the generator refused a section it can write:\n{left}"
@@ -1785,7 +1798,7 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
     // A section already written is the better text, so it is not overwritten.
     // A re-run of a release reaches this, and so does a section written by
     // hand.
-    let (passed, left) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
+    let (passed, left, _) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
     assert!(
         !passed && left == BEFORE,
         "the generator overwrote a section that was already written:\n{left}"
@@ -1809,7 +1822,7 @@ fn the_changelog_entry_reports_an_empty_result_rather_than_asserting_it() {
 
     let subjects = "The masthead is removed, and the ruling that kept it is revoked (#462)\n\
                     roadmap: a row moves\n";
-    let (passed, left) = changelog_entry("empty", "0.3.0", subjects, BEFORE);
+    let (passed, left, _) = changelog_entry("empty", "0.3.0", subjects, BEFORE);
     assert!(
         passed,
         "the generator refused a range it had dropped everything from:\n{left}"
@@ -1837,6 +1850,46 @@ fn the_changelog_entry_reports_an_empty_result_rather_than_asserting_it() {
     );
 }
 
+/// The generator names every subject it drops, in the log of the run that drops
+/// it.
+///
+/// A drop is invisible everywhere else. The section is the only place the change
+/// was going to appear, so a range that keeps nine subjects and loses the tenth
+/// reads as a complete section, and the branch above cannot see that case.
+///
+/// The kept subject is asserted absent as well, because a log naming the whole
+/// range would satisfy the other half while reporting no decision at all.
+#[cfg(unix)]
+#[test]
+fn the_changelog_entry_names_every_subject_it_drops() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let subjects = "roadmap: a row moves\n\
+                    The roadmap marks a row done (#449)\n\
+                    The pane stops showing what is no longer there (#340)\n";
+    let (passed, left, said) = changelog_entry("dropped", "0.2.0", subjects, BEFORE);
+    assert!(
+        passed,
+        "the generator refused a section it can write:\n{left}"
+    );
+
+    for dropped in [
+        "roadmap: a row moves",
+        "The roadmap marks a row done (#449)",
+    ] {
+        assert!(
+            said.contains(&format!("filtered as internal: {dropped}")),
+            "the run's log does not name {dropped:?}, so a release that loses one \
+             line out of ten loses it in silence:\n{said}"
+        );
+    }
+    assert!(
+        !said.contains("The pane stops showing"),
+        "the log names a subject the filter kept, so it reports the range rather \
+         than the decision:\n{said}"
+    );
+}
+
 /// Every config key reaches the filter that decides what a release says.
 ///
 /// That filter keeps a subject naming something a reader can press or set, and
@@ -1845,48 +1898,23 @@ fn the_changelog_entry_reports_an_empty_result_rather_than_asserting_it() {
 /// about, on any release whose subject also carries an internal word.
 ///
 /// The assignment line is read alone rather than the whole script, because the
-/// prose above it names the keys too and would satisfy a search over the file.
+/// prose above it names the settings too and would satisfy a search over the
+/// file.
 #[test]
 fn every_config_key_reaches_the_changelog_filter() {
-    let config = repo_file("crates/vigia/src/config.rs");
-    let keys: Vec<&str> = config
-        .split_once("pub const KEYS")
-        .expect("config.rs declares KEYS")
-        .1
-        .split_once("= [")
-        .expect("KEYS is an array literal")
-        .1
-        .split_once(']')
-        .expect("the array literal closes")
-        .0
-        .split(',')
-        .map(|key| key.trim().trim_matches('"'))
-        .filter(|key| !key.is_empty())
-        .collect();
-    assert!(
-        keys.len() > 3,
-        "only {} config key(s) parsed out of config.rs, so this gate is passing \
-         on nothing: {keys:?}",
-        keys.len()
-    );
-
     let script = repo_file(".github/scripts/changelog-entry.sh");
     let pattern = script
         .lines()
         .find(|line| line.starts_with("visible_subject="))
         .expect("changelog-entry.sh assigns visible_subject");
 
-    // Bounded by the alternation's own punctuation, so a key that is merely a
+    // Split on the alternation's own punctuation, so a key that is merely a
     // substring of another alternative does not count as named.
-    let names = |key: &str| {
-        pattern.match_indices(key).any(|(at, _)| {
-            let before = pattern[..at].chars().next_back();
-            let after = pattern[at + key.len()..].chars().next();
-            matches!(before, Some('|' | '(')) && matches!(after, Some('|' | ')'))
-        })
-    };
-
-    let missing: Vec<&str> = keys.iter().copied().filter(|key| !names(key)).collect();
+    let named: Vec<&str> = pattern.split(['|', '(', ')']).collect();
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
+        .filter(|key| !named.contains(key))
+        .collect();
     assert!(
         missing.is_empty(),
         "the release notes filter does not name {}, so a subject changing only \

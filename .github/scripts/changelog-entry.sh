@@ -75,17 +75,13 @@ internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|writt
 
 # **A subject naming something a reader can press or set survives that list.**
 # The list matches anywhere in a subject, so one internal word decides a whole
-# sentence, and this repository's rule that a revoked ruling is deleted in the
-# same commit as the change it governed makes that sentence ordinary: the
-# subject removing a key names the ruling too.
+# sentence, and the rule that a revoked ruling is deleted alongside the change it
+# governed makes that sentence ordinary: the subject removing a key names the
+# ruling too. The backticks are what make `single`, `wrap` and `links` safe to
+# name.
 #
-# The vocabulary is only what a gate can pin. Gestures are single characters, so
-# a character class covers every key with no enumeration to go stale, and the
-# settings are the ones `config.rs` declares, held to it by a test. Element
-# names are prose with nothing to pin them to, and the one that would have paid
-# here would have joined the list on the day it left the product.
-#
-# The backticks are what make `single`, `wrap` and `links` safe to name.
+# The character class cannot go stale and the settings are held to `config.rs` by
+# a test. The named keys are typed here, and a new one reaches this file by hand.
 visible_subject='`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|rail|single|staged|wrap|icons|links)`'
 
 # Read once, because the emptied-range branch below writes the range out and
@@ -109,14 +105,26 @@ kept=$(printf '%s\n' "$kept" | INTERNAL="$internal_subject" VISIBLE="$visible_su
     { print }
 ')
 
-# Trailing `(#123)` references are the tracker's, not the reader's. Stripped
-# repeatedly because a merge subject carries the issue's number and the pull
-# request's, and sometimes two issues'.
+# **Every subject the filter drops is named in the run's log.** A drop is
+# invisible everywhere else: the section is the only place the change was going
+# to appear, so a range that keeps nine subjects and loses the tenth reads as a
+# complete section, and the emptied-range branch below cannot see that case.
+#
+# Matched whole rather than by pattern, because a subject carrying `?` or `[` is
+# a subject about a key and `case` would read those as globs.
+printf '%s\n' "$subjects" | KEPT="$kept" awk '
+    BEGIN { n = split(ENVIRON["KEPT"], k, "\n"); for (i = 1; i <= n; i++) keep[k[i]] = 1 }
+    NF && !($0 in keep) { print "::notice::filtered as internal: " $0 }
+'
+
+# Trailing `(#123)` references are the tracker's, not the reader's. The loop
+# peels them one at a time because a merge subject carries the issue's number
+# and the pull request's, and sometimes two issues'.
 strip_references() {
-    sed -E 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-        | sed -E 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-        | sed -E 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-        | sed -E 's/[[:space:]]+$//' \
+    sed -E -e :a \
+           -e 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
+           -e ta \
+           -e 's/[[:space:]]+$//' \
         | grep -v '^$' \
         || true
 }
