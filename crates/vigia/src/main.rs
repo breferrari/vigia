@@ -25,7 +25,10 @@ fn main() -> ExitCode {
         }
         // A server rather than a pane: no terminal is taken and there is no
         // frame it can change, which is what keeps it outside B6's count.
-        Request::Mcp => vigia::mcp::serve(),
+        Request::Mcp => {
+            vigia::sweep_displaced();
+            vigia::mcp::serve()
+        }
         // The server's own two words, which a hook runs and a reader does not.
         Request::McpRegister => vigia::mcp::register(),
         Request::McpPending => vigia::mcp::pending(),
@@ -45,6 +48,7 @@ fn main() -> ExitCode {
         // `request_for` answers what was *asked* and an absent argument is not a
         // different question.
         Request::Watch => {
+            vigia::sweep_displaced();
             let path = args.first().map_or(Path::new("."), Path::new);
             match vigia::run(path) {
                 Ok(()) => ExitCode::SUCCESS,

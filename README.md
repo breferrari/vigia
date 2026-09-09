@@ -66,12 +66,11 @@ Windows will not let anything replace a running `.exe`, and the `vigia mcp` you 
 
 ```powershell
 $bin = if ($env:CARGO_HOME) { "$env:CARGO_HOME\bin" } else { "$env:USERPROFILE\.cargo\bin" }
-Remove-Item "$bin\vigia.exe.old-*" -Force -ErrorAction SilentlyContinue
-Move-Item "$bin\vigia.exe" "$bin\vigia.exe.old-$(Get-Date -Format yyyyMMddHHmmss)"
+Move-Item "$bin\vigia.exe" "$bin\vigia.exe.old" -Force
 cargo install vigia
 ```
 
-A running process follows its image through a rename, so the servers keep answering and the notes they hold are untouched. The leftover is locked until the last session that started before the upgrade closes, and the second line sweeps it on the next upgrade, so nothing accumulates.
+A running process follows its image through a rename, so the servers keep answering and the notes they hold are untouched. **You are not accumulating copies.** The name is always the same one, so an upgrade recycles it rather than adding to it, and `vigia` deletes it the next time one starts and finds nothing holding it, which is the next pane you open or the next session your agent starts. Windows keeps it alive only for as long as a process that began before the upgrade is still running.
 
 **Do not stop the processes instead.** That frees the same path and splits every session that is open: the socket rung goes on delivering your notes, the MCP half does not come back, and the agent reads a note it no longer has the tools to answer. A failed upgrade tells you what is wrong. That does not.
 
