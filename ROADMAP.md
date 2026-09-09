@@ -181,6 +181,11 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | The config file reaches six toggles and `c` is not one of them | [#491](https://github.com/breferrari/vigia/issues/491) |
+| ⬜ | Nothing draws the file list without the diff under it. **Reported from use** | [#493](https://github.com/breferrari/vigia/issues/493) |
+| ⬜ | A first run says what the keys are and never what the pane is. **Reported from use** | [#492](https://github.com/breferrari/vigia/issues/492) |
+| ⬜ | The header names where in the history the pane is, and a click moves it | [#490](https://github.com/breferrari/vigia/issues/490) |
+| ⬜ | decision: whether the pane remembers a toggle, and where it writes it. **Reported from use** | [#494](https://github.com/breferrari/vigia/issues/494) |
 | ✅ | A reply shifts the note box and leaves the arrow off the rule it should hang from. **Reported from use** | [#466](https://github.com/breferrari/vigia/issues/466) |
 | ✅ | The resolve line is required so the reader can read it, and it leaves before they can. **Reported from use** | [#465](https://github.com/breferrari/vigia/issues/465) |
 | ✅ | Dragging over a note copies the diff line above it. **Reported from use** | [#468](https://github.com/breferrari/vigia/issues/468) |
