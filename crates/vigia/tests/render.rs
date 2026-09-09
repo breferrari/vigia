@@ -598,7 +598,7 @@ fn the_right_hand_side_is_the_total_and_the_word_only_where_there_is_none() {
     let counted = screen(80, 6, &totalled(Some((1204, 318))), &chrome());
     let header = row_text(&counted, 0);
     assert!(
-        header.trim_end().ends_with("+1204 -318"),
+        header.trim_end().ends_with("+1204  -318"),
         "a run with a total does not end in it: {header:?}"
     );
     assert!(
@@ -674,7 +674,7 @@ fn the_binary_count_rides_on_the_left_and_leaves_the_total_where_it_was() {
     );
     for header in [&plain, &counted] {
         assert!(
-            header.trim_end().ends_with("+1204 -318"),
+            header.trim_end().ends_with("+1204  -318"),
             "the total left the right-hand edge: {header:?}"
         );
     }
@@ -735,17 +735,19 @@ fn a_total_too_wide_for_the_row_falls_to_the_word() {
     // is drawn whole or dropped, and what it drops to is the word rather than a
     // blank side, so a pane too narrow to count still says whether it is live.
     let wide = totalled(Some((104_233, 98_100)));
-    // Fourteen columns of total against the word's eight, on a five-column worktree.
+    // Sixteen columns of total against the word's eight, on a five-column worktree:
+    // fourteen of number, and the scrollbar's column, which the total stands off the
+    // pane by so that it lines up with the rows.
     let drawn = |width: u16| row_text(&screen(width, 6, &wide, &chrome()), 0);
 
-    for width in [14u16, 16, 20, 80] {
+    for width in [16u16, 20, 80] {
         let header = drawn(width);
         assert!(
             header.trim_end().ends_with("+104233 -98100"),
             "at {width} columns the total does not end the row: {header:?}"
         );
     }
-    for width in [8u16, 11, 13] {
+    for width in [8u16, 11, 13, 15] {
         let header = drawn(width);
         assert!(
             header.trim_end().ends_with("watching"),
@@ -789,6 +791,58 @@ fn the_total_is_drawn_whole_where_a_row_would_abbreviate() {
         row.contains("+104k") && !row.contains("+104233"),
         "the row drew its counts whole, so the header has nothing to differ from:          {row:?}"
     );
+}
+
+/// The column each half of a counts cell ends in, which is the anchor the halves
+/// are right-aligned on and so the one a reader reads down.
+fn anchors(row: &str) -> (Option<usize>, Option<usize>) {
+    let glyphs: Vec<char> = row.chars().collect();
+    let ends = |sigil: char| {
+        let at = glyphs.iter().position(|glyph| *glyph == sigil)?;
+        let run = glyphs[at..]
+            .iter()
+            .take_while(|glyph| !glyph.is_whitespace())
+            .count();
+        Some(at + run - 1)
+    };
+    (ends('+'), ends('-'))
+}
+
+#[test]
+fn the_totals_halves_stand_in_the_columns_the_rows_count_in() {
+    // Reported from the pane. The total is drawn to be compared against the rows
+    // under it, and two numbers are compared by their sigils rather than by their
+    // last digit: flush right, the header's `+` moved with the width of the number
+    // beside it and the rows' did not.
+    let mut view = ragged_counts();
+    view.churn = Some(Churn {
+        added: 183,
+        removed: 138,
+        binary: 0,
+    });
+
+    for width in [40u16, 44, 60, 80, 120] {
+        let drawn = screen(width, 10, &view, &chrome());
+        let header = anchors(&row_text(&drawn, 0));
+        assert!(
+            header.0.is_some() && header.1.is_some(),
+            "at {width} columns the header drew no total to line up: {:?}",
+            row_text(&drawn, 0)
+        );
+        // The three list rows, and the stream's own heading under the rule, which is
+        // the second region the reader named and is laid out separately.
+        for y in [LIST_TOP, LIST_TOP + 1, LIST_TOP + 2, LIST_TOP + 4] {
+            let row = row_text(&drawn, y);
+            assert_eq!(
+                anchors(&row),
+                header,
+                "at {width} columns row {y} counts on different anchors from the                  header above it:
+{:?}
+{row:?}",
+                row_text(&drawn, 0)
+            );
+        }
+    }
 }
 
 #[test]
