@@ -2421,8 +2421,7 @@ pub const SHEET_PURPOSE: [&str; 2] = [
 ];
 
 /// Rows [`SHEET_PURPOSE`] costs a one-column rung: the line, and the blank that
-/// keeps it from reading as the first row of the table under it. The other two
-/// rungs pay less, and `SPEC.md` §11.1 says what each pays and why.
+/// keeps it from reading as a table row. `SPEC.md` §11.1 says what each rung pays.
 const PURPOSE_ROWS: usize = 2;
 
 /// What the mouse group's heading spells, spaces included.
@@ -2574,9 +2573,8 @@ enum Line {
     Row(&'static Gesture),
     /// The mouse group's heading, which costs a row and is not a gesture.
     Heading(&'static str),
-    /// What the pane is, which is not a gesture either.
+    /// What the pane is, and the blank under it. Neither is a gesture.
     Said,
-    /// The blank under it.
     Blank,
 }
 
@@ -2596,29 +2594,17 @@ fn column_lines(from: usize, mouse: bool, purpose: bool) -> impl Iterator<Item =
     )
 }
 
-/// Which spelling of [`SHEET_PURPOSE`] a box with `room` columns can carry.
-///
-/// Off the room rather than the rung's `level`: at the tight spelling the
-/// two-column rung is seventy-one columns wide and the one-column rung is 38.
-fn purpose_level(room: usize) -> usize {
-    usize::from(width_of(SHEET_PURPOSE[0]) > room)
-}
-
-/// Columns a group's rows have inside a sheet `total` wide.
-const fn purpose_room(total: usize, at: usize) -> usize {
+/// Columns a sheet `total` wide leaves for text `at` columns in from its frame.
+const fn sheet_room(total: usize, at: usize) -> usize {
     total.saturating_sub(at + 2)
 }
 
-/// Whether a page with `capacity` rows may spend [`PURPOSE_ROWS`] of them saying
-/// what the pane is.
-///
-/// A rung gives a gesture up for width by reaching `from > 0` and for height by
-/// paging, and prose goes before either, so `bare` is measured without the line
-/// and the line rides only where the whole table still fits beside it. The rungs
-/// above the paged ones ask the same question by being offered twice: see
-/// [`sheet_plan`].
-fn purpose_fits(from: usize, mouse: bool, capacity: usize) -> bool {
-    let bare = sheet_rows(from, mouse, false);
+/// Whether a page of `capacity` rows may spend [`PURPOSE_ROWS`] of them saying
+/// what the pane is, given the `bare` rows its gestures need. A rung gives a
+/// gesture up for width by reaching `from > 0` and for height by paging, and
+/// prose goes before either, so the line rides only where the whole table still
+/// fits beside it.
+const fn purpose_fits(from: usize, bare: usize, capacity: usize) -> bool {
     from == 0 && bare + PURPOSE_ROWS <= capacity
 }
 
@@ -2646,21 +2632,13 @@ static SHEET_COUNTER_FLOOR: LazyLock<usize> = LazyLock::new(|| {
 });
 
 /// The ordinals of the gestures a page draws, or `None` when it draws them all.
-fn shown_of(
-    from: usize,
-    mouse: bool,
-    purpose: bool,
-    skip: usize,
-    take: usize,
-) -> Option<(usize, usize)> {
+fn shown_of(page: Column) -> Option<(usize, usize)> {
+    let lines = || column_lines(page.from, page.mouse, page.purpose);
     let is_row = |line: &Line| matches!(line, Line::Row(_));
-    let before = column_lines(from, mouse, purpose)
-        .take(skip)
-        .filter(is_row)
-        .count();
-    let count = column_lines(from, mouse, purpose)
-        .skip(skip)
-        .take(take)
+    let before = lines().take(page.skip).filter(is_row).count();
+    let count = lines()
+        .skip(page.skip)
+        .take(page.take)
         .filter(is_row)
         .count();
     (count < SHEET_TOTAL).then_some((before + 1, before + count))
@@ -2695,29 +2673,21 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     // The order is the ruling's: the roomy rung where there is room for it, then
     // every row in one column, then the two-column rung that buys height with
     // width, then the paged rungs, widest row set first.
-    // Each rung below the roomy one is offered twice, with the line and then
-    // without, so a pane gives up the line rather than the shape it had.
+    // Each rung below the roomy one is offered with the line and then without,
+    // so a pane short of room gives up the line rather than the shape it had.
     let rungs = std::iter::once_with(roomy_fit)
         .chain(
             [true, false]
                 .into_iter()
                 .map(move |said| column_fit(level, 0, true, said)),
         )
-        .chain(
-            [(0, true), (0, false), (1, true), (1, false)]
+        .chain([0, 1].into_iter().flat_map(|level| {
+            let placed = sheet_beside(level);
+            [true, false]
                 .into_iter()
-                .map(|(level, said)| beside_fit(level, said)),
-        )
-        .chain(sets.map(move |(from, mouse)| {
-            paged_fit(
-                level,
-                from,
-                mouse,
-                page,
-                capacity,
-                purpose_fits(from, mouse, capacity),
-            )
-        }));
+                .map(move |said| beside_fit(level, placed, said))
+        }))
+        .chain(sets.map(move |(from, mouse)| paged_fit(level, from, mouse, page, capacity, true)));
     for fit in rungs {
         let height = fit.rows + SHEET_FRAME;
         if fit.total > usize::from(room) || height > usize::from(body) {
@@ -2778,10 +2748,10 @@ fn roomy_fit() -> Fit {
 
 /// One column, at a spelling the pane picked, with the mouse group below the
 /// keyboard group or dropped, and `from` keyboard rows already gone.
-fn column_fit(level: usize, from: usize, mouse: bool, purpose: bool) -> Fit {
+fn column_fit(level: usize, from: usize, mouse: bool, offer: bool) -> Fit {
     // A capacity nothing can exceed is one page by arithmetic, which is the whole of
     // what makes this rung and the paged ones one constructor.
-    paged_fit(level, from, mouse, 0, usize::MAX, purpose)
+    paged_fit(level, from, mouse, 0, usize::MAX, offer)
 }
 
 /// One column, `capacity` rows of it at a time, showing page `page`.
@@ -2791,10 +2761,16 @@ fn paged_fit(
     mouse: bool,
     page: usize,
     capacity: usize,
-    purpose: bool,
+    offer: bool,
 ) -> Fit {
     let (keys, verb, total) = sheet_fields(level, from, mouse);
-    let lines = sheet_rows(from, mouse, purpose);
+    let bare = sheet_rows(from, mouse, false);
+    let purpose = offer && purpose_fits(from, bare, capacity);
+    let lines = if purpose {
+        sheet_rows(from, mouse, true)
+    } else {
+        bare
+    };
     let pages = lines.div_ceil(capacity.max(1)).max(1);
     let page = page.min(pages - 1);
     let skip = page * capacity;
@@ -2822,8 +2798,8 @@ fn paged_fit(
 }
 
 /// Two columns, keyboard beside mouse, every row drawn.
-fn beside_fit(level: usize, purpose: bool) -> Fit {
-    let (keyboard, mouse, total) = sheet_beside(level);
+fn beside_fit(level: usize, placed: (Group, Group, usize), purpose: bool) -> Fit {
+    let (keyboard, mouse, total) = placed;
     Fit {
         level,
         total,
@@ -2882,9 +2858,7 @@ impl Shape {
     /// gesture the tables hold.
     fn shown(self) -> Option<(usize, usize)> {
         match self {
-            Self::Column(page) => {
-                shown_of(page.from, page.mouse, page.purpose, page.skip, page.take)
-            }
+            Self::Column(page) => shown_of(page),
             // Both draw the whole table or are not selected, so there is never
             // anything for a counter to say.
             Self::Roomy { .. } | Self::Beside { .. } => None,
@@ -3621,13 +3595,16 @@ impl Painter<'_> {
         }
     }
 
-    /// What the pane is, at the column this rung's keys cells start in.
+    /// What the pane is, at the column this rung's keys cells start in. The
+    /// spelling is picked off the room rather than the rung's own `level`, which
+    /// disagree: the two-column rung takes the tight `level` at seventy-one
+    /// columns and the one-column rung takes it at thirty-eight.
     fn sheet_said(&mut self, y: u16, group: Group, area: Rect) {
-        let room = purpose_room(usize::from(area.width), group.at);
+        let room = sheet_room(usize::from(area.width), group.at);
         self.put(
             group.keys_at(area.x),
             y,
-            SHEET_PURPOSE[purpose_level(room)],
+            widest_fitting_or_last(&SHEET_PURPOSE, room),
             room,
             self.theme.chrome,
         );
@@ -3641,8 +3618,8 @@ impl Painter<'_> {
         self.sheet_pipes_over(area, area.y + 1);
         self.sheet_said(area.y + 1, group, area);
 
-        // The line in the row that was blank, then each section: its heading, its
-        // rows, and the blank row that separates it from the next.
+        // The line under the title bar, then each section: its heading, its rows,
+        // and the blank row that separates it from the next.
         let mut y = area.y + 2;
         for section in SECTIONS.iter() {
             // Capped against the frame rather than against the label's own width, which
@@ -3653,7 +3630,7 @@ impl Painter<'_> {
                 area.x + ROOMY_HEADING_INSET as u16 + 1,
                 y,
                 section.label,
-                usize::from(area.width).saturating_sub(ROOMY_HEADING_INSET + 2),
+                sheet_room(usize::from(area.width), ROOMY_HEADING_INSET),
                 self.theme.chrome_dim,
             );
             y += 1;
@@ -3703,7 +3680,7 @@ impl Painter<'_> {
         // either fix to the allocation a built rule costs.
         let style = self.theme.chrome_dim;
         self.put(x, y, "│", 1, style);
-        let after = self.put(x + 1, y, label, width.saturating_sub(3), style);
+        let after = self.put(x + 1, y, label, sheet_room(width, 1), style);
         let right = x + width as u16 - 1;
         self.rule(Rect {
             x: after,
@@ -5332,21 +5309,21 @@ mod sheet_tables {
         );
     }
     /// Every rung that can carry [`SHEET_PURPOSE`] has the columns for the
-    /// spelling it would choose. Walked over the layout rather than over drawn
-    /// panes, so a rung no pane in that sweep reaches is measured too.
+    /// spelling it would choose, walked over the layout rather than over drawn
+    /// panes so a rung no sweep reaches is measured too.
     #[test]
     fn every_rung_that_carries_the_line_has_the_columns_for_it() {
         let mut rooms = Vec::new();
         for level in [0, 1] {
             for mouse in [true, false] {
-                rooms.push(purpose_room(sheet_fields(level, 0, mouse).2, 1));
+                rooms.push(sheet_room(sheet_fields(level, 0, mouse).2, 1));
             }
-            rooms.push(purpose_room(sheet_beside(level).2, 1));
+            rooms.push(sheet_room(sheet_beside(level).2, 1));
         }
-        rooms.push(purpose_room(sheet_roomy().1, ROOMY_INSET));
+        rooms.push(sheet_room(sheet_roomy().1, ROOMY_INSET));
 
         for room in rooms {
-            let spelling = SHEET_PURPOSE[purpose_level(room)];
+            let spelling = widest_fitting_or_last(&SHEET_PURPOSE, room);
             assert!(
                 width_of(spelling) <= room,
                 "a rung with {room} columns of room would draw {spelling:?}, which \
@@ -5356,15 +5333,15 @@ mod sheet_tables {
         }
     }
 
-    /// A rung that has given a gesture up refuses the line at every capacity.
-    /// The width half is the one no sweep over drawn panes can isolate, since a
-    /// pane too narrow for the whole table is short of rows for its own reasons.
+    /// A rung that has given a gesture up refuses the line at every capacity. No
+    /// sweep over drawn panes can isolate that, since a pane too narrow for the
+    /// whole table is short of rows for its own reasons.
     #[test]
     fn a_rung_that_has_given_up_a_gesture_refuses_the_line() {
         for from in 1..=KEYBOARD.len() - SHEET_KEEP {
             for mouse in [true, false] {
                 assert!(
-                    !purpose_fits(from, mouse, usize::MAX),
+                    !purpose_fits(from, sheet_rows(from, mouse, false), usize::MAX),
                     "a rung {from} rows into DROP_ORDER accepted the line even with \
                      unbounded height, so width and height have stopped being one \
                      rule"
@@ -5374,11 +5351,11 @@ mod sheet_tables {
         // And the height half, at the boundary rather than well inside it.
         let whole = sheet_rows(0, true, false);
         assert!(
-            purpose_fits(0, true, whole + PURPOSE_ROWS),
+            purpose_fits(0, whole, whole + PURPOSE_ROWS),
             "a page with room for the whole table and the line refused the line"
         );
         assert!(
-            !purpose_fits(0, true, whole + PURPOSE_ROWS - 1),
+            !purpose_fits(0, whole, whole + PURPOSE_ROWS - 1),
             "a page one row short of the whole table and the line took the line \
              anyway, so the sheet would page to pay for prose"
         );
