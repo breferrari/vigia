@@ -30,6 +30,9 @@ const DRAWN_BUCKETS: usize = 12;
 /// The mark the renderer writes where a row runs past its edge.
 const CONTINUES: &str = "›";
 
+/// Columns the scrollbar reserves at the right of every row, drawn or not.
+const BAR_COLUMNS: usize = 2;
+
 /// What joins two facts about one subject on a line of chrome.
 const FACT_JOIN: &str = " · ";
 
@@ -2665,17 +2668,20 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
         "the mark is not drawn in the colour of the comment it cut"
     );
 
-    let narrow = screen(1, 7, &view(), &chrome());
+    // Three columns, which is the narrowest pane that draws a content row at all:
+    // the row is planned against the pane less the bar's reserve, so one column
+    // and two leave it nothing. What is drawn is the mark alone, with no text run
+    // beside it to take a colour from, which is the case this pins.
+    let narrow = screen(3, 7, &view(), &chrome());
     assert_eq!(
         narrow.buffer()[(0, CONTENT_ROW)].symbol(),
         CONTINUES,
-        "a one-column row did not mark that it continues"
+        "the narrowest row the pane draws did not mark that it continues"
     );
     assert_eq!(
         narrow.buffer()[(0, CONTENT_ROW)].style().fg,
         theme.added.fg,
-        "at one column the mark fell back to a default instead of taking the \
-         sigil's style, which is the divergence from `put_marked` this pins"
+        "the narrowest drawn row took a default, not the sigil's style"
     );
 }
 
@@ -5782,12 +5788,14 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
     // Gated here because nothing else covers it.
 
     let mut read_at: Vec<u16> = Vec::new();
-    for width in 30u16..=120 {
+    let mut read_barred: Vec<u16> = Vec::new();
+    let mut read_bare: Vec<u16> = Vec::new();
+    for (width, total) in (30u16..=120).flat_map(|width| [(width, 4000usize), (width, 0)]) {
         // Long enough to reach whatever edge it is given, so the row's rightmost
         // glyph is the edge rather than the end of its text.
         let long = "    let stale = self.pending.take(); ".repeat(12);
         let view = View {
-            total_rows: 4000,
+            total_rows: total,
             rows_above: 40,
             rows: vec![
                 file("src/engine/watch.rs", 42, 7),
@@ -5814,11 +5822,15 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
             continue;
         };
 
-        // The whole finding is about the screens where a bar exists, so a width
-        // that draws none has nothing to say here.
+        // Both screens, and the unbarred one is the whole point of the second half
+        // of the sweep. Where a bar is drawn the region has already lost the bar's
+        // columns, so the row's edge lands on the heading's whatever else decides
+        // it; the screen with no bar is the only one the reserve is visible from.
         let bar_drawn = (0..18u16).any(|y| is_bar_glyph(buffer[(width - 1, y)].symbol()));
-        if !bar_drawn {
-            continue;
+        if bar_drawn {
+            read_barred.push(width);
+        } else {
+            read_bare.push(width);
         }
         read_at.push(width);
 
@@ -5836,9 +5848,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         assert_eq!(
             last_glyph(content),
             last_glyph(heading),
-            "at {width} columns the content line stops at column {} where the \
-             heading in the same region stops at {}, so the pane's trailing \
-             margin was charged on top of the scrollbar's own reserve",
+            "at {width} columns the content stops at {} and its heading at {}",
             last_glyph(content),
             last_glyph(heading)
         );
@@ -5854,7 +5864,102 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
             "the sweep never drew a heading, a long content line and a bar \
              together at {rung} columns, which is a boundary of the margin ladder"
         );
+        assert!(
+            read_bare.contains(&rung),
+            "no bar was drawn at {rung} columns, the only screen the reserve shows on"
+        );
     }
+}
+
+#[test]
+fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
+    // The two numbers themselves, compared to each other rather than through the
+    // buffer. `Body::diff_width` is what the walk wraps a line at and what the box
+    // sizes its rung on; `Region::text` is what the painter draws a row across and
+    // what the pointer is told a row's text spans. A threshold two expressions
+    // agree about by hand is invisible to every gate that reads what was drawn,
+    // and nothing had ever put these two side by side.
+    let mut read_barred: Vec<u16> = Vec::new();
+    let mut read_bare: Vec<u16> = Vec::new();
+    let views = [4000usize, 0].map(|total| View {
+        total_rows: total,
+        rows_above: 40,
+        ..two_regions(1)
+    });
+    // Past the rail's own arrival width as well as under it. Beside a rail the diff
+    // region does not begin at column zero, which is the one shape where the span's
+    // origin and its width are not the same subtraction twice.
+    //
+    // The views carry a list, which is what pairs `body_layout` and `regions` the
+    // way `lib.rs` does: `view::list_rows_wanted` is the file count plus its run
+    // separators, and a rail needs a file, so the two never disagree about whether
+    // there is a list. A hand-built view with a rail and an empty list parts them by
+    // seventy columns, through `Body::clamped_to`'s rail arm, and is a shape the
+    // shell cannot build.
+    let railed = Chrome {
+        rail: true,
+        ..chrome()
+    };
+    let mut read_rail = 0usize;
+    for (width, chrome, view) in (1u16..=180)
+        .flat_map(|width| [&chrome(), &railed].map(|chrome| (width, chrome.clone())))
+        .flat_map(|(width, chrome)| views.iter().map(move |view| (width, chrome.clone(), view)))
+    {
+        let pane = Rect::new(0, 0, width, 24);
+        let laid = body_layout(pane, &chrome, view.files, view.list.len());
+        let laid_regions = regions(pane, &chrome, view);
+        // A pane with no diff region publishes no span, so there is no width to
+        // compare one against.
+        if laid_regions.diff.rows == 0 || laid_regions.diff.text == 0 {
+            continue;
+        }
+        if laid_regions.diff.bar.is_some() {
+            read_barred.push(width);
+        } else {
+            read_bare.push(width);
+        }
+        if laid_regions.diff.left > 0 {
+            read_rail += 1;
+        }
+        assert_eq!(
+            laid.diff_width,
+            usize::from(laid_regions.diff.text),
+            "at {width} columns a row wraps at {} and is drawn across {}",
+            laid.diff_width,
+            laid_regions.diff.text
+        );
+        // And the span sits where the region says, which the equality above cannot
+        // say: both its sides come from one call now, so a wrong answer moves them
+        // together. This reads the region's own left edge and width instead, and
+        // beside a rail those are not the pane's.
+        let diff = laid_regions.diff;
+        assert_eq!(
+            usize::from(diff.gutter.0) + usize::from(diff.text),
+            usize::from(diff.left) + usize::from(diff.width) - BAR_COLUMNS,
+            "at {width} columns the text ends at {} and the region at {}",
+            diff.gutter.0 + diff.text,
+            diff.left + diff.width
+        );
+    }
+
+    // Named widths rather than a count. Every barred screen agrees already, so a
+    // sweep that read only those is green against the defect: the rungs of the
+    // margin ladder with no bar drawn are the whole population this is for.
+    for rung in [15u16, 40, 43, 44, 79, 80] {
+        assert!(
+            read_bare.contains(&rung),
+            "no bar was drawn at {rung} columns, which is where the two widths part"
+        );
+    }
+    assert!(
+        !read_barred.is_empty(),
+        "no screen drew a bar, so this reads half the screens a pane has"
+    );
+    assert!(
+        read_rail > 0,
+        "no screen put the diff beside a rail, so the shape where the region does \
+         not start at column zero went unread"
+    );
 }
 
 #[test]

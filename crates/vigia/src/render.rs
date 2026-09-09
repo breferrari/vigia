@@ -343,19 +343,20 @@ fn flush_right(area: Rect, width: usize) -> Option<Rect> {
     Some(Rect::new(area.x + area.width - width, area.y, width, 1))
 }
 
-/// The columns of `area` a row's glyphs may use on `pane`: inset from the left,
-/// and stopped at the region's own edge or the pane's trailing margin, whichever
-/// comes first. Shared with [`regions`], which publishes it, so the painter and
-/// the pointer cannot come apart on where a row's text ends.
-fn glyph_span(area: Rect, pane: Rect, margins: (u16, u16)) -> Rect {
-    let left = area.x.saturating_add(margins.0);
-    // Through `Rect::right`, which `ratatui` defines as exactly this saturating
-    // add and which this file already calls one region over.
-    let stop = area.right().min(pane.right().saturating_sub(margins.1));
+/// Where a row's glyphs go inside `region`: inset from the left, across the
+/// width the region is planned against. The one place that is derived: the span
+/// [`regions`] publishes, the rows `Painter::body` draws, and [`Body::diff_width`],
+/// which is what the walk wraps a line at, all come from here.
+///
+/// The bar's reserve is charged whether or not a bar is drawn, and that is not a
+/// rounding: whether one is drawn is decided from the rows the walk produced, and
+/// the walk needs this width to produce them. Charging it only where a bar
+/// appears would make how wide a line wraps a fact about how long the file is.
+fn content_span(region: Rect, pane: Rect) -> Rect {
     Rect {
-        x: left,
-        width: stop.saturating_sub(left),
-        ..area
+        x: region.x.saturating_add(inset_of(pane.width)),
+        width: planning_width(region.width, pane.width, 0),
+        ..region
     }
 }
 
@@ -868,8 +869,8 @@ impl Bar {
             width: at.width,
             track: self.track(at.y, at.height),
             // The rect's own right edge, which is where `Painter::scrollbar` draws: it
-            // takes the region before `with_bar` narrows it and draws down the right of
-            // what it was given.
+            // takes the region before anything could narrow it and draws down the
+            // right of what it was given.
             bar: self.drawn().then(|| bar_column(at)),
             // `regions` fills the diff's from the rows it laid out.
             gutter: (0, 0),
@@ -1554,8 +1555,9 @@ pub struct Body {
     /// Whether the list is a left rail beside the diff rather than a strip
     /// above it.
     pub rail: bool,
-    /// Columns the diff's content is laid out against, the scrollbar's charged
-    /// whether or not one is drawn.
+    /// Columns the diff's content is laid out against, and the width its rows are
+    /// drawn across. The scrollbar's reserve is charged whether or not a bar is
+    /// drawn, so the wrap does not move when a diff outgrows its pane.
     pub diff_width: usize,
     /// Pages the gestures sheet takes on this pane, `Some(0)` on a pane too small
     /// to draw one, and `None` when nothing measured it.
@@ -1592,7 +1594,7 @@ impl Body {
         // Here rather than in each of `split_rows`' four exits, and after them rather
         // than inside, because the width is a function of the *shape* the split chose
         // and of the pane, and both are known once it has chosen.
-        body.diff_width = usize::from(planning_width(body.areas(area).diff.width, area.width, 0));
+        body.diff_width = usize::from(content_span(body.areas(area).diff, area).width);
         body
     }
 
@@ -1862,14 +1864,11 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         view.total_rows as u64,
     );
 
-    // The span `Painter::body` lays the rows out in, so the pointer's gutter target,
-    // the drawn number and the end of a row's text are one geometry.
     let (gutter, text) = if body.diff > 0 && view.files > 0 {
-        let inner = planning_width(areas.diff.width, area.width, 0);
+        let span = content_span(areas.diff, area);
         let digits = view
             .gutter
-            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
-        let span = glyph_span(diff_bar.narrows(areas.diff), area, margins_of(area.width));
+            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(span.width)));
         (
             (
                 span.x,
@@ -2083,26 +2082,22 @@ pub fn render(
     }
 
     if body.diff > 0 {
-        let region = areas.diff;
-        // Counted in rows of the diff, not of the terminal: the thumb spans the
-        // screenful the pane holds, which stops being its height when a line wraps.
-        let full = region;
+        let full = areas.diff;
         // Zero is *nobody measured*, which is a hand-built [`Body`] in a test and not a
         // real pane: [`Body::split`] fills the field for every shape it returns, and a
         // pane whose diff has no columns draws no content to wrap.
         debug_assert!(
-            body.diff_width == 0
-                || body.diff_width == usize::from(planning_width(full.width, area.width, 0)),
+            body.diff_width == 0 || body.diff_width == usize::from(content_span(full, area).width),
             "the rows were wrapped against {} columns and this region lays out with {}",
             body.diff_width,
-            planning_width(full.width, area.width, 0)
+            content_span(full, area).width
         );
+        // Counted in rows of the diff, not of the terminal: the thumb spans the
+        // screenful the pane holds, which stops being its height when a line wraps.
         let screenful = view.shown() as u64;
-        let (region, bar) = painter.with_bar(region, diff_bars, screenful, view.total_rows as u64);
-        // The wash spans the region's whole width, the bar's own column
-        // included.
+        // Asked rather than narrowed: nothing here draws to a narrowed rect.
+        let bar = bar_for(diff_bars, full.height, screenful, view.total_rows as u64);
         painter.body(
-            region,
             full,
             view,
             area,
@@ -2877,18 +2872,6 @@ impl Painter<'_> {
         text_within(area, (self.inset, self.trailing))
     }
 
-    /// The same, for a rect a scrollbar may already have narrowed.
-    fn region_text(&self, area: Rect, pane: Rect) -> Rect {
-        // The two derivations of the margin have to be the same one.
-        debug_assert_eq!(
-            margins_of(pane.width),
-            (self.inset, self.trailing),
-            "a region is being drawn against a different pane than the painter was \
-             built for, so its margin and the chrome's have come apart"
-        );
-        glyph_span(area, pane, (self.inset, self.trailing))
-    }
-
     /// Write `text` at `x`, clipped to `limit` columns, and return the next
     /// column.
     fn put(&mut self, x: u16, y: u16, text: &str, limit: usize, style: Style) -> u16 {
@@ -3661,10 +3644,19 @@ impl Painter<'_> {
     }
 
     /// Draw the body: the pinned list, the rule and the diff.
-    fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect, empty: &str) {
-        // Two rects, because this region draws both roles.
-        let washed = full.width;
-        let glyphs = self.region_text(area, pane);
+    fn body(&mut self, area: Rect, view: &View, pane: Rect, empty: &str) {
+        // `line_row` paints the left bar in `self.inset` and `content_span` insets
+        // from the pane, so a painter built for another pane bars the wrong column.
+        debug_assert_eq!(
+            margins_of(pane.width),
+            (self.inset, self.trailing),
+            "a region is being drawn against a different pane than the painter was \
+             built for, so its margin and the chrome's have come apart"
+        );
+        // The region draws both roles: the wash spans it whole, the bar's column
+        // included, and the glyphs stop short of that column.
+        let washed = area.width;
+        let glyphs = content_span(area, pane);
         if view.files == 0 {
             self.put_marked(
                 glyphs.x,
@@ -3676,17 +3668,13 @@ impl Painter<'_> {
             return;
         }
 
-        // The stream's own width rather than the list's: the two regions are different
-        // widths, and `SPEC.md` §11.1 rules they need not align glyph for glyph.
+        // The stream's own width rather than the list's: `SPEC.md` §11.1 rules each
+        // region plans its own slots and the two are entitled to differ.
         let shown = usize::from(area.height);
-        let inner = planning_width(full.width, pane.width, 0);
-        let columns = Columns::plan(inner, self.glyphs);
-
-        // The gutter comes from the same width, and that is the fixed-slot ruling one
-        // element over.
+        let columns = Columns::plan(glyphs.width, self.glyphs);
         self.gutter = view
             .gutter
-            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
+            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(glyphs.width)));
 
         // The line row the pointer's gutter mark lands on: the row itself when it is
         // a line, the line a continuation belongs to, and nothing over a heading, a
@@ -3749,14 +3737,11 @@ impl Painter<'_> {
                 }
             };
             match row {
-                // Given the planning width rather than the region's, for
-                // [`Painter::list`]'s reason: the elements are placed from the
-                // right edge, so the edge has to be a fact about the pane too.
                 Row::File(entry) => self.file_row(
                     Rect {
                         y,
                         x: glyphs.x,
-                        width: inner,
+                        width: glyphs.width,
                         ..area
                     },
                     &Heading::of(entry, view.grouped),
