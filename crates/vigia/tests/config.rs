@@ -1,7 +1,11 @@
 //! `SPEC.md` §11.2 B6 as amended: the pane a reader starts with.
 
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
+use vigia::{
+    Action, App, Config, ConfigError, Pointing, Regions, action_for, body_layout, config,
+    diff_height,
+};
 
 /// A home directory holding a config file, or holding none.
 fn home_with(name: &str, contents: Option<&str>) -> std::path::PathBuf {
@@ -103,7 +107,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
             staged: false,
             wrap: false,
             icons: false,
-            // Untouched by the file, so the hand-written default holds: on.
+            // Untouched by the file, so the hand-written defaults hold: on.
+            notes: true,
             links: true,
         }
     );
@@ -126,6 +131,7 @@ fn the_key_still_toggles_from_the_configured_state() {
         single: true,
         staged: false,
         wrap: false,
+        notes: false,
         icons: false,
         links: false,
     };
@@ -279,7 +285,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
             staged: false,
             wrap: false,
             icons: false,
-            // Untouched by the file, so the hand-written default holds: on.
+            // Untouched by the file, so the hand-written defaults hold: on.
+            notes: true,
             links: true,
         }
     );
@@ -406,6 +413,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         staged: true,
         links: false,
         wrap: false,
+        notes: false,
         icons: false,
     });
 
@@ -464,6 +472,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             staged: true,
             links: true,
             wrap: true,
+            notes: true,
             icons: true,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
@@ -534,5 +543,180 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
             .iter()
             .all(|change| change.origin == vigia_core::Origin::Unstaged),
         "a shell with no config file drew the staged run anyway"
+    );
+}
+
+/// Where a gesture's launch state is set, as the reason it is or is not a key of
+/// this file.
+#[derive(Debug)]
+enum Place {
+    /// The file's own key for it, which [`config::KEYS`] has to carry.
+    Key(&'static str),
+    /// A toggle kept out of the file on purpose. Carries why, because a toggle
+    /// absent from the file is absent by ruling or by oversight and nothing else
+    /// tells the two apart.
+    Excluded(&'static str),
+    /// Not a view toggle: what it does is no state a launch could start in.
+    /// Carries why, so the classification can be argued with rather than only read.
+    Neither(&'static str),
+}
+
+/// Where each action's launch state is set.
+///
+/// Exhaustive, with no wildcard arm, and that is the gate rather than the tests
+/// below: a gesture added later stops this file compiling until somebody has said
+/// which of the three it is. `sheet.rs::reach_of` holds the gestures sheet the
+/// same way, one surface over.
+fn place_of(action: &Action) -> Place {
+    match action {
+        // The gestures sheet's `view` section once follow is taken out of it.
+        Action::ToggleRail => Place::Key("rail"),
+        Action::ToggleSingle => Place::Key("single"),
+        Action::ToggleStaged => Place::Key("staged"),
+        Action::ToggleWrap => Place::Key("wrap"),
+        // The sheet's `notes` section, and the seventh toggle the file spent a
+        // release not having.
+        Action::ToggleNotes => Place::Key("notes"),
+        // The exclusion list, and its one entry.
+        Action::ToggleFollow => Place::Excluded(
+            "correct with zero interaction is a promise about the program, and a \
+             file able to turn follow off would make it a promise about one \
+             reader's configuration instead. I5, and `SPEC.md` §11.2 B6",
+        ),
+        Action::ToggleSheet | Action::CloseSheet => Place::Neither(
+            "the sheet is drawn over the pane and put away again, so there is no \
+             pane a launch could start inside one of",
+        ),
+        Action::Scroll(_)
+        | Action::ScrollList(_)
+        | Action::Page(_)
+        | Action::HalfPage(_)
+        | Action::File(_)
+        | Action::Top
+        | Action::Bottom
+        | Action::ListTo(_)
+        | Action::ListRow(_)
+        | Action::DiffTo(_) => Place::Neither(
+            "a move, and where the pane sits is I5's to decide rather than a \
+             setting's",
+        ),
+        Action::Quit | Action::Escape | Action::Redraw => {
+            Place::Neither("nothing they leave behind is a state a launch could hold")
+        }
+    }
+}
+
+/// Every action a key of the pane produces, one per variant.
+///
+/// Taken from the keymap rather than listed here, so a toggle bound to a new key
+/// is walked without this file being told about it. The candidate space is the
+/// printable range and the named keys against the four modifier sets, which is
+/// `sheet.rs::candidate_keys` less the function keys nothing binds: a key outside
+/// it would leave the tests below blind, and [`place_of`]'s own exhaustiveness is
+/// what still catches the variant.
+fn actions_keys_reach() -> Vec<Action> {
+    let mut codes: Vec<KeyCode> = (b' '..=b'~').map(|c| KeyCode::Char(c as char)).collect();
+    codes.extend([
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+        KeyCode::Enter,
+        KeyCode::Esc,
+    ]);
+
+    let mut found: Vec<Action> = Vec::new();
+    for code in codes {
+        for mods in [
+            KeyModifiers::NONE,
+            KeyModifiers::SHIFT,
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+        ] {
+            let event = Event::Key(KeyEvent::new(code, mods));
+            if let Some(action) = action_for(&event, Regions::default()) {
+                let fresh = !found
+                    .iter()
+                    .any(|seen| std::mem::discriminant(seen) == std::mem::discriminant(&action));
+                if fresh {
+                    found.push(action);
+                }
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn every_view_toggle_has_a_key_or_a_reason() {
+    let (mut keyed, mut excluded) = (0usize, 0usize);
+    for action in actions_keys_reach() {
+        match place_of(&action) {
+            Place::Key(key) => {
+                assert!(
+                    config::KEYS.contains(&key),
+                    "{action:?} is set by {key:?} and the file accepts no such key, \
+                     so a reader cannot start the pane where the gesture puts it"
+                );
+                keyed += 1;
+            }
+            Place::Excluded(why) => {
+                assert!(
+                    !why.trim().is_empty(),
+                    "{action:?} is excluded and says no reason, which is the \
+                     oversight this gate exists to tell from a ruling"
+                );
+                excluded += 1;
+            }
+            Place::Neither(why) => assert!(
+                !why.trim().is_empty(),
+                "{action:?} is called no toggle and says no reason, so the \
+                 classification cannot be argued with"
+            ),
+        }
+    }
+
+    // Non-vacuity: a sweep that reached no toggle at all would pass every
+    // assertion above by walking nothing.
+    assert!(
+        keyed > 0 && excluded > 0,
+        "the sweep found {keyed} keyed toggle(s) and {excluded} excluded, so it is \
+         not walking the keymap and the assertions above are over an empty set"
+    );
+
+    assert!(
+        matches!(place_of(&Action::ToggleFollow), Place::Excluded(_)),
+        "`f` left the exclusion list, and `SPEC.md` §11.1 is what has to change \
+         before this does"
+    );
+}
+
+#[test]
+fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
+    // The two `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
+    // they cannot come out of the sweep.
+    const CONFIG_ONLY: [&str; 2] = ["icons", "links"];
+
+    let mut reachable: Vec<&str> = actions_keys_reach()
+        .iter()
+        .filter_map(|action| match place_of(action) {
+            Place::Key(key) => Some(key),
+            Place::Excluded(_) | Place::Neither(_) => None,
+        })
+        .collect();
+    reachable.extend(CONFIG_ONLY);
+    reachable.sort_unstable();
+
+    let mut accepted: Vec<&str> = config::KEYS.to_vec();
+    accepted.sort_unstable();
+
+    assert_eq!(
+        reachable, accepted,
+        "a key here and not there is a gesture the file cannot start; a key there \
+         and not here is one no gesture and no ruling accounts for"
     );
 }

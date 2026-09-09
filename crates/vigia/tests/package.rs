@@ -1930,7 +1930,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 384037),
+    ("SPEC.md", 384354),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96001),
     ("RULINGS.md", 99141),
@@ -1942,7 +1942,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
-const CONFIG_KEYS_SPELLED: &str = "Six keys";
+const CONFIG_KEYS_SPELLED: &str = "Seven keys";
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///
@@ -1986,6 +1986,50 @@ fn the_spec_names_every_key_the_config_file_accepts() {
             vigia::config::KEYS.len()
         );
     }
+}
+
+/// `README.md`'s config block is a config file, and it teaches every key.
+///
+/// The block is handed to the parser rather than scanned, which is the whole
+/// strength of this gate: a scan of a documented example is a scan of prose
+/// unless it parses, and the parser refuses an unknown key, so a block teaching
+/// a key the binary does not have fails here without a second list to keep.
+/// Only the other direction, a key the block never names, needs reading.
+#[test]
+fn the_readme_teaches_a_config_file_that_parses_and_names_every_key() {
+    let readme = repo_file("README.md");
+    let block = readme
+        .split_once("# ~/.config/vigia/config")
+        .and_then(|(_, rest)| rest.split_once("```"))
+        .map(|(block, _)| block)
+        .expect("README.md shows a reader what to put in ~/.config/vigia/config");
+
+    let parsed = vigia::config::parse(block).unwrap_or_else(|why| {
+        panic!("README.md teaches a config file the binary refuses: {why}\n{block}")
+    });
+    // What makes the parse an assertion rather than a formality: a block of
+    // nothing but comments parses cleanly and teaches nobody anything.
+    assert_ne!(
+        parsed,
+        vigia::Config::default(),
+        "README.md's config block parses to the pane a reader already has, so no \
+         line of it was read as a setting:\n{block}"
+    );
+
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
+        .filter(|key| {
+            !block
+                .lines()
+                .filter_map(|line| line.split_once('='))
+                .any(|(named, _)| named.trim() == *key)
+        })
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the config file accepts {missing:?} and README.md's block never names \
+         them, so a reader is taught a surface smaller than the binary's:\n{block}"
+    );
 }
 
 /// The length `SPEC.md` gives the box's arrival is the length the pane runs it over.

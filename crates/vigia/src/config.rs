@@ -17,13 +17,15 @@ pub struct Config {
     pub staged: bool,
     /// Wrap a content line too wide for the pane onto the row below. `w`.
     pub wrap: bool,
+    /// Draw the rows of the reader's notes under their lines. `c`.
+    pub notes: bool,
     /// Draw a file-type icon before every listed path. No gesture; config only.
     pub icons: bool,
     /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
     pub links: bool,
 }
 
-/// Every toggle off and the links on, which is the shipped pane.
+/// Every toggle off and the notes and links on, which is the shipped pane.
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -31,6 +33,7 @@ impl Default for Config {
             single: false,
             staged: false,
             wrap: false,
+            notes: true,
             icons: false,
             links: true,
         }
@@ -38,7 +41,9 @@ impl Default for Config {
 }
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
-pub const KEYS: [&str; 6] = ["rail", "single", "staged", "wrap", "icons", "links"];
+pub const KEYS: [&str; 7] = [
+    "rail", "single", "staged", "wrap", "notes", "icons", "links",
+];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -48,6 +53,7 @@ impl Config {
             "single" => self.single = on,
             "staged" => self.staged = on,
             "wrap" => self.wrap = on,
+            "notes" => self.notes = on,
             "icons" => self.icons = on,
             "links" => self.links = on,
             _ => return false,

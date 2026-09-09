@@ -407,7 +407,7 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 | 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → **your terminal's own background** → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
-| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` |
+| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` and `notes` |
 | 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off` declines it |
 
 ```sh
@@ -533,7 +533,7 @@ set -ga terminal-features ",*:clipboard"
 
 ### 🪟 The pane you want, every time
 
-`r`, `s`, `a` and `w` change what the body is made of, and all four start off. If you always want one of them, say so once:
+`r`, `s`, `a`, `w` and `c` change what the body is made of. If you always want one of them, say so once:
 
 ```sh
 # ~/.config/vigia/config
@@ -541,13 +541,14 @@ rail     = on     # the file list beside the diff, from 139 columns
 single   = on     # one file at a time
 staged   = on     # what is staged, beside what is not
 wrap     = on     # a long line continues on the row below
+notes    = off    # the note rows under their lines; this is the off switch
 icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
 links    = off    # paths are clickable file:// links; this is the off switch
 ```
 
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
 
-**`links` is the one key that starts on**: every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor. A terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected and the key only exists to turn it off.
+**`links` and `notes` are the two keys that start on**, so both are written above as the off switches they are. Every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor; a terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected. And a note you left for the agent draws its own rows under the line it is on, which `notes = off` turns down to the mark alone, the way `c` does for a session.
 
 **`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
 

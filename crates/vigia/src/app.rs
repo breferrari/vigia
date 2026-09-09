@@ -203,6 +203,7 @@ impl App {
             rail: config.rail,
             single: config.single,
             wrap: config.wrap,
+            notes_shown: config.notes,
             shown: 0,
             staged: config.staged,
             icons: config.icons,
