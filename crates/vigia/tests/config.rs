@@ -484,6 +484,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
     );
 
     // And each one alone has to *change* something, which `is_ok` does not say.
+    let mut apart: Vec<(&str, Config, Config)> = Vec::new();
     for key in vigia::config::KEYS {
         let lit = config::parse(&format!("{key} = on\n"))
             .unwrap_or_else(|why| panic!("KEYS names {key:?} and parse refuses it: {why}"));
@@ -494,6 +495,23 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             "{key:?} is in KEYS and setting it changed nothing, so KEYS and \
              Config::set have drifted"
         );
+        apart.push((key, lit, unlit));
+    }
+
+    // And no two keys may move the same field. The assertions above cannot see
+    // that: a key wired to a neighbour's field leaves its own at the default,
+    // and where that default is already `on` the whole-file comparison holds
+    // anyway, while `lit != unlit` holds because the neighbour moved. What
+    // separates them is the pair, since a key that starts `on` and one that
+    // starts `off` agree on one side of it and never on both.
+    for (at, (key, lit, unlit)) in apart.iter().enumerate() {
+        for (other, other_lit, other_unlit) in &apart[at + 1..] {
+            assert!(
+                (lit, unlit) != (other_lit, other_unlit),
+                "{key:?} and {other:?} move the same field, so one of them is \
+                 wired to the other's and its own is whatever the default left there"
+            );
+        }
     }
 }
 

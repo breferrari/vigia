@@ -2654,7 +2654,7 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
     let scratch = fixture("notes-configured");
     let worktree = scratch.worktree();
 
-    let drawn = |notes: bool| {
+    let drawn = |notes: bool, press: bool| {
         let mut frame = worktree.frame();
         frame.advance().expect("advance");
         let mut rig = Rig::with(
@@ -2666,6 +2666,11 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
         );
         rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
         rig.reload();
+        if press {
+            rig.app
+                .apply(Action::ToggleNotes, &mut frame, 0)
+                .expect("toggle the rows");
+        }
         let painted = rig.paint(&mut frame, PANE, Pointing::default());
         let y = painted.row_of(EDITED);
         let marked: Vec<String> = painted
@@ -2677,13 +2682,14 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
         (painted.notes_under(y).len(), marked)
     };
 
-    // The configured-on pane first, so a fixture that drew no note at all could
-    // not leave the assertion below passing over nothing.
-    let (shown, marked) = drawn(true);
-    assert!(shown > 0, "`notes = on` drew no note rows");
+    // The configured-on pane first, at the count its neighbour asserts rather
+    // than merely non-zero: `BODY` wraps to two rows at this width, and a launch
+    // that drew one of them would be a launch this gate should not pass.
+    let (shown, marked) = drawn(true, false);
+    assert_eq!(shown, 2, "`notes = on` did not draw the note's two rows");
     assert_eq!(marked, vec!["n1"]);
 
-    let (hidden, marked) = drawn(false);
+    let (hidden, marked) = drawn(false, false);
     assert_eq!(
         hidden, 0,
         "`notes = off` drew {hidden} note row(s) on the first frame, so the file \
@@ -2692,6 +2698,15 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
     // And the mark stays, which is what `c` does for a session and what the file
     // has to do for a launch.
     assert_eq!(marked, vec!["n1"]);
+
+    // A setting is a starting point rather than a decision, which is the sentence
+    // the README makes and the one a reader would notice broken: `c` has to give
+    // the rows back to a pane that started without them.
+    let (given, _) = drawn(false, true);
+    assert_eq!(
+        given, shown,
+        "`c` did not give the rows back to a pane configured without them"
+    );
 }
 
 #[test]
