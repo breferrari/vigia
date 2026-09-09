@@ -48,9 +48,9 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 }
 
 /// What a config file can reach on the chrome, read off a drawn one.
-fn chrome_of(app: &App) -> (bool, bool, Option<usize>) {
+fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
     let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
-    (chrome.rail, chrome.following, chrome.sheet)
+    (chrome.rail, chrome.overview, chrome.following, chrome.sheet)
 }
 
 #[test]
@@ -58,10 +58,11 @@ fn each_key_sets_the_state_the_pane_starts_in() {
     // One key at a time, so a parser that set the wrong field would be caught by
     // the one it should not have touched rather than only by the one it should.
     for (key, chrome) in [
-        ("rail", (true, true, None)),
-        // `single` is not on the chrome, so its row asserts the one that is stays
+        ("rail", (true, false, true, None)),
+        ("overview", (false, true, true, None)),
+        // `single` is not on the chrome, so its row asserts the ones that are stay
         // off: a mapping that sent it to `rail` shows up there.
-        ("single", (false, true, None)),
+        ("single", (false, false, true, None)),
     ] {
         let home = home_with(&format!("app-{key}"), Some(&format!("{key} = on\n")));
         let config = config::from_env(home_env(&home)).expect("a config");
@@ -87,6 +88,13 @@ fn each_key_sets_the_state_the_pane_starts_in() {
                 ..Config::default()
             },
         ),
+        (
+            "overview",
+            Config {
+                overview: true,
+                ..Config::default()
+            },
+        ),
     ] {
         let home = home_with(&format!("one-{key}"), Some(&format!("{key} = on\n")));
         let got = config::from_env(home_env(&home)).expect("a config");
@@ -100,6 +108,7 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         Config {
             rail: true,
             single: true,
+            overview: false,
             staged: false,
             wrap: false,
             icons: false,
@@ -125,6 +134,7 @@ fn the_key_still_toggles_from_the_configured_state() {
     let config = Config {
         rail: true,
         single: true,
+        overview: false,
         staged: false,
         wrap: false,
         notes: false,
@@ -133,7 +143,7 @@ fn the_key_still_toggles_from_the_configured_state() {
     };
     let mut app = App::configured(config);
 
-    let (rail, following, _) = chrome_of(&app);
+    let (rail, _, following, _) = chrome_of(&app);
     assert!(rail, "the configured shell did not start configured");
     assert!(
         following,
@@ -146,7 +156,7 @@ fn the_key_still_toggles_from_the_configured_state() {
     support::materialise(&mut frame);
 
     app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
-    let (rail, following, _) = chrome_of(&app);
+    let (rail, _, following, _) = chrome_of(&app);
     assert!(
         !rail,
         "the key did not toggle away from what the file asked for"
@@ -154,7 +164,7 @@ fn the_key_still_toggles_from_the_configured_state() {
     assert!(following, "toggling a view key disengaged follow");
 
     app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
-    let (rail, _, _) = chrome_of(&app);
+    let (rail, _, _, _) = chrome_of(&app);
     assert!(rail, "the key did not toggle back");
 }
 
@@ -283,6 +293,7 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
         Config {
             rail: true,
             single: true,
+            overview: false,
             staged: false,
             wrap: false,
             icons: false,
@@ -411,6 +422,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     let mut configured = App::configured(Config {
         rail: true,
         single: true,
+        overview: false,
         staged: true,
         links: false,
         wrap: false,
@@ -422,7 +434,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // identically broken shells agree with each other perfectly.
     assert_eq!(
         chrome_of(&configured),
-        (true, true, None),
+        (true, false, true, None),
         "the configured shell is not configured, so the comparison below is \
          between two shells that both did nothing"
     );
@@ -470,6 +482,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
         Config {
             rail: true,
             single: true,
+            overview: true,
             staged: true,
             links: true,
             wrap: true,

@@ -1790,7 +1790,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 19),
+        (104, 20),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -1812,7 +1812,7 @@ const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 45,
+    height: 46,
 };
 
 /// I9 with the roomy rung drawn over the frame.
@@ -1820,7 +1820,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 42),
+        (68, 43),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
@@ -1841,6 +1841,112 @@ fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
 #[test]
 fn a_pinned_frame_holds_the_frame_budget() {
     frame_budget_on("shell-i9-single", 0, area(), None, false, true);
+}
+
+/// The pane the overview's own budget is measured on. Deep, because the state's
+/// whole cost is the list, and the list runs to the body: on the ordinary
+/// twenty-four-row terminal it would draw a fifth of the rows a reader with a
+/// tall pane sees, and the dear case is the one worth timing.
+const OVERVIEW_PANE: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 80,
+    height: 60,
+};
+
+/// I9 with the body as the file list alone (`SPEC.md` §11.1).
+///
+/// Its own gate rather than a call into `frame_budget_on`, because all three of
+/// that driver's non-vacuity checks are about diff rows: lines highlighted, a
+/// full screen of content, and a hunk re-parsed every frame. This state builds no
+/// diff row by construction, so routing it through there would mean turning those
+/// off for one caller, which is the shape of a gate weakened to admit a change.
+/// What stands in their place is the pair below: every row of the region is a
+/// listed file, and no diff row was built at all.
+#[test]
+fn an_overview_frame_holds_the_frame_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("shell-i9-overview", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+
+    // Before the layout is taken, because it decides what the layout is.
+    app.apply(vigia::Action::ToggleOverview, &mut frame, 0)
+        .expect("ask for the overview");
+    let screen = layout_of(&app, OVERVIEW_PANE, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(OVERVIEW_PANE);
+
+    // "Under continuous edits", the way every other I9 gate takes it: one line of
+    // one file is rewritten before every frame, so each frame revalidates
+    // ninety-nine files and re-diffs one.
+    let mut edits = 0usize;
+    // A cell rather than a `String`, because the sampler outlives the reader below.
+    let marker = RefCell::new(String::new());
+    let mut next_frame =
+        |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
+            *marker.borrow_mut() = format!("fn edited_{edits}() {{ let value = {edits}; }}");
+            scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
+            edits += 1;
+            time_cpu(|| {
+                sample(history, scratch.root(), EDITED_PATH);
+                shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
+            })
+        };
+
+    for _ in 0..WARMUP_FRAMES {
+        next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
+    }
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(next_frame(&mut frame, &mut app, &mut highlighter, &mut history).0);
+    }
+
+    // Non-vacuity, in the two directions this state can be hollow: a region that
+    // drew almost nothing would be cheap for a reason that is not the code, and a
+    // frame that walked the diff anyway would be timing the wrong shape.
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert_eq!(
+        view.list.len(),
+        screen.list,
+        "the overview drew {} of the {} rows the split gave it, so this gate is          timing a region that is mostly blank",
+        view.list.len(),
+        screen.list
+    );
+    assert!(
+        view.list.len() > layout_of(&App::new(), OVERVIEW_PANE, FILES).list,
+        "the region is {} rows, no deeper than the capped list every other state          draws, so this gate times no more of it than the gates already here do",
+        view.list.len()
+    );
+    assert!(
+        view.rows.is_empty(),
+        "{} diff row(s) were built, so the state under test is not the one this          gate is named for",
+        view.rows.len()
+    );
+
+    // And the edits have to be still landing.
+    the_edits_still_land(&mut frame, EDITED_PATH, &marker.borrow());
+
+    holds_p99(
+        &format!(
+            "I9: a frame drawing the file list alone over {FILES} files on a              {}x{} pane, {} listed rows and no diff",
+            OVERVIEW_PANE.width, OVERVIEW_PANE.height, screen.list
+        ),
+        budget(I9_FRAME),
+        &frames,
+        || format!("({} listed rows, {} files)", screen.list, FILES),
+        || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
+    );
 }
 
 /// The pane the note frames are measured on: fifty lines and the rows their

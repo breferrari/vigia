@@ -654,7 +654,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 18;
+const VARIANTS: usize = 19;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -670,6 +670,7 @@ fn tag(action: Action) -> usize {
         Action::ToggleFollow => 8,
         Action::ToggleRail => 9,
         Action::ToggleSingle => 10,
+        Action::ToggleOverview => 18,
         Action::ToggleStaged => 111,
         Action::ToggleWrap => 112,
         Action::ToggleNotes => 113,
@@ -716,6 +717,9 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // The pin itself, which moves no viewport and so must not be told a
         // height.
         Action::ToggleSingle,
+        // And the state that takes the diff away, which re-divides the body
+        // without being told how tall the one it removes was.
+        Action::ToggleOverview,
         Action::ToggleSheet,
         Action::CloseSheet,
         // Mid-track, for the reason `DiffTo` below is: `ListTo(0)` resolves

@@ -13,6 +13,8 @@ pub struct Config {
     pub rail: bool,
     /// Pin the diff to one file. `s`.
     pub single: bool,
+    /// Draw the file list alone, with no diff under it. `o`.
+    pub overview: bool,
     /// Draw the staged run beside the unstaged one. `a`.
     pub staged: bool,
     /// Wrap a content line too wide for the pane onto the row below. `w`.
@@ -31,6 +33,7 @@ impl Default for Config {
         Self {
             rail: false,
             single: false,
+            overview: false,
             staged: false,
             wrap: false,
             notes: true,
@@ -41,8 +44,8 @@ impl Default for Config {
 }
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
-pub const KEYS: [&str; 7] = [
-    "rail", "single", "staged", "wrap", "notes", "icons", "links",
+pub const KEYS: [&str; 8] = [
+    "rail", "single", "overview", "staged", "wrap", "notes", "icons", "links",
 ];
 
 impl Config {
@@ -51,6 +54,7 @@ impl Config {
         match key {
             "rail" => self.rail = on,
             "single" => self.single = on,
+            "overview" => self.overview = on,
             "staged" => self.staged = on,
             "wrap" => self.wrap = on,
             "notes" => self.notes = on,

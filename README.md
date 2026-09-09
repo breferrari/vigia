@@ -237,6 +237,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `f` | follow the newest change, or stop |
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
+| `o` | the file list and its numbers, with no diff under it |
 | `a` | show or hide staged changes |
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide the note rows |
@@ -533,12 +534,13 @@ set -ga terminal-features ",*:clipboard"
 
 ### 🪟 The pane you want, every time
 
-`r`, `s`, `a`, `w` and `c` change what the body is made of. If you always want one of them, say so once:
+`r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. If you always want one of them, say so once:
 
 ```sh
 # ~/.config/vigia/config
 rail     = on     # the file list beside the diff, from 139 columns
 single   = on     # one file at a time
+overview = on     # the file list alone, with no diff under it
 staged   = on     # what is staged, beside what is not
 wrap     = on     # a long line continues on the row below
 notes    = off    # the note rows under their lines; this is the off switch

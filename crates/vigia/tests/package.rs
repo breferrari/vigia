@@ -14,10 +14,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 26;
+const ESCAPING_FILES: usize = 27;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-six";
+const ESCAPING_FILES_SPELLED: &str = "twenty-seven";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1933,7 +1933,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 384353),
+    ("SPEC.md", 386701),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96001),
     ("RULINGS.md", 99141),
@@ -1945,7 +1945,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
-const CONFIG_KEYS_SPELLED: &str = "Seven keys";
+const CONFIG_KEYS_SPELLED: &str = "Eight keys";
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///
@@ -2263,8 +2263,8 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
 ///
-/// Raised twice on 2026-09-08 and three times on 2026-09-09, session, by 316, 790,
-/// 789, 725 and then 127 bytes, for the reason
+/// Raised twice on 2026-09-08, three times on 2026-09-09 and once on 2026-09-10,
+/// session, by 316, 790, 789, 725, 127 and then 2,285 bytes, for the reason
 /// the bullet above already names rather than a new one: a defect fix has to state
 /// what the code now does, and a filed issue has to take a roadmap row. Three
 /// passes that day each needed contract prose and none added a paragraph anyone
@@ -2277,8 +2277,11 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// reader's. The fourth raise is five issues filed in one pass, and a filed issue
 /// with no roadmap row is invisible to the take order rather than merely
 /// deprioritised, so the row is owed the moment the issue exists. The fifth is a
-/// sixth issue filed into the same block.
-const WRITTEN_LAYER_TOTAL: usize = 634585;
+/// sixth issue filed into the same block. The sixth is the third's reason again:
+/// #493 added a gesture, and the state behind this one contradicts a written cap
+/// and a written region count, so the paragraphs that say why are contract rather
+/// than commentary. The 63 bytes of slack the fifth raise left were spent first.
+const WRITTEN_LAYER_TOTAL: usize = 636870;
 
 /// Each document weighs no more than its budget.
 #[test]
