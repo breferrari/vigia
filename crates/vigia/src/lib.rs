@@ -61,8 +61,8 @@ pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
-    PaintStats, WORD_INSET, body_layout, box_cells, count_cell, diff_height, note_cells,
-    notice_area, regions, render, voice_style,
+    PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell, diff_height,
+    note_cells, notice_area, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};

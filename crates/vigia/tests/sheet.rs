@@ -1739,6 +1739,8 @@ const SECTIONS: [&str; 6] = ["moving", "files", "view", "notes", "mouse", "leavi
 enum RoomyRow {
     /// A blank row. The one thing on this rung no count can see.
     Air,
+    /// What the pane is, in the row this rung leaves blank on its own.
+    Said,
     /// A section heading, standing back from its own rows.
     Heading(&'static str),
     /// A gesture row, carrying the token a reader would look for.
@@ -1747,7 +1749,7 @@ enum RoomyRow {
 
 /// The roomy rung's shape, row by row, in the order it is drawn.
 fn roomy_shape() -> Vec<RoomyRow> {
-    let mut rows = vec![RoomyRow::Air];
+    let mut rows = vec![RoomyRow::Said];
     for (label, tokens) in [
         ("moving", &GESTURES[0..3]),
         ("files", &GESTURES[3..7]),
@@ -1873,6 +1875,10 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
                 RoomyRow::Air => assert!(
                     row[1..row.len() - 1].iter().all(|c| *c == ' '),
                     "row {n} of the roomy rung should be air and reads {text:?}"
+                ),
+                RoomyRow::Said => assert!(
+                    text.contains(PURPOSE_WIDE),
+                    "row {n} of the roomy rung should say what the pane is and                      reads {text:?}"
                 ),
                 RoomyRow::Heading(label) => {
                     let head: String = row[1..].iter().collect();
@@ -2122,7 +2128,7 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
     let tight = Rect::new(0, 0, 80, 23);
 
     sweep!("sheet-dimensions", |paint| {
-        for (at, want, spelling) in [(wide, (104u16, 19u16), "wide"), (tight, (71, 19), "tight")] {
+        for (at, want, spelling) in [(wide, (104u16, 20u16), "wide"), (tight, (71, 20), "tight")] {
             let (buf, laid) = paint(at);
             let sheet = laid.sheet.expect("the pane draws no sheet at all");
             let (_, drawn) = read_sheet(&buf, &laid);
@@ -2221,16 +2227,16 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // the one-column sheet without it, and the rows it loses to air it has
             // spare.
             (100, 45, (16, 1, 68, 42)),
-            (120, 23, (8, 1, 104, 19)),
+            (120, 23, (8, 1, 104, 20)),
             // The tight two-column rung, five columns narrower for the shortened tight
             // mouse verbs and a row taller for each of `r`, `s`, `w` and `c`.
-            (80, 23, (4, 1, 71, 19)),
+            (80, 23, (4, 1, 71, 20)),
             // Odd slack, which the first three above lack on both axes: halving
             // the slack the other way (`div_ceil`) or taking the trailing margin
             // instead of the leading one reproduces every one of them and misses
             // these, which is why this list is read as a set rather than case by
             // case.
-            (81, 26, (5, 3, 71, 19)),
+            (81, 26, (5, 2, 71, 20)),
             // The whole table in one column reaches this width, so this is the sheet
             // that draws every gesture rather than a rung that has given rows up.
             (43, 33, (3, 1, 38, 30)),
@@ -2272,7 +2278,8 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
 
             // The heading row: the label sits one column back from the keys cells
             // it names, so the space it opens with lands on the rule.
-            let heading: String = rows[1].iter().collect();
+            // Row 1 says what the pane is; the heading is under it.
+            let heading: String = rows[2].iter().collect();
             assert_eq!(
                 heading
                     .char_indices()
@@ -2284,9 +2291,9 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
             );
 
             // Which group is in which column, and which row is on top.
-            let row2: String = rows[2].iter().collect();
-            let keyboard_first: String = rows[2][cols[0]..].iter().collect();
-            let mouse_first: String = rows[2][cols[2]..].iter().collect();
+            let row2: String = rows[3].iter().collect();
+            let keyboard_first: String = rows[3][cols[0]..].iter().collect();
+            let mouse_first: String = rows[3][cols[2]..].iter().collect();
             assert!(
                 keyboard_first.starts_with('j'),
                 "the {spelling} left column does not open with the keyboard \
@@ -2304,7 +2311,7 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
 
             // The keyboard label's own column, which only the mouse label's was
             // pinned against.
-            let heading_head: String = rows[1][1..].iter().collect();
+            let heading_head: String = rows[2][1..].iter().collect();
             assert!(
                 heading_head.starts_with(" keyboard "),
                 "the {spelling} keyboard label is not against the frame:\n{sheet}"
@@ -2317,9 +2324,9 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
                 // keyboard rows.
                 let split = KEYBOARD_ROWS as usize;
                 let (col, row) = if n < split {
-                    (cols[0], 2 + n)
+                    (cols[0], 3 + n)
                 } else {
-                    (cols[2], 2 + (n - split))
+                    (cols[2], 3 + (n - split))
                 };
                 let text: String = rows[row][col..].iter().collect();
                 assert!(
@@ -2331,7 +2338,7 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
             }
 
             // The first gesture row carries all four fields.
-            let first = &rows[2];
+            let first = &rows[3];
             for at_col in cols {
                 assert!(
                     first[at_col] != ' ',
@@ -2434,19 +2441,21 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
     let history = History::new();
     toggle(&mut app, &mut frame);
 
-    for (w, h, keys_at, verb_at, spelling) in [
-        (120u16, 23u16, 2u16, 26u16, "two columns"),
-        (120, 34, 2, 26, "one column"),
+    for (w, h, keys_at, verb_at, lead, spelling) in [
+        // The two-column rung says what the pane is above its heading, so its
+        // first gesture is a row lower than the one-column rung's, which at this
+        // height has dropped the line to keep its shape.
+        (120u16, 23u16, 2u16, 26u16, 3u16, "two columns"),
+        (120, 34, 2, 26, 2, "one column"),
         // The roomy rung's own columns, which are its own: keys five in and verbs
         // thirty-five in, against two and twenty-six at every other rung.
-        (ROOMY_PANE.width, ROOMY_PANE.height, 5, 35, "roomy"),
+        (ROOMY_PANE.width, ROOMY_PANE.height, 5, 35, 3, "roomy"),
     ] {
         let at = Rect::new(0, 0, w, h);
         let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
         let sheet = laid.sheet.expect("a pane that draws no sheet");
-        // The roomy rung's first gesture row is one lower: air, then a heading,
-        // then the row. Non-vacuity below asserts the rung this case is named for.
-        let row = sheet.top + if spelling == "roomy" { 3 } else { 2 };
+        // Non-vacuity below asserts the rung this case is named for.
+        let row = sheet.top + lead;
         let (count, drawn) = read_sheet(&buf, &laid);
         // `moving` heads the roomy rung alone and `keyboard` the two-column rung
         // alone, so a case that names neither is the one column that draws every
@@ -2563,7 +2572,8 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
         SECTIONS.len()
     );
 
-    // The headings are furniture too, and the two-column rung has two of them.
+    // The headings are furniture too, and the two-column rung has two of them,
+    // on the row under the line that says what the pane is.
     let at = Rect::new(0, 0, 120, 23);
     let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
     let sheet = laid.sheet.expect("a pane that draws no sheet");
@@ -2576,13 +2586,13 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
         (56, "m", "the mouse label"),
     ] {
         assert_eq!(
-            buf[(sheet.left + col, sheet.top + 1)].symbol(),
+            buf[(sheet.left + col, sheet.top + 2)].symbol(),
             glyph,
             "{what} does not start at column {col}, so the weight read below is a \
              blank cell's"
         );
         assert_eq!(
-            buf[(sheet.left + col, sheet.top + 1)].fg,
+            buf[(sheet.left + col, sheet.top + 2)].fg,
             dim,
             "{what} is not drawn in the chrome's dim weight"
         );
@@ -3561,4 +3571,163 @@ fn escape_puts_the_sheet_away_before_it_puts_the_program_away() {
         .apply(Action::Escape, &mut frame, height)
         .expect("escape from the pane");
     assert!(!running, "`Esc` no longer leaves the program");
+}
+
+/// What the sheet says the pane *is*, restated for [`TITLE`]'s reason. Two
+/// spellings, because the narrowest rung that carries it has thirty-two columns
+/// of room and the widest has a hundred and one.
+const PURPOSE_WIDE: &str = "working tree's diff, live · it follows on its own";
+const PURPOSE_TIGHT: &str = "working tree's diff, live";
+
+#[test]
+fn the_sheet_opens_on_what_the_pane_is() {
+    // One pane of each rung that carries the line. The sheet answered *what can
+    // I press*, which is only a question a reader who already knows the answer
+    // would ask.
+    sweep!("sheet-purpose", |paint| {
+        for (at, rung) in [
+            (area(), "two columns"),
+            (ROOMY_PANE, "roomy"),
+            // Tall enough for the whole table in one column and the line over it,
+            // which is the third drawer and the only one that pages.
+            (Rect::new(0, 0, WIDE, 36), "one column"),
+        ] {
+            let (buf, laid) = paint(at);
+            let (count, sheet) = read_sheet(&buf, &laid);
+            let rows: Vec<&str> = sheet.lines().collect();
+
+            let seen = match (sheet.contains("moving"), sheet.contains("keyboard")) {
+                (true, _) => "roomy",
+                (_, true) => "two columns",
+                _ => "one column",
+            };
+            assert_eq!(
+                seen, rung,
+                "the {}x{} case draws the {seen} rung, not the {rung} one, so the \
+                 drawer this case is named for was never reached:\n{sheet}",
+                at.width, at.height
+            );
+
+            let said = rows
+                .iter()
+                .position(|row| row.contains(PURPOSE_WIDE))
+                .unwrap_or_else(|| panic!("the {rung} rung never says what the pane is:\n{sheet}"));
+            let first = rows
+                .iter()
+                .position(|row| GESTURES.iter().any(|g| row.contains(g)))
+                .expect("the sheet draws no gesture at all");
+            assert!(
+                said < first,
+                "the {rung} rung says what the pane is at row {said} and opens on a \
+                 gesture at row {first}, so it still opens on the key table:\n{sheet}"
+            );
+            // Non-vacuity in the direction that matters: a line drawn over the
+            // gestures rather than above them would satisfy the order above.
+            assert_eq!(
+                count,
+                GESTURES.len(),
+                "the line cost the {rung} rung a gesture, which is the one thing it \
+                 may not do on a pane that holds them all:\n{sheet}"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_line_fits_the_rung_that_carries_it() {
+    // The failure this closes is a copy edit, and the shape of it is why the row
+    // is found by its opening rather than by either spelling: the drawer clips at
+    // the room it is given, so a spelling one column too wide is drawn short and
+    // leaves the frame intact. A gate looking for a whole spelling would stop
+    // finding the row rather than fail, which is how a mutation survived it.
+    let (mut wide, mut tight) = (0usize, 0usize);
+    walk_the_ladder("sheet-purpose-fit", |w, h, _, buf, laid| {
+        let (_, sheet) = read_sheet(buf, laid);
+        // Both spellings open with the tight one, so this finds the row whether it
+        // was drawn whole, drawn short, or drawn at either spelling.
+        let Some(row) = sheet.lines().find(|row| row.contains(PURPOSE_TIGHT)) else {
+            return;
+        };
+        let said = row.trim_end_matches([' ', '│']);
+        if said.ends_with(PURPOSE_WIDE) {
+            wide += 1;
+        } else {
+            assert!(
+                said.ends_with(PURPOSE_TIGHT),
+                "at {w}x{h} the line is drawn short of either spelling, so a rung \
+                 chose one its own box cannot hold:\n{sheet}"
+            );
+            tight += 1;
+        }
+        let drawn: Vec<char> = row.chars().collect();
+        assert_eq!(
+            (drawn.first(), drawn.last()),
+            (Some(&'│'), Some(&'│')),
+            "at {w}x{h} the line reached the sheet's own frame:\n{sheet}"
+        );
+    });
+    assert!(
+        wide > 0 && tight > 0,
+        "the ladder drew the wide spelling {wide} times and the tight one {tight}, \
+         so one of the two is never checked"
+    );
+}
+
+#[test]
+fn a_rung_that_gives_up_a_gesture_gives_up_the_line_first() {
+    // The ladder's order, and the reason for it: a rung is narrow or short
+    // because the pane is, and prose is the first thing such a pane cannot
+    // afford. A rung gives a gesture up for width by dropping rows from the
+    // table and for height by paging, and neither may happen with the line up.
+    let (mut carried, mut rationed) = (0usize, 0usize);
+    walk_the_ladder("sheet-purpose-drop", |w, h, _, buf, laid| {
+        let (count, sheet) = read_sheet(buf, laid);
+        if !sheet.contains(TITLE) {
+            return;
+        }
+        let said = sheet.contains(PURPOSE_WIDE) || sheet.contains(PURPOSE_TIGHT);
+        if count < GESTURES.len() {
+            rationed += 1;
+            assert!(
+                !said,
+                "at {w}x{h} the sheet draws {count} of {} gestures and spends rows \
+                 saying what the pane is, so a pane short of room is being told what \
+                 it is instead of what it can do:\n{sheet}",
+                GESTURES.len()
+            );
+        } else if said {
+            carried += 1;
+        }
+    });
+    assert!(
+        carried > 0 && rationed > 0,
+        "the ladder saw {carried} panes carry the line and {rationed} ration \
+         gestures, so one side of this is never exercised"
+    );
+}
+
+#[test]
+fn the_page_counter_still_counts_gestures_only() {
+    // The line is not a gesture, so it may not move an ordinal. `Line::Heading`
+    // is the precedent this rides on.
+    sweep!("sheet-purpose-counter", |paint| {
+        let at = Rect::new(0, 0, WIDE, 12);
+        let (buf, laid) = paint(at);
+        let (count, sheet) = read_sheet(&buf, &laid);
+        let counter = counter_of(&sheet)
+            .unwrap_or_else(|| panic!("a twelve row pane's sheet draws no counter:\n{sheet}"));
+        assert!(
+            counter.trim().starts_with('1'),
+            "the first page does not begin at the first gesture: {counter:?}\n{sheet}"
+        );
+        assert!(
+            counter.trim().ends_with(&GESTURES.len().to_string()),
+            "the counter's total stopped being every gesture the tables hold: \
+             {counter:?}\n{sheet}"
+        );
+        assert!(
+            count > 0,
+            "the page drew no gesture at all, so the counter proves nothing:\n{sheet}"
+        );
+    });
 }
