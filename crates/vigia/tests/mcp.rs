@@ -1706,3 +1706,76 @@ fn a_session_id_the_registry_cannot_name_is_silent_rather_than_reported() {
          {out:?} {err:?}"
     );
 }
+
+/// A registered server holds `vigia.exe`, and renaming the image frees it.
+///
+/// Windows refuses to replace a running executable, so an upgrade fails for as
+/// long as any agent session holds a `vigia mcp` open. It permits renaming one,
+/// and a running process follows its image, so moving the binary aside frees
+/// the install path without stopping anything. `README.md` teaches that upgrade
+/// and this is what holds it true, because the two platforms CI also runs
+/// replace a running binary happily and can say nothing about any of it.
+///
+/// The third assertion is the point of the whole test. Freeing the path by
+/// stopping the servers passes the other three and is the worse outcome: it
+/// splits every open session, and no surface on either side explains why.
+#[cfg(windows)]
+#[test]
+fn a_running_server_blocks_an_install_until_its_image_is_renamed() {
+    let bin = TempDir::new("mcp-upgrade");
+    let installed = bin.path().join("vigia.exe");
+    let staged = bin.path().join("staged.exe");
+    fs::copy(env!("CARGO_BIN_EXE_vigia"), &installed).expect("install the binary");
+    fs::copy(env!("CARGO_BIN_EXE_vigia"), &staged).expect("stage its replacement");
+
+    let root = TempDir::new("mcp-upgrade-state");
+    let mut child = Command::new(&installed)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .env("XDG_STATE_HOME", root.path())
+        .env("LOCALAPPDATA", root.path())
+        .env("HOME", root.path())
+        .env("USERPROFILE", root.path())
+        .env_remove(PROJECT_VAR)
+        .current_dir(bin.path())
+        .spawn()
+        .expect("spawn the installed binary as a server");
+
+    // The move `cargo install` ends with, and the whole of the defect.
+    let blocked = fs::rename(&staged, &installed).map_err(|e| e.kind());
+    assert_eq!(
+        blocked,
+        Err(std::io::ErrorKind::PermissionDenied),
+        "the install replaced a running binary, so the upgrade README teaches is \
+         answering a defect this platform no longer has"
+    );
+
+    let aside = bin.path().join("vigia.exe.old-1");
+    fs::rename(&installed, &aside).expect("a running image renames aside");
+
+    let mut stdin = child.stdin.take().expect("a piped stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("a piped stdout"));
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": init_params(PROTOCOL_VERSIONS[0]),
+    });
+    writeln!(stdin, "{request}").expect("ask the renamed server");
+    let mut answer = String::new();
+    stdout
+        .read_line(&mut answer)
+        .expect("the renamed server answers");
+    assert!(
+        answer.contains("serverInfo"),
+        "the server stopped serving when its image moved, so the upgrade costs \
+         the reader every open session after all: {answer}"
+    );
+
+    fs::rename(&staged, &installed).expect("the install lands once the path is free");
+
+    drop(stdin);
+    let _ = child.wait();
+}
