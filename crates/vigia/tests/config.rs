@@ -103,7 +103,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
             staged: false,
             wrap: false,
             icons: false,
-            // Untouched by the file, so the hand-written default holds: on.
+            // Untouched by the file, so the hand-written defaults hold: on.
+            notes: true,
             links: true,
         }
     );
@@ -126,6 +127,7 @@ fn the_key_still_toggles_from_the_configured_state() {
         single: true,
         staged: false,
         wrap: false,
+        notes: false,
         icons: false,
         links: false,
     };
@@ -158,6 +160,11 @@ fn the_key_still_toggles_from_the_configured_state() {
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
+
+#[path = "support/mod.rs"]
+mod screen;
+
+use screen::{Place, actions_keys_reach, place_of};
 
 #[test]
 fn a_key_this_file_does_not_have_names_its_line_and_refuses() {
@@ -279,7 +286,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
             staged: false,
             wrap: false,
             icons: false,
-            // Untouched by the file, so the hand-written default holds: on.
+            // Untouched by the file, so the hand-written defaults hold: on.
+            notes: true,
             links: true,
         }
     );
@@ -406,6 +414,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         staged: true,
         links: false,
         wrap: false,
+        notes: false,
         icons: false,
     });
 
@@ -464,12 +473,14 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             staged: true,
             links: true,
             wrap: true,
+            notes: true,
             icons: true,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
     );
 
     // And each one alone has to *change* something, which `is_ok` does not say.
+    let mut apart: Vec<(&str, Config, Config)> = Vec::new();
     for key in vigia::config::KEYS {
         let lit = config::parse(&format!("{key} = on\n"))
             .unwrap_or_else(|why| panic!("KEYS names {key:?} and parse refuses it: {why}"));
@@ -480,6 +491,23 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             "{key:?} is in KEYS and setting it changed nothing, so KEYS and \
              Config::set have drifted"
         );
+        apart.push((key, lit, unlit));
+    }
+
+    // And no two keys may move the same field. The assertions above cannot see
+    // that: a key wired to a neighbour's field leaves its own at the default,
+    // and where that default is already `on` the whole-file comparison holds
+    // anyway, while `lit != unlit` holds because the neighbour moved. What
+    // separates them is the pair, since a key that starts `on` and one that
+    // starts `off` agree on one side of it and never on both.
+    for (at, (key, lit, unlit)) in apart.iter().enumerate() {
+        for (other, other_lit, other_unlit) in &apart[at + 1..] {
+            assert!(
+                (lit, unlit) != (other_lit, other_unlit),
+                "{key:?} and {other:?} move the same field, so one of them is \
+                 wired to the other's and its own is whatever the default left there"
+            );
+        }
     }
 }
 
@@ -534,5 +562,75 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
             .iter()
             .all(|change| change.origin == vigia_core::Origin::Unstaged),
         "a shell with no config file drew the staged run anyway"
+    );
+}
+
+#[test]
+fn every_view_toggle_has_a_key_or_a_reason() {
+    let (mut keyed, mut excluded) = (0usize, 0usize);
+    for action in actions_keys_reach() {
+        match place_of(&action) {
+            Place::Key { key, .. } => {
+                assert!(
+                    config::KEYS.contains(&key),
+                    "{action:?} is set by {key:?} and the file accepts no such key, \
+                     so a reader cannot start the pane where the gesture puts it"
+                );
+                keyed += 1;
+            }
+            Place::Excluded(why) => {
+                assert!(
+                    !why.trim().is_empty(),
+                    "{action:?} is excluded and says no reason, which is the \
+                     oversight this gate exists to tell from a ruling"
+                );
+                excluded += 1;
+            }
+            Place::Neither(why) => assert!(
+                !why.trim().is_empty(),
+                "{action:?} is called no toggle and says no reason, so the \
+                 classification cannot be argued with"
+            ),
+        }
+    }
+
+    // Non-vacuity: a sweep that reached no toggle at all would pass every
+    // assertion above by walking nothing.
+    assert!(
+        keyed > 0 && excluded > 0,
+        "the sweep found {keyed} keyed toggle(s) and {excluded} excluded, so it is \
+         not walking the keymap and the assertions above are over an empty set"
+    );
+
+    assert!(
+        matches!(place_of(&Action::ToggleFollow), Place::Excluded(_)),
+        "`f` left the exclusion list, and `SPEC.md` §11.1 is what has to change \
+         before this does"
+    );
+}
+
+#[test]
+fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
+    // The two `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
+    // they cannot come out of the sweep.
+    const CONFIG_ONLY: [&str; 2] = ["icons", "links"];
+
+    let mut reachable: Vec<&str> = actions_keys_reach()
+        .iter()
+        .filter_map(|action| match place_of(action) {
+            Place::Key { key, .. } => Some(key),
+            Place::Excluded(_) | Place::Neither(_) => None,
+        })
+        .collect();
+    reachable.extend(CONFIG_ONLY);
+    reachable.sort_unstable();
+
+    let mut accepted: Vec<&str> = config::KEYS.to_vec();
+    accepted.sort_unstable();
+
+    assert_eq!(
+        reachable, accepted,
+        "a key here and not there is a gesture the file cannot start; a key there \
+         and not here is one no gesture and no ruling accounts for"
     );
 }

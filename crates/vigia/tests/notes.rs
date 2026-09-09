@@ -18,7 +18,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use vigia::{
     ARRIVING_FRAME, Action, Alerts, App, BOX_ARRIVING, BOX_FRAME, BOX_ROWS, BoxPart, BoxRoute,
-    Change, Committed, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
+    Change, Committed, Config, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
     Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
     Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit, box_route,
     commit, count_cell, edge_at, effect_interval, has_room, hover_after, note_cells, opening,
@@ -205,10 +205,16 @@ struct Painted {
 
 impl Rig {
     fn open(scratch: &Scratch) -> Self {
+        Self::with(scratch, App::past_first_paint())
+    }
+
+    /// A rig over a shell the caller built, which is how a config file's own pane
+    /// is drawn rather than a toggled one.
+    fn with(scratch: &Scratch, app: App) -> Self {
         let root = TempDir::new("notes-state");
         let store = Store::open(root.path(), scratch.root()).expect("open the store");
         Self {
-            app: App::past_first_paint(),
+            app,
             highlighter: Highlighter::eager(),
             history: History::new(),
             theme: Theme::default(),
@@ -2639,6 +2645,74 @@ fn c_hides_the_rows_and_keeps_the_mark() {
         .expect("toggle the rows back");
     let again = rig.paint(&mut frame, PANE, Pointing::default());
     assert_eq!(again.rows(), shown.rows());
+}
+
+#[test]
+fn a_configured_notes_off_starts_with_the_rows_hidden() {
+    // The half `c` cannot prove: what the *first* frame draws, before anything has
+    // been pressed. `SPEC.md` §11.2 B6.
+    let scratch = fixture("notes-configured");
+    let worktree = scratch.worktree();
+
+    // What the reader's hand does before the frame that is measured.
+    enum Hand {
+        Nothing,
+        PressesC,
+    }
+
+    let drawn = |notes: bool, hand: Hand| {
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut rig = Rig::with(
+            &scratch,
+            App::configured(Config {
+                notes,
+                ..Config::default()
+            }),
+        );
+        rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+        rig.reload();
+        if matches!(hand, Hand::PressesC) {
+            rig.app
+                .apply(Action::ToggleNotes, &mut frame, 0)
+                .expect("toggle the rows");
+        }
+        let painted = rig.paint(&mut frame, PANE, Pointing::default());
+        let y = painted.row_of(EDITED);
+        let marked: Vec<String> = painted
+            .view
+            .marked_at(usize::from(y - painted.laid.diff.top))
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        (painted.notes_under(y).len(), marked)
+    };
+
+    // The configured-on pane first, at the count its neighbour asserts rather
+    // than merely non-zero: `BODY` wraps to two rows at this width, and a launch
+    // that drew one of them would be a launch this gate should not pass.
+    let (shown, marked) = drawn(true, Hand::Nothing);
+    assert_eq!(shown, 2, "`notes = on` did not draw the note's two rows");
+    assert_eq!(marked, vec!["n1"]);
+
+    let (hidden, marked) = drawn(false, Hand::Nothing);
+    assert_eq!(
+        hidden, 0,
+        "`notes = off` drew {hidden} note row(s) on the first frame, so the file \
+         sets a flag the first paint does not read"
+    );
+    // And the mark stays, which is what `c` does for a session and what the file
+    // has to do for a launch.
+    assert_eq!(marked, vec!["n1"]);
+
+    // A setting is a starting point rather than a decision, which is the sentence
+    // the README makes and the one a reader would notice broken: `c` has to give
+    // the rows back to a pane that started without them.
+    let (given, _) = drawn(false, Hand::PressesC);
+    assert_eq!(
+        given, shown,
+        "`c` did not give the rows back to a pane configured without them"
+    );
 }
 
 #[test]
