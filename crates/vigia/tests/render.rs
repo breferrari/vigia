@@ -2678,7 +2678,7 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
     assert_eq!(
         narrow.buffer()[(0, CONTENT_ROW)].style().fg,
         theme.added.fg,
-        "at the narrowest drawn row the mark fell back to a default instead of \n         taking the sigil's style, which is the divergence from `put_marked` \n         this pins"
+        "the narrowest drawn row took a default, not the sigil's style"
     );
 }
 
@@ -5845,7 +5845,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         assert_eq!(
             last_glyph(content),
             last_glyph(heading),
-            "at {width} columns the content line stops at column {} where the \n             heading in the same region stops at {}, so the two are not \n             sized by the same expression",
+            "at {width} columns the content stops at {} and its heading at {}",
             last_glyph(content),
             last_glyph(heading)
         );
@@ -5863,7 +5863,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         );
         assert!(
             read_bare.contains(&rung),
-            "the sweep never read {rung} columns with no bar drawn, which is the              only screen the scrollbar's unconditional reserve is visible from"
+            "no bar was drawn at {rung} columns, the only screen the reserve shows on"
         );
     }
 }
@@ -5878,15 +5878,15 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
     // and nothing had ever put these two side by side.
     let mut read_barred: Vec<u16> = Vec::new();
     let mut read_bare: Vec<u16> = Vec::new();
-    for (width, total) in (1u16..=120).flat_map(|width| [(width, 4000usize), (width, 0)]) {
-        let view = View {
-            total_rows: total,
-            rows_above: 40,
-            ..two_regions(1)
-        };
+    let views = [4000usize, 0].map(|total| View {
+        total_rows: total,
+        rows_above: 40,
+        ..two_regions(1)
+    });
+    for (width, view) in (1u16..=120).flat_map(|w| views.iter().map(move |view| (w, view))) {
         let pane = Rect::new(0, 0, width, 24);
         let laid = body_layout(pane, &chrome(), view.files, view.list.len());
-        let laid_regions = regions(pane, &chrome(), &view);
+        let laid_regions = regions(pane, &chrome(), view);
         // A pane with no diff region publishes no span, so there is no width to
         // compare one against.
         if laid_regions.diff.rows == 0 || laid_regions.diff.text == 0 {
@@ -5900,7 +5900,7 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
         assert_eq!(
             laid.diff_width,
             usize::from(laid_regions.diff.text),
-            "at {width} columns a row is wrapped at {} columns and drawn across              {}, so its text breaks before the edge its frame is drawn to",
+            "at {width} columns a row wraps at {} and is drawn across {}",
             laid.diff_width,
             laid_regions.diff.text
         );
@@ -5912,12 +5912,12 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
     for rung in [15u16, 40, 43, 44, 79, 80] {
         assert!(
             read_bare.contains(&rung),
-            "the sweep never read {rung} columns with no bar drawn, which is where              the two widths part"
+            "no bar was drawn at {rung} columns, which is where the two widths part"
         );
     }
     assert!(
         !read_barred.is_empty(),
-        "no screen in the sweep drew a bar, so the agreement is asserted on half          the screens a pane has"
+        "no screen drew a bar, so this reads half the screens a pane has"
     );
 }
 

@@ -1468,14 +1468,8 @@ fn a_notes_body_fills_the_enclosure_it_is_drawn_in() {
     // between them, so `str::find` measures this enclosure at three times its width.
     let column = |glyph: char| top.chars().position(|drawn| drawn == glyph);
     let left = column('┌').unwrap_or_else(|| {
-        panic!(
-            "no enclosure under the line:
-{}",
-            painted.rows().join(
-                "
-"
-            )
-        )
+        let screen = painted.rows().join("\n");
+        panic!("no enclosure under the line:\n{screen}")
     });
     let right = column('┐').expect("the enclosure drew no top-right corner");
     // The columns between the two rules, less the rule and its space each side.

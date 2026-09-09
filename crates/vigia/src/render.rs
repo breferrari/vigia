@@ -1555,8 +1555,7 @@ pub struct Body {
     /// Whether the list is a left rail beside the diff rather than a strip
     /// above it.
     pub rail: bool,
-    /// Columns the diff's content is laid out against, the scrollbar's charged
-    /// whether or not one is drawn.
+    /// Columns the diff's content is laid out against. See [`content_span`].
     pub diff_width: usize,
     /// Pages the gestures sheet takes on this pane, `Some(0)` on a pane too small
     /// to draw one, and `None` when nothing measured it.
@@ -1593,7 +1592,7 @@ impl Body {
         // Here rather than in each of `split_rows`' four exits, and after them rather
         // than inside, because the width is a function of the *shape* the split chose
         // and of the pane, and both are known once it has chosen.
-        body.diff_width = usize::from(planning_width(body.areas(area).diff.width, area.width, 0));
+        body.diff_width = usize::from(content_span(body.areas(area).diff, area).width);
         body
     }
 
@@ -2081,26 +2080,23 @@ pub fn render(
     }
 
     if body.diff > 0 {
-        let region = areas.diff;
-        // Counted in rows of the diff, not of the terminal: the thumb spans the
-        // screenful the pane holds, which stops being its height when a line wraps.
-        let full = region;
+        let full = areas.diff;
         // Zero is *nobody measured*, which is a hand-built [`Body`] in a test and not a
         // real pane: [`Body::split`] fills the field for every shape it returns, and a
         // pane whose diff has no columns draws no content to wrap.
         debug_assert!(
-            body.diff_width == 0
-                || body.diff_width == usize::from(planning_width(full.width, area.width, 0)),
+            body.diff_width == 0 || body.diff_width == usize::from(content_span(full, area).width),
             "the rows were wrapped against {} columns and this region lays out with {}",
             body.diff_width,
-            planning_width(full.width, area.width, 0)
+            content_span(full, area).width
         );
+        // Counted in rows of the diff, not of the terminal: the thumb spans the
+        // screenful the pane holds, which stops being its height when a line wraps.
         let screenful = view.shown() as u64;
-        let (region, bar) = painter.with_bar(region, diff_bars, screenful, view.total_rows as u64);
-        // The wash spans the region's whole width, the bar's own column
-        // included.
+        // Asked rather than narrowed: nothing here draws to the narrowed rect, since
+        // the wash spans the region whole and the glyphs stop at `content_span`.
+        let bar = bar_for(diff_bars, full.height, screenful, view.total_rows as u64);
         painter.body(
-            region,
             full,
             view,
             area,
@@ -3647,7 +3643,7 @@ impl Painter<'_> {
     }
 
     /// Draw the body: the pinned list, the rule and the diff.
-    fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect, empty: &str) {
+    fn body(&mut self, area: Rect, view: &View, pane: Rect, empty: &str) {
         // `line_row` paints the left bar in `self.inset` and `content_span` insets
         // from the pane, so a painter built for another pane bars the wrong column.
         debug_assert_eq!(
@@ -3658,8 +3654,8 @@ impl Painter<'_> {
         );
         // Two rects, because this region draws both roles, and the glyphs take the
         // region before the bar narrowed it: a bar arriving moves no row's edge.
-        let washed = full.width;
-        let glyphs = content_span(full, pane);
+        let washed = area.width;
+        let glyphs = content_span(area, pane);
         if view.files == 0 {
             self.put_marked(
                 glyphs.x,
