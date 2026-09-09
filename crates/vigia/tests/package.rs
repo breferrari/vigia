@@ -1,5 +1,8 @@
 //! What the published `.crate` carries, and what the release pipeline does.
 
+#[path = "support/mod.rs"]
+mod screen;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -2029,6 +2032,65 @@ fn the_readme_teaches_a_config_file_that_parses_and_names_every_key() {
         missing.is_empty(),
         "the config file accepts {missing:?} and README.md's block never names \
          them, so a reader is taught a surface smaller than the binary's:\n{block}"
+    );
+}
+
+/// Every gesture that a config key also reaches has a row in `README.md`'s key
+/// table.
+///
+/// The other half of the config block's gate, one vocabulary over: the block
+/// teaches what a reader *writes* and this table teaches what they *press*, and a
+/// key whose gesture went unlisted is a key a reader can set and never discover.
+/// The reverse direction belongs to `sheet.rs::every_gesture_the_readme_teaches_is_named_on_the_sheet`,
+/// since the table also teaches gestures no config key reaches.
+#[test]
+fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
+    let readme = repo_file("README.md");
+
+    // The table lives inside a `<td>` under a bold caption, and a row's left cell
+    // is what a reader looks for. `sheet.rs::readme_gestures` reads both tables
+    // the same way; only the keyboard one can carry a config key's gesture.
+    let mut taught: Vec<String> = Vec::new();
+    let mut inside = false;
+    for line in readme.lines() {
+        let trimmed = line.trim();
+        if trimmed == "**Keys**" {
+            inside = true;
+            continue;
+        }
+        if inside && trimmed.starts_with("</td>") {
+            break;
+        }
+        if !inside || !trimmed.starts_with('|') || trimmed.contains("---") {
+            continue;
+        }
+        let Some(cell) = trimmed.split('|').nth(1) else {
+            continue;
+        };
+        taught.extend(cell.replace('`', " ").split_whitespace().map(str::to_owned));
+    }
+
+    // Non-vacuity: an extractor that found nothing would pass every assertion
+    // below, and a change to the table's shape is exactly how that happens.
+    assert!(
+        taught.len() >= vigia::config::KEYS.len(),
+        "README.md's key table parsed to {} cells, so this gate is reading the \
+         document's shape wrongly rather than reading its rows",
+        taught.len()
+    );
+
+    let missing: Vec<&str> = screen::actions_keys_reach()
+        .iter()
+        .filter_map(|action| match screen::place_of(action) {
+            screen::Place::Key { gesture, .. } => Some(gesture),
+            screen::Place::Excluded(_) | screen::Place::Neither(_) => None,
+        })
+        .filter(|gesture| !taught.iter().any(|cell| cell == gesture))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the config file can set what {missing:?} press and README.md's key table \
+         never names them, so a reader can configure a gesture they cannot find"
     );
 }
 
