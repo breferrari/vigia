@@ -344,9 +344,9 @@ fn flush_right(area: Rect, width: usize) -> Option<Rect> {
 }
 
 /// Where a row's glyphs go inside `region`: inset from the left, across the
-/// width the region is planned against. Read by [`regions`], which publishes it,
-/// by `Painter::body`, which draws to it, and by `Body::split` for
-/// [`Body::diff_width`], which is what the walk wraps a line at.
+/// width the region is planned against. The one place that is derived: the span
+/// [`regions`] publishes, the rows `Painter::body` draws, and [`Body::diff_width`],
+/// which is what the walk wraps a line at, all come from here.
 ///
 /// The bar's reserve is charged whether or not a bar is drawn, and that is not a
 /// rounding: whether one is drawn is decided from the rows the walk produced, and
