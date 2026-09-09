@@ -492,3 +492,7 @@ The objection that ends it is that the dependency is **circular**. `render::gutt
 **Three facts in the issue were corrected against the documentation.** Messaging is on from v2.1.224 on macOS and Linux and v2.1.234 on native Windows, not 234 and 243. Delivery into an idle interactive session is documented, so only the payload after the auth line is left for #420's probe. Own-child verification is by process evidence on Linux, process evidence or the token on macOS, and the token alone on Windows, which the pane, not being a child, meets only through the token.
 
 **`.git` was refused on the writes gate and on the linked-worktree split**: a linked worktree's git dir is not its common dir, so one store per worktree under `.git` is two places, and *left byte for byte as it was found* is worth more than the convenience.
+
+## 11.1 — the two widths of a diff row
+
+Measured 2026-09-09, [#474](https://github.com/breferrari/vigia/issues/474): the two agree wherever a bar is drawn and part by 2 below forty-four and 1 to seventy-nine wherever none is. The alternatives, and the 2026-08-10 deferral they answer, are on the issue.
