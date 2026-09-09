@@ -183,6 +183,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 |---|---|---|
 | ⬜ | The config file reaches six toggles and `c` is not one of them | [#491](https://github.com/breferrari/vigia/issues/491) |
 | ⬜ | Nothing draws the file list without the diff under it. **Reported from use** | [#493](https://github.com/breferrari/vigia/issues/493) |
+| ⬜ | Nothing keeps a path out of the pane. **Reported from use** | [#495](https://github.com/breferrari/vigia/issues/495) |
 | ⬜ | A first run says what the keys are and never what the pane is. **Reported from use** | [#492](https://github.com/breferrari/vigia/issues/492) |
 | ⬜ | The header names where in the history the pane is, and a click moves it | [#490](https://github.com/breferrari/vigia/issues/490) |
 | ⬜ | decision: whether the pane remembers a toggle, and where it writes it. **Reported from use** | [#494](https://github.com/breferrari/vigia/issues/494) |

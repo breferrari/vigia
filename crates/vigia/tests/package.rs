@@ -1932,7 +1932,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 384037),
     ("REVOCATIONS.md", 11910),
-    ("ROADMAP.md", 95874),
+    ("ROADMAP.md", 96001),
     ("RULINGS.md", 99141),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -2157,8 +2157,8 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
 ///
-/// Raised twice on 2026-09-08 and twice on 2026-09-09, session, by 316, 790,
-/// 789 and then 725 bytes, for the reason
+/// Raised twice on 2026-09-08 and three times on 2026-09-09, session, by 316, 790,
+/// 789, 725 and then 127 bytes, for the reason
 /// the bullet above already names rather than a new one: a defect fix has to state
 /// what the code now does, and a filed issue has to take a roadmap row. Three
 /// passes that day each needed contract prose and none added a paragraph anyone
@@ -2170,8 +2170,9 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// drift §0 exists to stop. It stays a session ruling and the question is the
 /// reader's. The fourth raise is five issues filed in one pass, and a filed issue
 /// with no roadmap row is invisible to the take order rather than merely
-/// deprioritised, so the row is owed the moment the issue exists.
-const WRITTEN_LAYER_TOTAL: usize = 634458;
+/// deprioritised, so the row is owed the moment the issue exists. The fifth is a
+/// sixth issue filed into the same block.
+const WRITTEN_LAYER_TOTAL: usize = 634585;
 
 /// Each document weighs no more than its budget.
 #[test]
