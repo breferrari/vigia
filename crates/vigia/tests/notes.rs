@@ -2654,7 +2654,13 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
     let scratch = fixture("notes-configured");
     let worktree = scratch.worktree();
 
-    let drawn = |notes: bool, press: bool| {
+    // What the reader's hand does before the frame that is measured.
+    enum Hand {
+        Nothing,
+        PressesC,
+    }
+
+    let drawn = |notes: bool, hand: Hand| {
         let mut frame = worktree.frame();
         frame.advance().expect("advance");
         let mut rig = Rig::with(
@@ -2666,7 +2672,7 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
         );
         rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
         rig.reload();
-        if press {
+        if matches!(hand, Hand::PressesC) {
             rig.app
                 .apply(Action::ToggleNotes, &mut frame, 0)
                 .expect("toggle the rows");
@@ -2685,11 +2691,11 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
     // The configured-on pane first, at the count its neighbour asserts rather
     // than merely non-zero: `BODY` wraps to two rows at this width, and a launch
     // that drew one of them would be a launch this gate should not pass.
-    let (shown, marked) = drawn(true, false);
+    let (shown, marked) = drawn(true, Hand::Nothing);
     assert_eq!(shown, 2, "`notes = on` did not draw the note's two rows");
     assert_eq!(marked, vec!["n1"]);
 
-    let (hidden, marked) = drawn(false, false);
+    let (hidden, marked) = drawn(false, Hand::Nothing);
     assert_eq!(
         hidden, 0,
         "`notes = off` drew {hidden} note row(s) on the first frame, so the file \
@@ -2702,7 +2708,7 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
     // A setting is a starting point rather than a decision, which is the sentence
     // the README makes and the one a reader would notice broken: `c` has to give
     // the rows back to a pane that started without them.
-    let (given, _) = drawn(false, true);
+    let (given, _) = drawn(false, Hand::PressesC);
     assert_eq!(
         given, shown,
         "`c` did not give the rows back to a pane configured without them"

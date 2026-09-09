@@ -25,7 +25,7 @@ pub struct Config {
     pub links: bool,
 }
 
-/// Every toggle off and the notes and links on, which is the shipped pane.
+/// Every toggle off but the notes and the links, which is the shipped pane.
 impl Default for Config {
     fn default() -> Self {
         Self {

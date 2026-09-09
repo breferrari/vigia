@@ -256,8 +256,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         state::registry_for(worktree.workdir(), |key| std::env::var(key).ok()).transpose()?;
 
     // The view defaults reach the frame before its first walk, not just the
-    // shell. Four of the five keys only arrange rows the frame already holds;
-    // `staged` decides what it *walks*, so it must be honoured here.
+    // shell. `staged` is the only key that decides what the frame *walks* rather
+    // than how the rows it already holds are arranged, so it must be honoured here.
     arm_frame(&mut frame, config);
     frame.advance()?;
 

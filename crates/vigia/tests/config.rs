@@ -597,8 +597,7 @@ fn place_of(action: &Action) -> Place {
         Action::ToggleSingle => Place::Key("single"),
         Action::ToggleStaged => Place::Key("staged"),
         Action::ToggleWrap => Place::Key("wrap"),
-        // The sheet's `notes` section, and the seventh toggle the file spent a
-        // release not having.
+        // The sheet's `notes` section.
         Action::ToggleNotes => Place::Key("notes"),
         // The exclusion list, and its one entry.
         Action::ToggleFollow => Place::Excluded(
