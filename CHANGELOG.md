@@ -4,6 +4,18 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.43.0] - 2026-09-09
+
+- The header's right-hand side counts the run in lines
+- A note's left side takes it back, and the sheet says so
+- The smoke list checks the copy routes, which no gate can reach
+- A copy inside tmux goes through tmux, which is the one hand allowed to set the clipboard
+- A drag over a note sends the note, and its edges send nothing
+- The file list marks which file holds a note, and the strip marks where in it
+- The resolve line holds an announcement's minute, and the hold runs no motion
+- The enclosure is the same answered or not, and the arrow stands in its rule
+- 0.42.0 says what it removed, and the filter that hid it is filed
+
 ## [0.42.0] - 2026-09-08
 
 - The masthead is removed. The churn band, the `m` key that showed it and the `masthead` setting in `~/.config/vigia/config` are all gone, and the rows the band took go back to the diff. The per-file sparkline and heat strip are unchanged.
