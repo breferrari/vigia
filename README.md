@@ -62,10 +62,10 @@ vigia --version          # or -V. It is the only option there is
 
 <br>
 
-Windows will not let anything replace a running `.exe`, and the `vigia mcp` you register below runs for as long as each agent session does. So an upgrade fails while any session is open, naming only cargo and a path: nothing in the error connects a diff monitor's upgrade to a coding agent that started hours earlier. Both routes land in the same directory and fail the same way. Move the running binary aside and the upgrade goes through, with every open session still served:
+Windows will not let anything replace a running `.exe`, and the `vigia mcp` you register below runs for as long as each agent session does. So an upgrade fails while any session is open, naming only cargo and a path: nothing in the error connects a diff monitor's upgrade to a coding agent that started hours earlier. `cargo install` and the PowerShell installer both write to the same directory, so both fail this way. Move the running binary aside and the upgrade goes through, with every open session still served:
 
 ```powershell
-$bin = "$env:USERPROFILE\.cargo\bin"
+$bin = if ($env:CARGO_HOME) { "$env:CARGO_HOME\bin" } else { "$env:USERPROFILE\.cargo\bin" }
 Remove-Item "$bin\vigia.exe.old-*" -Force -ErrorAction SilentlyContinue
 Move-Item "$bin\vigia.exe" "$bin\vigia.exe.old-$(Get-Date -Format yyyyMMddHHmmss)"
 cargo install vigia

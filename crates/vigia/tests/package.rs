@@ -2086,31 +2086,28 @@ fn the_written_layer_stays_under_its_budget() {
 
 /// The upgrade the README teaches a Windows reader moves the binary aside.
 ///
-/// Windows refuses to overwrite a running image and permits renaming one, so
-/// moving `vigia.exe` frees the install path while every registered `vigia mcp`
-/// keeps serving from the renamed file. Stopping the servers instead frees the
-/// same path and splits every open session: the socket rung goes on delivering
-/// notes the MCP half can no longer answer, and neither surface says why.
-///
-/// So the assertion that matters is the absence. `Stop-Process` was this
-/// defect's first workaround and reads like the obvious one, which is exactly
-/// why a later edit would reach for it again.
+/// The assertion that matters is the absence. Stopping the servers frees the
+/// same path, so it reads like the obvious fix and was this defect's first
+/// workaround, which is exactly why a later edit would reach for it again.
 #[test]
 fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
-    let readme = repo_file("README.md");
-    let recipe = readme
-        .split_once(r"$env:USERPROFILE\.cargo\bin")
-        .map(|(_, rest)| rest.split("```").next().unwrap_or_default().to_owned())
+    // Both ends bounded, and to the block rather than the file: stopping a hung
+    // pane is fair advice elsewhere, and it is only the upgrade that must not
+    // reach for it.
+    let block = repo_file("README.md")
+        .split_once("<summary><b>Upgrading on Windows")
+        .and_then(|(_, rest)| rest.split_once("</details>"))
+        .map(|(block, _)| block.to_owned())
         .expect("README.md tells a Windows reader how to upgrade under an open session");
 
     assert!(
-        recipe.contains("Move-Item") && recipe.contains("vigia.exe"),
+        block.contains("Move-Item") && block.contains("vigia.exe"),
         "the upgrade no longer moves vigia.exe aside, so it no longer frees the \
-         path by renaming:\n{recipe}"
+         path by renaming:\n{block}"
     );
     assert!(
-        !readme.contains("Stop-Process"),
-        "README.md tells a reader to stop the servers. That frees the path and \
+        !block.contains("Stop-Process"),
+        "the upgrade tells a reader to stop the servers. That frees the path and \
          leaves every open session half-connected, which is the worse of the two \
          failures and the one no surface explains."
     );

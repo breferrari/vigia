@@ -886,7 +886,13 @@ fn init_params(version: &str) -> Value {
 
 impl Client {
     fn spawn(project: Option<&Path>, root: &Path, cwd: Option<&Path>) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_vigia"));
+        Self::spawn_at(Path::new(env!("CARGO_BIN_EXE_vigia")), project, root, cwd)
+    }
+
+    /// The same server from a nominated copy of the binary, for a test that
+    /// needs the image somewhere it is allowed to move it.
+    fn spawn_at(binary: &Path, project: Option<&Path>, root: &Path, cwd: Option<&Path>) -> Self {
+        let mut command = Command::new(binary);
         command
             .arg("mcp")
             .stdin(Stdio::piped())
@@ -1716,32 +1722,26 @@ fn a_session_id_the_registry_cannot_name_is_silent_rather_than_reported() {
 /// and this is what holds it true, because the two platforms CI also runs
 /// replace a running binary happily and can say nothing about any of it.
 ///
-/// The third assertion is the point of the whole test. Freeing the path by
-/// stopping the servers passes the other three and is the worse outcome: it
-/// splits every open session, and no surface on either side explains why.
+/// The server answering after the rename is the point of the whole test.
+/// Stopping it frees the same path and satisfies every other assertion here,
+/// and it is the worse outcome: it splits each open session, leaving the notes
+/// rung delivering to an agent that has lost the tools to answer them.
 #[cfg(windows)]
 #[test]
 fn a_running_server_blocks_an_install_until_its_image_is_renamed() {
     let bin = TempDir::new("mcp-upgrade");
     let installed = bin.path().join("vigia.exe");
     let staged = bin.path().join("staged.exe");
+    // The installed one is spawned, so it is the real binary and it is a copy:
+    // the test renames it out from under a running process, which the shared
+    // build artefact cannot be. The staged one is only ever a rename's source,
+    // and Windows refuses the move for the destination being held, so its bytes
+    // are never read and a stand-in proves the same thing 13MB cheaper.
     fs::copy(env!("CARGO_BIN_EXE_vigia"), &installed).expect("install the binary");
-    fs::copy(env!("CARGO_BIN_EXE_vigia"), &staged).expect("stage its replacement");
+    fs::write(&staged, b"the next version").expect("stage its replacement");
 
     let root = TempDir::new("mcp-upgrade-state");
-    let mut child = Command::new(&installed)
-        .arg("mcp")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("XDG_STATE_HOME", root.path())
-        .env("LOCALAPPDATA", root.path())
-        .env("HOME", root.path())
-        .env("USERPROFILE", root.path())
-        .env_remove(PROJECT_VAR)
-        .current_dir(bin.path())
-        .spawn()
-        .expect("spawn the installed binary as a server");
+    let mut client = Client::spawn_at(&installed, None, root.path(), Some(bin.path()));
 
     // The move `cargo install` ends with, and the whole of the defect.
     let blocked = fs::rename(&staged, &installed).map_err(|e| e.kind());
@@ -1755,27 +1755,15 @@ fn a_running_server_blocks_an_install_until_its_image_is_renamed() {
     let aside = bin.path().join("vigia.exe.old-1");
     fs::rename(&installed, &aside).expect("a running image renames aside");
 
-    let mut stdin = child.stdin.take().expect("a piped stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("a piped stdout"));
-    let request = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": init_params(PROTOCOL_VERSIONS[0]),
-    });
-    writeln!(stdin, "{request}").expect("ask the renamed server");
-    let mut answer = String::new();
-    stdout
-        .read_line(&mut answer)
-        .expect("the renamed server answers");
-    assert!(
-        answer.contains("serverInfo"),
+    let answer = client.request(1, "initialize", init_params(PROTOCOL_VERSIONS[0]));
+    assert_eq!(
+        answer["result"]["serverInfo"]["name"], "vigia",
         "the server stopped serving when its image moved, so the upgrade costs \
          the reader every open session after all: {answer}"
     );
 
     fs::rename(&staged, &installed).expect("the install lands once the path is free");
 
-    drop(stdin);
-    let _ = child.wait();
+    let (status, stderr, _) = client.finish();
+    assert!(status.success(), "the renamed server left badly: {stderr}");
 }
