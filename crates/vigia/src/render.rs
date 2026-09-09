@@ -2420,8 +2420,8 @@ pub const SHEET_PURPOSE: [&str; 2] = [
     "working tree's diff, live",
 ];
 
-/// Rows [`SHEET_PURPOSE`] costs a one-column rung: the line, and the blank that
-/// keeps it from reading as a table row. `SPEC.md` §11.1 says what each rung pays.
+/// Rows [`SHEET_PURPOSE`] costs a one-column rung, the line and a blank under it.
+/// `SPEC.md` §11.1 says what each of the three rungs pays and why.
 const PURPOSE_ROWS: usize = 2;
 
 /// What the mouse group's heading spells, spaces included.
@@ -2600,12 +2600,12 @@ const fn sheet_room(total: usize, at: usize) -> usize {
 }
 
 /// Whether a page of `capacity` rows may spend [`PURPOSE_ROWS`] of them saying
-/// what the pane is, given the `bare` rows its gestures need. A rung gives a
-/// gesture up for width by reaching `from > 0` and for height by paging, and
-/// prose goes before either, so the line rides only where the whole table still
-/// fits beside it.
-const fn purpose_fits(from: usize, bare: usize, capacity: usize) -> bool {
-    from == 0 && bare + PURPOSE_ROWS <= capacity
+/// what the pane is, given the `bare` rows its gestures need. Width takes
+/// gestures away two ways, a keyboard row at a time through [`DROP_ORDER`] and
+/// the mouse group all at once, and height takes them by paging. Prose goes
+/// before any of the three, so all three are asked here.
+const fn purpose_fits(from: usize, mouse: bool, bare: usize, capacity: usize) -> bool {
+    from == 0 && mouse && bare + PURPOSE_ROWS <= capacity
 }
 
 /// Gestures the whole sheet holds, which is what the page counter counts against.
@@ -2673,8 +2673,9 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     // The order is the ruling's: the roomy rung where there is room for it, then
     // every row in one column, then the two-column rung that buys height with
     // width, then the paged rungs, widest row set first.
-    // Each rung below the roomy one is offered with the line and then without,
-    // so a pane short of room gives up the line rather than the shape it had.
+    // An unpaged rung is offered with the line and then without, so a pane short
+    // of room gives up the line rather than the shape it had. A paged one is
+    // offered once and weighs the line itself, against its own capacity.
     let rungs = std::iter::once_with(roomy_fit)
         .chain(
             [true, false]
@@ -2765,7 +2766,7 @@ fn paged_fit(
 ) -> Fit {
     let (keys, verb, total) = sheet_fields(level, from, mouse);
     let bare = sheet_rows(from, mouse, false);
-    let purpose = offer && purpose_fits(from, bare, capacity);
+    let purpose = offer && purpose_fits(from, mouse, bare, capacity);
     let lines = if purpose {
         sheet_rows(from, mouse, true)
     } else {
@@ -3651,7 +3652,7 @@ impl Painter<'_> {
         // the rule that carries the labels.
         let head = area.y + 1 + u16::from(purpose);
         if purpose {
-            self.sheet_pipes_over(area, area.y + 1);
+            self.sheet_pipes(area, area.y + 1);
             self.sheet_said(area.y + 1, keyboard, area);
         }
 
@@ -5341,7 +5342,7 @@ mod sheet_tables {
         for from in 1..=KEYBOARD.len() - SHEET_KEEP {
             for mouse in [true, false] {
                 assert!(
-                    !purpose_fits(from, sheet_rows(from, mouse, false), usize::MAX),
+                    !purpose_fits(from, mouse, sheet_rows(from, mouse, false), usize::MAX),
                     "a rung {from} rows into DROP_ORDER accepted the line even with \
                      unbounded height, so width and height have stopped being one \
                      rule"
@@ -5349,13 +5350,21 @@ mod sheet_tables {
             }
         }
         // And the height half, at the boundary rather than well inside it.
+        // The mouse group is not in `DROP_ORDER`, so it is asked for separately.
+        let mouseless = sheet_rows(0, false, false);
+        assert!(
+            !purpose_fits(0, false, mouseless, usize::MAX),
+            "a rung that gave up the whole mouse group accepted the line, so the \
+             two ways width drops a gesture are not one rule"
+        );
+
         let whole = sheet_rows(0, true, false);
         assert!(
-            purpose_fits(0, whole, whole + PURPOSE_ROWS),
+            purpose_fits(0, true, whole, whole + PURPOSE_ROWS),
             "a page with room for the whole table and the line refused the line"
         );
         assert!(
-            !purpose_fits(0, whole, whole + PURPOSE_ROWS - 1),
+            !purpose_fits(0, true, whole, whole + PURPOSE_ROWS - 1),
             "a page one row short of the whole table and the line took the line \
              anyway, so the sheet would page to pay for prose"
         );

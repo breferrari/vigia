@@ -1878,7 +1878,8 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
                 ),
                 RoomyRow::Said => assert!(
                     text.contains(PURPOSE_WIDE),
-                    "row {n} of the roomy rung should say what the pane is and                      reads {text:?}"
+                    "row {n} of the roomy rung should say what the pane is and \
+                     reads {text:?}"
                 ),
                 RoomyRow::Heading(label) => {
                     let head: String = row[1..].iter().collect();
@@ -3730,4 +3731,43 @@ fn the_page_counter_still_counts_gestures_only() {
             "the page drew no gesture at all, so the counter proves nothing:\n{sheet}"
         );
     });
+}
+
+/// The narrowest panes the sheet draws at all, which the ladder sweep's own
+/// floor of forty columns does not reach. The sheet's floor is thirty.
+const NARROW_WIDTHS: std::ops::RangeInclusive<u16> = 30..=44;
+
+#[test]
+fn a_sheet_missing_the_mouse_group_carries_no_line() {
+    // The mouse group is eleven gestures given up for width, which is the same
+    // thing `DROP_ORDER` does one keyboard row at a time. A rule that counted
+    // only the second let a thirty-five column pane draw `1-16 of 27` in its own
+    // title bar and spend two rows saying what the pane is underneath it.
+    let mut dropped = 0usize;
+    sweep!("sheet-mouseless", |paint| {
+        for w in NARROW_WIDTHS {
+            for h in [12u16, 24, 30, 36, 48] {
+                let (buf, laid) = paint(Rect::new(0, 0, w, h));
+                let (count, sheet) = read_sheet(&buf, &laid);
+                if !sheet.contains(TITLE) {
+                    continue;
+                }
+                let said = sheet.contains(PURPOSE_WIDE) || sheet.contains(PURPOSE_TIGHT);
+                if count < GESTURES.len() {
+                    dropped += 1;
+                    assert!(
+                        !said,
+                        "at {w}x{h} the sheet draws {count} of {} gestures and says \
+                         what the pane is anyway:\n{sheet}",
+                        GESTURES.len()
+                    );
+                }
+            }
+        }
+    });
+    assert!(
+        dropped > 0,
+        "the narrow sweep never reached a sheet short of gestures, so it proves \
+         nothing"
+    );
 }
