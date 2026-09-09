@@ -1480,23 +1480,21 @@ fn a_notes_body_fills_the_enclosure_it_is_drawn_in() {
         "the body did not wrap on a fifteen-column pane: {body:?}"
     );
 
-    // Every row but the last is full: the first word of the row below could not
-    // have stood on it. That is the complaint stated as an assertion, and a blank
-    // column at the end of every row is what fails it.
-    for (n, pair) in body.windows(2).enumerate() {
-        let row = pair[0].trim_end();
-        let word = pair[1]
-            .trim_start()
-            .split(' ')
-            .next()
-            .unwrap_or("")
-            .to_owned();
-        assert!(
-            row.chars().count() + 1 + word.chars().count() > inner,
-            "row {n} of the enclosure holds {row:?} in {inner} columns and broke \
-             before {word:?}, which would have fitted"
-        );
-    }
+    // Some row reaches the far side. A greedy wrapper that broke one column early
+    // would leave every row short of it, which is the reported complaint, and a
+    // per-row check cannot say so: this body wraps inside `checked_mul`, where
+    // there is no space, so "the next word would have fitted" is never false there
+    // whatever the wrap was sized at.
+    let widest = body
+        .iter()
+        .map(|row| row.trim_end().chars().count())
+        .max()
+        .unwrap_or(0);
+    assert_eq!(
+        widest, inner,
+        "the widest row of the enclosure is {widest} columns inside a box drawn \
+         for {inner}, so the body was wrapped for a narrower box than it is in"
+    );
 }
 
 #[test]

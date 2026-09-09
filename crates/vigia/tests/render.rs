@@ -30,6 +30,9 @@ const DRAWN_BUCKETS: usize = 12;
 /// The mark the renderer writes where a row runs past its edge.
 const CONTINUES: &str = "›";
 
+/// Columns the scrollbar reserves at the right of every row, drawn or not.
+const BAR_COLUMNS: usize = 2;
+
 /// What joins two facts about one subject on a line of chrome.
 const FACT_JOIN: &str = " · ";
 
@@ -5883,10 +5886,21 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
         rows_above: 40,
         ..two_regions(1)
     });
-    for (width, view) in (1u16..=120).flat_map(|w| views.iter().map(move |view| (w, view))) {
+    // Past the rail's own arrival width as well as under it. Beside a rail the diff
+    // region does not begin at column zero, which is the one shape where the span's
+    // origin and its width are not the same subtraction twice.
+    let railed = Chrome {
+        rail: true,
+        ..chrome()
+    };
+    let mut read_rail = 0usize;
+    for (width, chrome, view) in (1u16..=180)
+        .flat_map(|width| [&chrome(), &railed].map(|chrome| (width, chrome.clone())))
+        .flat_map(|(width, chrome)| views.iter().map(move |view| (width, chrome.clone(), view)))
+    {
         let pane = Rect::new(0, 0, width, 24);
-        let laid = body_layout(pane, &chrome(), view.files, view.list.len());
-        let laid_regions = regions(pane, &chrome(), view);
+        let laid = body_layout(pane, &chrome, view.files, view.list.len());
+        let laid_regions = regions(pane, &chrome, view);
         // A pane with no diff region publishes no span, so there is no width to
         // compare one against.
         if laid_regions.diff.rows == 0 || laid_regions.diff.text == 0 {
@@ -5897,12 +5911,27 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
         } else {
             read_bare.push(width);
         }
+        if laid_regions.diff.left > 0 {
+            read_rail += 1;
+        }
         assert_eq!(
             laid.diff_width,
             usize::from(laid_regions.diff.text),
             "at {width} columns a row wraps at {} and is drawn across {}",
             laid.diff_width,
             laid_regions.diff.text
+        );
+        // And the span sits where the region says, which the equality above cannot
+        // say: both its sides come from one call now, so a wrong answer moves them
+        // together. This reads the region's own left edge and width instead, and
+        // beside a rail those are not the pane's.
+        let diff = laid_regions.diff;
+        assert_eq!(
+            usize::from(diff.gutter.0) + usize::from(diff.text),
+            usize::from(diff.left) + usize::from(diff.width) - BAR_COLUMNS,
+            "at {width} columns the text ends at {} and the region at {}",
+            diff.gutter.0 + diff.text,
+            diff.left + diff.width
         );
     }
 
@@ -5918,6 +5947,11 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
     assert!(
         !read_barred.is_empty(),
         "no screen drew a bar, so this reads half the screens a pane has"
+    );
+    assert!(
+        read_rail > 0,
+        "no screen put the diff beside a rail, so the shape where the region does \
+         not start at column zero went unread"
     );
 }
 

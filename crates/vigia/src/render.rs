@@ -3652,8 +3652,8 @@ impl Painter<'_> {
             "a region is being drawn against a different pane than the painter was \
              built for, so its margin and the chrome's have come apart"
         );
-        // Two rects, because this region draws both roles, and the glyphs take the
-        // region before the bar narrowed it: a bar arriving moves no row's edge.
+        // The region draws both roles: the wash spans it whole, the bar's column
+        // included, and the glyphs stop short of that column.
         let washed = area.width;
         let glyphs = content_span(area, pane);
         if view.files == 0 {
@@ -3667,8 +3667,8 @@ impl Painter<'_> {
             return;
         }
 
-        // The stream's own width rather than the list's: `SPEC.md` §11.1 rules the
-        // two regions need not align glyph for glyph.
+        // The stream's own width rather than the list's: `SPEC.md` §11.1 rules each
+        // region plans its own slots and the two are entitled to differ.
         let shown = usize::from(area.height);
         let columns = Columns::plan(glyphs.width, self.glyphs);
         self.gutter = view
