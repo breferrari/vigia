@@ -1767,3 +1767,59 @@ fn a_running_server_blocks_an_install_until_its_image_is_renamed() {
     let (status, stderr, _) = client.finish();
     assert!(status.success(), "the renamed server left badly: {stderr}");
 }
+
+/// The binary an upgrade displaced is removed by the next `vigia` to start.
+///
+/// The upgrade renames `vigia.exe` aside and Windows holds the renamed file for
+/// as long as a process that started before the upgrade is running, so nothing
+/// but a later `vigia` is in a position to see it become deletable. Held is the
+/// ordinary case rather than an error, which is the half worth gating: a sweep
+/// that reported, retried or waited would turn a tidy-up into a startup cost.
+#[cfg(windows)]
+#[test]
+fn the_binary_an_upgrade_displaced_is_swept_by_the_next_start_unless_it_is_held() {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    let bin = TempDir::new("mcp-sweep");
+    let installed = bin.path().join("vigia.exe");
+    let displaced = bin.path().join("vigia.exe.old");
+    fs::copy(env!("CARGO_BIN_EXE_vigia"), &installed).expect("install the binary");
+
+    let root = TempDir::new("mcp-sweep-state");
+    let serve = |held: bool| {
+        fs::write(&displaced, b"what the upgrade moved aside").expect("displace one");
+        // Windows only refuses the unlink while something holds the file with
+        // sharing denied, which is what a running image does and what an
+        // ordinary `File::open` does not: it shares delete by default.
+        let hold = held.then(|| {
+            OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&displaced)
+                .expect("hold the displaced file")
+        });
+        let client = Client::spawn_at(&installed, None, root.path(), Some(bin.path()));
+        let (status, stderr, _) = client.finish();
+        assert!(status.success(), "the server left badly: {stderr}");
+        drop(hold);
+    };
+
+    serve(false);
+    assert!(
+        !displaced.exists(),
+        "a displaced binary nothing holds survived a start, so it is kept until \
+         the reader deletes it by hand"
+    );
+    assert!(
+        installed.exists(),
+        "the sweep took the running binary, which is the one file it must never reach"
+    );
+
+    serve(true);
+    assert!(
+        displaced.exists(),
+        "the sweep removed a file another process still held, which the platform \
+         should have refused"
+    );
+}

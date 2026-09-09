@@ -314,6 +314,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | | Task | Issue |
 |---|---|---|
 | ✅ | `cargo install` cannot replace the binary while a registered `vigia mcp` holds it open on Windows | [#458](https://github.com/breferrari/vigia/issues/458) |
+| ✅ | Every Windows upgrade leaves another copy of the binary behind | [#486](https://github.com/breferrari/vigia/issues/486) |
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ✅ | The macOS watch suite fails three different ways under CI load, and it is blocking merges | [#337](https://github.com/breferrari/vigia/issues/337) |
 | ✅ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |

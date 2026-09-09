@@ -184,6 +184,32 @@ fn request_for_one(arg: &OsStr) -> Request {
     }
 }
 
+/// Remove the binary the last upgrade displaced, once nothing holds it.
+///
+/// Windows refuses to replace a running executable, so the upgrade `README.md`
+/// documents renames the old one aside, and it cannot be deleted until the last
+/// process that started before the upgrade exits. Nothing but a later `vigia` is
+/// in a position to notice that moment, so one unlink at startup is the whole of
+/// the cleanup: a file still held refuses, which is the ordinary case rather
+/// than an error, and the next start tries again.
+///
+/// It appends to the running image's own path, so the one file it can reach is
+/// that sibling, and never the binary a reader runs.
+#[cfg(windows)]
+pub fn sweep_displaced() {
+    let Ok(me) = std::env::current_exe() else {
+        return;
+    };
+    let mut displaced = me.into_os_string();
+    displaced.push(".old");
+    let _ = std::fs::remove_file(displaced);
+}
+
+/// Nothing to sweep: every other platform replaces a running binary in place,
+/// so no upgrade ever displaces one.
+#[cfg(not(windows))]
+pub fn sweep_displaced() {}
+
 /// Tell a frame what the shell's view defaults ask it to walk.
 #[doc(hidden)]
 pub fn arm_frame(frame: &mut vigia_core::Frame, config: crate::Config) {
