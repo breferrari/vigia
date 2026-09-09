@@ -1,6 +1,6 @@
 //! `SPEC.md` §11.2 B6 as amended: the pane a reader starts with.
 
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::Event;
 use ratatui::layout::Rect;
 use vigia::{
     Action, App, Config, ConfigError, Pointing, Regions, action_for, body_layout, config,
@@ -164,6 +164,11 @@ fn the_key_still_toggles_from_the_configured_state() {
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
+
+#[path = "support/mod.rs"]
+mod screen;
+
+use screen::candidate_keys;
 
 #[test]
 fn a_key_this_file_does_not_have_names_its_line_and_refuses() {
@@ -609,43 +614,16 @@ fn place_of(action: &Action) -> Place {
 /// Every action a key of the pane produces, one per variant.
 ///
 /// Taken from the keymap rather than listed here, so a toggle bound to a new key
-/// is walked without this file being told about it. The candidate space is the
-/// printable range and the named keys against the four modifier sets, which is
-/// `sheet.rs::candidate_keys` less the function keys nothing binds: a key outside
-/// it would leave the tests below blind, and [`place_of`]'s own exhaustiveness is
-/// what still catches the variant.
+/// is walked without this file being told about it.
 fn actions_keys_reach() -> Vec<Action> {
-    let mut codes: Vec<KeyCode> = (b' '..=b'~').map(|c| KeyCode::Char(c as char)).collect();
-    codes.extend([
-        KeyCode::Up,
-        KeyCode::Down,
-        KeyCode::Left,
-        KeyCode::Right,
-        KeyCode::Home,
-        KeyCode::End,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-        KeyCode::Enter,
-        KeyCode::Esc,
-    ]);
-
+    let mut seen = std::collections::HashSet::new();
     let mut found: Vec<Action> = Vec::new();
-    for code in codes {
-        for mods in [
-            KeyModifiers::NONE,
-            KeyModifiers::SHIFT,
-            KeyModifiers::CONTROL,
-            KeyModifiers::ALT,
-        ] {
-            let event = Event::Key(KeyEvent::new(code, mods));
-            if let Some(action) = action_for(&event, Regions::default()) {
-                let fresh = !found
-                    .iter()
-                    .any(|seen| std::mem::discriminant(seen) == std::mem::discriminant(&action));
-                if fresh {
-                    found.push(action);
-                }
-            }
+    for event in candidate_keys() {
+        let Some(action) = action_for(&Event::Key(event), Regions::default()) else {
+            continue;
+        };
+        if seen.insert(std::mem::discriminant(&action)) {
+            found.push(action);
         }
     }
     found

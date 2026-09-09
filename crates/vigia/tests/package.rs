@@ -1930,7 +1930,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 384354),
+    ("SPEC.md", 384353),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96001),
     ("RULINGS.md", 99141),

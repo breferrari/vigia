@@ -1,10 +1,12 @@
-//! Reading the drawn screen: the selectors more than one test binary needs.
+//! Reading the drawn screen, and the key space a sweep over the keymap walks:
+//! what more than one test binary needs.
 
 // Each test binary uses a different subset, and a binary that used all of it
 // would be a binary asking every question this file answers.
 #![allow(dead_code)]
 
 use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use vigia::{FileEntry, ListRow, Theme, View};
 
@@ -77,4 +79,40 @@ pub fn spark_colours(theme: &Theme) -> Vec<Color> {
 /// Every file the pinned list draws, skipping the run separators.
 pub fn listed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
     view.list.iter().filter_map(ListRow::entry)
+}
+
+/// Every key event a sweep over the keymap walks.
+///
+/// One list rather than one per sweeping binary: a gate whose candidate space
+/// is narrower than the keymap passes over the binding it cannot reach, and two
+/// hand-kept spaces drift without a compile error to say so.
+pub fn candidate_keys() -> Vec<KeyEvent> {
+    let mut codes: Vec<KeyCode> = (b' '..=b'~').map(|c| KeyCode::Char(c as char)).collect();
+    codes.extend([
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+        KeyCode::Enter,
+        KeyCode::Esc,
+        KeyCode::Backspace,
+        KeyCode::Tab,
+        KeyCode::Delete,
+        KeyCode::Insert,
+    ]);
+    codes.extend((1..=12).map(KeyCode::F));
+    let mods = [
+        KeyModifiers::NONE,
+        KeyModifiers::SHIFT,
+        KeyModifiers::CONTROL,
+        KeyModifiers::ALT,
+    ];
+    codes
+        .into_iter()
+        .flat_map(|code| mods.iter().map(move |m| KeyEvent::new(code, *m)))
+        .collect()
 }

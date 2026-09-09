@@ -3,6 +3,9 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+#[path = "support/mod.rs"]
+mod screen;
+
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -15,6 +18,7 @@ use vigia::{
 };
 use vigia_core::{Frame, Highlighter, History};
 
+use screen::candidate_keys;
 use support::{Scratch, materialise};
 
 const WIDE: u16 = 80;
@@ -1031,38 +1035,6 @@ fn reach_of(action: &Action) -> Reach {
              is nothing to teach",
         ),
     }
-}
-
-/// The candidate key space the sweep walks.
-fn candidate_keys() -> Vec<KeyEvent> {
-    let mut codes: Vec<KeyCode> = (b' '..=b'~').map(|c| KeyCode::Char(c as char)).collect();
-    codes.extend([
-        KeyCode::Up,
-        KeyCode::Down,
-        KeyCode::Left,
-        KeyCode::Right,
-        KeyCode::Home,
-        KeyCode::End,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-        KeyCode::Enter,
-        KeyCode::Esc,
-        KeyCode::Backspace,
-        KeyCode::Tab,
-        KeyCode::Delete,
-        KeyCode::Insert,
-    ]);
-    codes.extend((1..=12).map(KeyCode::F));
-    let mods = [
-        KeyModifiers::NONE,
-        KeyModifiers::SHIFT,
-        KeyModifiers::CONTROL,
-        KeyModifiers::ALT,
-    ];
-    codes
-        .into_iter()
-        .flat_map(|code| mods.iter().map(move |m| KeyEvent::new(code, *m)))
-        .collect()
 }
 
 /// How the sheet spells one key event in its keys column.
