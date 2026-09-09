@@ -642,7 +642,13 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
 /// is what leaves an empty tree the word rather than `+0 -0`, and a total wider
 /// than the room falls to the word rather than to nothing, so a pane too narrow
 /// to count still says whether it is live.
-fn header_right(view: &View, chrome: &Chrome, theme: &Theme, room: usize) -> Vec<(String, Style)> {
+fn header_right(
+    view: &View,
+    chrome: &Chrome,
+    theme: &Theme,
+    room: usize,
+    edge: usize,
+) -> Vec<(String, Style)> {
     let word = |style: Style| vec![(chrome.mode.word().to_owned(), style)];
     if chrome.mode == Mode::Lost {
         return word(theme.alert);
@@ -652,15 +658,30 @@ fn header_right(view: &View, chrome: &Chrome, theme: &Theme, room: usize) -> Vec
     else {
         return word(theme.chrome_dim);
     };
+    // Each half on the anchor the rows' counts cell gives its half: two numbers are
+    // read against each other by their sigils, not by their last digit. One wider
+    // than a cell grows left and pushes the other, the total being drawn whole.
+    let minus = format!("-{removed}");
     let total = vec![
         (format!("+{added}"), theme.added),
-        (" ".to_owned(), theme.chrome_dim),
-        (format!("-{removed}"), theme.removed),
+        (
+            " ".repeat(COUNT_CELL.saturating_sub(width_of(&minus)) + 1),
+            theme.chrome_dim,
+        ),
+        (minus, theme.removed),
+        (" ".repeat(edge), theme.chrome_dim),
     ];
     if total.iter().map(|(text, _)| width_of(text)).sum::<usize>() > room {
         return word(theme.chrome_dim);
     }
     total
+}
+
+/// The columns between the chrome's right edge and the one a file row's counts
+/// cell ends at, read off [`planning_width`] so the two cannot drift apart.
+const fn counts_edge(pane: u16, trailing: u16) -> usize {
+    let rows = planning_width(pane, pane, 0).saturating_add(inset_of(pane));
+    pane.saturating_sub(trailing).saturating_sub(rows) as usize
 }
 
 /// The facts about the tree, in the order a narrowing header gives them up.
@@ -3041,6 +3062,7 @@ impl Painter<'_> {
             chrome,
             self.theme,
             self.text_area(area).width as usize,
+            counts_edge(area.width, self.trailing),
         );
         let right: Vec<(&str, Style)> = owned
             .iter()
