@@ -10,6 +10,8 @@
 
 **Your agent writes in one pane. `vigia` watches in the pane beside it.**
 
+Leave it open. It follows what lands and asks nothing: `?` draws every gesture, and `~/.config/vigia/config` decides what it opens as.
+
 </div>
 
 <img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a note mark, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
