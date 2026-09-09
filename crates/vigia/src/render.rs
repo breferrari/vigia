@@ -1555,7 +1555,9 @@ pub struct Body {
     /// Whether the list is a left rail beside the diff rather than a strip
     /// above it.
     pub rail: bool,
-    /// Columns the diff's content is laid out against. See [`content_span`].
+    /// Columns the diff's content is laid out against, and the width its rows are
+    /// drawn across. The scrollbar's reserve is charged whether or not a bar is
+    /// drawn, so the wrap does not move when a diff outgrows its pane.
     pub diff_width: usize,
     /// Pages the gestures sheet takes on this pane, `Some(0)` on a pane too small
     /// to draw one, and `None` when nothing measured it.
@@ -2093,8 +2095,7 @@ pub fn render(
         // Counted in rows of the diff, not of the terminal: the thumb spans the
         // screenful the pane holds, which stops being its height when a line wraps.
         let screenful = view.shown() as u64;
-        // Asked rather than narrowed: nothing here draws to the narrowed rect, since
-        // the wash spans the region whole and the glyphs stop at `content_span`.
+        // Asked rather than narrowed: nothing here draws to a narrowed rect.
         let bar = bar_for(diff_bars, full.height, screenful, view.total_rows as u64);
         painter.body(
             full,
