@@ -584,6 +584,175 @@ fn every_rung_draws_from_the_stores_own_figures() {
     }
 }
 
+/// What the header claims, in the shape the rows are summed into.
+fn claimed(view: &View) -> Option<(u32, u32)> {
+    view.churn.map(|run| (run.added, run.removed))
+}
+
+/// Every drawn file row's counts, which is the header total's oracle.
+fn drawn_counts(view: &View) -> (u32, u32) {
+    view.rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::File(entry) => entry.churn,
+            _ => None,
+        })
+        .fold((0, 0), |(added, removed), (a, r)| (added + a, removed + r))
+}
+
+#[test]
+fn the_headers_total_is_the_rows_summed() {
+    // Four files whose lines are unique to each, so nothing here is paired as a
+    // rename and every count is the edit that produced it.
+    let scratch = Scratch::new("shell-rows-total");
+    for (name, lines) in [("a", 12), ("b", 12), ("d", 4)] {
+        scratch.write(&format!("src/{name}.rs"), unique(name, lines));
+    }
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/a.rs", 3, "a changed");
+    scratch.edit_line("src/b.rs", 3, "b changed");
+    scratch.edit_line("src/b.rs", 7, "b changed again");
+    scratch.write("src/c.rs", unique("c", 5));
+    scratch.remove("src/d.rs");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let viewport = |diff_rows: usize| Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        wrap: false,
+        width: 0,
+        diff_rows,
+        ..Viewport::default()
+    };
+
+    let whole =
+        View::collect(&mut frame, &mut highlighter, &history, viewport(ALL_ROWS)).expect("view");
+    let summed = drawn_counts(&whole);
+    assert_eq!(
+        whole
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::File(_)))
+            .count(),
+        4,
+        "the fixture did not draw its four changed files"
+    );
+    assert_eq!(
+        claimed(&whole),
+        Some(summed),
+        "the header total does not equal the rows it sits over"
+    );
+
+    // The claim the fold exists for: a pane too short to draw them all still counts
+    // them all, so a total taken over the drawn entries fails here rather than
+    // agreeing with itself.
+    let window = View::collect(&mut frame, &mut highlighter, &history, viewport(3)).expect("view");
+    assert!(
+        drawn_counts(&window) != summed,
+        "the short pane drew every file, so it proves nothing about the undrawn ones"
+    );
+    assert_eq!(
+        claimed(&window),
+        Some(summed),
+        "a pane drawing one file reported the run as {:?}",
+        window.churn
+    );
+}
+
+#[test]
+fn a_run_still_being_written_holds_its_last_answer() {
+    // A file inside the settle margin is deferred rather than re-read, and its span
+    // stays answered at the last value that was true of it. So the header holds the
+    // total it had instead of blanking, which is what the height does one field over.
+    let scratch = Scratch::large_diff("shell-rows-total-unsettled", 6, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    support::settle_spans(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let viewport = Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        wrap: false,
+        width: 0,
+        diff_rows: ALL_ROWS,
+        ..Viewport::default()
+    };
+
+    let settled = View::collect(&mut frame, &mut highlighter, &history, viewport).expect("view");
+    let before = settled.churn.expect("the settled pass answered no total");
+
+    // `arm_settle` rewrites and ticks until the walk actually lands inside the
+    // margin, because a burst whose walk landed late proves nothing.
+    let mut mid_write = None;
+    support::arm_settle(&scratch, &mut frame, 6, 80, |frame| {
+        mid_write = View::collect(frame, &mut highlighter, &history, viewport)
+            .expect("view")
+            .churn;
+    });
+
+    let held = mid_write.expect("a tick inside the margin blanked the total");
+    assert!(
+        held.added > 0 && held.removed > 0,
+        "the held total is empty, so the header would draw the mode word over a          run that has one: {held:?}"
+    );
+    assert_eq!(
+        held.binary, before.binary,
+        "the count of what the total leaves out moved while nothing settled"
+    );
+}
+
+#[test]
+fn a_binary_file_adds_nothing_and_says_nothing() {
+    // It is counted among the changed files and has no lines to contribute, and a
+    // file with no counts must not take the whole total away either.
+    let scratch = Scratch::new("shell-rows-total-binary");
+    scratch.write("src/a.rs", unique("a", 12));
+    scratch.write("assets/blob.bin", [0u8, 1, 2, 3, 0, 5]);
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/a.rs", 3, "a changed");
+    scratch.write("assets/blob.bin", [0u8, 9, 9, 9, 0, 9]);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let view = View::collect(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Viewport {
+            position: Position { file: 0, row: 0 },
+            anchored: false,
+            wrap: false,
+            width: 0,
+            diff_rows: ALL_ROWS,
+            ..Viewport::default()
+        },
+    )
+    .expect("view");
+
+    assert_eq!(frame.files().len(), 2, "the fixture lost one of its files");
+    assert_eq!(
+        claimed(&view),
+        Some((1, 1)),
+        "the binary file moved the total off the one line that changed"
+    );
+    // And it is named, because a total describing one of two changed files and
+    // saying so is the whole of what the count on the left is for.
+    assert_eq!(
+        view.churn.map(|run| run.binary),
+        Some(1),
+        "the binary file is not counted where the header would say so"
+    );
+}
+
 #[test]
 fn a_binary_file_gets_a_reason_instead_of_hunks() {
     // Otherwise it draws as a heading with nothing under it, which reads as a
@@ -692,5 +861,62 @@ fn a_files_block_ends_in_a_blank_row() {
         !matches!(view.rows.last(), Some(Row::Gap)),
         "the stream ends on a blank, so the gap has gone uniform and the bottom \
          of the diff is no longer content"
+    );
+}
+
+#[test]
+fn the_total_holds_when_the_reader_pins_one_file() {
+    // The walk that answers every file's span belongs to the scrollbar's sizing,
+    // and single-file mode skips it because one file's height is all its bar needs.
+    // The run's total is a fact about the run either way.
+    let scratch = Scratch::new("shell-rows-total-pinned");
+    for name in ["a", "b", "c", "d", "e", "f"] {
+        scratch.write(&format!("src/{name}.rs"), unique(name, 12));
+    }
+    scratch.commit_all("baseline");
+    for name in ["a", "b", "c", "d", "e", "f"] {
+        // Two lines longer and one line different: `+3 -1`, so added and removed
+        // are told apart by the numbers rather than only by the field they sit in.
+        scratch.write(&format!("src/{name}.rs"), unique(name, 14));
+        scratch.edit_line(&format!("src/{name}.rs"), 3, "changed");
+    }
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let viewport = |single: bool| Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        wrap: false,
+        width: 0,
+        diff_rows: 8,
+        // Fewer rows than there are changed files, so the list's own walk cannot
+        // stand in for the one the pin skips.
+        list_rows: 2,
+        measured: true,
+        single,
+        ..Viewport::default()
+    };
+
+    // The pinned collect goes first, on a frame nothing else has walked. The other
+    // order proves nothing: the unpinned walk answers every span and the pinned one
+    // then reads a cache it did not fill.
+    let pinned =
+        View::collect(&mut frame, &mut highlighter, &history, viewport(true)).expect("view");
+    assert_eq!(
+        claimed(&pinned),
+        Some((18, 6)),
+        "pinning one file took the run's total off the header"
+    );
+
+    let whole =
+        View::collect(&mut frame, &mut highlighter, &history, viewport(false)).expect("view");
+    assert_eq!(
+        claimed(&whole),
+        Some((18, 6)),
+        "the fixture is not six files of +3 -1"
     );
 }

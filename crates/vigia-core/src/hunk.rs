@@ -171,6 +171,13 @@ pub struct FileSpan {
     pub hunks: u32,
     /// Rows those hunks hold, context included and headers excluded.
     pub lines: u32,
+    /// Lines the working tree side adds, which is the `+` half of what a row
+    /// draws. Zero on a file with no line diff, which is not the same as a file
+    /// that added nothing: [`Self::binary`] and [`Self::unreadable`] are what
+    /// tell those apart.
+    pub added: u32,
+    /// Lines the index side loses, the `-` half.
+    pub removed: u32,
     /// True when either side sniffed as binary, so there are no hunks to draw.
     pub binary: bool,
     /// True when the read this span would have been taken from failed, so the
@@ -188,6 +195,8 @@ impl From<&FileDiff> for FileSpan {
         Self {
             hunks: diff.hunks.len() as u32,
             lines: diff.hunks.iter().map(|hunk| hunk.lines.len() as u32).sum(),
+            added: diff.added,
+            removed: diff.removed,
             binary: diff.binary,
             unreadable: diff.unreadable.is_some(),
             bytes: 0,
@@ -236,11 +245,9 @@ pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
     let bytes = (before.len() + after.len()) as u64;
     if is_binary(before) || is_binary(after) {
         return FileSpan {
-            hunks: 0,
-            lines: 0,
             binary: true,
-            unreadable: false,
             bytes,
+            ..FileSpan::default()
         };
     }
 
@@ -255,12 +262,18 @@ pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
     };
     for group in groups(diff.hunks()) {
         let (old_start, old_end, _, _) = bounds(&group, before_len, after_len);
-        let added: u32 = group
-            .iter()
-            .map(|raw| raw.after.end - raw.after.start)
-            .sum();
+        let (added, removed) = group.iter().fold((0u32, 0u32), |(added, removed), raw| {
+            (
+                added + (raw.after.end - raw.after.start),
+                removed + (raw.before.end - raw.before.start),
+            )
+        });
         span.hunks += 1;
+        // The rows a reader sees: every index-side row of the group, context and
+        // removals alike, and every added row under them.
         span.lines += (old_end - old_start) + added;
+        span.added += added;
+        span.removed += removed;
     }
     span
 }

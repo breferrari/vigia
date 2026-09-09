@@ -14,7 +14,7 @@ use vigia::{
     Chrome, FileEntry, FileNotes, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow,
     Mode, Position, Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
+use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
 
 /// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
 fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
@@ -253,6 +253,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -331,6 +332,7 @@ fn one_file() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -498,6 +500,7 @@ fn nothing_changed() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: Vec::new(),
@@ -557,51 +560,253 @@ fn the_header_says_which_mode_it_is_in() {
     );
 }
 
+/// The foregrounds `needle` was drawn in on row `y`, or `None` where the row does
+/// not carry it. Single-width cells only, which every glyph on a chrome row is.
+fn inks_of(backend: &TestBackend, y: u16, needle: &str) -> Option<Vec<Option<Color>>> {
+    let row = row_text(backend, y);
+    // Chars, not bytes: the header's separator is multi-byte and every glyph on a
+    // chrome row is one column, so a byte offset would read the window one right.
+    let at = row[..row.find(needle)?].chars().count();
+    let buffer = backend.buffer();
+    Some(
+        (at..at + needle.chars().count())
+            .map(|x| {
+                let x = u16::try_from(x).expect("column");
+                buffer[(x, y)].fg
+            })
+            .map(Some)
+            .collect(),
+    )
+}
+
+/// A header fixture whose right-hand side is the only thing that varies.
+fn totalled(churn: Option<(u32, u32)>) -> View {
+    View {
+        churn: churn.map(|(added, removed)| Churn {
+            added,
+            removed,
+            binary: 0,
+        }),
+        ..one_file()
+    }
+}
+
 #[test]
-fn the_header_carries_no_changed_line_total() {
-    // The ruling `SPEC.md` §10 closed with.
-    let backend = screen(80, 6, &glancing(), &chrome());
-    let header = row_text(&backend, 0);
+fn the_right_hand_side_is_the_total_and_the_word_only_where_there_is_none() {
+    let theme = Theme::default();
 
-    // What a header total would have to draw, in either form: the counters' own sigils,
-    // or the bare sum if it dropped them.
-    const TOTALS: [&str; 4] = ["+", "-", "55", "10"];
+    let counted = screen(80, 6, &totalled(Some((1204, 318))), &chrome());
+    let header = row_text(&counted, 0);
+    assert!(
+        header.trim_end().ends_with("+1204 -318"),
+        "a run with a total does not end in it: {header:?}"
+    );
+    assert!(
+        !header.contains("watching"),
+        "the word drew beside a total it is supposed to give the slot up to: \
+         {header:?}"
+    );
+    assert_eq!(
+        inks_of(&counted, 0, "+1204"),
+        Some(vec![theme.added.fg; 5]),
+        "the added half is not in the rows' own green: {header:?}"
+    );
+    assert_eq!(
+        inks_of(&counted, 0, "-318"),
+        Some(vec![theme.removed.fg; 4]),
+        "the removed half is not in the rows' own red: {header:?}"
+    );
 
-    // Guard the fixture, the way [`highlighted`] guards its spans.
-    let worktree = chrome().worktree;
-    for needle in TOTALS {
+    // The author's rule: the side is never blank, so no total means the word.
+    // A run of nothing is not a total, which is what keeps `+0 -0` off an empty
+    // tree's header.
+    for (churn, why) in [
+        (None, "nothing measured yet"),
+        (Some((0, 0)), "a run that adds and removes nothing"),
+    ] {
+        let waiting = screen(80, 6, &totalled(churn), &chrome());
+        let header = row_text(&waiting, 0);
         assert!(
-            !worktree.contains(needle),
-            "the fixture's worktree name {worktree:?} contains {needle:?}, so the \
-             assertion below would read its own left-hand side as a total"
+            header.trim_end().ends_with(" watching"),
+            "with {why} the header does not end in the word: {header:?}"
+        );
+        assert_eq!(
+            inks_of(&waiting, 0, "watching"),
+            Some(vec![theme.chrome_dim.fg; 8]),
+            "with {why} the word is not in the chrome's dim grey: {header:?}"
         );
     }
+}
 
-    // Non-vacuity, and it is what makes the rest worth asserting.
-    let height = backend.buffer().area.height;
-    let body: String = (1..height).map(|y| row_text(&backend, y)).collect();
-    // The two halves separately rather than as one joined string: each is
-    // right-anchored in its own fixed-width column, so how many spaces sit
-    // between them is a property of the pane rather than of the counts.
+/// A header fixture carrying a run that includes `binary` files with no lines.
+fn with_binary(files: usize, binary: usize) -> View {
+    View {
+        files,
+        churn: Some(Churn {
+            added: 1204,
+            removed: 318,
+            binary,
+        }),
+        ..one_file()
+    }
+}
+
+#[test]
+fn the_binary_count_rides_on_the_left_and_leaves_the_total_where_it_was() {
+    // The total is the one thing on this row a reader compares against the rows
+    // below, so nothing may push it off the edge it is measured from. The count of
+    // what the total leaves out is a fact about the tree, and the tree is the left.
+    let plain = row_text(&screen(80, 6, &with_binary(28, 0), &chrome()), 0);
+    let counted = row_text(&screen(80, 6, &with_binary(28, 2), &chrome()), 0);
+
     assert!(
-        body.contains("+42") && body.contains("-7"),
-        "no per-file counter was drawn, so the header's silence proves nothing: \
-         {body:?}"
+        plain.contains("28 changed") && !plain.contains("binary"),
+        "a run with no binary files still said something about them: {plain:?}"
     );
-
-    // And the header is populated, so its silence is about the total rather than
-    // about the row being empty.
     assert!(
-        header.contains(&format!("{worktree}{FACT_JOIN}3 changed")),
-        "header: {header:?}"
+        counted.contains(&format!("28 changed{FACT_JOIN}2 binary")),
+        "the binary count is not beside the count it qualifies: {counted:?}"
     );
-
-    for needle in TOTALS {
+    assert_eq!(
+        plain.len() - plain.trim_end().len(),
+        counted.len() - counted.trim_end().len(),
+        "the binary count moved the total: {plain:?} against {counted:?}"
+    );
+    for header in [&plain, &counted] {
         assert!(
-            !header.contains(needle),
-            "the header drew {needle:?}, which is a changed-line total or half of \
-             one: {header:?}"
+            header.trim_end().ends_with("+1204 -318"),
+            "the total left the right-hand edge: {header:?}"
         );
+    }
+}
+
+#[test]
+fn the_binary_count_is_the_first_fact_a_narrowing_header_gives_up_after_staged() {
+    // It qualifies the count, so it goes before the count does, and after the
+    // staged total, which is about the other run rather than about this one.
+    let view = with_binary(28, 2);
+    let staged = Chrome {
+        staged: Some(3),
+        ..chrome()
+    };
+    let rungs: Vec<String> = (30..=80)
+        .map(|width| row_text(&screen(width, 6, &view, &staged), 0))
+        .collect();
+
+    let holds = |needle: &str| rungs.iter().filter(|row| row.contains(needle)).count();
+    let (changed, binary, staged_count) =
+        (holds("28 changed"), holds("2 binary"), holds("3 staged"));
+    assert!(
+        changed > binary && binary > staged_count && staged_count > 0,
+        "the facts do not drop rightmost first across 30..=80 columns:          changed on {changed}, binary on {binary}, staged on {staged_count}"
+    );
+}
+
+#[test]
+fn a_dead_watch_takes_the_slot_from_the_total() {
+    // A total that cannot update is a number going stale in front of the reader,
+    // so the alert wins even where there is one to draw.
+    let theme = Theme::default();
+    let stopped = Chrome {
+        mode: Mode::Lost,
+        ..chrome()
+    };
+    let backend = screen(80, 6, &totalled(Some((1204, 318))), &stopped);
+    let header = row_text(&backend, 0);
+
+    assert!(
+        header.trim_end().ends_with("not watching"),
+        "a dead watch does not end the header: {header:?}"
+    );
+    assert!(
+        !header.contains("1204") && !header.contains("318"),
+        "the total drew over a dead watch: {header:?}"
+    );
+    assert_eq!(
+        inks_of(&backend, 0, "not watching"),
+        Some(vec![theme.alert.fg; 12]),
+        "a dead watch is not in the alert ink: {header:?}"
+    );
+}
+
+#[test]
+fn a_total_too_wide_for_the_row_falls_to_the_word() {
+    // One rung deeper than the ladder §11.1 already records for the word: the total
+    // is drawn whole or dropped, and what it drops to is the word rather than a
+    // blank side, so a pane too narrow to count still says whether it is live.
+    let wide = totalled(Some((104_233, 98_100)));
+    // Fourteen columns of total against the word's eight, on a five-column worktree.
+    let drawn = |width: u16| row_text(&screen(width, 6, &wide, &chrome()), 0);
+
+    for width in [14u16, 16, 20, 80] {
+        let header = drawn(width);
+        assert!(
+            header.trim_end().ends_with("+104233 -98100"),
+            "at {width} columns the total does not end the row: {header:?}"
+        );
+    }
+    for width in [8u16, 11, 13] {
+        let header = drawn(width);
+        assert!(
+            header.trim_end().ends_with("watching"),
+            "at {width} columns the total does not fit and the word did not take \
+             its place: {header:?}"
+        );
+    }
+    // Below the word's own width the row is the worktree's alone, which is the rung
+    // the ladder already had.
+    for width in [4u16, 7] {
+        let header = drawn(width);
+        assert!(
+            !header.contains("watching") && !header.contains('+'),
+            "at {width} columns something drew on a row that holds neither: {header:?}"
+        );
+    }
+}
+
+#[test]
+fn the_total_is_drawn_whole_where_a_row_would_abbreviate() {
+    // The claim is the difference between the two, not the header alone. A row's
+    // counts cell is five columns and abbreviates past them; the header has no cell
+    // to fit, and precision is the whole point of a total.
+    let mut view = ragged_counts();
+    view.churn = Some(Churn {
+        added: 104_233,
+        removed: 98_100,
+        binary: 0,
+    });
+    listed_mut(&mut view, 0).churn = Some((104_233, 98_100));
+
+    let drawn = screen(120, 8, &view, &chrome());
+    let header = row_text(&drawn, 0);
+    let row = row_text(&drawn, LIST_TOP);
+
+    assert!(
+        header.trim_end().ends_with("+104233 -98100"),
+        "the header abbreviated its total: {header:?}"
+    );
+    assert!(
+        row.contains("+104k") && !row.contains("+104233"),
+        "the row drew its counts whole, so the header has nothing to differ from:          {row:?}"
+    );
+}
+
+#[test]
+fn the_header_is_one_row_whatever_the_total_says() {
+    // The footer once grew a line a frame late off a count the collect produced.
+    // The header is laid out before the total is known, so it can only be filled.
+    for width in [40u16, 80, 120] {
+        let bare = screen(width, 8, &totalled(None), &chrome());
+        for churn in [Some((1, 0)), Some((104_233, 98_100))] {
+            let counted = screen(width, 8, &totalled(churn), &chrome());
+            for y in 1..8 {
+                assert_eq!(
+                    row_text(&counted, y),
+                    row_text(&bare, y),
+                    "at {width} columns a total of {churn:?} moved row {y}"
+                );
+            }
+        }
     }
 }
 
@@ -694,6 +899,7 @@ fn ragged_counts() -> View {
         ],
         list_top: 0,
         current_span: 400,
+        churn: None,
         total_rows: 400,
         rows_above: 0,
         rows: vec![row("src/engine/watch.rs", 139, 131)],
@@ -1577,6 +1783,7 @@ fn a_file_with_no_line_diff_says_why() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -1643,6 +1850,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![file(
@@ -1673,6 +1881,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -1899,6 +2108,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -1935,6 +2145,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -1992,6 +2203,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![line(LineKind::Added, 1234, "let value = compute(input);")],
@@ -2067,6 +2279,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         list: vec![saturated.clone().into(), listed("a.rs", 0, 0).into()],
         list_top: 0,
         current_span: 400,
+        churn: None,
         total_rows: 400,
         rows_above: 0,
         rows: vec![Row::file(saturated)],
@@ -2455,6 +2668,7 @@ fn glancing() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -3050,6 +3264,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         // Tall enough that a scroll inside one file is several rows of bar, which
         // is what makes the within-a-file half of the ruling observable at all.
         current_span: 400,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -3442,6 +3657,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         current_span: 400,
         // A diff far taller than any pane, with the viewport at its top. Gates
         // about where the thumb sits override these two.
+        churn: None,
         total_rows: 400 * files.max(1),
         rows_above: 0,
         rows: vec![
@@ -4665,6 +4881,7 @@ fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestB
 fn a_wash_runs_under_the_scrollbar_column() {
     let width = 64u16;
     let view = View {
+        churn: None,
         total_rows: 400,
         rows_above: 40,
         rows: vec![
@@ -4867,6 +5084,7 @@ fn a_row_washs_modifier_never_reaches_the_scrollbar() {
     use ratatui::style::Modifier;
 
     let view = View {
+        churn: None,
         total_rows: 400,
         rows_above: 40,
         rows: vec![
@@ -4940,6 +5158,7 @@ fn a_bar_styles_own_background_wins_over_the_band() {
         theme: &vigia::Theme,
     ) -> (ratatui::style::Color, ratatui::style::Color) {
         let view = View {
+            churn: None,
             total_rows: 400,
             rows_above: 40,
             rows: vec![
@@ -5373,6 +5592,7 @@ fn the_wash_bleeds_under_the_inset() {
              nothing to be about"
         );
         let view = View {
+            churn: None,
             total_rows: 400,
             rows_above: 40,
             rows: vec![
@@ -6000,6 +6220,7 @@ fn emphasised_view() -> View {
     let text = "    let stale = self.pending.take();";
     let stale = text.find("stale").expect("fixture") as u32;
     View {
+        churn: None,
         total_rows: 400,
         rows_above: 40,
         rows: vec![

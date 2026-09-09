@@ -79,7 +79,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
 ## 👀 Reading the pane
 
 ```
-   header  │  my-repo · 3 changed                                     watching
+   header  │  my-repo · 3 changed                                      +55 -10
            │
      list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
            │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3
@@ -573,7 +573,7 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 **It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, and the status bar.
 
-**The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. **One is left**: the header reads the worktree's name rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree.
+**The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. **Two are left.** The header reads the worktree's name rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree. And its right-hand side counts the run in lines, where the picture puts the mode word: every row carries its own `+42 -7`, so the per-file number is everywhere and the total was nowhere. `watching` draws there when there is nothing to count, and `not watching` whatever else is true.
 
 Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them. **One more came forward in August 2026**: the sparklines are drawn in the cyan the binary has used since the ramp landed rather than the green they were first mocked in, which is the ruling that green already means *added* two rows down.
 

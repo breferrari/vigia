@@ -1809,9 +1809,9 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 385683),
-    ("REVOCATIONS.md", 10220),
-    ("ROADMAP.md", 95873),
+    ("SPEC.md", 383980),
+    ("REVOCATIONS.md", 11910),
+    ("ROADMAP.md", 95860),
     ("RULINGS.md", 98835),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

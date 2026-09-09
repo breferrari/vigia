@@ -386,6 +386,7 @@ fn every_row_kind() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -606,6 +607,7 @@ fn awkward() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -643,6 +645,7 @@ fn empty() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: Vec::new(),
@@ -669,6 +672,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
             .collect(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: (0..n)
@@ -875,6 +879,7 @@ fn glancing() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -2314,6 +2319,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -2450,6 +2456,7 @@ fn a_clipped_content_line_says_it_continues() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        churn: None,
         total_rows: 0,
         rows_above: 0,
         rows: vec![line(LineKind::Removed, 260, text)],
@@ -3453,6 +3460,7 @@ fn overlong(rows: usize) -> View {
         list: vec![entry("src/f.rs").into()],
         list_top: 0,
         current_span: rows,
+        churn: None,
         total_rows: rows,
         rows_above: 0,
         rows: (0..rows)

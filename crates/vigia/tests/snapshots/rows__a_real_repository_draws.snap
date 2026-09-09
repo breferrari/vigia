@@ -2,7 +2,7 @@
 source: crates/vigia/tests/rows.rs
 expression: terminal.backend()
 ---
-" fixture · 2 changed                                   watching "
+" fixture · 2 changed                                      +3 -1 "
 "                                                                "
 "▸A src/added.rs          ■■■■■■■■■■■■ ____________    +2    -0  "
 " M src/lib.rs            ■■■■■■■■■■■■ ____________    +1    -1  "
