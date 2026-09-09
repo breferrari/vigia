@@ -343,19 +343,20 @@ fn flush_right(area: Rect, width: usize) -> Option<Rect> {
     Some(Rect::new(area.x + area.width - width, area.y, width, 1))
 }
 
-/// The columns of `area` a row's glyphs may use on `pane`: inset from the left,
-/// and stopped at the region's own edge or the pane's trailing margin, whichever
-/// comes first. Shared with [`regions`], which publishes it, so the painter and
-/// the pointer cannot come apart on where a row's text ends.
-fn glyph_span(area: Rect, pane: Rect, margins: (u16, u16)) -> Rect {
-    let left = area.x.saturating_add(margins.0);
-    // Through `Rect::right`, which `ratatui` defines as exactly this saturating
-    // add and which this file already calls one region over.
-    let stop = area.right().min(pane.right().saturating_sub(margins.1));
+/// Where a row's glyphs go inside `region`: inset from the left, across the
+/// width the region is planned against. Read by [`regions`], which publishes it,
+/// by `Painter::body`, which draws to it, and through [`planning_width`] by
+/// `Body::diff_width`, which is what the walk wraps a line at.
+///
+/// The bar's reserve is charged whether or not a bar is drawn, and that is not a
+/// rounding: whether one is drawn is decided from the rows the walk produced, and
+/// the walk needs this width to produce them. Charging it only where a bar
+/// appears would make how wide a line wraps a fact about how long the file is.
+fn content_span(region: Rect, pane: Rect) -> Rect {
     Rect {
-        x: left,
-        width: stop.saturating_sub(left),
-        ..area
+        x: region.x.saturating_add(inset_of(pane.width)),
+        width: planning_width(region.width, pane.width, 0),
+        ..region
     }
 }
 
@@ -1862,14 +1863,11 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         view.total_rows as u64,
     );
 
-    // The span `Painter::body` lays the rows out in, so the pointer's gutter target,
-    // the drawn number and the end of a row's text are one geometry.
     let (gutter, text) = if body.diff > 0 && view.files > 0 {
-        let inner = planning_width(areas.diff.width, area.width, 0);
+        let span = content_span(areas.diff, area);
         let digits = view
             .gutter
-            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
-        let span = glyph_span(diff_bar.narrows(areas.diff), area, margins_of(area.width));
+            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(span.width)));
         (
             (
                 span.x,
@@ -2877,18 +2875,6 @@ impl Painter<'_> {
         text_within(area, (self.inset, self.trailing))
     }
 
-    /// The same, for a rect a scrollbar may already have narrowed.
-    fn region_text(&self, area: Rect, pane: Rect) -> Rect {
-        // The two derivations of the margin have to be the same one.
-        debug_assert_eq!(
-            margins_of(pane.width),
-            (self.inset, self.trailing),
-            "a region is being drawn against a different pane than the painter was \
-             built for, so its margin and the chrome's have come apart"
-        );
-        glyph_span(area, pane, (self.inset, self.trailing))
-    }
-
     /// Write `text` at `x`, clipped to `limit` columns, and return the next
     /// column.
     fn put(&mut self, x: u16, y: u16, text: &str, limit: usize, style: Style) -> u16 {
@@ -3662,9 +3648,18 @@ impl Painter<'_> {
 
     /// Draw the body: the pinned list, the rule and the diff.
     fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect, empty: &str) {
-        // Two rects, because this region draws both roles.
+        // `line_row` paints the left bar in `self.inset` and `content_span` insets
+        // from the pane, so a painter built for another pane bars the wrong column.
+        debug_assert_eq!(
+            margins_of(pane.width),
+            (self.inset, self.trailing),
+            "a region is being drawn against a different pane than the painter was \
+             built for, so its margin and the chrome's have come apart"
+        );
+        // Two rects, because this region draws both roles, and the glyphs take the
+        // region before the bar narrowed it: a bar arriving moves no row's edge.
         let washed = full.width;
-        let glyphs = self.region_text(area, pane);
+        let glyphs = content_span(full, pane);
         if view.files == 0 {
             self.put_marked(
                 glyphs.x,
@@ -3676,17 +3671,13 @@ impl Painter<'_> {
             return;
         }
 
-        // The stream's own width rather than the list's: the two regions are different
-        // widths, and `SPEC.md` §11.1 rules they need not align glyph for glyph.
+        // The stream's own width rather than the list's: `SPEC.md` §11.1 rules the
+        // two regions need not align glyph for glyph.
         let shown = usize::from(area.height);
-        let inner = planning_width(full.width, pane.width, 0);
-        let columns = Columns::plan(inner, self.glyphs);
-
-        // The gutter comes from the same width, and that is the fixed-slot ruling one
-        // element over.
+        let columns = Columns::plan(glyphs.width, self.glyphs);
         self.gutter = view
             .gutter
-            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
+            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(glyphs.width)));
 
         // The line row the pointer's gutter mark lands on: the row itself when it is
         // a line, the line a continuation belongs to, and nothing over a heading, a
@@ -3749,14 +3740,11 @@ impl Painter<'_> {
                 }
             };
             match row {
-                // Given the planning width rather than the region's, for
-                // [`Painter::list`]'s reason: the elements are placed from the
-                // right edge, so the edge has to be a fact about the pane too.
                 Row::File(entry) => self.file_row(
                     Rect {
                         y,
                         x: glyphs.x,
-                        width: inner,
+                        width: glyphs.width,
                         ..area
                     },
                     &Heading::of(entry, view.grouped),

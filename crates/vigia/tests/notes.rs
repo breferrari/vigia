@@ -1368,8 +1368,10 @@ fn at_forty_columns_the_box_takes_the_content_width_and_the_label_drops_its_head
 
     // Narrower still, the anchor gives up its word first and keeps its path;
     // `legibility.rs` sweeps the rung below, where the path loses its head the
-    // way a heading's does.
-    let tight = rig.paint(&mut frame, Rect::new(0, 0, 20, 24), Pointing::default());
+    // way a heading's does. Twenty-two columns rather than twenty since the box
+    // stopped being drawn two columns wider than the rows it is built from: this
+    // rung is the same content, read on the pane that now holds it.
+    let tight = rig.paint(&mut frame, Rect::new(0, 0, 22, 24), Pointing::default());
     let y = tight.row_of("margin");
     let rows = tight.box_under(y);
     assert!(rows.len() > 3, "{rows:?}");
@@ -1436,6 +1438,127 @@ fn a_pane_with_no_room_for_the_box_opens_none() {
     let (left, _, _) = roomy.gutter();
     assert!(rig.press_opens(&roomy, left + 1, y));
     assert!(rig.app.box_open());
+}
+
+#[test]
+fn a_notes_body_fills_the_enclosure_it_is_drawn_in() {
+    // Reported on #474 from a fifteen-column pane: the body broke after `checked`
+    // with two columns standing empty at the end of every row, because the wrap
+    // was sized by one expression and the frame by another. Sixty rows so nothing
+    // scrolls, which is the screen the two parted on.
+    let narrow = Rect::new(0, 0, 15, 60);
+    let scratch = fixture("notes-enclosure-fills");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&note("n1", 5, EDITED, BODY)).expect("put");
+    rig.reload();
+    let painted = rig.paint(&mut frame, narrow, Pointing::default());
+    assert!(
+        painted.laid.diff.bar.is_none(),
+        "the fixture scrolls, and a barred screen is where the two expressions \
+         already agreed"
+    );
+    // The line, not the note: the body opens with `checked_mul` too, and a row
+    // anchored on that finds the note's first row instead of the line above it.
+    let y = painted.row_of("margin");
+    let top = painted.text(y + 1);
+    // Columns, not bytes. A corner is three bytes of UTF-8 and so is every rule
+    // between them, so `str::find` measures this enclosure at three times its width.
+    let column = |glyph: char| top.chars().position(|drawn| drawn == glyph);
+    let left = column('┌').unwrap_or_else(|| {
+        panic!(
+            "no enclosure under the line:
+{}",
+            painted.rows().join(
+                "
+"
+            )
+        )
+    });
+    let right = column('┐').expect("the enclosure drew no top-right corner");
+    // The columns between the two rules, less the rule and its space each side.
+    let inner = right - left + 1 - BOX_FRAME;
+    let body = painted.notes_under(y);
+    assert!(
+        body.len() > 2,
+        "the body did not wrap on a fifteen-column pane: {body:?}"
+    );
+
+    // Every row but the last is full: the first word of the row below could not
+    // have stood on it. That is the complaint stated as an assertion, and a blank
+    // column at the end of every row is what fails it.
+    for (n, pair) in body.windows(2).enumerate() {
+        let row = pair[0].trim_end();
+        let word = pair[1]
+            .trim_start()
+            .split(' ')
+            .next()
+            .unwrap_or("")
+            .to_owned();
+        assert!(
+            row.chars().count() + 1 + word.chars().count() > inner,
+            "row {n} of the enclosure holds {row:?} in {inner} columns and broke \
+             before {word:?}, which would have fitted"
+        );
+    }
+}
+
+#[test]
+fn a_pane_that_says_it_has_room_for_a_box_draws_one() {
+    // `notes::has_room` asks the width the pointer is told about and `box_rows`
+    // asks the width the walk wrapped at. A band where the two disagreed let a
+    // press take the keys while nothing on screen said where they had gone,
+    // which is the one thing `has_room`'s own docblock exists to prevent.
+    let scratch = fixture("notes-room-agrees");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+
+    let mut roomy = 0usize;
+    let mut refused = 0usize;
+    for width in 1..=60u16 {
+        let pane = Rect::new(0, 0, width, 24);
+        let painted = rig.paint(&mut frame, pane, Pointing::default());
+        if !has_room(painted.laid) {
+            refused += 1;
+            continue;
+        }
+        let Some(offset) = painted
+            .view
+            .rows
+            .iter()
+            .position(|row| matches!(row, Row::Line { .. }))
+        else {
+            continue;
+        };
+        let y = painted.laid.diff.top + offset as u16;
+        let (left, _, _) = painted.gutter();
+        if !rig.press_opens(&painted, left, y) {
+            continue;
+        }
+        roomy += 1;
+        let opened = rig.paint(&mut frame, pane, Pointing::default());
+        assert!(
+            opened
+                .view
+                .rows
+                .iter()
+                .any(|row| matches!(row, Row::Box { .. })),
+            "at {width} columns the pane said it had room for the box and drew \
+             none of it, so the press took the keys and nothing on screen says so"
+        );
+        rig.app.take_box();
+        rig.box_effect = None;
+    }
+
+    assert!(
+        roomy > 20 && refused > 0,
+        "the sweep opened {roomy} boxes and was refused {refused} times, so it is \
+         not reading both sides of the rung"
+    );
 }
 
 #[test]

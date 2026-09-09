@@ -19,7 +19,13 @@ const BOX_LABEL: &str = "crates/vigia/src/shell.rs:2";
 
 /// The narrowest pane the box draws on: below it the content leaves no column
 /// between the box's own two sides.
-const BOX_FLOOR: u16 = 7;
+///
+/// Nine rather than seven since the row's drawn edge stopped running past the
+/// width its rows were built at. Seven and eight had the pane telling a press it
+/// had room and then drawing nothing, which is the state `has_room` exists to
+/// refuse, and `notes.rs::a_pane_that_says_it_has_room_for_a_box_draws_one`
+/// is what fails if they come back.
+const BOX_FLOOR: u16 = 9;
 use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// The mark meaning "this continues past the right edge".
@@ -86,6 +92,16 @@ fn inset_at(width: u16) -> usize {
 
 /// Columns the scrollbar reserves on the right of every row.
 const BAR_COLUMNS: usize = 2;
+
+/// The columns a row of the diff region gets on a pane this wide: the pane less
+/// its leading inset and the bar's reserve, which is paid whether or not a bar
+/// is drawn. The gates below had three hand-written copies of this subtraction
+/// and every one of them was a column or two out the day the edge moved.
+fn content_room(width: u16) -> usize {
+    usize::from(width)
+        .saturating_sub(inset_at(width))
+        .saturating_sub(BAR_COLUMNS)
+}
 
 /// The narrowest a file row can be and still name its own file.
 const ROW_FLOOR: usize = 2 + 12;
@@ -982,7 +998,7 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             // The sigil and its gap cost two columns beyond the text itself, so
             // a row is clipped once the text reaches `room - 1` rather than
             // `room`.
-            let room = usize::from(width).saturating_sub(margin_at(width));
+            let room = content_room(width);
             // Read as "the text plus the sigil and its gap still fit", which names the
             // two columns instead of leaving a reader to hold two different `+ 1`s
             // twenty lines apart.
@@ -997,10 +1013,7 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             // Non-vacuity that matters more than the usual kind: only the widths
             // where a glyph lands on the final column can lose the mark, so a
             // sweep that never hit one would pass against the defect.
-            let trailing = margin_at(width) - inset_at(width);
-            if Span::raw(row.trim_end_matches(CONTINUES)).width() + 1
-                == usize::from(width) - trailing
-            {
+            if Span::raw(row.trim_end_matches(CONTINUES)).width() + 1 == inset_at(width) + room {
                 saw_swallowable = true;
             }
         }
@@ -1900,9 +1913,9 @@ fn the_empty_state_line_marks_its_edge() {
             "the empty state was cut at {width} columns without saying so: {body:?}"
         );
 
-        // Against the room the line is actually given, which is the pane less the
-        // margin's inset on both sides.
-        if Span::raw(LINE).width() <= usize::from(width).saturating_sub(margin_at(width)) {
+        // Against the room the line is actually given. The empty state is a row of
+        // the diff region and stops where every other row of it stops.
+        if Span::raw(LINE).width() <= content_room(width) {
             fitted += 1;
             assert!(
                 content(body, width).starts_with(LINE),
@@ -2367,10 +2380,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
                 label_is_honest(row, full, width),
                 "{label} was cut at {width} columns without saying so: {row:?}"
             );
-            // The room the row is given, for the reason the empty state's own fit
-            // predicate carries: the margin's inset comes off both sides
-            // first.
-            if Span::raw(full).width() <= usize::from(width).saturating_sub(margin_at(width)) {
+            if Span::raw(full).width() <= content_room(width) {
                 fitted += 1;
                 assert!(
                     content(row, width).starts_with(full),
