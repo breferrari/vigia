@@ -2672,21 +2672,20 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
 
     // The order is the ruling's: the roomy rung where there is room for it, then
     // every row in one column, then the two-column rung that buys height with
-    // width, then the paged rungs, widest row set first.
-    // An unpaged rung is offered with the line and then without, so a pane short
-    // of room gives up the line rather than the shape it had. A paged one is
-    // offered once and weighs the line itself, against its own capacity.
+    // width, then the paged rungs, widest row set first. A rung the line costs a
+    // row is offered with it and then without; the roomy rung once because the
+    // line is free there, and a paged one because it can weigh the line itself.
     let rungs = std::iter::once_with(roomy_fit)
         .chain(
             [true, false]
                 .into_iter()
                 .map(move |said| column_fit(level, 0, true, said)),
         )
-        .chain([0, 1].into_iter().flat_map(|level| {
-            let placed = sheet_beside(level);
+        .chain([0, 1].into_iter().flat_map(|spelling| {
+            let placed = sheet_beside(spelling);
             [true, false]
                 .into_iter()
-                .map(move |said| beside_fit(level, placed, said))
+                .map(move |said| beside_fit(spelling, placed, said))
         }))
         .chain(sets.map(move |(from, mouse)| paged_fit(level, from, mouse, page, capacity, true)));
     for fit in rungs {

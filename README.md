@@ -10,7 +10,7 @@
 
 **Your agent writes in one pane. `vigia` watches in the pane beside it.**
 
-Leave it open. It follows what lands and asks nothing: `?` draws every gesture, and `~/.config/vigia/config` decides what it opens as.
+Leave it open. It follows what lands and asks nothing.
 
 </div>
 
@@ -28,6 +28,7 @@ An agent edits **fast**, **wide**, and while you are reading something else. The
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle, under 5% memory drift over 24 hours |
 | 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging *actions*. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
+| ⌨️ **Nothing to learn first** | `?` draws every gesture the pane binds, over the pane and moving nothing. `~/.config/vigia/config` decides what it opens as |
 
 > [!NOTE]
 > **A monitor, not a reviewer.** A reviewer is something you *launch* per changeset to step through, annotate and decide on. `vigia` is already open. It is closer to `btop` than to a git client: you read it from shape and colour, then glance away.
