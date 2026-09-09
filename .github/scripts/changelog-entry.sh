@@ -56,9 +56,14 @@ fi
 # touches `crates/vigia/tests/package.rs` to move a ceiling. Measured over
 # 0.34.0 to 0.38.0, the path scope kept every document commit in the range.
 #
-# The list is tuned against the 143 subjects this repository had at 0.38.0 and
-# is a heuristic, not a rule: it will pass something internal through, and the
-# cost of that is one odd line in a release note rather than a broken release.
+# The list is tuned against the subjects this repository has and is a heuristic,
+# not a rule, and its two directions do not cost the same. Something internal
+# that slips through is one odd line a reader skims past. A visible change it
+# drops is a reader upgrading into a pane with a key missing and notes saying
+# nothing moved, and nothing downstream can catch that, because the section is
+# the only place the change was ever going to be named. That asymmetry is why
+# the allow pass below wins over this list, and why an emptied range is reported
+# rather than summarised.
 #
 # `token` is bounded the long way round rather than with `\b`, which is a GNU
 # extension that POSIX ERE does not define. The release runs this on one runner
@@ -68,30 +73,82 @@ fi
 internal_prefix='^(roadmap|spec|docs?|ci|chore|deps?|take-next|skill|test|refactor|perf|style|build|process|steering|mockup|harden|release|vault writes)(\([^)]*\))?: '
 internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|written layer|phase [0-9]|the shelf|shelved|readme|claude\.md|clippy|cargo doc|ci complete|workflow|pre-flight|version raise|release note|the release |the bump |(^|[^a-zA-Z])tokens?([^a-zA-Z]|$)|take-next|the skill|the harness|the record|budget table|mutation|audit|ceiling|proposal|declined|adopted|review agent|assertion|the mockup|funding|\.yml|§|^track the |^#[0-9]|^b[0-9]+[ :]|^[0-9]+\.[0-9]+,)'
 
-# `|| true` on both greps, because grep exits 1 when it filters everything out
-# and `set -e` would kill the script on the assignment rather than let the
-# empty case below be handled.
-kept=$(grep -Ev "$internal_prefix" || true)
-kept=$(printf '%s\n' "$kept" | grep -Eiv "$internal_subject" || true)
+# **A subject naming something a reader can press or set survives that list.**
+# The list matches anywhere in a subject, so one internal word decides a whole
+# sentence, and the rule that a revoked ruling is deleted alongside the change it
+# governed makes that sentence ordinary: the subject removing a key names the
+# ruling too. The backticks are what make `single`, `wrap` and `links` safe to
+# name.
+#
+# The character class cannot go stale and the settings are held to `config.rs` by
+# a test. The named keys are typed here, and a new one reaches this file by hand.
+visible_subject='`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|rail|single|staged|wrap|icons|links)`'
 
-# Trailing `(#123)` references are the tracker's, not the reader's. Stripped
-# repeatedly because a merge subject carries the issue's number and the pull
-# request's, and sometimes two issues'.
-entries=$(printf '%s\n' "$kept" \
-    | sed -E 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-    | sed -E 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-    | sed -E 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-    | sed -E 's/[[:space:]]+$//' \
-    | grep -v '^$' \
-    | sed -E 's/^/- /' \
-    || true)
+# Read once, because the emptied-range branch below writes the range out and
+# cannot go back to stdin for it.
+subjects=$(cat)
 
-# **An empty section is written rather than skipped, and it says so.** A version
-# with no section makes `dist` fall back to the install instructions alone, with
-# no warning anywhere, so the release that had nothing to report and the release
-# whose notes were lost look identical to a reader. This tells them apart.
+# `|| true` on the grep, because it exits 1 when it filters everything out and
+# `set -e` would kill the script on the assignment rather than let the empty
+# case below be handled.
+#
+# The second pass is `awk` rather than a second `grep` because its rule is a
+# conjunction, dropping a subject the list matches and the allow pass does not,
+# and splitting that over two greps would reorder the range, which is written
+# newest first. The patterns reach it through the environment rather than `-v`,
+# for the reason the entries do below: `-v` interprets backslash escapes, and
+# both patterns carry `\.`.
+kept=$(printf '%s\n' "$subjects" | grep -Ev "$internal_prefix" || true)
+kept=$(printf '%s\n' "$kept" | INTERNAL="$internal_subject" VISIBLE="$visible_subject" awk '
+    $0 ~ ENVIRON["VISIBLE"] { print; next }
+    tolower($0) ~ ENVIRON["INTERNAL"] { next }
+    { print }
+')
+
+# **Every subject the filter drops is named in the run's log.** A drop is
+# invisible everywhere else: the section is the only place the change was going
+# to appear, so a range that keeps nine subjects and loses the tenth reads as a
+# complete section, and the emptied-range branch below cannot see that case.
+#
+# Matched whole rather than by pattern, because a subject carrying `?` or `[` is
+# a subject about a key and `case` would read those as globs.
+printf '%s\n' "$subjects" | KEPT="$kept" awk '
+    BEGIN { n = split(ENVIRON["KEPT"], k, "\n"); for (i = 1; i <= n; i++) keep[k[i]] = 1 }
+    NF && !($0 in keep) { print "::notice::filtered as internal: " $0 }
+'
+
+# Trailing `(#123)` references are the tracker's, not the reader's. The loop
+# peels them one at a time because a merge subject carries the issue's number
+# and the pull request's, and sometimes two issues'.
+strip_references() {
+    sed -E -e :a \
+           -e 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
+           -e ta \
+           -e 's/[[:space:]]+$//' \
+        | grep -v '^$' \
+        || true
+}
+
+entries=$(printf '%s\n' "$kept" | strip_references | sed -E 's/^/- /')
+
+# **An empty section is written rather than skipped, and an emptied range says
+# what it held.** A version with no section makes `dist` fall back to the
+# install instructions alone, with no warning anywhere, so the release that had
+# nothing to report and the release whose notes were lost look identical to a
+# reader. A sentence claiming nothing moved does not tell them apart either: it
+# is a conclusion drawn from a word list's silence over free prose, and twice in
+# this repository's releases that list emptied a range because a subject named a
+# key and a ruling in one breath. So the range is written out instead, and the
+# reader has the thing the filter could not see.
 if [ -z "$entries" ]; then
-    entries="- Internal changes only. Nothing a user of the pane can see moved."
+    range=$(printf '%s\n' "$subjects" | strip_references | sed -E 's/^/  - /')
+    if [ -z "$range" ]; then
+        entries="- No commit sits between this release and the one before it."
+    else
+        entries=$(printf '%s\n%s\n' \
+            "- Nothing in this release's commits matched what a reader of the pane can see. That is as likely to be this filter dropping a change as a release with nothing in it, so every commit in the range is listed here unfiltered rather than summarised:" \
+            "$range")
+    fi
 fi
 
 # Written above the newest existing section, so the file stays newest first.

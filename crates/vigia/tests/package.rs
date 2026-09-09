@@ -1708,9 +1708,17 @@ fn the_bump_writes_the_changelog_it_publishes() {
 }
 
 /// Drives the generator against fixed subjects, in a scratch directory of its
-/// own. Returns whether it passed and the file it left behind.
+/// own. Returns whether it passed, the file it left behind, and what it said.
+///
+/// Read to end rather than waited on, because with the log captured a `wait`
+/// would block on a pipe nothing is draining.
 #[cfg(unix)]
-fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -> (bool, String) {
+fn changelog_entry(
+    case: &str,
+    version: &str,
+    subjects: &str,
+    changelog: &str,
+) -> (bool, String, String) {
     use std::io::Write;
     use std::process::Stdio;
 
@@ -1726,6 +1734,7 @@ fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -
         .arg("2026-01-01")
         .arg(&path)
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
     child
@@ -1734,11 +1743,15 @@ fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -
         .expect("the child's stdin is a pipe")
         .write_all(subjects.as_bytes())
         .expect("the subjects reach the script");
-    let passed = child.wait().expect("the script exits").success();
+    let out = child.wait_with_output().expect("the script exits");
 
     let left = read(&path);
     let _ = std::fs::remove_dir_all(&dir);
-    (passed, left)
+    (
+        out.status.success(),
+        left,
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
 }
 
 /// The generator keeps what a reader of the pane can see and drops the rest.
@@ -1746,8 +1759,9 @@ fn changelog_entry(case: &str, version: &str, subjects: &str, changelog: &str) -
 /// The filter is the only part of the release that decides what a user is
 /// told, and it is a heuristic over commit subjects, so it is driven here
 /// rather than trusted. One subject of each class it sorts on: prefixed
-/// internal work, unprefixed internal work naming a document, and two changes
-/// a reader can observe, whose trailing references belong to the tracker and
+/// internal work, unprefixed internal work naming a document, a subject whose
+/// visible half shares a sentence with an internal word, and two changes a
+/// reader can observe, whose trailing references belong to the tracker and
 /// come off.
 #[cfg(unix)]
 #[test]
@@ -1756,9 +1770,10 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 
     let subjects = "roadmap: a row moves\n\
                     The roadmap marks a row done (#449)\n\
+                    `Esc` closes the sheet, and the ruling that said otherwise is revoked (#394)\n\
                     `w` wraps a long line, capped at two (#272) (#344)\n\
                     The pane stops showing what is no longer there (#340) (#341)\n";
-    let (passed, left) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
+    let (passed, left, _) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
     assert!(
         passed,
         "the generator refused a section it can write:\n{left}"
@@ -1773,33 +1788,139 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
     assert_eq!(
         written,
         [
+            "- `Esc` closes the sheet, and the ruling that said otherwise is revoked",
             "- `w` wraps a long line, capped at two",
             "- The pane stops showing what is no longer there",
         ],
         "the generator kept the wrong subjects:\n{left}"
     );
 
-    // Nothing a reader can see is not the same as no section at all, and the
-    // difference is the whole reason this writes one: a missing section makes
-    // dist fall back to the install instructions without saying so.
-    let (passed, left) = changelog_entry("internal", "0.3.0", "roadmap: a row moves\n", BEFORE);
-    assert!(
-        passed,
-        "the generator refused an all-internal range:\n{left}"
-    );
-    assert!(
-        left.contains("## [0.3.0]") && left.contains("Internal changes only"),
-        "an all-internal range left no section, so the release would fall back to \
-         the install instructions in silence:\n{left}"
-    );
-
     // A section already written is the better text, so it is not overwritten.
     // A re-run of a release reaches this, and so does a section written by
     // hand.
-    let (passed, left) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
+    let (passed, left, _) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
     assert!(
         !passed && left == BEFORE,
         "the generator overwrote a section that was already written:\n{left}"
+    );
+}
+
+/// A range the filter empties is reported, not summarised as nothing moving.
+///
+/// A sentence saying nothing moved is a conclusion drawn from a word list's
+/// silence over free prose, and the section is the only place the change was
+/// ever going to be named, so nothing downstream can catch it being wrong. The
+/// range itself is what is honest to write: a reader who can see the change the
+/// filter could not is then looking at it.
+///
+/// The section still has to exist, because a missing one makes `dist` fall back
+/// to the install instructions with no warning anywhere.
+#[cfg(unix)]
+#[test]
+fn the_changelog_entry_reports_an_empty_result_rather_than_asserting_it() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let subjects = "The masthead is removed, and the ruling that kept it is revoked (#462)\n\
+                    roadmap: a row moves\n";
+    let (passed, left, _) = changelog_entry("empty", "0.3.0", subjects, BEFORE);
+    assert!(
+        passed,
+        "the generator refused a range it had dropped everything from:\n{left}"
+    );
+    assert!(
+        left.contains("## [0.3.0]"),
+        "a range the filter emptied left no section, so the release would fall \
+         back to the install instructions in silence:\n{left}"
+    );
+
+    for subject in [
+        "The masthead is removed, and the ruling that kept it is revoked",
+        "roadmap: a row moves",
+    ] {
+        assert!(
+            left.contains(subject),
+            "the section does not carry {subject:?}, so a reader is told what the \
+             filter concluded and never shown what it read:\n{left}"
+        );
+    }
+    assert!(
+        !left.contains("Nothing a user of the pane can see moved"),
+        "the section still asserts nothing moved, over a range whose one commit \
+         removed a key and its setting:\n{left}"
+    );
+}
+
+/// The generator names every subject it drops, in the log of the run that drops
+/// it.
+///
+/// A drop is invisible everywhere else. The section is the only place the change
+/// was going to appear, so a range that keeps nine subjects and loses the tenth
+/// reads as a complete section, and the branch above cannot see that case.
+///
+/// The kept subject is asserted absent as well, because a log naming the whole
+/// range would satisfy the other half while reporting no decision at all.
+#[cfg(unix)]
+#[test]
+fn the_changelog_entry_names_every_subject_it_drops() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let subjects = "roadmap: a row moves\n\
+                    The roadmap marks a row done (#449)\n\
+                    The pane stops showing what is no longer there (#340)\n";
+    let (passed, left, said) = changelog_entry("dropped", "0.2.0", subjects, BEFORE);
+    assert!(
+        passed,
+        "the generator refused a section it can write:\n{left}"
+    );
+
+    for dropped in [
+        "roadmap: a row moves",
+        "The roadmap marks a row done (#449)",
+    ] {
+        assert!(
+            said.contains(&format!("filtered as internal: {dropped}")),
+            "the run's log does not name {dropped:?}, so a release that loses one \
+             line out of ten loses it in silence:\n{said}"
+        );
+    }
+    assert!(
+        !said.contains("The pane stops showing"),
+        "the log names a subject the filter kept, so it reports the range rather \
+         than the decision:\n{said}"
+    );
+}
+
+/// Every config key reaches the filter that decides what a release says.
+///
+/// That filter keeps a subject naming something a reader can press or set, and
+/// it names the settings literally. A key added to the config and not to the
+/// pattern is a change a reader can make in their own file and never be told
+/// about, on any release whose subject also carries an internal word.
+///
+/// The assignment line is read alone rather than the whole script, because the
+/// prose above it names the settings too and would satisfy a search over the
+/// file.
+#[test]
+fn every_config_key_reaches_the_changelog_filter() {
+    let script = repo_file(".github/scripts/changelog-entry.sh");
+    let pattern = script
+        .lines()
+        .find(|line| line.starts_with("visible_subject="))
+        .expect("changelog-entry.sh assigns visible_subject");
+
+    // Split on the alternation's own punctuation, so a key that is merely a
+    // substring of another alternative does not count as named.
+    let named: Vec<&str> = pattern.split(['|', '(', ')']).collect();
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
+        .filter(|key| !named.contains(key))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the release notes filter does not name {}, so a subject changing only \
+         that setting is dropped whenever it shares a sentence with an internal \
+         word:\n{pattern}",
+        missing.join(" or ")
     );
 }
 
@@ -1811,7 +1932,7 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 384037),
     ("REVOCATIONS.md", 11910),
-    ("ROADMAP.md", 95439),
+    ("ROADMAP.md", 95149),
     ("RULINGS.md", 99141),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
