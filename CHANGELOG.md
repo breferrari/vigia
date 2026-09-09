@@ -4,6 +4,14 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.44.0] - 2026-09-09
+
+- A subject naming a key survives the notes filter, and an emptied range says what it held
+- The displaced binary has one name, and vigia deletes it
+- A row's frame is drawn to the width its text was wrapped at
+- The Windows upgrade moves the held binary aside rather than stopping the servers
+- The header's total counts in the columns the rows count in
+
 ## [0.43.0] - 2026-09-09
 
 - The header's right-hand side counts the run in lines
