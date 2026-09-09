@@ -1485,6 +1485,11 @@ fn a_notes_body_fills_the_enclosure_it_is_drawn_in() {
     // per-row check cannot say so: this body wraps inside `checked_mul`, where
     // there is no space, so "the next word would have fitted" is never false there
     // whatever the wrap was sized at.
+    //
+    // `BODY`'s longest word being wider than the box is what makes this exact
+    // rather than a floor: a body whose words all fit would wrap on spaces and
+    // leave every row legitimately short, and `widest == inner` would then fail a
+    // correct wrap.
     let widest = body
         .iter()
         .map(|row| row.trim_end().chars().count())

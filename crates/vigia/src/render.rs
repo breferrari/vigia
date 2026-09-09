@@ -345,8 +345,8 @@ fn flush_right(area: Rect, width: usize) -> Option<Rect> {
 
 /// Where a row's glyphs go inside `region`: inset from the left, across the
 /// width the region is planned against. Read by [`regions`], which publishes it,
-/// by `Painter::body`, which draws to it, and through [`planning_width`] by
-/// `Body::diff_width`, which is what the walk wraps a line at.
+/// by `Painter::body`, which draws to it, and by `Body::split` for
+/// [`Body::diff_width`], which is what the walk wraps a line at.
 ///
 /// The bar's reserve is charged whether or not a bar is drawn, and that is not a
 /// rounding: whether one is drawn is decided from the rows the walk produced, and
@@ -869,8 +869,8 @@ impl Bar {
             width: at.width,
             track: self.track(at.y, at.height),
             // The rect's own right edge, which is where `Painter::scrollbar` draws: it
-            // takes the region before `with_bar` narrows it and draws down the right of
-            // what it was given.
+            // takes the region before anything could narrow it and draws down the
+            // right of what it was given.
             bar: self.drawn().then(|| bar_column(at)),
             // `regions` fills the diff's from the rows it laid out.
             gutter: (0, 0),

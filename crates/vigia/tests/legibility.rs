@@ -3304,12 +3304,12 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
 
 #[test]
 fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
-    // The chrome's margin, which is the only trailing margin left: the header and
-    // the footer stand back from both edges, and a diff row stops at the bar's
-    // reserve, which is never the narrower of the two. So the rows that stand
-    // exactly on the margin here are the chrome's, and the diff's own edge is
-    // gated by `render.rs::the_width_a_row_wraps_at_is_the_width_it_is_drawn_across`
-    // and by `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge`.
+    // Both surfaces reach the margin from eighty columns up, where the bar's
+    // reserve and the trailing margin are the same two columns. Below eighty the
+    // reserve is the wider of the two, so only the chrome stands on the margin
+    // there and a diff row stops short of it. The diff's own edge is gated by
+    // `render.rs::the_width_a_row_wraps_at_is_the_width_it_is_drawn_across` and by
+    // `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge`.
     let long = "        for change in self.changes() { ".repeat(8);
     let view = View {
         // No total reported, so `scrollable` is false and no bar is drawn at any width.

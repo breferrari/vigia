@@ -5889,6 +5889,13 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
     // Past the rail's own arrival width as well as under it. Beside a rail the diff
     // region does not begin at column zero, which is the one shape where the span's
     // origin and its width are not the same subtraction twice.
+    //
+    // The views carry a list, which is what pairs `body_layout` and `regions` the
+    // way `lib.rs` does: `view::list_rows_wanted` is the file count plus its run
+    // separators, and a rail needs a file, so the two never disagree about whether
+    // there is a list. A hand-built view with a rail and an empty list parts them by
+    // seventy columns, through `Body::clamped_to`'s rail arm, and is a shape the
+    // shell cannot build.
     let railed = Chrome {
         rail: true,
         ..chrome()
