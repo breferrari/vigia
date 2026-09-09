@@ -118,7 +118,7 @@ pub fn candidate_keys() -> Vec<KeyEvent> {
 }
 
 /// Where a gesture's launch state is set, as the reason it is or is not a key of
-/// this file.
+/// the view-defaults config file.
 #[derive(Debug)]
 pub enum Place {
     /// The file's own key for it, which `config::KEYS` has to carry, beside the
@@ -140,10 +140,11 @@ pub enum Place {
 
 /// Where each action's launch state is set.
 ///
-/// Exhaustive, with no wildcard arm, and that is the gate rather than the tests
-/// below: a gesture added later stops this file compiling until somebody has said
-/// which of the three it is. `sheet.rs::reach_of` holds the gestures sheet the
-/// same way, one surface over.
+/// Exhaustive, with no wildcard arm, and that is the gate rather than any
+/// assertion over it: a gesture added later stops this module compiling, and with
+/// it every binary that reads it, until somebody has said which of the three it
+/// is. `sheet.rs::reach_of` holds the gestures sheet the same way, one surface
+/// over.
 pub fn place_of(action: &Action) -> Place {
     match action {
         // The gestures sheet's `view` section once follow is taken out of it.
