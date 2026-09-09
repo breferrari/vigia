@@ -58,6 +58,26 @@ vigia --version          # or -V. It is the only option there is
 ```
 
 <details>
+<summary><b>Upgrading on Windows, and <code>Access is denied. (os error 5)</code></b></summary>
+
+<br>
+
+Windows will not let anything replace a running `.exe`, and the `vigia mcp` you register below runs for as long as each agent session does. So an upgrade fails while any session is open, naming only cargo and a path: nothing in the error connects a diff monitor's upgrade to a coding agent that started hours earlier. `cargo install` and the PowerShell installer both write to the same directory, so both fail this way. Move the running binary aside and the upgrade goes through, with every open session still served:
+
+```powershell
+$bin = if ($env:CARGO_HOME) { "$env:CARGO_HOME\bin" } else { "$env:USERPROFILE\.cargo\bin" }
+Remove-Item "$bin\vigia.exe.old-*" -Force -ErrorAction SilentlyContinue
+Move-Item "$bin\vigia.exe" "$bin\vigia.exe.old-$(Get-Date -Format yyyyMMddHHmmss)"
+cargo install vigia
+```
+
+A running process follows its image through a rename, so the servers keep answering and the notes they hold are untouched. The leftover is locked until the last session that started before the upgrade closes, and the second line sweeps it on the next upgrade, so nothing accumulates.
+
+**Do not stop the processes instead.** That frees the same path and splits every session that is open: the socket rung goes on delivering your notes, the MCP half does not come back, and the agent reads a note it no longer has the tools to answer. A failed upgrade tells you what is wrong. That does not.
+
+</details>
+
+<details>
 <summary><b>Targets, static linking and the no-C-toolchain rule</b></summary>
 
 <br>

@@ -2083,3 +2083,32 @@ fn the_written_layer_stays_under_its_budget() {
          ruling moving house."
     );
 }
+
+/// The upgrade the README teaches a Windows reader moves the binary aside.
+///
+/// The assertion that matters is the absence. Stopping the servers frees the
+/// same path, so it reads like the obvious fix and was this defect's first
+/// workaround, which is exactly why a later edit would reach for it again.
+#[test]
+fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
+    // Both ends bounded, and to the block rather than the file: stopping a hung
+    // pane is fair advice elsewhere, and it is only the upgrade that must not
+    // reach for it.
+    let block = repo_file("README.md")
+        .split_once("<summary><b>Upgrading on Windows")
+        .and_then(|(_, rest)| rest.split_once("</details>"))
+        .map(|(block, _)| block.to_owned())
+        .expect("README.md tells a Windows reader how to upgrade under an open session");
+
+    assert!(
+        block.contains("Move-Item") && block.contains("vigia.exe"),
+        "the upgrade no longer moves vigia.exe aside, so it no longer frees the \
+         path by renaming:\n{block}"
+    );
+    assert!(
+        !block.contains("Stop-Process"),
+        "the upgrade tells a reader to stop the servers. That frees the path and \
+         leaves every open session half-connected, which is the worse of the two \
+         failures and the one no surface explains."
+    );
+}
