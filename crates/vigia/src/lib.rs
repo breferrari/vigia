@@ -224,7 +224,9 @@ pub fn arm_frame(frame: &mut vigia_core::Frame, config: &crate::Config) {
 ///
 /// `held` is the resolution the shell keeps: re-resolving every frame would put a
 /// revision walk on the frame path I9 pays for, and a base that moved under a
-/// reader is a diff that changed while the tree did not. A refusal keeps nothing.
+/// reader is a diff that changed while the tree did not. A refusal keeps nothing,
+/// and neither does a walk that fails on what this handed back, so a branch
+/// rewritten under a pane that has been open for days is not a dead end.
 ///
 /// # Errors
 ///
@@ -1114,6 +1116,12 @@ impl Shell {
             Ok(()) => self.app.stood(),
             Err(e) => {
                 self.app.warn(e.to_string());
+                // Taken again on the next press rather than replayed. A branch
+                // this pane resolved hours ago can be rebased, amended or
+                // collected out from under it, and a kept base the object
+                // database no longer has fails identically for as long as the
+                // process lives.
+                self.branch_point = None;
                 self.app
                     .stands(!matches!(previous, vigia_core::Standing::Current));
                 frame.stand(previous);
@@ -1922,6 +1930,62 @@ mod tests {
             collect < retire,
             "the wash is retired before the collect that decides whether it resolved \
              to anything, so it is judged on the frame before this one"
+        );
+    }
+
+    /// The rules the standing toggle keeps, read rather than driven.
+    ///
+    /// `Shell` is private and holds a terminal, so nothing here can press `b`, and
+    /// a gate reaching `App` alone proves only that `App` does what it is told.
+    #[test]
+    fn the_pane_moves_on_the_walk_and_not_on_the_press() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let stand = shipped
+            .split("fn stand(&mut self")
+            .nth(1)
+            .expect("`Shell::stand` is gone");
+        let stand = stand
+            .split("\n    }\n")
+            .next()
+            .expect("`stand` never closes");
+        for rule in [
+            // The move belongs to the walk that succeeded.
+            "Ok(()) => self.app.stood(),",
+            // A failed one puts the request, the frame and the base back.
+            "frame.stand(previous);",
+            "stands(!matches!(previous, vigia_core::Standing::Current));",
+            "self.branch_point = None;",
+            // A branch with nothing to measure from says so and stays put.
+            "self.app.stands(false);",
+            // Answered from state, because a list of the actions goes stale.
+            "if self.app.standing() == parked {",
+        ] {
+            assert!(
+                stand.contains(rule),
+                "`{rule}` is gone from `Shell::stand`, so the pane moves on a press \
+                 that resolved nothing, or keeps a token the body is not drawing"
+            );
+        }
+        // And it is asked after every action rather than for a named one: a list
+        // of the gestures that move the pane is a list that goes stale.
+        let apply = shipped
+            .split("fn apply(\n")
+            .nth(1)
+            .expect("`Shell::apply` is gone");
+        let apply = apply
+            .split("\n    }\n")
+            .next()
+            .expect("`apply` never closes");
+        assert!(
+            apply.contains("self.stand(frame, worktree);"),
+            "`Shell::apply` no longer asks where the pane should stand, so `b` \
+             flips a flag nothing acts on"
+        );
+        assert!(
+            !apply.contains("== Action::ToggleStanding"),
+            "`Shell::apply` names the gesture that moves the pane, which is the \
+             list `Shell::stand` answers from state to avoid"
         );
     }
 
