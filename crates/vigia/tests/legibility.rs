@@ -306,6 +306,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// The base fixture, and its worktree name is load bearing.
 fn chrome() -> Chrome {
     Chrome {
+        position: "current".to_owned(),
         pressed: None,
         gripped: None,
         hovered: None,
@@ -1087,7 +1088,16 @@ fn the_header_ladder_keeps_the_mode_word_last() {
                 files,
                 ..every_row_kind()
             };
-            let full = format!("{}{FACT_JOIN}{files} changed", chrome.worktree);
+            // Two whole clauses now, not one. The widest rung carries the
+            // position token between the name and the count; the rung under it
+            // is today's clause, because a token reading `current` is the first
+            // thing a narrowing header gives up. Either is whole; anything else
+            // is a count that was cut.
+            let full = format!(
+                "{}{FACT_JOIN}{}{FACT_JOIN}{files} changed",
+                chrome.worktree, chrome.position
+            );
+            let without = format!("{}{FACT_JOIN}{files} changed", chrome.worktree);
             let (mut saw_both, mut saw_word_only, mut saw_neither) = (false, false, false);
 
             for width in WIDTHS {
@@ -1114,9 +1124,9 @@ fn the_header_ladder_keeps_the_mode_word_last() {
                         "at {width} columns the count outlived {word:?}: {header:?}"
                     );
                     // The count is never cut, and this is where that is caught.
-                    assert_eq!(
-                        left, full,
-                        "at {width} columns the left-hand side is neither the whole \
+                    assert!(
+                        left == full || left == without,
+                        "at {width} columns the left-hand side is neither a whole \
                      clause nor the name alone: {header:?}"
                     );
                     saw_both = true;
@@ -1170,6 +1180,12 @@ fn the_header_count_sits_with_the_worktree_at_every_width() {
 
     for chrome in [chrome(), lost()] {
         let joined = format!("{}{FACT_JOIN}", chrome.worktree);
+        // Nothing is drawn *beside* the count, meaning the mode word on its
+        // right. Its left carries the branch, and now the position token.
+        let through_token = format!(
+            "{}{FACT_JOIN}{}{FACT_JOIN}",
+            chrome.worktree, chrome.position
+        );
         for width in WIDTHS {
             let header = rows_at(width, 8, &view, &chrome)[0].clone();
             // The count is the only number the header can draw: there is no
@@ -1180,10 +1196,11 @@ fn the_header_count_sits_with_the_worktree_at_every_width() {
                 continue;
             };
             saw_the_count += 1;
+            let head = &header[..at];
             assert!(
-                header[..at].ends_with(&joined),
+                head.ends_with(&joined) || head.ends_with(&through_token),
                 "at {width} columns the count is not joined to the worktree \
-                 name: {header:?}"
+                 name, through the position token or directly: {header:?}"
             );
         }
     }

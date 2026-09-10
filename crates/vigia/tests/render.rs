@@ -162,6 +162,7 @@ fn text_rows(drawn: &ratatui::backend::TestBackend, width: u16, height: u16) -> 
 
 fn chrome() -> Chrome {
     Chrome {
+        position: "current".to_owned(),
         pressed: None,
         gripped: None,
         hovered: None,
@@ -906,11 +907,17 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                      joined to the fact before it: {header:?}"
                 );
 
-                // The count is drawn, and it is drawn against the worktree name.
+                // The count is drawn against the worktree name, and the
+                // position token is the one thing that may come between.
+                let beside = format!("{worktree}{FACT_JOIN}{files} changed");
+                let through = format!(
+                    "{worktree}{FACT_JOIN}{}{FACT_JOIN}{files} changed",
+                    chrome().position
+                );
                 assert!(
-                    header.contains(&format!("{worktree}{FACT_JOIN}{files} changed")),
-                    "at {width} columns the count is not beside the worktree: \
-                     {header:?}"
+                    header.contains(&beside) || header.contains(&through),
+                    "at {width} columns the count is not beside the worktree, \
+                     through the position token or directly: {header:?}"
                 );
 
                 // And the mode word ends the row, with blank before it, which is what
@@ -1596,7 +1603,13 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
         ..one_file()
     };
     let theme = Theme::default();
-    let clause = format!("{}{FACT_JOIN}3 changed", chrome().worktree);
+    // The clause the header draws: name, position token, count. One weight
+    // covers all three.
+    let clause = format!(
+        "{}{FACT_JOIN}{}{FACT_JOIN}3 changed",
+        chrome().worktree,
+        chrome().position
+    );
 
     // Non-vacuity first. If the two chrome styles were equal, every assertion
     // below would hold against a renderer that drew the clause in either, and
@@ -1718,7 +1731,7 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         for width in 1..=120u16 {
             let header = row_text(&screen(width, 8, &view, &nameless), 0);
             assert!(
-                !header.contains(FACT_JOIN.trim()),
+                !header.trim_start().starts_with(FACT_JOIN.trim()),
                 "at {width} columns a {label} worktree name put a separator on \
                  the header with nothing for it to join: {header:?}"
             );
@@ -1826,11 +1839,23 @@ fn a_detached_head_names_no_branch_anywhere() {
         content(row_text(&backend, 1).trim_end(), 80),
         "no unstaged changes"
     );
-    assert!(
-        !row_text(&backend, 0).contains(FACT_JOIN),
-        "a detached head drew a second header fact, so a branch was invented: \
-         {:?}",
-        row_text(&backend, 0)
+    // Read as a set of facts rather than as the absence of a separator: the
+    // position token is a header fact of its own now, so a header with nothing
+    // joined to the name is no longer what a detached head looks like.
+    let header = row_text(&backend, 0);
+    let facts: Vec<&str> = header
+        .trim()
+        .split("  ")
+        .next()
+        .unwrap_or_default()
+        .split(FACT_JOIN.trim())
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        facts.as_slice(),
+        ["vigia", "current"],
+        "a detached head drew a header fact that is neither the worktree nor \
+         where it stands, so a branch was invented: {header:?}"
     );
 }
 

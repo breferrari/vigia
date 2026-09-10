@@ -10,7 +10,7 @@ use gix::ObjectId;
 /// stood in the working tree because there was no term for standing anywhere
 /// else.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum Position {
+pub enum Standing {
     /// The working tree against the index, which is the pane a reader has today.
     ///
     /// Not spelled `HEAD`: the live view is ahead of it, so that label would name
@@ -27,7 +27,7 @@ pub enum Position {
     },
 }
 
-impl Position {
+impl Standing {
     /// The word the header draws after the branch.
     #[must_use]
     pub fn label(&self) -> String {

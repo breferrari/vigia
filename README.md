@@ -242,6 +242,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `s` | one file, or the whole diff |
 | `o` | the file list and its numbers, with no diff under it |
 | `a` | show or hide staged changes |
+| `b` | stand at the branch point, or back at the live pane |
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide the note rows |
 | `Enter` `Esc` | in the note box: send the note, or close it and send nothing |

@@ -2,7 +2,7 @@
 source: crates/vigia/tests/render.rs
 expression: "screen(40, 6, &view, &diagnostics_chrome())"
 ---
-"vigia · 1 changed               watching"
+"vigia · current · 1 changed     watching"
 "M …src/frame.rs               +3    -1  "
 "@@ -258,7 +258,9 @@                     "
 "────────────────────────────────────────"

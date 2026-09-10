@@ -449,6 +449,9 @@ const FOLLOW_MARK: char = '▶';
 /// What joins two facts drawn on one line.
 const FACT_SEPARATOR: &str = " · ";
 
+/// What the position token reads on the pane every reader already has.
+const CURRENT: &str = "current";
+
 /// What the body says when there is no diff at all.
 const NOTHING_CHANGED: &str = "no unstaged changes";
 
@@ -486,6 +489,8 @@ pub struct Chrome {
     pub worktree: String,
     /// The branch the empty state names, when there is one.
     pub branch: Option<String>,
+    /// Where in the history the pane is standing, as the token draws it.
+    pub position: String,
     /// How many files the staged run holds, or `None` when it is not drawn.
     pub staged: Option<usize>,
     /// How many changes the run that is not drawn holds.
@@ -744,6 +749,7 @@ fn facts_of(files: usize, binary: usize, hidden: usize, staged: Option<usize>) -
 fn header_left(
     worktree: &str,
     branch: Option<&str>,
+    position: &str,
     files: usize,
     binary: usize,
     hidden: usize,
@@ -755,16 +761,20 @@ fn header_left(
     // The branch is drawn always, rather than on the empty state alone.
     let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
 
-    // A separator is owed only between two facts that are both there, which
-    // is [`FACT_SEPARATOR`]'s rule and the reason the name is measured rather
-    // than tested for emptiness: a worktree
-    // called `a zero-width space` is a non-empty string that draws nothing, and joining it
-    // would head the pane with a leading separator.
+    // A separator is owed only between two facts that are both there, which is
+    // [`FACT_SEPARATOR`]'s rule and the reason the name is measured rather than
+    // tested for emptiness: a worktree called `a zero-width space` is a non-empty
+    // string that draws nothing, and joining it would lead the pane with a separator.
     let visible = worktree.trim().replace(|c: char| c.is_control(), "");
     let name = (width_of(&visible) != 0).then_some(worktree);
+    // `current` names the pane a reader already has, so the token drops first; say
+    // anything else and it drops last, a count without it reading as the live tree's.
+    let standing = (!position.is_empty()).then_some(position);
+    let default_standing = position == CURRENT;
     let join = |kept: &[&str]| {
         name.into_iter()
             .chain(named)
+            .chain(standing)
             .chain(kept.iter().copied())
             .filter(|fact| !fact.is_empty())
             .collect::<Vec<_>>()
@@ -776,11 +786,29 @@ fn header_left(
     // then the name, because B3's empty state leans on the name to say which
     // repository this is.
     let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
-    for end in (1..=kept.len()).rev() {
-        rungs.push(join(&kept[..end]));
+    let without = |kept: &[&str]| {
+        name.into_iter()
+            .chain(named)
+            .chain(kept.iter().copied())
+            .filter(|fact| !fact.is_empty())
+            .collect::<Vec<_>>()
+            .join(FACT_SEPARATOR)
+    };
+    if default_standing {
+        // One rung with it, then today's whole ladder without it. Pushed with no
+        // fact to qualify too: a tree with nothing in it is still standing somewhere.
+        rungs.push(join(&kept));
+        for end in (1..=kept.len()).rev() {
+            rungs.push(without(&kept[..end]));
+        }
+    } else {
+        for end in (1..=kept.len()).rev() {
+            rungs.push(join(&kept[..end]));
+        }
+        rungs.push(join(&[]));
     }
     if named.is_some() {
-        rungs.push(join(&[]));
+        rungs.push(without(&[]));
     }
     rungs.push(worktree.to_owned());
     rungs
@@ -2200,7 +2228,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 17] = [
+const KEYBOARD: [Gesture; 18] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2260,6 +2288,10 @@ const KEYBOARD: [Gesture; 17] = [
         verb: ["show or hide staged changes", "staged changes"],
     },
     Gesture {
+        keys: ["b", "b"],
+        verb: ["stand at the branch point", "branch point"],
+    },
+    Gesture {
         keys: ["w", "w"],
         verb: ["wrap a long line, or clip it", "wrap long lines"],
     },
@@ -2288,12 +2320,15 @@ const KEYBOARD: [Gesture; 17] = [
 /// The order the width ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
 ///
+/// The two toggles that change what the frame *walks* outlive the body's other
+/// rows, and between them the older outlives the newer.
+///
 /// The box's keys rank second for the reason `q` ranks first: the box writes
 /// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
 /// pressed is the moment they are on screen. They are also the widest keys cell a
 /// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
 const DROP_ORDER: [usize; KEYBOARD.len()] =
-    [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 8, 9, 10, 12, 11, 7, 15];
+    [17, 15, 0, 1, 2, 3, 4, 5, 6, 14, 8, 9, 10, 13, 12, 11, 7, 16];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2409,11 +2444,11 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 13 },
+        rows: Rows::Keyboard { from: 7, to: 14 },
     },
     Section {
         label: "notes",
-        rows: Rows::Keyboard { from: 13, to: 15 },
+        rows: Rows::Keyboard { from: 14, to: 16 },
     },
     Section {
         label: "mouse",
@@ -2421,7 +2456,7 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 15, to: 17 },
+        rows: Rows::Keyboard { from: 16, to: 18 },
     },
 ];
 
@@ -3197,6 +3232,7 @@ impl Painter<'_> {
         let rungs = header_left(
             &chrome.worktree,
             chrome.branch.as_deref(),
+            &chrome.position,
             view.files,
             view.churn.map_or(0, |run| run.binary),
             hidden_of(view, chrome),
@@ -5340,9 +5376,10 @@ mod sheet_tables {
         }
     }
     #[test]
-    fn the_rows_given_up_before_the_keep_set_are_the_view_toggles() {
-        // Addressed by the cell it draws, not by its index. View toggles outlive notes.
-        const EXPECTED: [&str; 4] = ["r", "s", "o", "w"];
+    fn the_rows_given_up_last_are_the_view_toggles_under_the_standing_one() {
+        // Addressed by the cell it draws, not by its index. View toggles outlive
+        // notes, and the standing toggle outlives them: it changes what is walked.
+        const EXPECTED: [&str; 5] = ["r", "s", "o", "w", "b"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
@@ -5351,8 +5388,9 @@ mod sheet_tables {
         assert_eq!(
             outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail, then the pin, then the overview, then the wrap, so a pane at \
-             the floor is spending it on a gesture that could have fired there"
+             rail, then the pin, then the overview, then the wrap, then the branch \
+             point, so a pane at the floor is spending it on a gesture that could \
+             have fired there"
         );
     }
 

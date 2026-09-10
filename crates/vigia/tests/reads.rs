@@ -57,7 +57,14 @@ const RAIL_WIDTH: u16 = 160;
 fn layout_on(width: u16, height: u16) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
-        &railed(App::new().chrome("fixture", None, Pointing::default(), Default::default(), "")),
+        &railed(App::new().chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        )),
         FILES,
         FILES,
     )

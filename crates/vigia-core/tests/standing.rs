@@ -1,9 +1,9 @@
-//! Where the pane stands: `SPEC.md` §11.1's position.
+//! Where the pane stands: `SPEC.md` §11.1.
 
 mod support;
 
 use support::Scratch;
-use vigia_core::{ChangeKind, Frame, Hidden, Position, Worktree};
+use vigia_core::{ChangeKind, Frame, Hidden, Standing, Worktree};
 
 const KEPT: &str = "src/lib.rs";
 const OTHER: &str = "src/other.rs";
@@ -42,12 +42,12 @@ fn current_is_the_pane_the_reader_has_today() {
     let worktree = Worktree::discover(scratch.root()).expect("discover");
 
     let mut frame = worktree.frame();
-    assert_eq!(*frame.position(), Position::Current);
+    assert_eq!(*frame.standing(), Standing::Current);
     frame.advance().expect("advance");
 
     assert_eq!(paths(&frame), vec![KEPT.to_owned()]);
-    assert_eq!(Position::Current.label(), "current");
-    assert_eq!(Position::Current.at(), None);
+    assert_eq!(Standing::Current.label(), "current");
+    assert_eq!(Standing::Current.at(), None);
 }
 
 /// The point is the merge-base, and what the header draws is the branch.
@@ -69,7 +69,7 @@ fn the_branch_point_is_the_merge_base_named_by_the_branch() {
         "the point is not where this branch left main"
     );
     assert_eq!(
-        Position::Since {
+        Standing::Since {
             at,
             named: named.clone()
         }
@@ -97,7 +97,7 @@ fn a_since_run_holds_what_was_committed_since_the_branch_point() {
     assert_eq!(paths(&live), vec![OTHER.to_owned()]);
 
     let mut frame = worktree.frame();
-    frame.stand(Position::Since { at, named });
+    frame.stand(Standing::Since { at, named });
     frame.advance().expect("advance");
     assert_eq!(
         paths(&frame),
@@ -120,7 +120,7 @@ fn a_path_changed_on_both_sides_of_the_index_appears_once_from_the_base() {
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     let (at, named) = worktree.branch_point().expect("a branch point");
     let mut frame = worktree.frame();
-    frame.stand(Position::Since { at, named });
+    frame.stand(Standing::Since { at, named });
     frame.advance().expect("advance");
 
     assert_eq!(
@@ -161,7 +161,7 @@ fn a_path_added_and_then_deleted_reads_as_removed_rather_than_added() {
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     let (at, named) = worktree.branch_point().expect("a branch point");
     let mut frame = worktree.frame();
-    frame.stand(Position::Since { at, named });
+    frame.stand(Standing::Since { at, named });
     frame.advance().expect("advance");
 
     let gone = frame
@@ -190,7 +190,7 @@ fn the_hide_pattern_reaches_a_since_run() {
     let (at, named) = worktree.branch_point().expect("a branch point");
 
     let mut frame = worktree.frame();
-    frame.stand(Position::Since {
+    frame.stand(Standing::Since {
         at,
         named: named.clone(),
     });
@@ -198,7 +198,7 @@ fn the_hide_pattern_reaches_a_since_run() {
     assert_eq!(paths(&frame).len(), 2, "the fixture committed two files");
 
     let mut frame = worktree.frame();
-    frame.stand(Position::Since { at, named });
+    frame.stand(Standing::Since { at, named });
     frame.hide(Some(Hidden::new("^target/").expect("a pattern")));
     frame.advance().expect("advance");
     assert_eq!(
@@ -245,7 +245,7 @@ fn standing_somewhere_else_drops_what_the_old_position_measured() {
     support::materialise(&mut frame);
     let held = frame.stats().evicted;
 
-    frame.stand(Position::Since { at, named });
+    frame.stand(Standing::Since { at, named });
     assert!(
         frame.stats().evicted > held,
         "moving kept the diffs the old position produced"
@@ -256,7 +256,7 @@ fn standing_somewhere_else_drops_what_the_old_position_measured() {
 
     // And standing where it already stands is not a move.
     let settled = frame.stats().evicted;
-    frame.stand(frame.position().clone());
+    frame.stand(frame.standing().clone());
     assert_eq!(
         frame.stats().evicted,
         settled,

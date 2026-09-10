@@ -36,8 +36,8 @@ mod highlight;
 mod history;
 mod hunk;
 mod notes;
-mod position;
 mod session;
+mod standing;
 mod timing;
 mod watch;
 mod worktree;
@@ -60,8 +60,8 @@ pub use notes::{
     Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, key, names_a_record, resolve,
     run_of,
 };
-pub use position::Position;
 pub use session::{Registration, Registry};
+pub use standing::Standing;
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{

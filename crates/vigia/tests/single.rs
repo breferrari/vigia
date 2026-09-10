@@ -37,7 +37,14 @@ const PINNED: usize = 2;
 fn body() -> usize {
     diff_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &App::new().chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         FILES,
         FILES,
     )
@@ -52,7 +59,14 @@ fn split() -> Body {
 fn listed() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &App::new().chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         FILES,
         FILES,
     )
@@ -353,7 +367,14 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
     let area = Rect::new(0, 0, 80, 24);
     let laid = regions(
         area,
-        &app.chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         &view,
     );
     assert!(
@@ -814,7 +835,14 @@ fn a_pinned_pane_draws_and_its_bar_is_the_files() {
     let mut app = pinned(&mut frame);
 
     let at = Rect::new(0, 0, 80, 24);
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let laid = body_layout(at, &chrome, FILES, FILES);
     let view = app
         .view(&mut frame, &mut highlighter, &history, laid)
@@ -890,7 +918,14 @@ fn the_pin_and_the_rail_do_not_fight() {
     let at = Rect::new(0, 0, 160, 30);
     app.apply(Action::ToggleRail, &mut frame, body())
         .expect("apply");
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let laid = body_layout(at, &chrome, FILES, FILES);
     assert!(
         laid.rail,
@@ -1052,12 +1087,26 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
 
         // Exactly what the shell does: size the body from the chrome as it
         // stands, apply, then lay out and draw from the chrome as it ends up.
-        let before = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+        let before = app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
         let height = body_layout(at, &before, FILES, FILES).diff;
         app.apply(Action::Bottom, &mut frame, height)
             .expect("apply");
 
-        let after = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+        let after = app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
         let laid = body_layout(at, &after, FILES, FILES);
         if laid.diff == 0 || laid.diff >= SPAN {
             continue;

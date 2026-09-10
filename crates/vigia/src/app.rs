@@ -116,6 +116,10 @@ pub struct App {
     shown: usize,
     /// Whether the reader has asked for the staged run (`a`).
     staged: bool,
+    /// Whether the reader has asked to stand at the branch point (`b`). The
+    /// resolved commit is the shell's, because finding it is a repository
+    /// question and this type answers none of those.
+    standing: bool,
     /// How many files the staged run held on the last collect.
     staged_files: usize,
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
@@ -166,6 +170,7 @@ impl Default for App {
             single: false,
             overview: false,
             staged: false,
+            standing: false,
             wrap: false,
             notes: Vec::new(),
             notes_shown: true,
@@ -211,6 +216,7 @@ impl App {
             notes_shown: config.notes,
             shown: 0,
             staged: config.staged,
+            standing: false,
             icons: config.icons,
             links: config.links,
             ..Self::new()
@@ -334,6 +340,16 @@ impl App {
         self.staged
     }
 
+    /// Whether the reader has asked to stand at the branch point.
+    pub fn standing(&self) -> bool {
+        self.standing
+    }
+
+    /// Take the request back, for a branch with nothing to measure from.
+    pub fn unstand(&mut self) {
+        self.standing = false;
+    }
+
     /// Replace the notes the next collect places, with what the store lists.
     pub fn set_notes(&mut self, notes: Vec<Note>) {
         self.notes = notes;
@@ -426,6 +442,7 @@ impl App {
         &self,
         worktree: &str,
         branch: Option<&str>,
+        position: &str,
         pointing: Pointing,
         elsewhere: Counted,
         root: &str,
@@ -450,6 +467,7 @@ impl App {
             notes: self.note_count,
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
+            position: position.to_owned(),
             mode: self.mode,
             notice: self.notice().map(str::to_owned),
             voice: self.voice(),
@@ -553,6 +571,9 @@ impl App {
             // Display rows too, and the marks stay: a hidden note is still on its
             // line, and a click there still withdraws it.
             Action::ToggleNotes => self.notes_shown = !self.notes_shown,
+            // The other toggle that changes what the frame walks, and the only
+            // one that changes what it walks *against*.
+            Action::ToggleStanding => self.standing = !self.standing,
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;
@@ -914,6 +935,7 @@ mod tests {
         let chrome = app.chrome(
             "fixture",
             None,
+            "current",
             Pointing {
                 pressed: Some((79, 5)),
                 gripped: Some(Grabbed::Diff),
@@ -946,15 +968,29 @@ mod tests {
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
-                .mode,
+            app.chrome(
+                "fixture",
+                None,
+                "current",
+                Pointing::default(),
+                Counted::default(),
+                ""
+            )
+            .mode,
             Mode::Watching
         );
 
         app.watch_lost();
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
-                .mode,
+            app.chrome(
+                "fixture",
+                None,
+                "current",
+                Pointing::default(),
+                Counted::default(),
+                ""
+            )
+            .mode,
             Mode::Lost
         );
 
@@ -964,8 +1000,15 @@ mod tests {
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
-                .mode,
+            app.chrome(
+                "fixture",
+                None,
+                "current",
+                Pointing::default(),
+                Counted::default(),
+                ""
+            )
+            .mode,
             Mode::Lost
         );
     }
@@ -980,6 +1023,7 @@ mod tests {
             app.chrome(
                 "fixture",
                 Some("main"),
+                "current",
                 Pointing::default(),
                 Counted::default(),
                 ""
@@ -989,8 +1033,15 @@ mod tests {
             Some("main")
         );
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
-                .branch,
+            app.chrome(
+                "fixture",
+                None,
+                "current",
+                Pointing::default(),
+                Counted::default(),
+                ""
+            )
+            .branch,
             None
         );
     }

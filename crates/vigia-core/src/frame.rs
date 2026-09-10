@@ -8,7 +8,7 @@ use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::Result;
 use crate::hidden::Hidden;
 use crate::hunk::{FileDiff, FileSpan};
-use crate::position::Position;
+use crate::standing::Standing;
 use crate::worktree::{ChangeOptions, Worktree};
 
 /// What a [`Frame`] has done since it was created.
@@ -317,7 +317,7 @@ pub struct Frame<'w> {
     /// Whether the staged run is drawn beside the unstaged one.
     staged: bool,
     /// Where in the history this frame is standing.
-    position: Position,
+    standing: Standing,
     /// Paths the reader asked to keep out of the pane, and how many the last walk
     /// kept out. The count is the frame's because the walk that produced it is
     /// gone by the time the header asks.
@@ -356,7 +356,7 @@ impl<'w> Frame<'w> {
             attributes: HashMap::new(),
             failure: None,
             staged: false,
-            position: Position::default(),
+            standing: Standing::default(),
             hide: None,
             hidden: 0,
             staged_at: 0,
@@ -386,7 +386,7 @@ impl<'w> Frame<'w> {
         let mut files = Vec::with_capacity(self.files.len());
         // Bound rather than consumed in place: what a walk hid is only knowable
         // once it has been drained.
-        let mut walk = self.worktree.changes_at(&self.position, options)?;
+        let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
             files.push(change?);
         }
@@ -466,8 +466,8 @@ impl<'w> Frame<'w> {
     }
 
     /// Where this frame is standing.
-    pub fn position(&self) -> &Position {
-        &self.position
+    pub fn standing(&self) -> &Standing {
+        &self.standing
     }
 
     /// Stand somewhere else, from the next [`Frame::advance`] on.
@@ -476,11 +476,11 @@ impl<'w> Frame<'w> {
     /// a position names a different pair of endpoints, so every diff and every
     /// height under the old one describes a comparison this frame is no longer
     /// making.
-    pub fn stand(&mut self, position: Position) {
-        if self.position == position {
+    pub fn stand(&mut self, standing: Standing) {
+        if self.standing == standing {
             return;
         }
-        self.position = position;
+        self.standing = standing;
         // Credited before the clear, so I3's bound stays observable across a move.
         self.stats.evicted += self.cached.len() as u64;
         self.cached.clear();

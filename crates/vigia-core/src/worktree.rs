@@ -11,7 +11,7 @@ use crate::filter::Filter;
 use crate::frame::Frame;
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
-use crate::position::Position;
+use crate::standing::Standing;
 use crate::watch::{WatchOptions, Watcher};
 
 /// Knobs that change what a change sweep costs, and what it reports.
@@ -220,7 +220,7 @@ impl Worktree {
         let head = self
             .repo
             .head_id()
-            .map_err(|e| Error::Position(Box::new(e)))?
+            .map_err(|e| Error::Standing(Box::new(e)))?
             .detach();
         for (reference, named) in self.candidates() {
             let Ok(other) = self.repo.find_reference(reference.as_str()) else {
@@ -269,17 +269,17 @@ impl Worktree {
         out
     }
 
-    /// The run the position names, which for `Current` is the pane's own walk.
+    /// The run this standing names, which for `Current` is the pane's own walk.
     ///
     /// # Errors
     ///
     /// The walk fails, which is a failure of the whole comparison.
     pub fn changes_at<'h>(
         &self,
-        position: &Position,
+        standing: &Standing,
         options: ChangeOptions<'h>,
     ) -> Result<Changes<'h>> {
-        match position.at() {
+        match standing.at() {
             None => self.changes_with(options),
             Some(base) => Ok(Changes::over(
                 Inner::Staged(self.since(base, options)?.into_iter()),
@@ -312,9 +312,9 @@ impl Worktree {
         let tree = self
             .repo
             .find_object(base)
-            .map_err(|e| Error::Position(Box::new(e)))?
+            .map_err(|e| Error::Standing(Box::new(e)))?
             .peel_to_tree()
-            .map_err(|e| Error::Position(Box::new(e)))?
+            .map_err(|e| Error::Standing(Box::new(e)))?
             .id;
         let staged = self.against_index(tree, options)?;
         let mut unstaged = Vec::new();

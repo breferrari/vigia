@@ -47,7 +47,7 @@ pub enum Error {
         source: std::io::Error,
     },
     /// The commit a position measures from could not be resolved.
-    Position(Box<dyn std::error::Error + Send + Sync>),
+    Standing(Box<dyn std::error::Error + Send + Sync>),
     /// This branch has no other branch to measure from, or no commit in common
     /// with one.
     NoBranchPoint,
@@ -83,7 +83,7 @@ impl Error {
             | Error::Watch(_)
             | Error::FilterSetup(_)
             | Error::Store { .. }
-            | Error::Position(_)
+            | Error::Standing(_)
             | Error::NoBranchPoint
             | Error::Canonicalise { .. } => None,
         }
@@ -160,7 +160,7 @@ impl fmt::Display for Error {
             Error::Canonicalise { path, source } => {
                 write!(f, "could not canonicalise {}: {source}", path.display())
             }
-            Error::Position(e) => write!(f, "could not resolve where to measure from: {e}"),
+            Error::Standing(e) => write!(f, "could not resolve where to measure from: {e}"),
             Error::NoBranchPoint => f.write_str(
                 "this branch has no other branch to measure from, so there is no point to stand at",
             ),
@@ -172,7 +172,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Discover(e) => Some(e),
-            Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) | Error::Position(e) => {
+            Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) | Error::Standing(e) => {
                 Some(e.as_ref())
             }
             Error::Read { source, .. }

@@ -81,7 +81,14 @@ fn layout(app: &App, files: usize) -> Body {
 fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
     body_layout(
         pane,
-        &app.chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         files,
         files,
     )
@@ -122,7 +129,14 @@ fn frame_body(
     screen: Body,
 ) {
     app.sample_memory();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let view = app.view(frame, highlighter, history, screen).expect("view");
     // The pane comes from the buffer being painted rather than from [`area`].
     let pane = buf.area;
@@ -241,7 +255,14 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         );
     }
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     assert!(
         chrome.frame.is_some(),
         "the timed frame never recorded what it cost, so every wall-clock gate \
@@ -562,7 +583,14 @@ fn frame_budget_on(
         // Inside the sheet's own rect, not over the pane.
         let laid = vigia::regions(
             pane,
-            &app.chrome("fixture", None, Pointing::default(), Default::default(), ""),
+            &app.chrome(
+                "fixture",
+                None,
+                "current",
+                Pointing::default(),
+                Default::default(),
+                "",
+            ),
             &app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view"),
         );
@@ -1350,7 +1378,14 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
-        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
         let (painted, paint, paint_cpu) = timed_cpu(|| {
             render(
                 &mut buf,
@@ -1759,7 +1794,7 @@ const SHEET_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 23,
+    height: 24,
 };
 
 /// The size of the sheet `pane` draws, with the sheet up.
@@ -1772,7 +1807,14 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     let screen = layout_of(&app, pane, FILES);
     app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
         .expect("toggle the sheet");
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let laid = vigia::regions(pane, &chrome, &{
         let mut highlighter = Highlighter::eager();
         let history = History::new();
@@ -1790,7 +1832,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 20),
+        (104, 21),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -1812,7 +1854,7 @@ const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 46,
+    height: 47,
 };
 
 /// I9 with the roomy rung drawn over the frame.
@@ -1820,7 +1862,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 43),
+        (68, 44),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
@@ -2233,7 +2275,14 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             let began = Instant::now();
             frame.advance().expect("advance");
             app.sample_memory();
-            let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+            let chrome = app.chrome(
+                "fixture",
+                None,
+                "current",
+                Pointing::default(),
+                Default::default(),
+                "",
+            );
             let view = app.view(frame, highlighter, history, screen).expect("view");
             render(
                 &mut buf,
@@ -2302,7 +2351,14 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         arrivals.get(),
         sweeps.get()
     );
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let view = app
         .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
@@ -2538,8 +2594,14 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                 sample(history, scratch.root(), EDITED_PATH);
                 frame.advance().expect("advance");
                 app.sample_memory();
-                let chrome =
-                    app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+                let chrome = app.chrome(
+                    "fixture",
+                    None,
+                    "current",
+                    Pointing::default(),
+                    Default::default(),
+                    "",
+                );
                 let view = app.view(frame, highlighter, history, screen).expect("view");
                 let laid = regions(NOTED_PANE, &chrome, &view);
                 render(

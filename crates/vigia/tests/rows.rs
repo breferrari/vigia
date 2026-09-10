@@ -377,7 +377,14 @@ fn a_real_repository_draws() {
     // The shipped split, because this is the only whole-composition test.
     let split = body_layout(
         area,
-        &app.chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         frame.files().len(),
         frame.files().len(),
     );
@@ -395,7 +402,14 @@ fn a_real_repository_draws() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     terminal
         .draw(|f| {
             let area = f.area();
@@ -453,7 +467,14 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     let area = Rect::new(0, 0, 80, 12);
     let split = body_layout(
         area,
-        &app.chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         frame.files().len(),
         frame.files().len(),
     );
@@ -470,7 +491,14 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     terminal
         .draw(|f| {
             let drawn = f.area();
@@ -536,7 +564,14 @@ fn every_rung_draws_from_the_stores_own_figures() {
         let mut app = App::new();
         let mut terminal = Terminal::new(TestBackend::new(pane, 12)).expect("terminal");
         let area = Rect::new(0, 0, pane, 12);
-        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
         let split = body_layout(area, &chrome, frame.files().len(), frame.files().len());
         let view = app
             .view(&mut frame, &mut highlighter, &history, split)

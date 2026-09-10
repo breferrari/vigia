@@ -220,6 +220,27 @@ pub fn arm_frame(frame: &mut vigia_core::Frame, config: &crate::Config) {
     frame.hide(config.hide.clone());
 }
 
+/// Where a shell asking to stand at the branch point stands, resolved once.
+///
+/// `held` is the resolution the shell keeps: re-resolving every frame would put a
+/// revision walk on the frame path I9 pays for, and a base that moved under a
+/// reader is a diff that changed while the tree did not. A refusal keeps nothing.
+///
+/// # Errors
+///
+/// Nothing on the candidate ladder resolves, which is `Error::NoBranchPoint`.
+#[doc(hidden)]
+pub fn branch_point_of(
+    held: &mut Option<vigia_core::Standing>,
+    worktree: &Worktree,
+) -> vigia_core::Result<vigia_core::Standing> {
+    if held.is_none() {
+        let (at, named) = worktree.branch_point()?;
+        *held = Some(vigia_core::Standing::Since { at, named });
+    }
+    Ok(held.clone().unwrap_or_default())
+}
+
 /// The paths in one wake's burst that the pane is actually having.
 ///
 /// The history store is fed from the burst and never from the walk, so the walk's
@@ -308,6 +329,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         root: worktree.workdir().to_string_lossy().into_owned(),
         branch: None,
         elsewhere: Counted::default(),
+        standing: vigia_core::Standing::default(),
+        branch_point: None,
         screen: View::default(),
         regions: Regions::default(),
         held: None,
@@ -433,7 +456,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // `Scroll` and `ScrollList` today, neither of which reads a height, so the
             // literal zero this replaced was right by accident rather than by rule.
             let height = shell.diff_rows_for(step, frame.files())?;
-            match shell.apply(step, &mut frame, height) {
+            match shell.apply(step, &mut frame, &worktree, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
                 Err(e) => shell.app.warn(e.to_string()),
@@ -538,7 +561,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // The height, because a drag on the diff's bar is a
                             // `DiffTo` and `DiffTo` reads one.
                             let height = shell.diff_rows_for(drag, frame.files())?;
-                            match shell.apply(drag, &mut frame, height) {
+                            match shell.apply(drag, &mut frame, &worktree, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
                                 Err(e) => {
@@ -579,7 +602,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // drain's doing rather than tidiness.
                     let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
-                    match shell.apply(action, &mut frame, height) {
+                    match shell.apply(action, &mut frame, &worktree, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw
                         // below: leaving was asked for, and painting one more
@@ -829,6 +852,12 @@ struct Shell {
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     branch: Option<String>,
+    /// Where in the history the pane is standing. The frame walks it; this is
+    /// what the header draws.
+    standing: vigia_core::Standing,
+    /// The branch point, resolved once and kept as the standing it produces, so
+    /// no frame pays a merge-base and the shell needs no `gix` of its own.
+    branch_point: Option<vigia_core::Standing>,
     /// What the run this pane is not drawing holds. Both halves, because a pane
     /// whose only work is staged and hidden would otherwise read as a clean tree:
     /// the shown count is zero and the drawn run hid nothing.
@@ -904,6 +933,7 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
+            &self.standing.label(),
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1025,6 +1055,7 @@ impl Shell {
         &mut self,
         action: Action,
         frame: &mut vigia_core::Frame,
+        worktree: &Worktree,
         height: usize,
     ) -> vigia_core::Result<bool> {
         // The rung `Esc` climbs over quitting, reachable only while the button is
@@ -1036,7 +1067,40 @@ impl Shell {
         if action != Action::Redraw {
             self.deselect();
         }
-        self.app.apply(action, frame, height)
+        let carried = self.app.apply(action, frame, height)?;
+        self.stand(frame, worktree);
+        Ok(carried)
+    }
+
+    /// Put the frame where the reader asked to stand, and walk it if that moved.
+    ///
+    /// The request is a bool on `App`, because finding a branch point is a
+    /// repository question and `App` answers none of those. A branch with nothing
+    /// to measure from keeps the pane where it is and says so, rather than
+    /// emptying it for a reason nothing explains.
+    fn stand(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        let wanted = if self.app.standing() {
+            match branch_point_of(&mut self.branch_point, worktree) {
+                Ok(standing) => standing,
+                Err(e) => {
+                    self.app.warn(e.to_string());
+                    self.app.unstand();
+                    return;
+                }
+            }
+        } else {
+            vigia_core::Standing::Current
+        };
+        if wanted == self.standing {
+            return;
+        }
+        self.standing = wanted.clone();
+        frame.stand(wanted);
+        // Walked here for `ToggleStaged`'s reason: the frame this paint draws
+        // has to be the one the token names.
+        if let Err(e) = frame.advance() {
+            self.app.warn(e.to_string());
+        }
     }
 
     /// Drop the wash and the lines it stood for together: clearing one and not the
@@ -1459,6 +1523,7 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
+            &self.standing.label(),
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1510,6 +1575,7 @@ impl Shell {
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
+            &self.standing.label(),
             self.pointing(),
             self.elsewhere,
             &self.root,

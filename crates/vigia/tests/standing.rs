@@ -1,0 +1,291 @@
+//! Where the pane is standing, from the key to the header: `SPEC.md` §11.1.
+//!
+//! The walk itself is gated in `vigia-core/tests/standing.rs`. These are the
+//! three places the reading can come apart from the run it names: the key that
+//! moves it, the token the header draws, and the counts drawn beside that token.
+
+#[path = "../../vigia-core/tests/support/mod.rs"]
+mod support;
+
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use support::Scratch;
+use vigia::{
+    Action, App, Chrome, Glyphs, Pointing, Position, Theme, View, Viewport, branch_point_of, render,
+};
+use vigia_core::{Frame, Highlighter, History, Standing, Worktree};
+
+/// What joins two facts about one subject on a line of chrome.
+const FACT_JOIN: &str = " · ";
+
+fn viewport() -> Viewport {
+    Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        diff_rows: 20,
+        width: 120,
+        wrap: false,
+        list_top: 0,
+        list_rows: 8,
+        list_follows: true,
+        measured: true,
+        landing: false,
+        single: false,
+        highlight: false,
+    }
+}
+
+/// The tree every gate here reads: one file committed on a branch, one staged,
+/// one written and not staged, so the two readings cannot agree by accident.
+fn scratch(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/base.rs", "one\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    scratch.git(&["checkout", "-b", "work"]);
+    scratch.write("src/committed.rs", "two\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "on the branch"]);
+    scratch.write("src/staged.rs", "three\n");
+    scratch.git(&["add", "src/staged.rs"]);
+    scratch.write("src/written.rs", "four\n");
+    scratch
+}
+
+/// The branch point this worktree's `b` resolves to, as the shell resolves it.
+fn since(worktree: &Worktree) -> Standing {
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    Standing::Since { at, named }
+}
+
+/// The header a `View` and a position draw together, as one line of text.
+fn header(view: &View, position: &str, app: &App) -> String {
+    let chrome = Chrome {
+        position: position.to_owned(),
+        ..app.chrome(
+            "fixture",
+            Some("work"),
+            position,
+            Pointing::default(),
+            Default::default(),
+            "",
+        )
+    };
+    let mut terminal = Terminal::new(TestBackend::new(120, 8)).expect("terminal");
+    let theme = Theme::default();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
+        })
+        .expect("draw");
+    let backend = terminal.backend().clone();
+    let buffer = backend.buffer();
+    (buffer.area.left()..buffer.area.right())
+        .map(|x| buffer[(x, 0)].symbol().to_owned())
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+/// Walk `frame` where `standing` names and collect what a pane would draw.
+fn drawn(frame: &mut Frame, standing: Standing) -> View {
+    frame.stand(standing);
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    View::collect(frame, &mut highlighter, &history, viewport()).expect("collect")
+}
+
+/// A pane nobody has moved says so, rather than saying nothing.
+///
+/// The token is drawn always rather than only where it is interesting, which is
+/// what the reader ruled: a header that says nothing while standing `current`
+/// and says `since main` otherwise teaches the reading by its absence.
+#[test]
+fn the_token_reads_current_on_a_live_pane() {
+    let scratch = scratch("standing-current");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+
+    assert_eq!(
+        Standing::Current.label(),
+        "current",
+        "the default position spells itself something else, so the token below \
+         is not the one a pane opens on"
+    );
+    let drawn = header(&view, &Standing::Current.label(), &app);
+    assert!(
+        drawn.contains(&format!("fixture{FACT_JOIN}work{FACT_JOIN}current")),
+        "a pane nobody has moved does not say where it is standing: {drawn:?}"
+    );
+}
+
+/// Standing at the branch point names the branch rather than a hash.
+#[test]
+fn the_token_names_the_branch_point_under_since() {
+    let scratch = scratch("standing-since");
+    let worktree = scratch.worktree();
+    let standing = since(&worktree);
+    let label = standing.label();
+    assert!(
+        label.starts_with("since "),
+        "the token under `since` reads {label:?}"
+    );
+    let named = label.trim_start_matches("since ").to_owned();
+    assert!(
+        !named.is_empty() && named.chars().any(|c| !c.is_ascii_hexdigit()),
+        "the token names {named:?}, which is a commit id rather than something a \
+         reader would type"
+    );
+
+    let mut frame = worktree.frame();
+    let app = App::new();
+    let view = drawn(&mut frame, standing);
+    let drawn = header(&view, &label, &app);
+    assert!(
+        drawn.contains(&format!("fixture{FACT_JOIN}work{FACT_JOIN}{label}")),
+        "the header does not carry where the pane is standing: {drawn:?}"
+    );
+}
+
+/// The count beside the token is the run the token names, in both readings.
+///
+/// The two are computed a walk apart, and nothing else can see them disagree: a
+/// header drawn from the position with counts from the previous frame reads as a
+/// correct sentence about the wrong comparison.
+#[test]
+fn the_headers_facts_describe_what_the_token_names() {
+    let scratch = scratch("standing-facts");
+    let worktree = scratch.worktree();
+    let app = App::new();
+    let mut frame = worktree.frame();
+
+    let live = drawn(&mut frame, Standing::Current);
+    let (live_files, live_header) = (live.files, header(&live, "current", &app));
+
+    let standing = since(&worktree);
+    let label = standing.label();
+    let parked = drawn(&mut frame, standing);
+    let (parked_files, parked_header) = (parked.files, header(&parked, &label, &app));
+
+    // Non-vacuity: the two runs have to differ, or one number satisfies both
+    // assertions and the gate proves nothing.
+    assert!(
+        parked_files > live_files,
+        "the branch point run holds {parked_files} files against the live pane's \
+         {live_files}, so the fixture does not separate the two readings"
+    );
+
+    for (files, position, drawn) in [
+        (live_files, "current", &live_header),
+        (parked_files, label.as_str(), &parked_header),
+    ] {
+        assert!(
+            drawn.contains(&format!("{position}{FACT_JOIN}{files} changed")),
+            "standing {position:?} the header does not count the run it names: \
+             {drawn:?}"
+        );
+    }
+}
+
+/// One key, both directions, and the second press is the way back.
+#[test]
+fn one_key_flips_the_reading_and_is_a_toggle() {
+    let scratch = scratch("standing-toggle");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    assert!(
+        !app.standing(),
+        "a pane opens standing somewhere other than the working tree"
+    );
+    for wanted in [true, false, true] {
+        app.apply(Action::ToggleStanding, &mut frame, 20)
+            .expect("the toggle asked the shell to quit");
+        assert_eq!(
+            app.standing(),
+            wanted,
+            "the key does not flip the reading, so it is a switch rather than a \
+             toggle"
+        );
+    }
+}
+
+/// The branch point is resolved once and kept, and a refusal keeps nothing.
+///
+/// The resolution itself is gated in `vigia-core`. This is the step between the
+/// key and the walk: it runs on every press, so re-resolving would put a
+/// revision walk on the frame path, and a failure left behind would be inherited
+/// by the next press.
+#[test]
+fn the_branch_point_is_taken_once_and_a_refusal_keeps_nothing() {
+    let scratch = scratch("standing-resolve");
+    let worktree = scratch.worktree();
+
+    let mut held = None;
+    let first = branch_point_of(&mut held, &worktree).expect("a branch point");
+    assert_eq!(
+        held.as_ref(),
+        Some(&first),
+        "the resolution was handed back and not kept, so the next press resolves \
+         it again"
+    );
+
+    // Kept rather than re-derived: a standing already held is returned as it is,
+    // whatever the repository would resolve to now.
+    let mut held = Some(Standing::Since {
+        at: first.at().expect("a commit to measure from"),
+        named: "held".to_owned(),
+    });
+    let again = branch_point_of(&mut held, &worktree).expect("the held standing");
+    assert_eq!(
+        again.label(),
+        "since held",
+        "a shell that had already stood somewhere resolved the branch point a \
+         second time"
+    );
+
+    // And a worktree with nothing to measure from leaves the slot empty.
+    let bare = Scratch::new("standing-refused");
+    bare.write("src/a.rs", "one\n");
+    bare.git(&["add", "-A"]);
+    bare.git(&["commit", "-m", "init"]);
+    bare.write("src/a.rs", "two\n");
+    let bare = bare.worktree();
+
+    let mut held = None;
+    assert!(
+        branch_point_of(&mut held, &bare).is_err(),
+        "the fixture has a branch point after all, so the refusal below never \
+         happens"
+    );
+    assert!(
+        held.is_none(),
+        "a refused resolution left a position behind, so the next press stands \
+         somewhere the shell never resolved"
+    );
+
+    // The shell's own answer to that refusal, which is to put the reading back.
+    let mut app = App::new();
+    let mut frame = bare.frame();
+    frame.advance().expect("advance");
+    app.apply(Action::ToggleStanding, &mut frame, 20)
+        .expect("the toggle asked the shell to quit");
+    app.unstand();
+    assert!(
+        !app.standing(),
+        "the reading stayed at the branch point the shell could not resolve"
+    );
+}
