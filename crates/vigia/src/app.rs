@@ -350,6 +350,16 @@ impl App {
         self.standing = standing;
     }
 
+    /// The pane moved somewhere else and the walk that took it there succeeded.
+    ///
+    /// [`Action::ToggleStaged`]'s reason one step out: the file set changed
+    /// wholesale, so the row the pane was on names an unrelated file in the new
+    /// one. Separate from the keypress because the walk is the shell's, and a
+    /// press that resolved nothing has moved the reader nowhere.
+    pub fn stood(&mut self) {
+        self.position = Position::default();
+    }
+
     /// Replace the notes the next collect places, with what the store lists.
     pub fn set_notes(&mut self, notes: Vec<Note>) {
         self.notes = notes;
@@ -572,14 +582,11 @@ impl App {
             // line, and a click there still withdraws it.
             Action::ToggleNotes => self.notes_shown = !self.notes_shown,
             // The other toggle that changes what the frame walks, and the only
-            // one that changes what it walks *against*. The walk itself is the
-            // shell's, because a branch point is a repository question, but the
-            // move is this one's for `ToggleStaged`'s reason: the file set changes
-            // wholesale, so a row index into the old one names an unrelated file.
-            Action::ToggleStanding => {
-                self.standing = !self.standing;
-                self.position = Position::default();
-            }
+            // one that changes what it walks *against*. It moves nothing here: the
+            // walk is the shell's, because a branch point is a repository question,
+            // and a request that is refused or fails to walk must leave the reader
+            // where they were rather than at the top of a run they never left.
+            Action::ToggleStanding => self.standing = !self.standing,
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;

@@ -1110,11 +1110,14 @@ impl Shell {
         // has to be the one the token names. A failed walk leaves the previous
         // frame whole, so the token goes back with it rather than naming a
         // comparison the body underneath is not drawing.
-        if let Err(e) = frame.advance() {
-            self.app.warn(e.to_string());
-            self.app
-                .stands(!matches!(previous, vigia_core::Standing::Current));
-            frame.stand(previous);
+        match frame.advance() {
+            Ok(()) => self.app.stood(),
+            Err(e) => {
+                self.app.warn(e.to_string());
+                self.app
+                    .stands(!matches!(previous, vigia_core::Standing::Current));
+                frame.stand(previous);
+            }
         }
     }
 

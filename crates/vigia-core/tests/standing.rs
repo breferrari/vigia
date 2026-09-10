@@ -302,6 +302,55 @@ fn a_conflicted_path_in_a_since_run_still_reads_as_a_conflict() {
     );
 }
 
+/// A copy takes nothing from the file it copied.
+///
+/// A rename vacates the name it came from and a copy does not, so the fallback
+/// that pairs a rename with its base entry must not fire for a copy: the source
+/// is still on disk, and whatever the branch did to it is still its own row.
+#[test]
+fn a_copy_does_not_take_the_row_belonging_to_what_it_copied() {
+    let scratch = branched("position-copy");
+    scratch.git(&["mv", KEPT, "src/moved.rs"]);
+    scratch.git(&["commit", "-m", "move it"]);
+    std::fs::copy(
+        scratch.root().join("src/moved.rs"),
+        scratch.root().join("src/copy.rs"),
+    )
+    .expect("copy it");
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    let mut frame = worktree.frame();
+    frame.stand(Standing::Since { at, named });
+    frame.advance().expect("advance");
+
+    let moved = frame
+        .files()
+        .iter()
+        .find(|change| change.path == "src/moved.rs")
+        .expect("the file the branch moved kept its own row");
+    assert_eq!(
+        moved.kind,
+        ChangeKind::Renamed {
+            from: KEPT.to_owned()
+        },
+        "the moved file reads {:?}, so the copy beside it took its label",
+        moved.kind
+    );
+    let copy = frame
+        .files()
+        .iter()
+        .find(|change| change.path == "src/copy.rs")
+        .expect("the copy is in the run");
+    assert_ne!(
+        copy.kind,
+        ChangeKind::Renamed {
+            from: KEPT.to_owned()
+        },
+        "the copy wears the rename belonging to the file it was copied from"
+    );
+}
+
 /// The filter lives in `Changes`, and a second walk must not go round it.
 #[test]
 fn the_hide_pattern_reaches_a_since_run() {
@@ -310,6 +359,10 @@ fn the_hide_pattern_reaches_a_since_run() {
     scratch.write(KEPT, "one\ncommitted\n");
     scratch.git(&["add", "-A"]);
     scratch.git(&["commit", "-m", "committed"]);
+    // One hidden path in each half of the union: the committed one is the tree
+    // walk's and this one is the working tree's, so a filter that reaches only
+    // one of them is a count short as well as a row short.
+    scratch.write("target/fresh.log", "more noise\n");
 
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     let (at, named) = worktree.branch_point().expect("a branch point");
@@ -320,7 +373,11 @@ fn the_hide_pattern_reaches_a_since_run() {
         named: named.clone(),
     });
     frame.advance().expect("advance");
-    assert_eq!(paths(&frame).len(), 2, "the fixture committed two files");
+    assert_eq!(
+        paths(&frame).len(),
+        3,
+        "the fixture holds two committed files and one written since"
+    );
 
     let mut frame = worktree.frame();
     frame.stand(Standing::Since { at, named });
@@ -332,7 +389,61 @@ fn the_hide_pattern_reaches_a_since_run() {
         "the second walk went round the filter, so a reader's pattern stops \
          working the moment they move the pane"
     );
-    assert_eq!(frame.hidden(), 1);
+    assert_eq!(
+        frame.hidden(),
+        2,
+        "the count is short, so a half of the union filtered its own walk and \
+         dropped what it hid rather than handing it on"
+    );
+}
+
+/// The run comes back in the same order every time it is walked.
+///
+/// The union is built through a map keyed by path, and a `HashMap` hands its
+/// values back in a different order in every process. A pane whose rows shuffle
+/// between two frames over one unchanged tree is the opposite of glanceable.
+#[test]
+fn a_since_run_comes_back_in_one_order() {
+    let scratch = branched("position-order");
+    for n in 0..8 {
+        scratch.write(&format!("src/committed_{n}.rs"), "one\n");
+    }
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "eight files, none of them touched since"]);
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let (at, named) = worktree.branch_point().expect("a branch point");
+
+    let mut drawn = Vec::new();
+    for _ in 0..4 {
+        let mut frame = worktree.frame();
+        frame.stand(Standing::Since {
+            at,
+            named: named.clone(),
+        });
+        frame.advance().expect("advance");
+        drawn.push(
+            frame
+                .files()
+                .iter()
+                .map(|change| change.path.clone())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    // Non-vacuity: an order over one path is the same order however it is built.
+    assert!(
+        drawn[0].len() >= 8,
+        "the fixture put {} paths in the run, which is too few to shuffle",
+        drawn[0].len()
+    );
+    for (n, run) in drawn.iter().enumerate().skip(1) {
+        assert_eq!(
+            run, &drawn[0],
+            "walk {n} drew the run in a different order from walk 0, so the rows \
+             move under a reader on a tree that did not change"
+        );
+    }
 }
 
 /// A repository with one branch and no other has no point to measure from, and

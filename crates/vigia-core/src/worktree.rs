@@ -313,28 +313,45 @@ impl Worktree {
             .peel_to_tree()
             .map_err(|e| Error::Standing(Box::new(e)))?
             .id;
-        let staged = self.against_index(tree, options)?;
+        // Neither half filters: `changes_at` wraps the union in one [`Changes`],
+        // and a filter inside a half drops its own hidden count on the floor,
+        // which is a number the header owes the reader.
+        let unfiltered = ChangeOptions {
+            hide: None,
+            ..options
+        };
+        let from_base = self.against_index(tree, unfiltered)?;
         let mut unstaged = Vec::new();
-        for change in self.changes_of(Origin::Unstaged, options)? {
+        for change in self.changes_of(Origin::Unstaged, unfiltered)? {
             unstaged.push(change?);
         }
 
-        // Keyed by path, so the union is one pass over each walk rather than a
-        // scan of the first for every entry of the second.
-        let mut from_base: HashMap<String, FileChange> = staged
-            .into_iter()
-            .map(|change| (change.path.clone(), change))
+        // Indexed by path rather than owned by a map: the union wants one pass
+        // over each walk, and the pane draws the order the walk found them in,
+        // which a `HashMap` gives back differently every process.
+        let mut at: HashMap<String, usize> = from_base
+            .iter()
+            .enumerate()
+            .map(|(i, change)| (change.path.clone(), i))
             .collect();
+        let mut from_base: Vec<Option<FileChange>> = from_base.into_iter().map(Some).collect();
 
         let mut out = Vec::with_capacity(from_base.len() + unstaged.len());
         for mut change in unstaged {
-            // Under its own name, then under the name it came from: a path the
-            // branch renamed and the working tree renamed again is in the two walks
-            // under two different names, and pairing only on the first leaves the
-            // middle name as a row for a file that is not on disk.
-            let based = from_base
-                .remove(&change.path)
-                .or_else(|| change.kind.source().and_then(|from| from_base.remove(from)));
+            // Under its own name, then under the name a *rename* came from: a path
+            // the branch renamed and the working tree renamed again is in the two
+            // walks under two different names, and pairing only on the first leaves
+            // the middle name as a row for a file that is not on disk. A copy is
+            // not that case and must not take the fallback, because its source is
+            // still there and still owns whatever the branch did to it.
+            let vacated = match &change.kind {
+                ChangeKind::Renamed { from } => Some(from.as_str()),
+                _ => None,
+            };
+            let based = at
+                .remove(change.path.as_str())
+                .or_else(|| vacated.and_then(|from| at.remove(from)))
+                .and_then(|i| from_base[i].take());
             if let Some(based) = based {
                 // The path moved on both sides of the index. What it changed from
                 // is the base tree's blob, and what it is now is on disk.
@@ -348,8 +365,9 @@ impl Worktree {
             out.push(change);
         }
         // Whatever the working tree did not touch is the base-to-index change
-        // whole, and its index blob is what the file holds.
-        out.extend(from_base.into_values().map(|mut change| {
+        // whole, and its index blob is what the file holds. In the order that walk
+        // reported them, which is the order the pane draws.
+        out.extend(from_base.into_iter().flatten().map(|mut change| {
             change.origin = Origin::Unstaged;
             change
         }));
@@ -611,7 +629,11 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
 /// What a path did between the base tree and the working tree, given what it did
 /// on each side of the index, or `None` where it did nothing.
 ///
-/// The endpoints decide it and the middle does not: a file the branch added and
+/// The working tree's own kind decides first where it is one of the two that read
+/// no bytes from it, and only then do the endpoints: composing a conflict or a
+/// type change into anything diffable leaves a row with no right-hand side.
+///
+/// Otherwise the endpoints decide it and the middle does not: a file the branch added and
 /// the working tree then deleted was never in the base and is not on disk, so
 /// nothing happened to it and it is not a row. `git diff <base>` says the same,
 /// and a row reading `removed` would claim the reader deleted something the
@@ -986,7 +1008,9 @@ mod composing {
                 assert_eq!(
                     compose(&from_base, &undiffable),
                     Some(undiffable.clone()),
-                    "{from_base:?} then {undiffable:?} composed to something                      diffable, and the row it produces has no right-hand side to                      read, so the whole of the base content draws as deleted"
+                    "{from_base:?} then {undiffable:?} composed to something diffable, \
+                     and a row with no right-hand side to read draws the whole \
+                     of the base content as deleted"
                 );
             }
         }

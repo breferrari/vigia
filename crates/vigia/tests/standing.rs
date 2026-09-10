@@ -386,16 +386,18 @@ fn narrowing_a_since_pane_never_reads_like_the_current_one() {
             .unwrap_or_default()
             .trim()
             .to_owned();
-        // The floor of every ladder on this side, and the one rung that carries
-        // no fact at all: there is nothing there to mistake for a comparison.
-        if left == "fixture" {
+        // The floor of every ladder on this side carries no fact at all, so there
+        // is nothing there to mistake for a comparison. Asserted rather than
+        // skipped: a rung that has given the token up while still carrying
+        // something else is the defect, and skipping would hide it.
+        if !left.contains(&label) {
+            assert_eq!(
+                left, "fixture",
+                "at {width} columns the header gave up where it stands and kept \
+                 {left:?}, which is what a live pane draws at the same width"
+            );
             continue;
         }
-        assert!(
-            left.contains(&label),
-            "at {width} columns a pane standing at the branch point heads with \
-             {left:?}, which is what a live pane heads with at the same width"
-        );
         carried += 1;
     }
     assert!(
@@ -404,12 +406,14 @@ fn narrowing_a_since_pane_never_reads_like_the_current_one() {
     );
 }
 
-/// Moving the pane puts it back at the top.
+/// A walk that moved the pane puts it back at the top, and a press alone does not.
 ///
 /// `ToggleStaged`'s reason one step further out: the file set changes wholesale,
-/// so a row index into the old one names an unrelated file in the new one.
+/// so a row index into the old one names an unrelated file in the new one. The
+/// press cannot do it, because the walk is the shell's and a request that is
+/// refused or fails to walk has moved the reader nowhere.
 #[test]
-fn standing_somewhere_else_puts_the_pane_back_at_the_top() {
+fn a_walk_that_moved_the_pane_puts_it_back_at_the_top() {
     let scratch = scratch("standing-scroll");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -418,14 +422,23 @@ fn standing_somewhere_else_puts_the_pane_back_at_the_top() {
     let mut app = App::new();
     app.apply(Action::Scroll(3), &mut frame, 20)
         .expect("scroll");
+    let scrolled = app.position();
     assert_ne!(
-        app.position(),
+        scrolled,
         Position::default(),
         "the fixture did not move the pane, so the reset below proves nothing"
     );
 
     app.apply(Action::ToggleStanding, &mut frame, 20)
         .expect("the toggle asked the shell to quit");
+    assert_eq!(
+        app.position(),
+        scrolled,
+        "the press moved the pane on its own, so a refused branch point throws \
+         the reader to the top of a run they never left"
+    );
+
+    app.stood();
     assert_eq!(
         app.position(),
         Position::default(),
