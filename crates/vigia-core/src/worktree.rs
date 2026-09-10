@@ -8,20 +8,29 @@ use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
 use crate::frame::Frame;
+use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
 use crate::watch::{WatchOptions, Watcher};
 
-/// Knobs that change what a change sweep costs.
+/// Knobs that change what a change sweep costs, and what it reports.
+///
+/// Borrowed rather than owned so this stays `Copy`: a compiled pattern is not,
+/// and the walk needs one only for as long as it runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChangeOptions {
+pub struct ChangeOptions<'h> {
     /// Pair deletions with additions so a moved file reads as one change.
     pub track_renames: bool,
+    /// Paths the reader asked to keep out of the pane. Applied here rather than
+    /// at render, so a hidden path is absent from everything downstream of the
+    /// walk instead of merely undrawn.
+    pub hide: Option<&'h Hidden>,
 }
 
-impl Default for ChangeOptions {
+impl Default for ChangeOptions<'_> {
     fn default() -> Self {
         Self {
             track_renames: true,
+            hide: None,
         }
     }
 }
@@ -68,7 +77,7 @@ impl Worktree {
     /// # Errors
     ///
     /// `gix` cannot walk the worktree's status.
-    pub fn changes(&self) -> Result<Changes> {
+    pub fn changes(&self) -> Result<Changes<'static>> {
         self.changes_with(ChangeOptions::default())
     }
 
@@ -77,7 +86,7 @@ impl Worktree {
     /// # Errors
     ///
     /// `gix` cannot walk the worktree's status.
-    pub fn changes_with(&self, options: ChangeOptions) -> Result<Changes> {
+    pub fn changes_with<'h>(&self, options: ChangeOptions<'h>) -> Result<Changes<'h>> {
         self.changes_of(Origin::Unstaged, options)
     }
 
@@ -86,7 +95,11 @@ impl Worktree {
     /// # Errors
     ///
     /// `gix` cannot walk the worktree's status.
-    pub fn changes_of(&self, origin: Origin, options: ChangeOptions) -> Result<Changes> {
+    pub fn changes_of<'h>(
+        &self,
+        origin: Origin,
+        options: ChangeOptions<'h>,
+    ) -> Result<Changes<'h>> {
         match origin {
             Origin::Unstaged => {
                 let iter = self
@@ -101,25 +114,46 @@ impl Worktree {
                     )
                     .into_index_worktree_iter(Vec::<BString>::new())
                     .map_err(|e| Error::Status(Box::new(e)))?;
-                Ok(Changes::Unstaged(iter))
+                Ok(Changes::over(Inner::Unstaged(iter), options.hide))
             }
-            Origin::Staged => Ok(Changes::Staged(self.staged(options)?.into_iter())),
+            Origin::Staged => Ok(Changes::over(
+                Inner::Staged(self.staged(options)?.into_iter()),
+                options.hide,
+            )),
         }
     }
 
     /// How many changes one comparison holds, without keeping any of them.
     ///
+    /// Takes the pattern alone rather than the whole options struct, because this
+    /// forces rename tracking on and a caller able to turn it off here would be
+    /// changing what the number means rather than what it costs.
+    ///
     /// # Errors
     ///
     /// `gix` cannot walk the worktree's status.
-    pub fn count_of(&self, origin: Origin) -> Result<usize> {
+    pub fn count_of(&self, origin: Origin, hide: Option<&Hidden>) -> Result<Counted> {
         // Rename tracking on, and the cheaper spelling is wrong here.
-        self.changes_of(origin, ChangeOptions::default())?
-            .try_fold(0, |n, change| change.map(|_| n + 1))
+        let mut walk = self.changes_of(
+            origin,
+            ChangeOptions {
+                hide,
+                ..ChangeOptions::default()
+            },
+        )?;
+        let mut shown = 0;
+        for change in &mut walk {
+            change?;
+            shown += 1;
+        }
+        Ok(Counted {
+            shown,
+            hidden: walk.hidden(),
+        })
     }
 
     /// The index against `HEAD^{tree}`, collected.
-    fn staged(&self, options: ChangeOptions) -> Result<Vec<FileChange>> {
+    fn staged(&self, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
         let tree = match self.repo.head_tree_id() {
             Ok(id) => id.detach(),
             // Unborn, detached at nothing, or an unreadable `HEAD`.
@@ -320,18 +354,57 @@ fn git_separators(mut bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
-/// Iterator over one comparison's changes.
+/// What a comparison holds: what a reader would see, and what the pattern took.
+///
+/// Both, from one walk, because a caller with only the first cannot tell an empty
+/// comparison from one the reader hid every path in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counted {
+    /// Changes this comparison would draw.
+    pub shown: usize,
+    /// Changes the pattern kept out of it.
+    pub hidden: usize,
+}
+
+/// Iterator over one comparison's changes, less the ones the reader hid.
+pub struct Changes<'h> {
+    inner: Inner,
+    hide: Option<&'h Hidden>,
+    hidden: usize,
+}
+
+/// Which comparison is being walked.
 #[allow(
     clippy::large_enum_variant,
     reason = "the streaming arm is `gix`'s own iterator and is 1.5KB; boxing it \
               would put an allocation and a pointer chase on the walk I4 measures, \
               to shrink a value that exists once per frame"
 )]
-pub enum Changes {
+enum Inner {
     /// The working tree against the index, streamed off `gix`'s own iterator.
     Unstaged(gix::status::index_worktree::Iter),
     /// The index against `HEAD^{tree}`, already collected.
     Staged(std::vec::IntoIter<FileChange>),
+}
+
+impl<'h> Changes<'h> {
+    fn over(inner: Inner, hide: Option<&'h Hidden>) -> Self {
+        Self {
+            inner,
+            hide,
+            hidden: 0,
+        }
+    }
+
+    /// How many changes this walk kept from its caller, once it has been drained.
+    ///
+    /// Counted here because nothing downstream can recover it: a hidden path is
+    /// not a file the caller has and declines to draw, it is one the caller never
+    /// receives, and the header owes the reader that number.
+    #[must_use]
+    pub fn hidden(&self) -> usize {
+        self.hidden
+    }
 }
 
 fn path_of(raw: &gix::bstr::BStr) -> String {
@@ -461,7 +534,26 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
     })
 }
 
-impl Iterator for Changes {
+impl Iterator for Changes<'_> {
+    type Item = Result<FileChange>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let change = self.inner.next()?;
+            // A failure describes the whole comparison rather than one path, so
+            // there is no path to hold a pattern against and nothing to hide.
+            let Ok(change) = change else {
+                return Some(change);
+            };
+            match self.hide {
+                Some(hide) if hide.is_hidden(&change.path) => self.hidden += 1,
+                _ => return Some(Ok(change)),
+            }
+        }
+    }
+}
+
+impl Iterator for Inner {
     type Item = Result<FileChange>;
 
     fn next(&mut self) -> Option<Self::Item> {

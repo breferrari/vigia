@@ -319,7 +319,7 @@ fn chrome() -> Chrome {
         icons: false,
         links: false,
         root: String::new(),
-        elsewhere: 0,
+        elsewhere: Default::default(),
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -376,7 +376,7 @@ fn on_a_branch() -> Chrome {
         gripped: None,
         scrolling: None,
         staged: None,
-        elsewhere: 0,
+        elsewhere: Default::default(),
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -395,6 +395,7 @@ fn with_notice() -> Chrome {
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -616,6 +617,7 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
 /// longer than any pane.
 fn awkward() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -654,6 +656,7 @@ fn awkward() -> View {
 
 fn empty() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -679,6 +682,7 @@ fn empty() -> View {
 /// actually drawn can be counted.
 fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -888,6 +892,7 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// it.
 fn glancing() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1034,8 +1039,11 @@ fn the_header_never_takes_a_second_line() {
     for chrome in [chrome(), following(), lost(), with_notice()] {
         for width in 8..=120u16 {
             for height in [6u16, 24] {
-                for listed in [0usize, 3] {
-                    let view = numbered(4, 3, listed);
+                for (listed, hidden) in [(0usize, 0usize), (3, 0), (3, 12)] {
+                    let view = View {
+                        hidden,
+                        ..numbered(4, 3, listed)
+                    };
                     let marker = if listed > 0 { "src/f0.rs" } else { "R00" };
                     let rows = rows_at(width, height, &view, &chrome);
                     let Some(first) = rows.iter().position(|row| row.contains(marker)) else {
@@ -1053,9 +1061,9 @@ fn the_header_never_takes_a_second_line() {
                     let starts = list_top(&body);
                     assert_eq!(
                         first, starts,
-                        "at {width}x{height} with {listed} listed, the body \
-                         started on row {first} rather than {starts}, so the \
-                         header took more than one"
+                        "at {width}x{height} with {listed} listed and {hidden} \
+                         hidden, the body started on row {first} rather than \
+                         {starts}, so the header took more than one"
                     );
                 }
             }
@@ -2325,6 +2333,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2459,6 +2468,7 @@ fn a_clipped_content_line_says_it_continues() {
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -3471,6 +3481,7 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 /// sweep, over a diff tall enough that the region always draws a scrollbar.
 fn overlong(rows: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,

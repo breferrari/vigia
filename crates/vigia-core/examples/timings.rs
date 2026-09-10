@@ -69,9 +69,11 @@ fn main() -> ExitCode {
 
     let renames_on = ChangeOptions {
         track_renames: true,
+        ..ChangeOptions::default()
     };
     let renames_off = ChangeOptions {
         track_renames: false,
+        ..ChangeOptions::default()
     };
 
     // Cold, and measured from process start: this is the number I7 is about.
@@ -342,7 +344,11 @@ struct Sweep {
 }
 
 /// Enumerate every change, then diff at most `diff_limit` of them.
-fn sweep(worktree: &Worktree, options: ChangeOptions, diff_limit: usize) -> Result<Sweep, Error> {
+fn sweep(
+    worktree: &Worktree,
+    options: ChangeOptions<'_>,
+    diff_limit: usize,
+) -> Result<Sweep, Error> {
     let start = Instant::now();
 
     let mut first_change = None;

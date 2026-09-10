@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::Result;
+use crate::hidden::Hidden;
 use crate::hunk::{FileDiff, FileSpan};
 use crate::worktree::{ChangeOptions, Worktree};
 
@@ -314,6 +315,11 @@ pub struct Frame<'w> {
     failure: Option<FileDiff>,
     /// Whether the staged run is drawn beside the unstaged one.
     staged: bool,
+    /// Paths the reader asked to keep out of the pane, and how many the last walk
+    /// kept out. The count is the frame's because the walk that produced it is
+    /// gone by the time the header asks.
+    hide: Option<Hidden>,
+    hidden: usize,
     /// Where [`Self::files`]'s staged run begins, recorded by the walk that built
     /// it rather than recovered by scanning. See [`Frame::staged_at`].
     staged_at: usize,
@@ -347,6 +353,8 @@ impl<'w> Frame<'w> {
             attributes: HashMap::new(),
             failure: None,
             staged: false,
+            hide: None,
+            hidden: 0,
             staged_at: 0,
             stats: FrameStats::default(),
             settles_at: None,
@@ -367,19 +375,26 @@ impl<'w> Frame<'w> {
         // event brings the walk back.
         self.settles_at = None;
 
+        let options = ChangeOptions {
+            hide: self.hide.as_ref(),
+            ..ChangeOptions::default()
+        };
         let mut files = Vec::with_capacity(self.files.len());
-        for change in self.worktree.changes()? {
+        // Bound rather than consumed in place: what a walk hid is only knowable
+        // once it has been drained.
+        let mut walk = self.worktree.changes_with(options)?;
+        for change in &mut walk {
             files.push(change?);
         }
+        let mut hidden = walk.hidden();
         // Unstaged first, then staged, and the order is the product.
         let staged_at = files.len();
         if self.staged {
-            for change in self
-                .worktree
-                .changes_of(Origin::Staged, ChangeOptions::default())?
-            {
+            let mut walk = self.worktree.changes_of(Origin::Staged, options)?;
+            for change in &mut walk {
                 files.push(change?);
             }
+            hidden += walk.hidden();
         }
 
         // Nothing above this line mutated the frame's picture of the worktree, which
@@ -437,12 +452,24 @@ impl<'w> Frame<'w> {
 
         self.staged_at = staged_at;
         self.files = files;
+        self.hidden = hidden;
         Ok(())
     }
 
     /// Where the staged run begins in [`Frame::files`].
     pub fn staged_at(&self) -> usize {
         self.staged_at
+    }
+
+    /// Keep every path this pattern matches out of the walk, from the next
+    /// [`Frame::advance`] on.
+    pub fn hide(&mut self, hide: Option<Hidden>) {
+        self.hide = hide;
+    }
+
+    /// How many changed files the last walk kept out of [`Frame::files`].
+    pub fn hidden(&self) -> usize {
+        self.hidden
     }
 
     /// Draw the staged run, or stop drawing it.

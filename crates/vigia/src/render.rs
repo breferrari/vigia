@@ -7,7 +7,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
+use vigia_core::{
+    Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span,
+};
 
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
@@ -487,7 +489,7 @@ pub struct Chrome {
     /// How many files the staged run holds, or `None` when it is not drawn.
     pub staged: Option<usize>,
     /// How many changes the run that is not drawn holds.
-    pub elsewhere: usize,
+    pub elsewhere: Counted,
     /// Whether the watch is still live.
     pub mode: Mode,
     /// The cell a step button is being held down on, when one is.
@@ -687,18 +689,30 @@ const fn counts_edge(pane: u16, trailing: u16) -> usize {
     pane.saturating_sub(trailing).saturating_sub(rows) as usize
 }
 
+/// How much of the tree the pane is keeping from the reader, wherever it went.
+///
+/// The header and the empty state both draw it, and two counts of it one row
+/// apart and disagreeing is worse on a glance than either alone.
+fn hidden_of(view: &View, chrome: &Chrome) -> usize {
+    view.hidden + chrome.elsewhere.hidden
+}
+
 /// The facts about the tree, in the order a narrowing header gives them up.
 ///
-/// `N binary` says how much of the run the header's total leaves out, and draws
-/// only where there is some; the staged total is owed whenever the run is on,
-/// zero included, which is why it is the one here that draws its own nothing.
-fn facts_of(files: usize, binary: usize, staged: Option<usize>) -> Vec<String> {
-    if files == 0 {
+/// `N binary` says how much of the run the total leaves out and `N hidden` how
+/// much of the tree the count itself does; both draw only where there is some,
+/// and hidden is given up first of the two, being the one fact here the reader
+/// configured. The staged total is owed whenever the run is on, zero included.
+fn facts_of(files: usize, binary: usize, hidden: usize, staged: Option<usize>) -> Vec<String> {
+    if files == 0 && hidden == 0 {
         return Vec::new();
     }
     let mut facts = vec![format!("{files} changed")];
     if binary > 0 {
         facts.push(format!("{binary} binary"));
+    }
+    if hidden > 0 {
+        facts.push(format!("{hidden} hidden"));
     }
     if let Some(staged) = staged {
         facts.push(format!("{staged} staged"));
@@ -732,9 +746,10 @@ fn header_left(
     branch: Option<&str>,
     files: usize,
     binary: usize,
+    hidden: usize,
     staged: Option<usize>,
 ) -> Vec<String> {
-    let facts = facts_of(files, binary, staged);
+    let facts = facts_of(files, binary, hidden, staged);
     let mut rungs = Vec::with_capacity(facts.len() + 2);
 
     // The branch is drawn always, rather than on the empty state alone.
@@ -771,15 +786,20 @@ fn header_left(
     rungs
 }
 
-/// The one body line a worktree with no changes gets.
-fn empty_state_with(staged: Option<usize>, elsewhere: usize) -> String {
+/// The one body line a worktree with no changes gets: what this run holds, then
+/// where the rest of the work went.
+///
+/// A pattern that ate every change owns the first clause, because at a width
+/// that drops the header's count this row is the only thing left on screen.
+fn empty_state_with(staged: Option<usize>, elsewhere: usize, hidden: usize) -> String {
+    let held = match (hidden, staged) {
+        (0, Some(_)) => NOTHING_ANYWHERE.to_owned(),
+        (0, None) => NOTHING_CHANGED.to_owned(),
+        (hidden, _) => format!("{hidden} hidden"),
+    };
     match (staged, elsewhere) {
-        // The run is on and there is nothing in either. One line, both named.
-        (Some(_), _) => NOTHING_ANYWHERE.to_owned(),
-        // The run is off and the index has work in it: say where the work went.
-        (None, n) if n > 0 => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{n} staged"),
-        // A genuinely clean tree, which is B3's own line unchanged.
-        (None, _) => NOTHING_CHANGED.to_owned(),
+        (None, n) if n > 0 => format!("{held}{FACT_SEPARATOR}{n} staged"),
+        _ => held,
     }
 }
 
@@ -2144,7 +2164,11 @@ pub fn render(
             full,
             view,
             area,
-            &empty_state_with(chrome.staged, chrome.elsewhere),
+            &empty_state_with(
+                chrome.staged,
+                chrome.elsewhere.shown,
+                hidden_of(view, chrome),
+            ),
         );
         if bar.drawn() {
             painter.scrollbar(
@@ -3175,6 +3199,7 @@ impl Painter<'_> {
             chrome.branch.as_deref(),
             view.files,
             view.churn.map_or(0, |run| run.binary),
+            hidden_of(view, chrome),
             chrome.staged,
         );
         self.status_line(area, &rungs, self.theme.chrome, &right);

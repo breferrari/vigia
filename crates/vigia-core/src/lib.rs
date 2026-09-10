@@ -31,6 +31,7 @@ mod emphasis;
 mod error;
 mod filter;
 mod frame;
+mod hidden;
 mod highlight;
 mod history;
 mod hunk;
@@ -44,6 +45,7 @@ pub use change::{ChangeKind, FileChange, Origin};
 pub use emphasis::{Emphasis, mark};
 pub use error::{Error, Result};
 pub use frame::{Churn, Frame, FrameStats};
+pub use hidden::{Hidden, NotAPattern};
 pub use highlight::{
     CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_BYTES,
     WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport, Warmed,
@@ -61,6 +63,6 @@ pub use session::{Registration, Registry};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{
-    ChangeOptions, Changes, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed, Worktree,
-    indexed_extensions,
+    ChangeOptions, Changes, Counted, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed,
+    Worktree, indexed_extensions,
 };

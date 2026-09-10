@@ -51,7 +51,13 @@ fn area() -> Rect {
 }
 
 fn chrome(app: &App) -> Chrome {
-    app.chrome("fixture", Some("main"), Pointing::default(), 0, "")
+    app.chrome(
+        "fixture",
+        Some("main"),
+        Pointing::default(),
+        Default::default(),
+        "",
+    )
 }
 
 fn press(code: KeyCode) -> Event {
@@ -647,7 +653,7 @@ fn drawn_close(
             hovered,
             ..Pointing::default()
         },
-        0,
+        Default::default(),
         "",
     );
     let body = body_layout(area(), &chrome, FILES, FILES);

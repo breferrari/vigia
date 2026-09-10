@@ -14,10 +14,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 27;
+const ESCAPING_FILES: usize = 28;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-seven";
+const ESCAPING_FILES_SPELLED: &str = "twenty-eight";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1916,6 +1916,7 @@ fn every_config_key_reaches_the_changelog_filter() {
     let named: Vec<&str> = pattern.split(['|', '(', ')']).collect();
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
+        .chain(vigia::config::VALUES)
         .filter(|key| !named.contains(key))
         .collect();
     assert!(
@@ -1937,7 +1938,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 389167),
+    ("SPEC.md", 392973),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -2000,13 +2001,23 @@ fn the_spec_names_every_key_the_config_file_accepts() {
 
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
+        .chain(vigia::config::VALUES)
+        .filter(|key| !spec.contains(&format!("`{key}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the config file accepts {missing:?} and SPEC.md never names them, so the \
+         document describes a surface the binary no longer has"
+    );
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
         .filter(|key| !describes.contains(&format!("`{key}`")))
         .collect();
     assert!(
         missing.is_empty(),
-        "the config file accepts {missing:?} and SPEC.md's paragraph for it does \
-         not name them, so the document describes a surface the binary no longer \
-         has:\n{describes}"
+        "§11.1's paragraph for the file does not name {missing:?}, so a reader \
+         following the document's own list gets a smaller pane than the binary \
+         offers:\n{describes}"
     );
 
     for stated in [describes, rules] {
@@ -2049,6 +2060,7 @@ fn the_readme_teaches_a_config_file_that_parses_and_names_every_key() {
 
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
+        .chain(vigia::config::VALUES)
         .filter(|key| {
             !block
                 .lines()

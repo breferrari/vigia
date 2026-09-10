@@ -41,6 +41,7 @@ fn engine(c: &mut Criterion) {
                 worktree
                     .changes_with(ChangeOptions {
                         track_renames: false,
+                        ..ChangeOptions::default()
                     })
                     .expect("enumerate")
                     .count(),

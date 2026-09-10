@@ -14,7 +14,7 @@ use vigia::{
     Chrome, FileEntry, FileNotes, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow,
     Mode, Position, Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
+use vigia_core::{Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
 
 /// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
 fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
@@ -176,7 +176,7 @@ fn chrome() -> Chrome {
         icons: false,
         links: false,
         root: String::new(),
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -211,7 +211,7 @@ fn empty_chrome() -> Chrome {
         gripped: None,
         scrolling: None,
         staged: None,
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -249,6 +249,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     );
 
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -328,6 +329,7 @@ fn file(path: &str, added: u32, removed: u32) -> Row {
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
 fn one_file() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -496,6 +498,7 @@ fn a_content_row_stands_its_sigil_off_the_line() {
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -945,6 +948,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
 fn ragged_counts() -> View {
     let row = |path: &str, added: u32, removed: u32| Row::file(listed(path, added, removed));
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1833,6 +1837,7 @@ fn a_detached_head_names_no_branch_anywhere() {
 #[test]
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1900,6 +1905,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     // nothing. This is the truncated-to-useless shape I6 forbids, and it is the
     // one part of I6 the renderer decides on its own rather than by layout.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1931,6 +1937,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     // Git omits the count when a side covers exactly one line, and a reader calibrated
     // on `git diff` reads its absence as "one".
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2158,6 +2165,7 @@ fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
 fn tabs_become_columns_and_control_characters_become_visible() {
     // Not cosmetic.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2195,6 +2203,7 @@ fn a_double_width_character_is_never_cut_in_half() {
     // Diffs carry whatever is in the files, and a CJK ideograph or an emoji occupies
     // two columns.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2253,6 +2262,7 @@ fn the_gutter_gives_way_before_the_text_does() {
     // than a readable column. Both sides are asserted, because a rule that only
     // ever fires one way is not a rule.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2329,6 +2339,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         }; HEAT_BUCKETS],
     };
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2721,6 +2732,7 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 /// The three rungs of the recency ladder on one screen, with churn behind them.
 fn glancing() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -3311,6 +3323,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 /// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
 fn two_regions_at(current: usize, row: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -3703,6 +3716,7 @@ fn a_one_row_region_with_somewhere_to_scroll_still_spends_no_column() {
 /// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
 fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -5972,7 +5986,7 @@ fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
         let chrome = Chrome {
             worktree: worktree.to_owned(),
             staged: None,
-            elsewhere: 0,
+            elsewhere: Counted::default(),
             branch: Some("main".to_owned()),
             ..chrome()
         };
@@ -6007,7 +6021,7 @@ fn a_populated_worktree_names_its_branch_in_the_header() {
     let view = a_list_of(3, 3, 0);
     let chrome = Chrome {
         staged: None,
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         branch: Some("feature/band".to_owned()),
         ..chrome()
     };
@@ -6252,7 +6266,10 @@ fn the_header_counts_both_runs() {
 #[test]
 fn an_empty_view_says_where_the_work_went() {
     let signposted = Chrome {
-        elsewhere: 3,
+        elsewhere: Counted {
+            shown: 3,
+            hidden: 0,
+        },
         ..empty_chrome()
     };
     let rows = text_rows(&screen(80, 6, &nothing_changed(), &signposted), 80, 6);
@@ -6336,7 +6353,10 @@ fn the_layout_is_the_same_whatever_the_staged_facts_say() {
     let plain = chrome();
     let told = Chrome {
         staged: Some(7),
-        elsewhere: 4,
+        elsewhere: Counted {
+            shown: 4,
+            hidden: 0,
+        },
         ..chrome()
     };
 
@@ -6973,5 +6993,302 @@ fn no_emoji_presentation_selector_reaches_the_buffer() {
     assert!(
         drawn.contains('\u{26a0}'),
         "the selector was dropped and took its glyph with it:\n{drawn:?}"
+    );
+}
+
+/// A header fixture carrying a run beside `hidden` files the pattern kept out.
+fn with_hidden(files: usize, hidden: usize) -> View {
+    View {
+        files,
+        hidden,
+        churn: Some(Churn {
+            added: 1204,
+            removed: 318,
+            binary: 0,
+        }),
+        ..one_file()
+    }
+}
+
+#[test]
+fn the_header_says_how_many_files_it_is_keeping_back() {
+    // A monitor that hides work without saying so is lying about the tree, which
+    // is the worst failure available to it. The counts describe what can be seen
+    // and this token says what cannot.
+    let plain = row_text(&screen(80, 6, &with_hidden(28, 0), &chrome()), 0);
+    let kept = row_text(&screen(80, 6, &with_hidden(28, 12), &chrome()), 0);
+
+    assert!(
+        kept.contains(&format!("28 changed{FACT_JOIN}12 hidden")),
+        "the hidden count is not beside the count it qualifies: {kept:?}"
+    );
+    assert_eq!(
+        plain.len() - plain.trim_end().len(),
+        kept.len() - kept.trim_end().len(),
+        "the hidden count moved the total: {plain:?} against {kept:?}"
+    );
+    for header in [&plain, &kept] {
+        assert!(
+            header.trim_end().ends_with("+1204  -318"),
+            "the total left the right-hand edge: {header:?}"
+        );
+    }
+}
+
+#[test]
+fn a_pane_hiding_nothing_draws_no_hidden_token() {
+    // Nothing on screen until it matches something, which is what lets a reader
+    // with no pattern never learn the setting exists.
+    let plain = row_text(&screen(80, 6, &with_hidden(28, 0), &chrome()), 0);
+    assert!(
+        plain.contains("28 changed") && !plain.contains("hidden"),
+        "a reader with no pattern was told about hidden files: {plain:?}"
+    );
+}
+
+#[test]
+fn the_hidden_count_sits_between_the_binary_count_and_the_staged_one() {
+    // Both qualify the count beside them, so both go before it does. Hidden goes
+    // first of the two, because it is the one fact here the reader configured and
+    // a fact a reader chose is the one they need reminding of least.
+    let view = View {
+        hidden: 12,
+        ..with_binary(28, 2)
+    };
+    let staged = Chrome {
+        staged: Some(3),
+        ..chrome()
+    };
+    let rungs: Vec<String> = (30..=90)
+        .map(|width| row_text(&screen(width, 6, &view, &staged), 0))
+        .collect();
+
+    let holds = |needle: &str| rungs.iter().filter(|row| row.contains(needle)).count();
+    let (changed, binary, hidden, staged_count) = (
+        holds("28 changed"),
+        holds("2 binary"),
+        holds("12 hidden"),
+        holds("3 staged"),
+    );
+    assert!(
+        changed > binary && binary > hidden && hidden > staged_count && staged_count > 0,
+        "the facts do not drop rightmost first across 30..=90 columns: changed on \
+         {changed}, binary on {binary}, hidden on {hidden}, staged on {staged_count}"
+    );
+}
+
+#[test]
+fn a_tree_whose_every_change_is_hidden_still_says_so() {
+    // The empty state draws no facts at all, and a reader whose pattern swallowed
+    // the whole tree would otherwise get the same screen as a reader with nothing
+    // to see, which is the one case where the token matters most.
+    let view = View {
+        files: 0,
+        hidden: 12,
+        ..nothing_changed()
+    };
+    let header = row_text(&screen(80, 6, &view, &chrome()), 0);
+    assert!(
+        header.contains("12 hidden"),
+        "a pane hiding everything reads as a clean tree: {header:?}"
+    );
+    assert!(
+        header.contains("0 changed"),
+        "the count left when the tree emptied, so the token qualifies nothing: \
+         {header:?}"
+    );
+
+    // And a genuinely clean tree is unchanged, which is B3's own line.
+    let clean = row_text(&screen(80, 6, &nothing_changed(), &chrome()), 0);
+    assert!(
+        !clean.contains("hidden") && !clean.contains("changed"),
+        "a clean tree grew a fact it never had: {clean:?}"
+    );
+}
+
+/// The header and the body report one number, not two.
+///
+/// Every other gate here sets exactly one of the two halves, so a header reading
+/// its own half and a body reading the sum agreed by accident. With a file hidden
+/// in the drawn run and a different one hidden in the run beside it, the two rows
+/// drew `1 hidden` and `2 hidden` on the same frame, which is worse on a glance
+/// than either number alone.
+#[test]
+fn the_header_and_the_body_never_disagree_about_what_is_hidden() {
+    let view = View {
+        files: 0,
+        hidden: 1,
+        ..nothing_changed()
+    };
+    let both = Chrome {
+        elsewhere: Counted {
+            shown: 0,
+            hidden: 1,
+        },
+        ..chrome()
+    };
+    let drawn = screen(80, 6, &view, &both);
+    let header = row_text(&drawn, 0);
+    let body = row_text(&drawn, 1);
+
+    assert!(
+        header.contains("2 hidden"),
+        "the header counts only the run it drew: {header:?}"
+    );
+    assert!(
+        body.contains("2 hidden"),
+        "the body counts only the run it drew: {body:?}"
+    );
+
+    // Non-vacuity: neither row says two when only one half is set.
+    let drawn = screen(80, 6, &view, &chrome());
+    for row in [row_text(&drawn, 0), row_text(&drawn, 1)] {
+        assert!(
+            row.contains("1 hidden") && !row.contains("2 hidden"),
+            "a pane hiding one file says otherwise: {row:?}"
+        );
+    }
+}
+
+/// The other run can hold both kinds at once, which no other gate here sets.
+///
+/// A staged run with some files the pattern covers and some it does not, over a
+/// genuinely clean unstaged one: the body owes both numbers, and they describe
+/// disjoint sets of the same run.
+#[test]
+fn the_other_run_can_hold_both_what_is_shown_and_what_is_hidden() {
+    let view = View {
+        files: 0,
+        hidden: 0,
+        ..nothing_changed()
+    };
+    let mixed = Chrome {
+        elsewhere: Counted {
+            shown: 3,
+            hidden: 2,
+        },
+        ..chrome()
+    };
+    let drawn = screen(80, 6, &view, &mixed);
+    let body = row_text(&drawn, 1);
+    assert!(
+        body.contains("2 hidden") && body.contains("3 staged"),
+        "the body drops one of the two halves the other run holds: {body:?}"
+    );
+    assert!(
+        !body.contains("5 "),
+        "the two halves were added together, and they count different files: \
+         {body:?}"
+    );
+    assert!(
+        row_text(&drawn, 0).contains("2 hidden"),
+        "the header and the body disagree on the mixed run"
+    );
+}
+
+/// The run the pane is not drawing can be the one that was emptied.
+///
+/// The hardest shape to see: the unstaged run is genuinely clean, so the walk
+/// hides nothing and `view.hidden` is zero, and the staged run's only file
+/// matches the pattern, so its shown count is zero too. Nothing on either side is
+/// non-zero, and the pane read exactly like a clean tree while holding a change.
+#[test]
+fn a_pane_whose_only_work_is_staged_and_hidden_says_so() {
+    let view = View {
+        files: 0,
+        hidden: 0,
+        ..nothing_changed()
+    };
+    let taken = Chrome {
+        elsewhere: Counted {
+            shown: 0,
+            hidden: 1,
+        },
+        ..chrome()
+    };
+    let body = row_text(&screen(80, 6, &view, &taken), 1);
+    assert!(
+        body.contains("1 hidden"),
+        "the pattern took the only change there was and the pane reads as a \
+         clean tree: {body:?}"
+    );
+    assert!(
+        !body.contains("no unstaged changes"),
+        "the body still claims the tree is clean: {body:?}"
+    );
+
+    // Non-vacuity: the same chrome with nothing taken is B3's own line.
+    let clean = row_text(&screen(80, 6, &view, &chrome()), 1);
+    assert!(clean.contains("no unstaged changes"), "{clean:?}");
+}
+
+/// The body says it too, and this is the row that matters most.
+///
+/// The header gives the count up as it narrows, so below the width that holds it
+/// the body is the only thing left saying why the pane is empty. It said `no
+/// unstaged changes` over twelve hidden ones, which is the lie the count exists
+/// to stop, one row down and in the larger type.
+#[test]
+fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
+    for width in [12u16, 20, 30, 40, 80, 120] {
+        let view = View {
+            files: 0,
+            hidden: 12,
+            ..nothing_changed()
+        };
+        let body = row_text(&screen(width, 6, &view, &chrome()), 1);
+        assert!(
+            body.contains("12 hidden"),
+            "at {width} columns the body of a pane hiding everything reads {body:?}"
+        );
+        assert!(
+            !body.contains("no unstaged changes"),
+            "at {width} columns the body says the tree is clean over twelve changes the reader hid: {body:?}"
+        );
+
+        // A genuinely clean tree keeps B3's own line, at every one of these
+        // widths. Held by its head rather than whole, because below the width
+        // that fits it the row is elided like any other (I6).
+        let clean = row_text(&screen(width, 6, &nothing_changed(), &chrome()), 1);
+        assert!(
+            clean.trim_start().starts_with("no unsta"),
+            "at {width} columns a clean tree stopped saying so: {clean:?}"
+        );
+    }
+
+    // The other run's count still rides beside it, which is what B3's line has
+    // always done and what a reader loses if the pattern replaces the whole row.
+    let view = View {
+        files: 0,
+        hidden: 12,
+        ..nothing_changed()
+    };
+    let elsewhere = Chrome {
+        elsewhere: Counted {
+            shown: 3,
+            hidden: 0,
+        },
+        ..chrome()
+    };
+    let body = row_text(&screen(80, 6, &view, &elsewhere), 1);
+    assert!(
+        body.contains("12 hidden") && body.contains("3 staged"),
+        "the pattern took the row and the staged count went with it: {body:?}"
+    );
+
+    // Both runs on, and the pattern still owns the first clause.
+    let view = View {
+        files: 0,
+        hidden: 12,
+        ..nothing_changed()
+    };
+    let both = Chrome {
+        staged: Some(0),
+        ..chrome()
+    };
+    let body = row_text(&screen(80, 6, &view, &both), 1);
+    assert!(
+        body.contains("12 hidden") && !body.contains("no staged or unstaged"),
+        "with both runs on and everything hidden the body reads {body:?}"
     );
 }

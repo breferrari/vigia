@@ -991,6 +991,10 @@ pub struct View {
     pub rows_above: usize,
     /// Changed files in the whole worktree, not just the visible ones.
     pub files: usize,
+    /// Changed files the reader's `hide` pattern kept out of the walk. The header
+    /// draws it, because a count of what can be seen says nothing about what
+    /// cannot.
+    pub hidden: usize,
     /// Where the top row actually came from, once the request was resolved
     /// against the files that exist and how tall they are.
     pub top: Position,
@@ -1365,6 +1369,7 @@ impl View {
             churn: None,
             rows_above: 0,
             files,
+            hidden: frame.hidden(),
             // Until the walk below runs, the request is passed through with only its
             // file clamped.
             top: Position {

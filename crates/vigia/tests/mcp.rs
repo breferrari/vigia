@@ -1153,6 +1153,48 @@ fn a_note_on_a_line_only_the_staged_diff_holds_is_placed_against_it() {
     assert_eq!(with["current_text"], "staged three");
 }
 
+/// A `hide` pattern is the pane's, and the server has no pane.
+///
+/// Armed here it would report a note on a hidden path as adrift, which is what a
+/// note on a clean file looks like, and the agent would answer about a file it
+/// was told nothing had happened to.
+///
+/// The note is on a line only the *staged* diff holds, so one assertion tells
+/// three outcomes apart: `gone` means the config file was never read, `adrift`
+/// means the pattern reached the server, and `at` means it read the file and
+/// took the toggle without the pattern.
+#[test]
+fn a_pattern_that_hides_a_path_from_the_pane_does_not_hide_it_from_the_agent() {
+    let rig = Rig::new("mcp-hide");
+    rig.scratch.edit_line(PATH, 2, "staged three");
+    rig.scratch.git(&["add", PATH]);
+    rig.scratch.edit_line(PATH, 9, "unstaged ten");
+    rig.store
+        .put(&pinned("hide-1", PATH, Side::New, 3, "staged three"))
+        .expect("put");
+
+    let config = rig.root.path().join(".config").join("vigia");
+    fs::create_dir_all(&config).expect("make the config directory");
+    // A pattern covering the very file the note is on, beside a toggle that does
+    // travel.
+    fs::write(
+        config.join("config"),
+        format!("staged = on\nhide = ^{PATH}$\n"),
+    )
+    .expect("write the view defaults");
+
+    let mut server = rig.server();
+    let listed = document(&mut server, false);
+    let note = note_named(&listed, "hide-1");
+    assert_eq!(
+        note["placement"], "at",
+        "`gone` is a config file the server never read and `adrift` is the pane's \
+         pattern reaching it, which would read as a note on a file nothing \
+         changed: {note}"
+    );
+    assert_eq!(note["current_line"], 3);
+}
+
 #[test]
 fn a_note_on_a_binary_file_and_an_old_side_note_outside_every_hunk_carry_no_context() {
     let scratch = Scratch::new("mcp-binary");

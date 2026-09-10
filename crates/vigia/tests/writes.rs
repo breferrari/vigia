@@ -216,7 +216,9 @@ impl Rig<'_> {
     /// One whole frame: chrome, layout, collect, paint. Returns the diff's rows,
     /// which is what an `Action::Page` step is measured in.
     fn paint(&mut self) -> usize {
-        let chrome = self.app.chrome("fixture", None, Pointing::default(), 0, "");
+        let chrome = self
+            .app
+            .chrome("fixture", None, Pointing::default(), Default::default(), "");
         let body = body_layout(
             area(),
             &chrome,
@@ -408,7 +410,7 @@ fn one_gesture_writes_exactly_one_file() {
     let mut app = App::past_first_paint();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)

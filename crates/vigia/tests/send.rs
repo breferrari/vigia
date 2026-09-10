@@ -38,7 +38,7 @@ fn deep_scratch(name: &str) -> Scratch {
 fn painted(app: &mut App, frame: &mut Frame) -> View {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(Rect::new(0, 0, NARROW, 24), &chrome, 1, 1);
     app.view(frame, &mut highlighter, &history, body)
         .expect("view")
@@ -232,7 +232,7 @@ fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
         Voice::Said,
     );
     assert_eq!(
-        app.chrome("fixture", None, Pointing::default(), 0, "")
+        app.chrome("fixture", None, Pointing::default(), Default::default(), "")
             .notice
             .as_deref(),
         app.notice(),

@@ -20,10 +20,10 @@ use vigia_core::{
     Store, StoreWatch, Worktree, names_a_record, resolve, run_of,
 };
 
+use crate::VERSION;
 use crate::config::{self, Config};
 use crate::notes;
 use crate::state;
-use crate::{VERSION, arm_frame};
 
 /// The handshake revisions this server speaks, oldest first. The shapes it
 /// sends are the same in every one of them.
@@ -288,7 +288,12 @@ impl Site {
     fn listing(&self, all: bool) -> Result<Value, String> {
         let mut listing = self.store.list().map_err(|e| e.to_string())?;
         let mut frame = self.worktree.frame();
-        arm_frame(&mut frame, self.config);
+        // Only the run the file's toggle asks for. The `hide` pattern is not
+        // armed here and that is a ruling rather than an omission: it says what
+        // the pane draws, and a server has no pane. Armed, an agent asking about
+        // a note on a hidden path would be told its file is out of the diff,
+        // which is what a clean file looks like, when it is merely out of sight.
+        frame.show_staged(self.config.staged);
         frame
             .advance()
             .map_err(|e| format!("could not read the diff: {e}"))?;

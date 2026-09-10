@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use ratatui_textarea::Input;
-use vigia_core::{Frame, Highlighter, History, Note, Result, Samples};
+use vigia_core::{Counted, Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
@@ -202,7 +202,7 @@ impl App {
     }
 
     /// [`App::new`] with the view toggles a reader's config file asked for.
-    pub fn configured(config: crate::Config) -> Self {
+    pub fn configured(config: &crate::Config) -> Self {
         Self {
             rail: config.rail,
             single: config.single,
@@ -427,7 +427,7 @@ impl App {
         worktree: &str,
         branch: Option<&str>,
         pointing: Pointing,
-        elsewhere: usize,
+        elsewhere: Counted,
         root: &str,
     ) -> Chrome {
         let Pointing {
@@ -921,7 +921,7 @@ mod tests {
                 selected: None,
                 scrolling: Some((Grabbed::List, -1)),
             },
-            0,
+            Counted::default(),
             "",
         );
 
@@ -946,13 +946,15 @@ mod tests {
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0, "").mode,
+            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
+                .mode,
             Mode::Watching
         );
 
         app.watch_lost();
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0, "").mode,
+            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
+                .mode,
             Mode::Lost
         );
 
@@ -962,7 +964,8 @@ mod tests {
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0, "").mode,
+            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
+                .mode,
             Mode::Lost
         );
     }
@@ -974,13 +977,19 @@ mod tests {
         // that nothing invents one when there is none.
         let app = App::new();
         assert_eq!(
-            app.chrome("fixture", Some("main"), Pointing::default(), 0, "")
-                .branch
-                .as_deref(),
+            app.chrome(
+                "fixture",
+                Some("main"),
+                Pointing::default(),
+                Counted::default(),
+                ""
+            )
+            .branch
+            .as_deref(),
             Some("main")
         );
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0, "")
+            app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
                 .branch,
             None
         );

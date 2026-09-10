@@ -119,6 +119,7 @@ fn disabling_rename_tracking_splits_the_move_into_two_changes() {
     let mut kinds: Vec<ChangeKind> = worktree
         .changes_with(ChangeOptions {
             track_renames: false,
+            ..ChangeOptions::default()
         })
         .expect("enumerate without rename tracking")
         .map(|c| c.expect("change").kind)

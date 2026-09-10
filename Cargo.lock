@@ -2785,6 +2785,7 @@ name = "vigia-core"
 version = "0.45.0"
 dependencies = [
  "criterion",
+ "fancy-regex",
  "gix",
  "libc",
  "notify",

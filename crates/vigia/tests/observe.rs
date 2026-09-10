@@ -672,7 +672,7 @@ impl Pane<'_> {
             &self.name,
             self.branch.as_deref(),
             Pointing::default(),
-            0,
+            Default::default(),
             "",
         );
         self.body = body_layout(
@@ -700,7 +700,7 @@ impl Pane<'_> {
             &self.name,
             self.branch.as_deref(),
             Pointing::default(),
-            0,
+            Default::default(),
             "",
         );
         let _regions = regions(self.area, &chrome, &self.view);
@@ -722,7 +722,7 @@ impl Pane<'_> {
                 &self.name,
                 self.branch.as_deref(),
                 Pointing::default(),
-                0,
+                Default::default(),
                 "",
             )
             .frame
