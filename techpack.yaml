@@ -41,28 +41,31 @@ components:
   # scripts. Register runs on both ends of a session because its stdin payload is
   # what tells one from the other.
   #
-  # One source, two destinations, and the duplicate copy is deliberate. A
-  # component is the unit mcs installs, verifies and uninstalls, so two of them
-  # sharing a destination makes each one's removal the other's business, and the
-  # schema does not say which way that resolves. Two names cost a second copy of
-  # fifteen lines and make either component safe to deselect.
+  # The two register components are `isRequired` because they are one mechanism
+  # split across two events: the start records the socket and the end clears it,
+  # so a session that registers and never clears leaves a stale one behind. That
+  # is also what makes the shared destination safe. Neither can be deselected, so
+  # neither one's removal is ever the other's business, which the schema does not
+  # otherwise say how to resolve.
   - id: hook-register-start
     displayName: Socket registered on session start
     description: Records the session's socket beside the note store, so a note posts into it
     dependencies: [vigia-cli]
+    isRequired: true
     hookEvent: SessionStart
     hook:
       source: .techpack/hooks/register.sh
-      destination: register-start.sh
+      destination: register.sh
 
   - id: hook-register-end
     displayName: Socket cleared on session end
     description: Clears the session's socket when it ends
     dependencies: [vigia-cli]
+    isRequired: true
     hookEvent: SessionEnd
     hook:
       source: .techpack/hooks/register.sh
-      destination: register-end.sh
+      destination: register.sh
 
   - id: hook-pending
     displayName: Pending notes reported before a prompt

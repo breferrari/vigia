@@ -23,7 +23,7 @@ mcs sync --global
 | `vigia.hook-pending` | `vigia mcp pending`, on `UserPromptSubmit` |
 | `vigia.notes` | A `CLAUDE.local.md` section on what a resolved note is held to |
 
-Only the server is needed for the pack to be useful, and each hook is selectable under `mcs sync --customize`. The hooks install as scripts under `.claude/hooks/vigia/` rather than as the bare commands the README shows, because a script is what mcs registers and what lets every path exit clean: a machine without `vigia` gets a session that starts normally and says nothing. `mcs doctor` reports what is missing and the command that fixes it, and `mcs pack validate .` checks the manifest after an edit.
+Only the server is needed for the pack to be useful. `hook-pending` is selectable under `mcs sync --customize`; the two register hooks are not, because they are one mechanism split across two events and a session that records its socket and never clears it leaves a stale one behind. The hooks install as scripts under `.claude/hooks/vigia/` rather than as the bare commands the README shows, because a script is what mcs registers and what lets every path exit clean: a machine without `vigia` gets a session that starts normally and says nothing. `mcs doctor` reports what is missing and the command that fixes it, and `mcs pack validate .` checks the manifest after an edit.
 
 ## Links
 
