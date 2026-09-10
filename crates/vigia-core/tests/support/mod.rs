@@ -880,6 +880,17 @@ impl Scratch {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    /// Run git and hand back its output whatever it exits with, for a command
+    /// whose failure *is* the state a fixture wants: `merge` over a conflict.
+    pub fn git_may_fail(&self, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&self.path)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run git {args:?}: {e}"));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
     /// Write a file, creating parent directories.
     pub fn write(&self, rela: &str, contents: impl AsRef<[u8]>) {
         let full = self.path.join(rela);

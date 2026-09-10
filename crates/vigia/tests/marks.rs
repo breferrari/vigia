@@ -33,6 +33,7 @@ const GLYPHS: [&str; 3] = ["✎", "↳", "✓"];
 
 fn chrome() -> Chrome {
     Chrome {
+        position: "current".to_owned(),
         pressed: None,
         gripped: None,
         hovered: None,

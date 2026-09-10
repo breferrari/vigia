@@ -68,7 +68,14 @@ fn fixture(name: &str) -> Scratch {
 
 /// A chrome that has asked for the state under test, and optionally the rail.
 fn chrome_of(app: &App, rail: bool) -> Chrome {
-    let mut chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let mut chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     chrome.rail = rail;
     chrome
 }

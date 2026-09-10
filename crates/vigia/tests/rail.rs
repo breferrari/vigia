@@ -72,7 +72,14 @@ fn chrome() -> Chrome {
 
 /// A shell that has not asked, which is what ships.
 fn stacked_chrome() -> Chrome {
-    App::new().chrome("fixture", None, Pointing::default(), Default::default(), "")
+    App::new().chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    )
 }
 
 /// A file with a full history and a full heat strip, so every glance element has
@@ -999,7 +1006,14 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
     let railed = |app: &App| {
         body_layout(
             wide,
-            &app.chrome("f", None, Pointing::default(), Default::default(), ""),
+            &app.chrome(
+                "f",
+                None,
+                "current",
+                Pointing::default(),
+                Default::default(),
+                "",
+            ),
             3,
             3,
         )
@@ -1009,7 +1023,14 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
 
     let height = body_layout(
         wide,
-        &app.chrome("f", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "f",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         3,
         3,
     )
@@ -1054,7 +1075,14 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
     let of = |app: &App, at| {
         body_layout(
             at,
-            &app.chrome("f", None, Pointing::default(), Default::default(), ""),
+            &app.chrome(
+                "f",
+                None,
+                "current",
+                Pointing::default(),
+                Default::default(),
+                "",
+            ),
             3,
             3,
         )
@@ -1093,7 +1121,14 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
 
     let height = body_layout(
         at,
-        &app.chrome("f", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "f",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         3,
         3,
     )
@@ -1102,7 +1137,14 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
         .expect("scroll");
 
     let mut top_row = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> String {
-        let chrome = app.chrome("f", None, Pointing::default(), Default::default(), "");
+        let chrome = app.chrome(
+            "f",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
         let body = body_layout(at, &chrome, 3, 3);
         let view = app
             .view(frame, &mut highlighter, &history, body)
@@ -1134,7 +1176,14 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     assert!(
         body_layout(
             at,
-            &app.chrome("f", None, Pointing::default(), Default::default(), ""),
+            &app.chrome(
+                "f",
+                None,
+                "current",
+                Pointing::default(),
+                Default::default(),
+                ""
+            ),
             3,
             3
         )
@@ -1172,7 +1221,14 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     let at = Rect::new(0, 0, 160, TALL);
 
     let mut shape = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> (u16, u16) {
-        let chrome = app.chrome("f", None, Pointing::default(), Default::default(), "");
+        let chrome = app.chrome(
+            "f",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
         let body = body_layout(at, &chrome, 3, 3);
         let view = app
             .view(frame, &mut highlighter, &history, body)
@@ -1186,7 +1242,14 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     let stacked = shape(&mut app, &mut frame);
     let height = body_layout(
         at,
-        &app.chrome("f", None, Pointing::default(), Default::default(), ""),
+        &app.chrome(
+            "f",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         3,
         3,
     )
@@ -1236,7 +1299,14 @@ fn a_rail_draws_the_tail_of_the_staged_run() {
     let chrome = Chrome {
         rail: true,
         staged: Some(3),
-        ..App::new().chrome("fixture", None, Pointing::default(), Default::default(), "")
+        ..App::new().chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        )
     };
     let body = body_layout(
         at,

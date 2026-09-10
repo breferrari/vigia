@@ -37,6 +37,7 @@ mod history;
 mod hunk;
 mod notes;
 mod session;
+mod standing;
 mod timing;
 mod watch;
 mod worktree;
@@ -60,6 +61,7 @@ pub use notes::{
     run_of,
 };
 pub use session::{Registration, Registry};
+pub use standing::Standing;
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{

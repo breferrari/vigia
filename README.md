@@ -26,7 +26,7 @@ An agent edits **fast**, **wide**, and while you are reading something else. The
 |---|---|
 | 🤖 **Built for the pane beside the agent** | Zero input required. It follows the newest change and scrolls to it on its own |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle, under 5% memory drift over 24 hours |
-| 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging *actions*. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
+| 🎯 **The diff, and nothing else** | No branch or commit *browsing*, no stash list, no staging *actions*. `b` moves where the diff is measured from and picks nothing to look at. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
 | ⌨️ **Nothing to learn first** | `?` draws every gesture the pane binds, over the pane and moving nothing. `~/.config/vigia/config` decides what it opens as |
 
@@ -101,7 +101,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
 ## 👀 Reading the pane
 
 ```
-   header  │  my-repo · 3 changed                                      +55 -10
+   header  │  my-repo · main · current · 3 changed                     +55 -10
            │
      list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
            │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3
@@ -242,6 +242,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `s` | one file, or the whole diff |
 | `o` | the file list and its numbers, with no diff under it |
 | `a` | show or hide staged changes |
+| `b` | stand at the branch point, or back at the live pane |
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide the note rows |
 | `Enter` `Esc` | in the note box: send the note, or close it and send nothing |

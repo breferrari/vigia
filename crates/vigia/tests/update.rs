@@ -232,7 +232,14 @@ fn the_footer_carries_the_version_it_was_told() {
             Instant::now() + NOTICE_LINGER,
             Voice::Arrived,
         );
-        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
 
         let area = Rect::new(0, 0, width, 24);
         let mut buf = Buffer::empty(area);

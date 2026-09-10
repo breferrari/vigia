@@ -27,7 +27,14 @@ fn body() -> usize {
     // scroll arithmetic below is not entangled with I6's two-line footer.
     diff_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &App::new().chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         FILES,
         FILES,
     )
@@ -42,7 +49,14 @@ fn split() -> Body {
 fn listed() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), Default::default(), ""),
+        &App::new().chrome(
+            "fixture",
+            None,
+            "current",
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
         FILES,
         FILES,
     )
@@ -674,6 +688,7 @@ fn tag(action: Action) -> usize {
         Action::ToggleStaged => 111,
         Action::ToggleWrap => 112,
         Action::ToggleNotes => 113,
+        Action::ToggleStanding => 114,
         Action::ToggleSheet => 11,
         Action::CloseSheet => 12,
         Action::ListTo(_) => 13,

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{App, Body, Glyphs, Pointing, Row, Theme, body_layout, render};
-use vigia_core::{Highlighter, History, Worktree};
+use vigia_core::{Highlighter, History, Standing, Worktree};
 
 use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_delta};
 
@@ -34,6 +34,9 @@ struct FirstPaint {
     /// themselves: it is `Body::diff`, and a frame that drew too few is exactly
     /// what this gate must not accept.
     height: usize,
+    /// Rows the whole body holds, drawn or scrolled past, which is what tells
+    /// two runs over one tree apart on a pane that clips both.
+    total_rows: usize,
     /// The two frames' rows with every span stripped.
     plain: Vec<Row>,
     coloured: Vec<Row>,
@@ -44,15 +47,28 @@ struct FirstPaint {
 
 /// One cold start, staged as `vigia::run` stages it.
 fn cold_start(root: &std::path::Path) -> FirstPaint {
+    cold_start_at(root, &Standing::Current)
+}
+
+/// The same cold start, walking whichever position `standing` names.
+fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
     let began = Instant::now();
     let worktree = Worktree::discover(root).expect("discover");
     let mut frame = worktree.frame();
+    frame.stand(standing.clone());
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::eager();
     let mut app = App::new();
     let history = History::new();
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        &standing.label(),
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
@@ -64,6 +80,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
     let first = began.elapsed();
     let parsed_first = highlight_delta(before, highlighter.stats()).lines;
+    let total_rows = view.total_rows;
     let plain = stripped(&view.rows);
 
     // The frame after it, timed separately, and it is an eager highlighter's second
@@ -73,13 +90,21 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        &standing.label(),
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
     let second = began.elapsed();
     let parsed_second = highlight_delta(before, highlighter.stats()).lines;
     let coloured = stripped(&view.rows);
 
     FirstPaint {
+        total_rows,
         first,
         second,
         height: body.diff,
@@ -193,6 +218,89 @@ fn the_shells_first_paint_holds_the_startup_budget() {
     );
 }
 
+/// A worktree of `files` files committed on a branch off a base, then rewritten.
+///
+/// The branch point is the base commit, so the two readings differ by an entire
+/// commit: `current` sees the rewrite and `since` sees the files' whole contents.
+/// That is the widest gap the two readings can have on one tree, which is what
+/// makes it the fixture to price the new one against.
+fn branched(name: &str, files: usize, lines: usize) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/base.rs", "one\n");
+    scratch.commit_all("baseline");
+    scratch.git(&["checkout", "-q", "-b", "work"]);
+    scratch.fill_large_diff(files, lines);
+    scratch
+}
+
+/// I7 over the second reading, priced against the first on the same tree.
+///
+/// Standing somewhere else is a first paint of a new body rather than a frame,
+/// so I7 is the bar and not I9. Two fixtures and both readings, **interleaved**
+/// rather than run in blocks, so a machine that gets busy halfway moves both
+/// numbers instead of one.
+#[test]
+fn standing_at_the_branch_point_holds_the_startup_budget() {
+    let fixtures = [
+        ("a small history", branched("shell-i7-since-small", 3, 40)),
+        (
+            "two hundred files",
+            branched("shell-i7-since-wide", 200, LINES),
+        ),
+    ];
+
+    // Structural first, so a debug build still checks that the fixture separates
+    // the readings even where it cannot check the clock.
+    for (what, scratch) in &fixtures {
+        let worktree = Worktree::discover(scratch.root()).expect("discover");
+        let (at, named) = worktree.branch_point().expect("a branch point");
+        let since = Standing::Since { at, named };
+        let live = cold_start_at(scratch.root(), &Standing::Current);
+        let parked = cold_start_at(scratch.root(), &since);
+        assert!(
+            parked.total_rows != live.total_rows,
+            "{what}: the branch point run laid out {} body rows and the live pane \
+             {}, so the fixture is not separating the two readings and \
+             the numbers below price one walk twice",
+            parked.total_rows,
+            live.total_rows
+        );
+    }
+
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    for (what, scratch) in &fixtures {
+        let worktree = Worktree::discover(scratch.root()).expect("discover");
+        let (at, named) = worktree.branch_point().expect("a branch point");
+        let since = Standing::Since { at, named };
+
+        // Alternated rather than blocked, and best of three each, which is the
+        // idiom every absolute gate in this repository uses.
+        let (mut live, mut parked) = (Vec::new(), Vec::new());
+        for _ in 0..3 {
+            live.push(cold_start_at(scratch.root(), &Standing::Current).first);
+            parked.push(cold_start_at(scratch.root(), &since).first);
+        }
+        let best = |runs: &[Duration]| *runs.iter().min().expect("at least one run");
+        let (live, parked) = (best(&live), best(&parked));
+
+        eprintln!(
+            "note: {what}: first paint {live:?} standing `current` and {parked:?} \
+             standing at the branch point, against I7's {I7_STARTUP:?}"
+        );
+
+        assert!(
+            parked <= budget(I7_STARTUP),
+            "I7: {what}: the first paint at the branch point took {parked:?}, over \
+             the {:?} budget. The same tree read `current` took {live:?}",
+            budget(I7_STARTUP)
+        );
+    }
+}
+
 /// The opening two frames, as the state machine they are.
 #[test]
 fn the_first_frame_is_plain_and_owes_exactly_one_repaint() {
@@ -288,7 +396,14 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
     let mut app = App::new();
     let history = History::new();
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
     let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
     let mut buf = Buffer::empty(area());
 

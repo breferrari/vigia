@@ -14,10 +14,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 28;
+const ESCAPING_FILES: usize = 29;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-eight";
+const ESCAPING_FILES_SPELLED: &str = "twenty-nine";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1938,7 +1938,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 392973),
+    ("SPEC.md", 399882),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -1976,6 +1976,36 @@ fn no_ledger_carries_a_byte_ceiling() {
 /// here fails against the document, and the wrong word there fails against this.
 const CONFIG_KEYS_SPELLED: &str = "Eight keys";
 
+/// A revoked non-goal is gone from the documents that carried it, not annotated.
+///
+/// `CLAUDE.md`'s rule and the reason for it: a rule that survives being overruled
+/// re-fires on the next session, and the argument is had again from zero. The
+/// entry in the ledger is the other half, because a deletion with nothing saying
+/// who made it is indistinguishable from an accident.
+#[test]
+fn the_revoked_non_goal_left_the_spec_and_the_roadmap_for_the_ledger() {
+    for (path, text) in [
+        ("SPEC.md", repo_file("SPEC.md")),
+        ("ROADMAP.md", repo_file("ROADMAP.md")),
+    ] {
+        for phrase in ["branch or commit browsing", "Branch and commit browsing"] {
+            assert!(
+                !text.contains(phrase),
+                "{path} still carries {phrase:?}, so the override did not happen"
+            );
+        }
+    }
+
+    let ledger = repo_file("REVOCATIONS.md");
+    for phrase in ["Branch and commit browsing", "branch or commit browsing"] {
+        assert!(
+            ledger.contains(phrase),
+            "REVOCATIONS.md does not carry {phrase:?} verbatim, so the ruling was \
+             deleted rather than withdrawn"
+        );
+    }
+}
+
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///
 /// The count is checked as well as the list because the count is what went wrong:
@@ -1997,7 +2027,7 @@ fn the_spec_names_every_key_the_config_file_accepts() {
     // Two paragraphs carry the count and only one carries the names: §11.1
     // describes the file and §11.2 B6 rules on it.
     let describes = paragraph("The view toggles are a preference too");
-    let rules = paragraph("and `follow` is excluded on purpose");
+    let rules = paragraph("gestures are excluded on purpose");
 
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()

@@ -486,6 +486,8 @@ pub struct Chrome {
     pub worktree: String,
     /// The branch the empty state names, when there is one.
     pub branch: Option<String>,
+    /// Where in the history the pane is standing, as the token draws it.
+    pub position: String,
     /// How many files the staged run holds, or `None` when it is not drawn.
     pub staged: Option<usize>,
     /// How many changes the run that is not drawn holds.
@@ -744,6 +746,7 @@ fn facts_of(files: usize, binary: usize, hidden: usize, staged: Option<usize>) -
 fn header_left(
     worktree: &str,
     branch: Option<&str>,
+    position: &str,
     files: usize,
     binary: usize,
     hidden: usize,
@@ -755,47 +758,71 @@ fn header_left(
     // The branch is drawn always, rather than on the empty state alone.
     let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
 
-    // A separator is owed only between two facts that are both there, which
-    // is [`FACT_SEPARATOR`]'s rule and the reason the name is measured rather
-    // than tested for emptiness: a worktree
-    // called `a zero-width space` is a non-empty string that draws nothing, and joining it
-    // would head the pane with a leading separator.
+    // Measured rather than tested for emptiness: a worktree called `a zero-width
+    // space` is a non-empty string that draws nothing, and joining it would lead
+    // the pane with a separator that has nothing on its left to join.
     let visible = worktree.trim().replace(|c: char| c.is_control(), "");
     let name = (width_of(&visible) != 0).then_some(worktree);
-    let join = |kept: &[&str]| {
+    // Widest first, dropping one fact per rung in the order §11.1 rules: rightmost
+    // first, because each qualifies the one before it, then the branch, then the
+    // name, which B3's empty state leans on to say which repository this is.
+    let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
+    let rung = |kept: &[&str], branch: Option<&str>, standing: Option<&str>| {
         name.into_iter()
-            .chain(named)
+            .chain(branch)
+            .chain(standing)
             .chain(kept.iter().copied())
             .filter(|fact| !fact.is_empty())
             .collect::<Vec<_>>()
             .join(FACT_SEPARATOR)
     };
 
-    // Widest first, dropping one fact per rung in the order §11.1 rules: the facts
-    // go rightmost first, because each qualifies the one before it, then the branch,
-    // then the name, because B3's empty state leans on the name to say which
-    // repository this is.
-    let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
-    for end in (1..=kept.len()).rev() {
-        rungs.push(join(&kept[..end]));
-    }
-    if named.is_some() {
-        rungs.push(join(&[]));
+    // `current` names the pane a reader already has, so the token drops first; say
+    // anything else and it outlives every fact on this side, the branch included:
+    // a pane that stops naming where it stands reads exactly like the live one.
+    let standing = Some(position);
+    if position == vigia_core::Standing::CURRENT {
+        // One rung with it, then today's whole ladder without it. Pushed with no
+        // fact to qualify too: a tree with nothing in it is still standing somewhere.
+        rungs.push(rung(&kept, named, standing));
+        for end in (1..=kept.len()).rev() {
+            rungs.push(rung(&kept[..end], named, None));
+        }
+        if named.is_some() {
+            rungs.push(rung(&[], named, None));
+        }
+    } else {
+        for end in (1..=kept.len()).rev() {
+            rungs.push(rung(&kept[..end], named, standing));
+        }
+        rungs.push(rung(&[], named, standing));
+        if named.is_some() {
+            rungs.push(rung(&[], None, standing));
+        }
     }
     rungs.push(worktree.to_owned());
     rungs
 }
 
-/// The one body line a worktree with no changes gets: what this run holds, then
-/// where the rest of the work went.
+/// The one body line a worktree with no changes gets: which comparison found
+/// nothing, then where the rest of the work went.
 ///
 /// A pattern that ate every change owns the first clause, because at a width
 /// that drops the header's count this row is the only thing left on screen.
-fn empty_state_with(staged: Option<usize>, elsewhere: usize, hidden: usize) -> String {
-    let held = match (hidden, staged) {
-        (0, Some(_)) => NOTHING_ANYWHERE.to_owned(),
-        (0, None) => NOTHING_CHANGED.to_owned(),
-        (hidden, _) => format!("{hidden} hidden"),
+fn empty_state_with(
+    position: &str,
+    staged: Option<usize>,
+    elsewhere: usize,
+    hidden: usize,
+) -> String {
+    let parked = position != vigia_core::Standing::CURRENT;
+    let held = match (hidden, staged, parked) {
+        // The words name the comparison: `no unstaged changes` under `since main`
+        // describes a walk this frame did not make.
+        (0, _, true) => format!("no changes {position}"),
+        (0, Some(_), false) => NOTHING_ANYWHERE.to_owned(),
+        (0, None, false) => NOTHING_CHANGED.to_owned(),
+        (hidden, _, _) => format!("{hidden} hidden"),
     };
     match (staged, elsewhere) {
         (None, n) if n > 0 => format!("{held}{FACT_SEPARATOR}{n} staged"),
@@ -2165,6 +2192,7 @@ pub fn render(
             view,
             area,
             &empty_state_with(
+                &chrome.position,
                 chrome.staged,
                 chrome.elsewhere.shown,
                 hidden_of(view, chrome),
@@ -2200,7 +2228,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 17] = [
+const KEYBOARD: [Gesture; 18] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2260,6 +2288,10 @@ const KEYBOARD: [Gesture; 17] = [
         verb: ["show or hide staged changes", "staged changes"],
     },
     Gesture {
+        keys: ["b", "b"],
+        verb: ["stand at the branch point", "branch point"],
+    },
+    Gesture {
         keys: ["w", "w"],
         verb: ["wrap a long line, or clip it", "wrap long lines"],
     },
@@ -2288,12 +2320,15 @@ const KEYBOARD: [Gesture; 17] = [
 /// The order the width ladder gives keyboard rows up, first to go, as indices
 /// into [`KEYBOARD`].
 ///
+/// The two toggles that change what the frame *walks* outlive the body's other
+/// rows, and between them the older outlives the newer.
+///
 /// The box's keys rank second for the reason `q` ranks first: the box writes
 /// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
 /// pressed is the moment they are on screen. They are also the widest keys cell a
 /// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
 const DROP_ORDER: [usize; KEYBOARD.len()] =
-    [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 8, 9, 10, 12, 11, 7, 15];
+    [17, 15, 0, 1, 2, 3, 4, 5, 6, 14, 8, 9, 10, 13, 12, 11, 7, 16];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2409,11 +2444,11 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 13 },
+        rows: Rows::Keyboard { from: 7, to: 14 },
     },
     Section {
         label: "notes",
-        rows: Rows::Keyboard { from: 13, to: 15 },
+        rows: Rows::Keyboard { from: 14, to: 16 },
     },
     Section {
         label: "mouse",
@@ -2421,7 +2456,7 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 15, to: 17 },
+        rows: Rows::Keyboard { from: 16, to: 18 },
     },
 ];
 
@@ -3197,6 +3232,7 @@ impl Painter<'_> {
         let rungs = header_left(
             &chrome.worktree,
             chrome.branch.as_deref(),
+            &chrome.position,
             view.files,
             view.churn.map_or(0, |run| run.binary),
             hidden_of(view, chrome),
@@ -5340,9 +5376,10 @@ mod sheet_tables {
         }
     }
     #[test]
-    fn the_rows_given_up_before_the_keep_set_are_the_view_toggles() {
-        // Addressed by the cell it draws, not by its index. View toggles outlive notes.
-        const EXPECTED: [&str; 4] = ["r", "s", "o", "w"];
+    fn the_rows_given_up_last_are_the_view_toggles_under_the_standing_one() {
+        // Addressed by the cell it draws, not by its index. View toggles outlive
+        // notes, and the standing toggle outlives them: it changes what is walked.
+        const EXPECTED: [&str; 5] = ["r", "s", "o", "w", "b"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
@@ -5351,8 +5388,9 @@ mod sheet_tables {
         assert_eq!(
             outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail, then the pin, then the overview, then the wrap, so a pane at \
-             the floor is spending it on a gesture that could have fired there"
+             rail, then the pin, then the overview, then the wrap, then the branch \
+             point, so a pane at the floor is spending it on a gesture that could \
+             have fired there"
         );
     }
 

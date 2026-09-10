@@ -60,7 +60,14 @@ fn fixture(name: &str) -> Scratch {
 }
 
 fn chrome_of(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None, Pointing::default(), Default::default(), "")
+    app.chrome(
+        "fixture",
+        None,
+        "current",
+        Pointing::default(),
+        Default::default(),
+        "",
+    )
 }
 
 fn split(app: &App) -> Body {

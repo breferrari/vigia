@@ -173,7 +173,13 @@ pub fn place_of(action: &Action) -> Place {
             key: "notes",
             gesture: "c",
         },
-        // The exclusion list, and its one entry.
+        // The exclusion list.
+        Action::ToggleStanding => Place::Excluded(
+            "the pane opens on what the agent in the other pane just wrote, and a \
+             file able to open it somewhere else would make the thesis a setting. \
+             `b` is how a session says otherwise, which is a session's choice \
+             about a session. `SPEC.md` §11.2 B6",
+        ),
         Action::ToggleFollow => Place::Excluded(
             "correct with zero interaction is a promise about the program, and a \
              file able to turn follow off would make it a promise about one \

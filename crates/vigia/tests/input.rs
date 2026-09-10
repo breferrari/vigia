@@ -2195,6 +2195,48 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
     }
 }
 
+/// `b` moves where the pane stands, and nothing else does.
+#[test]
+fn b_moves_where_the_pane_stands_and_no_other_key_does() {
+    assert_eq!(
+        action_for(&press(KeyCode::Char('b')), Regions::default()),
+        Some(Action::ToggleStanding)
+    );
+
+    // One action for both directions, which is what makes it a toggle: nothing
+    // has to mean *stand there* and something else *come back*.
+    for other in "acdefghijklmnopqrstuvwxyzADGJKQS".chars() {
+        assert_ne!(
+            action_for(&press(KeyCode::Char(other)), Regions::default()),
+            Some(Action::ToggleStanding),
+            "{other:?} also moves where the pane stands"
+        );
+    }
+
+    // `Ctrl+B` is not this gesture, for `Ctrl+A`'s reason: `Ctrl` is the way
+    // out's, and a comparison change behind a chord nothing teaches would be
+    // worse than an unbound key.
+    assert_ne!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('b')),
+            Regions::default()
+        ),
+        Some(Action::ToggleStanding),
+        "Ctrl+b moves where the pane stands, and Ctrl is the quit chord's"
+    );
+
+    // `Alt+b` is, and that is the map's own fall-through rather than this key's.
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::ALT, KeyCode::Char('b')),
+            Regions::default()
+        ),
+        Some(Action::ToggleStanding),
+        "Alt+b stopped reaching the toggle, so this key is a special case in a \
+         map that has none"
+    );
+}
+
 /// `a` asks for the staged run, and nothing else does.
 #[test]
 fn a_asks_for_the_staged_run_and_no_other_key_does() {

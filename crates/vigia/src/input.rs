@@ -466,6 +466,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleStaged
         | Action::ToggleWrap
         | Action::ToggleNotes
+        | Action::ToggleStanding
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::Escape
@@ -632,6 +633,8 @@ pub enum Action {
     ToggleWrap,
     /// Draw the rows of the reader's notes under their lines, or only the marks.
     ToggleNotes,
+    /// Stand at the branch point, or come back.
+    ToggleStanding,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ToggleSheet,
     /// Stop drawing the gestures sheet, whatever page it is on.
@@ -675,6 +678,7 @@ impl Action {
             | Self::ToggleStaged
             | Self::ToggleWrap
             | Self::ToggleNotes
+            | Self::ToggleStanding
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Escape
@@ -717,6 +721,8 @@ impl Action {
             | Self::ToggleWrap
             // Display rows too, so hiding them moves nothing the bar counts.
             | Self::ToggleNotes
+            // Standing elsewhere remakes the body and moves no viewport.
+            | Self::ToggleStanding
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
@@ -755,6 +761,7 @@ impl Action {
             | Self::ToggleStaged
             | Self::ToggleWrap
             | Self::ToggleNotes
+            | Self::ToggleStanding
             | Self::ToggleSheet
             | Self::CloseSheet => false,
         }
@@ -842,6 +849,8 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // `o` for overview. `l` is refused where `h` is: a vi motion everywhere else.
         KeyCode::Char('o') => Some(Action::ToggleOverview),
         KeyCode::Char('a') => Some(Action::ToggleStaged),
+        // `b` for the branch point, the only place it can stand so far.
+        KeyCode::Char('b') => Some(Action::ToggleStanding),
         // `w`, and it is the reflex rather than what was free. `ov` binds `[w]`, `[W]`
         // to a character-based wrap toggle, `bat` spells the opposite state `-S` /
         // `--chop-long-lines`, and `less` toggles the same state with `-S`.

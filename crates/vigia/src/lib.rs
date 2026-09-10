@@ -220,6 +220,33 @@ pub fn arm_frame(frame: &mut vigia_core::Frame, config: &crate::Config) {
     frame.hide(config.hide.clone());
 }
 
+/// Where a shell asking to stand at the branch point stands, resolved once.
+///
+/// `held` is the resolution the shell keeps: re-resolving every frame would put a
+/// revision walk on the frame path I9 pays for, and a base that moved under a
+/// reader is a diff that changed while the tree did not. A refusal keeps nothing,
+/// and neither does a walk that fails on what this handed back, so a branch
+/// rewritten under a pane that has been open for days is not a dead end.
+///
+/// # Errors
+///
+/// Nothing on the candidate ladder resolves, which is `Error::NoBranchPoint`.
+#[doc(hidden)]
+pub fn branch_point_of(
+    held: &mut Option<vigia_core::Standing>,
+    worktree: &Worktree,
+) -> vigia_core::Result<vigia_core::Standing> {
+    match held {
+        Some(standing) => Ok(standing.clone()),
+        None => {
+            let (at, named) = worktree.branch_point()?;
+            Ok(held
+                .insert(vigia_core::Standing::Since { at, named })
+                .clone())
+        }
+    }
+}
+
 /// The paths in one wake's burst that the pane is actually having.
 ///
 /// The history store is fed from the burst and never from the walk, so the walk's
@@ -308,6 +335,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         root: worktree.workdir().to_string_lossy().into_owned(),
         branch: None,
         elsewhere: Counted::default(),
+        branch_point: None,
         screen: View::default(),
         regions: Regions::default(),
         held: None,
@@ -432,8 +460,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // The third of three, and it joined last. `Regions::step_at` yields only
             // `Scroll` and `ScrollList` today, neither of which reads a height, so the
             // literal zero this replaced was right by accident rather than by rule.
-            let height = shell.diff_rows_for(step, frame.files())?;
-            match shell.apply(step, &mut frame, height) {
+            let height = shell.diff_rows_for(step, &frame)?;
+            match shell.apply(step, &mut frame, &worktree, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
                 Err(e) => shell.app.warn(e.to_string()),
@@ -537,8 +565,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         if let Some(drag) = drag_action(&event, regions, on) {
                             // The height, because a drag on the diff's bar is a
                             // `DiffTo` and `DiffTo` reads one.
-                            let height = shell.diff_rows_for(drag, frame.files())?;
-                            match shell.apply(drag, &mut frame, height) {
+                            let height = shell.diff_rows_for(drag, &frame)?;
+                            match shell.apply(drag, &mut frame, &worktree, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
                                 Err(e) => {
@@ -577,9 +605,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     };
                     // Asked for only by the one action that reads it, and that is the
                     // drain's doing rather than tidiness.
-                    let height = shell.diff_rows_for(action, frame.files())?;
+                    let height = shell.diff_rows_for(action, &frame)?;
                     shell.note_scroll(action, Instant::now());
-                    match shell.apply(action, &mut frame, height) {
+                    match shell.apply(action, &mut frame, &worktree, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw
                         // below: leaving was asked for, and painting one more
@@ -623,7 +651,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                                 shell.app.follow(path, &frame);
                             }
                         }
-                        Err(e) => shell.app.warn(e.to_string()),
+                        Err(e) => shell.walk_failed(&mut frame, &e),
                     }
                 }
                 // Both halves, and they are not the same half twice. The mode is
@@ -829,6 +857,9 @@ struct Shell {
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     branch: Option<String>,
+    /// The branch point, resolved once and kept as the standing it produces, so
+    /// no frame pays a merge-base and the shell needs no `gix` of its own.
+    branch_point: Option<vigia_core::Standing>,
     /// What the run this pane is not drawing holds. Both halves, because a pane
     /// whose only work is staged and hidden would otherwise read as a clean tree:
     /// the shown count is zero and the drawn run hid nothing.
@@ -896,14 +927,16 @@ impl Shell {
     fn diff_rows_for(
         &mut self,
         action: Action,
-        files: &[vigia_core::FileChange],
+        frame: &vigia_core::Frame,
     ) -> Result<usize, Failure> {
         if !action.needs_height() {
             return Ok(0);
         }
+        let files = frame.files();
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
+            &frame.standing().label(),
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1004,7 +1037,32 @@ impl Shell {
     /// deadline is consumed on the turn that finds it and not on a timeout.
     fn settle_heights(&mut self, frame: &mut vigia_core::Frame) {
         if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
-            self.app.warn(e.to_string());
+            self.walk_failed(frame, &e);
+        }
+    }
+
+    /// Say what a failed walk was, and come home if what failed was the base.
+    ///
+    /// A base can be rebased, amended or collected out from under a pane that has
+    /// been open for days, and the tick is the only walk that runs with nobody
+    /// there to press anything. Left parked, the pane holds its last good picture
+    /// for as long as the process lives, which on a monitor cannot be told from a
+    /// tree that stopped changing. Only a lost base comes home: a status walk that
+    /// fails once is retried by the next wake, and must not move a reader who is
+    /// standing somewhere on purpose.
+    fn walk_failed(&mut self, frame: &mut vigia_core::Frame, e: &vigia_core::Error) {
+        self.app.warn(e.to_string());
+        if !matches!(e, vigia_core::Error::Standing(_))
+            || matches!(frame.standing(), vigia_core::Standing::Current)
+        {
+            return;
+        }
+        self.branch_point = None;
+        self.app.stands(false);
+        frame.stand(vigia_core::Standing::Current);
+        match frame.advance() {
+            Ok(()) => self.app.stood(),
+            Err(e) => self.app.warn(e.to_string()),
         }
     }
 
@@ -1025,6 +1083,7 @@ impl Shell {
         &mut self,
         action: Action,
         frame: &mut vigia_core::Frame,
+        worktree: &Worktree,
         height: usize,
     ) -> vigia_core::Result<bool> {
         // The rung `Esc` climbs over quitting, reachable only while the button is
@@ -1036,7 +1095,66 @@ impl Shell {
         if action != Action::Redraw {
             self.deselect();
         }
-        self.app.apply(action, frame, height)
+        let carried = self.app.apply(action, frame, height)?;
+        self.stand(frame, worktree);
+        Ok(carried)
+    }
+
+    /// Put the frame where the reader asked to stand, and walk it if that moved.
+    ///
+    /// The request is a bool on `App`, because finding a branch point is a
+    /// repository question and `App` answers none of those. A branch with nothing
+    /// to measure from keeps the pane where it is and says so, rather than
+    /// emptying it for a reason nothing explains.
+    ///
+    /// Called after every action and answering in a comparison for all but the one
+    /// that can change the request. Asking the state rather than keeping a list of
+    /// the actions that move it is what stops the list going stale behind a second
+    /// gesture that moves it later.
+    fn stand(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        let parked = !matches!(frame.standing(), vigia_core::Standing::Current);
+        if self.app.standing() == parked {
+            return;
+        }
+        let wanted = if self.app.standing() {
+            match branch_point_of(&mut self.branch_point, worktree) {
+                Ok(standing) => standing,
+                Err(e) => {
+                    self.app.warn(e.to_string());
+                    self.app.stands(false);
+                    return;
+                }
+            }
+        } else {
+            vigia_core::Standing::Current
+        };
+        if &wanted == frame.standing() {
+            return;
+        }
+        let previous = frame.standing().clone();
+        let reaching = matches!(wanted, vigia_core::Standing::Since { .. });
+        frame.stand(wanted);
+        // Walked here for `ToggleStaged`'s reason: the frame this paint draws
+        // has to be the one the token names. A failed walk leaves the previous
+        // frame whole, so the token goes back with it rather than naming a
+        // comparison the body underneath is not drawing.
+        match frame.advance() {
+            Ok(()) => self.app.stood(),
+            Err(e) => {
+                self.app.warn(e.to_string());
+                // Taken again on the next press rather than replayed, and only
+                // where the walk that failed is this base's: a branch can be
+                // rebased or collected out from under a pane that has been open
+                // for days, and a kept base the object database has lost fails
+                // the same way for as long as the process lives.
+                if reaching {
+                    self.branch_point = None;
+                }
+                self.app
+                    .stands(!matches!(previous, vigia_core::Standing::Current));
+                frame.stand(previous);
+            }
+        }
     }
 
     /// Drop the wash and the lines it stood for together: clearing one and not the
@@ -1452,6 +1570,7 @@ impl Shell {
         // file count so the read happens on exactly the frames that draw the answer.
         // That is the whole of I4 for this read.
         self.branch = worktree.branch();
+        let position = frame.standing().label();
 
         // The chrome is built before the layout, not after, because the footer takes a
         // second line at narrow widths and `body_layout` has to know whether this frame
@@ -1459,6 +1578,7 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
+            &position,
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1510,6 +1630,7 @@ impl Shell {
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
+            &position,
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1837,6 +1958,93 @@ mod tests {
             collect < retire,
             "the wash is retired before the collect that decides whether it resolved \
              to anything, so it is judged on the frame before this one"
+        );
+    }
+
+    /// The rules the standing toggle keeps, read rather than driven.
+    ///
+    /// `Shell` is private and holds a terminal, so nothing here can press `b`, and
+    /// a gate reaching `App` alone proves only that `App` does what it is told.
+    #[test]
+    fn the_pane_moves_on_the_walk_and_not_on_the_press() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let stand = shipped
+            .split("fn stand(&mut self")
+            .nth(1)
+            .expect("`Shell::stand` is gone");
+        let stand = stand
+            .split("\n    }\n")
+            .next()
+            .expect("`stand` never closes");
+        for rule in [
+            // The move belongs to the walk that succeeded.
+            "Ok(()) => self.app.stood(),",
+            // A failed one puts the request, the frame and the base back.
+            "frame.stand(previous);",
+            "stands(!matches!(previous, vigia_core::Standing::Current));",
+            "if reaching {\n                    self.branch_point = None;\n                }",
+            // A branch with nothing to measure from says so and stays put.
+            "self.app.stands(false);",
+            // Answered from state, because a list of the actions goes stale.
+            "if self.app.standing() == parked {",
+        ] {
+            assert!(
+                stand.contains(rule),
+                "`{rule}` is gone from `Shell::stand`, so the pane moves on a press \
+                 that resolved nothing, or keeps a token the body is not drawing"
+            );
+        }
+        // A base that goes away under a parked pane brings it home, on the one
+        // walk that runs with nobody there to notice.
+        let failed = shipped
+            .split("fn walk_failed(")
+            .nth(1)
+            .expect("`Shell::walk_failed` is gone");
+        let failed = failed
+            .split("\n    }\n")
+            .next()
+            .expect("`walk_failed` never closes");
+        for rule in [
+            "matches!(e, vigia_core::Error::Standing(_))",
+            "self.branch_point = None;",
+            "frame.stand(vigia_core::Standing::Current);",
+            // Coming home is a move like any other, and the row the pane was on
+            // names an unrelated file in the run it lands in.
+            "Ok(()) => self.app.stood(),",
+        ] {
+            assert!(
+                failed.contains(rule),
+                "`{rule}` is gone, so a base the object database has lost freezes \
+                 the pane on its last good picture for the life of the process"
+            );
+        }
+        assert!(
+            shipped.matches("shell.walk_failed(&mut frame, &e)").count() == 1
+                && shipped.contains("self.walk_failed(frame, &e);"),
+            "a walk that fails no longer routes through `walk_failed`, so the tick \
+             warns and parks the pane on a base that is gone"
+        );
+
+        // And it is asked after every action rather than for a named one: a list
+        // of the gestures that move the pane is a list that goes stale.
+        let apply = shipped
+            .split("fn apply(\n")
+            .nth(1)
+            .expect("`Shell::apply` is gone");
+        let apply = apply
+            .split("\n    }\n")
+            .next()
+            .expect("`apply` never closes");
+        assert!(
+            apply.contains("self.stand(frame, worktree);"),
+            "`Shell::apply` no longer asks where the pane should stand, so `b` \
+             flips a flag nothing acts on"
+        );
+        assert!(
+            !apply.contains("== Action::ToggleStanding"),
+            "`Shell::apply` names the gesture that moves the pane, which is the \
+             list `Shell::stand` answers from state to avoid"
         );
     }
 
