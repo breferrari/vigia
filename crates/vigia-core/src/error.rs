@@ -46,6 +46,13 @@ pub enum Error {
         /// The underlying I/O failure.
         source: std::io::Error,
     },
+    /// The `hide` pattern is not a regular expression.
+    Pattern {
+        /// What the reader wrote.
+        pattern: String,
+        /// What the engine said about it.
+        why: String,
+    },
     /// One file could not be normalised the way git's clean filter would.
     Filter {
         /// Repository-relative path that could not be normalised.
@@ -78,6 +85,7 @@ impl Error {
             | Error::Watch(_)
             | Error::FilterSetup(_)
             | Error::Store { .. }
+            | Error::Pattern { .. }
             | Error::Canonicalise { .. } => None,
         }
     }
@@ -153,6 +161,9 @@ impl fmt::Display for Error {
             Error::Canonicalise { path, source } => {
                 write!(f, "could not canonicalise {}: {source}", path.display())
             }
+            Error::Pattern { pattern, why } => {
+                write!(f, "{pattern:?} is not a pattern: {why}")
+            }
         }
     }
 }
@@ -166,7 +177,7 @@ impl std::error::Error for Error {
             | Error::Store { source, .. }
             | Error::Canonicalise { source, .. } => Some(source),
             Error::Filter { source, .. } => Some(source.as_ref()),
-            Error::Bare | Error::MissingBlob { .. } => None,
+            Error::Bare | Error::MissingBlob { .. } | Error::Pattern { .. } => None,
         }
     }
 }

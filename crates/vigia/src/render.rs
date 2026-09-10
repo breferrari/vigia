@@ -689,16 +689,21 @@ const fn counts_edge(pane: u16, trailing: u16) -> usize {
 
 /// The facts about the tree, in the order a narrowing header gives them up.
 ///
-/// `N binary` says how much of the run the header's total leaves out, and draws
-/// only where there is some; the staged total is owed whenever the run is on,
-/// zero included, which is why it is the one here that draws its own nothing.
-fn facts_of(files: usize, binary: usize, staged: Option<usize>) -> Vec<String> {
-    if files == 0 {
+/// `N binary` says how much of the run the header's total leaves out and `N hidden`
+/// how much of the tree the count itself leaves out; both draw only where there is
+/// some, and hidden is given up first of the two, being the one fact here the
+/// reader configured. The staged total is owed whenever the run is on, zero
+/// included, which is why it is the one that draws its own nothing.
+fn facts_of(files: usize, binary: usize, hidden: usize, staged: Option<usize>) -> Vec<String> {
+    if files == 0 && hidden == 0 {
         return Vec::new();
     }
     let mut facts = vec![format!("{files} changed")];
     if binary > 0 {
         facts.push(format!("{binary} binary"));
+    }
+    if hidden > 0 {
+        facts.push(format!("{hidden} hidden"));
     }
     if let Some(staged) = staged {
         facts.push(format!("{staged} staged"));
@@ -732,9 +737,10 @@ fn header_left(
     branch: Option<&str>,
     files: usize,
     binary: usize,
+    hidden: usize,
     staged: Option<usize>,
 ) -> Vec<String> {
-    let facts = facts_of(files, binary, staged);
+    let facts = facts_of(files, binary, hidden, staged);
     let mut rungs = Vec::with_capacity(facts.len() + 2);
 
     // The branch is drawn always, rather than on the empty state alone.
@@ -3175,6 +3181,7 @@ impl Painter<'_> {
             chrome.branch.as_deref(),
             view.files,
             view.churn.map_or(0, |run| run.binary),
+            view.hidden,
             chrome.staged,
         );
         self.status_line(area, &rungs, self.theme.chrome, &right);

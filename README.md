@@ -411,7 +411,7 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 | 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → **your terminal's own background** → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
-| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` and `notes` |
+| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` and `notes`, and nothing hidden |
 | 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off` declines it |
 
 ```sh
@@ -549,9 +549,12 @@ wrap     = on     # a long line continues on the row below
 notes    = off    # the note rows under their lines; this is the off switch
 icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
 links    = off    # paths are clickable file:// links; this is the off switch
+hide     = ^target/|\.lock$   # paths to keep out of the pane entirely
 ```
 
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
+
+**`hide` is the one setting that takes a value rather than `on` or `off`.** It is a regular expression, and it is *searched* rather than anchored, so `^target/|\.lock$` reads the way it looks and a bare `target` hides every path with that word anywhere in it. A matching file is gone from the list, the diff and the counts, and the header says `12 hidden` beside the changed count so you always know something is being kept from you. A pattern that does not compile is an error with its line on it, before the screen is taken. `#` still opens a comment, so a pattern that needs a literal one writes `[#]`. There is no key for it, deliberately: a gesture is for what changes while you are watching, and a file is for what was true before you opened the pane.
 
 **`links` and `notes` are the two keys that start on**, so both are written above as the off switches they are. Every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor; a terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected. And a note you left for the agent draws its own rows under the line it is on, which `notes = off` turns down to the mark alone, the way `c` does for a session.
 
@@ -567,6 +570,7 @@ Same shape as the theme file: one key per line, `#` for a comment, and a key it 
 | [gix](https://github.com/GitoxideLabs/gitoxide) | Pure Rust git. Diffs in process, no subprocess per change |
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what "no polling timer" requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
+| [fancy-regex](https://github.com/fancy-regex/fancy-regex) | The `hide` pattern. Already in the graph under `syntect`, which uses it as its own pure-Rust engine, so it costs the binary nothing |
 | [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a change can be seen arriving. It schedules nothing, which is what keeps "no polling timer" this program's own rule to keep |
 | [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text model, its caret and its undo. The shell draws the cells itself, so the box wraps by the same rule the note rows do |
 | [two-face](https://codeberg.org/CosmicHarper/two-face) | The grammars: [bat](https://github.com/sharkdp/bat)'s curated set, packaged for `syntect`. It builds the dump the binary carries and is itself absent from every shipped graph |

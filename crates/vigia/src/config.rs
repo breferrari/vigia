@@ -3,11 +3,13 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use vigia_core::Hidden;
+
 /// Where the view defaults are read from, under the reader's home directory.
 pub const CONFIG_FILE: &str = ".config/vigia/config";
 
 /// The state a pane starts in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     /// Ask for the pinned list beside the diff. `r`.
     pub rail: bool,
@@ -25,6 +27,9 @@ pub struct Config {
     pub icons: bool,
     /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
     pub links: bool,
+    /// Paths to keep out of the pane entirely. No gesture, and deliberately: a
+    /// pattern is a decision about a repository rather than about a moment.
+    pub hide: Option<Hidden>,
 }
 
 /// Every toggle off but the notes and the links, which is the shipped pane.
@@ -39,14 +44,22 @@ impl Default for Config {
             notes: true,
             icons: false,
             links: true,
+            hide: None,
         }
     }
 }
 
-/// Every key this file accepts, in the order the gestures sheet lists them.
+/// Every toggle this file accepts, in the order the gestures sheet lists them.
 pub const KEYS: [&str; 8] = [
     "rail", "single", "overview", "staged", "wrap", "notes", "icons", "links",
 ];
+
+/// Every setting that takes a value rather than `on` or `off`.
+///
+/// Apart from [`KEYS`] because a toggle is a pane some key could reach and a
+/// valued setting is reachable by no gesture, so a gate sweeping the keymap can
+/// account for the first list and never the second.
+pub const VALUES: [&str; 1] = ["hide"];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -82,6 +95,13 @@ pub enum ConfigError {
         line: usize,
         /// What they wrote.
         key: String,
+    },
+    /// A `hide` value that is not a regular expression.
+    BadPattern {
+        /// 1-based.
+        line: usize,
+        /// What the engine said about it.
+        why: String,
     },
     /// A value that is neither `on` nor `off`.
     UnknownValue {
@@ -124,9 +144,16 @@ impl fmt::Display for ConfigError {
             Self::UnknownKey { line, key } => write!(
                 f,
                 "line {line}: {key:?} is not a view setting. There are {}: {}",
-                KEYS.len(),
-                KEYS.join(", ")
+                KEYS.len() + VALUES.len(),
+                KEYS.iter()
+                    .chain(VALUES.iter())
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
+            Self::BadPattern { line, why } => {
+                write!(f, "line {line}: hide is not a pattern: {why}")
+            }
             Self::UnknownValue { line, key, value } => write!(
                 f,
                 "line {line}: {key} is {value:?}, which is neither `on` nor `off`"
@@ -148,6 +175,33 @@ impl fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// Everything after a key's `=` that is not a comment, trimmed.
+///
+/// A `#` opens a comment only at the start of the value or after whitespace, which
+/// is the rule the word-by-word reading this replaced already had. What that
+/// reading could not do is leave a value alone: rejoining its words normalises
+/// runs of spaces, and ` +` and `  +` are different patterns.
+fn value_of(after: &str) -> &str {
+    let mut rest = after;
+    let mut cut = after.len();
+    let mut at = 0;
+    while let Some(hash) = rest.find('#') {
+        let here = at + hash;
+        let opens = here == 0
+            || after[..here]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        if opens {
+            cut = here;
+            break;
+        }
+        at = here + 1;
+        rest = &after[at..];
+    }
+    after[..cut].trim()
+}
 
 /// Parse a config, which is a list of `key = on` lines and nothing else.
 ///
@@ -205,7 +259,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 
         // The key is judged before its value, which is the theme parser's order and was
         // not this one's.
-        if !KEYS.contains(&key) {
+        if !KEYS.contains(&key) && !VALUES.contains(&key) {
             return Err(ConfigError::UnknownKey {
                 line,
                 key: key.to_owned(),
@@ -223,18 +277,23 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             });
         }
 
-        // The whole value, not its first word. A `#` ends it, so `rail = on # from 134`
-        // works; everything before that `#` has to be the value.
-        let value: Vec<&str> = value
-            .split_whitespace()
-            .take_while(|word| !word.starts_with('#'))
-            .collect();
+        let value = value_of(value);
         if value.is_empty() {
             return Err(ConfigError::MissingValue { line });
         }
-        let value = value.join(" ");
 
-        let on = match value.as_str() {
+        if VALUES.contains(&key) {
+            // One valued key, so the match is on the key rather than on a second
+            // table. A second one is what would make a table worth its weight.
+            config.hide = Some(Hidden::new(value).map_err(|why| ConfigError::BadPattern {
+                line,
+                why: why.to_string(),
+            })?);
+            seen.push((key.to_owned(), line));
+            continue;
+        }
+
+        let on = match value {
             "on" => true,
             "off" => false,
             other => {

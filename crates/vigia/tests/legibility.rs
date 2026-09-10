@@ -395,6 +395,7 @@ fn with_notice() -> Chrome {
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -616,6 +617,7 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
 /// longer than any pane.
 fn awkward() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -654,6 +656,7 @@ fn awkward() -> View {
 
 fn empty() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -679,6 +682,7 @@ fn empty() -> View {
 /// actually drawn can be counted.
 fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -888,6 +892,7 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// it.
 fn glancing() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2325,6 +2330,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2459,6 +2465,7 @@ fn a_clipped_content_line_says_it_continues() {
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -3466,6 +3473,7 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 /// sweep, over a diff tall enough that the region always draws a scrollbar.
 fn overlong(rows: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,

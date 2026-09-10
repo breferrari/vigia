@@ -288,7 +288,7 @@ impl Site {
     fn listing(&self, all: bool) -> Result<Value, String> {
         let mut listing = self.store.list().map_err(|e| e.to_string())?;
         let mut frame = self.worktree.frame();
-        arm_frame(&mut frame, self.config);
+        arm_frame(&mut frame, &self.config);
         frame
             .advance()
             .map_err(|e| format!("could not read the diff: {e}"))?;

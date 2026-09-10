@@ -31,6 +31,7 @@ mod emphasis;
 mod error;
 mod filter;
 mod frame;
+mod hidden;
 mod highlight;
 mod history;
 mod hunk;
@@ -44,6 +45,7 @@ pub use change::{ChangeKind, FileChange, Origin};
 pub use emphasis::{Emphasis, mark};
 pub use error::{Error, Result};
 pub use frame::{Churn, Frame, FrameStats};
+pub use hidden::Hidden;
 pub use highlight::{
     CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_BYTES,
     WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport, Warmed,

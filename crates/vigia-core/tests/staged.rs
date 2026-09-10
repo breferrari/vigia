@@ -366,13 +366,13 @@ fn a_run_can_be_counted_without_being_walked_for_content() {
     scratch.write(OTHER, "alpha\nUNSTAGED\n");
 
     let worktree = Worktree::discover(scratch.root()).expect("discover");
-    assert_eq!(worktree.count_of(Origin::Staged).expect("count"), 1);
-    assert_eq!(worktree.count_of(Origin::Unstaged).expect("count"), 1);
+    assert_eq!(worktree.count_of(Origin::Staged, None).expect("count"), 1);
+    assert_eq!(worktree.count_of(Origin::Unstaged, None).expect("count"), 1);
 
     scratch.git(&["add", OTHER]);
-    assert_eq!(worktree.count_of(Origin::Staged).expect("count"), 2);
+    assert_eq!(worktree.count_of(Origin::Staged, None).expect("count"), 2);
     assert_eq!(
-        worktree.count_of(Origin::Unstaged).expect("count"),
+        worktree.count_of(Origin::Unstaged, None).expect("count"),
         0,
         "a fully staged worktree has nothing unstaged, which is the pane going \
          blank that #313 was opened on"

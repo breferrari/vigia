@@ -210,10 +210,30 @@ pub fn sweep_displaced() {
 #[cfg(not(windows))]
 pub fn sweep_displaced() {}
 
-/// Tell a frame what the shell's view defaults ask it to walk.
+/// Tell a frame what the shell's view defaults ask it to walk: `staged` decides
+/// which comparisons it makes and `hide` which of their answers it keeps.
 #[doc(hidden)]
-pub fn arm_frame(frame: &mut vigia_core::Frame, config: crate::Config) {
+pub fn arm_frame(frame: &mut vigia_core::Frame, config: &crate::Config) {
     frame.show_staged(config.staged);
+    frame.hide(config.hide.clone());
+}
+
+/// The paths in one wake's burst that the pane is actually having.
+///
+/// The history store is fed from the burst and never from the walk, so the walk's
+/// own filter cannot reach it: a hidden path left in here spends one of I10's 256
+/// tracked slots and holds a sparkline for a row nothing draws. It suppresses the
+/// sample and not the wake, which still arrives and is still walked.
+#[doc(hidden)]
+#[must_use]
+pub fn shown(paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<String> {
+    match hide {
+        None => paths,
+        Some(hide) => paths
+            .into_iter()
+            .filter(|path| !hide.is_hidden(path))
+            .collect(),
+    }
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
@@ -258,7 +278,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // The view defaults reach the frame before its first walk, not just the
     // shell. `staged` is the only key that decides what the frame *walks* rather
     // than how the rows it already holds are arranged, so it must be honoured here.
-    arm_frame(&mut frame, config);
+    arm_frame(&mut frame, &config);
     frame.advance()?;
 
     // Inert until something sends, so I1 never sees it. Built here because the
@@ -270,7 +290,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     let mut shell = Shell {
         session: Session::enter()?,
-        app: App::configured(config),
+        app: App::configured(&config),
+        hide: config.hide.clone(),
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
@@ -569,6 +590,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                 }
                 Wake::Tick(paths) => {
+                    // Before anything reads the burst, because a hidden path is
+                    // not a change this pane is having: it must reach neither the
+                    // arrival marks below nor the history store under them.
+                    let paths = shown(paths, shell.hide.as_ref());
                     shell.app.clear_notice();
                     // Armed here rather than in `App::follow`, because a change
                     // arrives whether or not the viewport moves to it.
@@ -807,6 +832,9 @@ struct Shell {
     branch: Option<String>,
     /// How many changes the run this pane is not drawing holds.
     elsewhere: usize,
+    /// The reader's `hide` pattern, kept because two things outside the frame ask
+    /// it: the count of the run this pane is not drawing, and the wake's burst.
+    hide: Option<vigia_core::Hidden>,
     /// The last view collected successfully.
     screen: View,
     /// Where the last painted screen's regions and scrollbars were.
@@ -1467,7 +1495,9 @@ impl Shell {
 
         // On a frame with nothing to draw, where the work went.
         self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
-            worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
+            worktree
+                .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
+                .unwrap_or(0)
         } else {
             0
         };
@@ -2087,6 +2117,28 @@ mod tests {
                 "a draw inside the loop reads a clock of its own rather than the \
                  turn's, so a sample boundary landing between a tick and its \
                  paint erases the pulse of the burst that caused the frame"
+            );
+        }
+
+        // The burst is narrowed to what the pane is having before anything reads
+        // it. The store is fed from here and never from the walk, so the walk's
+        // own filter cannot reach it and a `hide` pattern would otherwise leave a
+        // path in the history with no row to draw it on.
+        let tick = &turns[turns
+            .find("Wake::Tick(paths) => {")
+            .expect("the loop no longer has a tick arm")..];
+        let narrowed = tick
+            .find("shown(paths, ")
+            .expect("the tick no longer narrows its burst to what the pane shows");
+        for reader in [".add_unique_effect(", ".record_sized(sized("] {
+            let reads = tick
+                .find(reader)
+                .unwrap_or_else(|| panic!("the tick no longer calls {reader}"));
+            assert!(
+                narrowed < reads,
+                "the tick reads its burst at {reader} before narrowing it, so a \
+                 hidden path arrives as a mark on a row nothing drew and as a \
+                 sample against one of I10's 256 tracked paths"
             );
         }
 

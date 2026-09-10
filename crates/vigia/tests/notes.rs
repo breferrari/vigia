@@ -2665,7 +2665,7 @@ fn a_configured_notes_off_starts_with_the_rows_hidden() {
         frame.advance().expect("advance");
         let mut rig = Rig::with(
             &scratch,
-            App::configured(Config {
+            App::configured(&Config {
                 notes,
                 ..Config::default()
             }),

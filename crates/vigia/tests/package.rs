@@ -1916,6 +1916,7 @@ fn every_config_key_reaches_the_changelog_filter() {
     let named: Vec<&str> = pattern.split(['|', '(', ')']).collect();
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
+        .chain(vigia::config::VALUES)
         .filter(|key| !named.contains(key))
         .collect();
     assert!(
@@ -1972,13 +1973,23 @@ fn the_spec_names_every_key_the_config_file_accepts() {
 
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
+        .chain(vigia::config::VALUES)
+        .filter(|key| !spec.contains(&format!("`{key}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the config file accepts {missing:?} and SPEC.md never names them, so the \
+         document describes a surface the binary no longer has"
+    );
+    let missing: Vec<&str> = vigia::config::KEYS
+        .into_iter()
         .filter(|key| !describes.contains(&format!("`{key}`")))
         .collect();
     assert!(
         missing.is_empty(),
-        "the config file accepts {missing:?} and SPEC.md's paragraph for it does \
-         not name them, so the document describes a surface the binary no longer \
-         has:\n{describes}"
+        "§11.1's paragraph for the file does not name {missing:?}, so a reader \
+         following the document's own list gets a smaller pane than the binary \
+         offers:\n{describes}"
     );
 
     for stated in [describes, rules] {
@@ -2021,6 +2032,7 @@ fn the_readme_teaches_a_config_file_that_parses_and_names_every_key() {
 
     let missing: Vec<&str> = vigia::config::KEYS
         .into_iter()
+        .chain(vigia::config::VALUES)
         .filter(|key| {
             !block
                 .lines()

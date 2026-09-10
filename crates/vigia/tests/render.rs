@@ -249,6 +249,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     );
 
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -328,6 +329,7 @@ fn file(path: &str, added: u32, removed: u32) -> Row {
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
 fn one_file() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -496,6 +498,7 @@ fn a_content_row_stands_its_sigil_off_the_line() {
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -945,6 +948,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
 fn ragged_counts() -> View {
     let row = |path: &str, added: u32, removed: u32| Row::file(listed(path, added, removed));
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1833,6 +1837,7 @@ fn a_detached_head_names_no_branch_anywhere() {
 #[test]
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1900,6 +1905,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     // nothing. This is the truncated-to-useless shape I6 forbids, and it is the
     // one part of I6 the renderer decides on its own rather than by layout.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -1931,6 +1937,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     // Git omits the count when a side covers exactly one line, and a reader calibrated
     // on `git diff` reads its absence as "one".
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2158,6 +2165,7 @@ fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
 fn tabs_become_columns_and_control_characters_become_visible() {
     // Not cosmetic.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2195,6 +2203,7 @@ fn a_double_width_character_is_never_cut_in_half() {
     // Diffs carry whatever is in the files, and a CJK ideograph or an emoji occupies
     // two columns.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2253,6 +2262,7 @@ fn the_gutter_gives_way_before_the_text_does() {
     // than a readable column. Both sides are asserted, because a rule that only
     // ever fires one way is not a rule.
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2329,6 +2339,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         }; HEAT_BUCKETS],
     };
     let view = View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -2721,6 +2732,7 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 /// The three rungs of the recency ladder on one screen, with churn behind them.
 fn glancing() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -3311,6 +3323,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 /// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
 fn two_regions_at(current: usize, row: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -3703,6 +3716,7 @@ fn a_one_row_region_with_somewhere_to_scroll_still_spends_no_column() {
 /// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
 fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -6973,5 +6987,108 @@ fn no_emoji_presentation_selector_reaches_the_buffer() {
     assert!(
         drawn.contains('\u{26a0}'),
         "the selector was dropped and took its glyph with it:\n{drawn:?}"
+    );
+}
+
+/// A header fixture carrying a run beside `hidden` files the pattern kept out.
+fn with_hidden(files: usize, hidden: usize) -> View {
+    View {
+        files,
+        hidden,
+        churn: Some(Churn {
+            added: 1204,
+            removed: 318,
+            binary: 0,
+        }),
+        ..one_file()
+    }
+}
+
+#[test]
+fn the_header_says_how_many_files_it_is_keeping_back() {
+    // A monitor that hides work without saying so is lying about the tree, which
+    // is the worst failure available to it. The counts describe what can be seen
+    // and this token says what cannot.
+    let plain = row_text(&screen(80, 6, &with_hidden(28, 0), &chrome()), 0);
+    let kept = row_text(&screen(80, 6, &with_hidden(28, 12), &chrome()), 0);
+
+    assert!(
+        plain.contains("28 changed") && !plain.contains("hidden"),
+        "a reader with no pattern was told about hidden files: {plain:?}"
+    );
+    assert!(
+        kept.contains(&format!("28 changed{FACT_JOIN}12 hidden")),
+        "the hidden count is not beside the count it qualifies: {kept:?}"
+    );
+    assert_eq!(
+        plain.len() - plain.trim_end().len(),
+        kept.len() - kept.trim_end().len(),
+        "the hidden count moved the total: {plain:?} against {kept:?}"
+    );
+    for header in [&plain, &kept] {
+        assert!(
+            header.trim_end().ends_with("+1204  -318"),
+            "the total left the right-hand edge: {header:?}"
+        );
+    }
+}
+
+#[test]
+fn the_hidden_count_sits_between_the_binary_count_and_the_staged_one() {
+    // Both qualify the count beside them, so both go before it does. Hidden goes
+    // first of the two, because it is the one fact here the reader configured and
+    // a fact a reader chose is the one they need reminding of least.
+    let view = View {
+        hidden: 12,
+        ..with_binary(28, 2)
+    };
+    let staged = Chrome {
+        staged: Some(3),
+        ..chrome()
+    };
+    let rungs: Vec<String> = (30..=90)
+        .map(|width| row_text(&screen(width, 6, &view, &staged), 0))
+        .collect();
+
+    let holds = |needle: &str| rungs.iter().filter(|row| row.contains(needle)).count();
+    let (changed, binary, hidden, staged_count) = (
+        holds("28 changed"),
+        holds("2 binary"),
+        holds("12 hidden"),
+        holds("3 staged"),
+    );
+    assert!(
+        changed > binary && binary > hidden && hidden > staged_count && staged_count > 0,
+        "the facts do not drop rightmost first across 30..=90 columns: changed on \
+         {changed}, binary on {binary}, hidden on {hidden}, staged on {staged_count}"
+    );
+}
+
+#[test]
+fn a_tree_whose_every_change_is_hidden_still_says_so() {
+    // The empty state draws no facts at all, and a reader whose pattern swallowed
+    // the whole tree would otherwise get the same screen as a reader with nothing
+    // to see, which is the one case where the token matters most.
+    let view = View {
+        files: 0,
+        hidden: 12,
+        ..nothing_changed()
+    };
+    let header = row_text(&screen(80, 6, &view, &chrome()), 0);
+    assert!(
+        header.contains("12 hidden"),
+        "a pane hiding everything reads as a clean tree: {header:?}"
+    );
+    assert!(
+        header.contains("0 changed"),
+        "the count left when the tree emptied, so the token qualifies nothing: \
+         {header:?}"
+    );
+
+    // And a genuinely clean tree is unchanged, which is B3's own line.
+    let clean = row_text(&screen(80, 6, &nothing_changed(), &chrome()), 0);
+    assert!(
+        !clean.contains("hidden") && !clean.contains("changed"),
+        "a clean tree grew a fact it never had: {clean:?}"
     );
 }

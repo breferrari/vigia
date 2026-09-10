@@ -202,7 +202,7 @@ impl App {
     }
 
     /// [`App::new`] with the view toggles a reader's config file asked for.
-    pub fn configured(config: crate::Config) -> Self {
+    pub fn configured(config: &crate::Config) -> Self {
         Self {
             rail: config.rail,
             single: config.single,

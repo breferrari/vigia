@@ -71,6 +71,7 @@ fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
 /// full cluster rather than into an empty row.
 fn one_file(notes: FileNotes, newest: bool) -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,

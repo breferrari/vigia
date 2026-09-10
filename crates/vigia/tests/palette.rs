@@ -72,6 +72,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// A file, a hunk, and one line of each kind, in a known order.
 fn three_kinds() -> View {
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,
@@ -574,6 +575,7 @@ fn graded_heat() -> View {
         removed: 0,
     };
     View {
+        hidden: 0,
         whole: Vec::new(),
         landed: false,
         recorded: 0,

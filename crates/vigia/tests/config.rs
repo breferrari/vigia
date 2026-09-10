@@ -39,7 +39,7 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
     assert_eq!(config, Config::default());
 
     let plain = App::new();
-    let configured = App::configured(config);
+    let configured = App::configured(&config);
     assert_eq!(
         chrome_of(&configured),
         chrome_of(&plain),
@@ -67,7 +67,7 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         let home = home_with(&format!("app-{key}"), Some(&format!("{key} = on\n")));
         let config = config::from_env(home_env(&home)).expect("a config");
         assert_eq!(
-            chrome_of(&App::configured(config)),
+            chrome_of(&App::configured(&config)),
             chrome,
             "{key} = on reached the wrong field of the shell"
         );
@@ -115,6 +115,7 @@ fn each_key_sets_the_state_the_pane_starts_in() {
             // Untouched by the file, so the hand-written defaults hold: on.
             notes: true,
             links: true,
+            hide: None,
         }
     );
 
@@ -140,8 +141,9 @@ fn the_key_still_toggles_from_the_configured_state() {
         notes: false,
         icons: false,
         links: false,
+        hide: None,
     };
-    let mut app = App::configured(config);
+    let mut app = App::configured(&config);
 
     let (rail, _, following, _) = chrome_of(&app);
     assert!(rail, "the configured shell did not start configured");
@@ -300,6 +302,7 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
             // Untouched by the file, so the hand-written defaults hold: on.
             notes: true,
             links: true,
+            hide: None,
         }
     );
 
@@ -385,7 +388,7 @@ fn absent_is_not_an_error_and_unreadable_is() {
 #[test]
 fn a_railed_default_below_the_arrival_width_keeps_the_request() {
     // §11.2 B14 unchanged, reached from the file instead of from `r`.
-    let app = App::configured(Config {
+    let app = App::configured(&Config {
         rail: true,
         ..Config::default()
     });
@@ -419,7 +422,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         pressed.apply(action, &mut frame, 0).expect("apply");
     }
 
-    let mut configured = App::configured(Config {
+    let mut configured = App::configured(&Config {
         rail: true,
         single: true,
         overview: false,
@@ -428,6 +431,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         wrap: false,
         notes: false,
         icons: false,
+        hide: None,
     });
 
     // Non-vacuity first, which every sibling has and this gate did not: two
@@ -488,6 +492,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             wrap: true,
             notes: true,
             icons: true,
+            hide: None,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
     );
@@ -545,10 +550,10 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
     };
     // Both halves of what `run` does for a reader whose file says `staged = on`:
     // the shell takes the config and so does the frame.
-    let app = App::configured(config);
+    let app = App::configured(&config);
     assert!(app.staged(), "the shell did not take the setting");
     let mut frame = worktree.frame();
-    vigia::arm_frame(&mut frame, config);
+    vigia::arm_frame(&mut frame, &config);
     frame.advance().expect("advance");
 
     assert!(
@@ -561,13 +566,13 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
     );
 
     // And the default is untouched: a reader with no file gets one run.
-    let plain = App::configured(Config::default());
+    let plain = App::configured(&Config::default());
     assert!(
         !plain.staged(),
         "a shell with no file took the setting anyway"
     );
     let mut frame = worktree.frame();
-    vigia::arm_frame(&mut frame, Config::default());
+    vigia::arm_frame(&mut frame, &Config::default());
     frame.advance().expect("advance");
     assert!(
         frame
@@ -638,6 +643,10 @@ fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
     reachable.extend(CONFIG_ONLY);
     reachable.sort_unstable();
 
+    // The valued settings are not in this comparison, because the sweep is over
+    // the keymap and a valued setting is reachable by no gesture at all. That is
+    // the difference the two lists exist to hold, rather than a second exclusion
+    // list with a reason on it.
     let mut accepted: Vec<&str> = config::KEYS.to_vec();
     accepted.sort_unstable();
 
@@ -646,4 +655,120 @@ fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
         "a key here and not there is a gesture the file cannot start; a key there \
          and not here is one no gesture and no ruling accounts for"
     );
+
+    // And the parser accepts exactly the union of the two lists: a key on one of
+    // them the parser refuses is a list that has drifted, and a key on neither
+    // that the parser takes is a setting no gate here can see.
+    for key in config::KEYS.into_iter().chain(config::VALUES) {
+        let source = if config::VALUES.contains(&key) {
+            format!("{key} = ^x\n")
+        } else {
+            format!("{key} = on\n")
+        };
+        assert!(
+            config::parse(&source).is_ok(),
+            "{key:?} is on a list and the parser refuses it"
+        );
+    }
+    assert!(
+        config::parse("sidebar = on\n").is_err(),
+        "a key on neither list was accepted, so the union above is not what \
+         the parser reads"
+    );
+}
+
+/// The file's first valued setting is read, and reaches the walk.
+#[test]
+fn a_hide_pattern_is_read_from_the_file() {
+    let home = home_with("hide", Some("rail = on\nhide = ^target/|\\.lock$\n"));
+    let config = config::from_env(home_env(&home)).expect("a config");
+    let hide = config.hide.as_ref().expect("the file set a pattern");
+
+    assert_eq!(hide.as_str(), r"^target/|\.lock$");
+    assert!(hide.is_hidden("target/debug/x.o"));
+    assert!(hide.is_hidden("deps/pinned.lock"));
+    assert!(!hide.is_hidden("src/lib.rs"));
+
+    // And the toggles beside it are untouched, which is what makes the second
+    // grammar additive rather than a replacement.
+    assert!(config.rail, "the valued key ate the toggle above it");
+}
+
+/// Refused by line, before the terminal is taken, on the theme file's reason.
+#[test]
+fn a_pattern_that_does_not_compile_is_refused_by_line() {
+    let err = config::parse("# mine\nrail = on\nhide = ^target/(\n")
+        .expect_err("an unclosed group is not a pattern");
+    assert!(
+        matches!(&err, ConfigError::BadPattern { line, .. } if *line == 3),
+        "a bad pattern was accepted, or refused without its line: {err:?}"
+    );
+    let said = err.to_string();
+    assert!(
+        said.contains("line 3") && said.contains("hide"),
+        "the error names neither the line nor the key: {said}"
+    );
+}
+
+/// A pattern keeps what it was given. Splitting a value into words and rejoining
+/// them normalises runs of spaces, which no toggle can notice and a pattern can.
+#[test]
+fn a_hide_value_keeps_the_spaces_a_toggle_would_lose() {
+    let config = config::parse("hide =  ^a  b$ \n").expect("a config");
+    assert_eq!(
+        config.hide.expect("a pattern").as_str(),
+        "^a  b$",
+        "the value was rebuilt from its words, so a reader's spacing was changed \
+         under them and two different patterns became one"
+    );
+}
+
+/// One grammar, so a comment ends a value whichever kind of key it is on.
+#[test]
+fn a_comment_still_ends_a_hide_value() {
+    let config = config::parse("hide = ^target/   # everything generated\n").expect("a config");
+    assert_eq!(config.hide.expect("a pattern").as_str(), "^target/");
+
+    // A `#` that opens no comment is part of the value, which is the rule the
+    // toggles already had: `rail = on# x` is a bad value rather than a good one
+    // with a note on it.
+    let config = config::parse("hide = ^a#b$\n").expect("a config");
+    assert_eq!(config.hide.expect("a pattern").as_str(), "^a#b$");
+
+    // Nothing but a comment is a missing value rather than an empty pattern,
+    // which would have hidden every path in the tree.
+    assert!(matches!(
+        config::parse("hide = # nothing\n"),
+        Err(ConfigError::MissingValue { line: 1 })
+    ));
+}
+
+/// The repeated-key rule reaches the valued key, so `hide` twice names both lines
+/// rather than letting the later one win in silence.
+#[test]
+fn a_pattern_written_twice_is_a_repeat_like_any_other_key() {
+    let err = config::parse("hide = ^a\nhide = ^b\n").expect_err("a repeat");
+    assert_eq!(
+        err,
+        ConfigError::RepeatedKey {
+            line: 2,
+            key: "hide".to_owned(),
+            first: 1
+        }
+    );
+}
+
+/// The two lists are what tell a toggle from a valued setting, and a key in both
+/// would be set twice with the parser's second reading winning.
+#[test]
+fn a_toggle_is_never_also_a_valued_setting() {
+    assert!(
+        !config::KEYS.is_empty() && !config::VALUES.is_empty(),
+        "one of the two lists is empty, so the assertion below is vacuous"
+    );
+    let both: Vec<&str> = config::KEYS
+        .into_iter()
+        .filter(|key| config::VALUES.contains(key))
+        .collect();
+    assert!(both.is_empty(), "{both:?} is on both lists");
 }
