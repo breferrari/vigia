@@ -772,3 +772,46 @@ fn a_toggle_is_never_also_a_valued_setting() {
         .collect();
     assert!(both.is_empty(), "{both:?} is on both lists");
 }
+
+/// `hide` in the file reaches the frame, not just the parser.
+///
+/// The sibling of the staged gate above, and it exists for the same reason: a key
+/// that parses and never reaches the walk is a setting a reader can write, read
+/// back in an error message, and never see act.
+#[test]
+fn a_configured_pattern_is_applied_on_the_first_frame() {
+    let scratch = support::Scratch::new("config-hide");
+    scratch.write("src/a.rs", "one\ntwo\n");
+    scratch.write("target/debug/build.log", "noise\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    scratch.write("src/a.rs", "one\nTWO\n");
+    scratch.write("target/debug/build.log", "more noise\n");
+
+    let worktree = scratch.worktree();
+    let config = config::parse("hide = ^target/\n").expect("a config");
+
+    let mut frame = worktree.frame();
+    vigia::arm_frame(&mut frame, &config);
+    frame.advance().expect("advance");
+
+    let drawn: Vec<&str> = frame
+        .files()
+        .iter()
+        .map(|change| change.path.as_str())
+        .collect();
+    assert_eq!(
+        drawn,
+        vec!["src/a.rs"],
+        "a shell configured with a pattern walked every path anyway, so the key \
+         sets a field nothing acts on"
+    );
+    assert_eq!(frame.hidden(), 1);
+
+    // And a reader with no pattern gets the pane they have always had.
+    let mut frame = worktree.frame();
+    vigia::arm_frame(&mut frame, &Config::default());
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 2, "the fixture changed two files");
+    assert_eq!(frame.hidden(), 0);
+}

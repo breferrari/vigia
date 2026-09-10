@@ -14,10 +14,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 27;
+const ESCAPING_FILES: usize = 28;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-seven";
+const ESCAPING_FILES_SPELLED: &str = "twenty-eight";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1934,7 +1934,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 390599),
+    ("SPEC.md", 390607),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96205),
     ("RULINGS.md", 99973),
@@ -2293,7 +2293,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// ninth funded 405 of its bytes by deleting a section 11.1 paragraph that
 /// section 11.2 B6 already said twice over. It stays a session ruling and the
 /// question is the reader's.
-const WRITTEN_LAYER_TOTAL: usize = 641804;
+const WRITTEN_LAYER_TOTAL: usize = 641812;
 
 /// Each document weighs no more than its budget.
 #[test]

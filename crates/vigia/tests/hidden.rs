@@ -5,10 +5,14 @@
 //! burst, which feeds the churn history directly, and the header, which is what
 //! tells the reader anything is being kept from them at all.
 
+#[path = "../../vigia-core/tests/support/mod.rs"]
+mod support;
+
 use std::time::Instant;
 
-use vigia::{shown, sized};
-use vigia_core::{Hidden, History};
+use support::Scratch;
+use vigia::{Position, View, Viewport, shown, sized};
+use vigia_core::{Hidden, Highlighter, History};
 
 const KEPT: &str = "src/lib.rs";
 const GENERATED: &str = "target/debug/build.log";
@@ -76,4 +80,56 @@ fn the_burst_and_the_walk_read_one_pattern_the_same_way() {
         shown(paths, Some(&hide)),
         vec!["deps/pinned.lock.txt".to_owned()]
     );
+}
+
+/// The count the header draws comes off the frame that hid them.
+///
+/// The header's own gates build a `View` by hand, so every one of them stays
+/// green with the collect cut off from the walk entirely. This is the wire
+/// between the two, and it is the only gate that can see it break.
+#[test]
+fn the_collected_view_carries_what_the_walk_hid() {
+    let scratch = Scratch::new("hidden-view");
+    scratch.write("src/a.rs", "one\ntwo\n");
+    scratch.write("target/debug/build.log", "noise\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    scratch.write("src/a.rs", "one\nTWO\n");
+    scratch.write("target/debug/build.log", "more noise\n");
+
+    let worktree = scratch.worktree();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let viewport = Viewport {
+        position: Position { file: 0, row: 0 },
+        anchored: false,
+        diff_rows: 20,
+        width: 80,
+        wrap: false,
+        list_top: 0,
+        list_rows: 8,
+        list_follows: true,
+        measured: true,
+        landing: false,
+        single: false,
+        highlight: false,
+    };
+
+    let mut frame = worktree.frame();
+    frame.hide(Some(Hidden::new("^target/").expect("a pattern")));
+    frame.advance().expect("advance");
+    let view = View::collect(&mut frame, &mut highlighter, &history, viewport).expect("collect");
+    assert_eq!(
+        view.hidden, 1,
+        "the collect does not carry the walk's hidden count, so the header draws \
+         a number that came from somewhere else or from nowhere"
+    );
+    assert_eq!(view.files, 1, "the hidden file was still in the run");
+
+    // Non-vacuity: the same collect over the same tree with no pattern.
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = View::collect(&mut frame, &mut highlighter, &history, viewport).expect("collect");
+    assert_eq!(view.hidden, 0);
+    assert_eq!(view.files, 2);
 }
