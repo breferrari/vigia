@@ -63,6 +63,6 @@ pub use session::{Registration, Registry};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{
-    ChangeOptions, Changes, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed, Worktree,
-    indexed_extensions,
+    ChangeOptions, Changes, Counted, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed,
+    Worktree, indexed_extensions,
 };

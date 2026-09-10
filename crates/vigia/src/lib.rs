@@ -83,7 +83,9 @@ use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use tachyonfx::EffectManager;
 use tachyonfx::pattern::{AnyPattern, RadialPattern, SweepPattern};
-use vigia_core::{Highlighter, History, Note, Registry, Store, StoreWatch, WatchOptions, Worktree};
+use vigia_core::{
+    Counted, Highlighter, History, Note, Registry, Store, StoreWatch, WatchOptions, Worktree,
+};
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
@@ -305,7 +307,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         name: short_name(worktree.workdir()),
         root: worktree.workdir().to_string_lossy().into_owned(),
         branch: None,
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         screen: View::default(),
         regions: Regions::default(),
         held: None,
@@ -827,8 +829,10 @@ struct Shell {
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     branch: Option<String>,
-    /// How many changes the run this pane is not drawing holds.
-    elsewhere: usize,
+    /// What the run this pane is not drawing holds. Both halves, because a pane
+    /// whose only work is staged and hidden would otherwise read as a clean tree:
+    /// the shown count is zero and the drawn run hid nothing.
+    elsewhere: Counted,
     /// The reader's `hide` pattern, kept because two things outside the frame ask
     /// it: the count of the run this pane is not drawing, and the wake's burst.
     hide: Option<vigia_core::Hidden>,
@@ -1494,9 +1498,9 @@ impl Shell {
         self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
             worktree
                 .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
-                .unwrap_or(0)
+                .unwrap_or_default()
         } else {
-            0
+            Counted::default()
         };
 
         // Rebuilt so a notice raised by the collect above, and the notes it

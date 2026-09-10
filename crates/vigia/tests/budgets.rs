@@ -15,8 +15,8 @@ use vigia::{
     note_cells, opening, regions, render,
 };
 use vigia_core::{
-    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
-    Samples, Side, Status,
+    CHECKPOINT_STRIDE, Counted, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History,
+    LineKind, Note, Samples, Side, Status,
 };
 
 use support::{
@@ -81,7 +81,7 @@ fn layout(app: &App, files: usize) -> Body {
 fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
     body_layout(
         pane,
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         files,
         files,
     )
@@ -122,7 +122,7 @@ fn frame_body(
     screen: Body,
 ) {
     app.sample_memory();
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
     let view = app.view(frame, highlighter, history, screen).expect("view");
     // The pane comes from the buffer being painted rather than from [`area`].
     let pane = buf.area;
@@ -241,7 +241,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         );
     }
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
     assert!(
         chrome.frame.is_some(),
         "the timed frame never recorded what it cost, so every wall-clock gate \
@@ -562,7 +562,7 @@ fn frame_budget_on(
         // Inside the sheet's own rect, not over the pane.
         let laid = vigia::regions(
             pane,
-            &app.chrome("fixture", None, Pointing::default(), 0, ""),
+            &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
             &app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view"),
         );
@@ -1350,7 +1350,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
-        let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+        let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
         let (painted, paint, paint_cpu) = timed_cpu(|| {
             render(
                 &mut buf,
@@ -1772,7 +1772,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     let screen = layout_of(&app, pane, FILES);
     app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
         .expect("toggle the sheet");
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
     let laid = vigia::regions(pane, &chrome, &{
         let mut highlighter = Highlighter::eager();
         let history = History::new();
@@ -2233,7 +2233,7 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             let began = Instant::now();
             frame.advance().expect("advance");
             app.sample_memory();
-            let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+            let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
             let view = app.view(frame, highlighter, history, screen).expect("view");
             render(
                 &mut buf,
@@ -2302,7 +2302,7 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         arrivals.get(),
         sweeps.get()
     );
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
     let view = app
         .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
@@ -2538,7 +2538,8 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                 sample(history, scratch.root(), EDITED_PATH);
                 frame.advance().expect("advance");
                 app.sample_memory();
-                let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+                let chrome =
+                    app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
                 let view = app.view(frame, highlighter, history, screen).expect("view");
                 let laid = regions(NOTED_PANE, &chrome, &view);
                 render(

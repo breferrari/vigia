@@ -14,7 +14,7 @@ use vigia::{
     Chrome, FileEntry, FileNotes, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow,
     Mode, Position, Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
+use vigia_core::{Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
 
 /// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
 fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
@@ -176,7 +176,7 @@ fn chrome() -> Chrome {
         icons: false,
         links: false,
         root: String::new(),
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -211,7 +211,7 @@ fn empty_chrome() -> Chrome {
         gripped: None,
         scrolling: None,
         staged: None,
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -5986,7 +5986,7 @@ fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
         let chrome = Chrome {
             worktree: worktree.to_owned(),
             staged: None,
-            elsewhere: 0,
+            elsewhere: Counted::default(),
             branch: Some("main".to_owned()),
             ..chrome()
         };
@@ -6021,7 +6021,7 @@ fn a_populated_worktree_names_its_branch_in_the_header() {
     let view = a_list_of(3, 3, 0);
     let chrome = Chrome {
         staged: None,
-        elsewhere: 0,
+        elsewhere: Counted::default(),
         branch: Some("feature/band".to_owned()),
         ..chrome()
     };
@@ -6266,7 +6266,10 @@ fn the_header_counts_both_runs() {
 #[test]
 fn an_empty_view_says_where_the_work_went() {
     let signposted = Chrome {
-        elsewhere: 3,
+        elsewhere: Counted {
+            shown: 3,
+            hidden: 0,
+        },
         ..empty_chrome()
     };
     let rows = text_rows(&screen(80, 6, &nothing_changed(), &signposted), 80, 6);
@@ -6350,7 +6353,10 @@ fn the_layout_is_the_same_whatever_the_staged_facts_say() {
     let plain = chrome();
     let told = Chrome {
         staged: Some(7),
-        elsewhere: 4,
+        elsewhere: Counted {
+            shown: 4,
+            hidden: 0,
+        },
         ..chrome()
     };
 
@@ -7100,6 +7106,42 @@ fn a_tree_whose_every_change_is_hidden_still_says_so() {
     );
 }
 
+/// The run the pane is not drawing can be the one that was emptied.
+///
+/// The hardest shape to see: the unstaged run is genuinely clean, so the walk
+/// hides nothing and `view.hidden` is zero, and the staged run's only file
+/// matches the pattern, so its shown count is zero too. Nothing on either side is
+/// non-zero, and the pane read exactly like a clean tree while holding a change.
+#[test]
+fn a_pane_whose_only_work_is_staged_and_hidden_says_so() {
+    let view = View {
+        files: 0,
+        hidden: 0,
+        ..nothing_changed()
+    };
+    let taken = Chrome {
+        elsewhere: Counted {
+            shown: 0,
+            hidden: 1,
+        },
+        ..chrome()
+    };
+    let body = row_text(&screen(80, 6, &view, &taken), 1);
+    assert!(
+        body.contains("1 hidden"),
+        "the pattern took the only change there was and the pane reads as a \
+         clean tree: {body:?}"
+    );
+    assert!(
+        !body.contains("no unstaged changes"),
+        "the body still claims the tree is clean: {body:?}"
+    );
+
+    // Non-vacuity: the same chrome with nothing taken is B3's own line.
+    let clean = row_text(&screen(80, 6, &view, &chrome()), 1);
+    assert!(clean.contains("no unstaged changes"), "{clean:?}");
+}
+
 /// The body says it too, and this is the row that matters most.
 ///
 /// The header gives the count up as it narrows, so below the width that holds it
@@ -7108,7 +7150,7 @@ fn a_tree_whose_every_change_is_hidden_still_says_so() {
 /// to stop, one row down and in the larger type.
 #[test]
 fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
-    for width in [30u16, 40, 80, 120] {
+    for width in [12u16, 20, 30, 40, 80, 120] {
         let view = View {
             files: 0,
             hidden: 12,
@@ -7117,20 +7159,42 @@ fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
         let body = row_text(&screen(width, 6, &view, &chrome()), 1);
         assert!(
             body.contains("12 hidden"),
-            "at {width} columns the body of a pane hiding everything reads              {body:?}"
+            "at {width} columns the body of a pane hiding everything reads {body:?}"
         );
         assert!(
             !body.contains("no unstaged changes"),
-            "at {width} columns the body says the tree is clean over twelve              changes the reader hid: {body:?}"
+            "at {width} columns the body says the tree is clean over twelve changes the reader hid: {body:?}"
         );
 
-        // A genuinely clean tree keeps B3's own line, at every one of these widths.
+        // A genuinely clean tree keeps B3's own line, at every one of these
+        // widths. Held by its head rather than whole, because below the width
+        // that fits it the row is elided like any other (I6).
         let clean = row_text(&screen(width, 6, &nothing_changed(), &chrome()), 1);
         assert!(
-            clean.contains("no unstaged changes"),
+            clean.trim_start().starts_with("no unsta"),
             "at {width} columns a clean tree stopped saying so: {clean:?}"
         );
     }
+
+    // The other run's count still rides beside it, which is what B3's line has
+    // always done and what a reader loses if the pattern replaces the whole row.
+    let view = View {
+        files: 0,
+        hidden: 12,
+        ..nothing_changed()
+    };
+    let elsewhere = Chrome {
+        elsewhere: Counted {
+            shown: 3,
+            hidden: 0,
+        },
+        ..chrome()
+    };
+    let body = row_text(&screen(80, 6, &view, &elsewhere), 1);
+    assert!(
+        body.contains("12 hidden") && body.contains("3 staged"),
+        "the pattern took the row and the staged count went with it: {body:?}"
+    );
 
     // Both runs on, and the pattern still owns the first clause.
     let view = View {

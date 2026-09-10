@@ -3,7 +3,7 @@
 mod support;
 
 use support::Scratch;
-use vigia_core::{ChangeOptions, Frame, Hidden, Origin, Worktree};
+use vigia_core::{ChangeOptions, Counted, Frame, Hidden, Origin, Worktree};
 
 const KEPT: &str = "src/lib.rs";
 const GENERATED: &str = "target/debug/build.log";
@@ -150,16 +150,24 @@ fn the_staged_run_hides_by_the_same_pattern() {
     );
 }
 
-/// The count the empty state draws for the run the pane is not showing.
+/// The count the empty state draws for the run the pane is not showing, both
+/// halves of it.
+///
+/// The shown half alone is what a pane whose only work is staged and hidden
+/// would read as a clean tree: with the staged toggle off the walk never sees
+/// that file, so the drawn run hides nothing and the shown count is zero.
 #[test]
-fn a_hidden_path_is_absent_from_the_other_runs_count() {
+fn the_other_runs_count_says_what_the_pattern_took_there() {
     let scratch = fixture("hidden-count");
     scratch.git(&["add", "-A"]);
 
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     assert_eq!(
         worktree.count_of(Origin::Staged, None).expect("count"),
-        3,
+        Counted {
+            shown: 3,
+            hidden: 0
+        },
         "the fixture staged three files"
     );
 
@@ -168,9 +176,12 @@ fn a_hidden_path_is_absent_from_the_other_runs_count() {
         worktree
             .count_of(Origin::Staged, Some(&hide))
             .expect("count"),
-        1,
-        "the count of the run the pane is not drawing ignores the pattern, so a \
-         reader is told about work they asked never to see"
+        Counted {
+            shown: 1,
+            hidden: 2
+        },
+        "the run the pane is not drawing reports what a reader would see and not \
+         what was taken from them"
     );
 }
 
@@ -229,7 +240,7 @@ fn a_pattern_that_does_not_compile_is_refused() {
     assert!(!said.trim().is_empty(), "the refusal says nothing at all");
     assert!(
         !said.contains("is not a pattern"),
-        "the refusal frames the engine's words in a sentence its caller will          say again: {said}"
+        "the refusal frames the engine's words in a sentence its caller will say again: {said}"
     );
 }
 
@@ -316,6 +327,41 @@ fn a_pattern_survives_the_ticks_a_session_is_made_of() {
         frame.hidden() >= 1,
         "a run added mid-session hid nothing at all"
     );
+}
+
+/// A second pattern replaces the first, and no pattern brings everything back.
+///
+/// `Frame::hide` is a plain setter where `show_staged` clears both caches, and
+/// the asymmetry is what makes this worth a gate: `advance` drops every cached
+/// entry whose path is no longer in the file list, so a path the new pattern
+/// hides carries nothing forward and a path it stops hiding arrives cold.
+#[test]
+fn a_second_pattern_replaces_the_first_from_the_next_walk() {
+    let scratch = fixture("hidden-replaced");
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+
+    frame.hide(Some(Hidden::new(r"^target/").expect("a pattern")));
+    frame.advance().expect("advance");
+    assert_eq!(frame.hidden(), 1);
+    assert!(paths(&frame).iter().any(|path| path == LOCK));
+
+    // A different pattern, mid-session, covering a different file.
+    frame.hide(Some(Hidden::new(r"\.lock$").expect("a pattern")));
+    frame.advance().expect("advance");
+    assert_eq!(frame.hidden(), 1, "the second pattern did not take effect");
+    assert!(
+        paths(&frame).iter().any(|path| path == GENERATED),
+        "the first pattern is still hiding a path the second one does not: {:?}",
+        paths(&frame)
+    );
+    assert!(!paths(&frame).iter().any(|path| path == LOCK));
+
+    // And clearing it brings the whole tree back.
+    frame.hide(None);
+    frame.advance().expect("advance");
+    assert_eq!(frame.hidden(), 0);
+    assert_eq!(paths(&frame).len(), 3);
 }
 
 /// What a pattern costs the walk it filters, both fixtures interleaved.

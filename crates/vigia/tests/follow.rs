@@ -7,7 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use vigia::{Action, App, Body, Glyphs, Pointing, Position, Row, Theme, body_layout, render};
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Counted, Frame, Highlighter, History};
 
 use support::{Scratch, delta};
 
@@ -26,7 +26,7 @@ const OTHER: usize = 21;
 fn layout() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), 0, ""),
+        &App::new().chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         FILES,
         FILES,
     )
@@ -157,7 +157,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     let area = Rect::new(0, 0, 64, 12);
     let height = body_layout(
         area,
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         frame.files().len(),
         frame.files().len(),
     );
@@ -167,7 +167,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     assert_eq!(view.files, 3, "the fixture is not three changed files");
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, Pointing::default(), 0, "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
     let mut terminal = Terminal::new(TestBackend::new(64, 12)).expect("terminal");
     terminal
         .draw(|f| {
@@ -470,7 +470,7 @@ const CUT_HUNK_LINES: u32 = CUT_LINES as u32 + vigia_core::CONTEXT * 2;
 fn tall_layout(app: &App) -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         1,
         1,
     )
@@ -758,7 +758,7 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
 
     let layout = body_layout(
         Rect::new(0, 0, 80, 24),
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         frame.files().len(),
         frame.files().len(),
     );
@@ -906,7 +906,7 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
 
     let layout = body_layout(
         Rect::new(0, 0, 80, 24),
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         frame.files().len(),
         frame.files().len(),
     );
@@ -974,7 +974,7 @@ fn a_refused_landing_is_settled_rather_than_deferred() {
 
     let layout = body_layout(
         Rect::new(0, 0, 80, 24),
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         frame.files().len(),
         frame.files().len(),
     );
@@ -1038,7 +1038,7 @@ fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
     let history = History::new();
     let layout = body_layout(
         Rect::new(0, 0, 80, 24),
-        &app.chrome("fixture", None, Pointing::default(), 0, ""),
+        &app.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
         frame.files().len(),
         frame.files().len(),
     );

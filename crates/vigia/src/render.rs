@@ -7,7 +7,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Churn, Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
+use vigia_core::{
+    Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span,
+};
 
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
@@ -487,7 +489,7 @@ pub struct Chrome {
     /// How many files the staged run holds, or `None` when it is not drawn.
     pub staged: Option<usize>,
     /// How many changes the run that is not drawn holds.
-    pub elsewhere: usize,
+    pub elsewhere: Counted,
     /// Whether the watch is still live.
     pub mode: Mode,
     /// The cell a step button is being held down on, when one is.
@@ -2154,7 +2156,11 @@ pub fn render(
             full,
             view,
             area,
-            &empty_state_with(chrome.staged, chrome.elsewhere, view.hidden),
+            &empty_state_with(
+                chrome.staged,
+                chrome.elsewhere.shown,
+                view.hidden + chrome.elsewhere.hidden,
+            ),
         );
         if bar.drawn() {
             painter.scrollbar(

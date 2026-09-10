@@ -132,16 +132,24 @@ impl Worktree {
     /// # Errors
     ///
     /// `gix` cannot walk the worktree's status.
-    pub fn count_of(&self, origin: Origin, hide: Option<&Hidden>) -> Result<usize> {
+    pub fn count_of(&self, origin: Origin, hide: Option<&Hidden>) -> Result<Counted> {
         // Rename tracking on, and the cheaper spelling is wrong here.
-        self.changes_of(
+        let mut walk = self.changes_of(
             origin,
             ChangeOptions {
                 hide,
                 ..ChangeOptions::default()
             },
-        )?
-        .try_fold(0, |n, change| change.map(|_| n + 1))
+        )?;
+        let mut shown = 0;
+        for change in &mut walk {
+            change?;
+            shown += 1;
+        }
+        Ok(Counted {
+            shown,
+            hidden: walk.hidden(),
+        })
     }
 
     /// The index against `HEAD^{tree}`, collected.
@@ -344,6 +352,18 @@ fn git_separators(mut bytes: Vec<u8>) -> Vec<u8> {
         }
     }
     bytes
+}
+
+/// What a comparison holds: what a reader would see, and what the pattern took.
+///
+/// Both, from one walk, because a caller with only the first cannot tell an empty
+/// comparison from one the reader hid every path in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counted {
+    /// Changes this comparison would draw.
+    pub shown: usize,
+    /// Changes the pattern kept out of it.
+    pub hidden: usize,
 }
 
 /// Iterator over one comparison's changes, less the ones the reader hid.
