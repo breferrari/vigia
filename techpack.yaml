@@ -40,6 +40,12 @@ components:
   # All three fail open, so they are safe to install once and forget: see the
   # scripts. Register runs on both ends of a session because its stdin payload is
   # what tells one from the other.
+  #
+  # One source, two destinations, and the duplicate copy is deliberate. A
+  # component is the unit mcs installs, verifies and uninstalls, so two of them
+  # sharing a destination makes each one's removal the other's business, and the
+  # schema does not say which way that resolves. Two names cost a second copy of
+  # fifteen lines and make either component safe to deselect.
   - id: hook-register-start
     displayName: Socket registered on session start
     description: Records the session's socket beside the note store, so a note posts into it
@@ -47,7 +53,7 @@ components:
     hookEvent: SessionStart
     hook:
       source: .techpack/hooks/register.sh
-      destination: register.sh
+      destination: register-start.sh
 
   - id: hook-register-end
     displayName: Socket cleared on session end
@@ -56,7 +62,7 @@ components:
     hookEvent: SessionEnd
     hook:
       source: .techpack/hooks/register.sh
-      destination: register.sh
+      destination: register-end.sh
 
   - id: hook-pending
     displayName: Pending notes reported before a prompt

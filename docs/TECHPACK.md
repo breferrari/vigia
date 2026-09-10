@@ -2,6 +2,8 @@
 
 `techpack.yaml` at the root of this repository packages what the README asks you to set up by hand, so that [`mcs`](https://github.com/mcs-cli/mcs) installs and maintains it instead: the server from **Give the agent the server**, and the three hooks from **And reach the session already running**.
 
+**macOS and Linux.** `mcs` installs the binary through Homebrew and the hooks are shell scripts, so this route does not reach Windows even though `vigia` itself is a tier-1 target there. A Windows reader wants the README's own instructions, which are three lines of `claude mcp add` and settings and cost nothing extra.
+
 ## Installing
 
 ```sh
