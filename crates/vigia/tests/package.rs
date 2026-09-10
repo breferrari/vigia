@@ -1935,7 +1935,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 388313),
     ("REVOCATIONS.md", 11910),
-    ("ROADMAP.md", 96001),
+    ("ROADMAP.md", 96145),
     ("RULINGS.md", 99973),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -2271,10 +2271,9 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// could decline, so there was never a trade to make, and the remedy this rule
 /// prescribes would have been deleting live contract prose to pay for live
 /// contract prose. Two raises in one day is the measurement the open question has
-/// been waiting for, and the third raise is the same measurement again: #469 added
-/// a gesture, and a gesture the pane answers and the document does not name is the
-/// drift §0 exists to stop. It stays a session ruling and the question is the
-/// reader's. The fourth raise is five issues filed in one pass, and a filed issue
+/// been waiting for, and the third is that measurement again: a gesture the pane
+/// answers and the document does not name is the drift §0 exists to stop. It stays
+/// a session ruling and the question is the reader's. The fourth raise is five issues filed in one pass, and a filed issue
 /// with no roadmap row is invisible to the take order rather than merely
 /// deprioritised, so the row is owed the moment the issue exists. The fifth is a
 /// sixth issue filed into the same block. The sixth is 1,493 and it is the third
@@ -2284,9 +2283,10 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// raise to restore slack the per-file ceilings had quietly eaten, one of them
 /// having been raised against this total rather than alongside it. The seventh is
 /// that bullet again, for a gesture whose state contradicts a written cap and a
-/// written region count, and the eighth is that gesture's road not taken: a branch
-/// refused only in a commit message is one the next session re-argues from zero.
-const WRITTEN_LAYER_TOTAL: usize = 639314;
+/// written region count; the eighth is that gesture's road not taken, a branch
+/// refused only in a commit message being one the next session re-argues from
+/// zero; and the ninth is a shelf row, which the ledger bullet already excepts.
+const WRITTEN_LAYER_TOTAL: usize = 639458;
 
 /// Each document weighs no more than its budget.
 #[test]

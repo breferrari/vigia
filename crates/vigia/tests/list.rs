@@ -637,9 +637,12 @@ fn the_two_regions_tile_the_body_exactly() {
                             saw_a_clamp = true;
                         }
 
-                        // The footer's own height is not exposed, so it is recovered from
-                        // the unclamped split rather than restated: whatever it is,
-                        // clamping must not change it.
+                        // The footer's own height is not exposed, so it is recovered
+                        // from the unclamped split. That recovery is also this
+                        // assertion's whole limit: `height` stands on both sides and
+                        // cancels, so it pins what clamping does to the body and can
+                        // say nothing about what built it. The comparison above the
+                        // loop is what covers that half.
                         let footer = usize::from(height).saturating_sub(1 + full.rows());
                         assert_eq!(
                             1 + body.rows() + footer,
