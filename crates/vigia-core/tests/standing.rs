@@ -217,6 +217,82 @@ fn a_rename_on_the_branch_survives_a_later_edit_to_the_same_path() {
     );
 }
 
+/// A path the branch renamed and the working tree renamed again is one row.
+///
+/// The two walks hold it under two different names, so pairing on the drawn path
+/// alone leaves the middle name standing as a row for a file that is not on disk,
+/// beside a second row claiming the file came from it.
+#[test]
+fn a_path_renamed_twice_arrives_once_under_its_last_name() {
+    let scratch = branched("position-rename-twice");
+    scratch.git(&["mv", KEPT, "src/middle.rs"]);
+    scratch.git(&["commit", "-m", "move it once"]);
+    scratch.git(&["mv", "src/middle.rs", "src/last.rs"]);
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    let mut frame = worktree.frame();
+    frame.stand(Standing::Since { at, named });
+    frame.advance().expect("advance");
+
+    assert_eq!(
+        paths(&frame),
+        vec!["src/last.rs".to_owned()],
+        "the run holds a name the file passed through rather than the one it has"
+    );
+    let moved = &frame.files()[0];
+    assert_eq!(
+        moved.kind,
+        ChangeKind::Renamed {
+            from: KEPT.to_owned()
+        },
+        "the row says {:?}, so it names the middle of the journey rather than \
+         where the file was at the branch point",
+        moved.kind
+    );
+}
+
+/// A conflicted path is a conflict since the branch point too.
+///
+/// `reads_side` is what makes a conflict draw no working-tree bytes. A composed
+/// kind of `Modified` over a change whose right side was never read draws the
+/// whole of the base content as deleted, which is a fabricated diff in exactly
+/// the state a reader stands at the branch point to understand.
+#[test]
+fn a_conflicted_path_is_not_composed_into_a_modification() {
+    let scratch = branched("position-conflict");
+    scratch.write(KEPT, "one\nbranch\n");
+    scratch.git(&["commit", "-am", "on the branch"]);
+    scratch.git(&["checkout", "-q", "main"]);
+    scratch.write(KEPT, "one\nmain\n");
+    scratch.git(&["commit", "-am", "on main"]);
+    scratch.git(&["checkout", "-q", "work"]);
+    scratch.git_may_fail(&["merge", "main"]);
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    let mut frame = worktree.frame();
+    frame.stand(Standing::Since { at, named });
+    frame.advance().expect("advance");
+
+    let conflicted = frame
+        .files()
+        .iter()
+        .find(|change| change.path == KEPT)
+        .expect("the conflicted path is in the run");
+    assert_eq!(
+        conflicted.kind,
+        ChangeKind::Conflict,
+        "a conflicted path reads {:?} since the branch point, and a diffable kind \
+         over a row that reads no working tree draws the base content as deleted",
+        conflicted.kind
+    );
+    assert!(
+        !conflicted.is_diffable(),
+        "the row is diffable, so something will read a side it has not got"
+    );
+}
+
 /// The filter lives in `Changes`, and a second walk must not go round it.
 #[test]
 fn the_hide_pattern_reaches_a_since_run() {

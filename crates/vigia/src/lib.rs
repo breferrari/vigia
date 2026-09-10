@@ -1087,7 +1087,7 @@ impl Shell {
                 Ok(standing) => standing,
                 Err(e) => {
                     self.app.warn(e.to_string());
-                    self.app.unstand();
+                    self.app.stands(false);
                     return;
                 }
             }
@@ -1097,11 +1097,17 @@ impl Shell {
         if &wanted == frame.standing() {
             return;
         }
+        let previous = frame.standing().clone();
         frame.stand(wanted);
         // Walked here for `ToggleStaged`'s reason: the frame this paint draws
-        // has to be the one the token names.
+        // has to be the one the token names. A failed walk leaves the previous
+        // frame whole, so the token goes back with it rather than naming a
+        // comparison the body underneath is not drawing.
         if let Err(e) = frame.advance() {
             self.app.warn(e.to_string());
+            self.app
+                .stands(!matches!(previous, vigia_core::Standing::Current));
+            frame.stand(previous);
         }
     }
 

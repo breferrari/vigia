@@ -767,9 +767,9 @@ fn header_left(
     // first, because each qualifies the one before it, then the branch, then the
     // name, which B3's empty state leans on to say which repository this is.
     let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
-    let rung = |kept: &[&str], standing: Option<&str>| {
+    let rung = |kept: &[&str], branch: Option<&str>, standing: Option<&str>| {
         name.into_iter()
-            .chain(named)
+            .chain(branch)
             .chain(standing)
             .chain(kept.iter().copied())
             .filter(|fact| !fact.is_empty())
@@ -778,23 +778,27 @@ fn header_left(
     };
 
     // `current` names the pane a reader already has, so the token drops first; say
-    // anything else and it drops last, a count without it reading as the live tree's.
+    // anything else and it outlives every fact on this side, the branch included:
+    // a pane that stops naming where it stands reads exactly like the live one.
     let standing = Some(position);
     if position == vigia_core::Standing::CURRENT {
         // One rung with it, then today's whole ladder without it. Pushed with no
         // fact to qualify too: a tree with nothing in it is still standing somewhere.
-        rungs.push(rung(&kept, standing));
+        rungs.push(rung(&kept, named, standing));
         for end in (1..=kept.len()).rev() {
-            rungs.push(rung(&kept[..end], None));
+            rungs.push(rung(&kept[..end], named, None));
+        }
+        if named.is_some() {
+            rungs.push(rung(&[], named, None));
         }
     } else {
         for end in (1..=kept.len()).rev() {
-            rungs.push(rung(&kept[..end], standing));
+            rungs.push(rung(&kept[..end], named, standing));
         }
-        rungs.push(rung(&[], standing));
-    }
-    if named.is_some() {
-        rungs.push(rung(&[], None));
+        rungs.push(rung(&[], named, standing));
+        if named.is_some() {
+            rungs.push(rung(&[], None, standing));
+        }
     }
     rungs.push(worktree.to_owned());
     rungs

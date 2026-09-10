@@ -60,16 +60,22 @@ fn since(worktree: &Worktree) -> Standing {
 
 /// The body's first row, which on an empty pane is B3's one line.
 fn body_line(view: &View, position: &str, app: &App) -> String {
-    drawn_row(view, position, app, 1)
+    drawn_row(view, position, app, 1, 120)
 }
 
 /// The header a `View` and a position draw together, as one line of text.
 fn header(view: &View, position: &str, app: &App) -> String {
-    drawn_row(view, position, app, 0)
+    drawn_row(view, position, app, 0, 120)
 }
 
-/// Row `y` of a pane drawing `view` while standing where `position` says.
-fn drawn_row(view: &View, position: &str, app: &App, y: u16) -> String {
+/// The same header on a pane `width` columns across.
+fn header_at(view: &View, position: &str, app: &App, width: u16) -> String {
+    drawn_row(view, position, app, 0, width)
+}
+
+/// Row `y` of a `width`-column pane drawing `view` while standing where
+/// `position` says.
+fn drawn_row(view: &View, position: &str, app: &App, y: u16, width: u16) -> String {
     let chrome = Chrome {
         position: position.to_owned(),
         ..app.chrome(
@@ -81,7 +87,7 @@ fn drawn_row(view: &View, position: &str, app: &App, y: u16) -> String {
             "",
         )
     };
-    let mut terminal = Terminal::new(TestBackend::new(120, 8)).expect("terminal");
+    let mut terminal = Terminal::new(TestBackend::new(width, 8)).expect("terminal");
     let theme = Theme::default();
     terminal
         .draw(|f| {
@@ -293,7 +299,7 @@ fn the_branch_point_is_taken_once_and_a_refusal_keeps_nothing() {
     frame.advance().expect("advance");
     app.apply(Action::ToggleStanding, &mut frame, 20)
         .expect("the toggle asked the shell to quit");
-    app.unstand();
+    app.stands(false);
     assert!(
         !app.standing(),
         "the reading stayed at the branch point the shell could not resolve"
@@ -352,5 +358,95 @@ fn an_empty_since_run_says_what_it_found_nothing_since() {
     assert!(
         line.contains("no unstaged changes"),
         "the live pane stopped saying which comparison it is empty for: {line:?}"
+    );
+}
+
+/// Narrowing a pane that is standing somewhere never makes it read like the live
+/// one.
+///
+/// The token outlives every other fact on the header's left, the branch included.
+/// A rung that has given it up says exactly what a live pane says at the same
+/// width, and the header is the only place the reading is written down.
+#[test]
+fn narrowing_a_since_pane_never_reads_like_the_current_one() {
+    let scratch = scratch("standing-narrow");
+    let worktree = scratch.worktree();
+    let standing = since(&worktree);
+    let label = standing.label();
+    let app = App::new();
+    let mut frame = worktree.frame();
+    let view = drawn(&mut frame, standing);
+
+    let mut carried = 0usize;
+    for width in 40u16..=120 {
+        let drawn = header_at(&view, &label, &app, width);
+        let left = drawn
+            .split("  ")
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        // The floor of every ladder on this side, and the one rung that carries
+        // no fact at all: there is nothing there to mistake for a comparison.
+        if left == "fixture" {
+            continue;
+        }
+        assert!(
+            left.contains(&label),
+            "at {width} columns a pane standing at the branch point heads with \
+             {left:?}, which is what a live pane heads with at the same width"
+        );
+        carried += 1;
+    }
+    assert!(
+        carried > 0,
+        "no width drew more than the worktree name, so the sweep asserts nothing"
+    );
+}
+
+/// Moving the pane puts it back at the top.
+///
+/// `ToggleStaged`'s reason one step further out: the file set changes wholesale,
+/// so a row index into the old one names an unrelated file in the new one.
+#[test]
+fn standing_somewhere_else_puts_the_pane_back_at_the_top() {
+    let scratch = scratch("standing-scroll");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    app.apply(Action::Scroll(3), &mut frame, 20)
+        .expect("scroll");
+    assert_ne!(
+        app.position(),
+        Position::default(),
+        "the fixture did not move the pane, so the reset below proves nothing"
+    );
+
+    app.apply(Action::ToggleStanding, &mut frame, 20)
+        .expect("the toggle asked the shell to quit");
+    assert_eq!(
+        app.position(),
+        Position::default(),
+        "the pane kept a row index from the run it was reading before"
+    );
+}
+
+/// A refusal says what could not be measured from, in words a reader can act on.
+#[test]
+fn a_branch_with_nothing_to_measure_from_says_so_in_its_own_words() {
+    let bare = Scratch::new("standing-words");
+    bare.write("src/a.rs", "one\n");
+    bare.git(&["add", "-A"]);
+    bare.git(&["commit", "-m", "init"]);
+    let bare = bare.worktree();
+
+    let mut held = None;
+    let refused = branch_point_of(&mut held, &bare).expect_err("a branch point");
+    let said = refused.to_string();
+    assert!(
+        said.contains("no other branch to measure from"),
+        "the refusal reads {said:?}, which does not tell a reader what is missing"
     );
 }

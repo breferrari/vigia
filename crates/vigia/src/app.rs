@@ -344,9 +344,10 @@ impl App {
         self.standing
     }
 
-    /// Take the request back, for a branch with nothing to measure from.
-    pub fn unstand(&mut self) {
-        self.standing = false;
+    /// Put the request where the frame actually is, which is what a refusal or a
+    /// failed walk leaves the reader with.
+    pub fn stands(&mut self, standing: bool) {
+        self.standing = standing;
     }
 
     /// Replace the notes the next collect places, with what the store lists.
@@ -571,8 +572,14 @@ impl App {
             // line, and a click there still withdraws it.
             Action::ToggleNotes => self.notes_shown = !self.notes_shown,
             // The other toggle that changes what the frame walks, and the only
-            // one that changes what it walks *against*.
-            Action::ToggleStanding => self.standing = !self.standing,
+            // one that changes what it walks *against*. The walk itself is the
+            // shell's, because a branch point is a repository question, but the
+            // move is this one's for `ToggleStaged`'s reason: the file set changes
+            // wholesale, so a row index into the old one names an unrelated file.
+            Action::ToggleStanding => {
+                self.standing = !self.standing;
+                self.position = Position::default();
+            }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 self.staged = !self.staged;

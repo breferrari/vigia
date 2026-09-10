@@ -294,9 +294,10 @@ impl Worktree {
     /// its index blob as the thing it changed from, which is a state the reader
     /// never asked about.
     ///
-    /// A path whose two halves cancel is still a row. Detecting that it came back
-    /// to the base content is a read per path, and `SPEC.md` §3's I4 is what says
-    /// a walk does not read content; the diff under it draws zero hunks and says
+    /// A path that cancels by *existence* is not a row at all, and [`compose`]
+    /// says why. A path that cancels by *content* is one: detecting that it came
+    /// back to the base bytes is a read per path, and `SPEC.md` §3's I4 says a
+    /// walk does not read content, so the diff under it draws zero hunks and says
     /// so, which is the cheaper honesty.
     ///
     /// # Errors
@@ -327,7 +328,14 @@ impl Worktree {
 
         let mut out = Vec::with_capacity(from_base.len() + unstaged.len());
         for mut change in unstaged {
-            if let Some(based) = from_base.remove(&change.path) {
+            // Under its own name, then under the name it came from: a path the
+            // branch renamed and the working tree renamed again is in the two walks
+            // under two different names, and pairing only on the first leaves the
+            // middle name as a row for a file that is not on disk.
+            let based = from_base
+                .remove(&change.path)
+                .or_else(|| moved_from(&change.kind).and_then(|from| from_base.remove(from)));
+            if let Some(based) = based {
                 // The path moved on both sides of the index. What it changed from
                 // is the base tree's blob, and what it is now is on disk.
                 let Some(kind) = compose(&based.kind, &change.kind) else {
@@ -600,6 +608,14 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     }
 }
 
+/// The name a change moved from, where it moved at all.
+fn moved_from(kind: &ChangeKind) -> Option<&str> {
+    match kind {
+        ChangeKind::Renamed { from } | ChangeKind::Copied { from } => Some(from),
+        _ => None,
+    }
+}
+
 /// What a path did between the base tree and the working tree, given what it did
 /// on each side of the index, or `None` where it did nothing.
 ///
@@ -613,6 +629,13 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
 /// moved from is a fact about the base, so it outranks a plain modification the
 /// worktree made on top of it.
 fn compose(from_base: &ChangeKind, in_worktree: &ChangeKind) -> Option<ChangeKind> {
+    // A conflict and a type change are why a row reads no working-tree bytes
+    // ([`reads_side`]), and they describe the end the reader is looking at. Composing
+    // one into `Modified` leaves a diffable row with nothing on its right, which
+    // draws the whole of the base content as deleted.
+    if matches!(in_worktree, ChangeKind::Conflict | ChangeKind::TypeChange) {
+        return Some(in_worktree.clone());
+    }
     let absent_from_base = matches!(from_base, ChangeKind::Added | ChangeKind::IntentToAdd);
     let gone_from_worktree = matches!(in_worktree, ChangeKind::Removed);
     match (absent_from_base, gone_from_worktree) {

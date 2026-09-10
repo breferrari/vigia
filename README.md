@@ -26,7 +26,7 @@ An agent edits **fast**, **wide**, and while you are reading something else. The
 |---|---|
 | 🤖 **Built for the pane beside the agent** | Zero input required. It follows the newest change and scrolls to it on its own |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle, under 5% memory drift over 24 hours |
-| 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging *actions*. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
+| 🎯 **The diff, and nothing else** | No branch or commit *browsing*, no stash list, no staging *actions*. `b` moves where the diff is measured from and picks nothing to look at. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
 | ⌨️ **Nothing to learn first** | `?` draws every gesture the pane binds, over the pane and moving nothing. `~/.config/vigia/config` decides what it opens as |
 
