@@ -4,7 +4,9 @@
 mod support;
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use vigia::{
     Action, App, Body, Chrome, Glyphs, LIST_SETTLED, Pointing, Regions, Theme, View, action_for,
@@ -348,6 +350,16 @@ fn the_list_takes_the_rows_the_diff_gave_up() {
         "the shipped pane drew all {FILES} file(s) without being capped, so the \
          comparison below is against nothing"
     );
+    // The two numbers `SPEC.md` §11.1 works this rung out in, held here so the
+    // prose and the arithmetic cannot drift apart in silence.
+    assert_eq!(
+        (capped.list, view.list.len()),
+        (12, 30),
+        "the document says a fifty-row pane draws thirty rows where every other \
+         state draws twelve, and this pane draws {} and {}",
+        capped.list,
+        view.list.len()
+    );
     assert!(
         deep.list > capped.list,
         "the overview drew {} list row(s) against the capped {}, so the cap is \
@@ -396,6 +408,42 @@ fn a_list_shorter_than_the_body_leaves_the_rest_blank() {
         "the region shrank to its entries, so the rows below them left the body"
     );
     assert_eq!(body.diff, 0, "a diff region reappeared under a short list");
+
+    // A pointer can reach those blank rows, which nothing could before the region
+    // stopped shrinking to its entries. They answer for no file, so they move
+    // nothing: the caret stays where it was and the window stays engaged.
+    let chrome = chrome_of(&app, false);
+    let where_it_is = regions(at, &chrome, &view);
+    let was = view.top;
+    for row in [where_it_is.list.rows - 1, where_it_is.list.rows - 2] {
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            // Not the bar's column, which is a drag and is checked first.
+            column: 2,
+            row: where_it_is.list.top + row,
+            modifiers: KeyModifiers::NONE,
+        });
+        if let Some(action) = action_for(&click, where_it_is) {
+            app.apply(action, &mut frame, body.diff).expect("apply");
+        }
+    }
+    app.apply(Action::ScrollList(1), &mut frame, body.diff)
+        .expect("apply");
+    let (_, after) = screen(&mut app, &mut frame, at, false);
+    assert_eq!(
+        after.top, was,
+        "a press on a blank row below the last file moved the caret"
+    );
+    assert_eq!(
+        after.list_top, 0,
+        "the window scrolled although every file already fits it"
+    );
+    assert_eq!(
+        after.list.len(),
+        2,
+        "the list stopped drawing both files after a press below them"
+    );
+
     assert!(
         !body.rule,
         "a rule was drawn under a list with nothing below it"

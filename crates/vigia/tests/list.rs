@@ -613,10 +613,23 @@ fn the_two_regions_tile_the_body_exactly() {
                 // The default chrome never draws one. The list-alone chrome is
                 // swept beside it because it is the third arm, and it is the one
                 // whose `rows()` counts the list rather than the diff.
+                // The body is the pane less its header and a footer whose height no
+                // shape decides, so every shape has to report the same one. This is
+                // the gate's only independent reference: the tiling assertion below
+                // recovers `footer` from `full.rows()` and so cannot fail on a shape
+                // that under-reports the body at construction, which one did.
+                let plain = body_layout(area, &chrome(&App::new()), files, files);
                 for chrome in [railed(&App::new()), watching(&App::new())] {
                     let full = body_layout(area, &chrome, files, files);
                     saw_rail |= full.rail;
                     saw_overview |= full.overview;
+                    assert_eq!(
+                        full.rows(),
+                        plain.rows(),
+                        "at {width}x{height} over {files} files, {full:?} reports a \
+                         different body than the stacked shape's {}",
+                        plain.rows()
+                    );
 
                     for have in 0..=LIST_SETTLED + 2 {
                         let body = full.clamped_to(have);
