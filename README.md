@@ -101,7 +101,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
 ## 👀 Reading the pane
 
 ```
-   header  │  my-repo · 3 changed                                      +55 -10
+   header  │  my-repo · main · current · 3 changed                     +55 -10
            │
      list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
            │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3

@@ -1107,6 +1107,7 @@ impl Shell {
             return;
         }
         let previous = frame.standing().clone();
+        let reaching = matches!(wanted, vigia_core::Standing::Since { .. });
         frame.stand(wanted);
         // Walked here for `ToggleStaged`'s reason: the frame this paint draws
         // has to be the one the token names. A failed walk leaves the previous
@@ -1116,12 +1117,14 @@ impl Shell {
             Ok(()) => self.app.stood(),
             Err(e) => {
                 self.app.warn(e.to_string());
-                // Taken again on the next press rather than replayed. A branch
-                // this pane resolved hours ago can be rebased, amended or
-                // collected out from under it, and a kept base the object
-                // database no longer has fails identically for as long as the
-                // process lives.
-                self.branch_point = None;
+                // Taken again on the next press rather than replayed, and only
+                // where the walk that failed is this base's: a branch can be
+                // rebased or collected out from under a pane that has been open
+                // for days, and a kept base the object database has lost fails
+                // the same way for as long as the process lives.
+                if reaching {
+                    self.branch_point = None;
+                }
                 self.app
                     .stands(!matches!(previous, vigia_core::Standing::Current));
                 frame.stand(previous);
@@ -1955,7 +1958,7 @@ mod tests {
             // A failed one puts the request, the frame and the base back.
             "frame.stand(previous);",
             "stands(!matches!(previous, vigia_core::Standing::Current));",
-            "self.branch_point = None;",
+            "if reaching {\n                    self.branch_point = None;\n                }",
             // A branch with nothing to measure from says so and stays put.
             "self.app.stands(false);",
             // Answered from state, because a list of the actions goes stale.
