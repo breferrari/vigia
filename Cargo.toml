@@ -56,6 +56,10 @@ gix = { version = "0.87", default-features = false, features = [
     "status",
     "max-performance-safe",
     "sha1",
+    # `merge_base` and `rev_walk`, for SPEC.md section 11.1's position. A feature
+    # rather than a crate: `gix-revision` is already compiled beneath `status`,
+    # so this adds nothing to the graph. Measured at 213 crates either way.
+    "revision",
 ] }
 # Not used here, and declared only to bound a version. `tinyvec 1.13.0` does not
 # compile at all: it imports `alloc::vec` as a module, which shadows the `vec!`
