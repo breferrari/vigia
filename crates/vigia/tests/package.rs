@@ -1936,7 +1936,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
     ("SPEC.md", 386762),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96001),
-    ("RULINGS.md", 99141),
+    ("RULINGS.md", 99973),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
@@ -2264,7 +2264,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// issue reopened cannot be declined to fit, which is #374.
 ///
 /// Raised twice on 2026-09-08, three times on 2026-09-09 and once on 2026-09-10,
-/// session, by 316, 790, 789, 725, 127 and then 2,346 bytes, for the reason
+/// session, by 316, 790, 789, 725, 127, 2,346 and then 832 bytes, for the reason
 /// the bullet above already names rather than a new one: a defect fix has to state
 /// what the code now does, and a filed issue has to take a roadmap row. Three
 /// passes that day each needed contract prose and none added a paragraph anyone
@@ -2277,11 +2277,12 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// reader's. The fourth raise is five issues filed in one pass, and a filed issue
 /// with no roadmap row is invisible to the take order rather than merely
 /// deprioritised, so the row is owed the moment the issue exists. The fifth is a
-/// sixth issue filed into the same block. The sixth is the third's reason again:
-/// #493 added a gesture, and the state behind this one contradicts a written cap
-/// and a written region count, so the paragraphs that say why are contract rather
-/// than commentary. The 63 bytes of slack the fifth raise left were spent first.
-const WRITTEN_LAYER_TOTAL: usize = 636931;
+/// sixth issue filed into the same block. The sixth is the third's reason again: a
+/// gesture arrived, and the state behind it contradicts a written cap and a written
+/// region count, so the paragraphs that say why are contract rather than commentary.
+/// The seventh is that gesture's road not taken, which `RULINGS.md` is for: a branch
+/// refused only in a commit message is one the next session re-argues from zero. The 63 bytes of slack the fifth raise left were spent first.
+const WRITTEN_LAYER_TOTAL: usize = 637763;
 
 /// Each document weighs no more than its budget.
 #[test]
