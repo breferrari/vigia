@@ -127,7 +127,13 @@ done < "$tmp/issue-invariants.txt"
 say "3. state — roadmap marks vs issue state:"
 found=0
 grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]' "$tmp/roadmap.md" | while IFS= read -r row; do
-  n=$(printf '%s' "$row" | grep -oE '\[#[0-9]+\]' | head -1 | tr -dc '0-9')
+  # The row's own issue is the one in its last cell, not the first link in it.
+  # Six rows cite a second issue in their task prose (`Revoked by`, `Closed by`,
+  # `Deferred by`), and reading the first link checked those rows against the
+  # wrong issue. Five of the six agreed by luck, both being closed; the sixth is
+  # a shelf row whose deferral cites a closed issue while its own is open, and
+  # that one reported drift on a roadmap that was correct.
+  n=$(printf '%s' "$row" | grep -oE '\[#[0-9]+\]' | tail -1 | tr -dc '0-9')
   state=$(awk -F'\t' -v n="$n" '$1 == n { print $2 }' "$tmp/issues.tsv")
   # A row citing an issue the board does not have used to `continue`, which is the
   # same silence #369 was about and not the same cause: truncation is one way to

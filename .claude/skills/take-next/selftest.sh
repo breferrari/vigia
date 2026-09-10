@@ -213,6 +213,27 @@ case "$line" in
        "DRIFT row cites #9, which the tracker does not have" "$line" ;;
 esac
 
+# A row's issue is the one in its last cell. Six live rows cite a second issue in
+# their task prose (`Revoked by`, `Closed by`, `Deferred by`), and reading the
+# first link checked those rows against the wrong issue: five agreed by luck,
+# both being closed, and the sixth reported drift on a roadmap that was correct.
+#
+# Its own fixture, because the shared one above is read by two cases that would
+# see this row's second link as a board it lacks.
+cat > "$FIX/roadmap.md" <<'ROW'
+## Phase 8 - look
+| | Task | Issue |
+|---|---|---|
+| ⬜ | deferred by [#1](https://example.invalid/1) | [#2](https://example.invalid/2) |
+ROW
+jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "I1: the first"},
+        {number: 2, state: "OPEN", milestone: {title: "Phase 8 - look"}, title: "issue 2"}]'   > "$FIX/issues.json"
+line=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md"   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md"   PREFLIGHT_ISSUES_FILE="$FIX/issues.json"   PREFLIGHT_ISSUE_LIMIT=10     sh "$PRE" 2>&1 | awk '/row (not marked done|marked done|cites)/ { $1 = $1; print }')
+case "$line" in
+  "") ok "a row is checked against the issue in its own cell" ;;
+  *)  no "a row is checked against the issue in its own cell" "no drift" "$line" ;;
+esac
+
 echo "drift:"
 
 present() { # needle, file, name
