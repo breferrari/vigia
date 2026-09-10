@@ -1039,8 +1039,11 @@ fn the_header_never_takes_a_second_line() {
     for chrome in [chrome(), following(), lost(), with_notice()] {
         for width in 8..=120u16 {
             for height in [6u16, 24] {
-                for listed in [0usize, 3] {
-                    let view = numbered(4, 3, listed);
+                for (listed, hidden) in [(0usize, 0usize), (3, 0), (3, 12)] {
+                    let view = View {
+                        hidden,
+                        ..numbered(4, 3, listed)
+                    };
                     let marker = if listed > 0 { "src/f0.rs" } else { "R00" };
                     let rows = rows_at(width, height, &view, &chrome);
                     let Some(first) = rows.iter().position(|row| row.contains(marker)) else {
@@ -1058,9 +1061,9 @@ fn the_header_never_takes_a_second_line() {
                     let starts = list_top(&body);
                     assert_eq!(
                         first, starts,
-                        "at {width}x{height} with {listed} listed, the body \
-                         started on row {first} rather than {starts}, so the \
-                         header took more than one"
+                        "at {width}x{height} with {listed} listed and {hidden} \
+                         hidden, the body started on row {first} rather than \
+                         {starts}, so the header took more than one"
                     );
                 }
             }

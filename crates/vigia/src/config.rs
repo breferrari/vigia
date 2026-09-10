@@ -27,8 +27,8 @@ pub struct Config {
     pub icons: bool,
     /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
     pub links: bool,
-    /// Paths to keep out of the pane entirely. No gesture, and deliberately: a
-    /// pattern is a decision about a repository rather than about a moment.
+    /// Paths to keep out of the pane entirely. No gesture: a pattern is a
+    /// decision about a repository rather than about a moment.
     pub hide: Option<Hidden>,
 }
 
@@ -57,8 +57,8 @@ pub const KEYS: [&str; 8] = [
 /// Every setting that takes a value rather than `on` or `off`.
 ///
 /// Apart from [`KEYS`] because a toggle is a pane some key could reach and a
-/// valued setting is reachable by no gesture, so a gate sweeping the keymap can
-/// account for the first list and never the second.
+/// valued setting is reachable by no gesture, so a keymap sweep accounts for the
+/// first list and never the second.
 pub const VALUES: [&str; 1] = ["hide"];
 
 impl Config {
@@ -100,7 +100,8 @@ pub enum ConfigError {
     BadPattern {
         /// 1-based.
         line: usize,
-        /// What the engine said about it.
+        /// The engine's own words, with no sentence around them: the message
+        /// below is the sentence.
         why: String,
     },
     /// A value that is neither `on` nor `off`.
@@ -178,29 +179,19 @@ impl std::error::Error for ConfigError {}
 
 /// Everything after a key's `=` that is not a comment, trimmed.
 ///
-/// A `#` opens a comment only at the start of the value or after whitespace, which
-/// is the rule the word-by-word reading this replaced already had. What that
-/// reading could not do is leave a value alone: rejoining its words normalises
-/// runs of spaces, and ` +` and `  +` are different patterns.
+/// A `#` opens a comment at the start of the value or after whitespace, and
+/// nowhere else. What the word-by-word reading this replaced could not do is
+/// leave a value alone: rejoining its words normalises runs of spaces, and ` +`
+/// and `  +` are different patterns.
 fn value_of(after: &str) -> &str {
-    let mut rest = after;
-    let mut cut = after.len();
-    let mut at = 0;
-    while let Some(hash) = rest.find('#') {
-        let here = at + hash;
-        let opens = here == 0
-            || after[..here]
-                .chars()
-                .next_back()
-                .is_some_and(char::is_whitespace);
-        if opens {
-            cut = here;
-            break;
+    let mut opens = true;
+    for (at, c) in after.char_indices() {
+        if c == '#' && opens {
+            return after[..at].trim();
         }
-        at = here + 1;
-        rest = &after[at..];
+        opens = c.is_whitespace();
     }
-    after[..cut].trim()
+    after.trim()
 }
 
 /// Parse a config, which is a list of `key = on` lines and nothing else.
@@ -213,12 +204,9 @@ fn value_of(after: &str) -> &str {
 /// ```
 ///
 /// The theme file's grammar, less what a config has no use for. A theme is a base
-/// plus overrides and its values are several words; this has no base and its
-/// values are one word, so three things a theme expresses legitimately are
-/// mistakes here: a repeated key ([`ConfigError::RepeatedKey`]), a trailing token,
-/// and a value that is nothing but a comment ([`ConfigError::MissingValue`] —
-/// `theme::words_of` keeps a bare `#` because `added = #3fb950` has to parse, and
-/// no value here begins with one).
+/// plus overrides, so two things a theme expresses legitimately are mistakes
+/// here: a repeated key ([`ConfigError::RepeatedKey`]) and a value that is
+/// nothing but a comment ([`ConfigError::MissingValue`]).
 ///
 /// An unknown key is refused rather than ignored: a silently dropped key is a
 /// setting that does nothing, which is the one explanation a reader cannot reach
@@ -236,8 +224,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
 
     let mut config = Config::default();
-    // Where each key was set, so a repeat can name the line it collides with
-    // rather than only its own.
+    // The line each key was set on, so a repeat can name the one it collides with.
     let mut seen: Vec<(String, usize)> = Vec::new();
 
     for (index, raw) in source.lines().enumerate() {
@@ -283,8 +270,7 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
         }
 
         if VALUES.contains(&key) {
-            // One valued key, so the match is on the key rather than on a second
-            // table. A second one is what would make a table worth its weight.
+            // One valued key, so the match is on the key rather than on a table.
             config.hide = Some(Hidden::new(value).map_err(|why| ConfigError::BadPattern {
                 line,
                 why: why.to_string(),
@@ -305,7 +291,6 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             }
         };
 
-        // The return is read, and discarding it is the hole.
         if !config.set(key, on) {
             return Err(ConfigError::UnknownKey {
                 line,

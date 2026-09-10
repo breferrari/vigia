@@ -226,14 +226,11 @@ pub fn arm_frame(frame: &mut vigia_core::Frame, config: &crate::Config) {
 /// sample and not the wake, which still arrives and is still walked.
 #[doc(hidden)]
 #[must_use]
-pub fn shown(paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<String> {
-    match hide {
-        None => paths,
-        Some(hide) => paths
-            .into_iter()
-            .filter(|path| !hide.is_hidden(path))
-            .collect(),
+pub fn shown(mut paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<String> {
+    if let Some(hide) = hide {
+        paths.retain(|path| !hide.is_hidden(path));
     }
+    paths
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.

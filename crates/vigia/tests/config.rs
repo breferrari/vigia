@@ -708,6 +708,13 @@ fn a_pattern_that_does_not_compile_is_refused_by_line() {
         said.contains("line 3") && said.contains("hide"),
         "the error names neither the line nor the key: {said}"
     );
+    // One sentence, not two. The engine's words arrive bare so this line can
+    // frame them, and framing them twice buries the pattern mid-message.
+    assert_eq!(
+        said.matches("is not a pattern").count(),
+        1,
+        "the refusal says the same thing twice: {said}"
+    );
 }
 
 /// A pattern keeps what it was given. Splitting a value into words and rejoining

@@ -2,8 +2,6 @@
 
 use std::fmt;
 
-use crate::error::{Error, Result};
-
 /// A pattern that decides which changed paths the pane never sees.
 ///
 /// Searched rather than anchored, which is what makes `^target/|\.lock$` read the
@@ -22,14 +20,10 @@ impl Hidden {
     /// `pattern` is not a regular expression this engine can build. The caller
     /// reports it before taking the terminal, because a full-screen program that
     /// paints an error and then hands the terminal back has painted nothing.
-    pub fn new(pattern: &str) -> Result<Self> {
-        match fancy_regex::Regex::new(pattern) {
-            Ok(matcher) => Ok(Self { matcher }),
-            Err(why) => Err(Error::Pattern {
-                pattern: pattern.to_owned(),
-                why: why.to_string(),
-            }),
-        }
+    pub fn new(pattern: &str) -> Result<Self, NotAPattern> {
+        fancy_regex::Regex::new(pattern)
+            .map(|matcher| Self { matcher })
+            .map_err(|why| NotAPattern(why.to_string()))
     }
 
     /// Whether `path` is one the reader asked to keep out of the pane.
@@ -67,3 +61,19 @@ impl PartialEq for Hidden {
 }
 
 impl Eq for Hidden {}
+
+/// Why a pattern would not compile, in the engine's own words.
+///
+/// The engine's words and nothing around them, because the caller has the
+/// sentence: a config file says which line and which key, and a wrapper here
+/// would make it say *is not a pattern* twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotAPattern(String);
+
+impl fmt::Display for NotAPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotAPattern {}

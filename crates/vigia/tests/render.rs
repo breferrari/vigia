@@ -7013,10 +7013,6 @@ fn the_header_says_how_many_files_it_is_keeping_back() {
     let kept = row_text(&screen(80, 6, &with_hidden(28, 12), &chrome()), 0);
 
     assert!(
-        plain.contains("28 changed") && !plain.contains("hidden"),
-        "a reader with no pattern was told about hidden files: {plain:?}"
-    );
-    assert!(
         kept.contains(&format!("28 changed{FACT_JOIN}12 hidden")),
         "the hidden count is not beside the count it qualifies: {kept:?}"
     );
@@ -7031,6 +7027,17 @@ fn the_header_says_how_many_files_it_is_keeping_back() {
             "the total left the right-hand edge: {header:?}"
         );
     }
+}
+
+#[test]
+fn a_pane_hiding_nothing_draws_no_hidden_token() {
+    // Nothing on screen until it matches something, which is what lets a reader
+    // with no pattern never learn the setting exists.
+    let plain = row_text(&screen(80, 6, &with_hidden(28, 0), &chrome()), 0);
+    assert!(
+        plain.contains("28 changed") && !plain.contains("hidden"),
+        "a reader with no pattern was told about hidden files: {plain:?}"
+    );
 }
 
 #[test]

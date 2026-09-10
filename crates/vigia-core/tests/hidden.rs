@@ -33,38 +33,84 @@ fn paths(frame: &Frame) -> Vec<String> {
         .collect()
 }
 
-/// The issue's own acceptance: a matching path is absent, and the walk says how
-/// many it kept back.
+/// The issue's own acceptance: a matching path is absent from the walk.
 #[test]
 fn a_matching_path_never_reaches_the_file_list() {
     let scratch = fixture("hidden-absent");
     let worktree = Worktree::discover(scratch.root()).expect("discover");
-
-    // Without a pattern the pane is what it has always been, which is the
-    // non-vacuity half: a gate over an already-empty list proves nothing.
-    let mut frame = worktree.frame();
-    frame.advance().expect("advance");
-    assert_eq!(paths(&frame).len(), 3, "the fixture changed three files");
-    assert_eq!(
-        frame.hidden(),
-        0,
-        "nothing was hidden and something was counted"
-    );
-
     let mut frame = worktree.frame();
     frame.hide(Some(Hidden::new(r"^target/|\.lock$").expect("a pattern")));
     frame.advance().expect("advance");
+
     assert_eq!(
         paths(&frame),
         vec![KEPT.to_owned()],
         "a hidden path reached the file list, so it reaches the diff and the \
          counts under it too"
     );
+}
+
+/// Whatever the pattern keeps out, the walk knows how much of it there was.
+#[test]
+fn the_walk_counts_what_it_hid() {
+    let scratch = fixture("hidden-counted");
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.hide(Some(Hidden::new(r"^target/|\.lock$").expect("a pattern")));
+    frame.advance().expect("advance");
+
     assert_eq!(
         frame.hidden(),
         2,
         "the walk hid two paths and told the header a different number, which is \
          a header that lies about what it is keeping back"
+    );
+}
+
+/// The pane a reader with no pattern gets, which is what makes every assertion
+/// above about the pattern rather than about an empty worktree.
+#[test]
+fn no_pattern_hides_nothing() {
+    let scratch = fixture("hidden-none");
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    assert_eq!(paths(&frame).len(), 3, "the fixture changed three files");
+    assert_eq!(
+        frame.hidden(),
+        0,
+        "nothing was hidden and something was counted"
+    );
+}
+
+/// A hidden file's lines are absent from the run's total, the way a binary
+/// file's are, so the figure on the right describes what the rows below show.
+#[test]
+fn a_hidden_files_lines_are_absent_from_the_runs_total() {
+    let scratch = fixture("hidden-churn");
+    // Twenty more lines into the file the pattern covers, so the two totals
+    // cannot coincide by accident.
+    scratch.write(GENERATED, "noise\n".repeat(20));
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let whole = frame.churn().expect("churn").expect("every file measured");
+
+    let mut frame = worktree.frame();
+    frame.hide(Some(Hidden::new(r"^target/|\.lock$").expect("a pattern")));
+    frame.advance().expect("advance");
+    let shown = frame.churn().expect("churn").expect("every file measured");
+
+    assert!(
+        shown.added < whole.added,
+        "the total counts lines from a file the pane never draws: {shown:?} \
+         against {whole:?}"
+    );
+    assert_eq!(
+        shown.added, 1,
+        "the total is not the kept file's alone: {shown:?}"
     );
 }
 
@@ -172,13 +218,18 @@ fn a_pattern_searches_rather_than_anchors() {
 
 /// Refused rather than dropped, so a typo is reported instead of silently
 /// hiding nothing.
+///
+/// The refusal carries the engine's words and no sentence around them. Every
+/// caller has a sentence of its own, and a wrapper here is what made the config
+/// file say *is not a pattern* twice in one line.
 #[test]
 fn a_pattern_that_does_not_compile_is_refused() {
     let why = Hidden::new("^target/(").expect_err("an unclosed group is not a pattern");
     let said = why.to_string();
+    assert!(!said.trim().is_empty(), "the refusal says nothing at all");
     assert!(
-        said.contains("^target/("),
-        "the refusal does not quote what the reader wrote: {said}"
+        !said.contains("is not a pattern"),
+        "the refusal frames the engine's words in a sentence its caller will          say again: {said}"
     );
 }
 
