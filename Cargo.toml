@@ -108,6 +108,13 @@ syntect = { version = "5.3", default-features = false, features = [
     "dump-load",
     "regex-fancy",
 ] }
+# The `hide` pattern, SPEC.md section 11.2 B6. Declared rather than reached
+# through `syntect`, which is the only way rust lets a crate `use` one; the
+# graph is untouched either way, because `regex-fancy` above already puts this
+# exact version in it with these exact default features. `regex` would have
+# looked equally free and is not: it is in the lock as a dev-dependency of
+# `criterion` alone, so taking it would grow the shipped binary.
+fancy-regex = "0.16"
 # The startup update check, SPEC.md section 11.1. One request per process, and
 # the only one this program makes.
 #

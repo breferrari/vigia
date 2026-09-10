@@ -1933,9 +1933,9 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 388313),
+    ("SPEC.md", 390599),
     ("REVOCATIONS.md", 11910),
-    ("ROADMAP.md", 96001),
+    ("ROADMAP.md", 96205),
     ("RULINGS.md", 99973),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
@@ -2263,30 +2263,25 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
 ///
-/// Raised twice on 2026-09-08, three times on 2026-09-09 and once on 2026-09-10,
-/// session, by 316, 790, 789, 725, 127, 1,493, 2,409 and 832 bytes, for the reason
-/// the bullet above already names rather than a new one: a defect fix has to state
-/// what the code now does, and a filed issue has to take a roadmap row. Three
-/// passes that day each needed contract prose and none added a paragraph anyone
-/// could decline, so there was never a trade to make, and the remedy this rule
-/// prescribes would have been deleting live contract prose to pay for live
-/// contract prose. Two raises in one day is the measurement the open question has
-/// been waiting for, and the third raise is the same measurement again: #469 added
-/// a gesture, and a gesture the pane answers and the document does not name is the
-/// drift §0 exists to stop. It stays a session ruling and the question is the
-/// reader's. The fourth raise is five issues filed in one pass, and a filed issue
-/// with no roadmap row is invisible to the take order rather than merely
-/// deprioritised, so the row is owed the moment the issue exists. The fifth is a
-/// sixth issue filed into the same block. The sixth is 1,493 and it is the third
-/// raise this rule's own bullet already licenses: the gestures sheet draws a line
-/// the document did not name, and a surface the binary has and the contract does
-/// not is the drift the opening section exists to stop. It is also the first
-/// raise to restore slack the per-file ceilings had quietly eaten, one of them
-/// having been raised against this total rather than alongside it. The seventh is
-/// that bullet again, for a gesture whose state contradicts a written cap and a
-/// written region count, and the eighth is that gesture's road not taken: a branch
-/// refused only in a commit message is one the next session re-argues from zero.
-const WRITTEN_LAYER_TOTAL: usize = 639314;
+/// Raised nine times between 2026-09-08 and 2026-09-10, session, on four reasons
+/// and no fifth. A defect fix has to state what the code now does. A filed issue
+/// has to take a roadmap row, because an issue with none is invisible to the take
+/// order rather than merely deprioritised. A surface the binary has and the
+/// contract does not is the drift the opening section exists to stop, which is
+/// what a new gesture, a new region and a new setting each arrive under, and it
+/// carries section 6's own rule with it: a direct dependency reaches the spec
+/// before it reaches a manifest. And a road not taken refused only in a commit
+/// message is one the next session re-argues from zero.
+///
+/// What none of the nine had was a paragraph anyone could decline, so there was
+/// never a trade to make, and the remedy this rule prescribes would have been
+/// deleting live contract prose to pay for live contract prose. Two of them did
+/// better than that: one restored slack the per-file ceilings had quietly eaten,
+/// from a ceiling raised against this total rather than alongside it, and the
+/// ninth funded 405 of its bytes by deleting a section 11.1 paragraph that
+/// section 11.2 B6 already said twice over. It stays a session ruling and the
+/// question is the reader's.
+const WRITTEN_LAYER_TOTAL: usize = 641804;
 
 /// Each document weighs no more than its budget.
 #[test]

@@ -183,7 +183,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 |---|---|---|
 | ✅ | The config file reaches six toggles and `c` is not one of them | [#491](https://github.com/breferrari/vigia/issues/491) |
 | ✅ | Nothing draws the file list without the diff under it. **Reported from use** | [#493](https://github.com/breferrari/vigia/issues/493) |
-| ⬜ | Nothing keeps a path out of the pane. **Reported from use** | [#495](https://github.com/breferrari/vigia/issues/495) |
+| ✅ | Nothing keeps a path out of the pane. **Reported from use** | [#495](https://github.com/breferrari/vigia/issues/495) |
 | ✅ | A first run says what the keys are and never what the pane is. **Reported from use** | [#492](https://github.com/breferrari/vigia/issues/492) |
 | ⬜ | The header names where in the history the pane is, and a click moves it | [#490](https://github.com/breferrari/vigia/issues/490) |
 | ⬜ | decision: whether the pane remembers a toggle, and where it writes it. **Reported from use** | [#494](https://github.com/breferrari/vigia/issues/494) |
@@ -331,6 +331,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
 | ⬜ | `SHEET_KEEP` names two things, so removing a gesture reassigns the never-drop set by rank | [#464](https://github.com/breferrari/vigia/issues/464) |
 | ✅ | A release that removes a key can be filed as internal, and 0.42.0 was | [#467](https://github.com/breferrari/vigia/issues/467) |
+| ⬜ | A hidden path still wakes the watch. **Deferred by [#495](https://github.com/breferrari/vigia/issues/495): it changes what I1 measures** | [#501](https://github.com/breferrari/vigia/issues/501) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
