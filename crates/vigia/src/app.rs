@@ -97,6 +97,9 @@ pub struct App {
     /// Whether the diff shows one file at a time (`s`). Which file is
     /// [`Self::position`]'s.
     single: bool,
+    /// Whether the body is the file list alone, with no diff under it (`o`).
+    /// What the pane can give is [`Body::overview`].
+    overview: bool,
     /// Whether a too-wide content line continues on the row below (`w`).
     wrap: bool,
     /// The reader's notes as the store last listed them, placed by every collect.
@@ -161,6 +164,7 @@ impl Default for App {
             following: false,
             rail: false,
             single: false,
+            overview: false,
             staged: false,
             wrap: false,
             notes: Vec::new(),
@@ -202,6 +206,7 @@ impl App {
         Self {
             rail: config.rail,
             single: config.single,
+            overview: config.overview,
             wrap: config.wrap,
             notes_shown: config.notes,
             shown: 0,
@@ -450,6 +455,7 @@ impl App {
             voice: self.voice(),
             following: self.following,
             rail: self.rail,
+            overview: self.overview,
             icons: self.icons,
             links: self.links,
             root: root.to_owned(),
@@ -541,6 +547,7 @@ impl App {
             // No jump and no clamp here, which is the arm doing the least of the three
             // and is deliberate.
             Action::ToggleSingle => self.single = !self.single,
+            Action::ToggleOverview => self.overview = !self.overview,
             // The reflow changes what a screenful is; see [`Self::screenful`].
             Action::ToggleWrap => self.wrap = !self.wrap,
             // Display rows too, and the marks stay: a hidden note is still on its

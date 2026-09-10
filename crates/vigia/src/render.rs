@@ -511,6 +511,8 @@ pub struct Chrome {
     /// Whether the reader has asked for the pinned list beside the diff, which `r`
     /// toggles.
     pub rail: bool,
+    /// What `o` asked for; [`Body::overview`] is what the pane can give.
+    pub overview: bool,
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     pub sheet: Option<usize>,
     /// Whether listed paths carry a file-type icon, from the config file's
@@ -1555,6 +1557,8 @@ pub struct Body {
     /// Whether the list is a left rail beside the diff rather than a strip
     /// above it.
     pub rail: bool,
+    /// Whether the body is the list alone, with no diff region at all.
+    pub overview: bool,
     /// Columns the diff's content is laid out against, and the width its rows are
     /// drawn across. The scrollbar's reserve is charged whether or not a bar is
     /// drawn, so the wrap does not move when a diff outgrows its pane.
@@ -1576,6 +1580,7 @@ impl Body {
             // and this shape has one.
             diff_width: 0,
             rail: false,
+            overview: false,
             // Attached by `body_layout`, which is the only caller that has the
             // pane. A `Body` built for a diff walk has no sheet to count.
             sheet_pages: None,
@@ -1608,6 +1613,12 @@ impl Body {
     ) -> Self {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
+        // Before the rail, which needs a diff to sit beside. `files > 0` is the rail's
+        // own guard: the empty-worktree sentence draws in the diff's region.
+        if chrome.overview && files > 0 {
+            return Self::alone(body);
+        }
+
         // The rail is decided before the row clamps, because it removes two of them.
         if chrome.rail && affords_rail(area.width) && files > 0 {
             return Self::beside(body, list_rows);
@@ -1632,7 +1643,29 @@ impl Body {
             diff: after,
             diff_width: 0,
             rail: false,
+            overview: false,
             // Attached by `body_layout`, which is the only caller with the pane.
+            sheet_pages: None,
+        }
+    }
+
+    /// The same body as the list alone, with no diff region under it.
+    fn alone(body: usize) -> Self {
+        // `Body::split`'s `affordable` reserves `MIN_BODY` for a diff this shape lacks.
+        if body <= LEAD_ROWS {
+            return Self::diff_only(body);
+        }
+        Self {
+            lead: LEAD_ROWS,
+            // The body, not the entry count: this region *is* the body, and a shorter
+            // one would leave rows belonging to nothing. The quarter-pane cap does not
+            // apply for the same reason it exists, which is the diff's share.
+            list: body - LEAD_ROWS,
+            rule: false,
+            diff: 0,
+            diff_width: 0,
+            rail: false,
+            overview: true,
             sheet_pages: None,
         }
     }
@@ -1661,6 +1694,7 @@ impl Body {
             diff: rows,
             diff_width: 0,
             rail: true,
+            overview: false,
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
         }
@@ -1674,9 +1708,13 @@ impl Body {
         self.lead + self.list + usize::from(self.rule) + self.diff
     }
 
-    /// Shrink the list to the rows a view actually carries, giving the rest back
-    /// to the diff.
+    /// Re-divide the body once the view has said how many entries it holds, without
+    /// changing how many rows the body has.
     pub fn clamped_to(self, have: usize) -> Self {
+        // Shrinking this region would take rows out of the body: here it is the body.
+        if self.overview {
+            return self;
+        }
         // Beside a rail there is nothing to give back. The rows the list does not use
         // are in the rail's own column, and the diff is not below them: handing them
         // over would draw the diff twice, once in each region.
@@ -1709,6 +1747,7 @@ impl Body {
             // Carried, for [`Body::sheet_pages`]' reason two fields down.
             diff_width: self.diff_width,
             rail: false,
+            overview: false,
             // Carried, unlike the two constructors above. A clamp re-divides
             // the rows this body already has and does not re-measure the pane, so
             // the sheet it could draw is the same sheet.
@@ -1743,6 +1782,10 @@ impl Body {
         debug_assert!(
             !(self.rail && self.rule),
             "a body cannot draw a rule between regions that are side by side"
+        );
+        debug_assert!(
+            !(self.rail && self.overview),
+            "a body cannot put the list beside a diff it does not have"
         );
 
         // The header's row, then the lead blank.
@@ -2133,7 +2176,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 16] = [
+const KEYBOARD: [Gesture; 17] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2179,6 +2222,11 @@ const KEYBOARD: [Gesture; 16] = [
         keys: ["s", "s"],
         verb: ["one file, or the whole diff", "one file only"],
     },
+    // The two spellings share `list alone`, so one token names this row at every rung.
+    Gesture {
+        keys: ["o", "o"],
+        verb: ["the file list alone, no diff", "the list alone"],
+    },
     // Both cells sit inside the field maxima this table already had, for the reason
     // B16's row above states: the wide verb field is 28 on `next / previous changed
     // file` and the tight one is 19 on the mouse group's `a row, held repeats`, where
@@ -2220,7 +2268,8 @@ const KEYBOARD: [Gesture; 16] = [
 /// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
 /// pressed is the moment they are on screen. They are also the widest keys cell a
 /// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
-const DROP_ORDER: [usize; KEYBOARD.len()] = [15, 13, 0, 1, 2, 3, 4, 5, 6, 12, 8, 9, 11, 10, 7, 14];
+const DROP_ORDER: [usize; KEYBOARD.len()] =
+    [16, 14, 0, 1, 2, 3, 4, 5, 6, 13, 8, 9, 10, 12, 11, 7, 15];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2336,11 +2385,11 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 12 },
+        rows: Rows::Keyboard { from: 7, to: 13 },
     },
     Section {
         label: "notes",
-        rows: Rows::Keyboard { from: 12, to: 14 },
+        rows: Rows::Keyboard { from: 13, to: 15 },
     },
     Section {
         label: "mouse",
@@ -2348,7 +2397,7 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 14, to: 16 },
+        rows: Rows::Keyboard { from: 15, to: 17 },
     },
 ];
 
@@ -5266,9 +5315,9 @@ mod sheet_tables {
         }
     }
     #[test]
-    fn the_rows_given_up_before_the_keep_set_are_the_notes_then_the_rail() {
-        // Addressed by the cell it draws, not by its index.
-        const EXPECTED: [&str; 4] = ["c", "r", "s", "w"];
+    fn the_rows_given_up_before_the_keep_set_are_the_view_toggles() {
+        // Addressed by the cell it draws, not by its index. View toggles outlive notes.
+        const EXPECTED: [&str; 4] = ["r", "s", "o", "w"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
@@ -5277,7 +5326,7 @@ mod sheet_tables {
         assert_eq!(
             outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             note rows, then the rail, then the pin, then the wrap, so a pane at \
+             rail, then the pin, then the overview, then the wrap, so a pane at \
              the floor is spending it on a gesture that could have fired there"
         );
     }

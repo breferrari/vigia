@@ -496,3 +496,7 @@ The objection that ends it is that the dependency is **circular**. `render::gutt
 ## 11.1 — the two widths of a diff row
 
 Measured 2026-09-09, [#474](https://github.com/breferrari/vigia/issues/474): the two agree wherever a bar is drawn and part by 2 below forty-four and 1 to seventy-nine wherever none is. The alternatives, and the 2026-08-10 deferral they answer, are on the issue.
+
+## 11.1 — the list-alone state took a key of its own rather than a third state of `s`
+
+Ruled 2026-09-10, reader, from the pane ([#493](https://github.com/breferrari/vigia/issues/493)). `s` cycling whole diff, one file, no diff keeps the keymap the size it is, and it was refused on the config file rather than on the keymap: `config.rs` accepts exactly `on` and `off` and `Config` is a struct of `bool`, so a tri-state `single` changes the file's grammar, which is a §11.2 B6 change and not an implementation detail. A new key costs one row of the gestures sheet, one `Config` field, one `Action` and one `Place` arm, and it keeps `README.md`'s claim that each key means one thing. `l` was refused for the reason the keymap already gives for refusing `h`: it is a vi motion everywhere else, on a pane with no horizontal scroll.

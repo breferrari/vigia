@@ -156,6 +156,10 @@ pub fn place_of(action: &Action) -> Place {
             key: "single",
             gesture: "s",
         },
+        Action::ToggleOverview => Place::Key {
+            key: "overview",
+            gesture: "o",
+        },
         Action::ToggleStaged => Place::Key {
             key: "staged",
             gesture: "a",

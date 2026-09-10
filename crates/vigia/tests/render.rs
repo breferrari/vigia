@@ -167,6 +167,7 @@ fn chrome() -> Chrome {
         hovered: None,
         selected: None,
         scrolling: None,
+        overview: false,
         worktree: "vigia".to_owned(),
         // `None` because these views have a diff in them, and only the empty
         // state names a branch. A populated frame never asks, which is I4 and

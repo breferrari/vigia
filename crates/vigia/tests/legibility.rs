@@ -311,6 +311,7 @@ fn chrome() -> Chrome {
         hovered: None,
         selected: None,
         scrolling: None,
+        overview: false,
         worktree: "vigia".to_owned(),
         // Only the empty state names a branch, so every populated fixture leaves this
         // `None`.

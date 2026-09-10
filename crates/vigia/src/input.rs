@@ -462,6 +462,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleFollow
         | Action::ToggleRail
         | Action::ToggleSingle
+        | Action::ToggleOverview
         | Action::ToggleStaged
         | Action::ToggleWrap
         | Action::ToggleNotes
@@ -623,6 +624,8 @@ pub enum Action {
     ToggleRail,
     /// Pin the diff to the file the viewport is inside, or unpin it.
     ToggleSingle,
+    /// Draw the file list alone with no diff under it, or put the diff back.
+    ToggleOverview,
     /// Show the staged run beside the unstaged one, or stop showing it.
     ToggleStaged,
     /// Wrap a content line too wide for the pane onto the row below, or clip it.
@@ -668,6 +671,7 @@ impl Action {
             | Self::ToggleFollow
             | Self::ToggleRail
             | Self::ToggleSingle
+            | Self::ToggleOverview
             | Self::ToggleStaged
             | Self::ToggleWrap
             | Self::ToggleNotes
@@ -708,6 +712,7 @@ impl Action {
             // And a pin is the one of the two that can move the viewport, and still
             // expresses no intent about where it should be.
             | Self::ToggleSingle
+            | Self::ToggleOverview
             | Self::ToggleStaged
             | Self::ToggleWrap
             // Display rows too, so hiding them moves nothing the bar counts.
@@ -746,6 +751,7 @@ impl Action {
             | Self::ToggleFollow
             | Self::ToggleRail
             | Self::ToggleSingle
+            | Self::ToggleOverview
             | Self::ToggleStaged
             | Self::ToggleWrap
             | Self::ToggleNotes
@@ -833,6 +839,8 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // `r`: the keys that change what the body is made of rather than where
         // in it the reader is. B16.
         KeyCode::Char('s') => Some(Action::ToggleSingle),
+        // `o` for overview. `l` is refused where `h` is: a vi motion everywhere else.
+        KeyCode::Char('o') => Some(Action::ToggleOverview),
         KeyCode::Char('a') => Some(Action::ToggleStaged),
         // `w`, and it is the reflex rather than what was free. `ov` binds `[w]`, `[W]`
         // to a character-based wrap toggle, `bat` spells the opposite state `-S` /

@@ -14,10 +14,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 26;
+const ESCAPING_FILES: usize = 27;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "twenty-six";
+const ESCAPING_FILES_SPELLED: &str = "twenty-seven";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -1933,10 +1933,10 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 385904),
+    ("SPEC.md", 388313),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96001),
-    ("RULINGS.md", 99141),
+    ("RULINGS.md", 99973),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
@@ -1945,7 +1945,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
 ///
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
-const CONFIG_KEYS_SPELLED: &str = "Seven keys";
+const CONFIG_KEYS_SPELLED: &str = "Eight keys";
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///
@@ -2263,8 +2263,8 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// A ledger row is the exception it cannot express: a withdrawal recorded or an
 /// issue reopened cannot be declined to fit, which is #374.
 ///
-/// Raised twice on 2026-09-08 and three times on 2026-09-09, session, by 316, 790,
-/// 789, 725 and then 127 bytes, for the reason
+/// Raised twice on 2026-09-08, three times on 2026-09-09 and once on 2026-09-10,
+/// session, by 316, 790, 789, 725, 127, 1,493, 2,409 and 832 bytes, for the reason
 /// the bullet above already names rather than a new one: a defect fix has to state
 /// what the code now does, and a filed issue has to take a roadmap row. Three
 /// passes that day each needed contract prose and none added a paragraph anyone
@@ -2282,8 +2282,11 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// the document did not name, and a surface the binary has and the contract does
 /// not is the drift the opening section exists to stop. It is also the first
 /// raise to restore slack the per-file ceilings had quietly eaten, one of them
-/// having been raised against this total rather than alongside it.
-const WRITTEN_LAYER_TOTAL: usize = 636078;
+/// having been raised against this total rather than alongside it. The seventh is
+/// that bullet again, for a gesture whose state contradicts a written cap and a
+/// written region count, and the eighth is that gesture's road not taken: a branch
+/// refused only in a commit message is one the next session re-argues from zero.
+const WRITTEN_LAYER_TOTAL: usize = 639314;
 
 /// Each document weighs no more than its budget.
 #[test]
