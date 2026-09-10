@@ -1708,8 +1708,8 @@ impl Body {
         self.lead + self.list + usize::from(self.rule) + self.diff
     }
 
-    /// Shrink the list to the rows a view actually carries, giving the rest back
-    /// to the diff.
+    /// Re-divide the body once the view has said how many entries it holds, without
+    /// changing how many rows the body has.
     pub fn clamped_to(self, have: usize) -> Self {
         // Shrinking this region would take rows out of the body that nothing gives
         // back, because here the region is the body. Unfilled entries draw blank.
