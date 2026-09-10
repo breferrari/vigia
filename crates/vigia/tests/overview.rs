@@ -4,14 +4,20 @@
 mod support;
 
 use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Chrome, Glyphs, LIST_SETTLED, Pointing, Theme, View, body_layout, regions,
-    render,
+    Action, App, Body, Chrome, Glyphs, LIST_SETTLED, Pointing, Regions, Theme, View, action_for,
+    body_layout, regions, render,
 };
 use vigia_core::{Frame, FrameStats, Highlighter, History};
 
 use support::{Scratch, delta, materialise};
+
+/// A key event, spelled once.
+fn press(key: char) -> Event {
+    Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))
+}
 
 /// Files in the fixture. More than [`LIST_SETTLED`], so a list that ran to the
 /// body and a list that stopped at the shipped cap are different screens.
@@ -159,6 +165,15 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
 
 #[test]
 fn o_is_what_asks_for_the_list_alone_and_o_is_what_gives_the_diff_back() {
+    // The binding itself, through the real key resolution. Without this every gate
+    // in this file reaches the state by naming the action, and `o` could be bound to
+    // anything at all.
+    assert_eq!(
+        action_for(&press('o'), Regions::default()),
+        Some(Action::ToggleOverview),
+        "`o` resolves to no action, so nothing on a keyboard reaches this state"
+    );
+
     let scratch = fixture("shell-overview-toggle");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
