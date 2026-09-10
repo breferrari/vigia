@@ -4,6 +4,14 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.46.0] - 2026-09-10
+
+- The pane can stand at the branch point, and the header says where it is
+- Nothing keeps a path out of the pane, and `hide` is what does
+- An mcs tech pack installs the notes server and its hooks
+- Ledgers leave the byte budget, and the cross-file total is deleted
+- The suite is swept for gates that rebuild their expected value, and one was the only one
+
 ## [0.45.0] - 2026-09-10
 
 - The body draws the file list alone, and `o` is what asks for it
