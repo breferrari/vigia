@@ -333,6 +333,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | A release that removes a key can be filed as internal, and 0.42.0 was | [#467](https://github.com/breferrari/vigia/issues/467) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
+| ✅ | A gate can rebuild its expected value from the value under test, and one did | [#499](https://github.com/breferrari/vigia/issues/499) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ⬜ | A frame reads a whole file to discover it is binary | [#18](https://github.com/breferrari/vigia/issues/18) |

@@ -3438,6 +3438,11 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
         if !header.ends_with(word) {
             continue;
         }
+        // `width` stands on both sides of the assertion below without cancelling,
+        // which is the difference between sharing an input and rebuilding an
+        // expectation: `occupied` is measured off the drawn row and the right-hand
+        // side is the ladder's own answer, so a painter leaving the wrong number of
+        // blanks moves one and not the other.
         let occupied = Span::raw(header.as_str()).width();
         let trailing = usize::from(width).saturating_sub(occupied);
         checked.push(width);
