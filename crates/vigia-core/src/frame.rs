@@ -380,14 +380,13 @@ impl<'w> Frame<'w> {
             ..ChangeOptions::default()
         };
         let mut files = Vec::with_capacity(self.files.len());
-        // The iterator is bound rather than consumed in place, because what it hid
-        // is only knowable once it has been drained.
-        let mut hidden = 0;
+        // Bound rather than consumed in place: what a walk hid is only knowable
+        // once it has been drained.
         let mut walk = self.worktree.changes_with(options)?;
         for change in &mut walk {
             files.push(change?);
         }
-        hidden += walk.hidden();
+        let mut hidden = walk.hidden();
         // Unstaged first, then staged, and the order is the product.
         let staged_at = files.len();
         if self.staged {

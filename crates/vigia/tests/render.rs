@@ -7150,6 +7150,42 @@ fn the_header_and_the_body_never_disagree_about_what_is_hidden() {
     }
 }
 
+/// The other run can hold both kinds at once, which no other gate here sets.
+///
+/// A staged run with some files the pattern covers and some it does not, over a
+/// genuinely clean unstaged one: the body owes both numbers, and they describe
+/// disjoint sets of the same run.
+#[test]
+fn the_other_run_can_hold_both_what_is_shown_and_what_is_hidden() {
+    let view = View {
+        files: 0,
+        hidden: 0,
+        ..nothing_changed()
+    };
+    let mixed = Chrome {
+        elsewhere: Counted {
+            shown: 3,
+            hidden: 2,
+        },
+        ..chrome()
+    };
+    let drawn = screen(80, 6, &view, &mixed);
+    let body = row_text(&drawn, 1);
+    assert!(
+        body.contains("2 hidden") && body.contains("3 staged"),
+        "the body drops one of the two halves the other run holds: {body:?}"
+    );
+    assert!(
+        !body.contains("5 "),
+        "the two halves were added together, and they count different files: \
+         {body:?}"
+    );
+    assert!(
+        row_text(&drawn, 0).contains("2 hidden"),
+        "the header and the body disagree on the mixed run"
+    );
+}
+
 /// The run the pane is not drawing can be the one that was emptied.
 ///
 /// The hardest shape to see: the unstaged run is genuinely clean, so the walk
