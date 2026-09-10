@@ -651,7 +651,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                                 shell.app.follow(path, &frame);
                             }
                         }
-                        Err(e) => shell.app.warn(e.to_string()),
+                        Err(e) => shell.walk_failed(&mut frame, &e),
                     }
                 }
                 // Both halves, and they are not the same half twice. The mode is
@@ -1037,6 +1037,30 @@ impl Shell {
     /// deadline is consumed on the turn that finds it and not on a timeout.
     fn settle_heights(&mut self, frame: &mut vigia_core::Frame) {
         if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
+            self.walk_failed(frame, &e);
+        }
+    }
+
+    /// Say what a failed walk was, and come home if what failed was the base.
+    ///
+    /// A base can be rebased, amended or collected out from under a pane that has
+    /// been open for days, and the tick is the only walk that runs with nobody
+    /// there to press anything. Left parked, the pane holds its last good picture
+    /// for as long as the process lives, which on a monitor cannot be told from a
+    /// tree that stopped changing. Only a lost base comes home: a status walk that
+    /// fails once is retried by the next wake, and must not move a reader who is
+    /// standing somewhere on purpose.
+    fn walk_failed(&mut self, frame: &mut vigia_core::Frame, e: &vigia_core::Error) {
+        self.app.warn(e.to_string());
+        if !matches!(e, vigia_core::Error::Standing(_))
+            || matches!(frame.standing(), vigia_core::Standing::Current)
+        {
+            return;
+        }
+        self.branch_point = None;
+        self.app.stands(false);
+        frame.stand(vigia_core::Standing::Current);
+        if let Err(e) = frame.advance() {
             self.app.warn(e.to_string());
         }
     }
@@ -1970,6 +1994,34 @@ mod tests {
                  that resolved nothing, or keeps a token the body is not drawing"
             );
         }
+        // A base that goes away under a parked pane brings it home, on the one
+        // walk that runs with nobody there to notice.
+        let failed = shipped
+            .split("fn walk_failed(")
+            .nth(1)
+            .expect("`Shell::walk_failed` is gone");
+        let failed = failed
+            .split("\n    }\n")
+            .next()
+            .expect("`walk_failed` never closes");
+        for rule in [
+            "matches!(e, vigia_core::Error::Standing(_))",
+            "self.branch_point = None;",
+            "frame.stand(vigia_core::Standing::Current);",
+        ] {
+            assert!(
+                failed.contains(rule),
+                "`{rule}` is gone, so a base the object database has lost freezes \
+                 the pane on its last good picture for the life of the process"
+            );
+        }
+        assert!(
+            shipped.matches("shell.walk_failed(&mut frame, &e)").count() == 1
+                && shipped.contains("self.walk_failed(frame, &e);"),
+            "a walk that fails no longer routes through `walk_failed`, so the tick \
+             warns and parks the pane on a base that is gone"
+        );
+
         // And it is asked after every action rather than for a named one: a list
         // of the gestures that move the pane is a list that goes stale.
         let apply = shipped
