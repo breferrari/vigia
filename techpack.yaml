@@ -1,0 +1,106 @@
+schemaVersion: 1
+identifier: vigia
+displayName: vigia
+description: The vigia notes server, and the hooks that carry a pinned note into a running session
+author: Brenno Ferrari
+# The release that added `ignore:`, which is what keeps a commit to the crates
+# from telling installed copies that a pack update is waiting.
+minMCSVersion: "2026.4.27"
+
+components:
+  # Not `brew:`, which derives a `commandExists` check against the string it is
+  # given, and a tap-qualified formula is not a command. `shell:` derives nothing,
+  # so the check below is what tells sync to skip the install: without it every
+  # sync shells out to a tap round-trip.
+  - id: vigia-cli
+    displayName: vigia
+    description: A live diff monitor for the terminal, and the notes store the server reads
+    type: brewPackage
+    shell: "brew install breferrari/tap/vigia"
+    doctorChecks:
+      - type: commandExists
+        name: "vigia installed"
+        section: Dependencies
+        command: vigia
+        args: ["--version"]
+        fixCommand: "brew install breferrari/tap/vigia"
+
+  # Not the default local scope: the notes are kept per worktree and Claude Code
+  # names the project for the server, so one registration reaches every repository.
+  - id: notes-server
+    displayName: vigia notes
+    description: Reads the notes the reader pinned to the diff, and replies to or resolves them
+    dependencies: [vigia-cli]
+    mcp:
+      name: vigia
+      command: vigia
+      args: ["mcp"]
+      scope: user
+
+  # All three fail open, so they are safe to install once and forget: see the
+  # scripts. Register runs on both ends of a session because its stdin payload is
+  # what tells one from the other.
+  #
+  # The two register components are `isRequired` because they are one mechanism
+  # split across two events: the start records the socket and the end clears it,
+  # so a session that registers and never clears leaves a stale one behind. That
+  # is also what makes the shared destination safe. Neither can be deselected, so
+  # neither one's removal is ever the other's business, which the schema does not
+  # otherwise say how to resolve.
+  - id: hook-register-start
+    displayName: Socket registered on session start
+    description: Records the session's socket beside the note store, so a note posts into it
+    dependencies: [vigia-cli]
+    isRequired: true
+    hookEvent: SessionStart
+    hook:
+      source: .techpack/hooks/register.sh
+      destination: register.sh
+
+  - id: hook-register-end
+    displayName: Socket cleared on session end
+    description: Clears the session's socket when it ends
+    dependencies: [vigia-cli]
+    isRequired: true
+    hookEvent: SessionEnd
+    hook:
+      source: .techpack/hooks/register.sh
+      destination: register.sh
+
+  - id: hook-pending
+    displayName: Pending notes reported before a prompt
+    description: Puts one line in front of the next prompt saying what the notes are waiting on
+    dependencies: [vigia-cli]
+    hookEvent: UserPromptSubmit
+    hook:
+      source: .techpack/hooks/pending.sh
+      destination: pending.sh
+
+templates:
+  - sectionIdentifier: notes
+    contentFile: .techpack/templates/notes.md
+    dependencies: [notes-server]
+
+supplementaryDoctorChecks:
+  # Reported, never installed: putting a package manager on the machine is the
+  # reader's call, not a diff monitor's.
+  - type: commandExists
+    name: Homebrew
+    section: Prerequisites
+    command: brew
+    fixCommand: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+
+# Everything that builds or documents `vigia` sits beside this manifest and none
+# of it is the pack, which is `.techpack/` and this file. A directory holding a
+# path a component references may not be listed here, so the pack's own subtree
+# is absent by requirement rather than by oversight.
+ignore:
+  - .claude/
+  - assets/
+  - crates/
+  - docs/
+  - xtask/
+  - Cargo.*
+  - "*.md"
+  - .om-project
+  - .gitattributes

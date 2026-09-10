@@ -160,6 +160,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
 | | Task | Issue |
 |---|---|---|
+| ✅ | An mcs tech pack installs the notes server and its hooks. **Contributed** | [#505](https://github.com/breferrari/vigia/issues/505) |
 | ✅ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
 | ✅ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
 | ✅ | The height is recounted when a moved file settles, not at the next event | [#425](https://github.com/breferrari/vigia/issues/425) |

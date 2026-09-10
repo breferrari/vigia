@@ -1937,7 +1937,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 388313),
+    ("SPEC.md", 389167),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
