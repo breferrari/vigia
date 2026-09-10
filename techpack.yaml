@@ -46,7 +46,7 @@ components:
     dependencies: [vigia-cli]
     hookEvent: SessionStart
     hook:
-      source: hooks/register.sh
+      source: .techpack/hooks/register.sh
       destination: register.sh
 
   - id: hook-register-end
@@ -55,7 +55,7 @@ components:
     dependencies: [vigia-cli]
     hookEvent: SessionEnd
     hook:
-      source: hooks/register.sh
+      source: .techpack/hooks/register.sh
       destination: register.sh
 
   - id: hook-pending
@@ -64,12 +64,12 @@ components:
     dependencies: [vigia-cli]
     hookEvent: UserPromptSubmit
     hook:
-      source: hooks/pending.sh
+      source: .techpack/hooks/pending.sh
       destination: pending.sh
 
 templates:
   - sectionIdentifier: notes
-    contentFile: templates/notes.md
+    contentFile: .techpack/templates/notes.md
     dependencies: [notes-server]
 
 supplementaryDoctorChecks:
@@ -82,8 +82,9 @@ supplementaryDoctorChecks:
     fixCommand: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
 # Everything that builds or documents `vigia` sits beside this manifest and none
-# of it is the pack. `*.md` cannot reach `templates/notes.md`, because these globs
-# do not cross `/`.
+# of it is the pack, which is `.techpack/` and this file. A directory holding a
+# path a component references may not be listed here, so the pack's own subtree
+# is absent by requirement rather than by oversight.
 ignore:
   - .claude/
   - assets/
