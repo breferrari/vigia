@@ -132,4 +132,20 @@ fn the_collected_view_carries_what_the_walk_hid() {
     let view = View::collect(&mut frame, &mut highlighter, &history, viewport).expect("collect");
     assert_eq!(view.hidden, 0);
     assert_eq!(view.files, 2);
+
+    // And the state the empty-state body is about, reached the way a pane reaches
+    // it rather than by building a `View` by hand: a pattern covering every
+    // changed path leaves no files and a count of what it took.
+    let mut frame = worktree.frame();
+    frame.hide(Some(Hidden::new(".").expect("a pattern")));
+    frame.advance().expect("advance");
+    let view = View::collect(&mut frame, &mut highlighter, &history, viewport).expect("collect");
+    assert_eq!(
+        view.files, 0,
+        "a pattern matching every path left files behind"
+    );
+    assert_eq!(
+        view.hidden, 2,
+        "the pane a reader sees as empty carries no count of why it is empty"
+    );
 }
