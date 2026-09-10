@@ -5,7 +5,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Body, Pointing, Position, Row, View, body_layout, diff_height};
-use vigia_core::{Counted, Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, generated, materialise};
 
@@ -27,7 +27,7 @@ fn body() -> usize {
     // scroll arithmetic below is not entangled with I6's two-line footer.
     diff_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), Counted::default(), ""),
+        &App::new().chrome("fixture", None, Pointing::default(), Default::default(), ""),
         FILES,
         FILES,
     )
@@ -42,7 +42,7 @@ fn split() -> Body {
 fn listed() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, Pointing::default(), Counted::default(), ""),
+        &App::new().chrome("fixture", None, Pointing::default(), Default::default(), ""),
         FILES,
         FILES,
     )

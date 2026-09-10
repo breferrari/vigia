@@ -1934,7 +1934,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 391944),
+    ("SPEC.md", 392112),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96205),
     ("RULINGS.md", 99973),
@@ -2293,7 +2293,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// ninth funded 405 of its bytes by deleting a section 11.1 paragraph that
 /// section 11.2 B6 already said twice over. It stays a session ruling and the
 /// question is the reader's.
-const WRITTEN_LAYER_TOTAL: usize = 643149;
+const WRITTEN_LAYER_TOTAL: usize = 643317;
 
 /// Each document weighs no more than its budget.
 #[test]

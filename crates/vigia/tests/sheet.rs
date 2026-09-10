@@ -16,7 +16,7 @@ use vigia::{
     Action, App, Chrome, Glyphs, Grabbed, Hovered, Pointing, Regions, Sheet, Theme, action_for,
     body_layout, regions, render,
 };
-use vigia_core::{Counted, Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History};
 
 use screen::candidate_keys;
 use support::{Scratch, materialise};
@@ -55,7 +55,7 @@ fn chrome(app: &App) -> Chrome {
         "fixture",
         Some("main"),
         Pointing::default(),
-        Counted::default(),
+        Default::default(),
         "",
     )
 }
@@ -653,7 +653,7 @@ fn drawn_close(
             hovered,
             ..Pointing::default()
         },
-        Counted::default(),
+        Default::default(),
         "",
     );
     let body = body_layout(area(), &chrome, FILES, FILES);

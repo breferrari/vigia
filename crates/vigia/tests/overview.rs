@@ -12,7 +12,7 @@ use vigia::{
     Action, App, Body, Chrome, Glyphs, LIST_SETTLED, Pointing, Regions, Theme, View, action_for,
     body_layout, regions, render,
 };
-use vigia_core::{Counted, Frame, FrameStats, Highlighter, History};
+use vigia_core::{Frame, FrameStats, Highlighter, History};
 
 use support::{Scratch, delta, materialise};
 
@@ -68,7 +68,7 @@ fn fixture(name: &str) -> Scratch {
 
 /// A chrome that has asked for the state under test, and optionally the rail.
 fn chrome_of(app: &App, rail: bool) -> Chrome {
-    let mut chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let mut chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     chrome.rail = rail;
     chrome
 }

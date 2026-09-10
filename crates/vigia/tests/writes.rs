@@ -15,7 +15,7 @@ use vigia::{
     opening, regions, render, state_root,
 };
 use vigia_core::{
-    Counted, Frame, Highlighter, History, Note, Registry, Store, WARM_FILES, WatchOptions, Worktree,
+    Frame, Highlighter, History, Note, Registry, Store, WARM_FILES, WatchOptions, Worktree,
 };
 
 use support::{Scratch, TempDir, made_link, note, registration, settle_tree};
@@ -218,7 +218,7 @@ impl Rig<'_> {
     fn paint(&mut self) -> usize {
         let chrome = self
             .app
-            .chrome("fixture", None, Pointing::default(), Counted::default(), "");
+            .chrome("fixture", None, Pointing::default(), Default::default(), "");
         let body = body_layout(
             area(),
             &chrome,
@@ -410,7 +410,7 @@ fn one_gesture_writes_exactly_one_file() {
     let mut app = App::past_first_paint();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)

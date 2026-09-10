@@ -13,7 +13,7 @@ use vigia::{
     Action, App, Body, Glyphs, Pointing, Row, TRACK_SCALE, Theme, View, Viewport, body_layout,
     diff_height, regions, render,
 };
-use vigia_core::{Counted, Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise, settle_spans};
 
@@ -60,7 +60,7 @@ fn fixture(name: &str) -> Scratch {
 }
 
 fn chrome_of(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
+    app.chrome("fixture", None, Pointing::default(), Default::default(), "")
 }
 
 fn split(app: &App) -> Body {

@@ -15,8 +15,8 @@ use vigia::{
     Action, App, Body, Glyphs, Pointing, Row, Theme, View, body_layout, diff_height, render,
 };
 use vigia_core::{
-    Counted, FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History,
-    HistoryStats, RETAINED_HUNKS, Store, WatchOptions, Worktree,
+    FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
+    RETAINED_HUNKS, Store, WatchOptions, Worktree,
 };
 
 use support::{Scratch, generated};
@@ -796,7 +796,7 @@ fn drive(
         }
 
         if let Some(action) = scripted(frames, body.diff) {
-            let chrome = app.chrome(NAME, None, Pointing::default(), Counted::default(), "");
+            let chrome = app.chrome(NAME, None, Pointing::default(), Default::default(), "");
             let height = diff_height(area, &chrome, frame.files().len(), frame.files().len());
             if let Err(e) = app.apply(action, &mut frame, height) {
                 failed += 1;
@@ -814,7 +814,7 @@ fn drive(
         // belong in a soak for a different reason than they belong in a budget gate.
         let frame_began = Instant::now();
         app.sample_memory();
-        let chrome = app.chrome(NAME, None, Pointing::default(), Counted::default(), "");
+        let chrome = app.chrome(NAME, None, Pointing::default(), Default::default(), "");
         body = body_layout(area, &chrome, frame.files().len(), frame.files().len());
         match app.view(&mut frame, &mut highlighter, &history, body) {
             Ok(fresh) => {

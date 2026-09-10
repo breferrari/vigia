@@ -2,7 +2,6 @@
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
-use vigia_core::Counted;
 
 /// A home directory holding a config file, or holding none.
 fn home_with(name: &str, contents: Option<&str>) -> std::path::PathBuf {
@@ -50,7 +49,7 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 
 /// What a config file can reach on the chrome, read off a drawn one.
 fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     (chrome.rail, chrome.overview, chrome.following, chrome.sheet)
 }
 
@@ -393,7 +392,7 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
         rail: true,
         ..Config::default()
     });
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     assert!(chrome.rail, "the file's request did not reach the chrome");
 
     let narrow = body_layout(Rect::new(0, 0, 100, 30), &chrome, 6, 6);
@@ -452,7 +451,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // And `single`, which no comparison of chromes can reach.
     let body = diff_height(
         Rect::new(0, 0, 80, 24),
-        &configured.chrome("fixture", None, Pointing::default(), Counted::default(), ""),
+        &configured.chrome("fixture", None, Pointing::default(), Default::default(), ""),
         6,
         6,
     );

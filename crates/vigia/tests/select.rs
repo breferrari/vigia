@@ -16,7 +16,7 @@ use vigia::{
     Action, App, Glyphs, NoteLead, Pointing, Region, Regions, Row, Selection, Theme, body_layout,
     render, selection_after,
 };
-use vigia_core::{Counted, Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise, note, numbered_lines};
 
@@ -102,7 +102,7 @@ fn sent_on(
         app.apply(Action::ToggleWrap, frame, 24).expect("wrap");
     }
     app.select(Some(span));
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(pane, &chrome, 1, 1);
     let view = app
         .view(frame, &mut highlighter, &history, body)
@@ -132,7 +132,7 @@ fn drawn(app: &mut App, frame: &mut Frame) -> String {
 fn drawn_on(app: &mut App, frame: &mut Frame, pane: Rect) -> String {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(pane, &chrome, 1, 1);
     let view = app
         .view(frame, &mut highlighter, &history, body)
@@ -331,7 +331,7 @@ fn the_cheap_answer_agrees_with_the_lines_it_stands_for() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(PANE, &chrome, 1, 1);
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
@@ -434,7 +434,7 @@ fn a_wrapped_line_is_sent_once_and_whole() {
     probe
         .apply(Action::ToggleWrap, &mut frame, 24)
         .expect("wrap");
-    let chrome = probe.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = probe.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(PANE, &chrome, 1, 1);
     let view = probe
         .view(&mut frame, &mut highlighter, &history, body)
@@ -518,7 +518,7 @@ fn washes(
 ) -> (Vec<ratatui::style::Color>, Regions) {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let mut chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let mut chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     // Before the layout, so a layout that reserved a row for the wash is caught too.
     chrome.selected = selected;
     let body = body_layout(PANE, &chrome, 1, 1);
@@ -709,7 +709,7 @@ fn a_wrapped_line_at_the_foot_of_the_pane_is_still_sent_whole() {
     let history = History::new();
 
     app.apply(Action::ToggleWrap, &mut frame, 24).expect("wrap");
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(PANE, &chrome, 1, 1);
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
@@ -801,7 +801,7 @@ fn the_footer_counts_lines_and_not_rows() {
             app.apply(Action::ToggleWrap, &mut frame, 24).expect("wrap");
         }
         app.select(Some(span));
-        let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
         let body = body_layout(PANE, &chrome, 1, 1);
         let view = app
             .view(&mut frame, &mut highlighter, &history, body)
@@ -841,7 +841,7 @@ fn a_span_ending_on_a_blank_row_is_still_counted_whole() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(PANE, &chrome, 1, 1);
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
@@ -889,7 +889,7 @@ fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(PANE, &chrome, 1, 1);
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
@@ -924,7 +924,7 @@ fn a_span_the_walk_had_no_rows_for_holds_no_selection() {
 
     let mut collect = |app: &mut App, frame: &mut Frame, span| {
         app.select(Some(span));
-        let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
         let body = body_layout(PANE, &chrome, 1, 1);
         app.view(frame, &mut highlighter, &history, body)
             .expect("view")
@@ -980,7 +980,7 @@ fn view_rows(app: &mut App, frame: &mut Frame) -> Vec<Row> {
 fn view_rows_on(app: &mut App, frame: &mut Frame, pane: Rect) -> Vec<Row> {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(pane, &chrome, 1, 1);
     app.view(frame, &mut highlighter, &history, body)
         .expect("view")

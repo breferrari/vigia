@@ -24,7 +24,7 @@ use vigia::{
     commit, count_cell, edge_at, effect_interval, has_room, hover_after, note_cells, opening,
     press_at, regions, render, repainted, selection_after, withdraw,
 };
-use vigia_core::{ChangeKind, Counted, Frame, Highlighter, History, Side, Status, Store, key};
+use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
 
 use support::{Scratch, TempDir, files_in, note, numbered_lines};
 
@@ -300,7 +300,7 @@ impl Rig {
         let files = frame.files().len();
         let chrome = self
             .app
-            .chrome("fixture", None, pointing, Counted::default(), "");
+            .chrome("fixture", None, pointing, Default::default(), "");
         let body = body_layout(pane, &chrome, files, files);
         let view = self
             .app
@@ -310,7 +310,7 @@ impl Rig {
         // frame placed reaches this frame's footer.
         let chrome = self
             .app
-            .chrome("fixture", None, pointing, Counted::default(), "");
+            .chrome("fixture", None, pointing, Default::default(), "");
         let laid = regions(pane, &chrome, &view);
         let mut terminal =
             Terminal::new(TestBackend::new(pane.width, pane.height)).expect("terminal");
@@ -1701,7 +1701,7 @@ fn a_box_opened_at_the_top_of_a_bottom_anchored_screen_stays_on_it() {
     let height = body_layout(
         short,
         &rig.app
-            .chrome("fixture", None, Pointing::default(), Counted::default(), ""),
+            .chrome("fixture", None, Pointing::default(), Default::default(), ""),
         1,
         1,
     )
@@ -2547,7 +2547,7 @@ fn a_note_the_box_holds_stands_aside_in_the_run_the_box_is_not_drawn_in() {
     let height = body_layout(
         TALL,
         &rig.app
-            .chrome("fixture", None, Pointing::default(), Counted::default(), ""),
+            .chrome("fixture", None, Pointing::default(), Default::default(), ""),
         2,
         2,
     )
@@ -3348,7 +3348,7 @@ fn a_pane_with_no_notes_draws_todays_frame() {
     let files = frame.files().len();
     let chrome = rig
         .app
-        .chrome("fixture", None, Pointing::default(), Counted::default(), "");
+        .chrome("fixture", None, Pointing::default(), Default::default(), "");
     let body = body_layout(PANE, &chrome, files, files);
 
     // The collect the pane ran, spelled without any notes at all.
@@ -3451,7 +3451,7 @@ fn the_bottom_clamp_counts_note_rows() {
     let files = frame.files().len();
     let chrome = rig
         .app
-        .chrome("fixture", None, Pointing::default(), Counted::default(), "");
+        .chrome("fixture", None, Pointing::default(), Default::default(), "");
     let height = body_layout(PANE, &chrome, files, files).diff;
     // Past the end, so the walk's bottom clamp answers with the last screenful.
     rig.app
@@ -3488,7 +3488,7 @@ fn the_notes_count_never_buys_the_footer_a_second_line() {
     // grew the footer would leave the body a row shorter than the rows collected
     // for it. Every width, against a count wide enough to matter.
     let app = App::new();
-    let without = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let without = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let mut with = without.clone();
     with.notes = NoteCount {
         total: 12,
@@ -5995,7 +5995,7 @@ fn a_screen_opening_inside_a_note_counts_no_line_for_it() {
     let height = body_layout(
         short,
         &rig.app
-            .chrome("fixture", None, Pointing::default(), Counted::default(), ""),
+            .chrome("fixture", None, Pointing::default(), Default::default(), ""),
         1,
         1,
     )

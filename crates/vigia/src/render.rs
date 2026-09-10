@@ -689,6 +689,14 @@ const fn counts_edge(pane: u16, trailing: u16) -> usize {
     pane.saturating_sub(trailing).saturating_sub(rows) as usize
 }
 
+/// How much of the tree the pane is keeping from the reader, wherever it went.
+///
+/// The header and the empty state both draw it, and two counts of it one row
+/// apart and disagreeing is worse on a glance than either alone.
+fn hidden_of(view: &View, chrome: &Chrome) -> usize {
+    view.hidden + chrome.elsewhere.hidden
+}
+
 /// The facts about the tree, in the order a narrowing header gives them up.
 ///
 /// `N binary` says how much of the run the total leaves out and `N hidden` how
@@ -2159,7 +2167,7 @@ pub fn render(
             &empty_state_with(
                 chrome.staged,
                 chrome.elsewhere.shown,
-                view.hidden + chrome.elsewhere.hidden,
+                hidden_of(view, chrome),
             ),
         );
         if bar.drawn() {
@@ -3191,7 +3199,7 @@ impl Painter<'_> {
             chrome.branch.as_deref(),
             view.files,
             view.churn.map_or(0, |run| run.binary),
-            view.hidden,
+            hidden_of(view, chrome),
             chrome.staged,
         );
         self.status_line(area, &rungs, self.theme.chrome, &right);

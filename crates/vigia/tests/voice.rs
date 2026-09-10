@@ -15,7 +15,6 @@ use vigia::{
     ARRIVING_FRAME, App, Depth, Glyphs, NOTICE_ARRIVING, NOTICE_LINGER, Pointing, Theme, View,
     Voice, arrival, departure, notice_area, render,
 };
-use vigia_core::Counted;
 
 /// An ordinary pane.
 const PANE: Rect = Rect {
@@ -36,7 +35,7 @@ fn drawn(voice: Voice) -> (Buffer, App) {
         Instant::now() + NOTICE_LINGER,
         voice,
     );
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let mut buf = Buffer::empty(PANE);
     render(
         &mut buf,
@@ -66,7 +65,7 @@ fn styles(buf: &Buffer, area: Rect) -> Vec<Style> {
 
 /// The area the footer's message occupies on this pane.
 fn area_of(app: &App) -> Rect {
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     notice_area(PANE, &chrome, &View::default()).expect("a message on the footer has an area")
 }
 
@@ -94,7 +93,7 @@ fn a_message_is_not_drawn_in_the_hints_own_style() {
     // colour, so nothing on it meant anything.
     let mut app = App::new();
     let hints = {
-        let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
         let mut buf = Buffer::empty(PANE);
         render(
             &mut buf,
@@ -113,7 +112,7 @@ fn a_message_is_not_drawn_in_the_hints_own_style() {
     );
     let (buf, app) = (
         {
-            let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+            let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
             let mut buf = Buffer::empty(PANE);
             render(
                 &mut buf,
@@ -226,14 +225,14 @@ fn the_area_is_the_bottom_row_and_only_the_message() {
 #[test]
 fn a_pane_with_no_message_has_no_area() {
     let app = App::new();
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     assert_eq!(notice_area(PANE, &chrome, &View::default()), None);
 }
 
 #[test]
 fn a_pane_with_no_room_has_no_area() {
     let (_, app) = drawn(Voice::Said);
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     for empty in [
         Rect::new(0, 0, 0, 12),
         Rect::new(0, 0, 80, 0),
@@ -258,7 +257,7 @@ fn a_long_message_stops_where_the_readouts_begin() {
         Instant::now() + NOTICE_LINGER,
         Voice::Alert,
     );
-    let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+    let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
     let area = notice_area(PANE, &chrome, &View::default()).expect("an area");
 
     let mut buf = Buffer::empty(PANE);
@@ -330,7 +329,7 @@ fn a_depth_with_no_colour_still_gets_the_message() {
                 Instant::now() + NOTICE_LINGER,
                 voice,
             );
-            let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+            let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
             let mut settled = Buffer::empty(PANE);
             render(
                 &mut settled,

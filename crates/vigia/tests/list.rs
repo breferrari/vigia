@@ -10,7 +10,7 @@ use vigia::{
     Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Row, Theme, View, Viewport,
     body_layout, regions, render,
 };
-use vigia_core::{Counted, Highlighter, History, Origin};
+use vigia_core::{Highlighter, History, Origin};
 
 use support::{Scratch, materialise};
 
@@ -35,7 +35,7 @@ const MANY: usize = 500;
 const DEEP: u16 = 50;
 
 fn chrome(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None, Pointing::default(), Counted::default(), "")
+    app.chrome("fixture", None, Pointing::default(), Default::default(), "")
 }
 
 /// The same, with the rail asked for.
@@ -521,7 +521,7 @@ fn the_region_at_fifty_files() {
         let area = ratatui::layout::Rect::new(0, 0, 80, 24);
         let body = body_layout(
             area,
-            &app.chrome("vigia", None, Pointing::default(), Counted::default(), ""),
+            &app.chrome("vigia", None, Pointing::default(), Default::default(), ""),
             FILES,
             FILES,
         );
@@ -531,7 +531,7 @@ fn the_region_at_fifty_files() {
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let theme = Theme::default();
-        let chrome = app.chrome("vigia", None, Pointing::default(), Counted::default(), "");
+        let chrome = app.chrome("vigia", None, Pointing::default(), Default::default(), "");
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -1473,7 +1473,7 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
             "fixture",
             None,
             vigia::Pointing::default(),
-            Counted::default(),
+            Default::default(),
             "",
         )
     };

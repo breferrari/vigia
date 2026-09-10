@@ -11,7 +11,6 @@ use vigia::{
     ARRIVED_LINGER, App, Glyphs, NOTICE_ARRIVING, NOTICE_LINGER, Pointing, Theme, View, Voice,
     linger_for, render,
 };
-use vigia_core::Counted;
 
 /// The notice is unasked for, so it stays long enough to be seen by a reader whose
 /// eyes are on the other pane: a minute, where a receipt answers a gesture and
@@ -233,7 +232,7 @@ fn the_footer_carries_the_version_it_was_told() {
             Instant::now() + NOTICE_LINGER,
             Voice::Arrived,
         );
-        let chrome = app.chrome("fixture", None, Pointing::default(), Counted::default(), "");
+        let chrome = app.chrome("fixture", None, Pointing::default(), Default::default(), "");
 
         let area = Rect::new(0, 0, width, 24);
         let mut buf = Buffer::empty(area);

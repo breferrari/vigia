@@ -7106,6 +7106,50 @@ fn a_tree_whose_every_change_is_hidden_still_says_so() {
     );
 }
 
+/// The header and the body report one number, not two.
+///
+/// Every other gate here sets exactly one of the two halves, so a header reading
+/// its own half and a body reading the sum agreed by accident. With a file hidden
+/// in the drawn run and a different one hidden in the run beside it, the two rows
+/// drew `1 hidden` and `2 hidden` on the same frame, which is worse on a glance
+/// than either number alone.
+#[test]
+fn the_header_and_the_body_never_disagree_about_what_is_hidden() {
+    let view = View {
+        files: 0,
+        hidden: 1,
+        ..nothing_changed()
+    };
+    let both = Chrome {
+        elsewhere: Counted {
+            shown: 0,
+            hidden: 1,
+        },
+        ..chrome()
+    };
+    let drawn = screen(80, 6, &view, &both);
+    let header = row_text(&drawn, 0);
+    let body = row_text(&drawn, 1);
+
+    assert!(
+        header.contains("2 hidden"),
+        "the header counts only the run it drew: {header:?}"
+    );
+    assert!(
+        body.contains("2 hidden"),
+        "the body counts only the run it drew: {body:?}"
+    );
+
+    // Non-vacuity: neither row says two when only one half is set.
+    let drawn = screen(80, 6, &view, &chrome());
+    for row in [row_text(&drawn, 0), row_text(&drawn, 1)] {
+        assert!(
+            row.contains("1 hidden") && !row.contains("2 hidden"),
+            "a pane hiding one file says otherwise: {row:?}"
+        );
+    }
+}
+
 /// The run the pane is not drawing can be the one that was emptied.
 ///
 /// The hardest shape to see: the unstaged run is genuinely clean, so the walk

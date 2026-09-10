@@ -10,7 +10,7 @@ use vigia::{
     Action, App, Body, Deadlines, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Pointing, Position, Row,
     body_layout, diff_rows, patience,
 };
-use vigia_core::{Counted, Frame, FrameStats, HighlightStats, Highlighter, History, Recency};
+use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency};
 
 use support::{Scratch, arm_settle, delta, materialise, settle, settle_spans};
 
@@ -57,7 +57,7 @@ const RAIL_WIDTH: u16 = 160;
 fn layout_on(width: u16, height: u16) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
-        &railed(App::new().chrome("fixture", None, Pointing::default(), Counted::default(), "")),
+        &railed(App::new().chrome("fixture", None, Pointing::default(), Default::default(), "")),
         FILES,
         FILES,
     )
