@@ -216,7 +216,6 @@ impl App {
             notes_shown: config.notes,
             shown: 0,
             staged: config.staged,
-            standing: false,
             icons: config.icons,
             links: config.links,
             ..Self::new()

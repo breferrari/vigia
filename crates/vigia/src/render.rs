@@ -449,9 +449,6 @@ const FOLLOW_MARK: char = '▶';
 /// What joins two facts drawn on one line.
 const FACT_SEPARATOR: &str = " · ";
 
-/// What the position token reads on the pane every reader already has.
-const CURRENT: &str = "current";
-
 /// What the body says when there is no diff at all.
 const NOTHING_CHANGED: &str = "no unstaged changes";
 
@@ -761,17 +758,16 @@ fn header_left(
     // The branch is drawn always, rather than on the empty state alone.
     let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
 
-    // A separator is owed only between two facts that are both there, which is
-    // [`FACT_SEPARATOR`]'s rule and the reason the name is measured rather than
-    // tested for emptiness: a worktree called `a zero-width space` is a non-empty
-    // string that draws nothing, and joining it would lead the pane with a separator.
+    // Measured rather than tested for emptiness: a worktree called `a zero-width
+    // space` is a non-empty string that draws nothing, and joining it would lead
+    // the pane with a separator that has nothing on its left to join.
     let visible = worktree.trim().replace(|c: char| c.is_control(), "");
     let name = (width_of(&visible) != 0).then_some(worktree);
-    // `current` names the pane a reader already has, so the token drops first; say
-    // anything else and it drops last, a count without it reading as the live tree's.
-    let standing = (!position.is_empty()).then_some(position);
-    let default_standing = position == CURRENT;
-    let join = |kept: &[&str]| {
+    // Widest first, dropping one fact per rung in the order §11.1 rules: rightmost
+    // first, because each qualifies the one before it, then the branch, then the
+    // name, which B3's empty state leans on to say which repository this is.
+    let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
+    let rung = |kept: &[&str], standing: Option<&str>| {
         name.into_iter()
             .chain(named)
             .chain(standing)
@@ -781,49 +777,48 @@ fn header_left(
             .join(FACT_SEPARATOR)
     };
 
-    // Widest first, dropping one fact per rung in the order §11.1 rules: the facts
-    // go rightmost first, because each qualifies the one before it, then the branch,
-    // then the name, because B3's empty state leans on the name to say which
-    // repository this is.
-    let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
-    let without = |kept: &[&str]| {
-        name.into_iter()
-            .chain(named)
-            .chain(kept.iter().copied())
-            .filter(|fact| !fact.is_empty())
-            .collect::<Vec<_>>()
-            .join(FACT_SEPARATOR)
-    };
-    if default_standing {
+    // `current` names the pane a reader already has, so the token drops first; say
+    // anything else and it drops last, a count without it reading as the live tree's.
+    let standing = Some(position);
+    if position == vigia_core::Standing::CURRENT {
         // One rung with it, then today's whole ladder without it. Pushed with no
         // fact to qualify too: a tree with nothing in it is still standing somewhere.
-        rungs.push(join(&kept));
+        rungs.push(rung(&kept, standing));
         for end in (1..=kept.len()).rev() {
-            rungs.push(without(&kept[..end]));
+            rungs.push(rung(&kept[..end], None));
         }
     } else {
         for end in (1..=kept.len()).rev() {
-            rungs.push(join(&kept[..end]));
+            rungs.push(rung(&kept[..end], standing));
         }
-        rungs.push(join(&[]));
+        rungs.push(rung(&[], standing));
     }
     if named.is_some() {
-        rungs.push(without(&[]));
+        rungs.push(rung(&[], None));
     }
     rungs.push(worktree.to_owned());
     rungs
 }
 
-/// The one body line a worktree with no changes gets: what this run holds, then
-/// where the rest of the work went.
+/// The one body line a worktree with no changes gets: which comparison found
+/// nothing, then where the rest of the work went.
 ///
 /// A pattern that ate every change owns the first clause, because at a width
 /// that drops the header's count this row is the only thing left on screen.
-fn empty_state_with(staged: Option<usize>, elsewhere: usize, hidden: usize) -> String {
-    let held = match (hidden, staged) {
-        (0, Some(_)) => NOTHING_ANYWHERE.to_owned(),
-        (0, None) => NOTHING_CHANGED.to_owned(),
-        (hidden, _) => format!("{hidden} hidden"),
+fn empty_state_with(
+    position: &str,
+    staged: Option<usize>,
+    elsewhere: usize,
+    hidden: usize,
+) -> String {
+    let parked = position != vigia_core::Standing::CURRENT;
+    let held = match (hidden, staged, parked) {
+        // The words name the comparison: `no unstaged changes` under `since main`
+        // describes a walk this frame did not make.
+        (0, _, true) => format!("no changes {position}"),
+        (0, Some(_), false) => NOTHING_ANYWHERE.to_owned(),
+        (0, None, false) => NOTHING_CHANGED.to_owned(),
+        (hidden, _, _) => format!("{hidden} hidden"),
     };
     match (staged, elsewhere) {
         (None, n) if n > 0 => format!("{held}{FACT_SEPARATOR}{n} staged"),
@@ -2193,6 +2188,7 @@ pub fn render(
             view,
             area,
             &empty_state_with(
+                &chrome.position,
                 chrome.staged,
                 chrome.elsewhere.shown,
                 hidden_of(view, chrome),

@@ -116,10 +116,10 @@ impl Worktree {
                     )
                     .into_index_worktree_iter(Vec::<BString>::new())
                     .map_err(|e| Error::Status(Box::new(e)))?;
-                Ok(Changes::over(Inner::Unstaged(iter), options.hide))
+                Ok(Changes::over(Inner::Streamed(iter), options.hide))
             }
             Origin::Staged => Ok(Changes::over(
-                Inner::Staged(self.staged(options)?.into_iter()),
+                Inner::Collected(self.staged(options)?.into_iter()),
                 options.hide,
             )),
         }
@@ -250,14 +250,10 @@ impl Worktree {
         if let Ok(Some(head)) = self.repo.head_ref()
             && let Some(Ok(upstream)) = head.remote_tracking_ref_name(gix::remote::Direction::Fetch)
         {
-            let full = upstream.as_bstr().to_string();
             // `refs/remotes/origin/main` reads as `origin/main`, which is what a
             // reader would type.
-            let short = full
-                .strip_prefix("refs/remotes/")
-                .unwrap_or(&full)
-                .to_owned();
-            out.push((full, short));
+            let short = upstream.shorten().to_string();
+            out.push((upstream.as_bstr().to_string(), short));
         }
         for name in ["main", "master"] {
             out.push((format!("refs/heads/{name}"), name.to_owned()));
@@ -282,7 +278,7 @@ impl Worktree {
         match standing.at() {
             None => self.changes_with(options),
             Some(base) => Ok(Changes::over(
-                Inner::Staged(self.since(base, options)?.into_iter()),
+                Inner::Collected(self.since(base, options)?.into_iter()),
                 options.hide,
             )),
         }
@@ -334,8 +330,11 @@ impl Worktree {
             if let Some(based) = from_base.remove(&change.path) {
                 // The path moved on both sides of the index. What it changed from
                 // is the base tree's blob, and what it is now is on disk.
+                let Some(kind) = compose(&based.kind, &change.kind) else {
+                    continue;
+                };
                 change.before = based.before;
-                change.kind = compose(&based.kind, &change.kind);
+                change.kind = kind;
             }
             change.origin = Origin::Unstaged;
             out.push(change);
@@ -538,9 +537,11 @@ pub struct Changes<'h> {
 )]
 enum Inner {
     /// The working tree against the index, streamed off `gix`'s own iterator.
-    Unstaged(gix::status::index_worktree::Iter),
-    /// The index against `HEAD^{tree}`, already collected.
-    Staged(std::vec::IntoIter<FileChange>),
+    Streamed(gix::status::index_worktree::Iter),
+    /// A walk that had to be drained before it could be handed on, which is any
+    /// comparison against a tree: `Origin` says which one, and a `since` run is
+    /// collected the same way while being unstaged.
+    Collected(std::vec::IntoIter<FileChange>),
 }
 
 impl<'h> Changes<'h> {
@@ -600,20 +601,28 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
 }
 
 /// What a path did between the base tree and the working tree, given what it did
-/// on each side of the index.
+/// on each side of the index, or `None` where it did nothing.
 ///
-/// The endpoints decide it and the middle does not: a file the index added and
-/// the working tree then deleted was never in the base and is not on disk, so it
-/// belongs to neither run. Everything else reads off whether the base had it and
-/// whether the worktree does.
-fn compose(from_base: &ChangeKind, in_worktree: &ChangeKind) -> ChangeKind {
+/// The endpoints decide it and the middle does not: a file the branch added and
+/// the working tree then deleted was never in the base and is not on disk, so
+/// nothing happened to it and it is not a row. `git diff <base>` says the same,
+/// and a row reading `removed` would claim the reader deleted something the
+/// branch point never had.
+///
+/// A rename survives where the other side did not delete the path. The name it
+/// moved from is a fact about the base, so it outranks a plain modification the
+/// worktree made on top of it.
+fn compose(from_base: &ChangeKind, in_worktree: &ChangeKind) -> Option<ChangeKind> {
     let absent_from_base = matches!(from_base, ChangeKind::Added | ChangeKind::IntentToAdd);
     let gone_from_worktree = matches!(in_worktree, ChangeKind::Removed);
     match (absent_from_base, gone_from_worktree) {
-        (true, true) => ChangeKind::Removed,
-        (true, false) => ChangeKind::Added,
-        (false, true) => ChangeKind::Removed,
-        (false, false) => ChangeKind::Modified,
+        (true, true) => None,
+        (true, false) => Some(ChangeKind::Added),
+        (false, true) => Some(ChangeKind::Removed),
+        (false, false) => Some(match from_base {
+            moved @ (ChangeKind::Renamed { .. } | ChangeKind::Copied { .. }) => moved.clone(),
+            _ => ChangeKind::Modified,
+        }),
     }
 }
 
@@ -732,8 +741,8 @@ impl Iterator for Inner {
 
     fn next(&mut self) -> Option<Self::Item> {
         let inner = match self {
-            Self::Unstaged(iter) => iter,
-            Self::Staged(iter) => return iter.next().map(Ok),
+            Self::Streamed(iter) => iter,
+            Self::Collected(iter) => return iter.next().map(Ok),
         };
         loop {
             let item = match inner.next()? {

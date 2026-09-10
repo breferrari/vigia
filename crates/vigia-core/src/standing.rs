@@ -28,11 +28,15 @@ pub enum Standing {
 }
 
 impl Standing {
+    /// What [`Standing::Current`] draws, named so the header's drop ladder can
+    /// recognise it without a second copy of the word.
+    pub const CURRENT: &'static str = "current";
+
     /// The word the header draws after the branch.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
-            Self::Current => "current".to_owned(),
+            Self::Current => Self::CURRENT.to_owned(),
             Self::Since { named, .. } => format!("since {named}"),
         }
     }

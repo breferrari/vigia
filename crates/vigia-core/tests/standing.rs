@@ -151,11 +151,12 @@ fn a_path_changed_on_both_sides_of_the_index_appears_once_from_the_base() {
 /// A file the branch added and then deleted was never in the base and is not on
 /// disk, so it belongs to neither end.
 #[test]
-fn a_path_added_and_then_deleted_reads_as_removed_rather_than_added() {
+fn a_path_added_and_then_deleted_is_not_a_row_at_all() {
     let scratch = branched("position-cancel");
     scratch.write("src/gone.rs", "temporary\n");
+    scratch.write(KEPT, "one\nkept\n");
     scratch.git(&["add", "-A"]);
-    scratch.git(&["commit", "-m", "add a file"]);
+    scratch.git(&["commit", "-m", "add two files"]);
     std::fs::remove_file(scratch.root().join("src/gone.rs")).expect("remove");
 
     let worktree = Worktree::discover(scratch.root()).expect("discover");
@@ -164,16 +165,55 @@ fn a_path_added_and_then_deleted_reads_as_removed_rather_than_added() {
     frame.stand(Standing::Since { at, named });
     frame.advance().expect("advance");
 
-    let gone = frame
+    // Non-vacuity: the walk reached this tree and kept the file beside it.
+    assert_eq!(
+        paths(&frame),
+        vec![KEPT.to_owned()],
+        "the run holds something other than the one path that actually moved"
+    );
+    assert!(
+        !frame
+            .files()
+            .iter()
+            .any(|change| change.path == "src/gone.rs"),
+        "a file the branch added and the working tree then deleted is a row. \
+         The branch point never had it and disk does not have it, so nothing \
+         happened to it, and `git diff <base>` says the same"
+    );
+}
+
+/// A rename the branch made survives the working tree touching the file after.
+///
+/// The composed kind reads off the endpoints, and *renamed from* is a fact about
+/// the base end. Collapsing it to `Modified` loses the one label naming where the
+/// file came from, and only on the paths busy enough to have moved on both sides
+/// of the index.
+#[test]
+fn a_rename_on_the_branch_survives_a_later_edit_to_the_same_path() {
+    let scratch = branched("position-rename");
+    scratch.git(&["mv", KEPT, "src/moved.rs"]);
+    scratch.git(&["commit", "-m", "move it"]);
+    scratch.write("src/moved.rs", "one\ntwo\nand more\n");
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    let mut frame = worktree.frame();
+    frame.stand(Standing::Since { at, named });
+    frame.advance().expect("advance");
+
+    let moved = frame
         .files()
         .iter()
-        .find(|change| change.path == "src/gone.rs")
-        .expect("the path is in the run");
+        .find(|change| change.path == "src/moved.rs")
+        .expect("the moved path is in the run");
     assert_eq!(
-        gone.kind,
-        ChangeKind::Removed,
-        "a file added on the branch and then deleted reads as added, so the pane \
-         says a file exists that does not"
+        moved.kind,
+        ChangeKind::Renamed {
+            from: KEPT.to_owned()
+        },
+        "the run says the file was {:?}, so a reader sees an edit to a path that \
+         did not exist at the branch point and no sign of where it came from",
+        moved.kind
     );
 }
 

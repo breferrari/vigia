@@ -234,11 +234,15 @@ pub fn branch_point_of(
     held: &mut Option<vigia_core::Standing>,
     worktree: &Worktree,
 ) -> vigia_core::Result<vigia_core::Standing> {
-    if held.is_none() {
-        let (at, named) = worktree.branch_point()?;
-        *held = Some(vigia_core::Standing::Since { at, named });
+    match held {
+        Some(standing) => Ok(standing.clone()),
+        None => {
+            let (at, named) = worktree.branch_point()?;
+            Ok(held
+                .insert(vigia_core::Standing::Since { at, named })
+                .clone())
+        }
     }
-    Ok(held.clone().unwrap_or_default())
 }
 
 /// The paths in one wake's burst that the pane is actually having.
@@ -329,7 +333,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         root: worktree.workdir().to_string_lossy().into_owned(),
         branch: None,
         elsewhere: Counted::default(),
-        standing: vigia_core::Standing::default(),
         branch_point: None,
         screen: View::default(),
         regions: Regions::default(),
@@ -455,7 +458,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // The third of three, and it joined last. `Regions::step_at` yields only
             // `Scroll` and `ScrollList` today, neither of which reads a height, so the
             // literal zero this replaced was right by accident rather than by rule.
-            let height = shell.diff_rows_for(step, frame.files())?;
+            let height = shell.diff_rows_for(step, &frame)?;
             match shell.apply(step, &mut frame, &worktree, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
@@ -560,7 +563,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         if let Some(drag) = drag_action(&event, regions, on) {
                             // The height, because a drag on the diff's bar is a
                             // `DiffTo` and `DiffTo` reads one.
-                            let height = shell.diff_rows_for(drag, frame.files())?;
+                            let height = shell.diff_rows_for(drag, &frame)?;
                             match shell.apply(drag, &mut frame, &worktree, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
@@ -600,7 +603,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     };
                     // Asked for only by the one action that reads it, and that is the
                     // drain's doing rather than tidiness.
-                    let height = shell.diff_rows_for(action, frame.files())?;
+                    let height = shell.diff_rows_for(action, &frame)?;
                     shell.note_scroll(action, Instant::now());
                     match shell.apply(action, &mut frame, &worktree, height) {
                         Ok(true) => {}
@@ -852,9 +855,6 @@ struct Shell {
     root: String,
     /// What the header calls the branch, or `None` when there is none to call.
     branch: Option<String>,
-    /// Where in the history the pane is standing. The frame walks it; this is
-    /// what the header draws.
-    standing: vigia_core::Standing,
     /// The branch point, resolved once and kept as the standing it produces, so
     /// no frame pays a merge-base and the shell needs no `gix` of its own.
     branch_point: Option<vigia_core::Standing>,
@@ -925,15 +925,16 @@ impl Shell {
     fn diff_rows_for(
         &mut self,
         action: Action,
-        files: &[vigia_core::FileChange],
+        frame: &vigia_core::Frame,
     ) -> Result<usize, Failure> {
         if !action.needs_height() {
             return Ok(0);
         }
+        let files = frame.files();
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            &self.standing.label(),
+            &frame.standing().label(),
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1068,7 +1069,9 @@ impl Shell {
             self.deselect();
         }
         let carried = self.app.apply(action, frame, height)?;
-        self.stand(frame, worktree);
+        if action == Action::ToggleStanding {
+            self.stand(frame, worktree);
+        }
         Ok(carried)
     }
 
@@ -1091,10 +1094,9 @@ impl Shell {
         } else {
             vigia_core::Standing::Current
         };
-        if wanted == self.standing {
+        if &wanted == frame.standing() {
             return;
         }
-        self.standing = wanted.clone();
         frame.stand(wanted);
         // Walked here for `ToggleStaged`'s reason: the frame this paint draws
         // has to be the one the token names.
@@ -1516,6 +1518,7 @@ impl Shell {
         // file count so the read happens on exactly the frames that draw the answer.
         // That is the whole of I4 for this read.
         self.branch = worktree.branch();
+        let position = frame.standing().label();
 
         // The chrome is built before the layout, not after, because the footer takes a
         // second line at narrow widths and `body_layout` has to know whether this frame
@@ -1523,7 +1526,7 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            &self.standing.label(),
+            &position,
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1575,7 +1578,7 @@ impl Shell {
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            &self.standing.label(),
+            &position,
             self.pointing(),
             self.elsewhere,
             &self.root,

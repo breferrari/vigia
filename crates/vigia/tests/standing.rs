@@ -58,8 +58,18 @@ fn since(worktree: &Worktree) -> Standing {
     Standing::Since { at, named }
 }
 
+/// The body's first row, which on an empty pane is B3's one line.
+fn body_line(view: &View, position: &str, app: &App) -> String {
+    drawn_row(view, position, app, 1)
+}
+
 /// The header a `View` and a position draw together, as one line of text.
 fn header(view: &View, position: &str, app: &App) -> String {
+    drawn_row(view, position, app, 0)
+}
+
+/// Row `y` of a pane drawing `view` while standing where `position` says.
+fn drawn_row(view: &View, position: &str, app: &App, y: u16) -> String {
     let chrome = Chrome {
         position: position.to_owned(),
         ..app.chrome(
@@ -89,7 +99,7 @@ fn header(view: &View, position: &str, app: &App) -> String {
     let backend = terminal.backend().clone();
     let buffer = backend.buffer();
     (buffer.area.left()..buffer.area.right())
-        .map(|x| buffer[(x, 0)].symbol().to_owned())
+        .map(|x| buffer[(x, y)].symbol().to_owned())
         .collect::<String>()
         .trim()
         .to_owned()
@@ -287,5 +297,60 @@ fn the_branch_point_is_taken_once_and_a_refusal_keeps_nothing() {
     assert!(
         !app.standing(),
         "the reading stayed at the branch point the shell could not resolve"
+    );
+}
+
+/// An empty pane says which comparison it is empty *for*, and off the live pane
+/// that comparison is the token's.
+///
+/// B3 spends the body's one row on the fact that is the body's own. `no unstaged
+/// changes` under `since main` spends it on a walk this frame did not make, which
+/// is worse than spending it on nothing.
+#[test]
+fn an_empty_since_run_says_what_it_found_nothing_since() {
+    let scratch = Scratch::new("standing-empty");
+    scratch.write("src/base.rs", "one\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "baseline"]);
+    scratch.git(&["branch", "-M", "main"]);
+    scratch.git(&["checkout", "-q", "-b", "work"]);
+    // Added on the branch and taken away again, so the branch has commits to
+    // measure from, nothing to show for them, and a clean worktree: both readings
+    // are empty and the words are the only thing that tells them apart.
+    scratch.write("src/gone.rs", "temporary\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "add it"]);
+    std::fs::remove_file(scratch.root().join("src/gone.rs")).expect("remove");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "take it away"]);
+
+    let worktree = scratch.worktree();
+    let standing = since(&worktree);
+    let label = standing.label();
+    let app = App::new();
+    let mut frame = worktree.frame();
+
+    let view = drawn(&mut frame, standing);
+    assert_eq!(
+        view.files, 0,
+        "the fixture has {} changed files, so the pane below is not the empty \
+         state this gate is about",
+        view.files
+    );
+
+    let line = body_line(&view, &label, &app);
+    assert!(
+        line.contains(&format!("no changes {label}")),
+        "the empty pane says {line:?} while standing {label:?}, so it names a \
+         comparison it is not making"
+    );
+
+    // Non-vacuity: the same empty pane, read the other way, keeps today's words.
+    let live = drawn(&mut frame, Standing::Current);
+    assert_eq!(live.files, 0, "the live pane is not empty either");
+    let line = body_line(&live, "current", &app);
+    assert!(
+        line.contains("no unstaged changes"),
+        "the live pane stopped saying which comparison it is empty for: {line:?}"
     );
 }
