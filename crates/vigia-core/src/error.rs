@@ -46,6 +46,11 @@ pub enum Error {
         /// The underlying I/O failure.
         source: std::io::Error,
     },
+    /// The commit a position measures from could not be resolved.
+    Position(Box<dyn std::error::Error + Send + Sync>),
+    /// This branch has no other branch to measure from, or no commit in common
+    /// with one.
+    NoBranchPoint,
     /// One file could not be normalised the way git's clean filter would.
     Filter {
         /// Repository-relative path that could not be normalised.
@@ -78,6 +83,8 @@ impl Error {
             | Error::Watch(_)
             | Error::FilterSetup(_)
             | Error::Store { .. }
+            | Error::Position(_)
+            | Error::NoBranchPoint
             | Error::Canonicalise { .. } => None,
         }
     }
@@ -153,6 +160,10 @@ impl fmt::Display for Error {
             Error::Canonicalise { path, source } => {
                 write!(f, "could not canonicalise {}: {source}", path.display())
             }
+            Error::Position(e) => write!(f, "could not resolve where to measure from: {e}"),
+            Error::NoBranchPoint => f.write_str(
+                "this branch has no other branch to measure from, so there is no point to stand at",
+            ),
         }
     }
 }
@@ -161,12 +172,14 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Discover(e) => Some(e),
-            Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) => Some(e.as_ref()),
+            Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) | Error::Position(e) => {
+                Some(e.as_ref())
+            }
             Error::Read { source, .. }
             | Error::Store { source, .. }
             | Error::Canonicalise { source, .. } => Some(source),
             Error::Filter { source, .. } => Some(source.as_ref()),
-            Error::Bare | Error::MissingBlob { .. } => None,
+            Error::Bare | Error::MissingBlob { .. } | Error::NoBranchPoint => None,
         }
     }
 }

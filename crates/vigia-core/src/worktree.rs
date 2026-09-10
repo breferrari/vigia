@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use gix::bstr::{BString, ByteSlice};
@@ -10,6 +11,7 @@ use crate::filter::Filter;
 use crate::frame::Frame;
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
+use crate::position::Position;
 use crate::watch::{WatchOptions, Watcher};
 
 /// Knobs that change what a change sweep costs, and what it reports.
@@ -159,6 +161,16 @@ impl Worktree {
             // Unborn, detached at nothing, or an unreadable `HEAD`.
             Err(_) => self.repo.empty_tree().id().detach(),
         };
+        self.against_index(tree, options)
+    }
+
+    /// One tree against the index, which is the staged run's own walk with the
+    /// tree left to the caller.
+    fn against_index(
+        &self,
+        tree: gix::ObjectId,
+        options: ChangeOptions<'_>,
+    ) -> Result<Vec<FileChange>> {
         let index = self
             .repo
             .index_or_empty()
@@ -191,6 +203,150 @@ impl Worktree {
             return Err(Error::Status(Box::new(e)));
         }
         Ok(changes)
+    }
+
+    /// The commit this branch left the one it tracks, and what to call it.
+    ///
+    /// The name matters as much as the id: a reader is thinking `main`, not a
+    /// hash, so the header draws the branch and the diff uses the merge-base
+    /// behind it. Resolved through the branch's own upstream first, then the
+    /// remote's default, then the two names a repository with neither is
+    /// overwhelmingly likely to use.
+    ///
+    /// # Errors
+    ///
+    /// There is no other branch to measure from, or no commit in common with it.
+    pub fn branch_point(&self) -> Result<(gix::ObjectId, String)> {
+        let head = self
+            .repo
+            .head_id()
+            .map_err(|e| Error::Position(Box::new(e)))?
+            .detach();
+        for (reference, named) in self.candidates() {
+            let Ok(other) = self.repo.find_reference(reference.as_str()) else {
+                continue;
+            };
+            let Ok(other) = other.into_fully_peeled_id() else {
+                continue;
+            };
+            let other = other.detach();
+            // A branch that is its own upstream has no point to measure from:
+            // the merge-base is HEAD and the run would be empty for a reason
+            // nothing on screen explains.
+            if other == head {
+                continue;
+            }
+            if let Ok(base) = self.repo.merge_base(head, other) {
+                return Ok((base.detach(), named));
+            }
+        }
+        Err(Error::NoBranchPoint)
+    }
+
+    /// The references `branch_point` tries, in order, with the name each would
+    /// put in the header.
+    fn candidates(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if let Ok(Some(head)) = self.repo.head_ref()
+            && let Some(Ok(upstream)) = head.remote_tracking_ref_name(gix::remote::Direction::Fetch)
+        {
+            let full = upstream.as_bstr().to_string();
+            // `refs/remotes/origin/main` reads as `origin/main`, which is what a
+            // reader would type.
+            let short = full
+                .strip_prefix("refs/remotes/")
+                .unwrap_or(&full)
+                .to_owned();
+            out.push((full, short));
+        }
+        for name in ["main", "master"] {
+            out.push((format!("refs/heads/{name}"), name.to_owned()));
+            out.push((
+                format!("refs/remotes/origin/{name}"),
+                format!("origin/{name}"),
+            ));
+        }
+        out
+    }
+
+    /// The run the position names, which for `Current` is the pane's own walk.
+    ///
+    /// # Errors
+    ///
+    /// The walk fails, which is a failure of the whole comparison.
+    pub fn changes_at<'h>(
+        &self,
+        position: &Position,
+        options: ChangeOptions<'h>,
+    ) -> Result<Changes<'h>> {
+        match position.at() {
+            None => self.changes_with(options),
+            Some(base) => Ok(Changes::over(
+                Inner::Staged(self.since(base, options)?.into_iter()),
+                options.hide,
+            )),
+        }
+    }
+
+    /// Everything since `base`: that commit's tree against the working tree.
+    ///
+    /// Two walks, because `gix` offers tree-against-index and
+    /// index-against-worktree and the working tree is not a tree. The path set is
+    /// their union, and **each path's before side is the base tree's**, which is
+    /// what makes this one diff against `base` rather than two diffs printed
+    /// together: a file changed on both sides of the index would otherwise show
+    /// its index blob as the thing it changed from, which is a state the reader
+    /// never asked about.
+    ///
+    /// A path whose two halves cancel is still a row. Detecting that it came back
+    /// to the base content is a read per path, and `SPEC.md` §3's I4 is what says
+    /// a walk does not read content; the diff under it draws zero hunks and says
+    /// so, which is the cheaper honesty.
+    ///
+    /// # Errors
+    ///
+    /// Either walk fails, which is a failure of the whole comparison.
+    fn since(&self, base: gix::ObjectId, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
+        // A position measures from a commit and the walk below diffs a tree, so
+        // the peel is the whole of the difference between the two.
+        let tree = self
+            .repo
+            .find_object(base)
+            .map_err(|e| Error::Position(Box::new(e)))?
+            .peel_to_tree()
+            .map_err(|e| Error::Position(Box::new(e)))?
+            .id;
+        let staged = self.against_index(tree, options)?;
+        let mut unstaged = Vec::new();
+        for change in self.changes_of(Origin::Unstaged, options)? {
+            unstaged.push(change?);
+        }
+
+        // Keyed by path, so the union is one pass over each walk rather than a
+        // scan of the first for every entry of the second.
+        let mut from_base: HashMap<String, FileChange> = staged
+            .into_iter()
+            .map(|change| (change.path.clone(), change))
+            .collect();
+
+        let mut out = Vec::with_capacity(from_base.len() + unstaged.len());
+        for mut change in unstaged {
+            if let Some(based) = from_base.remove(&change.path) {
+                // The path moved on both sides of the index. What it changed from
+                // is the base tree's blob, and what it is now is on disk.
+                change.before = based.before;
+                change.kind = compose(&based.kind, &change.kind);
+            }
+            change.origin = Origin::Unstaged;
+            out.push(change);
+        }
+        // Whatever the working tree did not touch is the base-to-index change
+        // whole, and its index blob is what the file holds.
+        out.extend(from_base.into_values().map(|mut change| {
+            change.origin = Origin::Unstaged;
+            change
+        }));
+        Ok(out)
     }
 
     /// Start watching this working tree for change.
@@ -440,6 +596,24 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     match kind {
         ChangeKind::Conflict | ChangeKind::TypeChange | ChangeKind::Removed => None,
         _ => Some(Side::Worktree),
+    }
+}
+
+/// What a path did between the base tree and the working tree, given what it did
+/// on each side of the index.
+///
+/// The endpoints decide it and the middle does not: a file the index added and
+/// the working tree then deleted was never in the base and is not on disk, so it
+/// belongs to neither run. Everything else reads off whether the base had it and
+/// whether the worktree does.
+fn compose(from_base: &ChangeKind, in_worktree: &ChangeKind) -> ChangeKind {
+    let absent_from_base = matches!(from_base, ChangeKind::Added | ChangeKind::IntentToAdd);
+    let gone_from_worktree = matches!(in_worktree, ChangeKind::Removed);
+    match (absent_from_base, gone_from_worktree) {
+        (true, true) => ChangeKind::Removed,
+        (true, false) => ChangeKind::Added,
+        (false, true) => ChangeKind::Removed,
+        (false, false) => ChangeKind::Modified,
     }
 }
 
