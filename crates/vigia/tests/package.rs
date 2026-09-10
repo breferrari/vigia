@@ -1933,7 +1933,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// they sit in the same context window as the work: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 386762),
+    ("SPEC.md", 388313),
     ("REVOCATIONS.md", 11910),
     ("ROADMAP.md", 96001),
     ("RULINGS.md", 99973),
@@ -2264,7 +2264,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// issue reopened cannot be declined to fit, which is #374.
 ///
 /// Raised twice on 2026-09-08, three times on 2026-09-09 and once on 2026-09-10,
-/// session, by 316, 790, 789, 725, 127, 2,346 and then 832 bytes, for the reason
+/// session, by 316, 790, 789, 725, 127, 1,493, 2,409 and 832 bytes, for the reason
 /// the bullet above already names rather than a new one: a defect fix has to state
 /// what the code now does, and a filed issue has to take a roadmap row. Three
 /// passes that day each needed contract prose and none added a paragraph anyone
@@ -2277,12 +2277,16 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
 /// reader's. The fourth raise is five issues filed in one pass, and a filed issue
 /// with no roadmap row is invisible to the take order rather than merely
 /// deprioritised, so the row is owed the moment the issue exists. The fifth is a
-/// sixth issue filed into the same block. The sixth is the third's reason again: a
-/// gesture arrived, and the state behind it contradicts a written cap and a written
-/// region count, so the paragraphs that say why are contract rather than commentary.
-/// The seventh is that gesture's road not taken, which `RULINGS.md` is for: a branch
-/// refused only in a commit message is one the next session re-argues from zero. The 63 bytes of slack the fifth raise left were spent first.
-const WRITTEN_LAYER_TOTAL: usize = 637763;
+/// sixth issue filed into the same block. The sixth is 1,493 and it is the third
+/// raise this rule's own bullet already licenses: the gestures sheet draws a line
+/// the document did not name, and a surface the binary has and the contract does
+/// not is the drift the opening section exists to stop. It is also the first
+/// raise to restore slack the per-file ceilings had quietly eaten, one of them
+/// having been raised against this total rather than alongside it. The seventh is
+/// that bullet again, for a gesture whose state contradicts a written cap and a
+/// written region count, and the eighth is that gesture's road not taken: a branch
+/// refused only in a commit message is one the next session re-argues from zero.
+const WRITTEN_LAYER_TOTAL: usize = 639314;
 
 /// Each document weighs no more than its budget.
 #[test]
@@ -2344,5 +2348,46 @@ fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
         "the upgrade tells a reader to stop the servers. That frees the path and \
          leaves every open session half-connected, which is the worse of the two \
          failures and the one no surface explains."
+    );
+}
+
+/// The README says what the pane is before it says how to install it.
+///
+/// Bounded to the half above the install heading on purpose. Both tokens appear
+/// far below it already, so a search over the whole file passes today and would
+/// have passed on the day the defect was reported.
+#[test]
+fn the_readme_names_what_the_pane_is_before_installation() {
+    let readme = repo_file("README.md");
+    let (above, _) = readme
+        .split_once("## 📦 Install")
+        .expect("README.md still has an install heading");
+
+    for wanted in ["`?`", vigia::CONFIG_FILE] {
+        assert!(
+            above.contains(wanted),
+            "a reader meets {wanted} for the first time below the install \
+             heading, which is past the point they have decided whether this is \
+             for them"
+        );
+    }
+}
+
+/// `SPEC.md` quotes what the sheet says the pane is, in the words it says it.
+///
+/// The document's copy is the one a session reads before changing the drawer, so
+/// a spelling that moved in the code and not here leaves the contract describing
+/// a sheet the binary no longer draws.
+#[test]
+fn the_spec_quotes_the_sheets_purpose_lines() {
+    let spec = repo_file("SPEC.md");
+    let missing: Vec<&str> = vigia::SHEET_PURPOSE
+        .into_iter()
+        .filter(|line| !spec.contains(line))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the sheet opens on {missing:?} and SPEC.md quotes neither, so the \
+         document describes a surface the binary no longer has"
     );
 }
