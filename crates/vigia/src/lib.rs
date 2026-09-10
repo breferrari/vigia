@@ -1060,8 +1060,9 @@ impl Shell {
         self.branch_point = None;
         self.app.stands(false);
         frame.stand(vigia_core::Standing::Current);
-        if let Err(e) = frame.advance() {
-            self.app.warn(e.to_string());
+        match frame.advance() {
+            Ok(()) => self.app.stood(),
+            Err(e) => self.app.warn(e.to_string()),
         }
     }
 
@@ -2008,6 +2009,9 @@ mod tests {
             "matches!(e, vigia_core::Error::Standing(_))",
             "self.branch_point = None;",
             "frame.stand(vigia_core::Standing::Current);",
+            // Coming home is a move like any other, and the row the pane was on
+            // names an unrelated file in the run it lands in.
+            "Ok(()) => self.app.stood(),",
         ] {
             assert!(
                 failed.contains(rule),
