@@ -4,6 +4,11 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.45.0] - 2026-09-10
+
+- The body draws the file list alone, and `o` is what asks for it
+- The gestures sheet opens on what the pane is
+
 ## [0.44.0] - 2026-09-09
 
 - A subject naming a key survives the notes filter, and an emptied range says what it held
