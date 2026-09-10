@@ -411,7 +411,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
 | ✅ | The pre-flight read a truncated board and called it drift | [#369](https://github.com/breferrari/vigia/issues/369) |
 | ⬜ | The pre-flight's cheapest loop is its slowest | [#371](https://github.com/breferrari/vigia/issues/371) |
-| ⬜ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |
+| ✅ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |
 | ✅ | Clippy lints one platform, denies for three | [#376](https://github.com/breferrari/vigia/issues/376) |
 | ✅ | A row's wrap and its frame are sized by two expressions that disagree by two columns | [#474](https://github.com/breferrari/vigia/issues/474) |
 | ⬜ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
