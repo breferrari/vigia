@@ -80,7 +80,7 @@ const SESSION_CONTEXT_CEILING: usize = 0;
 /// `//!` is deliberately outside it. A module header is the one place RFC 505
 /// asks for length — it documents a file rather than an item, so there is no
 /// item for it to be longer than.
-const DOCBLOCK_LINES_CEILING: usize = 31;
+const DOCBLOCK_LINES_CEILING: usize = 29;
 
 /// Comments citing a tracker issue or pull request, as a ceiling that may only
 /// fall.
@@ -92,7 +92,7 @@ const DOCBLOCK_LINES_CEILING: usize = 31;
 /// history restated in a file nobody reads it from. Every citation left in the
 /// tree is of the first kind, so this cannot fall further without the tracker
 /// moving first, and it must not rise.
-const TRACKER_CEILING: usize = 9;
+const TRACKER_CEILING: usize = 6;
 
 fn crates_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")

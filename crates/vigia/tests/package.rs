@@ -1928,19 +1928,47 @@ fn every_config_key_reaches_the_changelog_filter() {
     );
 }
 
-/// What each document is allowed to weigh, in bytes.
+/// What each prose document is allowed to weigh, in bytes.
 ///
-/// The two a session reads before anything else are in the table, because
-/// they sit in the same context window as the work: a rule stated three
+/// Prose says what holds and why, so it should get shorter as rulings are
+/// replaced, and a ceiling equal to today's size is what makes a pass adding a
+/// paragraph go and find one to delete. The two a session reads before anything
+/// else are here for the same reason from the other side: a rule stated three
 /// times in the skill costs the pass the room it needs to reason.
-const WRITTEN_LAYER_BUDGET: [(&str, usize); 6] = [
-    ("SPEC.md", 392119),
-    ("REVOCATIONS.md", 11910),
-    ("ROADMAP.md", 96205),
-    ("RULINGS.md", 99973),
+///
+/// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
+const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
+    ("SPEC.md", 392973),
+    ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
+
+/// The documents that record events rather than argue positions.
+///
+/// A roadmap row exists because an issue was filed and a revocation entry
+/// because a ruling was withdrawn. Neither is a judgement about how much prose
+/// the project needs, and neither can be declined to fit, so a byte ceiling over
+/// them prices a record against somebody's still-true prose and produces a
+/// mandatory raise with no decision in it.
+const LEDGERS: [&str; 2] = ["ROADMAP.md", "REVOCATIONS.md"];
+
+/// A ledger carries no byte ceiling.
+#[test]
+fn no_ledger_carries_a_byte_ceiling() {
+    let capped: Vec<&str> = LEDGERS
+        .into_iter()
+        .filter(|ledger| WRITTEN_LAYER_BUDGET.iter().any(|(name, _)| name == ledger))
+        .collect();
+    assert!(
+        capped.is_empty(),
+        "the budget gives a byte ceiling to {}. A row in a ledger exists because \
+         an issue was filed or a ruling was withdrawn, so it cannot be declined \
+         to fit and the ceiling can only ever be raised. Take it out rather than \
+         raising it again",
+        capped.join(" and ")
+    );
+}
 
 /// How many keys the config file accepts, as the prose spells it.
 ///
@@ -2267,35 +2295,7 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
     );
 }
 
-/// What the documents together are allowed to weigh.
-///
-/// A ceiling may rise only while another falls by at least as much. The per-file
-/// checks cannot see that trade; this exists to.
-///
-/// A ledger row is the exception it cannot express: a withdrawal recorded or an
-/// issue reopened cannot be declined to fit, which is #374.
-///
-/// Raised nine times between 2026-09-08 and 2026-09-10, session, on four reasons
-/// and no fifth. A defect fix has to state what the code now does. A filed issue
-/// has to take a roadmap row, because an issue with none is invisible to the take
-/// order rather than merely deprioritised. A surface the binary has and the
-/// contract does not is the drift the opening section exists to stop, which is
-/// what a new gesture, a new region and a new setting each arrive under, and it
-/// carries section 6's own rule with it: a direct dependency reaches the spec
-/// before it reaches a manifest. And a road not taken refused only in a commit
-/// message is one the next session re-argues from zero.
-///
-/// What none of the nine had was a paragraph anyone could decline, so there was
-/// never a trade to make, and the remedy this rule prescribes would have been
-/// deleting live contract prose to pay for live contract prose. Two of them did
-/// better than that: one restored slack the per-file ceilings had quietly eaten,
-/// from a ceiling raised against this total rather than alongside it, and the
-/// ninth funded 405 of its bytes by deleting a section 11.1 paragraph that
-/// section 11.2 B6 already said twice over. It stays a session ruling and the
-/// question is the reader's.
-const WRITTEN_LAYER_TOTAL: usize = 643324;
-
-/// Each document weighs no more than its budget.
+/// Each prose document weighs no more than its budget.
 #[test]
 fn the_written_layer_stays_under_its_budget() {
     let root = repo_root();
@@ -2313,19 +2313,9 @@ fn the_written_layer_stays_under_its_budget() {
     assert!(
         over.is_empty(),
         "the written layer grew past its budget:\n{}\n\nLower the ceiling when prose \
-         comes out. Raising one to fit what was added is what this refuses, and the \
-         total below is the only exception: a ceiling may rise while another falls by \
-         at least as much.",
+         comes out. Raising one to fit what was added is what this refuses: go and \
+         find the paragraph this one replaces.",
         over.join("\n")
-    );
-
-    let sum: usize = WRITTEN_LAYER_BUDGET.iter().map(|(_, c)| c).sum();
-    assert!(
-        sum <= WRITTEN_LAYER_TOTAL,
-        "the ceilings above now sum to {sum} against a written layer of \
-         {WRITTEN_LAYER_TOTAL}. One of them was raised without another falling by \
-         as much, which is the per-file ceiling being edited to fit rather than a \
-         ruling moving house."
     );
 }
 

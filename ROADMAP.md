@@ -160,6 +160,7 @@ Milestone: [Phase 7.5](https://github.com/breferrari/vigia/milestone/9)
 
 | | Task | Issue |
 |---|---|---|
+| ✅ | An mcs tech pack installs the notes server and its hooks. **Contributed** | [#505](https://github.com/breferrari/vigia/issues/505) |
 | ✅ | A wrapped diff shorter than the region draws a bar the pointer cannot see | [#413](https://github.com/breferrari/vigia/issues/413) |
 | ✅ | The thumb resizes when the reader scrolls into a file that changed off screen. **Reported from use** | [#412](https://github.com/breferrari/vigia/issues/412) |
 | ✅ | The height is recounted when a moved file settles, not at the next event | [#425](https://github.com/breferrari/vigia/issues/425) |
@@ -334,6 +335,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | A hidden path still wakes the watch. **Deferred by [#495](https://github.com/breferrari/vigia/issues/495): it changes what I1 measures** | [#501](https://github.com/breferrari/vigia/issues/501) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
+| ✅ | A gate can rebuild its expected value from the value under test, and one did | [#499](https://github.com/breferrari/vigia/issues/499) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ⬜ | A frame reads a whole file to discover it is binary | [#18](https://github.com/breferrari/vigia/issues/18) |
@@ -411,7 +413,8 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
 | ✅ | The pre-flight read a truncated board and called it drift | [#369](https://github.com/breferrari/vigia/issues/369) |
 | ⬜ | The pre-flight's cheapest loop is its slowest | [#371](https://github.com/breferrari/vigia/issues/371) |
-| ⬜ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |
+| ✅ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |
+| ⬜ | Nothing holds the written layer's two lists against the documents that exist | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Clippy lints one platform, denies for three | [#376](https://github.com/breferrari/vigia/issues/376) |
 | ✅ | A row's wrap and its frame are sized by two expressions that disagree by two columns | [#474](https://github.com/breferrari/vigia/issues/474) |
 | ⬜ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
@@ -428,6 +431,7 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 
 | Item | Surfaced | Moved to | Why |
 |---|---|---|---|
+| Nothing holds the written layer's two lists against the documents that exist ([#504](https://github.com/breferrari/vigia/issues/504)) | #374, 2026-09-10 | Shelf | Found by the altitude pass over #374. Closing it means classifying every tracked `.md` as prose, ledger or out of the rule's reach, which is a ruling about each of them and a long way past what #374 asked. The population is already discoverable through `register.rs::markdown()`; what is missing is the ruling on the third bucket. |
 | A row's wrap and its frame are sized by two expressions that disagree by two columns ([#474](https://github.com/breferrari/vigia/issues/474)) | #466, 2026-09-08 | Shelf, taken 2026-09-09 | Found measuring the enclosure's width rung. `View::layout` wraps at `content_width(gutter, width)` and `Renderer::note_row` draws at `glyphs.width - line_origin(gutter)`, and below some width the second runs two columns past the first: at fifteen columns a body wraps at seven inside a box whose inner width is nine. `content` is what every content line wraps at and not only a note's, so moving either expression moves the wrap of every line at narrow widths and needs the wrap suite around it, which is a width contract beside #466's one column. It is also why the enclosure's rung has no gate on its wide side: `edge_width` set one column wider survives the whole suite, where one column narrower goes red at once. The slack is what no drawn edge can see, and it is two columns: the edge is not cut until the third shave, because the room it is drawn in runs that far past the content the boundary was decided on |
 | The bar's span is spelled at each call site rather than decided once for the map and the painter ([#424](https://github.com/breferrari/vigia/issues/424)) | #413, 2026-09-04 | Shelf | `regions` and `render` each spell both bars' `(span, of)` by hand, one line apart on the same inputs, and #413 was the diff's pair diverging. The geometry and the column were unified on 2026-08-21 and the span was left; deciding both bars once for both readers touches `bar_for`'s callers, `with_bar`, `scrollbar` and the draw closure, which is structural beside a one-line fix, so it waits for a bar pass or a third site |
 | The sheet has no roomy rung: no air, no sections, and a reorder that would invert the keep-set ([#285](https://github.com/breferrari/vigia/issues/285)) | #220, 2026-08-24 | Phase 8 | #220 carried three rungs under one title, which is #125's shape. Split before a plan was written. This rung needs a display reorder the height ladder's keep-set is load-bearing on, so it cannot ride along with the width rung. |

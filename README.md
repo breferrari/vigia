@@ -315,6 +315,8 @@ claude mcp add --scope user vigia -- vigia mcp
 
 That covers every project you open from now on. Claude Code tells the server which project the session is in, so one registration finds whichever worktree you are watching, and the notes are kept per worktree, so two repositories never see each other's.
 
+If you keep your Claude Code setup with [`mcs`](https://github.com/mcs-cli/mcs), this registration and the hooks below come as a tech pack instead: [`docs/TECHPACK.md`](docs/TECHPACK.md).
+
 The agent gets three tools and one resource. `notes` lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen`. `reply` writes a line under a note and leaves it unresolved. `resolve` closes one, and its line is required, because that line is what you watch arrive. The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
 
 **`--scope project` is the other shape, and it is a decision about your team rather than about you.** It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
