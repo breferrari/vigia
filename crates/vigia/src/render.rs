@@ -689,11 +689,10 @@ const fn counts_edge(pane: u16, trailing: u16) -> usize {
 
 /// The facts about the tree, in the order a narrowing header gives them up.
 ///
-/// `N binary` says how much of the run the header's total leaves out and `N hidden`
-/// how much of the tree the count itself leaves out; both draw only where there is
-/// some, and hidden is given up first of the two, being the one fact here the
-/// reader configured. The staged total is owed whenever the run is on, zero
-/// included, which is why it is the one that draws its own nothing.
+/// `N binary` says how much of the run the total leaves out and `N hidden` how
+/// much of the tree the count itself does; both draw only where there is some,
+/// and hidden is given up first of the two, being the one fact here the reader
+/// configured. The staged total is owed whenever the run is on, zero included.
 fn facts_of(files: usize, binary: usize, hidden: usize, staged: Option<usize>) -> Vec<String> {
     if files == 0 && hidden == 0 {
         return Vec::new();
@@ -777,15 +776,20 @@ fn header_left(
     rungs
 }
 
-/// The one body line a worktree with no changes gets.
-fn empty_state_with(staged: Option<usize>, elsewhere: usize) -> String {
+/// The one body line a worktree with no changes gets: what this run holds, then
+/// where the rest of the work went.
+///
+/// A pattern that ate every change owns the first clause, because at a width
+/// that drops the header's count this row is the only thing left on screen.
+fn empty_state_with(staged: Option<usize>, elsewhere: usize, hidden: usize) -> String {
+    let held = match (hidden, staged) {
+        (0, Some(_)) => NOTHING_ANYWHERE.to_owned(),
+        (0, None) => NOTHING_CHANGED.to_owned(),
+        (hidden, _) => format!("{hidden} hidden"),
+    };
     match (staged, elsewhere) {
-        // The run is on and there is nothing in either. One line, both named.
-        (Some(_), _) => NOTHING_ANYWHERE.to_owned(),
-        // The run is off and the index has work in it: say where the work went.
-        (None, n) if n > 0 => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{n} staged"),
-        // A genuinely clean tree, which is B3's own line unchanged.
-        (None, _) => NOTHING_CHANGED.to_owned(),
+        (None, n) if n > 0 => format!("{held}{FACT_SEPARATOR}{n} staged"),
+        _ => held,
     }
 }
 
@@ -2150,7 +2154,7 @@ pub fn render(
             full,
             view,
             area,
-            &empty_state_with(chrome.staged, chrome.elsewhere),
+            &empty_state_with(chrome.staged, chrome.elsewhere, view.hidden),
         );
         if bar.drawn() {
             painter.scrollbar(

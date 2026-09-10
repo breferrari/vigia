@@ -264,6 +264,60 @@ fn a_pattern_is_its_text() {
     assert!(format!("{one:?}").contains("^target/"));
 }
 
+/// The pattern holds across ticks, which is the shape the pane actually runs in.
+///
+/// Every other gate here advances a fresh frame once. A live pane arms the
+/// pattern before the first walk and then advances the same frame for the life
+/// of the session, migrating caches between ticks and re-counting both runs
+/// whenever the staged toggle moves. The count is rewritten by each walk, so
+/// what it says has to follow the tree rather than accumulate.
+#[test]
+fn a_pattern_survives_the_ticks_a_session_is_made_of() {
+    let scratch = fixture("hidden-ticks");
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.hide(Some(Hidden::new(r"^target/").expect("a pattern")));
+
+    frame.advance().expect("advance");
+    assert_eq!(frame.hidden(), 1);
+    assert_eq!(paths(&frame).len(), 2);
+
+    // A second tick over an unchanged tree says the same thing, rather than
+    // adding this walk's count to the last one's.
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.hidden(),
+        1,
+        "the count accumulates across ticks instead of describing this one"
+    );
+
+    // The hidden file stops being changed, and the count follows the tree down.
+    scratch.git(&["checkout", "--", GENERATED]);
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.hidden(),
+        0,
+        "the count kept a path the tree no longer changes"
+    );
+    assert_eq!(paths(&frame).len(), 2);
+
+    // And the staged run joins mid-session, which clears both caches and walks
+    // a second comparison the pattern has to reach as well.
+    scratch.write(GENERATED, "staged noise\n");
+    scratch.git(&["add", "-A"]);
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert!(
+        !paths(&frame).iter().any(|path| path == GENERATED),
+        "a run added mid-session drew a path the pattern covers: {:?}",
+        paths(&frame)
+    );
+    assert!(
+        frame.hidden() >= 1,
+        "a run added mid-session hid nothing at all"
+    );
+}
+
 /// What a pattern costs the walk it filters, both fixtures interleaved.
 ///
 /// Not a gate. The shipped default is no pattern, so every budget gate measures

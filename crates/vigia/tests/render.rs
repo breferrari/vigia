@@ -7099,3 +7099,52 @@ fn a_tree_whose_every_change_is_hidden_still_says_so() {
         "a clean tree grew a fact it never had: {clean:?}"
     );
 }
+
+/// The body says it too, and this is the row that matters most.
+///
+/// The header gives the count up as it narrows, so below the width that holds it
+/// the body is the only thing left saying why the pane is empty. It said `no
+/// unstaged changes` over twelve hidden ones, which is the lie the count exists
+/// to stop, one row down and in the larger type.
+#[test]
+fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
+    for width in [30u16, 40, 80, 120] {
+        let view = View {
+            files: 0,
+            hidden: 12,
+            ..nothing_changed()
+        };
+        let body = row_text(&screen(width, 6, &view, &chrome()), 1);
+        assert!(
+            body.contains("12 hidden"),
+            "at {width} columns the body of a pane hiding everything reads              {body:?}"
+        );
+        assert!(
+            !body.contains("no unstaged changes"),
+            "at {width} columns the body says the tree is clean over twelve              changes the reader hid: {body:?}"
+        );
+
+        // A genuinely clean tree keeps B3's own line, at every one of these widths.
+        let clean = row_text(&screen(width, 6, &nothing_changed(), &chrome()), 1);
+        assert!(
+            clean.contains("no unstaged changes"),
+            "at {width} columns a clean tree stopped saying so: {clean:?}"
+        );
+    }
+
+    // Both runs on, and the pattern still owns the first clause.
+    let view = View {
+        files: 0,
+        hidden: 12,
+        ..nothing_changed()
+    };
+    let both = Chrome {
+        staged: Some(0),
+        ..chrome()
+    };
+    let body = row_text(&screen(80, 6, &view, &both), 1);
+    assert!(
+        body.contains("12 hidden") && !body.contains("no staged or unstaged"),
+        "with both runs on and everything hidden the body reads {body:?}"
+    );
+}

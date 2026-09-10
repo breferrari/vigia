@@ -1153,6 +1153,36 @@ fn a_note_on_a_line_only_the_staged_diff_holds_is_placed_against_it() {
     assert_eq!(with["current_text"], "staged three");
 }
 
+/// A `hide` pattern is the pane's, and the server has no pane.
+///
+/// Armed here it would report a note on a hidden path as adrift, which is what a
+/// note on a clean file looks like, and the agent would answer about a file it
+/// was told nothing had happened to. The staged toggle beside it in the same
+/// file does still travel, which is what makes this a ruling rather than the
+/// server ignoring its config.
+#[test]
+fn a_pattern_that_hides_a_path_from_the_pane_does_not_hide_it_from_the_agent() {
+    let rig = Rig::new("mcp-hide");
+    rig.scratch.edit_line(PATH, 2, "three, edited");
+    rig.store
+        .put(&pinned("hide-1", PATH, Side::New, 3, "three, edited"))
+        .expect("put");
+
+    let config = rig.root.path().join(".config").join("vigia");
+    fs::create_dir_all(&config).expect("make the config directory");
+    // A pattern covering the very file the note is on.
+    fs::write(config.join("config"), format!("hide = ^{PATH}$\n")).expect("write the view default");
+
+    let mut server = rig.server();
+    let listed = document(&mut server, false);
+    let note = note_named(&listed, "hide-1");
+    assert_eq!(
+        note["placement"], "at",
+        "the pane's pattern reached the server, so a note on a hidden path reads          as one on a file nothing changed: {note}"
+    );
+    assert_eq!(note["current_line"], 3);
+}
+
 #[test]
 fn a_note_on_a_binary_file_and_an_old_side_note_outside_every_hunk_carry_no_context() {
     let scratch = Scratch::new("mcp-binary");

@@ -462,10 +462,8 @@ impl<'w> Frame<'w> {
         self.staged_at
     }
 
-    /// Keep every path this pattern matches out of the walk.
-    ///
-    /// Set once, before the first [`Frame::advance`], because the file it comes
-    /// from is read once before the terminal is taken and never again.
+    /// Keep every path this pattern matches out of the walk, from the next
+    /// [`Frame::advance`] on.
     pub fn hide(&mut self, hide: Option<Hidden>) {
         self.hide = hide;
     }
