@@ -355,16 +355,23 @@ fn the_list_takes_the_rows_the_diff_gave_up() {
         deep.list,
         capped.list
     );
+    // Against the capped body rather than against itself: `deep.lead + deep.list`
+    // *is* `deep.rows()` for this shape by construction, so the two sides have to
+    // come from different panes' arithmetic or the assertion cannot fail.
     assert_eq!(
-        deep.list + deep.lead,
         deep.rows(),
-        "the list did not take the whole body, so rows went somewhere the layout \
-         does not name"
+        capped.rows(),
+        "the two shapes report different bodies on one pane, so rows went \
+         somewhere the layout does not name"
     );
+    // Every changed file, not `deep.list`: the region is the whole body here, and
+    // what the ruling is about is how many files a reader can see at once.
     assert_eq!(
         view.list.len(),
-        deep.list,
-        "the collect did not fill the region the split gave it"
+        FILES,
+        "the collect drew {} of {FILES} file(s) into a region with room for {}",
+        view.list.len(),
+        deep.list
     );
 }
 
@@ -381,7 +388,13 @@ fn a_list_shorter_than_the_body_leaves_the_rest_blank() {
 
     let (body, view) = screen(&mut app, &mut frame, at, false);
     assert_eq!(view.files, 2, "the fixture is not two files");
-    assert_eq!(body.list, 2, "the list is not the changed-file count");
+    assert_eq!(view.list.len(), 2, "the list is not the changed-file count");
+    // The region stays the whole body and the two entries fill the top of it, which
+    // is what makes the rest blank rather than absent.
+    assert!(
+        body.list > view.list.len(),
+        "the region shrank to its entries, so the rows below them left the body"
+    );
     assert_eq!(body.diff, 0, "a diff region reappeared under a short list");
     assert!(
         !body.rule,
@@ -412,18 +425,19 @@ fn an_empty_worktree_still_says_so_in_the_overview() {
         "a clean worktree in the overview kept no region for B3's sentence"
     );
 
-    let (buf, _, _) = drawn(&mut app, &mut frame, at, false);
-    let whole: String = (0..at.height)
-        .map(|row| {
-            (0..at.width)
-                .map(|col| buf[(col, row)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Read out of the diff's own region, not off the whole pane: the header and the
+    // footer draw whatever the worktree is doing, so a sweep of the pane passes
+    // whether or not the sentence itself was ever drawn.
+    let (buf, view, chrome) = drawn(&mut app, &mut frame, at, false);
+    let where_it_is = regions(at, &chrome, &view);
     assert!(
-        whole.split_whitespace().count() > 2,
-        "the pane says nothing at all about a clean worktree:\n{whole}"
+        where_it_is.diff.rows > 0,
+        "the pane published no diff region, so there is nowhere for the sentence"
+    );
+    let said = text_of(&buf, where_it_is.diff);
+    assert!(
+        said.split_whitespace().count() > 2,
+        "the diff's region says nothing about a clean worktree:\n{said}"
     );
 }
 

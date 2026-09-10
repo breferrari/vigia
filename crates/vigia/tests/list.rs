@@ -46,6 +46,13 @@ fn railed(app: &App) -> vigia::Chrome {
     }
 }
 
+fn watching(app: &App) -> vigia::Chrome {
+    vigia::Chrome {
+        overview: true,
+        ..chrome(app)
+    }
+}
+
 fn split(width: u16, height: u16, files: usize) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
@@ -593,6 +600,7 @@ fn the_two_regions_tile_the_body_exactly() {
     let mut checked = 0;
     let mut saw_a_clamp = false;
     let mut saw_rail = false;
+    let mut saw_overview = false;
 
     for height in 1..=40u16 {
         // Two widths past the rail's arrival, so the one subtraction this gate exists
@@ -602,42 +610,48 @@ fn the_two_regions_tile_the_body_exactly() {
                 let area = Rect::new(0, 0, width, height);
                 // Railed, so the two widths past 134 reach `clamped_to`'s rail
                 // arm rather than sweeping the stacked shape five times. Since
-                // The default chrome never draws one.
-                let chrome = railed(&App::new());
-                let full = body_layout(area, &chrome, files, files);
-                saw_rail |= full.rail;
+                // The default chrome never draws one. The list-alone chrome is
+                // swept beside it because it is the third arm, and it is the one
+                // whose `rows()` counts the list rather than the diff.
+                for chrome in [railed(&App::new()), watching(&App::new())] {
+                    let full = body_layout(area, &chrome, files, files);
+                    saw_rail |= full.rail;
+                    saw_overview |= full.overview;
 
-                for have in 0..=LIST_SETTLED + 2 {
-                    let body = full.clamped_to(have);
-                    if body.list != full.list {
-                        saw_a_clamp = true;
-                    }
+                    for have in 0..=LIST_SETTLED + 2 {
+                        let body = full.clamped_to(have);
+                        if body.list != full.list {
+                            saw_a_clamp = true;
+                        }
 
-                    // The footer's own height is not exposed, so it is recovered from
-                    // the unclamped split rather than restated: whatever it is,
-                    // clamping must not change it.
-                    let footer = usize::from(height).saturating_sub(1 + full.rows());
-                    assert_eq!(
-                        1 + body.rows() + footer,
-                        usize::from(height),
-                        "at {width}x{height} over {files} files with {have} \
+                        // The footer's own height is not exposed, so it is recovered from
+                        // the unclamped split rather than restated: whatever it is,
+                        // clamping must not change it.
+                        let footer = usize::from(height).saturating_sub(1 + full.rows());
+                        assert_eq!(
+                            1 + body.rows() + footer,
+                            usize::from(height),
+                            "at {width}x{height} over {files} files with {have} \
                          entries, {body:?} plus a header and {footer} footer rows \
                          does not tile the pane"
-                    );
-                    // Beside a rail there is no rule at all, which is §11.2 B11
-                    // dissolved rather than reopened: the list is beside the diff and
-                    // there is no boundary for a horizontal rule to be drawn on.
-                    assert_eq!(
-                        body.rule,
-                        !body.rail && body.list > 0,
-                        "a rule and a list disagree about each other: {body:?}"
-                    );
-                    assert_eq!(
-                        body.clamped_to(have),
-                        body,
-                        "clamping twice is not clamping once: {body:?}"
-                    );
-                    checked += 1;
+                        );
+                        // Beside a rail there is no rule at all, which is §11.2 B11
+                        // dissolved rather than reopened: the list is beside the diff and
+                        // there is no boundary for a horizontal rule to be drawn on. With
+                        // the list alone there is none either, and for the stronger
+                        // reason: a rule marks a boundary, and nothing is below it.
+                        assert_eq!(
+                            body.rule,
+                            !body.rail && !body.overview && body.list > 0,
+                            "a rule and a list disagree about each other: {body:?}"
+                        );
+                        assert_eq!(
+                            body.clamped_to(have),
+                            body,
+                            "clamping twice is not clamping once: {body:?}"
+                        );
+                        checked += 1;
+                    }
                 }
             }
         }
@@ -653,6 +667,11 @@ fn the_two_regions_tile_the_body_exactly() {
         saw_rail,
         "no shape in the sweep drew a rail, so `clamped_to`'s rail arm is covered \
          by a comment rather than by this gate"
+    );
+    assert!(
+        saw_overview,
+        "no shape in the sweep drew the list alone, so `clamped_to`'s third arm is \
+         covered by a comment rather than by this gate"
     );
 }
 

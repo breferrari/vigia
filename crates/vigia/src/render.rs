@@ -1614,10 +1614,9 @@ impl Body {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // Before the rail, which needs a diff to sit beside. `files > 0` is the rail's
-        // own guard: B3's sentence draws in the diff's region, so an empty worktree
-        // keeps one.
+        // own guard: the empty-worktree sentence draws in the diff's region.
         if chrome.overview && files > 0 {
-            return Self::alone(body, list_rows);
+            return Self::alone(body);
         }
 
         // The rail is decided before the row clamps, because it removes two of them.
@@ -1651,17 +1650,17 @@ impl Body {
     }
 
     /// The same body as the list alone, with no diff region under it.
-    fn alone(body: usize, list_rows: usize) -> Self {
-        // `Body::split`'s `affordable` test is not reused the way `beside` reuses it:
-        // it reserves `MIN_BODY` rows for a diff this shape does not have.
+    fn alone(body: usize) -> Self {
+        // `Body::split`'s `affordable` reserves `MIN_BODY` for a diff this shape lacks.
         if body <= LEAD_ROWS {
             return Self::diff_only(body);
         }
-        let rows = body - LEAD_ROWS;
         Self {
             lead: LEAD_ROWS,
-            // The quarter-pane cap does not apply: its reason names a diff this has none of.
-            list: list_rows.min(rows),
+            // The body, not the entry count: this region *is* the body, and a shorter
+            // one would leave rows belonging to nothing. The quarter-pane cap does not
+            // apply for the same reason it exists, which is the diff's share.
+            list: body - LEAD_ROWS,
             rule: false,
             diff: 0,
             diff_width: 0,
@@ -1712,9 +1711,15 @@ impl Body {
     /// Shrink the list to the rows a view actually carries, giving the rest back
     /// to the diff.
     pub fn clamped_to(self, have: usize) -> Self {
-        // Neither shape has anywhere to give the rows back *to*: beside a rail they
-        // sit in its own column, and with the list alone there is no diff region.
-        if self.rail || self.overview {
+        // Shrinking this region would take rows out of the body that nothing gives
+        // back, because here the region is the body. Unfilled entries draw blank.
+        if self.overview {
+            return self;
+        }
+        // Beside a rail there is nothing to give back. The rows the list does not use
+        // are in the rail's own column, and the diff is not below them: handing them
+        // over would draw the diff twice, once in each region.
+        if self.rail {
             if have == 0 {
                 // The page count survives the collapse.
                 return Self {
@@ -2218,8 +2223,7 @@ const KEYBOARD: [Gesture; 17] = [
         keys: ["s", "s"],
         verb: ["one file, or the whole diff", "one file only"],
     },
-    // Inside the field maxima the rows above state, at 27 and 14. The two spellings
-    // share `list alone`, which lets one token stand for this row at every rung.
+    // The two spellings share `list alone`, so one token names this row at every rung.
     Gesture {
         keys: ["o", "o"],
         verb: ["the file list alone, no diff", "the list alone"],
@@ -5230,8 +5234,7 @@ mod sheet_tables {
     }
     #[test]
     fn the_rows_given_up_before_the_keep_set_are_the_view_toggles() {
-        // Addressed by the cell it draws, not by its index. View toggles outlive the
-        // note rows, and both survive the narrowest sheet.
+        // Addressed by the cell it draws, not by its index. View toggles outlive notes.
         const EXPECTED: [&str; 4] = ["r", "s", "o", "w"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
