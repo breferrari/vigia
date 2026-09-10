@@ -1919,18 +1919,22 @@ fn an_overview_frame_holds_the_frame_budget() {
     assert_eq!(
         view.list.len(),
         screen.list,
-        "the overview drew {} of the {} rows the split gave it, so this gate is          timing a region that is mostly blank",
+        "the overview drew {} of the {} rows the split gave it, so this gate is \
+         timing a region that is mostly blank",
         view.list.len(),
         screen.list
     );
     assert!(
         view.list.len() > layout_of(&App::new(), OVERVIEW_PANE, FILES).list,
-        "the region is {} rows, no deeper than the capped list every other state          draws, so this gate times no more of it than the gates already here do",
+        "the region is {} rows, no deeper than the capped list every other state \
+         draws, so this gate times no more of it than the gates already \
+         here do",
         view.list.len()
     );
     assert!(
         view.rows.is_empty(),
-        "{} diff row(s) were built, so the state under test is not the one this          gate is named for",
+        "{} diff row(s) were built, so the state under test is not the one this \
+         gate is named for",
         view.rows.len()
     );
 

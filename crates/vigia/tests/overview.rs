@@ -152,7 +152,9 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
     );
     assert!(
         FILES > shipped.list,
-        "the fixture has {FILES} files against a shipped list of {} on a {DEEP}-row \n         pane, so a list that ran to the body and one that stopped at the cap would \n         draw the same rows",
+        "the fixture has {FILES} files against a shipped list of {} on a {DEEP}-row \
+         pane, so a list that ran to the body and one that stopped at the cap \
+         would draw the same rows",
         shipped.list
     );
     let churn = frame.churn().expect("churn").expect("measured");
@@ -343,7 +345,8 @@ fn the_list_takes_the_rows_the_diff_gave_up() {
 
     assert!(
         capped.list < FILES,
-        "the shipped pane drew all {FILES} file(s) without being capped, so the \n         comparison below is against nothing"
+        "the shipped pane drew all {FILES} file(s) without being capped, so the \
+         comparison below is against nothing"
     );
     assert!(
         deep.list > capped.list,
@@ -524,7 +527,8 @@ fn the_overview_is_legible_at_forty_columns() {
     // neither over-occupies the pane nor stops short of it.
     assert_eq!(
         where_it_is.list.width, NARROW,
-        "the list is not the pane's full width, so the row widths below say          nothing about the pane"
+        "the list is not the pane's full width, so the row widths below say \
+         nothing about the pane"
     );
     let listed = text_of(&buf, where_it_is.list);
     for (row, line) in listed.lines().enumerate() {
