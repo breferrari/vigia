@@ -227,7 +227,14 @@ fn a_path_renamed_twice_arrives_once_under_its_last_name() {
     let scratch = branched("position-rename-twice");
     scratch.git(&["mv", KEPT, "src/middle.rs"]);
     scratch.git(&["commit", "-m", "move it once"]);
-    scratch.git(&["mv", "src/middle.rs", "src/last.rs"]);
+    // On disk and not through git, so the second move is the working tree's:
+    // `git mv` stages it, which puts both halves in the same walk and asks the
+    // union to pair nothing.
+    std::fs::rename(
+        scratch.root().join("src/middle.rs"),
+        scratch.root().join("src/last.rs"),
+    )
+    .expect("move it again");
 
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     let (at, named) = worktree.branch_point().expect("a branch point");
@@ -254,12 +261,14 @@ fn a_path_renamed_twice_arrives_once_under_its_last_name() {
 
 /// A conflicted path is a conflict since the branch point too.
 ///
-/// `reads_side` is what makes a conflict draw no working-tree bytes. A composed
-/// kind of `Modified` over a change whose right side was never read draws the
-/// whole of the base content as deleted, which is a fabricated diff in exactly
-/// the state a reader stands at the branch point to understand.
+/// The tree walk reports no unmerged path, so this one never reaches `compose`
+/// and does not gate it: the composition's own table is a unit test beside it,
+/// named for the reason. What this asserts is the half a reader can see, that a
+/// path in conflict mid-merge still reads as one from the branch point and is
+/// still not diffable, since `reads_side` is what stops anything reading a side
+/// it has not got.
 #[test]
-fn a_conflicted_path_is_not_composed_into_a_modification() {
+fn a_conflicted_path_in_a_since_run_still_reads_as_a_conflict() {
     let scratch = branched("position-conflict");
     scratch.write(KEPT, "one\nbranch\n");
     scratch.git(&["commit", "-am", "on the branch"]);

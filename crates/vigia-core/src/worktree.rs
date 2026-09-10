@@ -334,7 +334,7 @@ impl Worktree {
             // middle name as a row for a file that is not on disk.
             let based = from_base
                 .remove(&change.path)
-                .or_else(|| moved_from(&change.kind).and_then(|from| from_base.remove(from)));
+                .or_else(|| change.kind.source().and_then(|from| from_base.remove(from)));
             if let Some(based) = based {
                 // The path moved on both sides of the index. What it changed from
                 // is the base tree's blob, and what it is now is on disk.
@@ -605,14 +605,6 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     match kind {
         ChangeKind::Conflict | ChangeKind::TypeChange | ChangeKind::Removed => None,
         _ => Some(Side::Worktree),
-    }
-}
-
-/// The name a change moved from, where it moved at all.
-fn moved_from(kind: &ChangeKind) -> Option<&str> {
-    match kind {
-        ChangeKind::Renamed { from } | ChangeKind::Copied { from } => Some(from),
-        _ => None,
     }
 }
 
@@ -967,6 +959,75 @@ mod tests {
             );
         } else {
             assert_eq!(converted, raw);
+        }
+    }
+}
+
+#[cfg(test)]
+mod composing {
+    use super::{ChangeKind, compose};
+
+    /// The kinds a walk can hand the composition, and what it must make of them.
+    ///
+    /// A unit test because one arm of this table is reachable from the outside on
+    /// one platform only: a type change needs a stored symlink, and the tree walk
+    /// does not report an unmerged path at all, so `crates/vigia-core/tests/
+    /// standing.rs` can drive every other arm and not these two.
+    #[test]
+    fn the_working_trees_own_kind_outranks_the_composition() {
+        for undiffable in [ChangeKind::Conflict, ChangeKind::TypeChange] {
+            for from_base in [
+                ChangeKind::Modified,
+                ChangeKind::Added,
+                ChangeKind::Renamed {
+                    from: "old".to_owned(),
+                },
+            ] {
+                assert_eq!(
+                    compose(&from_base, &undiffable),
+                    Some(undiffable.clone()),
+                    "{from_base:?} then {undiffable:?} composed to something                      diffable, and the row it produces has no right-hand side to                      read, so the whole of the base content draws as deleted"
+                );
+            }
+        }
+    }
+
+    /// The rest of the table, which the integration gates drive as well.
+    #[test]
+    fn the_endpoints_decide_and_the_middle_does_not() {
+        let renamed = ChangeKind::Renamed {
+            from: "old".to_owned(),
+        };
+        for (from_base, in_worktree, want) in [
+            (ChangeKind::Added, ChangeKind::Removed, None),
+            (ChangeKind::IntentToAdd, ChangeKind::Removed, None),
+            (
+                ChangeKind::Added,
+                ChangeKind::Modified,
+                Some(ChangeKind::Added),
+            ),
+            (
+                ChangeKind::Modified,
+                ChangeKind::Removed,
+                Some(ChangeKind::Removed),
+            ),
+            (
+                ChangeKind::Modified,
+                ChangeKind::Modified,
+                Some(ChangeKind::Modified),
+            ),
+            (renamed.clone(), ChangeKind::Modified, Some(renamed.clone())),
+            (
+                renamed.clone(),
+                ChangeKind::Removed,
+                Some(ChangeKind::Removed),
+            ),
+        ] {
+            assert_eq!(
+                compose(&from_base, &in_worktree),
+                want,
+                "{from_base:?} then {in_worktree:?}"
+            );
         }
     }
 }

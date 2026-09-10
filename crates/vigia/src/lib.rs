@@ -1069,9 +1069,7 @@ impl Shell {
             self.deselect();
         }
         let carried = self.app.apply(action, frame, height)?;
-        if action == Action::ToggleStanding {
-            self.stand(frame, worktree);
-        }
+        self.stand(frame, worktree);
         Ok(carried)
     }
 
@@ -1081,7 +1079,16 @@ impl Shell {
     /// repository question and `App` answers none of those. A branch with nothing
     /// to measure from keeps the pane where it is and says so, rather than
     /// emptying it for a reason nothing explains.
+    ///
+    /// Called after every action and answering in a comparison for all but the one
+    /// that can change the request. Asking the state rather than keeping a list of
+    /// the actions that move it is what stops the list going stale behind a second
+    /// gesture that moves it later.
     fn stand(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        let parked = !matches!(frame.standing(), vigia_core::Standing::Current);
+        if self.app.standing() == parked {
+            return;
+        }
         let wanted = if self.app.standing() {
             match branch_point_of(&mut self.branch_point, worktree) {
                 Ok(standing) => standing,
