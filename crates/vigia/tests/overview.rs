@@ -112,11 +112,15 @@ fn drawn(app: &mut App, frame: &mut Frame, at: Rect, rail: bool) -> (Buffer, Vie
     (buf, view, chrome)
 }
 
-/// One region's rows, as text.
-fn text_of(buf: &Buffer, at: Rect, region: vigia::Region) -> String {
+/// One region's rows, as text, over the region's own columns.
+///
+/// Not `support::rows_of`, which trims each row's trailing blanks: the gate at
+/// forty columns is about a row occupying exactly its region's width, and a
+/// trimmed row cannot fail it.
+fn text_of(buf: &Buffer, region: vigia::Region) -> String {
     (region.top..region.top + region.rows)
         .map(|row| {
-            (0..at.width)
+            (region.left..region.left + region.width)
                 .map(|col| buf[(col, row)].symbol())
                 .collect::<String>()
         })
@@ -210,7 +214,7 @@ fn the_overview_draws_the_list_and_no_diff_row() {
         "the pane published no list region, so there is nothing to read"
     );
 
-    let listed = text_of(&buf, at, where_it_is.list);
+    let listed = text_of(&buf, where_it_is.list);
     for index in 0..view.list.len() {
         let path = &frame.files()[index].path;
         assert!(
@@ -501,7 +505,13 @@ fn the_overview_is_legible_at_forty_columns() {
         where_it_is.list.rows > 0,
         "the narrow pane published no list region"
     );
-    let listed = text_of(&buf, at, where_it_is.list);
+    // The region is the whole pane, so a row that fills it exactly is a row that
+    // neither over-occupies the pane nor stops short of it.
+    assert_eq!(
+        where_it_is.list.width, NARROW,
+        "the list is not the pane's full width, so the row widths below say          nothing about the pane"
+    );
+    let listed = text_of(&buf, where_it_is.list);
     for (row, line) in listed.lines().enumerate() {
         assert_eq!(
             line.chars().count(),

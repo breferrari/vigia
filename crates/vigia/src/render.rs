@@ -1614,8 +1614,8 @@ impl Body {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // Before the rail, which needs a diff to sit beside. `files > 0` is the rail's
-        // own guard: B3's empty sentence is drawn in the diff's region, so an empty
-        // worktree has to keep one to say so in.
+        // own guard: B3's sentence draws in the diff's region, so an empty worktree
+        // keeps one.
         if chrome.overview && files > 0 {
             return Self::alone(body, list_rows);
         }
@@ -1660,8 +1660,7 @@ impl Body {
         let rows = body - LEAD_ROWS;
         Self {
             lead: LEAD_ROWS,
-            // The quarter-pane cap does not apply: its reason is that the map may not
-            // grow at the diff's expense, and there is no diff here to charge it to.
+            // The quarter-pane cap does not apply: its reason names a diff this has none of.
             list: list_rows.min(rows),
             rule: false,
             diff: 0,
@@ -1713,24 +1712,9 @@ impl Body {
     /// Shrink the list to the rows a view actually carries, giving the rest back
     /// to the diff.
     pub fn clamped_to(self, have: usize) -> Self {
-        // Nor anything to give the rows back *to* when the body is the list alone:
-        // the stacked branch below would open a diff region and rule off nothing.
-        if self.overview {
-            if have == 0 {
-                return Self {
-                    sheet_pages: self.sheet_pages,
-                    ..Self::diff_only(self.rows())
-                };
-            }
-            return Self {
-                list: self.list.min(have),
-                ..self
-            };
-        }
-        // Beside a rail there is nothing to give back. The rows the list does not use
-        // are in the rail's own column, and the diff is not below them: handing them
-        // over would draw the diff twice, once in each region.
-        if self.rail {
+        // Neither shape has anywhere to give the rows back *to*: beside a rail they
+        // sit in its own column, and with the list alone there is no diff region.
+        if self.rail || self.overview {
             if have == 0 {
                 // The page count survives the collapse.
                 return Self {
