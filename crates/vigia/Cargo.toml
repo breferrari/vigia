@@ -1,6 +1,6 @@
 [package]
 name = "vigia"
-description = "A live diff monitor for the terminal."
+description = "A live diff monitor for the terminal, and a note wire to the coding agent in the pane beside it."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

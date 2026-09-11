@@ -2067,7 +2067,7 @@ fn the_spec_names_every_key_the_config_file_accepts() {
     }
 }
 
-/// `README.md`'s config block is a config file, and it teaches every key.
+/// The config doc's block is a config file, and it teaches every key.
 ///
 /// The block is handed to the parser rather than scanned, which is the whole
 /// strength of this gate: a scan of a documented example is a scan of prose
@@ -2075,16 +2075,16 @@ fn the_spec_names_every_key_the_config_file_accepts() {
 /// a key the binary does not have fails here without a second list to keep.
 /// Only the other direction, a key the block never names, needs reading.
 #[test]
-fn the_readme_teaches_a_config_file_that_parses_and_names_every_key() {
-    let readme = repo_file("README.md");
+fn the_config_doc_teaches_a_config_file_that_parses_and_names_every_key() {
+    let readme = repo_file("docs/CONFIG.md");
     let block = readme
         .split_once("# ~/.config/vigia/config")
         .and_then(|(_, rest)| rest.split_once("```"))
         .map(|(block, _)| block)
-        .expect("README.md shows a reader what to put in ~/.config/vigia/config");
+        .expect("docs/CONFIG.md shows a reader what to put in ~/.config/vigia/config");
 
     let parsed = vigia::config::parse(block).unwrap_or_else(|why| {
-        panic!("README.md teaches a config file the binary refuses: {why}\n{block}")
+        panic!("docs/CONFIG.md teaches a config file the binary refuses: {why}\n{block}")
     });
     // What makes the parse an assertion rather than a formality: a block of
     // nothing but comments parses cleanly and teaches nobody anything.
@@ -2387,15 +2387,17 @@ fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
 
 /// The README says what the pane is before it says how to install it.
 ///
-/// Bounded to the half above the install heading on purpose. Both tokens appear
-/// far below it already, so a search over the whole file passes today and would
-/// have passed on the day the defect was reported.
+/// Bounded to the half above the **first install command** rather than above a
+/// heading: installing is a step of the tour now rather than a section of its own,
+/// and the rule was always about what a reader has read before being asked to
+/// install. Both tokens appear far below it too, so a search over the whole file
+/// passes today and would have passed on the day the defect was reported.
 #[test]
 fn the_readme_names_what_the_pane_is_before_installation() {
     let readme = repo_file("README.md");
     let (above, _) = readme
-        .split_once("## 📦 Install")
-        .expect("README.md still has an install heading");
+        .split_once("cargo install vigia")
+        .expect("README.md no longer tells a reader how to install");
 
     for wanted in ["`?`", vigia::CONFIG_FILE] {
         assert!(
