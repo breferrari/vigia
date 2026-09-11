@@ -1762,10 +1762,16 @@ fn changelog_entry(
 /// The filter is the only part of the release that decides what a user is
 /// told, and it is a heuristic over commit subjects, so it is driven here
 /// rather than trusted. One subject of each class it sorts on: prefixed
-/// internal work, unprefixed internal work naming a document, a subject whose
-/// visible half shares a sentence with an internal word, and two changes a
-/// reader can observe, whose trailing references belong to the tracker and
-/// come off.
+/// internal work, unprefixed internal work naming a document, a credential
+/// subject the release machinery owns, a subject whose visible half shares a
+/// sentence with an internal word, two naming the pane over a word that would
+/// otherwise drop them, and two changes a reader can observe, whose trailing
+/// references belong to the tracker and come off.
+///
+/// The two naming the pane are the direction this file is least able to be
+/// wrong in. A visible change has no mention anywhere but the section, so the
+/// filter dropping one is invisible to every check downstream, and the words
+/// that drop it match anywhere in the sentence rather than at an anchor.
 #[cfg(unix)]
 #[test]
 fn the_changelog_entry_keeps_what_a_reader_can_see() {
@@ -1773,8 +1779,11 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
 
     let subjects = "roadmap: a row moves\n\
                     The roadmap marks a row done (#449)\n\
+                    The release token is the one that already exists (#146)\n\
                     `Esc` closes the sheet, and the ruling that said otherwise is revoked (#394)\n\
                     `w` wraps a long line, capped at two (#272) (#344)\n\
+                    B12: the keymap gets a sheet over the pane, not a longer hint bar (#273)\n\
+                    A click on the position token opens the list (#508)\n\
                     The pane stops showing what is no longer there (#340) (#341)\n";
     let (passed, left, _) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
     assert!(
@@ -1793,6 +1802,8 @@ fn the_changelog_entry_keeps_what_a_reader_can_see() {
         [
             "- `Esc` closes the sheet, and the ruling that said otherwise is revoked",
             "- `w` wraps a long line, capped at two",
+            "- B12: the keymap gets a sheet over the pane, not a longer hint bar",
+            "- A click on the position token opens the list",
             "- The pane stops showing what is no longer there",
         ],
         "the generator kept the wrong subjects:\n{left}"
