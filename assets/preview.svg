@@ -230,13 +230,13 @@
            is drawn rather than spelled in box characters: SPEC.md 5.1 binds this
            picture to the element set and its promises, never to glyph-for-glyph
            fidelity, and a stroked rect is what a cell grid is approximating. -->
-      <rect x="88" y="306" width="700" height="68" rx="4" fill="none" stroke="#30363d"/>
-      <rect x="100" y="298" width="222" height="16" fill="#0d1117"/>
-      <text class="m dim" x="108" y="311" font-size="12">note &#183; src/engine/watch.rs:40</text>
+      <rect x="88" y="312" width="700" height="52" rx="4" fill="none" stroke="#30363d"/>
+      <rect x="100" y="304" width="222" height="16" fill="#0d1117"/>
+      <text class="m dim" x="108" y="317" font-size="12">note &#183; src/engine/watch.rs:40</text>
       <text class="m fg" x="108" y="346">this races the settle margin</text>
       <rect x="336.4" y="334" width="8" height="16" fill="#39c5cf"/>
-      <rect x="100" y="366" width="196" height="16" fill="#0d1117"/>
-      <text class="m faint" x="108" y="379" font-size="12">Enter sends &#183; Esc cancels</text>
+      <rect x="100" y="356" width="196" height="16" fill="#0d1117"/>
+      <text class="m faint" x="108" y="369" font-size="12">Enter sends &#183; Esc cancels</text>
 
       <rect x="8" y="376" width="884" height="24" fill="#0f2c1c"/>
       <rect x="8" y="376" width="3" height="24" fill="#3fb950"/>
