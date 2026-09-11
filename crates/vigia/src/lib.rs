@@ -1341,19 +1341,23 @@ impl Shell {
     /// The cell is armed before the action rather than after it, so the effect runs
     /// over the row the reader aimed at even when flipping it moves the caret.
     fn flip_menu(&mut self, action: Action, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        let before = self.app.settings();
+        self.apply_menu(action, frame, worktree);
+        // A pointer can land on the rule and the air around it, and `SPEC.md` §11.1
+        // writes the file for a toggle the reader pressed and nothing else ever.
+        if self.app.settings() == before {
+            return;
+        }
         self.menu_effect = Some(Timed::armed(
             motion::coalescing(SAID_ARRIVING),
             Instant::now(),
         ));
-        self.apply_menu(action, frame, worktree);
         self.remember();
     }
 
-    /// Write what the reader flipped back into their own file, where they asked.
-    ///
-    /// On the flip rather than on exit, which `SPEC.md` §11.2 B22 rules and I8 is
-    /// the reason for: the process can be ended in ways it runs no code for, so a
-    /// write deferred to the end is a write a reader cannot rely on.
+    /// Write what the reader flipped into their own file, on the flip rather than
+    /// on exit, which `SPEC.md` §11.2 B22 rules and I8 is the reason for: the
+    /// process can be ended in ways it runs no code for.
     ///
     /// A refusal turns remembering **off** as well as saying so. A row reading `on`
     /// over nothing being written is the invisible state the menu exists to remove,
@@ -2741,6 +2745,14 @@ mod tests {
         assert!(
             body.contains("self.remember()"),
             "`flip_menu` no longer writes the reader's file, so remembering is a row that says `on` and reaches nothing: {body}"
+        );
+        // And nothing is written for a press that moved nothing: the rule and the
+        // air around it are rows a pointer can land on, and a write there would
+        // clobber a hand-edit with a click that showed no sign of happening.
+        assert!(
+            body.contains("if self.app.settings() == before {"),
+            "`flip_menu` writes whatever the press did, so a click on the menu's own \
+             furniture reaches the reader's file: {body}"
         );
         // And the write is the last thing it does, after the flip has landed: a
         // write ahead of the action would keep the state the reader just left.

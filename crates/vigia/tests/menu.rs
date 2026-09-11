@@ -992,6 +992,61 @@ fn a_refused_write_turns_remembering_off_rather_than_only_saying_so() {
 }
 
 #[test]
+fn a_press_on_the_rule_or_the_air_around_it_moves_nothing() {
+    // The caret cannot land on them, but a pointer can: they are drawn rows inside
+    // the box, and `row_at` answers by arithmetic on the window. With remembering
+    // on, a press that flipped nothing would still have written the reader's file,
+    // clobbering a hand-edit with a click that showed no sign of happening.
+    let mut pane = Pane::open("menu-furniture");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let menu = laid.menu.expect("a menu region");
+        let (text, at) = drawn(&buf, &laid);
+
+        // The rule's own row, found by what it draws rather than by its index.
+        let rule = text
+            .lines()
+            .position(|line| {
+                let inside = line.trim_matches(['\u{2502}', ' ']);
+                !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
+            })
+            .expect("the menu draws no rule");
+        let furniture = [rule - 1, rule, rule + 1];
+
+        let before = app.settings();
+        for row in furniture {
+            let screen = at.y + u16::try_from(row).expect("a small row");
+            let offset = screen - menu.top - 2;
+            assert_eq!(
+                menu_route(&click(menu.left + 6, screen), Some(menu)),
+                MenuRoute::Row(offset),
+                "a press on row {row} is not reported as a row at all, so this gate \
+                 is about a cell the pointer cannot reach"
+            );
+            apply(app, frame, area(), Action::MenuRow(offset));
+            assert_eq!(
+                app.settings(),
+                before,
+                "a press on row {row}, which is the rule or the air around it, moved \
+                 a setting"
+            );
+        }
+
+        // Non-vacuity: the same press on a row that is a toggle does move one, so
+        // the loop above is about the furniture rather than about a dead action.
+        let real = u16::try_from(rule - 3).expect("a small row");
+        apply(app, frame, area(), Action::MenuRow(real - 2));
+        assert_ne!(
+            app.settings(),
+            before,
+            "no press in this box moves anything, so the assertions above prove \
+             nothing"
+        );
+    });
+}
+
+#[test]
 fn every_label_is_one_column_per_byte() {
     // `render::MENU_LABEL` sizes the label field with `str::len`, which is bytes,
     // because `width_of` is not const. That is only the same number while every
