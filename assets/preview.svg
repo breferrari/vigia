@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 496" width="900" height="496" role="img"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 548" width="900" height="548" role="img"
      aria-label="Mockup of the vigia terminal interface: a pinned list of changed files with sparklines, heat strips and line counts, the file being read marked with a caret, above a syntax highlighted diff with a scrollbar and a heading that repeats the same row for the file being read, its dot marking the file that just changed, a note box open under a changed line with a half-typed sentence for the coding agent in the pane beside it, and a status bar showing frame time, resident memory and the follow state.">
   <defs>
-    <clipPath id="win"><rect x="8" y="8" width="884" height="480" rx="12"/></clipPath>
+    <clipPath id="win"><rect x="8" y="8" width="884" height="532" rx="12"/></clipPath>
     <style>
       .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
       .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
@@ -11,7 +11,7 @@
     </style>
   </defs>
 
-  <rect x="8" y="8" width="884" height="480" rx="12" fill="#0d1117"/>
+  <rect x="8" y="8" width="884" height="532" rx="12" fill="#0d1117"/>
 
   <g clip-path="url(#win)">
     <!-- title bar -->
@@ -223,8 +223,10 @@
            only ever watches describes half the product.
 
            The number of the line the note is about stays lit, one row up, which is
-           what says which line the sentence is about. The box's own row carries no
-           number, because it is not a line of the file. The frame
+           what says which line the sentence is about. The box's own rows carry no
+           numbers, because they are not lines of the file, and the diff below keeps
+           every one of its own: the box takes three rows from the pane rather than
+           two from the hunk. The frame
            is drawn rather than spelled in box characters: SPEC.md 5.1 binds this
            picture to the element set and its promises, never to glyph-for-glyph
            fidelity, and a stroked rect is what a cell grid is approximating. -->
@@ -236,19 +238,32 @@
       <rect x="100" y="366" width="196" height="16" fill="#0d1117"/>
       <text class="m faint" x="108" y="379" font-size="12">Enter sends &#183; Esc cancels</text>
 
-      <rect x="8" y="402" width="884" height="24" fill="#2d1416"/>
-      <rect x="8" y="402" width="3" height="24" fill="#f85149"/>
-      <rect x="28" y="402" width="40" height="24" fill="#1f0d0f"/>
-      <text class="m faint" x="60" y="420" text-anchor="end">41</text>
-      <text class="m red" x="72" y="420">&#8722;</text>
-      <text class="m" x="120.4" y="420"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="fnn">flush</tspan><tspan class="fg">()</tspan></text>
+      <rect x="8" y="376" width="884" height="24" fill="#0f2c1c"/>
+      <rect x="8" y="376" width="3" height="24" fill="#3fb950"/>
+      <rect x="28" y="376" width="40" height="24" fill="#0a2013"/>
+      <text class="m faint" x="60" y="394" text-anchor="end">41</text>
+      <text class="m grn" x="72" y="394">+</text>
+      <text class="m fg" x="120.4" y="394">}</text>
 
-      <rect x="8" y="428" width="884" height="24" fill="#0f2c1c"/>
-      <rect x="8" y="428" width="3" height="24" fill="#3fb950"/>
-      <rect x="28" y="428" width="40" height="24" fill="#0a2013"/>
-      <text class="m faint" x="60" y="446" text-anchor="end">42</text>
-      <text class="m grn" x="72" y="446">+</text>
-      <text class="m kw" x="120.4" y="446">None</text>
+      <text class="m faint" x="60" y="420" text-anchor="end">42</text>
+      <text class="m" x="120.4" y="420"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="var">pending</tspan><tspan class="fg">.</tspan><tspan class="fnn">insert</tspan><tspan class="fg">(</tspan><tspan class="var">ev</tspan><tspan class="fg">.</tspan><tspan class="var">path</tspan><tspan class="fg">);</tspan></text>
+
+      <rect x="8" y="428" width="884" height="24" fill="#2d1416"/>
+      <rect x="8" y="428" width="3" height="24" fill="#f85149"/>
+      <rect x="28" y="428" width="40" height="24" fill="#1f0d0f"/>
+      <text class="m faint" x="60" y="446" text-anchor="end">43</text>
+      <text class="m red" x="72" y="446">&#8722;</text>
+      <text class="m" x="120.4" y="446"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="fnn">flush</tspan><tspan class="fg">()</tspan></text>
+
+      <rect x="8" y="454" width="884" height="24" fill="#0f2c1c"/>
+      <rect x="8" y="454" width="3" height="24" fill="#3fb950"/>
+      <rect x="28" y="454" width="40" height="24" fill="#0a2013"/>
+      <text class="m faint" x="60" y="472" text-anchor="end">44</text>
+      <text class="m grn" x="72" y="472">+</text>
+      <text class="m kw" x="120.4" y="472">None</text>
+
+      <text class="m faint" x="60" y="498" text-anchor="end">45</text>
+      <text class="m fg" x="88" y="498">}</text>
     </g>
 
     <!-- diff scrollbar: file-granular plus the fraction within the current
@@ -267,21 +282,21 @@
          thing: the shell draws the bar and then hands the *narrowed* rect to the
          content. What it can express is the wash reaching into the bar's columns
          and overwriting cells already drawn, which is what #214 is open about. -->
-    <rect x="882.8" y="190" width="6" height="276" rx="3" fill="#21262d"/>
-    <rect x="882.8" y="190" width="6" height="82" rx="3" fill="#8b949e"/>
+    <rect x="882.8" y="190" width="6" height="328" rx="3" fill="#21262d"/>
+    <rect x="882.8" y="190" width="6" height="108" rx="3" fill="#8b949e"/>
 
     <!-- status bar -->
-    <rect x="8" y="458" width="884" height="30" fill="#161b22"/>
-    <line x1="8" y1="458" x2="892" y2="458" stroke="#21262d" stroke-width="1"/>
+    <rect x="8" y="510" width="884" height="30" fill="#161b22"/>
+    <line x1="8" y1="510" x2="892" y2="510" stroke="#21262d" stroke-width="1"/>
     <!-- #80 cut this to q, f and ? from four hints that named keys the ? sheet
          carries. `m config` rejoined it with the config menu: HINT_RUNGS' widest
          rung holds all four and the ladder draws it wherever the line fits, which
          a pane this wide does. HINT_BASELINE sits one below it and decides only
          whether the footer takes a second line, so `m config` is the first hint
          given up and never costs the body a row. -->
-    <text class="m faint" x="32" y="478" font-size="12.5">q quit  &#183;  f follow  &#183;  m config  &#183;  ? keys</text>
-    <text class="m" x="866" y="478" font-size="12.5" text-anchor="end"><tspan class="cyn">0.8ms</tspan><tspan class="dim"> frame</tspan><tspan class="dim">&#160;&#160;&#160;</tspan><tspan class="cyn">24MiB</tspan><tspan class="dim">&#160;&#160;</tspan><tspan class="dim">follow </tspan><tspan class="grn">&#9654;</tspan><tspan class="dim">&#160;&#160;1/3</tspan></text>
+    <text class="m faint" x="32" y="530" font-size="12.5">q quit  &#183;  f follow  &#183;  m config  &#183;  ? keys</text>
+    <text class="m" x="866" y="530" font-size="12.5" text-anchor="end"><tspan class="cyn">0.8ms</tspan><tspan class="dim"> frame</tspan><tspan class="dim">&#160;&#160;&#160;</tspan><tspan class="cyn">24MiB</tspan><tspan class="dim">&#160;&#160;</tspan><tspan class="dim">follow </tspan><tspan class="grn">&#9654;</tspan><tspan class="dim">&#160;&#160;1/3</tspan></text>
   </g>
 
-  <rect x="8.5" y="8.5" width="883" height="479" rx="12" fill="none" stroke="#30363d"/>
+  <rect x="8.5" y="8.5" width="883" height="531" rx="12" fill="none" stroke="#30363d"/>
 </svg>
