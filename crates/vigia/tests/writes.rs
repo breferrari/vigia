@@ -577,6 +577,21 @@ fn a_flip_with_remembering_off_writes_nothing_at_all() {
         "a flip with remembering off wrote {}",
         path.display()
     );
+
+    // And the arm the loop skipped is one a reader reaches: with the row turned on
+    // the same joint puts the file there, so what is asserted above is a write that
+    // was live and held back rather than a call nothing could have made.
+    app.apply(Action::TogglePersist, &mut frame, 0)
+        .expect("turn remembering on");
+    assert!(
+        app.settings().persist,
+        "the row did not turn remembering on"
+    );
+    config::save(&path, &app.config()).expect("save");
+    assert!(
+        path.exists(),
+        "the same save with remembering on wrote nothing"
+    );
     let _ = &mut frame_scratch;
 }
 

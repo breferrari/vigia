@@ -2930,6 +2930,10 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
 #[must_use]
 pub fn menu_cell(area: Rect, chrome: &Chrome, files: usize) -> Option<Rect> {
     let menu = chrome.menu?;
+    // The reset spells no state, so there is no cell for a receipt to run over.
+    if !matches!(menu::ROWS.get(menu.caret.at)?, menu::Row::Toggle(_)) {
+        return None;
+    }
     let footer = Footer::plan(area, chrome, files).height();
     let plan = menu_drawn(area, footer, margins_of(area.width), menu)?;
     let window = menu.caret.window(plan.rows);

@@ -197,7 +197,7 @@ impl Row {
 /// Where the reader is inside the menu, which is all that survives between frames.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Caret {
-    /// The row it is on, as an index into [`SETTINGS`].
+    /// The row it is on, as an index into [`ROWS`].
     pub at: usize,
     /// The first row the window shows.
     pub top: usize,

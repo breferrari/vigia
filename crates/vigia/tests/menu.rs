@@ -10,7 +10,8 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use vigia::{
     Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, RESET, ROWS, Regions, SETTINGS,
-    Setting, Sheet, Theme, action_for, body_layout, menu_route, regions, render, scroll_mark,
+    Setting, Sheet, Theme, action_for, body_layout, menu_cell, menu_route, regions, render,
+    scroll_mark,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -1059,4 +1060,41 @@ fn every_label_is_one_column_per_byte() {
             setting.label()
         );
     }
+}
+
+/// The reset is an act rather than a state, and the menu's one motion is a
+/// flipped cell.
+#[test]
+fn the_reset_spells_no_state_and_no_receipt_runs_over_it() {
+    // `SPEC.md` §11.1 draws the reset "as the act it is and with no state cell", and
+    // the receipt is planned from the row the caret is on. Asked for on this row it
+    // answers with three blank cells at the right margin, which is a flash over
+    // nothing on the one press that changes every other row.
+    let mut pane = Pane::open("menu-reset-cell");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        assert!(
+            menu_cell(area(), &chrome(app), FILES).is_some(),
+            "the menu opens on a toggle, and that row's receipt has no cell to run \
+             over, so the assertion below is about the wrong thing"
+        );
+
+        let past_the_end = isize::try_from(ROWS.len()).expect("a short list");
+        apply(app, frame, area(), Action::MenuMove(past_the_end));
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let (text, _) = drawn(&buf, &laid);
+        let row = text
+            .lines()
+            .find(|line| line.contains(RESET))
+            .expect("the menu draws no reset row");
+        assert_eq!(
+            row.trim_matches(['│', ' ', CARET]),
+            RESET,
+            "the reset row spells something beside its own label: {row:?}"
+        );
+        assert!(
+            menu_cell(area(), &chrome(app), FILES).is_none(),
+            "a receipt is planned over a row that draws no state"
+        );
+    });
 }
