@@ -467,17 +467,17 @@ fn frame_budget_on(
     let screen = layout_of(&app, pane, FILES);
     let height = screen.diff;
 
+    // One match, read twice: the action that raises the overlay, and the words its
+    // box has to be drawn with once the frames are timed.
+    let asked: Option<(vigia::Action, &str, Option<&str>)> = match overlay {
+        Overlay::Bare => None,
+        Overlay::Sheet(rung) => Some((vigia::Action::ToggleSheet, "gestures", Some(rung))),
+        Overlay::Menu => Some((vigia::Action::ToggleMenu, "config menu", None)),
+    };
     // Retained state, so one toggle covers every frame the loop below times.
-    match overlay {
-        Overlay::Bare => {}
-        Overlay::Sheet(_) => {
-            app.apply(vigia::Action::ToggleSheet, &mut frame, height)
-                .expect("toggle the sheet");
-        }
-        Overlay::Menu => {
-            app.apply(vigia::Action::ToggleMenu, &mut frame, height)
-                .expect("toggle the menu");
-        }
+    if let Some((action, _, _)) = asked {
+        app.apply(action, &mut frame, height)
+            .expect("raise the overlay");
     }
 
     if depth > 0 {
@@ -600,12 +600,7 @@ fn frame_budget_on(
 
     // And when an overlay was asked for, one has to have been on the frames that
     // were timed.
-    let wanted: Option<(&str, Option<&str>)> = match overlay {
-        Overlay::Bare => None,
-        Overlay::Sheet(rung) => Some(("gestures", Some(rung))),
-        Overlay::Menu => Some(("config menu", None)),
-    };
-    if let Some((word, rung)) = wanted {
+    if let Some((_, word, rung)) = asked {
         // Inside the overlay's own rect, not over the pane.
         let laid = vigia::regions(
             pane,

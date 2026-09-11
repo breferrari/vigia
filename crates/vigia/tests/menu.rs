@@ -156,10 +156,43 @@ fn state_of(text: &str, label: &str) -> String {
         .to_owned()
 }
 
-/// The drawn box on a painted screen, as text, with the rect it occupies.
+/// The box as it was painted, found in the buffer by its own frame, and held
+/// against what `Regions` published.
+///
+/// Taking the rect from the region alone measures what the pointer is told and
+/// says nothing about what was drawn. The two are built by separate calls, so a
+/// gate reading only the region stays green while the drawn box moves under it:
+/// `no_toggle_the_menu_draws_moves_the_box_it_is_drawn_in` did exactly that
+/// against a mutation that tied the drawn box's height to the rail.
 fn drawn(buf: &Buffer, laid: &Regions) -> (String, Rect) {
-    let menu = laid.menu.expect("the menu published no region");
-    let at = Rect::new(menu.left, menu.top, menu.width, menu.height);
+    let area = *buf.area();
+    let corners =
+        |x: u16, y: u16, of: [char; 2]| of.iter().any(|c| buf[(x, y)].symbol() == c.to_string());
+    let (top, left) = (area.y..area.y + area.height)
+        .flat_map(|y| (area.x..area.x + area.width).map(move |x| (y, x)))
+        .find(|&(y, x)| {
+            corners(x, y, ['┌', '╭'])
+                && text_of(buf, Rect::new(x, y, area.width - x, 1)).contains(TITLE)
+        })
+        .expect("no config menu is painted anywhere on this screen");
+    let width = (left + 1..area.x + area.width)
+        .find(|&x| corners(x, top, ['┐', '╮']))
+        .map(|right| right + 1 - left)
+        .expect("the painted box has no closing corner on its title bar");
+    let height = (top + 1..area.y + area.height)
+        .find(|&y| corners(left, y, ['└', '╰']))
+        .map(|bottom| bottom + 1 - top)
+        .expect("the painted box has no bottom edge");
+    let at = Rect::new(left, top, width, height);
+
+    let menu = laid
+        .menu
+        .expect("the menu was painted and published no region");
+    assert_eq!(
+        (menu.left, menu.top, menu.width, menu.height),
+        (at.x, at.y, at.width, at.height),
+        "the region the pointer is told about is not the box that was drawn"
+    );
     (text_of(buf, at), at)
 }
 
@@ -517,16 +550,18 @@ fn no_toggle_the_menu_draws_moves_the_box_it_is_drawn_in() {
     let mut pane = Pane::open("menu-still");
     pane.with(|app, frame, highlighter, history| {
         apply(app, frame, area(), Action::ToggleMenu);
-        let (_, laid) = paint(app, frame, highlighter, history, area());
-        let first = laid.menu.expect("a menu region");
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        // Off the painted cells, not off the published region: the region is where
+        // the pointer is told the box is, and the claim is about where it was drawn.
+        let (_, first) = drawn(&buf, &laid);
 
         for setting in SETTINGS {
             apply(app, frame, area(), setting.action());
-            let (_, laid) = paint(app, frame, highlighter, history, area());
-            let now = laid.menu.expect("a menu region");
+            let (buf, laid) = paint(app, frame, highlighter, history, area());
+            let (_, now) = drawn(&buf, &laid);
             assert_eq!(
-                (now.left, now.top, now.width, now.height),
-                (first.left, first.top, first.width, first.height),
+                now,
+                first,
                 "flipping {:?} moved the box under the reader's hand",
                 setting.label()
             );

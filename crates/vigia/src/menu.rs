@@ -3,7 +3,6 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use ratatui::layout::Position;
 
 use crate::input::{Action, Sheet};
 
@@ -151,19 +150,17 @@ pub struct Caret {
 /// The menu as one frame draws it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Menu {
-    /// The row the caret is on, as an index into [`SETTINGS`].
-    pub caret: usize,
-    /// The first row the window shows, for a pane too short for all of them.
-    pub top: usize,
+    /// Where the reader is inside it.
+    pub caret: Caret,
     /// What the rows say.
     pub settings: Settings,
 }
 
-impl Menu {
+impl Caret {
     /// The window's first row, clamped so the caret is always drawn.
     ///
-    /// Resolved here rather than when the caret moves, because how many rows fit
-    /// is a property of the pane and the pane resizes without anybody pressing
+    /// Resolved on demand rather than when the caret moves, because how many rows
+    /// fit is a property of the pane and the pane resizes without anybody pressing
     /// anything.
     #[must_use]
     pub fn window(self, rows: usize) -> usize {
@@ -171,10 +168,10 @@ impl Menu {
             return 0;
         }
         let top = self.top.min(SETTINGS.len() - rows);
-        if self.caret < top {
-            self.caret
-        } else if self.caret >= top + rows {
-            self.caret + 1 - rows
+        if self.at < top {
+            self.at
+        } else if self.at >= top + rows {
+            self.at + 1 - rows
         } else {
             top
         }
@@ -279,10 +276,4 @@ pub fn row_at(over: Sheet, row: u16) -> Option<u16> {
     let rows = usize::from(over.height).saturating_sub(MENU_FRAME);
     let offset = row.checked_sub(first)?;
     (usize::from(offset) < rows).then_some(offset)
-}
-
-/// Whether `at` is inside the drawn box at all.
-#[must_use]
-pub fn covers(over: Sheet, at: Position) -> bool {
-    over.covers(at.x, at.y)
 }

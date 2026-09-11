@@ -497,8 +497,7 @@ impl App {
             root: root.to_owned(),
             sheet: self.sheet,
             menu: self.menu.map(|caret| Menu {
-                caret: caret.at,
-                top: caret.top,
+                caret,
                 settings: self.settings(),
             }),
             frame: self.frames.percentile(0.99),
@@ -526,12 +525,7 @@ impl App {
     fn settle_menu(&mut self) {
         let rows = self.menu_rows;
         if let Some(caret) = self.menu.as_mut() {
-            caret.top = Menu {
-                caret: caret.at,
-                top: caret.top,
-                settings: Settings::default(),
-            }
-            .window(rows);
+            caret.top = caret.window(rows);
         }
     }
 
@@ -541,15 +535,9 @@ impl App {
         self.menu.is_some()
     }
 
-    /// The setting the caret is on, resolved against the drawn window.
+    /// The setting a click `offset` rows down the drawn window landed on.
     fn menu_at(&self, offset: usize) -> Option<Setting> {
-        let caret = self.menu?;
-        let top = Menu {
-            caret: caret.at,
-            top: caret.top,
-            settings: self.settings(),
-        }
-        .window(self.menu_rows);
+        let top = self.menu?.window(self.menu_rows);
         (offset < self.menu_rows)
             .then(|| SETTINGS.get(top + offset).copied())
             .flatten()

@@ -1913,9 +1913,12 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
     // sheet is not a region and takes no row from one, so it has no place in the split
     // that divides the body between them.
     body.sheet_pages = Some(sheet_pages_of(area, footer, margins_of(area.width)));
-    // Attached for the line above's reason, and measured against a full menu so the
-    // count does not depend on where the caret happens to be.
-    body.menu_rows = Some(menu_rows_of(area, footer, margins_of(area.width)));
+    // Attached for the line above's reason, measured against a full menu so the count
+    // does not follow the caret, and only while one is drawn: on a short pane it
+    // allocates the counter, which a closed menu would pay for on every frame.
+    body.menu_rows = chrome
+        .menu
+        .map(|_| menu_rows_of(area, footer, margins_of(area.width)));
     body
 }
 
@@ -2007,9 +2010,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
             .map(|plan| plan.target()),
         // From the plan the painter draws, for the line above's reason.
         menu: chrome.menu.and_then(|menu| {
-            let margins = margins_of(area.width);
-            let plan = menu_plan(area, footer.height(), margins, 0)?;
-            menu_plan(area, footer.height(), margins, menu.window(plan.rows))
+            menu_drawn(area, footer.height(), margins_of(area.width), menu)
                 .map(|plan| plan.target())
         }),
     }
@@ -2135,14 +2136,9 @@ pub fn render(
     let sheet = chrome
         .sheet
         .and_then(|page| sheet_plan(area, footer.height(), margins, page));
-    // Planned twice: once to learn how many rows this pane gives the window, and
-    // once at the window that count resolves to. The alternative is a plan that
-    // takes a caret, and the counter it draws is a fact about the window rather
-    // than about the caret.
-    let menu_drawn = chrome.menu.and_then(|menu| {
-        let rows = menu_plan(area, footer.height(), margins, 0)?.rows;
-        menu_plan(area, footer.height(), margins, menu.window(rows)).map(|plan| (plan, menu))
-    });
+    let drawn_menu = chrome
+        .menu
+        .and_then(|menu| menu_drawn(area, footer.height(), margins, menu).map(|plan| (plan, menu)));
 
     let mut painter = Painter {
         buf,
@@ -2165,7 +2161,7 @@ pub fn render(
         spark_ramp: theme.spark_ramp(),
         // Whichever overlay is up, and never both: an effect must not run over
         // cells an overlay is drawn on.
-        covered: menu_drawn
+        covered: drawn_menu
             .as_ref()
             .map(|(plan, _)| plan.area)
             .or_else(|| sheet.as_ref().map(|plan| plan.area)),
@@ -2252,7 +2248,7 @@ pub fn render(
     }
 
     // Last, over everything, and only if a reader asked.
-    if let Some((plan, menu)) = menu_drawn {
+    if let Some((plan, menu)) = drawn_menu {
         painter.menu(&plan, &menu);
     }
     if let Some(plan) = sheet {
@@ -2830,23 +2826,20 @@ const MENU_HINT_RUNGS: [&str; 3] = [
     "",
 ];
 
-/// Columns between the widest label and the state cell at the tight rung. One
-/// would let a full-width label touch the word beside it, and the pair would read
-/// as one run at a glance.
+/// Columns between the widest label and the state cell at the tight rung. One would
+/// let a full-width label touch the word beside it, and they would read as one run.
 const MENU_GAP: usize = 2;
 
 /// The gap the roomy rung wants, which is what buys the wider inset.
 const MENU_AIR: usize = 6;
 
 /// Rule cells the bottom edge keeps after its legend, at least. Without them the
-/// widest rung fills the edge and the foot stops reading as a frame with a label
-/// on it.
+/// widest rung fills the edge and the foot stops reading as a frame.
 const MENU_EDGE_RULE: usize = 2;
 
 /// The widest the box ever gets: the bottom edge's widest rung, its two corners
 /// and a dozen columns of rule. Past it the row's gap grows and the box says
-/// nothing more for it, which is air a glance crosses for free. Gated by
-/// `crates/vigia/tests/menu.rs`, since the rung it derives from is measured.
+/// nothing more for it, which is air a glance crosses for free.
 const MENU_WIDEST: usize = 52;
 
 /// The widest label any row draws, which sets the label field.
@@ -2880,10 +2873,9 @@ const MENU_FLOOR: usize = menu_span(MENU_INSETS[1]);
 
 /// Where the config menu goes, or `None` on a pane that cannot hold one.
 ///
-/// It takes the pane and the footer's height, as [`sheet_plan`] does, and never
-/// the body's split. That is what makes `SPEC.md` §11.2 B22's *nothing moves the
-/// box* a property of the code: the five toggles that reshape the body reach none
-/// of these arguments.
+/// It takes the pane and the footer's height, as [`sheet_plan`] does, and never the
+/// body's split. That is what makes `SPEC.md` §11.2 B22's *nothing moves the box* a
+/// property of the code: the toggles that reshape the body reach no argument here.
 fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> Option<MenuPlan> {
     let body = area.height.saturating_sub(1 + footer_rows);
     let room = usize::from(area.width.saturating_sub(margins.0 + margins.1));
@@ -2934,17 +2926,25 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
 }
 
 /// The state cell of the row the caret is on, for its receipt to run over. Planned
-/// from the pane rather than measured off the painted screen, so the effect and
-/// the drawer read one derivation.
+/// from the pane rather than off the painted screen, so both read one derivation.
 #[must_use]
 pub fn menu_cell(area: Rect, chrome: &Chrome, files: usize) -> Option<Rect> {
     let menu = chrome.menu?;
     let footer = Footer::plan(area, chrome, files).height();
-    let margins = margins_of(area.width);
-    let rows = menu_plan(area, footer, margins, 0)?.rows;
-    let window = menu.window(rows);
-    let plan = menu_plan(area, footer, margins, window)?;
-    Some(plan.state_cell(menu.caret.checked_sub(window)?))
+    let plan = menu_drawn(area, footer, margins_of(area.width), menu)?;
+    let window = menu.caret.window(plan.rows);
+    Some(plan.state_cell(menu.caret.at.checked_sub(window)?))
+}
+
+/// The plan for one open menu on this pane, or `None` where it draws none.
+///
+/// Twice inside, because the counter the title bar draws is a fact about the
+/// window rather than about the caret. **Every caller comes through here**: the
+/// drawn box, the region the pointer is told about and the cell an effect runs
+/// over are one derivation, and two of them would disagree in silence.
+fn menu_drawn(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -> Option<MenuPlan> {
+    let rows = menu_plan(area, footer_rows, margins, 0)?.rows;
+    menu_plan(area, footer_rows, margins, menu.caret.window(rows))
 }
 
 /// How many rows the config menu's window has on this pane, and zero where it
@@ -3830,53 +3830,19 @@ impl Painter<'_> {
     fn menu(&mut self, plan: &MenuPlan, menu: &Menu) {
         let area = plan.area;
         let frame = self.theme.chrome_dim;
-        let lit = self.theme.chrome;
         let width = usize::from(area.width);
-
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                // Clipped rather than assumed: any area is legal here.
-                if let Some(cell) = self.buf.cell_mut((x, y)) {
-                    cell.reset();
-                    cell.set_symbol(" ").set_style(frame);
-                }
-            }
-        }
-
-        let counter = plan.counter.clone().unwrap_or_default();
         let rounded = !matches!(self.glyphs, Glyphs::Block);
-        let mut top = String::with_capacity(width * 3);
-        if rounded {
-            top.push('╭');
-            top.push('┐');
-            top.push_str(MENU_SPLICE);
-            top.push_str(&counter);
-            top.push('┌');
-            let fixed = 3 + width_of(MENU_SPLICE) + width_of(&counter) + 4;
-            for _ in 0..width.saturating_sub(fixed) {
-                top.push(RULE);
-            }
-            top.push_str("   ╮");
-        } else {
-            top.push('┌');
-            top.push_str(MENU_TITLE);
-            top.push_str(&counter);
-            for _ in 0..width.saturating_sub(width_of(MENU_TITLE) + width_of(&counter) + 5) {
-                top.push(RULE);
-            }
-            top.push_str("   ┐");
-        }
-        self.put(area.x, area.y, &top, width, frame);
-        if rounded {
-            self.put(area.x + 2, area.y, MENU_SPLICE, width_of(MENU_SPLICE), lit);
-        }
-        let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
-        let control = if hovered { self.theme.bar_hover } else { lit };
-        self.put(plan.close.0, plan.close.1, DISMISS, 1, control);
 
-        self.menu_pipes_over(area);
+        self.overlay_head(
+            area,
+            MENU_TITLE,
+            MENU_SPLICE,
+            plan.counter.as_deref().unwrap_or_default(),
+            plan.close,
+        );
+        self.sheet_pipes_over(area, area.y + 1);
 
-        let window = menu.window(plan.rows);
+        let window = menu.caret.window(plan.rows);
         for offset in 0..plan.rows {
             let Some(setting) = SETTINGS.get(window + offset).copied() else {
                 break;
@@ -3910,16 +3876,6 @@ impl Painter<'_> {
         }
     }
 
-    /// The box's own left and right rules.
-    fn menu_pipes_over(&mut self, area: Rect) {
-        let frame = self.theme.chrome_dim;
-        let right = area.x + area.width - 1;
-        for y in area.y + 1..area.y + area.height - 1 {
-            self.put(area.x, y, "│", 1, frame);
-            self.put(right, y, "│", 1, frame);
-        }
-    }
-
     /// One row: its mark, its name, and the word for where it stands.
     fn menu_row(
         &mut self,
@@ -3932,7 +3888,7 @@ impl Painter<'_> {
         let area = plan.area;
         let y = area.y + 2 + u16::try_from(offset).unwrap_or(0);
         let at = window + offset;
-        let carets = at == menu.caret;
+        let carets = at == menu.caret.at;
         // The pointer marks its row in the ink the caret's row takes, and the caret
         // glyph is what tells the two apart.
         let pointed = self.hovered == Some(Hovered::MenuRow(y));
@@ -3956,95 +3912,26 @@ impl Painter<'_> {
         self.put(label_at, y, setting.label(), room, name);
 
         let on = setting.of(menu.settings);
-        let word = if on { ON } else { OFF };
-        let ink = if on {
-            self.theme.added
+        let (word, ink) = if on {
+            (ON, self.theme.added)
         } else {
-            self.theme.removed
+            (OFF, self.theme.removed)
         };
+        // Right-aligned by placing it: the field and both words are constants, so
+        // the pad is arithmetic rather than an allocation per drawn row.
         let cell = plan.state_cell(offset);
-        self.put(
-            cell.x,
-            y,
-            &format!("{word:>STATE_WIDTH$}"),
-            STATE_WIDTH,
-            ink,
-        );
+        let pad = u16::try_from(STATE_WIDTH - width_of(word)).unwrap_or(0);
+        self.put(cell.x + pad, y, word, width_of(word), ink);
     }
 
     fn sheet(&mut self, plan: &SheetPlan) {
         let area = plan.area;
         let frame = self.theme.chrome_dim;
-        let lit = self.theme.chrome;
         let width = usize::from(area.width);
-
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                // Clipped rather than assumed, for the reason the heat strip is:
-                // any area is legal here, including one the buffer has shrunk
-                // under.
-                if let Some(cell) = self.buf.cell_mut((x, y)) {
-                    // Reset first, then style.
-                    cell.reset();
-                    cell.set_symbol(" ").set_style(frame);
-                }
-            }
-        }
-
-        // The title bar, with the close control's cell left blank and written after it
-        // in its own weight: a control is not part of the frame it sits in, which is
-        // the step buttons' rule one element over.
-        let counter = plan.shape.shown().map(sheet_counter).unwrap_or_default();
-        // The corners follow the glyph rung, and the splice goes with them (`SPEC.md`
-        // §11.2 B18).
         let rounded = !matches!(self.glyphs, Glyphs::Block);
-        let mut top = String::with_capacity(width * 3);
-        if rounded {
-            top.push('╭');
-            top.push('┐');
-            top.push_str(SHEET_SPLICE);
-            top.push_str(&counter);
-            top.push('┌');
-            // Corner, splice brackets, the title, the counter, then the three
-            // cells the control sits in and the closing corner: the same
-            // sixteen fixed cells the square spelling costs, which is what
-            // keeps every width rung where it was.
-            let fixed = 3 + width_of(SHEET_SPLICE) + width_of(&counter) + 4;
-            for _ in 0..width.saturating_sub(fixed) {
-                top.push(RULE);
-            }
-            top.push_str("   ╮");
-        } else {
-            top.push('┌');
-            top.push_str(SHEET_TITLE);
-            top.push_str(&counter);
-            // Corner, title, counter, dashes, then the three cells the control
-            // sits in and the closing corner. The rule cannot go negative
-            // because `sheet_floor` charges `sheet_counter_floor` on every rung.
-            for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + width_of(&counter) + 5) {
-                top.push(RULE);
-            }
-            top.push_str("   ┐");
-        }
-        self.put(area.x, area.y, &top, width, frame);
-        if rounded {
-            // The spliced word in the chrome's own weight, over the border's
-            // reserved gap: the splice is what makes the title read as a label
-            // on the box rather than a break in it.
-            self.put(
-                area.x + 2,
-                area.y,
-                SHEET_SPLICE,
-                width_of(SHEET_SPLICE),
-                lit,
-            );
-        }
-        // The control takes a hover rung, which is what says it is clickable. B10's
-        // ladder, minus its top rung: chrome at rest and [`Theme::bar_hover`] under the
-        // pointer.
-        let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
-        let control = if hovered { self.theme.bar_hover } else { lit };
-        self.put(plan.close.0, plan.close.1, DISMISS, 1, control);
+
+        let counter = plan.shape.shown().map(sheet_counter).unwrap_or_default();
+        self.overlay_head(area, SHEET_TITLE, SHEET_SPLICE, &counter, plan.close);
 
         match plan.shape {
             Shape::Roomy { group } => self.sheet_roomy(plan, group),
@@ -4205,6 +4092,71 @@ impl Painter<'_> {
     fn sheet_pipes(&mut self, area: Rect, y: u16) {
         self.put(area.x, y, "│", 1, self.theme.chrome_dim);
         self.put(area.x + area.width - 1, y, "│", 1, self.theme.chrome_dim);
+    }
+
+    /// An overlay's ground and its title bar: the cells blanked, the frame's top
+    /// edge with the word spliced into it, and the close control. Shared, because
+    /// the glyph rung decides the corners and the splice together (`SPEC.md` §11.2
+    /// B18) and a second copy would be left behind by the next rung.
+    fn overlay_head(
+        &mut self,
+        area: Rect,
+        title: &str,
+        splice: &str,
+        counter: &str,
+        close: (u16, u16),
+    ) {
+        let frame = self.theme.chrome_dim;
+        let lit = self.theme.chrome;
+        let width = usize::from(area.width);
+
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                // Clipped rather than assumed: any area is legal here, including
+                // one the buffer has shrunk under.
+                if let Some(cell) = self.buf.cell_mut((x, y)) {
+                    cell.reset();
+                    cell.set_symbol(" ").set_style(frame);
+                }
+            }
+        }
+
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
+        let mut top = String::with_capacity(width * 3);
+        if rounded {
+            top.push('╭');
+            top.push('┐');
+            top.push_str(splice);
+            top.push_str(counter);
+            top.push('┌');
+            // The same fixed cells the square spelling costs, which is what keeps
+            // every width rung where it was.
+            let fixed = 3 + width_of(splice) + width_of(counter) + 4;
+            for _ in 0..width.saturating_sub(fixed) {
+                top.push(RULE);
+            }
+            top.push_str("   ╮");
+        } else {
+            top.push('┌');
+            top.push_str(title);
+            top.push_str(counter);
+            // The rule cannot go negative because each plan's own floor charges
+            // the title and the counter before it chooses a width.
+            for _ in 0..width.saturating_sub(width_of(title) + width_of(counter) + 5) {
+                top.push(RULE);
+            }
+            top.push_str("   ┐");
+        }
+        self.put(area.x, area.y, &top, width, frame);
+        if rounded {
+            // In the chrome's own weight, which is what makes the title read as a
+            // label on the box rather than a break in it.
+            self.put(area.x + 2, area.y, splice, width_of(splice), lit);
+        }
+        // A hover rung says it is clickable: B10's ladder minus its top one.
+        let hovered = self.hovered == Some(Hovered::Button(close.0, close.1));
+        let control = if hovered { self.theme.bar_hover } else { lit };
+        self.put(close.0, close.1, DISMISS, 1, control);
     }
 
     /// One row of a group: the keys cell lit, the verb dim.
