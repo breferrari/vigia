@@ -21,7 +21,13 @@
     <circle cx="74" cy="31" r="6" fill="#3fb950"/>
     <text class="m fg" x="102" y="36" font-size="14" font-weight="700">vigia</text>
     <text class="m fg" x="152" y="36" font-size="14" font-weight="700">&#183; main &#183; current &#9662; &#183; 3 changed</text>
-    <text class="m" x="866" y="36" font-size="13" text-anchor="end"><tspan class="grn">+55</tspan><tspan class="dim">&#160;&#160;&#160;</tspan><tspan class="red">&#8722;10</tspan></text>
+    <!-- The total joins the file rows' counts column rather than the status
+         bar's right edge. `render.rs::counts_edge` is one derivation read by the
+         header and by a row, and its own comment says why: two counts of the same
+         quantity a few rows apart, ending at different columns, is a worse glance
+         than either alone. Anchored at the same two x as every row below. -->
+    <text class="m grn" x="826.1" y="36" font-size="13.5" text-anchor="end">+55</text>
+    <text class="m red" x="874.7" y="36" font-size="13.5" text-anchor="end">&#8722;10</text>
 
     <!-- file rows -->
     <g font-size="13.5">
