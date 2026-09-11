@@ -336,28 +336,17 @@ Every note draws under its line with one word for where it stands.
 
 **Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`, because a monitor that wrote where it watches would wake itself.
 
-### Setting it up, in one command
+### Setting it up
 
-If you keep your Claude Code setup with [`mcs`](https://github.com/mcs-cli/mcs), the whole of the next section is a package. `techpack.yaml` at the root of this repository is what it reads:
+Two pieces, and both go in your own config rather than in the repository, because `vigia` is yours and so is the pane you run it in.
 
-```sh
-mcs pack add breferrari/vigia
-mcs sync --global
-```
-
-That installs the binary, registers the MCP server for your user, and writes all three hooks under `~/.claude/`, so every repository you open from now on is covered. `mcs doctor` names anything missing and the command that fixes it, and running `mcs sync` again after an upgrade puts back whatever moved. macOS and Linux only: the pack installs through Homebrew and its hooks are shell scripts. [`docs/TECHPACK.md`](docs/TECHPACK.md) lists every component and what each one is.
-
-Everything below is what that pack does for you, and it is the route on Windows.
-
-### Setting it up by hand
-
-**1. Give the agent the server.** `vigia mcp` is an MCP server over stdio, and it belongs to **you** rather than to any one repository:
+**1. Give the agent the server.** `vigia mcp` is an MCP server over stdio:
 
 ```sh
 claude mcp add --scope user vigia -- vigia mcp
 ```
 
-One registration covers every project you open from now on. Claude Code tells the server which project the session is in, so it finds whichever worktree you are watching, and notes are kept per worktree, so two repositories never see each other's.
+`--scope user` writes `~/.claude.json`, which covers **every project you open on this machine** and stays private to you. Claude Code tells the server which project a session is in, so that one registration finds whichever worktree you are watching, and notes are kept per worktree, so two repositories never see each other's.
 
 The agent gets three tools and one resource:
 
@@ -369,7 +358,7 @@ The agent gets three tools and one resource:
 
 The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
 
-**2. Reach the session already running.** With the server alone your note waits until the agent next looks. Three hooks make it arrive instead, and they go in `~/.claude/settings.json` for the same reason the server does: write them once, and every repository is covered.
+**2. Reach the session already running.** With the server alone your note waits until the agent next looks. Three hooks make it arrive instead, and they go in `~/.claude/settings.json`, which is the same scope as the line above: write them once, and every repository is covered.
 
 ```json
 {
@@ -392,11 +381,29 @@ The resource is `vigia://notes`, and the server announces every change to the st
 `vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
 
 <details>
-<summary><b>Registering for a whole team instead</b></summary>
+<summary><b>Both steps in one command, if you already use <code>mcs</code></b></summary>
 
 <br>
 
-**`--scope project` is a decision about your team rather than about you.** It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
+[`mcs`](https://github.com/mcs-cli/mcs) is a package manager for a Claude Code setup. It is not needed for any of the above and nothing here depends on it. If you already keep your setup that way, `techpack.yaml` at the root of this repository is a pack it can install:
+
+```sh
+mcs pack add breferrari/vigia
+mcs sync --global
+```
+
+**Its `--global` is the scope both steps above already use**, under another name: machine-wide for your user, writing the server into `~/.claude.json` and the hooks into `~/.claude/settings.json`. What it adds is doing both at once, installing the binary with them, and putting back whatever moved when you run `mcs sync` again after an upgrade. `mcs doctor` names anything missing and the command that fixes it.
+
+macOS and Linux only, because the pack installs the binary through Homebrew and its hooks are shell scripts. [`docs/TECHPACK.md`](docs/TECHPACK.md) lists every component and what each one is.
+
+</details>
+
+<details>
+<summary><b>Putting the server in the repository instead</b></summary>
+
+<br>
+
+`--scope project` is the one shape here that reaches anybody but you. It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
 
 ```json
 {
@@ -406,7 +413,7 @@ The resource is `vigia://notes`, and the server announces every change to the st
 }
 ```
 
-Right when the whole team watches its diffs this way, and only then. If it is just you, take the user-scoped line above.
+Right when the whole team watches its diffs this way, and only then. If it is just you, the user-scoped line above is the one, and it already covers every repository on the machine.
 
 </details>
 
