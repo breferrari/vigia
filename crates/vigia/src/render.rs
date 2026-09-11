@@ -16,6 +16,7 @@ use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, OVERLAY_FRAME, Region, Regions, Selection, Sheet, Token};
 use crate::menu::{self, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
 use crate::positions::{self, Positions};
+use crate::quote::Run;
 use crate::theme::Theme;
 use crate::view::{
     BOX_FRAME, BoxPart, FileEntry, FileNotes, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead,
@@ -4893,6 +4894,7 @@ impl Painter<'_> {
                 Row::Note {
                     lead,
                     text,
+                    runs,
                     state,
                     last,
                     faded,
@@ -4907,6 +4909,7 @@ impl Painter<'_> {
                         },
                         *lead,
                         text,
+                        runs,
                         state,
                         *last,
                         *faded,
@@ -5440,6 +5443,7 @@ impl Painter<'_> {
         glyphs: Rect,
         lead: NoteLead,
         text: &str,
+        runs: &[Run],
         state: &str,
         last: bool,
         faded: bool,
@@ -5534,7 +5538,13 @@ impl Painter<'_> {
                     NoteLead::Reply | NoteLead::Blank => reply,
                     _ => self.theme.chrome_dim.add_modifier(dim),
                 };
-                self.put_marked(next, glyphs.y, text, left.saturating_sub(spent), body);
+                let limit = left.saturating_sub(spent);
+                if runs.is_empty() {
+                    self.put_marked(next, glyphs.y, text, limit, body);
+                } else {
+                    let painted = self.note_runs(text, runs, body, dim);
+                    self.put_runs_marked(next, glyphs.y, &painted, width_of(text) > limit, limit);
+                }
             }
         }
         // Over whatever the lead drew there, since the mark is what the pointer
@@ -5548,6 +5558,45 @@ impl Painter<'_> {
                 self.theme.bar_hover.add_modifier(dim),
             );
         }
+    }
+
+    /// A note row's text as styled runs: the voice's own ink where the agent
+    /// wrote words, and the diff's own syntax inks where it quoted code.
+    ///
+    /// A run that does not land on a character boundary ends the walk and the
+    /// rest of the row takes the voice, because this draws under a panic hook
+    /// that takes the pane down with it and a miscounted run is not worth that.
+    fn note_runs(
+        &self,
+        text: &str,
+        runs: &[Run],
+        voice: Style,
+        dim: Modifier,
+    ) -> Vec<(String, Style)> {
+        let mut out = Vec::with_capacity(runs.len() + 1);
+        let mut at = 0usize;
+        for run in runs {
+            let end = (at + run.len).min(text.len());
+            let Some(piece) = text.get(at..end) else {
+                break;
+            };
+            if !piece.is_empty() {
+                out.push((
+                    piece.to_owned(),
+                    match run.class {
+                        Some(class) => self.theme.class(class).add_modifier(dim),
+                        None => voice,
+                    },
+                ));
+            }
+            at = end;
+        }
+        if let Some(rest) = text.get(at..)
+            && !rest.is_empty()
+        {
+            out.push((rest.to_owned(), voice));
+        }
+        out
     }
 
     /// ```text
