@@ -338,6 +338,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | A release that removes a key can be filed as internal, and 0.42.0 was | [#467](https://github.com/breferrari/vigia/issues/467) |
 | ⬜ | A hidden path still wakes the watch. **Deferred by [#495](https://github.com/breferrari/vigia/issues/495): it changes what I1 measures** | [#501](https://github.com/breferrari/vigia/issues/501) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
+| ⬜ | Two overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511): a refactor of a pair that predates the branch that found it** | [#515](https://github.com/breferrari/vigia/issues/515) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ✅ | A gate can rebuild its expected value from the value under test, and one did | [#499](https://github.com/breferrari/vigia/issues/499) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
