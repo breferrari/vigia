@@ -618,7 +618,7 @@ impl App {
 
     /// The same, for the position list, whose row count is its own.
     fn settle_positions(&mut self) {
-        let (rows, of) = (self.positions_rows, self.places.len());
+        let (rows, of) = (self.positions_rows, self.places.rows());
         if let Some(caret) = self.positions.as_mut() {
             caret.at = caret.at.min(of.saturating_sub(1));
             caret.top = caret.window(rows, of);
@@ -720,7 +720,7 @@ impl App {
                 .is_some_and(|commit| Some(commit.id) == standing.at()),
             _ => false,
         };
-        (0..self.places.len()).find(|at| wanted(*at)).unwrap_or(0)
+        (0..self.places.rows()).find(|at| wanted(*at)).unwrap_or(0)
     }
 
     /// What standing the row at `at` asks for.
@@ -740,7 +740,7 @@ impl App {
 
     /// The same for the position list, where every row is selectable.
     fn positions_at(&self, offset: usize) -> Option<usize> {
-        let of = self.places.len();
+        let of = self.places.rows();
         let top = self.positions?.window(self.positions_rows, of);
         (offset < self.positions_rows && top + offset < of).then_some(top + offset)
     }
@@ -970,7 +970,7 @@ impl App {
             }
             Action::ClosePositions => self.positions = None,
             Action::PositionsMove(rows) => {
-                let of = self.places.len();
+                let of = self.places.rows();
                 // The reader has moved it, so it is no longer owed a row: landing it
                 // again when the next page arrives would drag them back up.
                 self.caret_owed = false;

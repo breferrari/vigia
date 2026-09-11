@@ -71,7 +71,7 @@ impl Places {
     /// scrolled rather than with the window.
     #[must_use]
     pub fn row_at(&self, at: usize) -> Option<Row> {
-        if at >= self.len() {
+        if at >= self.rows() {
             return None;
         }
         Some(match at {
@@ -81,17 +81,12 @@ impl Places {
         })
     }
 
-    /// How many rows there are.
+    /// How many rows there are. Never zero: the live pane is always one of them, which
+    /// is why this is not spelled `len`, a length carrying an `is_empty` that could only
+    /// ever answer no.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub fn rows(&self) -> usize {
         self.named() + self.commits.len()
-    }
-
-    /// Whether there is nothing to draw, which no repository with a commit in it
-    /// produces: `current` is always a row.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Take `page`, freshly walked from HEAD, as the front of this list, and say whether
@@ -115,8 +110,9 @@ impl Places {
         match held.and_then(|id| page.commits.iter().position(|at| at.id == id)) {
             Some(at) => {
                 // `more` is a fact about the oldest row held, which gained nothing.
-                self.commits
-                    .splice(0..0, page.commits[..at].iter().cloned());
+                let mut fresh = page.commits;
+                fresh.truncate(at);
+                self.commits.splice(0..0, fresh);
                 false
             }
             None => {
@@ -130,10 +126,10 @@ impl Places {
     /// Take `page` onto the end of what is already walked.
     ///
     /// The page's own `more` replaces this one's, because what is behind the history is
-    /// a fact about the last commit walked and the new page holds it. A page whose
-    /// first commit is already here is dropped rather than appended: a resumed walk
-    /// skips the tip it was given, so a repeat means the resume point was wrong and
-    /// appending it would draw one commit twice.
+    /// a fact about the last commit walked and the new page holds it. A commit already
+    /// held is dropped rather than appended: a resumed walk skips the tip it was given,
+    /// so a repeat means the resume point was wrong and appending it would draw one
+    /// commit twice.
     pub fn extend(&mut self, page: vigia_core::Page) {
         for commit in page.commits {
             if !self.commits.iter().any(|held| held.id == commit.id) {
@@ -162,7 +158,7 @@ impl Places {
 /// are one answer; two would let a caret near the end resume from the wrong place.
 #[must_use]
 pub fn resume_from(caret: Caret, places: &Places) -> Option<&Landmark> {
-    if !places.more || caret.at + 2 < places.len() {
+    if !places.more || caret.at + 2 < places.rows() {
         return None;
     }
     places.commits.last()

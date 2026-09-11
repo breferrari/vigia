@@ -1089,7 +1089,7 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
          whole history"
     );
     let last = vigia::positions::Caret {
-        at: places.len() - 1,
+        at: places.rows() - 1,
         top: 0,
     };
     // The commit as well as the decision: a caret near the end that resumed from the
@@ -1120,14 +1120,14 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
     let next = worktree
         .commits_from(Some(from), page)
         .expect("a second page");
-    let (was, coming) = (grown.len(), next.commits.len());
+    let (was, coming) = (grown.rows(), next.commits.len());
     assert!(
         coming > 0,
         "the second page is empty, so the append is unasserted"
     );
     grown.extend(next);
     assert_eq!(
-        grown.len(),
+        grown.rows(),
         was + coming,
         "the second page did not go onto the end of the first"
     );
@@ -1145,10 +1145,10 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
     let repeat = worktree
         .commits_from(None, page)
         .expect("the first page again");
-    let held = grown.len();
+    let held = grown.rows();
     grown.extend(repeat);
     assert_eq!(
-        grown.len(),
+        grown.rows(),
         held,
         "a page of commits already held was appended a second time"
     );
@@ -1385,7 +1385,7 @@ fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
     };
     let from = first.commits.last().expect("three commits").id;
     places.extend(worktree.commits_from(Some(from), 3).expect("a second page"));
-    let scrolled = places.len();
+    let scrolled = places.rows();
     let deepest = places.commits.last().expect("commits").id;
     assert!(
         scrolled > 3,
@@ -1399,7 +1399,7 @@ fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
         "a page of the history already held was read as another branch"
     );
     assert_eq!(
-        places.len(),
+        places.rows(),
         scrolled,
         "an unchanged history moved the rows"
     );
@@ -1414,7 +1414,7 @@ fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
         "a commit on the branch the list is already on replaced every row"
     );
     assert_eq!(
-        places.len(),
+        places.rows(),
         scrolled + 1,
         "the new commit did not go onto the front of what was already walked"
     );

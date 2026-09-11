@@ -3261,7 +3261,7 @@ fn positions_drawn(
     margins: (u16, u16),
     list: &Positions,
 ) -> Option<PositionsPlan> {
-    let of = list.places.len();
+    let of = list.places.rows();
     let rows = positions_plan(area, footer_rows, margins, 0, of)?.rows;
     positions_plan(area, footer_rows, margins, list.caret.window(rows, of), of)
 }
@@ -4314,7 +4314,7 @@ impl Painter<'_> {
         );
         self.sheet_pipes_over(area, area.y + 1);
 
-        let of = list.places.len();
+        let of = list.places.rows();
         let window = list.caret.window(plan.rows, of);
         for offset in 0..plan.rows {
             let Some(row) = list.places.row_at(window + offset) else {
