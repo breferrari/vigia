@@ -13,8 +13,9 @@ use vigia_core::{
 
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
-use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
-use crate::menu::{self, MENU_FRAME, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
+use crate::input::{Grabbed, Hovered, OVERLAY_FRAME, Region, Regions, Selection, Sheet, Token};
+use crate::menu::{self, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
+use crate::positions::{self, Positions};
 use crate::theme::Theme;
 use crate::view::{
     BOX_FRAME, BoxPart, FileEntry, FileNotes, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead,
@@ -192,6 +193,15 @@ const BAR_TRACK: char = '│';
 /// The step button at the top of a bar, and the one at the bottom.
 const STEP_UP: char = '▲';
 const STEP_DOWN: char = '▼';
+
+/// The mark after the position token, saying a list lives behind it: the small sibling
+/// of [`STEP_DOWN`], the step buttons having taught that a solid triangle is a thing to
+/// press. A glyph earns its cell by being on screen at rest, which a hover mark cannot
+/// do. No degradation rung, for [`DISMISS`]'s reason.
+const OPENS: char = '▾';
+
+/// The same while it is open, so the token says how to put it away.
+const OPENED: char = '▴';
 
 /// Rows a stepped bar spends on buttons: one at each end.
 const STEP_ROWS: u16 = 2;
@@ -526,6 +536,14 @@ pub struct Chrome {
     pub overview: bool,
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     pub sheet: Option<usize>,
+    /// The position list, when `B` or a click on the token has drawn it. §11.1.
+    pub positions: Option<Positions>,
+    /// Now, in seconds since the epoch, for the ages the list spells.
+    ///
+    /// Passed in rather than read where it is drawn: a clock read once per row would
+    /// let two rows of one frame disagree about the present, and a frame is one
+    /// answer about one moment.
+    pub now: i64,
     /// The config menu, when `m` has drawn it. `SPEC.md` §11.2 B22.
     pub menu: Option<Menu>,
     /// Whether listed paths carry a file-type icon, from the config file's
@@ -658,39 +676,85 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
 /// is what leaves an empty tree the word rather than `+0 -0`, and a total wider
 /// than the room falls to the word rather than to nothing, so a pane too narrow
 /// to count still says whether it is live.
-fn header_right(
-    view: &View,
-    chrome: &Chrome,
-    theme: &Theme,
-    room: usize,
-    edge: usize,
-) -> Vec<(String, Style)> {
-    let word = |style: Style| vec![(chrome.mode.word().to_owned(), style)];
-    if chrome.mode == Mode::Lost {
-        return word(theme.alert);
+/// What the header's right side says, decided before any of it is inked. Split from the
+/// drawing because the left ladder is chosen against the columns this takes and
+/// [`regions`] reaches that answer with no theme: ink never changes a width, and a
+/// derivation believing otherwise is how the token's cells stop being a click's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Right {
+    /// The mode word.
+    Word,
+    /// The run's total, which only fits where it fits.
+    Total {
+        /// Lines the run adds.
+        added: u32,
+        /// Lines it loses.
+        removed: u32,
+    },
+}
+
+impl Right {
+    /// Which of the two this frame draws.
+    fn of(view: &View, chrome: &Chrome, room: usize, edge: usize) -> Self {
+        if chrome.mode == Mode::Lost {
+            return Self::Word;
+        }
+        let Some(Churn { added, removed, .. }) =
+            view.churn.filter(|run| run.added > 0 || run.removed > 0)
+        else {
+            return Self::Word;
+        };
+        let total = Self::Total { added, removed };
+        if total.width(chrome, edge) > room {
+            return Self::Word;
+        }
+        total
     }
-    let Some(Churn { added, removed, .. }) =
-        view.churn.filter(|run| run.added > 0 || run.removed > 0)
-    else {
-        return word(theme.chrome_dim);
-    };
-    // Each half on the anchor the rows' counts cell gives its half: two numbers are
-    // read against each other by their sigils, not by their last digit. One wider
-    // than a cell grows left and pushes the other, the total being drawn whole.
-    let minus = format!("-{removed}");
-    let total = vec![
-        (format!("+{added}"), theme.added),
-        (
-            " ".repeat(COUNT_CELL.saturating_sub(width_of(&minus)) + 1),
-            theme.chrome_dim,
-        ),
-        (minus, theme.removed),
-        (" ".repeat(edge), theme.chrome_dim),
-    ];
-    if total.iter().map(|(text, _)| width_of(text)).sum::<usize>() > room {
-        return word(theme.chrome_dim);
+
+    /// Columns it occupies, the trailing edge included.
+    fn width(self, chrome: &Chrome, edge: usize) -> usize {
+        match self {
+            Self::Word => width_of(chrome.mode.word()),
+            Self::Total { added, removed } => {
+                let minus = format!("-{removed}");
+                width_of(&format!("+{added}"))
+                    + COUNT_CELL.saturating_sub(width_of(&minus))
+                    + 1
+                    + width_of(&minus)
+                    + edge
+            }
+        }
     }
-    total
+
+    /// The cells, with their ink.
+    fn parts(self, chrome: &Chrome, theme: &Theme, edge: usize) -> Vec<(String, Style)> {
+        match self {
+            Self::Word => {
+                let ink = if chrome.mode == Mode::Lost {
+                    theme.alert
+                } else {
+                    theme.chrome_dim
+                };
+                vec![(chrome.mode.word().to_owned(), ink)]
+            }
+            // Each half on the anchor the rows' counts cell gives its half: two
+            // numbers are read against each other by their sigils, not by their last
+            // digit. One wider than a cell grows left and pushes the other, the total
+            // being drawn whole.
+            Self::Total { added, removed } => {
+                let minus = format!("-{removed}");
+                vec![
+                    (format!("+{added}"), theme.added),
+                    (
+                        " ".repeat(COUNT_CELL.saturating_sub(width_of(&minus)) + 1),
+                        theme.chrome_dim,
+                    ),
+                    (minus, theme.removed),
+                    (" ".repeat(edge), theme.chrome_dim),
+                ]
+            }
+        }
+    }
 }
 
 /// The columns between the chrome's right edge and the one a file row's counts
@@ -752,15 +816,16 @@ fn facts_of(files: usize, binary: usize, hidden: usize, staged: Option<usize>) -
 /// directory names. `U+2800` and `U+115F` escape deliberately: they draw a real
 /// glyph that happens to be blank, and whether a font inks something is not a
 /// question this process can ask.
-fn header_left(
-    worktree: &str,
-    branch: Option<&str>,
-    position: &str,
-    files: usize,
-    binary: usize,
-    hidden: usize,
-    staged: Option<usize>,
-) -> Vec<String> {
+fn header_left(chrome: &Chrome, view: &View) -> Vec<(String, Option<usize>)> {
+    let (worktree, branch, position) = (
+        chrome.worktree.as_str(),
+        chrome.branch.as_deref(),
+        chrome.position.as_str(),
+    );
+    let open = chrome.positions.is_some();
+    let (files, staged) = (view.files, chrome.staged);
+    let binary = view.churn.map_or(0, |run| run.binary);
+    let hidden = hidden_of(view, chrome);
     let facts = facts_of(files, binary, hidden, staged);
     let mut rungs = Vec::with_capacity(facts.len() + 2);
 
@@ -776,20 +841,38 @@ fn header_left(
     // first, because each qualifies the one before it, then the branch, then the
     // name, which B3's empty state leans on to say which repository this is.
     let kept: Vec<&str> = facts.iter().map(String::as_str).collect();
+    // The columns before the token, counted rather than searched for: a worktree
+    // may legally be named the same thing the token spells, and finding the word in
+    // the joined line would then mark the wrong cells.
     let rung = |kept: &[&str], branch: Option<&str>, standing: Option<&str>| {
-        name.into_iter()
+        let lead: Vec<&str> = name
+            .into_iter()
             .chain(branch)
+            .filter(|fact| !fact.is_empty())
+            .collect();
+        let at = standing.filter(|token| !token.is_empty()).map(|_| {
+            lead.iter()
+                .map(|fact| width_of(fact) + width_of(FACT_SEPARATOR))
+                .sum()
+        });
+        let text = lead
+            .into_iter()
             .chain(standing)
             .chain(kept.iter().copied())
             .filter(|fact| !fact.is_empty())
             .collect::<Vec<_>>()
-            .join(FACT_SEPARATOR)
+            .join(FACT_SEPARATOR);
+        (text, at)
     };
 
+    // The chevron travels with the word, because the thing a click opens is the
+    // token and not the two columns after it, and a rung that kept one without the
+    // other would offer half a target.
+    let token = format!("{position} {}", if open { OPENED } else { OPENS });
     // `current` names the pane a reader already has, so the token drops first; say
     // anything else and it outlives every fact on this side, the branch included:
     // a pane that stops naming where it stands reads exactly like the live one.
-    let standing = Some(position);
+    let standing = Some(token.as_str());
     if position == vigia_core::Standing::CURRENT {
         // One rung with it, then today's whole ladder without it. Pushed with no
         // fact to qualify too: a tree with nothing in it is still standing somewhere.
@@ -809,8 +892,72 @@ fn header_left(
             rungs.push(rung(&[], None, standing));
         }
     }
-    rungs.push(worktree.to_owned());
+    rungs.push((worktree.to_owned(), None));
     rungs
+}
+
+/// Where the header's position token lands, or `None` on a rung that dropped it. **The
+/// one derivation**: the painter marks these cells and [`regions`] tells the pointer
+/// about them, and two answers would disagree in silence, invisibly at eighty columns.
+fn position_token(area: Rect, chrome: &Chrome, view: &View, margins: (u16, u16)) -> Option<Token> {
+    token_in(area, chrome, view, margins, &header_left(chrome, view))
+}
+
+/// The same, for a caller holding the ladder already. The painter is one: letting it
+/// rebuild the ladder to find the token put a third build on every hovered frame.
+fn token_in(
+    area: Rect,
+    chrome: &Chrome,
+    view: &View,
+    margins: (u16, u16),
+    rungs: &[(String, Option<usize>)],
+) -> Option<Token> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let header = Rect { height: 1, ..area };
+    let text = text_within(header, margins);
+    let edge = counts_edge(area.width, margins.1);
+    let room = usize::from(text.width);
+    // The same two steps the painter takes: the right side is laid out first and
+    // the left side's ladder is chosen against what is left.
+    let right = Right::of(view, chrome, room, edge).width(chrome, edge);
+    let taken = flush_right(text, right).map_or(0, |_| right + 1);
+    let (drawn, at) = chosen_rung(rungs, room.saturating_sub(taken))?;
+    let at = u16::try_from(at).ok()?;
+    let token = token_of(chrome);
+    let width = u16::try_from(width_of(&token)).ok()?;
+    // Clipped against what the row can actually hold: a rung fits by construction,
+    // but the cells a pointer is told about may never run past the text area.
+    let left = text.x.checked_add(at)?;
+    let end = text.x.saturating_add(text.width);
+    (left < end && !drawn.is_empty()).then(|| Token {
+        left,
+        row: header.y,
+        width: width.min(end - left),
+    })
+}
+
+/// What the token spells on this frame, chevron included.
+fn token_of(chrome: &Chrome) -> String {
+    format!(
+        "{} {}",
+        chrome.position,
+        if chrome.positions.is_some() {
+            OPENED
+        } else {
+            OPENS
+        }
+    )
+}
+
+/// The rung a ladder draws in `room`, and where its token sits. By index, which
+/// [`widest_fitting_or_last`] cannot hand back: two rungs can spell the same thing and
+/// only one carries the offset that applies.
+fn chosen_rung(rungs: &[(String, Option<usize>)], room: usize) -> Option<(&str, usize)> {
+    let at = fitting_at(rungs.len(), |at| width_of(&rungs[at].0), room);
+    let (text, token) = rungs.get(at)?;
+    Some((text.as_str(), (*token)?))
 }
 
 /// The one body line a worktree with no changes gets: which comparison found
@@ -990,8 +1137,10 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
     buckets.iter().any(|bucket| bucket.total() > 0)
 }
 
-/// Columns one half of the counts cell occupies, whatever that half says.
-const COUNT_CELL: usize = 5;
+/// Columns one half of the counts cell occupies, whatever that half says. Public
+/// because the suite holds the list's own totals against it, the two being laid out
+/// against one field and drawn a dozen rows apart.
+pub const COUNT_CELL: usize = 5;
 
 /// Every shape a file row's right-hand side may take, widest first.
 const ROW_LAYOUTS: [Columns; 10] = [
@@ -1420,11 +1569,18 @@ fn fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> Option<&str> {
         .find(|rung| width_of(rung) <= room)
 }
 
+/// The index the ladder rule picks: widest first, the last rung where none fits. Taken
+/// by width so the token's ladder, whose rungs carry an offset, reads the same rule.
+fn fitting_at(rungs: usize, width: impl Fn(usize) -> usize, room: usize) -> usize {
+    (0..rungs)
+        .find(|at| width(*at) <= room)
+        .unwrap_or(rungs.saturating_sub(1))
+}
+
 /// The widest rung of `ladder` that fits, or its last rung when none does.
 fn widest_fitting_or_last<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
-    fitting(ladder, room)
-        .or_else(|| ladder.last().map(AsRef::as_ref))
-        .unwrap_or("")
+    let at = fitting_at(ladder.len(), |at| width_of(ladder[at].as_ref()), room);
+    ladder.get(at).map_or("", AsRef::as_ref)
 }
 
 /// What the footer will draw, and how many rows it needs.
@@ -1625,6 +1781,8 @@ pub struct Body {
     /// Rows the config menu's window has on this pane, `Some(0)` on a pane too
     /// small to draw one, and `None` when nothing measured it.
     pub menu_rows: Option<usize>,
+    /// The same for the position list, whose box is sized to its own rows.
+    pub positions_rows: Option<usize>,
 }
 
 impl Body {
@@ -1644,6 +1802,7 @@ impl Body {
             // pane. A `Body` built for a diff walk has no sheet to count.
             sheet_pages: None,
             menu_rows: None,
+            positions_rows: None,
         }
     }
 
@@ -1707,6 +1866,7 @@ impl Body {
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
             menu_rows: None,
+            positions_rows: None,
         }
     }
 
@@ -1729,6 +1889,7 @@ impl Body {
             overview: true,
             sheet_pages: None,
             menu_rows: None,
+            positions_rows: None,
         }
     }
 
@@ -1760,6 +1921,7 @@ impl Body {
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
             menu_rows: None,
+            positions_rows: None,
         }
     }
 
@@ -1787,6 +1949,7 @@ impl Body {
                 return Self {
                     sheet_pages: self.sheet_pages,
                     menu_rows: self.menu_rows,
+                    positions_rows: self.positions_rows,
                     ..Self::diff_only(self.rows())
                 };
             }
@@ -1817,6 +1980,7 @@ impl Body {
             // the sheet it could draw is the same sheet.
             sheet_pages: self.sheet_pages,
             menu_rows: self.menu_rows,
+            positions_rows: self.positions_rows,
         }
     }
 }
@@ -1919,6 +2083,13 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
     body.menu_rows = chrome
         .menu
         .map(|menu| menu_rows_of(area, footer, margins_of(area.width), menu));
+    // And the same for the list, whose row count is its own: the menu's is the
+    // length of a constant table, and this one is however much history the reader
+    // has walked.
+    body.positions_rows = chrome
+        .positions
+        .as_ref()
+        .map(|list| positions_rows_of(area, footer, margins_of(area.width), list));
     body
 }
 
@@ -2013,6 +2184,12 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
             menu_drawn(area, footer.height(), margins_of(area.width), menu)
                 .map(|plan| plan.target())
         }),
+        positions: chrome.positions.as_ref().and_then(|list| {
+            positions_drawn(area, footer.height(), margins_of(area.width), list)
+                .map(|plan| plan.target())
+        }),
+        // The token, from the derivation the painter marks it with.
+        position: position_token(area, chrome, view, margins_of(area.width)),
     }
 }
 
@@ -2139,6 +2316,9 @@ pub fn render(
     let drawn_menu = chrome
         .menu
         .and_then(|menu| menu_drawn(area, footer.height(), margins, menu).map(|plan| (plan, menu)));
+    let drawn_list = chrome.positions.as_ref().and_then(|list| {
+        positions_drawn(area, footer.height(), margins, list).map(|plan| (plan, list))
+    });
 
     let mut painter = Painter {
         buf,
@@ -2164,6 +2344,7 @@ pub fn render(
         covered: drawn_menu
             .as_ref()
             .map(|(plan, _)| plan.area)
+            .or_else(|| drawn_list.as_ref().map(|(plan, _)| plan.area))
             .or_else(|| sheet.as_ref().map(|plan| plan.area)),
         icons: chrome.icons,
         link_root: (chrome.links && !chrome.root.is_empty()).then(|| chrome.root.clone()),
@@ -2248,6 +2429,9 @@ pub fn render(
     }
 
     // Last, over everything, and only if a reader asked.
+    if let Some((plan, list)) = drawn_list {
+        painter.positions(&plan, list, chrome.now);
+    }
     if let Some((plan, menu)) = drawn_menu {
         painter.menu(&plan, &menu);
     }
@@ -2327,9 +2511,14 @@ const KEYBOARD: [Gesture; 19] = [
         keys: ["a", "a"],
         verb: ["show or hide staged changes", "staged changes"],
     },
+    // Two senses of one concept in one row, the shape `g  Home  /  G  End` already has:
+    // a row of its own would grow a table whose rung figures are ruled. The tight verb
+    // keeps `branch point`, which stays the half both spellings share and leaves the
+    // column's field where `jump to a list row` set it, at the eighteen §11.1's
+    // *71 narrowest two-column* is measured from.
     Gesture {
-        keys: ["b", "b"],
-        verb: ["stand at the branch point", "branch point"],
+        keys: ["b  /  B", "b  /  B"],
+        verb: ["branch point / the list", "branch point"],
     },
     Gesture {
         keys: ["w", "w"],
@@ -2392,7 +2581,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 }
 
 /// The mouse half, which is the first thing the width ladder drops.
-const MOUSE: [Gesture; 11] = [
+const MOUSE: [Gesture; 12] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -2412,6 +2601,15 @@ const MOUSE: [Gesture; 11] = [
     Gesture {
         keys: ["click a listed file", "click a file"],
         verb: ["jump the diff to it", "jump the diff to it"],
+    },
+    // Eighteen columns at the wide rung against the nineteen `click a listed file`
+    // above already set, and eleven at the tight one against a field of thirteen. One
+    // verb at both rungs, which three rows here already do, so the verb is the half
+    // both spellings share: the keys cell cannot be, `position` not fitting the
+    // narrow one.
+    Gesture {
+        keys: ["click the position", "click where"],
+        verb: ["where it stands", "where it stands"],
     },
     Gesture {
         keys: ["drag the diff", "drag the diff"],
@@ -2884,7 +3082,7 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
     }
     // One row is a legal menu: it draws a name and the title bar says the rest are
     // there.
-    let capacity = usize::from(body).saturating_sub(MENU_FRAME);
+    let capacity = usize::from(body).saturating_sub(OVERLAY_FRAME);
     if capacity == 0 {
         return None;
     }
@@ -2892,7 +3090,7 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
 
     // The title bar's own floor, so a box wide enough for its rows is never too
     // narrow for the word on its edge.
-    let counter = (rows < ROWS.len()).then(|| menu_counter(top, rows));
+    let counter = (rows < ROWS.len()).then(|| overlay_counter(top, rows, ROWS.len()));
     let titled = width_of(MENU_TITLE) + counter.as_deref().map_or(0, width_of) + 5;
     // Grown with the pane, which puts the names and their states at the two ends of
     // the box rather than side by side in the middle of it.
@@ -2907,7 +3105,7 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
         .0;
 
     let width = u16::try_from(total).unwrap_or(u16::MAX);
-    let height = u16::try_from(rows + MENU_FRAME).unwrap_or(u16::MAX);
+    let height = u16::try_from(rows + OVERLAY_FRAME).unwrap_or(u16::MAX);
     let left = area.x + margins.0 + (u16::try_from(room).unwrap_or(u16::MAX) - width) / 2;
     let top_row = area.y + 1 + (body - height) / 2;
     Some(MenuPlan {
@@ -2923,6 +3121,173 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
         // Three in from the right edge: the corner, the space before it, and this.
         close: (left + width - 3, top_row),
     })
+}
+
+/// The list's title bar, corner excluded: the reading, so the box documents what a
+/// chosen row does and spends no row on it.
+fn positions_title() -> String {
+    format!("{RULE} {} ", positions::title())
+}
+
+/// The same word, spliced into a rounded frame.
+fn positions_splice() -> String {
+    format!(" {} ", positions::title())
+}
+
+/// The list's bottom edge, widest rung first.
+const POSITIONS_HINT_RUNGS: [&str; 3] = [
+    " ↑↓ move · Space stands here · Esc closes ",
+    " ↑↓ · Space · Esc ",
+    "",
+];
+
+/// Columns a commit's abbreviation takes, fixed by [`vigia_core::SHORT_ID`].
+const POSITIONS_ID: usize = vigia_core::SHORT_ID;
+
+/// Columns the age cell takes: three digits and a unit, the widest [`spelled_age`]
+/// produces, fixed so the subjects beside it do not shuffle as the rows age.
+const POSITIONS_AGE: usize = 4;
+
+/// Columns a named row's facts take: the count, then the two totals on the header's own
+/// field widths.
+const POSITIONS_FACTS: usize = 11 + COUNT_CELL + 1 + COUNT_CELL;
+
+/// Columns between a row's cells. Read by the suite, which holds the three cells of a
+/// named row's facts against it as one field rather than as cells that happen to be near
+/// each other.
+#[must_use]
+pub const fn positions_gap() -> usize {
+    POSITIONS_GAP
+}
+
+/// Columns between a row's cells.
+const POSITIONS_GAP: usize = 2;
+
+/// The widest the box gets: its widest bottom rung, two corners and a dozen columns of
+/// rule, which is the menu's reasoning at this box's width.
+const POSITIONS_WIDEST: usize = 58;
+
+/// The narrowest box that carries a row: two insets, an abbreviation, an age, a gap.
+const POSITIONS_FLOOR: usize =
+    4 * 2 + POSITIONS_ID + POSITIONS_GAP + POSITIONS_AGE + POSITIONS_GAP + 8;
+
+/// Where a row's first cell starts, from the box's left edge. The caret hangs two
+/// columns inside it rather than widening it, so the rows keep their column.
+const POSITIONS_INSET: usize = 4;
+
+/// Where the position list goes, or `None` on a pane that cannot hold one. Takes the
+/// pane and the footer's height and never the body's split, which is the config
+/// menu's rule and for its reason: a toggle that reshapes the body must not move it.
+fn positions_plan(
+    area: Rect,
+    footer_rows: u16,
+    margins: (u16, u16),
+    top: usize,
+    of: usize,
+) -> Option<PositionsPlan> {
+    let body = area.height.saturating_sub(1 + footer_rows);
+    let room = usize::from(area.width.saturating_sub(margins.0 + margins.1));
+    if room < POSITIONS_FLOOR {
+        return None;
+    }
+    let capacity = usize::from(body).saturating_sub(OVERLAY_FRAME);
+    if capacity == 0 {
+        return None;
+    }
+    let rows = capacity.min(of.max(1));
+
+    let counter = (rows < of).then(|| overlay_counter(top, rows, of));
+    let titled = width_of(&positions_title()) + counter.as_deref().map_or(0, width_of) + 5;
+    let total = room.clamp(POSITIONS_FLOOR, POSITIONS_WIDEST).max(titled);
+    if total > room {
+        return None;
+    }
+
+    let width = u16::try_from(total).unwrap_or(u16::MAX);
+    let height = u16::try_from(rows + OVERLAY_FRAME).unwrap_or(u16::MAX);
+    let left = area.x + margins.0 + (u16::try_from(room).unwrap_or(u16::MAX) - width) / 2;
+    let top_row = area.y + 1 + (body - height) / 2;
+    Some(PositionsPlan {
+        area: Rect {
+            x: left,
+            y: top_row,
+            width,
+            height,
+        },
+        rows,
+        counter,
+        // Three in from the right edge: the corner, the space before it, and this.
+        close: (left + width - 3, top_row),
+    })
+}
+
+/// Where the list is drawn and how many rows it holds.
+struct PositionsPlan {
+    /// The whole box, frame included.
+    area: Rect,
+    /// Rows of places it draws.
+    rows: usize,
+    /// The counter its title bar carries, where it cannot draw them all.
+    counter: Option<String>,
+    /// The close control's own cell.
+    close: (u16, u16),
+}
+
+impl PositionsPlan {
+    /// The cells a pointer is told the box occupies.
+    fn target(&self) -> Sheet {
+        overlay_target(self.area, self.close)
+    }
+}
+
+/// The cells a pointer is told an overlay occupies. One derivation for all three
+/// boxes: a field added to [`Sheet`] otherwise needs the same edit three times.
+fn overlay_target(area: Rect, close: (u16, u16)) -> Sheet {
+    Sheet {
+        left: area.x,
+        top: area.y,
+        width: area.width,
+        height: area.height,
+        close,
+    }
+}
+
+/// The plan for one open list, or `None` where the pane draws none. Twice inside, for
+/// [`menu_drawn`]'s reason. **Every caller comes through here**, so the drawn box and
+/// the box the pointer is told about are one derivation.
+fn positions_drawn(
+    area: Rect,
+    footer_rows: u16,
+    margins: (u16, u16),
+    list: &Positions,
+) -> Option<PositionsPlan> {
+    let of = list.places.rows();
+    let rows = positions_plan(area, footer_rows, margins, 0, of)?.rows;
+    positions_plan(area, footer_rows, margins, list.caret.window(rows, of), of)
+}
+
+/// How many rows the list's window has on this pane, and zero where it draws none.
+fn positions_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), list: &Positions) -> usize {
+    positions_drawn(area, footer_rows, margins, list).map_or(0, |plan| plan.rows)
+}
+
+/// How long ago `when` was, in the widest unit that leaves it two digits. An age rather
+/// than a stamp, the question being how recent and never which day, and `now` is passed
+/// in because a clock read twice in one frame gives two rows two presents.
+fn spelled_age(when: i64, now: i64) -> String {
+    let since = now.saturating_sub(when).max(0);
+    for (unit, each) in [
+        ('y', 60 * 60 * 24 * 365),
+        ('w', 60 * 60 * 24 * 7),
+        ('d', 60 * 60 * 24),
+        ('h', 60 * 60),
+        ('m', 60),
+    ] {
+        if since >= each {
+            return format!("{}{unit}", since / each);
+        }
+    }
+    format!("{since}s")
 }
 
 /// The state cell of the row the caret is on, for its receipt to run over. Planned
@@ -2957,10 +3322,10 @@ fn menu_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -
     menu_drawn(area, footer_rows, margins, menu).map_or(0, |plan| plan.rows)
 }
 
-/// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw
-/// everything it holds says so the same way wherever it happens.
-fn menu_counter(top: usize, rows: usize) -> String {
-    format!("{}-{} of {} ", top + 1, top + rows, ROWS.len())
+/// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw everything it
+/// holds says so the same way wherever it happens.
+fn overlay_counter(top: usize, rows: usize, of: usize) -> String {
+    format!("{}-{} of {of} ", top + 1, top + rows)
 }
 
 /// Where the config menu is drawn and how its rows are laid out inside it.
@@ -2980,13 +3345,7 @@ struct MenuPlan {
 impl MenuPlan {
     /// What a pointer needs to know about it.
     fn target(&self) -> Sheet {
-        Sheet {
-            left: self.area.x,
-            top: self.area.y,
-            width: self.area.width,
-            height: self.area.height,
-            close: self.close,
-        }
+        overlay_target(self.area, self.close)
     }
 
     /// The state cell of the row `offset` rows down the drawn window. It ends
@@ -3237,13 +3596,7 @@ struct SheetPlan {
 impl SheetPlan {
     /// What a pointer needs to know about it.
     fn target(&self) -> Sheet {
-        Sheet {
-            left: self.area.x,
-            top: self.area.y,
-            width: self.area.width,
-            height: self.area.height,
-            close: self.close,
-        }
+        overlay_target(self.area, self.close)
     }
 }
 
@@ -3460,13 +3813,9 @@ impl Painter<'_> {
         // from `assets/preview.svg` on purpose: a title bar reading `vigia` spends six
         // of forty columns telling the reader which program they started, and what they
         // cannot tell by looking is which *tree*.
-        let owned = header_right(
-            view,
-            chrome,
-            self.theme,
-            self.text_area(area).width as usize,
-            counts_edge(area.width, self.trailing),
-        );
+        let edge = counts_edge(area.width, self.trailing);
+        let owned = Right::of(view, chrome, self.text_area(area).width as usize, edge)
+            .parts(chrome, self.theme, edge);
         let right: Vec<(&str, Style)> = owned
             .iter()
             .map(|(text, ink)| (text.as_str(), *ink))
@@ -3474,16 +3823,23 @@ impl Painter<'_> {
         // One style across both facts on the left, and that is a ruling. Drawing the
         // count in the mode word's dim grey gives one clause two weights, telling the
         // reader in colour that these are separate claims.
-        let rungs = header_left(
-            &chrome.worktree,
-            chrome.branch.as_deref(),
-            &chrome.position,
-            view.files,
-            view.churn.map_or(0, |run| run.binary),
-            hidden_of(view, chrome),
-            chrome.staged,
-        );
-        self.status_line(area, &rungs, self.theme.chrome, &right);
+        let rungs = header_left(chrome, view);
+        let texts: Vec<&str> = rungs.iter().map(|(text, _)| text.as_str()).collect();
+        self.status_line(area, &texts, self.theme.chrome, &right);
+        // Over the rung that was just drawn, so a pointer resting on the token lifts
+        // the same cells the pointer was told about. B10's ladder minus its top rung,
+        // which is the close control's rule: a hover says clickable, nothing more.
+        if self.hovered == Some(Hovered::Position)
+            && let Some(token) = token_in(area, chrome, view, (self.inset, self.trailing), &rungs)
+        {
+            self.put(
+                token.left,
+                token.row,
+                &token_of(chrome),
+                usize::from(token.width),
+                self.theme.path_hover,
+            );
+        }
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -3941,6 +4297,158 @@ impl Painter<'_> {
         let cell = plan.state_cell(offset);
         let pad = u16::try_from(STATE_WIDTH - width_of(word)).unwrap_or(0);
         self.put(cell.x + pad, y, word, width_of(word), ink);
+    }
+
+    fn positions(&mut self, plan: &PositionsPlan, list: &Positions, now: i64) {
+        let area = plan.area;
+        let frame = self.theme.chrome_dim;
+        let width = usize::from(area.width);
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
+
+        self.overlay_head(
+            area,
+            &positions_title(),
+            &positions_splice(),
+            plan.counter.as_deref().unwrap_or_default(),
+            plan.close,
+        );
+        self.sheet_pipes_over(area, area.y + 1);
+
+        let of = list.places.rows();
+        let window = list.caret.window(plan.rows, of);
+        for offset in 0..plan.rows {
+            let Some(row) = list.places.row_at(window + offset) else {
+                break;
+            };
+            self.position_row(plan, list, offset, row, window, now);
+        }
+
+        let hint = widest_fitting_or_last(
+            &POSITIONS_HINT_RUNGS,
+            width.saturating_sub(2 + MENU_EDGE_RULE),
+        );
+        let corners = if rounded {
+            ('╰', '╯')
+        } else {
+            ('└', '┘')
+        };
+        self.box_edge(
+            area.x,
+            area.y + area.height - 1,
+            width,
+            corners,
+            (hint, ""),
+            frame,
+        );
+        if !hint.is_empty() {
+            self.put(
+                area.x + 1,
+                area.y + area.height - 1,
+                hint,
+                width_of(hint),
+                frame,
+            );
+        }
+    }
+
+    /// One row: a named place and its facts, or a commit.
+    fn position_row(
+        &mut self,
+        plan: &PositionsPlan,
+        list: &Positions,
+        offset: usize,
+        row: positions::Row,
+        window: usize,
+        now: i64,
+    ) {
+        let area = plan.area;
+        let y = area.y + 2 + u16::try_from(offset).unwrap_or(0);
+        let at = window + offset;
+        let inset = u16::try_from(POSITIONS_INSET).unwrap_or(0);
+        let carets = at == list.caret.at;
+        // The pointer marks its row in the ink the caret's row takes, and the caret
+        // glyph is what tells the two apart. The config menu's rule.
+        let pointed = self.hovered == Some(Hovered::PositionRow(y));
+        let ink = if carets || pointed {
+            self.theme.path_hover
+        } else {
+            self.theme.chrome
+        };
+        if carets {
+            self.put(area.x + inset - 2, y, CARET, 1, ink);
+        }
+        let room = usize::from(area.width).saturating_sub(POSITIONS_INSET * 2);
+
+        let Some(commit) = list.places.commit_at(row) else {
+            // A named place: the word, then its facts where a run has measured them. The
+            // branch point's row exists only where its name does, which is
+            // `Places::row_at`'s own rule, so there is no row here without one.
+            let point = list.places.point.as_ref();
+            let (name, facts) = match (row, point) {
+                (positions::Row::Point, Some((named, facts))) => (named.as_str(), *facts),
+                _ => (vigia_core::Standing::CURRENT, list.places.current),
+            };
+            let label = room.saturating_sub(POSITIONS_FACTS + POSITIONS_GAP);
+            self.put(area.x + inset, y, name, label, ink);
+            if let Some(facts) = facts {
+                self.position_facts(plan, y, facts);
+            }
+            return;
+        };
+
+        // A commit: its abbreviation, its age, then as much of the subject as fits.
+        self.put(
+            area.x + inset,
+            y,
+            &commit.named,
+            POSITIONS_ID,
+            self.theme.chrome_dim,
+        );
+        let age_at = inset + u16::try_from(POSITIONS_ID + POSITIONS_GAP).unwrap_or(0);
+        self.put(
+            area.x + age_at,
+            y,
+            &spelled_age(commit.when, now),
+            POSITIONS_AGE,
+            self.theme.chrome_dim,
+        );
+        let subject_at = age_at + u16::try_from(POSITIONS_AGE + POSITIONS_GAP).unwrap_or(0);
+        let left = room.saturating_sub(usize::from(subject_at) - POSITIONS_INSET);
+        self.put(area.x + subject_at, y, &commit.subject, left, ink);
+    }
+
+    /// A named row's facts, on the cells the header draws its own in.
+    fn position_facts(&mut self, plan: &PositionsPlan, y: u16, facts: positions::Facts) {
+        let area = plan.area;
+        let right = area.x + area.width - u16::try_from(POSITIONS_INSET).unwrap_or(0);
+        let changed = format!("{} changed", facts.files);
+        let minus = format!("-{}", facts.removed);
+        let plus = format!("+{}", facts.added);
+        // `-N` on the box's own right edge and `+N` a count cell to its left, which is
+        // the header's arithmetic rather than its columns: the box is centred and
+        // narrower, so the two can read against each other by their sigils without
+        // sitting under anything. A total wider than a cell grows left and pushes the
+        // other, drawn whole, which is [`header_right`]'s rule one surface over.
+        let tail =
+            width_of(&plus) + COUNT_CELL.saturating_sub(width_of(&minus)) + 1 + width_of(&minus);
+        let Some(from) = right.checked_sub(u16::try_from(tail).unwrap_or(u16::MAX)) else {
+            return;
+        };
+        self.put(from, y, &plus, width_of(&plus), self.theme.added);
+        self.put(
+            right - u16::try_from(width_of(&minus)).unwrap_or(0),
+            y,
+            &minus,
+            width_of(&minus),
+            self.theme.removed,
+        );
+        // The count goes left of the totals, where a file row's path would be.
+        let Some(at) =
+            from.checked_sub(u16::try_from(width_of(&changed) + POSITIONS_GAP).unwrap_or(u16::MAX))
+        else {
+            return;
+        };
+        self.put(at, y, &changed, width_of(&changed), self.theme.chrome_dim);
     }
 
     fn sheet(&mut self, plan: &SheetPlan) {
@@ -5740,7 +6248,7 @@ mod sheet_tables {
         // Addressed by the cell it draws, not by its index. View toggles outlive
         // notes, and the standing toggle outlives them: it changes what is walked.
         // The menu's door outlives all of them, which is `DROP_ORDER`'s own rule.
-        const EXPECTED: [&str; 5] = ["s", "o", "w", "b", "m  Esc"];
+        const EXPECTED: [&str; 5] = ["s", "o", "w", "b  /  B", "m  Esc"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())

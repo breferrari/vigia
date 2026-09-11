@@ -71,7 +71,10 @@ fn chrome_of(app: &App, rail: bool) -> Chrome {
     let mut chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",

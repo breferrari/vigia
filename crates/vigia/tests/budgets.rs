@@ -84,7 +84,10 @@ fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -132,7 +135,10 @@ fn frame_body(
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -258,7 +264,10 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -428,6 +437,8 @@ enum Overlay<'a> {
     Sheet(&'a str),
     /// The config menu.
     Menu,
+    /// The position list, `SPEC.md` §11.1, over a history the box cannot all draw.
+    Positions,
 }
 
 fn frame_budget_on(
@@ -473,11 +484,37 @@ fn frame_budget_on(
         Overlay::Bare => None,
         Overlay::Sheet(rung) => Some((vigia::Action::ToggleSheet, "gestures", Some(rung))),
         Overlay::Menu => Some((vigia::Action::ToggleMenu, "config menu", None)),
+        Overlay::Positions => Some((vigia::Action::TogglePositions, "since", None)),
     };
     // Retained state, so one toggle covers every frame the loop below times.
     if let Some((action, _, _)) = asked {
         app.apply(action, &mut frame, height)
             .expect("raise the overlay");
+    }
+    // The rows the list draws are the shell's to walk, so this gate hands the app what
+    // a walk produced: every frame below then paints a full box, which is the cost the
+    // frame path pays and the one I9 bounds.
+    if matches!(overlay, Overlay::Positions) {
+        let walk = worktree
+            .commits_from(None, POSITIONS_PAGE)
+            .expect("a page of history");
+        app.set_places(vigia::Places {
+            commits: walk.commits,
+            more: walk.more,
+            current: Some(vigia::Facts {
+                files: FILES,
+                added: 900,
+                removed: 100,
+            }),
+            point: Some((
+                "main".to_owned(),
+                Some(vigia::Facts {
+                    files: FILES,
+                    added: 900,
+                    removed: 100,
+                }),
+            )),
+        });
     }
 
     if depth > 0 {
@@ -607,7 +644,10 @@ fn frame_budget_on(
             &app.chrome(
                 "fixture",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -618,6 +658,7 @@ fn frame_budget_on(
         let at = laid
             .sheet
             .or(laid.menu)
+            .or(laid.positions)
             .map(|s| Rect::new(s.left, s.top, s.width, s.height))
             .expect("this gate asked for an overlay and the pane published none");
         let drawn = (at.top()..at.bottom())
@@ -1405,7 +1446,10 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1834,7 +1878,10 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -1873,12 +1920,30 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
     );
 }
 
+/// Rows of history the position list's own budget is measured over. More than any
+/// pane here can draw, so the box is full at every width and the paint is the widest
+/// one the gate can ask for.
+const POSITIONS_PAGE: usize = 64;
+
+/// I9 with the position list drawn over the frame. `SPEC.md` §11.1.
+#[test]
+fn a_frame_under_the_position_list_holds_the_frame_budget() {
+    frame_budget_on(
+        "shell-i9-positions",
+        0,
+        SHEET_PANE,
+        Overlay::Positions,
+        false,
+        false,
+    );
+}
+
 /// The pane the roomy rung's own budget is measured on.
 const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 48,
+    height: 49,
 };
 
 /// I9 with the roomy rung drawn over the frame.
@@ -1886,7 +1951,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 45),
+        (68, 46),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
@@ -2312,7 +2377,10 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             let chrome = app.chrome(
                 "fixture",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -2388,7 +2456,10 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -2631,7 +2702,10 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                 let chrome = app.chrome(
                     "fixture",
                     None,
-                    "current",
+                    vigia::Stood {
+                        position: "current",
+                        now: 0,
+                    },
                     Pointing::default(),
                     Default::default(),
                     "",

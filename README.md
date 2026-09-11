@@ -101,7 +101,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
 ## 👀 Reading the pane
 
 ```
-   header  │  my-repo · main · current · 3 changed                     +55 -10
+   header  │  my-repo · main · current ▾ · 3 changed                   +55 -10
            │
      list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
            │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3
@@ -243,6 +243,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `o` | the file list and its numbers, with no diff under it |
 | `a` | show or hide staged changes |
 | `b` | stand at the branch point, or back at the live pane |
+| `B` | the list of every place it can stand |
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide the note rows |
 | `Enter` `Esc` | in the note box: send the note, or close it and send nothing |
@@ -261,6 +262,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | click a track | send it there |
 | click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
+| click the position | the list of every place the pane can stand |
 | drag the diff | copy those rows: let go and they are sent |
 | click a line number | open a note there, for the agent in the other pane |
 | click a note's side | take that note back, reply and all |

@@ -52,7 +52,10 @@ fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -410,7 +413,10 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -478,7 +484,10 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         &configured.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

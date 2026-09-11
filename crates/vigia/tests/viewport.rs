@@ -38,7 +38,10 @@ fn body() -> usize {
         &App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

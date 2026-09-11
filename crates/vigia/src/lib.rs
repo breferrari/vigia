@@ -25,6 +25,9 @@ pub mod menu;
 /// safe to ship.
 pub mod motion;
 mod notes;
+/// `SPEC.md` §11.1's position list. Public for [`menu`]'s reason: the suite drives the
+/// overlay as the loop does.
+pub mod positions;
 /// `SPEC.md` §11.2 B21's send rung: what Enter puts on the agent session's
 /// socket. Public because the wire is the whole subject and no drawn cell shows
 /// it, so the suite drives it as the pane does.
@@ -40,15 +43,15 @@ pub mod theme;
 pub mod update;
 mod view;
 
-pub use app::{App, Sending, Voice};
+pub use app::{App, Asked, Sending, Stood, Voice};
 pub use clipboard::{Carrier, Route, plan, put, remote, system_tools, tmux_command};
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
-    Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
-    Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
-    repainted, scroll_mark, selection_after, settled,
+    Action, Deadlines, Grabbed, Held, Hovered, OVERLAY_FRAME, Pointing, Region, Regions,
+    STEP_DELAY, STEP_REPEAT, Selection, Sheet, TRACK_SCALE, Token, WHEEL_ROWS, action_for,
+    drag_action, hover_after, patience, repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
     Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH, Setting, Settings,
@@ -64,12 +67,13 @@ pub use notes::{
     box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
     resolve_arrival, withdraw, word_arrival,
 };
+pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
-    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
-    PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell, diff_height,
-    menu_cell, note_cells, notice_area, regions, render, voice_style,
+    Areas, Band, Body, COUNT_CELL, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells,
+    NoteCount, PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell,
+    diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
@@ -96,6 +100,11 @@ use vigia_core::{
 
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
+
+/// The frame behind the list's other named row, and where it stands. Beside the pane's
+/// own because a [`vigia_core::Frame`] borrows the worktree, and kept rather than
+/// rebuilt so its re-diff is incremental through I2a's machinery. §3's I4 carries it.
+type Aside<'w> = Option<(vigia_core::Standing, vigia_core::Frame<'w>)>;
 
 /// Why the shell woke up.
 enum Wake {
@@ -254,6 +263,18 @@ pub fn branch_point_of(
     }
 }
 
+/// Now, in seconds since the epoch, or zero on a clock set before it: every age then
+/// reads as a moment ago, which a reader can see, where a dead pane cannot.
+#[doc(hidden)]
+#[must_use]
+pub fn epoch_now() -> i64 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+        })
+}
+
 /// The paths in one wake's burst that the pane is actually having.
 ///
 /// The history store is fed from the burst and never from the walk, so the walk's
@@ -279,6 +300,8 @@ pub fn shown(mut paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<S
 pub fn run(path: &Path) -> Result<(), Failure> {
     let worktree = Worktree::discover(path)?;
     let mut frame = worktree.frame();
+    // Empty until the position list is open, and dropped with it: see [`Aside`].
+    let mut aside: Aside<'_> = None;
 
     // Same rule one input over: an error painted inside a TUI that then hands
     // the terminal back is an error nobody sees. `SPEC.md` §11.1.
@@ -366,6 +389,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         registry,
         store_watch: None,
         notes_stale: false,
+        places_stale: false,
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
         box_effect: None,
@@ -407,7 +431,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // One call, two frames. `Shell::draw` settles the repaint debt itself, so the
     // opening is one mechanism rather than two statements in a row that a future edit
     // can separate.
-    shell.draw(&mut frame, &worktree, Instant::now())?;
+    shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
 
     // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone());
@@ -493,7 +517,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // The margin's end after a print that moved, which no filesystem event marks.
             shell.settle_heights(&mut frame);
             shell.app.sample_memory();
-            shell.draw(&mut frame, &worktree, began)?;
+            shell.draw(&mut frame, &worktree, &mut aside, began)?;
             shell.request_warm(&worktree, &tx);
             // A timeout is a frame and belongs in the frame time the bar reports, which
             // `SPEC.md` §5.1 defines as the whole turn of this loop.
@@ -551,6 +575,34 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             }
                             BoxRoute::Inert => continue,
                             BoxRoute::Through => {}
+                        }
+                    }
+                    // The third bounded mode, four keys wide for the menu's reason:
+                    // `r` still flips the rail from inside the list. §11.1.
+                    if shell.app.positions_open() {
+                        match positions::positions_route(&event, regions.positions) {
+                            PositionsRoute::Move(rows) => {
+                                shell.move_positions(rows, &mut frame, &worktree);
+                                continue;
+                            }
+                            PositionsRoute::Pick => {
+                                shell.apply_menu(Action::PositionsPick, &mut frame, &worktree);
+                                continue;
+                            }
+                            PositionsRoute::Row(offset) => {
+                                shell.apply_menu(
+                                    Action::PositionsRow(offset),
+                                    &mut frame,
+                                    &worktree,
+                                );
+                                continue;
+                            }
+                            PositionsRoute::Close => {
+                                shell.apply_menu(Action::ClosePositions, &mut frame, &worktree);
+                                continue;
+                            }
+                            PositionsRoute::Inert => continue,
+                            PositionsRoute::Through => {}
                         }
                     }
                     // The pane's second bounded mode, and a narrow one: four keys are
@@ -671,6 +723,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // A tick is the world changing, so a demand that could not be
                     // served a moment ago is worth offering again.
                     shell.written = true;
+                    // The list's facts describe runs, so a write moves them too.
+                    shell.places_stale = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only thing
                     // that moves it is a wake the loop was already having.
@@ -735,7 +789,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // Once per batch, not once per wake. That is the whole of the
         // coalescing: every wake above was handled, in arrival order, and only
         // the paint is shared. See `drain`.
-        shell.draw(&mut frame, &worktree, began)?;
+        shell.draw(&mut frame, &worktree, &mut aside, began)?;
 
         // After the paint, because the paint is what raises the demand.
         // `Highlighter::wanted` describes the frame that just drew, so asking before it
@@ -949,6 +1003,9 @@ struct Shell {
     store_watch: Option<StoreWatch>,
     /// A wake said the store changed and no paint has read it back yet.
     notes_stale: bool,
+    /// Whether the list's facts are owed a walk: set when the tree moves, the list opens
+    /// or the pane does, so the arrows re-measure nothing.
+    places_stale: bool,
     /// What the pane holds of the store between wakes: the notes as listed and
     /// the ones on their way off the screen.
     ledger: Ledger,
@@ -980,7 +1037,10 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            &frame.standing().label(),
+            crate::app::Stood {
+                position: &frame.standing().label(),
+                now: epoch_now(),
+            },
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1103,7 +1163,10 @@ impl Shell {
             return;
         }
         self.branch_point = None;
-        self.app.stands(false);
+        self.app.stands(crate::app::Asked::Current);
+        // Owed here as well as in `apply`, which this path does not reach: an open list
+        // would keep drawing the branch it was measuring from.
+        self.places_stale = true;
         frame.stand(vigia_core::Standing::Current);
         match frame.advance() {
             Ok(()) => self.app.stood(),
@@ -1141,8 +1204,13 @@ impl Shell {
             self.deselect();
         }
         let before = self.app.settings();
+        let opened = self.app.positions_open();
+        let stood = frame.standing().clone();
         let carried = self.app.apply(action, frame, height)?;
         self.stand(frame, worktree);
+        // Owed where the list opened or the pane moved and on no other keystroke: the
+        // facts are a walk, and a caret crossing a row re-measures nothing.
+        self.places_stale |= opened != self.app.positions_open() || &stood != frame.standing();
         // Every flip is written back at once, whichever gesture made it: `r` from the
         // map and the rail's row in the menu are one change to one setting. The press
         // that turns remembering off is written too, or the file keeps `persist = on`
@@ -1166,27 +1234,29 @@ impl Shell {
     /// the actions that move it is what stops the list going stale behind a second
     /// gesture that moves it later.
     fn stand(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) {
-        let parked = !matches!(frame.standing(), vigia_core::Standing::Current);
-        if self.app.standing() == parked {
-            return;
-        }
-        let wanted = if self.app.standing() {
-            match branch_point_of(&mut self.branch_point, worktree) {
-                Ok(standing) => standing,
-                Err(e) => {
-                    self.app.warn(e.to_string());
-                    self.app.stands(false);
-                    return;
+        let wanted = match self.app.asked() {
+            crate::app::Asked::Current => vigia_core::Standing::Current,
+            // Already resolved: the walk that drew the row is what found the commit.
+            crate::app::Asked::At(standing) => standing.clone(),
+            crate::app::Asked::BranchPoint => {
+                match branch_point_of(&mut self.branch_point, worktree) {
+                    Ok(standing) => standing,
+                    Err(e) => {
+                        self.app.warn(e.to_string());
+                        self.app.stands(crate::app::Asked::Current);
+                        return;
+                    }
                 }
             }
-        } else {
-            vigia_core::Standing::Current
         };
+        // Against the frame rather than a remembered flag, which is what lets a third
+        // place exist: a list of the gestures that move it would go stale.
         if &wanted == frame.standing() {
             return;
         }
         let previous = frame.standing().clone();
-        let reaching = matches!(wanted, vigia_core::Standing::Since { .. });
+        // Asked before the walk, because the walk is what can change it.
+        let reaching = matches!(self.app.asked(), crate::app::Asked::BranchPoint);
         frame.stand(wanted);
         // Walked here for `ToggleStaged`'s reason: the frame this paint draws
         // has to be the one the token names. A failed walk leaves the previous
@@ -1200,12 +1270,12 @@ impl Shell {
                 // where the walk that failed is this base's: a branch can be
                 // rebased or collected out from under a pane that has been open
                 // for days, and a kept base the object database has lost fails
-                // the same way for as long as the process lives.
+                // the same way for as long as the process lives. A row the list
+                // named is not this base, so its failure keeps the resolution.
                 if reaching {
                     self.branch_point = None;
                 }
-                self.app
-                    .stands(!matches!(previous, vigia_core::Standing::Current));
+                self.app.stands(self.asked_of(&previous));
                 frame.stand(previous);
             }
         }
@@ -1343,6 +1413,156 @@ impl Shell {
         if let Err(e) = self.apply(action, frame, worktree, 0) {
             self.app.warn(e.to_string());
         }
+    }
+
+    /// The request naming where a frame already stands, put back after a failed walk so
+    /// the token names what the body is drawing. A position that *is* the held branch
+    /// point comes back as the request for it: the commit would be the same diff today
+    /// and a frozen one tomorrow, and the list could not tell which row it was on.
+    fn asked_of(&self, standing: &vigia_core::Standing) -> crate::app::Asked {
+        match standing {
+            vigia_core::Standing::Current => crate::app::Asked::Current,
+            other if self.branch_point.as_ref() == Some(other) => crate::app::Asked::BranchPoint,
+            other => crate::app::Asked::At(other.clone()),
+        }
+    }
+
+    /// Move the list's caret, extending the walk where it reached the end of one.
+    fn move_positions(&mut self, rows: isize, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        self.apply_menu(Action::PositionsMove(rows), frame, worktree);
+        let Some(caret) = self.app.positions_caret() else {
+            return;
+        };
+        self.extend_places(worktree, caret);
+    }
+
+    /// Rows a page takes, floored at one so a pane that measured nothing still extends.
+    fn positions_page(&self) -> usize {
+        self.app.positions_rows().max(1)
+    }
+
+    /// Walk a page on from where the caret asks; a caret with room asks for none.
+    fn extend_places(&mut self, worktree: &Worktree, caret: positions::Caret) {
+        let Some(from) = positions::resume_from(caret, self.app.places()).map(|at| at.id) else {
+            return;
+        };
+        match worktree.commits_from(Some(from), self.positions_page()) {
+            Ok(page) => {
+                let mut places = self.app.places().clone();
+                places.extend(page);
+                self.app.set_places(places);
+            }
+            // Said rather than swallowed: a page that will not walk is no reason to
+            // lose the rows above it.
+            Err(e) => self.app.warn(e.to_string()),
+        }
+    }
+
+    /// Put the list's rows where the repository has them, while one is open. The first
+    /// page waits a frame, a page being measured in the rows the box holds. The row the
+    /// pane stands on takes its facts off the view the header drew, so the two cannot
+    /// disagree; the other is walked, and `places_stale` keeps that off a keypress.
+    fn refresh_places<'w>(
+        &mut self,
+        frame: &vigia_core::Frame<'_>,
+        worktree: &'w Worktree,
+        aside: &mut Aside<'w>,
+    ) {
+        if !self.app.positions_open() {
+            // Dropped with the box, so no span cache outlives the run nobody is
+            // looking at.
+            *aside = None;
+            self.places_stale = false;
+            return;
+        }
+        // One gate and not two: deriving *never walked* from the collection's emptiness
+        // bypasses this one, and a history that will not walk is then retried per key.
+        if !std::mem::take(&mut self.places_stale) {
+            return;
+        }
+        let mut places = self.app.places().clone();
+        // Re-anchored rather than only filled: a checkout moves HEAD, and a list walked
+        // from one branch would name its commits for the life of the process.
+        match worktree.commits_from(None, self.positions_page()) {
+            Ok(page) => {
+                if places.re_anchor(page) {
+                    self.app.owe_caret();
+                }
+            }
+            // Said rather than swallowed: a history that will not walk still leaves the
+            // two named rows, which are the places a reader came for.
+            Err(e) => self.app.warn(e.to_string()),
+        }
+
+        // The name alone, from the resolution the shell holds: a place a reader can go
+        // is worth naming before it is worth counting.
+        let point = match branch_point_of(&mut self.branch_point, worktree) {
+            Ok(vigia_core::Standing::Since { at, named }) => Some((at, named)),
+            // A branch with no point to measure from draws no row for it, which is
+            // the same answer `b` gives: nothing to stand at rather than an empty run.
+            Ok(vigia_core::Standing::Current) | Err(_) => None,
+        };
+        let here = frame.standing().at();
+        let drawn = Some(Facts {
+            files: self.screen.files,
+            added: self.screen.churn.map_or(0, |run| run.added),
+            removed: self.screen.churn.map_or(0, |run| run.removed),
+        });
+
+        // One aside frame: only where the pane stands at a commit are both named rows
+        // runs it is not drawing, and then `current` is the one a reader came for.
+        places.current = if here.is_none() {
+            drawn
+        } else {
+            self.facts_at(worktree, aside, &vigia_core::Standing::Current)
+        };
+        places.point = point.map(|(at, named)| {
+            let facts = if here == Some(at) {
+                drawn
+            } else if here.is_none() {
+                self.facts_at(
+                    worktree,
+                    aside,
+                    &vigia_core::Standing::Since {
+                        at,
+                        named: named.clone(),
+                    },
+                )
+            } else {
+                // `current` took the one aside frame; a second would double the walk.
+                None
+            };
+            (named, facts)
+        });
+        self.app.set_places(places);
+    }
+
+    /// What one run holds, from the frame kept beside the pane's own. Armed the way that
+    /// one is, so `a` and `hide` reach it: a row counting hidden files is a second
+    /// answer about one tree.
+    fn facts_at<'w>(
+        &self,
+        worktree: &'w Worktree,
+        aside: &mut Aside<'w>,
+        standing: &vigia_core::Standing,
+    ) -> Option<Facts> {
+        // Rebuilt only where the position changed, which is what makes it incremental:
+        // fresh each wake costs the run, 20.21ms over two hundred files, kept 5.93ms.
+        if aside.as_ref().is_none_or(|(at, _)| at != standing) {
+            let mut made = worktree.frame();
+            made.stand(standing.clone());
+            *aside = Some((standing.clone(), made));
+        }
+        let (_, held) = aside.as_mut()?;
+        held.show_staged(self.app.staged());
+        held.hide(self.hide.clone());
+        held.advance().ok()?;
+        let churn = held.churn().ok()?.unwrap_or_default();
+        Some(Facts {
+            files: held.files().len(),
+            added: churn.added,
+            removed: churn.removed,
+        })
     }
 
     /// Flip a row, and arm the receipt a three-character word needs.
@@ -1650,26 +1870,28 @@ impl Shell {
     }
 
     /// Collect a screenful and paint it, settling any repaint it leaves owed.
-    fn draw(
+    fn draw<'w>(
         &mut self,
-        frame: &mut vigia_core::Frame,
-        worktree: &Worktree,
+        frame: &mut vigia_core::Frame<'_>,
+        worktree: &'w Worktree,
+        aside: &mut Aside<'w>,
         now: Instant,
     ) -> Result<(), Failure> {
         // The window is rolled here because this is where every frame passes.
         self.history.record_sized([], now);
-        self.paint(frame, worktree, now)?;
+        self.paint(frame, worktree, aside, now)?;
         if self.app.owes_repaint() {
-            self.paint(frame, worktree, now)?;
+            self.paint(frame, worktree, aside, now)?;
         }
         Ok(())
     }
 
     /// One collect and one paint, with no view of what it leaves owed.
-    fn paint(
+    fn paint<'w>(
         &mut self,
-        frame: &mut vigia_core::Frame,
-        worktree: &Worktree,
+        frame: &mut vigia_core::Frame<'_>,
+        worktree: &'w Worktree,
+        aside: &mut Aside<'w>,
         now: Instant,
     ) -> Result<(), Failure> {
         // Before the chrome, because the chrome carries it, and from the frame's own
@@ -1684,7 +1906,10 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            &position,
+            crate::app::Stood {
+                position: &position,
+                now: epoch_now(),
+            },
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -1720,6 +1945,10 @@ impl Shell {
             self.deselect();
         }
 
+        // Beside `elsewhere` and for its reason: both say what a run this pane is not
+        // drawing holds, and both are owed only by the frames that draw the answer.
+        self.refresh_places(frame, worktree, aside);
+
         // On a frame with nothing to draw, where the work went.
         self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
             worktree
@@ -1736,7 +1965,10 @@ impl Shell {
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            &position,
+            crate::app::Stood {
+                position: &position,
+                now: epoch_now(),
+            },
             self.pointing(),
             self.elsewhere,
             &self.root,
@@ -2096,12 +2328,12 @@ mod tests {
             "Ok(()) => self.app.stood(),",
             // A failed one puts the request, the frame and the base back.
             "frame.stand(previous);",
-            "stands(!matches!(previous, vigia_core::Standing::Current));",
+            "self.app.stands(self.asked_of(&previous));",
             "if reaching {\n                    self.branch_point = None;\n                }",
             // A branch with nothing to measure from says so and stays put.
-            "self.app.stands(false);",
-            // Answered from state, because a list of the actions goes stale.
-            "if self.app.standing() == parked {",
+            "self.app.stands(crate::app::Asked::Current);",
+            // Compared against the frame, because a list of the actions goes stale.
+            "if &wanted == frame.standing() {",
         ] {
             assert!(
                 stand.contains(rule),
@@ -2109,6 +2341,35 @@ mod tests {
                  that resolved nothing, or keeps a token the body is not drawing"
             );
         }
+        // What the list's rows cost, which is a frequency rather than a value and so is
+        // read here: no test can build a `Shell`, and a refresh running on every frame
+        // draws exactly what a correct one draws.
+        let refresh = shipped
+            .split("fn refresh_places<")
+            .nth(1)
+            .expect("`Shell::refresh_places` is gone");
+        let refresh = refresh
+            .split(
+                "
+    }
+",
+            )
+            .next()
+            .expect("`refresh_places` never closes");
+        for rule in [
+            // Nothing at all while the box is away.
+            "if !self.app.positions_open() {",
+            // And one walk per wake while it is up, rather than one per keypress.
+            "if !std::mem::take(&mut self.places_stale) {",
+            // Re-anchored, or a checkout leaves every commit row on the old branch.
+            "if places.re_anchor(page)",
+        ] {
+            assert!(
+                refresh.contains(rule),
+                "`{rule}` is gone from `Shell::refresh_places`, so the list's rows cost                  a walk of a whole run on frames that asked for nothing, or name a                  branch the pane is no longer on"
+            );
+        }
+
         // A base that goes away under a parked pane brings it home, on the one
         // walk that runs with nobody there to notice.
         let failed = shipped
@@ -2126,6 +2387,8 @@ mod tests {
             // Coming home is a move like any other, and the row the pane was on
             // names an unrelated file in the run it lands in.
             "Ok(()) => self.app.stood(),",
+            // And an open list is measuring from the base that just went away.
+            "self.places_stale = true;",
         ] {
             assert!(
                 failed.contains(rule),
@@ -2413,7 +2676,7 @@ mod tests {
 
         // Every frame rolls the window before it paints, and `Shell::draw` is where
         // every frame passes.
-        let drawer = &code[code.find("\n    fn draw(").expect("`Shell::draw` is gone")..];
+        let drawer = &code[code.find("\n    fn draw<").expect("`Shell::draw` is gone")..];
         let signature = &drawer[..drawer
             .find("-> Result<(), Failure>")
             .expect("`Shell::draw` no longer returns a `Result`")];
@@ -2615,7 +2878,7 @@ mod tests {
         // Each path to a paint settles the footer on the way: an announcement
         // never taken is one this run never says.
         let paints: Vec<usize> = code
-            .match_indices("shell.draw(&mut frame, &worktree, began)?")
+            .match_indices("shell.draw(&mut frame, &worktree, &mut aside, began)?")
             .map(|(at, _)| at)
             .collect();
         assert_eq!(
@@ -2703,7 +2966,7 @@ mod tests {
             .join("\n");
 
         let first_paint = code
-            .find("shell.draw(&mut frame, &worktree, Instant::now())?")
+            .find("shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?")
             .expect("`run` no longer paints before the loop");
         let armed = code
             .find("shell.watch_store(&tx, Instant::now())")
@@ -2722,7 +2985,7 @@ mod tests {
             .find("Wake::Notes => shell.notes_stale = true")
             .expect("the loop no longer marks the store stale on its wake");
         let paints: Vec<usize> = code
-            .match_indices("shell.draw(&mut frame, &worktree, began)?")
+            .match_indices("shell.draw(&mut frame, &worktree, &mut aside, began)?")
             .map(|(at, _)| at)
             .collect();
         assert!(
@@ -2828,7 +3091,7 @@ mod tests {
 
         // And the paint asks the interval rule with what the previous paint
         // recorded, and records for the next one after the effects have drawn.
-        let paint = code.find("fn paint(\n").expect("`Shell::paint` is gone");
+        let paint = code.find("fn paint<").expect("`Shell::paint` is gone");
         let paint = &code[paint..];
         let paint = &paint[..paint.find("\n    }\n").expect("`paint` never closes")];
         let asked = paint

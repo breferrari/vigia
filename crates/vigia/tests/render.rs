@@ -36,6 +36,11 @@ const BAR_COLUMNS: usize = 2;
 /// What joins two facts about one subject on a line of chrome.
 const FACT_JOIN: &str = " · ";
 
+/// The chevron the position token carries, which the painter adds rather than the
+/// caller. A gate that builds the header by hand has to add it too, or it is
+/// modelling a token the pane does not draw.
+const OPENS: &str = " ▾";
+
 /// The sparkline's ramp, tallest last.
 const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
@@ -186,6 +191,8 @@ fn chrome() -> Chrome {
         following: false,
         rail: false,
         sheet: None,
+        positions: None,
+        now: 0,
         // The first paint's chrome: no frame has completed, so there is no p99 to draw.
         frame: None,
         memory: None,
@@ -918,7 +925,7 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                 // position token is the one thing that may come between.
                 let beside = format!("{worktree}{FACT_JOIN}{files} changed");
                 let through = format!(
-                    "{worktree}{FACT_JOIN}{}{FACT_JOIN}{files} changed",
+                    "{worktree}{FACT_JOIN}{}{OPENS}{FACT_JOIN}{files} changed",
                     chrome().position
                 );
                 assert!(
@@ -1613,7 +1620,7 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
     // The clause the header draws: name, position token, count. One weight
     // covers all three.
     let clause = format!(
-        "{}{FACT_JOIN}{}{FACT_JOIN}3 changed",
+        "{}{FACT_JOIN}{}{OPENS}{FACT_JOIN}3 changed",
         chrome().worktree,
         chrome().position
     );
@@ -1861,9 +1868,10 @@ fn a_detached_head_names_no_branch_anywhere() {
         .split(FACT_JOIN.trim())
         .map(str::trim)
         .collect();
+    let token = format!("{}{OPENS}", chrome().position);
     assert_eq!(
         facts.as_slice(),
-        ["vigia", "current"],
+        ["vigia", token.as_str()],
         "a detached head drew a header fact that is neither the worktree nor \
          where it stands, so a branch was invented: {header:?}"
     );

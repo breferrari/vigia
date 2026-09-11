@@ -54,6 +54,8 @@ fn chrome() -> Chrome {
         following: false,
         rail: false,
         sheet: None,
+        positions: None,
+        now: 0,
         frame: None,
         memory: None,
         notes: Default::default(),

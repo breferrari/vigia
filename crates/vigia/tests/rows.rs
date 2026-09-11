@@ -380,7 +380,10 @@ fn a_real_repository_draws() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -405,7 +408,10 @@ fn a_real_repository_draws() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -470,7 +476,10 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -494,7 +503,10 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -567,7 +579,10 @@ fn every_rung_draws_from_the_stores_own_figures() {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

@@ -341,7 +341,8 @@ fn mouse_route(mouse: &MouseEvent, over: Option<Sheet>) -> MenuRoute {
             if (mouse.column, mouse.row) == over.close {
                 return MenuRoute::Close;
             }
-            row_at(over, mouse.row).map_or(MenuRoute::Inert, MenuRoute::Row)
+            over.row_at(mouse.row)
+                .map_or(MenuRoute::Inert, MenuRoute::Row)
         }
         MouseEventKind::Down(_) if !inside => MenuRoute::Close,
         // The wheel passes through, so the diff still scrolls behind it, which is
@@ -349,19 +350,4 @@ fn mouse_route(mouse: &MouseEvent, over: Option<Sheet>) -> MenuRoute {
         // in a way it is not.
         _ => MenuRoute::Through,
     }
-}
-
-/// Rows the frame and the air inside it cost, top and bottom.
-///
-/// Two border rows and one blank row at each end: the blank is what stops a name
-/// touching the edge it is written under.
-pub const MENU_FRAME: usize = 4;
-
-/// The drawn row a screen row falls on, counted from the top of the window.
-#[must_use]
-pub fn row_at(over: Sheet, row: u16) -> Option<u16> {
-    let first = over.top.saturating_add(2);
-    let rows = usize::from(over.height).saturating_sub(MENU_FRAME);
-    let offset = row.checked_sub(first)?;
-    (usize::from(offset) < rows).then_some(offset)
 }

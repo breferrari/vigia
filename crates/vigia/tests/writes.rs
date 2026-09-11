@@ -219,7 +219,10 @@ impl Rig<'_> {
         let chrome = self.app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -418,7 +421,10 @@ fn one_gesture_writes_exactly_one_file() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",

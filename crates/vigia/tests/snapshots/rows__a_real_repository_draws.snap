@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/rows.rs
+assertion_line: 428
 expression: terminal.backend()
 ---
-" fixture · current · 2 changed                        +3    -1  "
+" fixture · current ▾ · 2 changed                      +3    -1  "
 "                                                                "
 "▸A src/added.rs          ■■■■■■■■■■■■ ____________    +2    -0  "
 " M src/lib.rs            ■■■■■■■■■■■■ ____________    +1    -1  "

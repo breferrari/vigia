@@ -63,7 +63,10 @@ fn chrome_of(app: &App) -> vigia::Chrome {
     app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",

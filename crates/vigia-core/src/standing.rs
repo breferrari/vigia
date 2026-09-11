@@ -32,12 +32,16 @@ impl Standing {
     /// recognise it without a second copy of the word.
     pub const CURRENT: &'static str = "current";
 
+    /// The reading, which the token spells before the commit and the position
+    /// list spells on its own title bar.
+    pub const SINCE: &'static str = "since";
+
     /// The word the header draws after the branch.
     #[must_use]
     pub fn label(&self) -> String {
         match self {
             Self::Current => Self::CURRENT.to_owned(),
-            Self::Since { named, .. } => format!("since {named}"),
+            Self::Since { named, .. } => format!("{} {named}", Self::SINCE),
         }
     }
 

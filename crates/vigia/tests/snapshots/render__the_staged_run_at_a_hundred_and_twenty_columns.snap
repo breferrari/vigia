@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/render.rs
+assertion_line: 6392
 expression: "screen(120, 12, &both_runs(), &Chrome\n{ menu: None, staged: Some(2), ..chrome() })"
 ---
-"  vigia · current · 4 changed · 2 staged                                                                      watching  "
+"  vigia · current ▾ · 4 changed · 2 staged                                                                    watching  "
 "                                                                                                                        "
 "  ──  unstaged  2 ────────────────────────────────────────────────────────────────────────────────────────────────────  "
 "▸ M src/render.rs                                                                ■■■■■■■■■■■■ ____________    +4    -1  "

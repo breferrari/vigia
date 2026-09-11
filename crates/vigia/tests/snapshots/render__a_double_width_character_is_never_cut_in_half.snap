@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/render.rs
+assertion_line: 2299
 expression: "screen(40, 5, &view, &chrome())"
 ---
-"vigia · current · 1 changed     watching"
+"vigia · current ▾ · 1 changed   watching"
 "M …cs/読み方.md               +2    -0  " Hidden by multi-width symbols: [(7, " "), (9, " "), (11, " ")]
 "1 + 見出し a 見出し b 見出し c          " Hidden by multi-width symbols: [(5, " "), (7, " "), (9, " "), (14, " "), (16, " "), (18, " "), (23, " "), (25, " "), (27, " ")]
 "────────────────────────────────────────"

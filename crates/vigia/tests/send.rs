@@ -41,7 +41,10 @@ fn painted(app: &mut App, frame: &mut Frame) -> View {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -242,7 +245,10 @@ fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
         app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0
+            },
             Pointing::default(),
             Default::default(),
             ""

@@ -9,11 +9,46 @@ use crate::input::{Action, Pointing};
 use crate::memory;
 use crate::menu::{Caret, Menu, ROWS, Row, Settings};
 use crate::notes::NoteBox;
+use crate::positions::{self, Places, Positions};
 use crate::render::{Body, Chrome, Mode, NoteCount};
 use crate::view::{Anchor, Position, View, Viewport, rows_in};
 
 /// Completed frames the status bar's p99 is taken over.
 const FRAME_SAMPLES: usize = 128;
+
+/// Where the pane stands and when, as one frame draws it.
+///
+/// One argument rather than two because the position and the clock are one subject:
+/// the token spells the first and the list's ages are measured from the second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stood<'p> {
+    /// The token's word, as the frame spells it.
+    pub position: &'p str,
+    /// Now, in seconds since the epoch, for the ages the list draws. Passed in rather
+    /// than read where it is drawn: a clock read twice in one frame gives two rows
+    /// different ideas of the present.
+    pub now: i64,
+}
+
+/// Where the reader has asked the pane to stand, before anything resolves it.
+///
+/// Not a [`Standing`] outright, because two of the three answers are requests
+/// rather than positions: the branch point is a repository question and this type
+/// answers none of those, and coming home names no commit at all. A row of the
+/// position list arrives already resolved, since the walk that drew it is what
+/// found the commit.
+///
+/// [`Standing`]: vigia_core::Standing
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Asked {
+    /// The live pane.
+    #[default]
+    Current,
+    /// Everything since the branch point, wherever that turns out to be.
+    BranchPoint,
+    /// Everything since a commit a row named.
+    At(vigia_core::Standing),
+}
 
 /// A track fraction resolved against a count, saturating at the last index.
 fn scaled(at: u32, count: usize) -> usize {
@@ -129,10 +164,10 @@ pub struct App {
     shown: usize,
     /// Whether the reader has asked for the staged run (`a`).
     staged: bool,
-    /// Whether the reader has asked to stand at the branch point (`b`). The
-    /// resolved commit is the shell's, because finding it is a repository
-    /// question and this type answers none of those.
-    standing: bool,
+    /// Where the reader has asked the pane to stand, which `b` toggles and a row
+    /// of the position list names outright. Resolving a request is the shell's,
+    /// for [`Asked`]'s reason.
+    asked: Asked,
     /// How many files the staged run held on the last collect.
     staged_files: usize,
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
@@ -143,6 +178,21 @@ pub struct App {
     menu: Option<Caret>,
     /// Rows the config menu's window has on this pane, from [`Body::menu_rows`].
     menu_rows: usize,
+    /// Where the reader is inside the position list, or `None` while it is away.
+    positions: Option<positions::Caret>,
+    /// Rows that list's window has on this pane, from [`Body::positions_rows`].
+    positions_rows: usize,
+    /// The places it draws, walked by the shell because history is a repository
+    /// question. Kept here so one frame's rows and the caret over them are one
+    /// answer.
+    places: Places,
+    /// Whether the caret is still owed the row the pane is standing on.
+    ///
+    /// The rows are walked on the frame after the key, so a list opened on a pane that
+    /// has never drawn one has nothing to land on yet. Owed rather than derived on
+    /// demand, for [`App::landing`]'s reason: the answer arrives later than the ask, and
+    /// deriving it every frame would drag the caret back under a reader who moved it.
+    caret_owed: bool,
     /// Pages the sheet has on the pane last drawn for. One frame stale after a
     /// resize, which `sheet_plan` clamps.
     sheet_pages: usize,
@@ -188,7 +238,7 @@ impl Default for App {
             single: false,
             overview: false,
             staged: false,
-            standing: false,
+            asked: Asked::default(),
             wrap: false,
             notes: Vec::new(),
             notes_shown: true,
@@ -204,6 +254,10 @@ impl Default for App {
             sheet_pages: 1,
             menu: None,
             menu_rows: 0,
+            positions: None,
+            positions_rows: 0,
+            places: Places::default(),
+            caret_owed: false,
             anchored: false,
             list_top: 0,
             list_follows: true,
@@ -362,15 +416,26 @@ impl App {
         self.staged
     }
 
-    /// Whether the reader has asked to stand at the branch point.
-    pub fn standing(&self) -> bool {
-        self.standing
+    /// Where the reader has asked the pane to stand.
+    pub fn asked(&self) -> &Asked {
+        &self.asked
     }
 
-    /// Put the request where the frame actually is, which is what a refusal or a
-    /// failed walk leaves the reader with.
-    pub fn stands(&mut self, standing: bool) {
-        self.standing = standing;
+    /// Put the request somewhere, and owe the caret its row while a list is open.
+    ///
+    /// Every path that moves where the pane stands comes through here: the key, a
+    /// refusal, a failed walk, and a base lost under a parked pane. Which row the caret
+    /// is on is the list's only mark for where the pane is standing, so a standing that
+    /// moves under an open box and leaves the caret behind is a box pointing at the
+    /// wrong row.
+    pub fn stands(&mut self, asked: Asked) {
+        self.asked = asked;
+        self.caret_owed = self.positions.is_some();
+    }
+
+    /// Owe the caret its row, for a caller that moved the rows rather than the standing.
+    pub const fn owe_caret(&mut self) {
+        self.caret_owed = true;
     }
 
     /// The pane moved somewhere else and the walk that took it there succeeded.
@@ -475,11 +540,12 @@ impl App {
         &self,
         worktree: &str,
         branch: Option<&str>,
-        position: &str,
+        stood: Stood<'_>,
         pointing: Pointing,
         elsewhere: Counted,
         root: &str,
     ) -> Chrome {
+        let Stood { position, now } = stood;
         let Pointing {
             pressed,
             gripped,
@@ -511,6 +577,11 @@ impl App {
             links: self.links,
             root: root.to_owned(),
             sheet: self.sheet,
+            now,
+            positions: self.positions.map(|caret| Positions {
+                caret,
+                places: self.places.clone(),
+            }),
             menu: self.menu.map(|caret| Menu {
                 caret,
                 settings: self.settings(),
@@ -543,6 +614,56 @@ impl App {
         if let Some(caret) = self.menu.as_mut() {
             caret.top = caret.window(rows);
         }
+    }
+
+    /// The same, for the position list, whose row count is its own.
+    fn settle_positions(&mut self) {
+        let (rows, of) = (self.positions_rows, self.places.rows());
+        if let Some(caret) = self.positions.as_mut() {
+            caret.at = caret.at.min(of.saturating_sub(1));
+            caret.top = caret.window(rows, of);
+        }
+    }
+
+    /// Whether the position list is drawn.
+    #[must_use]
+    pub const fn positions_open(&self) -> bool {
+        self.positions.is_some()
+    }
+
+    /// Where its caret is, for the shell to resolve a pick against.
+    #[must_use]
+    pub fn positions_caret(&self) -> Option<positions::Caret> {
+        self.positions
+    }
+
+    /// Rows its window has on the pane last drawn for, which is what a page of the
+    /// walk is measured in: a page tied to the window extends on a resize rather
+    /// than re-walking, where a fixed chunk would draw blank rows on a tall pane.
+    #[must_use]
+    pub const fn positions_rows(&self) -> usize {
+        self.positions_rows
+    }
+
+    /// Put the places the list draws where the shell walked them.
+    ///
+    /// The caret is settled with them, because a page that grew or a branch point
+    /// that stopped resolving changes how many rows there are.
+    pub fn set_places(&mut self, places: Places) {
+        self.places = places;
+        if std::mem::take(&mut self.caret_owed) {
+            let at = self.standing_row();
+            if let Some(caret) = self.positions.as_mut() {
+                caret.at = at;
+            }
+        }
+        self.settle_positions();
+    }
+
+    /// What the list is drawing, so the shell can extend the walk it came from.
+    #[must_use]
+    pub fn places(&self) -> &Places {
+        &self.places
     }
 
     /// The pane's view settings as a [`crate::Config`], less the `hide` the shell
@@ -581,6 +702,47 @@ impl App {
         let top = self.menu?.window(self.menu_rows);
         (offset < self.menu_rows && ROWS.get(top + offset).is_some_and(|row| row.selectable()))
             .then_some(top + offset)
+    }
+
+    /// The row the pane is currently standing on, which is where the list opens.
+    ///
+    /// A commit the reader picked is found by id rather than by a remembered index:
+    /// the walk can have grown since, and an index into a list that changed names a
+    /// different commit.
+    fn standing_row(&self) -> usize {
+        let wanted = |at: usize| match (&self.asked, self.places.row_at(at)) {
+            (Asked::Current, Some(positions::Row::Current))
+            | (Asked::BranchPoint, Some(positions::Row::Point)) => true,
+            (Asked::At(standing), Some(positions::Row::Commit(nth))) => self
+                .places
+                .commits
+                .get(nth)
+                .is_some_and(|commit| Some(commit.id) == standing.at()),
+            _ => false,
+        };
+        (0..self.places.rows()).find(|at| wanted(*at)).unwrap_or(0)
+    }
+
+    /// What standing the row at `at` asks for.
+    fn asked_at(&self, at: usize) -> Option<Asked> {
+        match self.places.row_at(at)? {
+            positions::Row::Current => Some(Asked::Current),
+            positions::Row::Point => Some(Asked::BranchPoint),
+            positions::Row::Commit(nth) => {
+                let commit = self.places.commits.get(nth)?;
+                Some(Asked::At(vigia_core::Standing::Since {
+                    at: commit.id,
+                    named: commit.named.clone(),
+                }))
+            }
+        }
+    }
+
+    /// The same for the position list, where every row is selectable.
+    fn positions_at(&self, offset: usize) -> Option<usize> {
+        let of = self.places.rows();
+        let top = self.positions?.window(self.positions_rows, of);
+        (offset < self.positions_rows && top + offset < of).then_some(top + offset)
     }
 
     /// Record what changed most recently, and move to it if following (I5).
@@ -677,7 +839,14 @@ impl App {
             // walk is the shell's, because a branch point is a repository question,
             // and a request that is refused or fails to walk must leave the reader
             // where they were rather than at the top of a run they never left.
-            Action::ToggleStanding => self.standing = !self.standing,
+            Action::ToggleStanding => {
+                // Anywhere else comes home, so the key stays a toggle rather than
+                // becoming a cycle once the list can name a third place.
+                self.stands(match self.asked {
+                    Asked::Current => Asked::BranchPoint,
+                    Asked::BranchPoint | Asked::At(_) => Asked::Current,
+                });
+            }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 let (was, had) = (self.staged, self.position);
@@ -704,6 +873,7 @@ impl App {
             Action::ToggleSheet => {
                 // One overlay at a time, from this side too. B22.
                 self.menu = None;
+                self.positions = None;
                 self.sheet = match self.sheet {
                     None => Some(0),
                     Some(page) if page + 1 < self.sheet_pages => Some(page + 1),
@@ -758,6 +928,7 @@ impl App {
             // One overlay at a time, so opening either puts the other away. B22.
             Action::ToggleMenu => {
                 self.sheet = None;
+                self.positions = None;
                 self.menu = match self.menu {
                     None => Some(Caret::default()),
                     Some(_) => None,
@@ -775,6 +946,60 @@ impl App {
             Action::MenuFlip => {
                 if let Some(action) = self.menu.and_then(|caret| flips(caret.at)) {
                     return self.apply(action, frame, height);
+                }
+            }
+            // One overlay at a time, which is B22's rule, so opening this puts the
+            // other two away.
+            Action::TogglePositions => {
+                self.sheet = None;
+                self.menu = None;
+                self.positions = match self.positions {
+                    // Opened on the row the pane is standing on, so a list of
+                    // destinations says where you are in no ink at all.
+                    None => Some(positions::Caret {
+                        at: self.standing_row(),
+                        top: 0,
+                    }),
+                    Some(_) => None,
+                };
+                // And asked again once the rows arrive: pressing `b` then `B` opens the
+                // list on a pane whose branch point row has not been walked yet, so the
+                // row the pane stands on does not exist to land on.
+                self.caret_owed = self.positions.is_some();
+                self.settle_positions();
+            }
+            Action::ClosePositions => self.positions = None,
+            Action::PositionsMove(rows) => {
+                let of = self.places.rows();
+                // The reader has moved it, so it is no longer owed a row: landing it
+                // again when the next page arrives would drag them back up.
+                self.caret_owed = false;
+                if let Some(caret) = self.positions.as_mut() {
+                    caret.at = caret.stepped(rows, of);
+                }
+                // Resolved here for `MenuMove`'s reason: the state and the screen
+                // have to agree about which rows are drawn.
+                self.settle_positions();
+            }
+            Action::PositionsPick => {
+                if let Some(asked) = self.positions.and_then(|caret| self.asked_at(caret.at)) {
+                    // Closed before the standing moves, which is where this parts from
+                    // the menu: a flip is one of several a reader makes and a place is
+                    // the whole gesture, so leaving the box up would cover the body they
+                    // just asked to look at, and a closed box owes its caret nothing.
+                    self.positions = None;
+                    self.stands(asked);
+                }
+            }
+            Action::PositionsRow(offset) => {
+                if let Some(at) = self.positions_at(usize::from(offset)) {
+                    // The caret follows the pointer, so the mouse and the keyboard
+                    // cannot disagree about which row is live.
+                    if let Some(caret) = self.positions.as_mut() {
+                        caret.at = at;
+                    }
+                    self.settle_positions();
+                    return self.apply(Action::PositionsPick, frame, height);
                 }
             }
             Action::MenuRow(offset) => {
@@ -1087,6 +1312,10 @@ impl App {
             self.menu_rows = rows;
             self.settle_menu();
         }
+        if let Some(rows) = body.positions_rows {
+            self.positions_rows = rows;
+            self.settle_positions();
+        }
         // The staged total, below the collect and for the reason `elsewhere` is.
         self.staged_files = frame.files().len() - frame.staged_at();
         // Stored back for the reason the position is: resolution happens once,
@@ -1138,7 +1367,10 @@ mod tests {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing {
                 pressed: Some((79, 5)),
                 gripped: Some(Grabbed::Diff),
@@ -1174,7 +1406,10 @@ mod tests {
             app.chrome(
                 "fixture",
                 None,
-                "current",
+                Stood {
+                    position: "current",
+                    now: 0
+                },
                 Pointing::default(),
                 Counted::default(),
                 ""
@@ -1188,7 +1423,10 @@ mod tests {
             app.chrome(
                 "fixture",
                 None,
-                "current",
+                Stood {
+                    position: "current",
+                    now: 0
+                },
                 Pointing::default(),
                 Counted::default(),
                 ""
@@ -1206,7 +1444,10 @@ mod tests {
             app.chrome(
                 "fixture",
                 None,
-                "current",
+                Stood {
+                    position: "current",
+                    now: 0
+                },
                 Pointing::default(),
                 Counted::default(),
                 ""
@@ -1226,7 +1467,10 @@ mod tests {
             app.chrome(
                 "fixture",
                 Some("main"),
-                "current",
+                Stood {
+                    position: "current",
+                    now: 0
+                },
                 Pointing::default(),
                 Counted::default(),
                 ""
@@ -1239,7 +1483,10 @@ mod tests {
             app.chrome(
                 "fixture",
                 None,
-                "current",
+                Stood {
+                    position: "current",
+                    now: 0
+                },
                 Pointing::default(),
                 Counted::default(),
                 ""

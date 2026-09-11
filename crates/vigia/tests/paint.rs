@@ -48,7 +48,10 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -292,7 +295,10 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
     let chrome = App::new().chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -354,7 +360,10 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
         ..App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -407,7 +416,10 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

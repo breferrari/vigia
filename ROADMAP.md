@@ -187,8 +187,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | A first run says what the keys are and never what the pane is. **Reported from use** | [#492](https://github.com/breferrari/vigia/issues/492) |
 | ⬜ | The header names where in the history the pane is, and a click moves it. **Split into the three below** | [#490](https://github.com/breferrari/vigia/issues/490) |
 | ✅ | The pane can stand at the branch point, and the header says where it is | [#507](https://github.com/breferrari/vigia/issues/507) |
-| ⬜ | A list behind the token puts the pane at any commit. **Blocked by [#507](https://github.com/breferrari/vigia/issues/507)** | [#508](https://github.com/breferrari/vigia/issues/508) |
-| ⬜ | The third word is `only`, and it is the reading that goes inert. **Blocked by [#508](https://github.com/breferrari/vigia/issues/508)** | [#509](https://github.com/breferrari/vigia/issues/509) |
+| ✅ | A list behind the token puts the pane at any commit | [#508](https://github.com/breferrari/vigia/issues/508) |
+| ⬜ | The third word is `only`, and it is the reading that goes inert | [#509](https://github.com/breferrari/vigia/issues/509) |
 | ✅ | decision: whether the pane remembers a toggle, and where it writes it. **Ruled: the config menu, and remembering is one of its rows** | [#494](https://github.com/breferrari/vigia/issues/494) |
 | ✅ | Nothing shows the reader their own settings, and the config menu is what does | [#511](https://github.com/breferrari/vigia/issues/511) |
 | ✅ | Nothing keeps a toggle the reader flipped, and remember between runs is what does | [#512](https://github.com/breferrari/vigia/issues/512) |
@@ -338,8 +338,9 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | A release that removes a key can be filed as internal, and 0.42.0 was | [#467](https://github.com/breferrari/vigia/issues/467) |
 | ⬜ | A hidden path still wakes the watch. **Deferred by [#495](https://github.com/breferrari/vigia/issues/495): it changes what I1 measures** | [#501](https://github.com/breferrari/vigia/issues/501) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
-| ⬜ | Two overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511): a refactor of a pair that predates the branch that found it** | [#515](https://github.com/breferrari/vigia/issues/515) |
+| ⬜ | Three overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511) and again by [#508](https://github.com/breferrari/vigia/issues/508): a refactor of the two that predate the branches that found it** | [#515](https://github.com/breferrari/vigia/issues/515) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
+| ⬜ | A body-file path the leak guard cannot read is allowed in silence. **Found by [#508](https://github.com/breferrari/vigia/issues/508), which published a session URL past it** | [#520](https://github.com/breferrari/vigia/issues/520) |
 | ✅ | A gate can rebuild its expected value from the value under test, and one did | [#499](https://github.com/breferrari/vigia/issues/499) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |

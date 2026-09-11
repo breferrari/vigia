@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/render.rs
+assertion_line: 2241
 expression: backend
 ---
-" vigia · current · 1 changed                       watching "
+" vigia · current ▾ · 1 changed                     watching "
 " M Makefile                       ____________    +1    -0  "
 " 1 +     cargo build a   b                                  "
 "────────────────────────────────────────────────────────────"
