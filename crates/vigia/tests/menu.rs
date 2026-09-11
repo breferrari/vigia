@@ -637,6 +637,63 @@ fn the_menu_draws_inside_the_pane_at_forty_columns() {
     });
 }
 
+/// Every pane the box could be asked to draw in, including the ones below its
+/// floor.
+///
+/// The bounds are the drawer's, not the product's: `SPEC.md` I6 names forty
+/// columns, and `menu_plan` is asked for a box at every size a terminal can be,
+/// so the region between one column and forty is exactly where an underflow or a
+/// rect past the buffer would hide from every other gate here.
+const SWEEP_WIDTHS: std::ops::RangeInclusive<u16> = 1..=144;
+const SWEEP_HEIGHTS: std::ops::RangeInclusive<u16> = 1..=40;
+
+#[test]
+fn the_box_never_leaves_the_pane_at_any_size_a_terminal_can_be() {
+    let mut pane = Pane::open("menu-sweep");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (mut drew, mut declined) = (0usize, 0usize);
+        for w in SWEEP_WIDTHS {
+            for h in SWEEP_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(app, frame, highlighter, history, at);
+                let Some(menu) = laid.menu else {
+                    declined += 1;
+                    continue;
+                };
+                drew += 1;
+                assert!(
+                    menu.left + menu.width <= w && menu.top + menu.height <= h,
+                    "at {w}x{h} the box runs from ({}, {}) for {}x{}, past the pane",
+                    menu.left,
+                    menu.top,
+                    menu.width,
+                    menu.height
+                );
+                // The header owns row zero and the footer owns the rows under the
+                // body, so a box over either is a box the reader cannot read past.
+                assert!(menu.top >= 1, "at {w}x{h} the box covers the header row");
+                // And what was published is what was painted, which is `drawn`'s
+                // own assertion. It also proves the box is really on the screen
+                // rather than only in a rect.
+                let (_, painted) = drawn(&buf, &laid);
+                assert_eq!(
+                    (painted.x, painted.y, painted.width, painted.height),
+                    (menu.left, menu.top, menu.width, menu.height),
+                    "at {w}x{h} the painted box is not the published one"
+                );
+            }
+        }
+        // Non-vacuity, both ways: a sweep that drew nothing would pass every
+        // assertion above, and one that drew everywhere would never reach the
+        // floor this is aimed at.
+        assert!(
+            drew > 0 && declined > 0,
+            "the sweep drew {drew} boxes and declined {declined}, so it never              crossed the floor it exists to cross"
+        );
+    });
+}
+
 #[test]
 fn every_label_is_one_column_per_byte() {
     // `render::MENU_LABEL` sizes the label field with `str::len`, which is bytes,
