@@ -162,6 +162,7 @@ fn text_rows(drawn: &ratatui::backend::TestBackend, width: u16, height: u16) -> 
 
 fn chrome() -> Chrome {
     Chrome {
+        menu: None,
         position: "current".to_owned(),
         pressed: None,
         gripped: None,
@@ -195,6 +196,7 @@ fn chrome() -> Chrome {
 /// The chrome of every frame after the first, on a platform that reads memory.
 fn diagnostics_chrome() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -208,6 +210,7 @@ fn diagnostics_chrome() -> Chrome {
 /// The chrome of a worktree with nothing in it, which is what B3 specifies.
 fn empty_chrome() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -221,6 +224,7 @@ fn empty_chrome() -> Chrome {
 /// The chrome a shell actually starts with.
 fn following_chrome() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -555,6 +559,7 @@ fn the_header_says_which_mode_it_is_in() {
     assert!(!live.contains("not watching"), "live header: {live:?}");
 
     let stopped = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -694,6 +699,7 @@ fn the_binary_count_is_the_first_fact_a_narrowing_header_gives_up_after_staged()
     // staged total, which is about the other run rather than about this one.
     let view = with_binary(28, 2);
     let staged = Chrome {
+        menu: None,
         staged: Some(3),
         ..chrome()
     };
@@ -716,6 +722,7 @@ fn a_dead_watch_takes_the_slot_from_the_total() {
     // so the alert wins even where there is one to draw.
     let theme = Theme::default();
     let stopped = Chrome {
+        menu: None,
         mode: Mode::Lost,
         ..chrome()
     };
@@ -1719,6 +1726,7 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
 
     for (label, name) in names {
         let nameless = Chrome {
+            menu: None,
             pressed: None,
             gripped: None,
             scrolling: None,
@@ -1773,6 +1781,7 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
 
     let live = style_of(&chrome());
     let lost = style_of(&Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -1796,6 +1805,7 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
     // The notice carries which failure did it, which is not durable at all.
     let view = one_file();
     let stopped = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -2003,6 +2013,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
 fn a_notice_takes_the_footer_from_the_key_hints() {
     let view = one_file();
     let chrome = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -2026,6 +2037,7 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
     // most worth knowing precisely when something has just gone wrong.
     let view = one_file();
     let chrome = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -2089,6 +2101,7 @@ fn follow_marker_columns(chromes: impl IntoIterator<Item = Chrome>) -> Vec<u16> 
 fn the_frame_cell_never_shifts_what_is_beside_it() {
     // The one property that makes a per-frame readout safe to draw.
     let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -2106,6 +2119,7 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
 fn the_memory_cell_never_shifts_what_is_beside_it() {
     // [`the_frame_cell_never_shifts_what_is_beside_it`]'s property, one cell over.
     let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -2138,6 +2152,7 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
     );
 
     let unavailable = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -2159,6 +2174,7 @@ fn the_first_paint_draws_no_readouts_at_all() {
     // `None`.
     let view = one_file();
     let first = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -3920,6 +3936,7 @@ fn a_held_step_button_lights_and_only_that_one() {
     // Each button in turn: it lights, and the other three do not.
     for pressed in ends {
         let held = Chrome {
+            menu: None,
             pressed: Some((x, pressed)),
             ..chrome()
         };
@@ -3947,6 +3964,7 @@ fn a_held_step_button_lights_and_only_that_one() {
     // A cell that is not a button is unaffected, so the highlight cannot leak
     // onto the track or off the bar's column.
     let elsewhere = Chrome {
+        menu: None,
         pressed: Some((x, laid.diff.track.0)),
         ..chrome()
     };
@@ -3978,6 +3996,7 @@ fn a_dragged_bar_lights_its_thumb_and_the_other_bar_stays_put() {
         ("the diff", Grabbed::Diff, laid.diff, laid.list),
     ] {
         let held = Chrome {
+            menu: None,
             gripped: Some(whose),
             ..chrome()
         };
@@ -4061,6 +4080,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
         ),
     ] {
         let scrolling = Chrome {
+            menu: None,
             scrolling: Some((whose, way)),
             ..chrome()
         };
@@ -4089,6 +4109,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
     // Magnitude is not direction: a half page lights what a single row lights.
     for way in [-9isize, -1, 1, 9] {
         let scrolling = Chrome {
+            menu: None,
             scrolling: Some((Grabbed::Diff, way)),
             ..chrome()
         };
@@ -4122,6 +4143,7 @@ fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
     assert_eq!(fg(&chrome()), theme.bar_track.fg, "a button at rest");
 
     let hovered = Chrome {
+        menu: None,
         hovered: Some(Hovered::Button(x, button)),
         ..chrome()
     };
@@ -4133,12 +4155,14 @@ fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
     );
 
     let pressed = Chrome {
+        menu: None,
         pressed: Some((x, button)),
         ..chrome()
     };
     assert_eq!(fg(&pressed), theme.bar_active.fg, "a pressed button");
 
     let both = Chrome {
+        menu: None,
         hovered: Some(Hovered::Button(x, button)),
         pressed: Some((x, button)),
         ..chrome()
@@ -4215,6 +4239,7 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
         height,
         &view,
         &Chrome {
+            menu: None,
             hovered: Some(Hovered::Row(row)),
             ..chrome()
         },
@@ -4403,6 +4428,7 @@ fn a_hovered_row_that_is_also_the_current_one_reads_as_both() {
         height,
         &view,
         &Chrome {
+            menu: None,
             hovered: Some(Hovered::Row(row)),
             ..chrome()
         },
@@ -4460,6 +4486,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     assert_eq!(fg(&chrome()), weight(theme.bar_track), "a button at rest");
     assert_eq!(
         fg(&Chrome {
+            menu: None,
             hovered: Some(Hovered::Button(x, button)),
             ..chrome()
         }),
@@ -4468,6 +4495,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     );
     assert_eq!(
         fg(&Chrome {
+            menu: None,
             hovered: Some(Hovered::Button(x, button)),
             pressed: Some((x, button)),
             ..chrome()
@@ -4497,6 +4525,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     );
 
     let hovering = Chrome {
+        menu: None,
         hovered: Some(Hovered::Track(Grabbed::Diff)),
         ..chrome()
     };
@@ -4509,6 +4538,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     assert!(
         thumb_fg(
             &Chrome {
+                menu: None,
                 gripped: Some(Grabbed::Diff),
                 ..hovering.clone()
             },
@@ -4560,6 +4590,7 @@ fn hovering_one_bars_button_leaves_the_other_bars_alone() {
         ("the list's down", list_down, [list_up, diff_up, diff_down]),
     ] {
         let hovered = Chrome {
+            menu: None,
             hovered: Some(Hovered::Button(x, lit)),
             ..chrome()
         };
@@ -5442,6 +5473,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
         (
             "a frame over a second",
             Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -5453,6 +5485,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
         (
             "memory over a gigabyte",
             Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -5499,6 +5532,7 @@ fn a_notice_can_never_colour_the_follow_marker() {
     let theme = Theme::default();
     for following in [false, true] {
         let chrome = Chrome {
+            menu: None,
             pressed: None,
             gripped: None,
             scrolling: None,
@@ -5937,6 +5971,7 @@ fn the_width_a_row_wraps_at_is_the_width_it_is_drawn_across() {
     // seventy columns, through `Body::clamped_to`'s rail arm, and is a shape the
     // shell cannot build.
     let railed = Chrome {
+        menu: None,
         rail: true,
         ..chrome()
     };
@@ -6009,6 +6044,7 @@ fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
     let mut narrowed = false;
     for worktree in ["", " ", "\u{200b}", "\u{7}"] {
         let chrome = Chrome {
+            menu: None,
             worktree: worktree.to_owned(),
             staged: None,
             elsewhere: Counted::default(),
@@ -6045,6 +6081,7 @@ fn a_populated_worktree_names_its_branch_in_the_header() {
     let width = 80u16;
     let view = a_list_of(3, 3, 0);
     let chrome = Chrome {
+        menu: None,
         staged: None,
         elsewhere: Counted::default(),
         branch: Some("feature/band".to_owned()),
@@ -6251,6 +6288,7 @@ fn drawing_both_runs_spends_no_column_on_the_mark() {
 #[test]
 fn the_header_counts_both_runs() {
     let with = Chrome {
+        menu: None,
         staged: Some(2),
         ..chrome()
     };
@@ -6265,6 +6303,7 @@ fn the_header_counts_both_runs() {
     // worktree with nothing staged can give. A key that does nothing a reader can
     // see is the defect B17 is named for, one layer down.
     let empty = Chrome {
+        menu: None,
         staged: Some(0),
         ..chrome()
     };
@@ -6291,6 +6330,7 @@ fn the_header_counts_both_runs() {
 #[test]
 fn an_empty_view_says_where_the_work_went() {
     let signposted = Chrome {
+        menu: None,
         elsewhere: Counted {
             shown: 3,
             hidden: 0,
@@ -6319,6 +6359,7 @@ fn an_empty_view_with_nothing_anywhere_says_only_that() {
     // With the run on and nothing anywhere, both comparisons are named,
     // because both were asked about and the line has to say it looked.
     let both = Chrome {
+        menu: None,
         staged: Some(0),
         ..empty_chrome()
     };
@@ -6337,6 +6378,7 @@ fn the_staged_run_at_eighty_columns() {
         12,
         &both_runs(),
         &Chrome {
+            menu: None,
             staged: Some(2),
             ..chrome()
         }
@@ -6350,6 +6392,7 @@ fn the_staged_run_at_a_hundred_and_twenty_columns() {
         12,
         &both_runs(),
         &Chrome {
+            menu: None,
             staged: Some(2),
             ..chrome()
         }
@@ -6365,6 +6408,7 @@ fn the_staged_run_at_forty_columns() {
         12,
         &both_runs(),
         &Chrome {
+            menu: None,
             staged: Some(2),
             ..chrome()
         }
@@ -6377,6 +6421,7 @@ fn the_layout_is_the_same_whatever_the_staged_facts_say() {
     let view = both_runs();
     let plain = chrome();
     let told = Chrome {
+        menu: None,
         staged: Some(7),
         elsewhere: Counted {
             shown: 4,
@@ -7081,6 +7126,7 @@ fn the_hidden_count_sits_between_the_binary_count_and_the_staged_one() {
         ..with_binary(28, 2)
     };
     let staged = Chrome {
+        menu: None,
         staged: Some(3),
         ..chrome()
     };
@@ -7146,6 +7192,7 @@ fn the_header_and_the_body_never_disagree_about_what_is_hidden() {
         ..nothing_changed()
     };
     let both = Chrome {
+        menu: None,
         elsewhere: Counted {
             shown: 0,
             hidden: 1,
@@ -7188,6 +7235,7 @@ fn the_other_run_can_hold_both_what_is_shown_and_what_is_hidden() {
         ..nothing_changed()
     };
     let mixed = Chrome {
+        menu: None,
         elsewhere: Counted {
             shown: 3,
             hidden: 2,
@@ -7225,6 +7273,7 @@ fn a_pane_whose_only_work_is_staged_and_hidden_says_so() {
         ..nothing_changed()
     };
     let taken = Chrome {
+        menu: None,
         elsewhere: Counted {
             shown: 0,
             hidden: 1,
@@ -7289,6 +7338,7 @@ fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
         ..nothing_changed()
     };
     let elsewhere = Chrome {
+        menu: None,
         elsewhere: Counted {
             shown: 3,
             hidden: 0,
@@ -7308,6 +7358,7 @@ fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
         ..nothing_changed()
     };
     let both = Chrome {
+        menu: None,
         staged: Some(0),
         ..chrome()
     };

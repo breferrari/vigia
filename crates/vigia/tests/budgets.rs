@@ -225,7 +225,7 @@ fn a_frame_beside_a_rail_holds_the_frame_budget() {
          which is not the deeper region this gate exists to time",
         rail.list
     );
-    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, None, true, false);
+    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, Overlay::Bare, true, false);
 }
 
 #[test]
@@ -412,15 +412,29 @@ fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
 
 /// Sample the frame budget with the viewport `depth` rows into the diff.
 fn frame_budget_at_depth(name: &str, depth: usize) {
-    frame_budget_on(name, depth, area(), None, false, false);
+    frame_budget_on(name, depth, area(), Overlay::Bare, false, false);
 }
 
 /// The same, on a named pane.
+/// Which overlay a timed frame carries, and what its box has to be drawn with.
+///
+/// One parameter rather than two flags, because the pane never draws both:
+/// `SPEC.md` §11.2 B22 rules one overlay at a time, and a pair of bools could
+/// ask for a frame that cannot exist.
+enum Overlay<'a> {
+    /// Nothing over the pane.
+    Bare,
+    /// The gestures sheet, at the rung whose name is here.
+    Sheet(&'a str),
+    /// The config menu.
+    Menu,
+}
+
 fn frame_budget_on(
     name: &str,
     depth: usize,
     pane: Rect,
-    sheet: Option<&str>,
+    overlay: Overlay<'_>,
     rail: bool,
     single: bool,
 ) {
@@ -453,10 +467,17 @@ fn frame_budget_on(
     let screen = layout_of(&app, pane, FILES);
     let height = screen.diff;
 
-    if sheet.is_some() {
-        // Retained state, so one toggle covers every frame the loop below times.
-        app.apply(vigia::Action::ToggleSheet, &mut frame, height)
-            .expect("toggle the sheet");
+    // Retained state, so one toggle covers every frame the loop below times.
+    match overlay {
+        Overlay::Bare => {}
+        Overlay::Sheet(_) => {
+            app.apply(vigia::Action::ToggleSheet, &mut frame, height)
+                .expect("toggle the sheet");
+        }
+        Overlay::Menu => {
+            app.apply(vigia::Action::ToggleMenu, &mut frame, height)
+                .expect("toggle the menu");
+        }
     }
 
     if depth > 0 {
@@ -577,10 +598,15 @@ fn frame_budget_on(
         || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
 
-    // And when a sheet was asked for, one has to have been on the frames that were
-    // timed.
-    if let Some(rung) = sheet {
-        // Inside the sheet's own rect, not over the pane.
+    // And when an overlay was asked for, one has to have been on the frames that
+    // were timed.
+    let wanted: Option<(&str, Option<&str>)> = match overlay {
+        Overlay::Bare => None,
+        Overlay::Sheet(rung) => Some(("gestures", Some(rung))),
+        Overlay::Menu => Some(("config menu", None)),
+    };
+    if let Some((word, rung)) = wanted {
+        // Inside the overlay's own rect, not over the pane.
         let laid = vigia::regions(
             pane,
             &app.chrome(
@@ -596,8 +622,9 @@ fn frame_budget_on(
         );
         let at = laid
             .sheet
+            .or(laid.menu)
             .map(|s| Rect::new(s.left, s.top, s.width, s.height))
-            .expect("this gate asked for a sheet and the pane published none");
+            .expect("this gate asked for an overlay and the pane published none");
         let drawn = (at.top()..at.bottom())
             .map(|y| {
                 (at.left()..at.right())
@@ -607,15 +634,17 @@ fn frame_budget_on(
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            drawn.contains("gestures"),
-            "this gate asked for the sheet and timed {SAMPLED_FRAMES} frames \
-             without one on them, so it measured the gate above under another name"
+            drawn.contains(word),
+            "this gate asked for {word:?} and timed {SAMPLED_FRAMES} frames without \
+             one on them, so it measured the gate above under another name"
         );
-        assert!(
-            drawn.contains(rung),
-            "the timed frames carried a sheet but not the {rung:?} rung this gate \
-             is named for"
-        );
+        if let Some(rung) = rung {
+            assert!(
+                drawn.contains(rung),
+                "the timed frames carried a sheet but not the {rung:?} rung this \
+                 gate is named for"
+            );
+        }
     }
 }
 
@@ -1794,7 +1823,7 @@ const SHEET_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 24,
+    height: 25,
 };
 
 /// The size of the sheet `pane` draws, with the sheet up.
@@ -1832,7 +1861,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 21),
+        (104, 22),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -1843,7 +1872,7 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
         "shell-i9-sheet",
         0,
         SHEET_PANE,
-        Some("keyboard"),
+        Overlay::Sheet("keyboard"),
         false,
         false,
     );
@@ -1854,7 +1883,7 @@ const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 47,
+    height: 49,
 };
 
 /// I9 with the roomy rung drawn over the frame.
@@ -1862,7 +1891,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 44),
+        (68, 45),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
@@ -1873,16 +1902,26 @@ fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
         "shell-i9-roomy",
         0,
         ROOMY_PANE,
-        Some("moving"),
+        Overlay::Sheet("moving"),
         false,
         false,
     );
 }
 
+/// I9 with the config menu drawn over the frame (`SPEC.md` §11.2 B22).
+///
+/// The overlay's own cost is the box, which is bounded by the settings list rather
+/// than by the diff, so the dear case is a pane deep enough to be drawing a full
+/// screenful underneath it.
+#[test]
+fn a_frame_under_the_config_menu_holds_the_frame_budget() {
+    frame_budget_on("shell-i9-menu", 0, SHEET_PANE, Overlay::Menu, false, false);
+}
+
 /// I9 with the diff pinned to one file, which is `SPEC.md` §11.2 B16.
 #[test]
 fn a_pinned_frame_holds_the_frame_budget() {
-    frame_budget_on("shell-i9-single", 0, area(), None, false, true);
+    frame_budget_on("shell-i9-single", 0, area(), Overlay::Bare, false, true);
 }
 
 /// The pane the overview's own budget is measured on. Deep, because the state's

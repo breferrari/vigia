@@ -28,7 +28,7 @@ An agent edits **fast**, **wide**, and while you are reading something else. The
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle, under 5% memory drift over 24 hours |
 | 🎯 **The diff, and nothing else** | No branch or commit *browsing*, no stash list, no staging *actions*. `b` moves where the diff is measured from and picks nothing to look at. One mode, the note box, which you open with a click and leave with `Esc`; outside it `vigia` has toggles and no key ever changes meaning, so there is no state you end up in by accident |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
-| ⌨️ **Nothing to learn first** | `?` draws every gesture the pane binds, over the pane and moving nothing. `~/.config/vigia/config` decides what it opens as |
+| ⌨️ **Nothing to learn first** | `?` draws every gesture the pane binds and `m` draws every setting, both over the pane and moving nothing. `~/.config/vigia/config` decides what it opens as |
 
 > [!NOTE]
 > **A monitor, not a reviewer.** A reviewer is something you *launch* per changeset to step through, annotate and decide on. `vigia` is already open. It is closer to `btop` than to a git client: you read it from shape and colour, then glance away.
@@ -246,6 +246,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide the note rows |
 | `Enter` `Esc` | in the note box: send the note, or close it and send nothing |
+| `m` `Esc` | **every setting above, in one box**, with `↑` `↓` to move and `Space` to flip. `Esc` puts it away |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 

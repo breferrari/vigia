@@ -77,6 +77,7 @@ fn header_at(view: &View, position: &str, app: &App, width: u16) -> String {
 /// `position` says.
 fn drawn_row(view: &View, position: &str, app: &App, y: u16, width: u16) -> String {
     let chrome = Chrome {
+        menu: None,
         position: position.to_owned(),
         ..app.chrome(
             "fixture",

@@ -7,6 +7,7 @@ use vigia_core::{Counted, Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
+use crate::menu::{Caret, Menu, SETTINGS, Setting, Settings};
 use crate::notes::NoteBox;
 use crate::render::{Body, Chrome, Mode, NoteCount};
 use crate::view::{Anchor, Position, View, Viewport, rows_in};
@@ -125,6 +126,11 @@ pub struct App {
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
     /// Retained between frames, or an agent's write dismisses it.
     sheet: Option<usize>,
+    /// Where the reader is inside the config menu, or `None` while it is away.
+    /// `SPEC.md` §11.2 B22.
+    menu: Option<Caret>,
+    /// Rows the config menu's window has on this pane, from [`Body::menu_rows`].
+    menu_rows: usize,
     /// Pages the sheet has on the pane last drawn for. One frame stale after a
     /// resize, which `sheet_plan` clamps.
     sheet_pages: usize,
@@ -183,6 +189,8 @@ impl Default for App {
             staged_files: 0,
             sheet: None,
             sheet_pages: 1,
+            menu: None,
+            menu_rows: 0,
             anchored: false,
             list_top: 0,
             list_follows: true,
@@ -488,9 +496,63 @@ impl App {
             links: self.links,
             root: root.to_owned(),
             sheet: self.sheet,
+            menu: self.menu.map(|caret| Menu {
+                caret: caret.at,
+                top: caret.top,
+                settings: self.settings(),
+            }),
             frame: self.frames.percentile(0.99),
             memory: self.memory,
         }
+    }
+
+    /// Every toggle the config menu draws, as the pane stands.
+    #[must_use]
+    pub const fn settings(&self) -> Settings {
+        Settings {
+            follow: self.following,
+            rail: self.rail,
+            single: self.single,
+            overview: self.overview,
+            staged: self.staged,
+            wrap: self.wrap,
+            notes: self.notes_shown,
+            icons: self.icons,
+            links: self.links,
+        }
+    }
+
+    /// Put the window where the caret is, which is what a pane too short needs.
+    fn settle_menu(&mut self) {
+        let rows = self.menu_rows;
+        if let Some(caret) = self.menu.as_mut() {
+            caret.top = Menu {
+                caret: caret.at,
+                top: caret.top,
+                settings: Settings::default(),
+            }
+            .window(rows);
+        }
+    }
+
+    /// Whether the config menu is drawn.
+    #[must_use]
+    pub const fn menu_open(&self) -> bool {
+        self.menu.is_some()
+    }
+
+    /// The setting the caret is on, resolved against the drawn window.
+    fn menu_at(&self, offset: usize) -> Option<Setting> {
+        let caret = self.menu?;
+        let top = Menu {
+            caret: caret.at,
+            top: caret.top,
+            settings: self.settings(),
+        }
+        .window(self.menu_rows);
+        (offset < self.menu_rows)
+            .then(|| SETTINGS.get(top + offset).copied())
+            .flatten()
     }
 
     /// Record what changed most recently, and move to it if following (I5).
@@ -554,6 +616,7 @@ impl App {
             // `Esc` leaves the frontmost thing, and the sheet is a thing. Reported from
             // a real pane: a reader pressed `Esc` to put the help away and the monitor
             // exited.
+            Action::Escape if self.menu.is_some() => self.menu = None,
             Action::Escape if self.sheet.is_some() => self.sheet = None,
             Action::Escape => return Ok(false),
             Action::Redraw => {}
@@ -600,6 +663,8 @@ impl App {
             // No jump and no move at all, and unlike the toggles above it does not
             // even resize a region: it draws over rows the diff keeps.
             Action::ToggleSheet => {
+                // One overlay at a time, from this side too. B22.
+                self.menu = None;
                 self.sheet = match self.sheet {
                     None => Some(0),
                     Some(page) if page + 1 < self.sheet_pages => Some(page + 1),
@@ -609,6 +674,49 @@ impl App {
             // The control means close, where `?` means the sheet, which is why B13
             // needs a second variant.
             Action::CloseSheet => self.sheet = None,
+            // Neither reaches a key. The menu is the only gesture that flips them, which
+            // is what B22 gives B18's two config-only settings.
+            Action::ToggleIcons => self.icons = !self.icons,
+            Action::ToggleLinks => self.links = !self.links,
+            // One overlay at a time, so opening either puts the other away. B22.
+            Action::ToggleMenu => {
+                self.sheet = None;
+                self.menu = match self.menu {
+                    None => Some(Caret::default()),
+                    Some(_) => None,
+                };
+            }
+            Action::CloseMenu => self.menu = None,
+            Action::MenuMove(rows) => {
+                if let Some(caret) = self.menu.as_mut() {
+                    // Clamped rather than wrapped: a list that jumps from its last row
+                    // to its first moves the eye further than the key asked to.
+                    caret.at = caret
+                        .at
+                        .saturating_add_signed(rows)
+                        .min(SETTINGS.len().saturating_sub(1));
+                }
+                // Resolved here so the state and the screen agree about which rows are
+                // drawn, which is `sheet_pages`' rule one overlay over.
+                self.settle_menu();
+            }
+            Action::MenuFlip => {
+                if let Some(setting) = self.menu.and_then(|caret| SETTINGS.get(caret.at).copied()) {
+                    return self.apply(setting.action(), frame, height);
+                }
+            }
+            Action::MenuRow(offset) => {
+                if let Some(setting) = self.menu_at(usize::from(offset)) {
+                    // The caret follows the pointer, so the mouse and the keyboard
+                    // cannot disagree about which row is live.
+                    if let Some(at) = SETTINGS.iter().position(|row| *row == setting)
+                        && let Some(caret) = self.menu.as_mut()
+                    {
+                        caret.at = at;
+                    }
+                    return self.apply(setting.action(), frame, height);
+                }
+            }
             Action::Scroll(rows) => {
                 self.scroll(rows, frame)?;
             }
@@ -897,6 +1005,12 @@ impl App {
         // reader on the heading for good: the tick that armed it is spent.
         self.landing = owed && !view.landed;
         self.list_rows = body.list;
+        // Recorded for `sheet_pages`' reason: the caret's window is a property of the
+        // pane, and a resize moves it with nobody pressing anything.
+        if let Some(rows) = body.menu_rows {
+            self.menu_rows = rows;
+            self.settle_menu();
+        }
         // The staged total, below the collect and for the reason `elsewhere` is.
         self.staged_files = frame.files().len() - frame.staged_at();
         // Stored back for the reason the position is: resolution happens once,

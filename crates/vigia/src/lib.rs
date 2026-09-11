@@ -17,6 +17,9 @@ mod input;
 /// over the notes store. Public because the suite drives it as the loop does.
 pub mod mcp;
 pub mod memory;
+/// `SPEC.md` §11.2 B22's config menu: the pane's settings, drawn where a reader
+/// can see them. Public because the suite drives the overlay as the loop does.
+pub mod menu;
 /// Public for [`theme`]'s reason, and because the pane's motions are its
 /// sources: the suite compiles every one, which is what makes a text motion
 /// safe to ship.
@@ -47,6 +50,9 @@ pub use input::{
     Selection, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
     repainted, scroll_mark, selection_after, settled,
 };
+pub use menu::{
+    Caret, Menu, MenuRoute, OFF, ON, SETTINGS, STATE_WIDTH, Setting, Settings, menu_route,
+};
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
     NOTICE_ARRIVING, NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
@@ -62,7 +68,7 @@ pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
     PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell, diff_height,
-    note_cells, notice_area, regions, render, voice_style,
+    menu_cell, note_cells, notice_area, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
@@ -356,6 +362,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
         box_effect: None,
+        menu_effect: None,
         alerts: Alerts::default(),
         effects_ran: false,
     };
@@ -537,6 +544,31 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             }
                             BoxRoute::Inert => continue,
                             BoxRoute::Through => {}
+                        }
+                    }
+                    // The pane's second bounded mode, and a narrow one: four keys are
+                    // the menu's while it is up and every other one reaches the map
+                    // below, so `r` still flips the rail from inside it. B22.
+                    if shell.app.menu_open() {
+                        match menu::menu_route(&event, regions.menu) {
+                            MenuRoute::Move(rows) => {
+                                shell.apply_menu(Action::MenuMove(rows), &mut frame, &worktree);
+                                continue;
+                            }
+                            MenuRoute::Flip => {
+                                shell.flip_menu(Action::MenuFlip, &mut frame, &worktree);
+                                continue;
+                            }
+                            MenuRoute::Row(offset) => {
+                                shell.flip_menu(Action::MenuRow(offset), &mut frame, &worktree);
+                                continue;
+                            }
+                            MenuRoute::Close => {
+                                shell.apply_menu(Action::CloseMenu, &mut frame, &worktree);
+                                continue;
+                            }
+                            MenuRoute::Inert => continue,
+                            MenuRoute::Through => {}
                         }
                     }
                     // A press on a content row's gutter opens the box and never begins
@@ -914,6 +946,8 @@ struct Shell {
     note_effects: NoteEffects,
     /// The effect over the note box's rows while it arrives or leaves.
     box_effect: Option<Timed>,
+    /// The flipped state cell's own, over the cells it drew. B22's only motion.
+    menu_effect: Option<Timed>,
     /// What the last listing had to say, so the alert is said when that changes
     /// and not on every wake.
     alerts: Alerts,
@@ -985,6 +1019,7 @@ impl Shell {
             || self.notice_effects.is_running()
             || self.note_effects.is_running()
             || self.box_effect.as_ref().is_some_and(Timed::is_running)
+            || self.menu_effect.as_ref().is_some_and(Timed::is_running)
     }
 
     /// How long the loop may block before something here has to act.
@@ -1282,6 +1317,27 @@ impl Shell {
 
     /// Esc, or a press anywhere outside the box: the keys are the pane's again
     /// now, and the rows stay drawn while the entrance plays backwards.
+    /// Apply one of the menu's own actions, which move nothing and read no height.
+    fn apply_menu(&mut self, action: Action, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        // The height is not read by any of them, and asking for one would walk the
+        // diff to answer a question about a box drawn over it.
+        if let Err(e) = self.apply(action, frame, worktree, 0) {
+            self.app.warn(e.to_string());
+        }
+    }
+
+    /// Flip a row, and arm the receipt a three-character word needs.
+    ///
+    /// The cell is armed before the action rather than after it, so the effect runs
+    /// over the row the reader aimed at even when flipping it moves the caret.
+    fn flip_menu(&mut self, action: Action, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        self.menu_effect = Some(Timed::armed(
+            motion::coalescing(SAID_ARRIVING),
+            Instant::now(),
+        ));
+        self.apply_menu(action, frame, worktree);
+    }
+
     fn cancel_box(&mut self, now: Instant) {
         // The rows stand aside for as long as the sweep runs, which is the
         // motion's own length rather than a constant read twice.
@@ -1383,6 +1439,7 @@ impl Shell {
         // The box's own end, on the same terms: dropped on the turn that finds it.
         self.app.settle_box(now);
         self.box_effect.take_if(|armed| armed.spent(now));
+        self.menu_effect.take_if(|armed| armed.spent(now));
     }
 
     /// Hand the next collect what the ledger says is drawn.
@@ -1649,6 +1706,7 @@ impl Shell {
         let notice_effects = &mut self.notice_effects;
         let note_effects = &mut self.note_effects;
         let box_effect = &mut self.box_effect;
+        let menu_effect = &mut self.menu_effect;
         let mut painted = Regions::default();
         let was = self.regions;
         self.session.screen().draw(|f| {
@@ -1682,6 +1740,13 @@ impl Shell {
             // The box's, over the cells it drew; off screen it waits the same way.
             if let Some(armed) = box_effect.as_mut()
                 && let Some(over) = render::box_cells(&painted, screen)
+            {
+                armed.draw(since, f.buffer_mut(), over);
+            }
+            // The menu's flipped cell, drawn after the overlay it sits on and
+            // clipped to the three columns the word takes.
+            if let Some(armed) = menu_effect.as_mut()
+                && let Some(over) = render::menu_cell(area, &chrome, screen.files)
             {
                 armed.draw(since, f.buffer_mut(), over);
             }

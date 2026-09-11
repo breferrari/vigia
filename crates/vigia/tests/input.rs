@@ -598,6 +598,7 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 /// A screen with a pinned list on rows 1..4, a diff on 5..20, and bars at 79.
 fn bars_at(regions: Regions, column: u16) -> Regions {
     Regions {
+        menu: None,
         list: Region {
             bar: Some(column),
             ..regions.list
@@ -613,6 +614,7 @@ fn bars_at(regions: Regions, column: u16) -> Regions {
 /// The same screen with no bar drawn in either region.
 fn without_bars(regions: Regions) -> Regions {
     Regions {
+        menu: None,
         list: Region {
             bar: None,
             ..regions.list
@@ -627,6 +629,7 @@ fn without_bars(regions: Regions) -> Regions {
 
 fn two_regions() -> Regions {
     Regions {
+        menu: None,
         list: Region::bare(1, 3, 0, 80, Some(79)),
         diff: Region {
             top: 5,
@@ -646,6 +649,7 @@ fn two_regions() -> Regions {
 /// by their columns alone.
 fn beside() -> Regions {
     Regions {
+        menu: None,
         list: Region::bare(1, 18, 0, 30, Some(29)),
         diff: Region::bare(1, 18, 30, 70, Some(99)),
         sheet: None,
@@ -702,6 +706,7 @@ fn the_wheel_scrolls_whichever_region_it_is_over() {
 #[test]
 fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
     let scrolling_diff = Regions {
+        menu: None,
         // No bar: three files fit, so there is nothing to scroll.
         list: Region::bare(1, 3, 0, 80, None),
         // A bar: the diff runs past the pane.
@@ -945,6 +950,7 @@ fn a_press_on_a_step_button_steps_one_row_in_the_region_it_is_in() {
 fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
     // The list's own buttons, on a fixture tall enough to have them.
     let regions = Regions {
+        menu: None,
         list: Region {
             top: 1,
             rows: 6,
@@ -1214,6 +1220,7 @@ fn a_step_button_the_sheet_covers_arms_nothing() {
     // Covering the top button and not the bottom one, so the two assertions
     // below are the same bar at two rows rather than a bar and something else.
     let covered = Regions {
+        menu: None,
         sheet: Some(Sheet {
             left: 70,
             top: 2,
@@ -1271,6 +1278,7 @@ fn a_track_the_sheet_covers_grabs_nothing() {
     assert_eq!(bare.grab_at(79, 12), Some(Grabbed::Diff));
 
     let covered = Regions {
+        menu: None,
         sheet: Some(Sheet {
             left: 70,
             top: 10,
@@ -1329,6 +1337,7 @@ fn a_track_the_sheet_covers_grabs_nothing() {
     // because it is the one cell of the sheet a click acts on, so a reader of the
     // guard will ask.
     let over_close = Regions {
+        menu: None,
         sheet: Some(Sheet {
             left: 70,
             top: 10,
@@ -1403,6 +1412,7 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
     // mode the same way: moving the map expresses no intent about the diff, and
     // moving the diff is a manual scroll.
     let regions = Regions {
+        menu: None,
         list: Region {
             top: 1,
             rows: 6,
@@ -1532,6 +1542,7 @@ fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
     // Any change at all retires it, and the rule deliberately does not try to tell one
     // button from another.
     let grown = Regions {
+        menu: None,
         list: Region::bare(1, 5, 0, 80, Some(79)),
         ..before
     };
@@ -2071,6 +2082,7 @@ fn a_region_with_no_rows_lights_nothing() {
     // A mark nobody can see still costs a wake, which is what this guard is
     // for now and is not what it was for.
     let regions = Regions {
+        menu: None,
         list: Region::bare(1, 0, 0, 80, Some(79)),
         diff: Region::bare(1, 20, 0, 80, Some(79)),
         sheet: None,
@@ -2330,6 +2342,7 @@ fn the_note_edge_is_one_column_at_the_content_origin_and_the_sheet_swallows_it()
     // and the drawn cell cannot drift.
     let gutter = (2u16, 5u16);
     let regions = Regions {
+        menu: None,
         diff: Region {
             gutter,
             text: 40,
@@ -2361,6 +2374,7 @@ fn the_note_edge_is_one_column_at_the_content_origin_and_the_sheet_swallows_it()
 
     // And the sheet swallows what lands on it, as it does for every other target.
     let covered = Regions {
+        menu: None,
         sheet: Some(Sheet {
             left: 0,
             top: 0,

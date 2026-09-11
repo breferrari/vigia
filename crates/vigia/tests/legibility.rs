@@ -306,6 +306,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// The base fixture, and its worktree name is load bearing.
 fn chrome() -> Chrome {
     Chrome {
+        menu: None,
         position: "current".to_owned(),
         pressed: None,
         gripped: None,
@@ -339,6 +340,7 @@ fn chrome() -> Chrome {
 /// The status bar with both readouts on it, which is every frame after the first.
 fn diagnostics() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -351,6 +353,7 @@ fn diagnostics() -> Chrome {
 
 fn following() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -362,6 +365,7 @@ fn following() -> Chrome {
 /// A watch that has stopped, which widens the mode word from 8 columns to 12.
 fn lost() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -373,6 +377,7 @@ fn lost() -> Chrome {
 /// A worktree with nothing in it, on a branch.
 fn on_a_branch() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -385,6 +390,7 @@ fn on_a_branch() -> Chrome {
 
 fn with_notice() -> Chrome {
     Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -774,6 +780,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "clean worktree on a branch, following",
             empty(),
             Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -795,6 +802,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "both runs, following",
             both_runs_pinned(),
             Chrome {
+                menu: None,
                 staged: Some(2),
                 ..following()
             },
@@ -803,6 +811,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "both runs, idle",
             both_runs_pinned(),
             Chrome {
+                menu: None,
                 staged: Some(2),
                 ..chrome()
             },
@@ -813,6 +822,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "a wide worktree name, following",
             every_row_kind(),
             Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -824,6 +834,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "clean worktree, watch lost",
             empty(),
             Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -842,6 +853,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "readouts and a notice",
             every_row_kind(),
             Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 scrolling: None,
@@ -1285,6 +1297,7 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
         // name's own width and pinning one fixture's walk pins a coincidence.
         for name in [fixture_name.clone(), "v".to_owned(), "a".repeat(64)] {
             let chrome = Chrome {
+                menu: None,
                 pressed: None,
                 gripped: None,
                 hovered: None,
@@ -1365,6 +1378,7 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     // Railed, because this gate is about tiling and the rail is one of the two shapes
     // the body tiles in.
     let chrome = Chrome {
+        menu: None,
         rail: true,
         ..chrome()
     };
@@ -1781,6 +1795,7 @@ fn a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently() {
         ("wide", "読み方リポジトリテスト"),
     ] {
         let chrome = Chrome {
+            menu: None,
             pressed: None,
             gripped: None,
             scrolling: None,
@@ -2379,6 +2394,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         notes: Default::default(),
     };
     let long_name = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,
@@ -3022,15 +3038,26 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     };
     let baseline = bar_at(40);
     let hints = bar_at(120);
-    assert_eq!(
-        hints, baseline,
-        "the widest pane drew {hints:?} where forty columns drew {baseline:?}, so \
-         a rung is being held back for wide screens and the constant that stops it \
-         buying a footer row is load bearing again rather than structural"
-    );
     assert!(
         !baseline.is_empty(),
-        "neither pane drew a hint bar at all, so the comparison above proves nothing"
+        "neither pane drew a hint bar at all, so the comparisons below prove nothing"
+    );
+    assert!(
+        hints.chars().count() > baseline.chars().count(),
+        "the widest pane drew {hints:?} and forty columns drew {baseline:?}, so no \
+         rung is held back for a wide screen and `HINT_BASELINE` is guarding an \
+         empty case rather than a bonus"
+    );
+    assert!(
+        hints.contains("m config") && !baseline.contains("m config"),
+        "the bonus rung is not the door to the config menu: {hints:?} against \
+         {baseline:?}"
+    );
+    assert_eq!(
+        rows(120, &chrome()),
+        rows(40, &chrome()),
+        "the bonus rung costs the footer a row somewhere between forty columns and \
+         a hundred and twenty, which is exactly what `HINT_BASELINE` exists to stop"
     );
 
     // And the height never grows as a pane gets wider, which is the general
@@ -3051,7 +3078,13 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
 
 /// The widths at which the status readouts reach each of their rungs, in the
 /// state that has both to draw.
-const READOUT_RUNGS: [(u16, usize); 2] = [(56, 1), (64, 2)];
+/// Where each readout arrives, in columns: the frame time first, then the pair.
+///
+/// Moved from `[(56, 1), (64, 2)]` on 2026-09-11 when `SPEC.md` §11.2 B22 gave the
+/// bar its fourth hint. Both boundaries slid by the eleven columns ` · m config`
+/// costs, which is this gate doing the job its own name describes rather than
+/// being in the way: the hint was asked for and the readouts are what pays.
+const READOUT_RUNGS: [(u16, usize); 2] = [(67, 1), (75, 2)];
 
 #[test]
 fn a_wider_hint_bar_cannot_quietly_push_the_readouts_out() {
@@ -4664,6 +4697,7 @@ fn drawing_both_runs_costs_the_path_no_column_at_any_width() {
         ..grouped.clone()
     };
     let chrome = Chrome {
+        menu: None,
         staged: Some(2),
         ..following()
     };

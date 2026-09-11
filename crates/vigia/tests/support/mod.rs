@@ -189,6 +189,24 @@ pub fn place_of(action: &Action) -> Place {
             "the sheet is drawn over the pane and put away again, so there is no \
              pane a launch could start inside one of",
         ),
+        Action::ToggleMenu
+        | Action::CloseMenu
+        | Action::MenuMove(_)
+        | Action::MenuFlip
+        | Action::MenuRow(_) => Place::Neither(
+            "the config menu is the sheet's shape one overlay over: drawn over the              pane and put away again, and where its caret sits is no state a launch              could start in. `SPEC.md` §11.2 B22",
+        ),
+        // The gesture is `m` for both, because the menu is one gesture for every
+        // row rather than a key each. Neither comes out of the keymap sweep, so
+        // this arm documents rather than gates.
+        Action::ToggleIcons => Place::Key {
+            key: "icons",
+            gesture: "m",
+        },
+        Action::ToggleLinks => Place::Key {
+            key: "links",
+            gesture: "m",
+        },
         Action::Scroll(_)
         | Action::ScrollList(_)
         | Action::Page(_)
