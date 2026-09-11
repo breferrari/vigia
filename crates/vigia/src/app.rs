@@ -442,10 +442,10 @@ impl App {
     /// Put the request somewhere, and owe the caret its row while a list is open.
     ///
     /// Every path that moves where the pane stands comes through here: the key, a
-    /// refusal, a failed walk, and a base lost under a parked pane. Which row the caret
-    /// is on is the list's only mark for where the pane is standing, so a standing that
-    /// moves under an open box and leaves the caret behind is a box pointing at the
-    /// wrong row.
+    /// refusal, a failed walk, and a base lost under a pane standing at one. Which row
+    /// the caret is on is the list's only mark for where the pane stands, so a standing
+    /// that moves under an open box and leaves the caret behind points at the wrong
+    /// row.
     pub fn stands(&mut self, asked: Asked) {
         self.asked = asked;
         self.caret_owed = self.positions.is_some();
@@ -887,13 +887,16 @@ impl App {
             // *between* changes. A position with no commit in it has none to flip,
             // and the branch point's is a commit this branch did not make, so both
             // refuse rather than move a reader somewhere unasked. §11.1.
-            Action::ToggleReading => match &self.asked {
-                Asked::At(standing) => {
-                    let flipped = standing.flipped().expect("`At` always names a commit");
-                    self.stands(Asked::At(flipped));
+            Action::ToggleReading => {
+                let flipped = match &self.asked {
+                    Asked::At(standing) => standing.flipped().map(Asked::At),
+                    Asked::Current | Asked::BranchPoint => None,
+                };
+                match flipped {
+                    Some(asked) => self.stands(asked),
+                    None => self.warn(NOTHING_TO_READ.to_owned()),
                 }
-                Asked::Current | Asked::BranchPoint => self.warn(NOTHING_TO_READ.to_owned()),
-            },
+            }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
                 let (was, had) = (self.staged, self.position);

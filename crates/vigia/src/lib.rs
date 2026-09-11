@@ -908,6 +908,17 @@ fn travels_from(voice: Voice, theme: &Theme) -> Option<ratatui::style::Color> {
     theme::contrast(theme.chrome_dim, voice_style(voice, theme))
 }
 
+/// Whether a failed walk takes the reader off where they are standing. Only one
+/// does: the position's own commit will not resolve, so there is nowhere to stand,
+/// and every other leaves them for the next wake to try again. A function rather
+/// than a line in its one caller, so the rule can be asserted rather than read for.
+#[doc(hidden)]
+#[must_use]
+pub fn comes_home(e: &vigia_core::Error, standing: &vigia_core::Standing) -> bool {
+    matches!(e, vigia_core::Error::Standing(_))
+        && !matches!(standing, vigia_core::Standing::Current)
+}
+
 /// What the footer says while the pane is parked and the tree moves under it. The
 /// burst's count is the one number free: walking to learn more is what parking saves.
 #[doc(hidden)]
@@ -1169,20 +1180,15 @@ impl Shell {
         }
     }
 
-    /// Say what a failed walk was, and come home if what failed was the base.
+    /// Say what a failed walk was, and come home where [`comes_home`] says to.
     ///
-    /// A base can be rebased, amended or collected out from under a pane that has
-    /// been open for days, and the tick is the only walk that runs with nobody
-    /// there to press anything. Left parked, the pane holds its last good picture
-    /// for as long as the process lives, which on a monitor cannot be told from a
-    /// tree that stopped changing. Only a lost base comes home: a status walk that
-    /// fails once is retried by the next wake, and must not move a reader who is
-    /// standing somewhere on purpose.
+    /// A base can be rebased, amended or collected out from under a pane open for
+    /// days, and the tick is the only walk that runs with nobody there. Left
+    /// standing, the pane holds its last picture for the life of the process, which
+    /// on a monitor reads as a tree that stopped changing.
     fn walk_failed(&mut self, frame: &mut vigia_core::Frame, e: &vigia_core::Error) {
         self.app.warn(e.to_string());
-        if !matches!(e, vigia_core::Error::Standing(_))
-            || matches!(frame.standing(), vigia_core::Standing::Current)
-        {
+        if !comes_home(e, frame.standing()) {
             return;
         }
         self.branch_point = None;
@@ -2402,7 +2408,7 @@ mod tests {
             );
         }
 
-        // A base that goes away under a parked pane brings it home, on the one
+        // A base that goes away under a pane standing at one brings it home, on the
         // walk that runs with nobody there to notice.
         let failed = shipped
             .split("fn walk_failed(")
@@ -2413,7 +2419,7 @@ mod tests {
             .next()
             .expect("`walk_failed` never closes");
         for rule in [
-            "matches!(e, vigia_core::Error::Standing(_))",
+            "comes_home(e, frame.standing())",
             "self.branch_point = None;",
             "frame.stand(vigia_core::Standing::Current);",
             // Coming home is a move like any other, and the row the pane was on

@@ -1048,8 +1048,14 @@ fn a_commit_whose_parent_is_gone_is_a_failed_walk_rather_than_a_lost_position() 
         .advance()
         .expect_err("the walk found a parent tree the object database no longer has");
     assert!(
-        !matches!(failed, vigia_core::Error::Standing(_)),
-        "a lost parent reads as a position that will not resolve, so the shell \
-         takes a reader off a commit that is still there: {failed:?}"
+        matches!(failed, vigia_core::Error::Comparison(_)),
+        "a lost parent reads as {failed:?} rather than as the comparison failing, \
+         so the shell takes a reader off a commit that is still there or the \
+         footer names something that is at neither end of it"
+    );
+    assert!(
+        !failed.to_string().contains("working tree"),
+        "the footer sends a reader to look at a working tree that is at neither \
+         end of a commit against a commit: {failed}"
     );
 }

@@ -51,6 +51,14 @@ pub enum Error {
     /// This branch has no other branch to measure from, or no commit in common
     /// with one.
     NoBranchPoint,
+    /// Two commits could not be diffed against each other.
+    ///
+    /// Separate from [`Error::Standing`] for [`Error::History`]'s reason: the
+    /// position resolved and the comparison it names did not, so the reader stays
+    /// where they are and the next wake tries again. Separate from
+    /// [`Error::Status`] because no working tree and no index are in it, and a
+    /// footer saying otherwise sends a reader looking at the wrong thing.
+    Comparison(Box<dyn std::error::Error + Send + Sync>),
     /// A page of the commit history could not be walked.
     ///
     /// Separate from [`Error::Standing`] deliberately: that one means the commit
@@ -91,6 +99,7 @@ impl Error {
             | Error::Store { .. }
             | Error::Standing(_)
             | Error::NoBranchPoint
+            | Error::Comparison(_)
             | Error::History(_)
             | Error::Canonicalise { .. } => None,
         }
@@ -171,6 +180,7 @@ impl fmt::Display for Error {
             Error::NoBranchPoint => f.write_str(
                 "this branch has no other branch to measure from, so there is no point to stand at",
             ),
+            Error::Comparison(e) => write!(f, "could not diff one commit against another: {e}"),
             Error::History(e) => write!(f, "could not read the commits behind this branch: {e}"),
         }
     }
@@ -184,6 +194,7 @@ impl std::error::Error for Error {
             | Error::Watch(e)
             | Error::FilterSetup(e)
             | Error::Standing(e)
+            | Error::Comparison(e)
             | Error::History(e) => Some(e.as_ref()),
             Error::Read { source, .. }
             | Error::Store { source, .. }

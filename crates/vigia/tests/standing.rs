@@ -2445,3 +2445,51 @@ fn the_inert_keys_say_nothing_because_the_pane_already_does() {
          above hold whatever the inert keys do"
     );
 }
+
+/// Only a position that will not resolve moves the reader, and only where they
+/// are standing somewhere to be moved from.
+///
+/// The rule is about the pair, and the pair is what a source-read cannot assert.
+/// Under `only` it is the difference between a corrupt read of one object emptying
+/// a pane that is fine and the next wake trying again: `Worktree::only` reaches two
+/// of these variants and the shell must answer them differently.
+#[test]
+fn only_a_position_that_will_not_resolve_brings_the_pane_home() {
+    let scratch = history("comes-home");
+    let at = tip(&scratch.worktree()).id;
+    let gone = || std::io::Error::other("the object database has lost it");
+    let everywhere = [
+        Standing::Current,
+        Standing::Since {
+            at,
+            named: "main".to_owned(),
+        },
+        Standing::Only {
+            at,
+            named: "a1b2c3".to_owned(),
+        },
+    ];
+
+    for standing in &everywhere {
+        let home = matches!(standing, Standing::Current);
+        assert_eq!(
+            vigia::comes_home(&vigia_core::Error::Standing(Box::new(gone())), standing),
+            !home,
+            "a position that will not resolve does the wrong thing at {standing:?}"
+        );
+        // Every other failure, including both the `only` walk produces past its own
+        // commit, leaves the reader where they are.
+        for other in [
+            vigia_core::Error::Comparison(Box::new(gone())),
+            vigia_core::Error::Status(Box::new(gone())),
+            vigia_core::Error::History(Box::new(gone())),
+            vigia_core::Error::NoBranchPoint,
+        ] {
+            assert!(
+                !vigia::comes_home(&other, standing),
+                "{other:?} took the reader off {standing:?}, so one object the \
+                 object database could not read empties a pane that is fine"
+            );
+        }
+    }
+}

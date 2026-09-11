@@ -367,12 +367,12 @@ impl Worktree {
     ///
     /// The commit, either tree, or the diff between them cannot be read.
     fn only(&self, at: gix::ObjectId, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
-        // Where the line between the two errors falls, and it decides whether a
-        // failure moves the reader. [`Error::Standing`] is what the shell answers by
-        // bringing the pane home, so it covers this position's own object and
-        // nothing else: a commit that cannot be read is a place nobody can stand.
-        // The parent and the diff between them are the *comparison*, which fails the
-        // way any walk fails and leaves the reader where they are.
+        // Where the line between the two errors falls, and it decides both whether a
+        // failure moves the reader and what the footer tells them. [`Error::Standing`]
+        // is what the shell answers by bringing the pane home, so it covers this
+        // position's own object and nothing else: a commit that cannot be read is a
+        // place nobody can stand. The parent and the diff between them are the
+        // comparison, which leaves the reader where they are.
         let commit = self
             .repo
             .find_object(at)
@@ -386,9 +386,9 @@ impl Worktree {
             .map(|parent| {
                 self.repo
                     .find_object(parent)
-                    .map_err(|e| Error::Status(Box::new(e)))?
+                    .map_err(|e| Error::Comparison(Box::new(e)))?
                     .peel_to_tree()
-                    .map_err(|e| Error::Status(Box::new(e)))
+                    .map_err(|e| Error::Comparison(Box::new(e)))
             })
             .transpose()?;
 
@@ -400,7 +400,7 @@ impl Worktree {
                 Some(&tree),
                 gix::diff::Options::default().with_rewrites(rewrites),
             )
-            .map_err(|e| Error::Status(Box::new(e)))?;
+            .map_err(|e| Error::Comparison(Box::new(e)))?;
 
         Ok(changes.iter().filter_map(committed_change).collect())
     }
@@ -1242,6 +1242,56 @@ mod tests {
         } else {
             assert_eq!(converted, raw);
         }
+    }
+}
+
+#[cfg(test)]
+mod reading {
+    /// Nothing `only` reaches past the position's own object reads as a working
+    /// tree failing.
+    ///
+    /// `Error::Standing` takes the reader home and `Error::Status` says *working
+    /// tree* on the footer, and a commit against a commit has neither a position
+    /// that is gone nor a working tree in it. The source rather than a fixture,
+    /// because two of the three mappings need an object database broken in a way
+    /// no test can arrange: a tree whose entries are there and whose diff still
+    /// will not walk.
+    #[test]
+    fn only_maps_every_failure_past_the_commit_to_the_comparison() {
+        let source = include_str!("worktree.rs");
+        let body = source
+            .split("fn only(&self, at: gix::ObjectId")
+            .nth(1)
+            .expect("`Worktree::only` is gone");
+        let body = &body[..body
+            .find(
+                "
+    }
+",
+            )
+            .expect("`only` never closes")];
+        let (position, comparison) = body
+            .split_once("let parent =")
+            .expect("`only` no longer takes the parent after the commit it names");
+
+        assert_eq!(
+            position.matches("Error::Standing(Box::new").count(),
+            3,
+            "the commit, its peel and its tree are what a reader cannot stand at,              and {position} maps some other number of them home"
+        );
+        assert!(
+            !comparison.contains("Error::Standing(Box::new"),
+            "a failure past the commit brings the reader home, so one object the              object database could not read empties a pane that is fine:{comparison}"
+        );
+        assert!(
+            !comparison.contains("Error::Status(Box::new"),
+            "a failure past the commit says the working tree could not be read,              and neither end of this comparison is one:{comparison}"
+        );
+        assert_eq!(
+            comparison.matches("Error::Comparison(Box::new").count(),
+            3,
+            "the parent, its peel and the diff between the two trees are the              comparison, and{comparison} maps some other number of them"
+        );
     }
 }
 
