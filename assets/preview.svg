@@ -220,7 +220,9 @@
            It is the half of this pane that is not a diff: the reader points at a
            line, says one thing, and the agent in the other pane is handed the file,
            the line and the words. Drawn here because a picture of a monitor that
-           only ever watches describes half the product.
+           only ever watches describes half the product, and the sentence is a
+           question because that is what the loop is: the reply lands on a row under
+           it. Nothing here needs the codebase to parse, which the first draft did.
 
            The number of the line the note is about stays lit, one row up, which is
            what says which line the sentence is about. The box's own rows carry no
@@ -233,8 +235,8 @@
       <rect x="88" y="312" width="700" height="52" rx="4" fill="none" stroke="#30363d"/>
       <rect x="100" y="304" width="222" height="16" fill="#0d1117"/>
       <text class="m dim" x="108" y="317" font-size="12">note &#183; src/engine/watch.rs:40</text>
-      <text class="m fg" x="108" y="346">this races the settle margin</text>
-      <rect x="336.4" y="334" width="8" height="16" fill="#39c5cf"/>
+      <text class="m fg" x="108" y="346">should this reset on every event, or just the first?</text>
+      <rect x="532.2" y="334" width="8" height="16" fill="#39c5cf"/>
       <rect x="100" y="356" width="196" height="16" fill="#0d1117"/>
       <text class="m faint" x="108" y="369" font-size="12">Enter sends &#183; Esc cancels</text>
 
