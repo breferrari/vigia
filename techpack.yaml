@@ -1,7 +1,7 @@
 schemaVersion: 1
 identifier: vigia
 displayName: vigia
-description: The vigia notes server, and the hooks that carry a pinned note into a running session
+description: Installs vigia, a live diff monitor for the terminal, and wires its notes into your Claude Code session
 author: Brenno Ferrari
 # The release that added `ignore:`, which is what keeps a commit to the crates
 # from telling installed copies that a pack update is waiting.
