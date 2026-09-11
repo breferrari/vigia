@@ -895,8 +895,13 @@ fn readme_gestures() -> Vec<String> {
     )
     .expect("README.md is where the crate says it is");
 
-    // The two tables live inside one `<td>` each under a bold caption. A row is
-    // `| cell | cell |`, and the left cell is what a reader looks for.
+    // Each table follows a bold caption. A row is `| cell | cell |`, and the left
+    // cell is what a reader looks for.
+    //
+    // A table ends at the first line that is neither blank nor a row. That is the
+    // table's own shape rather than the markup around it: these were cells of an
+    // HTML table until a nested table could not be made to fit the column, and a
+    // gate anchored on `</td>` reads to the end of the file the day that goes.
     let mut out = Vec::new();
     let mut inside = false;
     for line in readme.lines() {
@@ -905,7 +910,7 @@ fn readme_gestures() -> Vec<String> {
             inside = true;
             continue;
         }
-        if inside && trimmed.starts_with("</td>") {
+        if inside && !trimmed.is_empty() && !trimmed.starts_with('|') {
             inside = false;
             continue;
         }

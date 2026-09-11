@@ -43,7 +43,7 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 **1. Install it and point it at a repo.**
 
 ```sh
-cargo install vigia
+cargo install vigia                          # or brew install breferrari/tap/vigia
 vigia                                        # the tree you are in
 ```
 
@@ -55,10 +55,10 @@ Leave it in the pane beside your agent. There is nothing to configure and nothin
 
 ```
   41 +      self.deadline = Instant::now() + DEBOUNCE;
-     ✎ this races the settle margin, check against I1
+     ✎ should this reset on every event, or just the first?
 ```
 
-The note goes to the agent anchored to that file and that line. Its answer arrives on a row under yours. This needs [one registration](#-notes-to-the-agent), once, for every project you will ever open.
+The note goes to the agent anchored to that file and that line. Its answer arrives on a row under yours. This needs [one registration](#notes), once, for every project you will ever open.
 
 **4. Look back when you need to.** `B` opens a list of every place the pane can stand: the live tree, the branch point, or any commit behind it. Pick one and the whole pane, counts and all, moves there. `Esc` and you are back.
 
@@ -69,11 +69,7 @@ The note goes to the agent anchored to that file and that line. Its answer arriv
 
 <br>
 
-```sh
-brew install breferrari/tap/vigia            # macOS and Linuxbrew
-```
-
-Or a prebuilt binary, no toolchain at all:
+A prebuilt binary, with no toolchain at all:
 
 ```sh
 # macOS and Linux
@@ -239,9 +235,6 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 
 ## ⌨️ Drive it
 
-<table>
-<tr><td valign="top" width="50%">
-
 **Keys**
 
 | | |
@@ -267,8 +260,6 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `?` `Esc` | all of this, on screen |
 | `q` `Ctrl+C` | quit |
 
-</td><td valign="top" width="50%">
-
 **Mouse**
 
 | | |
@@ -285,9 +276,6 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | click `✕` | close the sheet |
 | just point | it marks itself |
 | `Shift`+drag | your terminal selects text |
-
-</td></tr>
-</table>
 
 **`m` opens every setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `remember between runs` keeps what you flip for next time; `reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
 
@@ -313,49 +301,64 @@ It shows the working tree against the **index**, untracked files included, and i
 
 ---
 
+<a id="notes"></a>
+
 ## ✍️ Notes to the agent
 
-Point at a line number in the diff and it becomes a pencil `✎`. Click it, and a small box opens under the line. Type one sentence, press `Enter`, and it goes to the agent in the other pane, anchored to that file and that line.
+Point at a line number in the diff and it becomes a pencil `✎`. Click it, type one sentence, press `Enter`.
+
+```
+  41 +      self.deadline = Instant::now() + DEBOUNCE;
+     ✎ should this reset on every event, or just the first?
+```
+
+It goes to the agent in the other pane carrying the file, the line and your words. The answer comes back on a row under yours.
 
 That is the whole of it. `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
 
-**After you press `Enter`.** The note draws under its line with a word for where it stands: `open` until the agent has looked, `seen` once it has, `changed` and drawn dim if you edited the line underneath it, and `gone`, under the file's heading, if the line left the diff. A file that leaves the diff altogether leaves its note **adrift**, counted in the footer beside the position as `2 notes · 1 adrift` and back under its line the moment the file returns. No state loses a note. The line's number stays lit while a note is on it, and `c` hides the rows without hiding the marks. The file's own row in the list carries a mark too, `✎` while you are waiting on the agent and `↳` once it has answered, which is how you find the one note in a run of thirty files.
+### What a note says while it waits
+
+Every note draws under its line with one word for where it stands.
+
+| | |
+|---|---|
+| `open` | Sent. The agent has not looked yet |
+| `seen` | The agent has read it |
+| `changed` | You edited the line underneath, so the row draws dim |
+| `gone` | The line left the diff, and the note moved under the file's heading |
+| `adrift` | The whole file left the diff. The footer counts it beside the position as `2 notes · 1 adrift` |
+
+**No state loses a note.** An adrift one is back under its line the moment the file returns. A line's number stays lit while a note is on it, and the file's own row in the list carries `✎` while you are waiting and `↳` once the agent has answered, which is how you find one note in a run of thirty files. `c` hides the note rows without hiding those marks.
 
 **When the agent resolves one**, its answer arrives on a row under the note, holds for a minute, and the note leaves.
 
-**To take one back yourself**, point at the note's left side. The cell under your pointer becomes `✕`, and clicking it withdraws the note, whether or not the agent has answered it. Nothing is drawn there until you point, so a screen full of notes stays a screen full of notes. Emptying the box over a note and pressing `Enter` does the same thing, and a note the agent resolved in the meantime is left alone: its answer is on its way to you.
+**To take one back**, point at the note's left side. The cell under your pointer becomes `✕`, and clicking it withdraws the note whether or not the agent has answered. Emptying the box and pressing `Enter` does the same. A note the agent resolved in the meantime is left alone, because its answer is already on its way to you.
 
-**Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`. A monitor that wrote where it watches would wake itself, and the pane puts nothing in that directory but the notes you make.
+**Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`, because a monitor that wrote where it watches would wake itself.
 
-### Give the agent the server
+### Setting it up
 
-`vigia mcp` is an MCP server over stdio, and it belongs to **you** rather than to any one repository. Register it once:
+Two pieces, and both go in your own config rather than in the repository, because `vigia` is yours and so is the pane you run it in.
+
+**1. Give the agent the server.** `vigia mcp` is an MCP server over stdio:
 
 ```sh
 claude mcp add --scope user vigia -- vigia mcp
 ```
 
-That covers every project you open from now on. Claude Code tells the server which project the session is in, so one registration finds whichever worktree you are watching, and the notes are kept per worktree, so two repositories never see each other's.
+`--scope user` writes `~/.claude.json`, which covers **every project you open on this machine** and stays private to you. Claude Code tells the server which project a session is in, so that one registration finds whichever worktree you are watching, and notes are kept per worktree, so two repositories never see each other's.
 
-If you keep your Claude Code setup with [`mcs`](https://github.com/mcs-cli/mcs), this registration and the hooks below come as a tech pack instead: [`docs/TECHPACK.md`](docs/TECHPACK.md).
+The agent gets three tools and one resource:
 
-The agent gets three tools and one resource. `notes` lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen`. `reply` writes a line under a note and leaves it unresolved. `resolve` closes one, and its line is required, because that line is what you watch arrive. The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
+| | |
+|---|---|
+| `notes` | Lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen` |
+| `reply` | Writes a line under a note and leaves it unresolved |
+| `resolve` | Closes one. Its line is required, because that line is what you watch arrive |
 
-**`--scope project` is the other shape, and it is a decision about your team rather than about you.** It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
+The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
 
-```json
-{
-  "mcpServers": {
-    "vigia": { "command": "vigia", "args": ["mcp"] }
-  }
-}
-```
-
-Right when the whole team watches its diffs this way, and only then. If it is just you, take the line above.
-
-### And reach the session already running
-
-With the server alone your note waits until the agent next looks. Two hooks make it arrive instead, and they go in `~/.claude/settings.json` for the same reason the server does: write them once, and every repository you open is covered.
+**2. Reach the session already running.** With the server alone your note waits until the agent next looks. Three hooks make it arrive instead, and they go in `~/.claude/settings.json`, which is the same scope as the line above: write them once, and every repository is covered.
 
 ```json
 {
@@ -373,9 +376,46 @@ With the server alone your note waits until the agent next looks. Two hooks make
 }
 ```
 
-`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is registered. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
+`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
 
 `vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
+
+<details>
+<summary><b>Both steps in one command, if you already use <code>mcs</code></b></summary>
+
+<br>
+
+[`mcs`](https://github.com/mcs-cli/mcs) is a package manager for a Claude Code setup. It is not needed for any of the above and nothing here depends on it. If you already keep your setup that way, `techpack.yaml` at the root of this repository is a pack it can install:
+
+```sh
+mcs pack add breferrari/vigia
+mcs sync --global
+```
+
+**Its `--global` is the scope both steps above already use**, under another name: machine-wide for your user, writing the server into `~/.claude.json` and the hooks into `~/.claude/settings.json`. What it adds is doing both at once, installing the binary with them, and putting back whatever moved when you run `mcs sync` again after an upgrade. `mcs doctor` names anything missing and the command that fixes it.
+
+macOS and Linux only, because the pack installs the binary through Homebrew and its hooks are shell scripts. [`docs/TECHPACK.md`](docs/TECHPACK.md) lists every component and what each one is.
+
+</details>
+
+<details>
+<summary><b>Putting the server in the repository instead</b></summary>
+
+<br>
+
+`--scope project` is the one shape here that reaches anybody but you. It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
+
+```json
+{
+  "mcpServers": {
+    "vigia": { "command": "vigia", "args": ["mcp"] }
+  }
+}
+```
+
+Right when the whole team watches its diffs this way, and only then. If it is just you, the user-scoped line above is the one, and it already covers every repository on the machine.
+
+</details>
 
 <details>
 <summary><b>The small print on the hooks</b></summary>

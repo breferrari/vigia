@@ -2135,9 +2135,14 @@ fn the_config_doc_teaches_a_config_file_that_parses_and_names_every_key() {
 fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
     let readme = repo_file("README.md");
 
-    // The table lives inside a `<td>` under a bold caption, and a row's left cell
-    // is what a reader looks for. `sheet.rs::readme_gestures` reads both tables
-    // the same way; only the keyboard one can carry a config key's gesture.
+    // The table follows a bold caption and a row's left cell is what a reader
+    // looks for. `sheet.rs::readme_gestures` reads both tables the same way;
+    // only the keyboard one can carry a config key's gesture.
+    //
+    // The end is the first line that is neither blank nor a row, which is the
+    // table's own shape rather than the markup around it: these were cells of an
+    // HTML table until a nested table could not be made to fit the column, and a
+    // gate anchored on `</td>` reads to the end of the file the day that goes.
     let mut taught: Vec<String> = Vec::new();
     let mut inside = false;
     for line in readme.lines() {
@@ -2146,7 +2151,7 @@ fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
             inside = true;
             continue;
         }
-        if inside && trimmed.starts_with("</td>") {
+        if inside && !trimmed.is_empty() && !trimmed.starts_with('|') {
             break;
         }
         if !inside || !trimmed.starts_with('|') || trimmed.contains("---") {
