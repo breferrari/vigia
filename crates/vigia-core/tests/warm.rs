@@ -1252,3 +1252,70 @@ fn a_quote_whose_grammar_is_uncompiled_draws_plain() {
         "the answer stayed plain after its grammar was compiled"
     );
 }
+
+/// A block quoted in a language the worktree holds no file of is still warmed.
+///
+/// The path-driven warmer cannot reach one: it resolves a grammar from a file it
+/// opens, and a fence naming a language of its own names a grammar no path here
+/// carries. Without a demand of its own such a block draws plain for the life of
+/// the session, which is the half of the fence feature it exists for.
+#[test]
+fn a_quote_naming_a_language_no_path_carries_is_still_warmed() {
+    let mut highlighter = Highlighter::new();
+    let lines = vec![
+        "if [ -f /etc/hosts ]; then".to_owned(),
+        "  exit 0".to_owned(),
+    ];
+
+    let classes = |highlighter: &mut Highlighter| -> Vec<Class> {
+        let mut pass = highlighter.pass();
+        pass.quoted("n1", 0, Some("sh"), "src/mod_0.rs", &lines)
+            .iter()
+            .flat_map(|line| line.iter().map(|span| span.class))
+            .collect()
+    };
+
+    assert_eq!(
+        classes(&mut highlighter)
+            .iter()
+            .filter(|class| **class != Class::Plain)
+            .count(),
+        0,
+        "a cold grammar was compiled on the frame that drew the answer"
+    );
+
+    let demand = highlighter.uncompiled().to_vec();
+    assert_eq!(demand.len(), 1, "the block raised no demand: {demand:?}");
+    assert_eq!(demand[0].token.as_deref(), Some("sh"));
+    assert_eq!(
+        demand[0].lines, lines,
+        "the demand carries no text, so a warm would compile the wrong patterns"
+    );
+
+    let report = highlighter
+        .warm_quoted(demand, None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(report.warmed, 1, "the warmer compiled nothing");
+
+    assert!(
+        classes(&mut highlighter).contains(&Class::Keyword),
+        "the block stayed plain after its own grammar was warmed"
+    );
+}
+
+/// One warm per grammar, however many blocks of an answer named it.
+#[test]
+fn two_blocks_of_one_language_warm_once() {
+    let highlighter = Highlighter::new();
+    let block = |ordinal: usize| vigia_core::Uncompiled {
+        token: Some("sh".to_owned()),
+        path: format!("src/mod_{ordinal}.rs"),
+        lines: vec!["exit 0".to_owned()],
+    };
+    let report = highlighter
+        .warm_quoted(vec![block(0), block(1), block(2)], None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(report.warmed, 1, "one grammar was compiled three times");
+}

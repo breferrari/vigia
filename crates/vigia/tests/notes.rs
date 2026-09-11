@@ -6801,3 +6801,155 @@ fn a_quoted_block_draws_plain_where_no_grammar_answers() {
         "the anchored file's Rust grammar reached a block that said it was not Rust"
     );
 }
+
+/// An answer that quoted an empty fence still draws, because a note the agent
+/// answered has to show that it did.
+///
+/// A resolved note draws its answer and nothing else, so an answer with no rows
+/// is the whole note gone from the pane while the store says it was answered.
+#[test]
+fn an_answer_of_nothing_but_a_fence_still_draws_a_row() {
+    let scratch = fixture("notes-empty-fence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, "```\n```");
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert_eq!(
+        answer_rows(&painted).len(),
+        1,
+        "an emptied answer drew no row at all"
+    );
+    let y = painted.row_of(EDITED);
+    assert_eq!(
+        painted
+            .text(painted.reply_row(y))
+            .chars()
+            .nth(usize::from(painted.gutter().2)),
+        Some('↳'),
+        "the arrow that says the agent answered is not drawn"
+    );
+}
+
+/// And a resolved one, which draws its answer alone, still departs visibly.
+#[test]
+fn a_resolved_note_whose_answer_is_a_fence_still_draws() {
+    let scratch = fixture("notes-empty-fence-resolved");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut note = note("n1", 5, EDITED, "short");
+    note.status = Status::Resolved;
+    note.reply = Some("```".to_owned());
+    rig.store.put(&note).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "a resolved note whose answer quoted nothing vanished from the pane"
+    );
+}
+
+/// A block of four backticks holds a block of three whole.
+#[test]
+fn a_longer_fence_holds_a_shorter_one_inside_it() {
+    let scratch = fixture("notes-nested-fence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "like this:\n````\nbefore\n```\ninside\n```\nafter\n````",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = answer_rows(&painted);
+    let drawn: Vec<&str> = rows.iter().map(|row| row.text.as_str()).collect();
+
+    for line in ["before", "inside", "after"] {
+        assert!(
+            drawn.iter().any(|row| row.contains(line)),
+            "the inner fence closed the outer block early: {drawn:?}"
+        );
+    }
+    assert!(
+        drawn.iter().any(|row| row.contains("```")),
+        "the inner fence is content of the outer block and is not drawn: {drawn:?}"
+    );
+}
+
+/// An indented block is words, which is the shape a continued list item has too.
+#[test]
+fn an_indented_block_in_an_answer_stays_prose() {
+    let scratch = fixture("notes-indented-block");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "swapped it:\n\n    let margin = 2;\n\nand that was all",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert!(
+        answer_rows(&painted).iter().all(|row| row.runs.is_empty()),
+        "an indented block was read as code"
+    );
+}
+
+/// And a tilde fence is words, for the same reason: what is not recognised draws
+/// exactly as it drew before there was any of this.
+#[test]
+fn a_tilde_fence_is_not_a_fence() {
+    let scratch = fixture("notes-tilde-fence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, "~~~\nlet margin = 2;\n~~~");
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = answer_rows(&painted);
+
+    assert!(
+        rows.iter().all(|row| row.runs.is_empty()),
+        "a tilde fence was read as a fence: {rows:?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.text.contains("~~~")),
+        "the tildes were dropped as though they were markup: {rows:?}"
+    );
+}
+
+/// An answer written on a platform whose lines end in two characters draws no
+/// stray mark at the end of each of them.
+#[test]
+fn an_answer_with_carriage_returns_draws_no_stray_mark() {
+    let scratch = fixture("notes-crlf");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "swapped it:\r\n```rust\r\nlet margin = 2;\r\n```\r\nand that was all",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = answer_rows(&painted);
+
+    assert!(
+        rows.iter().all(|row| !row.text.contains('\r')),
+        "a carriage return survived into a drawn row: {rows:?}"
+    );
+    let under = painted.notes_under(painted.row_of(EDITED));
+    assert!(
+        !under.iter().any(|row| row.contains('·')),
+        "the unprintable mark reached the pane: {under:?}"
+    );
+}

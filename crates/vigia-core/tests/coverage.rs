@@ -1256,29 +1256,38 @@ fn a_quote_is_reparsed_only_when_its_content_changes() {
     assert_eq!(parses(&mut highlighter, &second, 3), 0, "reused again");
 }
 
-/// A pass that does not ask for a quote drops it, which is what keeps the cache
-/// bounded by what a frame drew rather than by how many notes a store holds.
+/// A quote survives one pass that passes it over and not two.
+///
+/// The one pass of grace is for the frame that overshoots its bottom clamp,
+/// drops its pass and walks again: without it every answer on such a frame is
+/// parsed twice. The second miss is what keeps the cache bounded by what a frame
+/// drew rather than by how many notes a store holds.
 #[test]
-fn a_quote_no_frame_asked_for_is_swept() {
+fn a_quote_survives_one_pass_that_passes_it_over_and_not_two() {
     use vigia_core::Highlighter;
 
     let mut highlighter = Highlighter::eager();
     let lines = vec!["let margin = 2;".to_owned()];
-    {
-        let mut pass = highlighter.pass();
-        let _ = pass.quoted("n1", 0, None, "src/watch.rs", &lines);
-    }
-    // A frame that drew no notes at all, which is the pane with `c` pressed.
-    drop(highlighter.pass());
+    let ask = |highlighter: &mut Highlighter| {
+        let before = highlighter.stats().quoted;
+        {
+            let mut pass = highlighter.pass();
+            let _ = pass.quoted("n1", 0, None, "src/watch.rs", &lines);
+        }
+        highlighter.stats().quoted - before
+    };
 
-    let before = highlighter.stats().quoted;
-    {
-        let mut pass = highlighter.pass();
-        let _ = pass.quoted("n1", 0, None, "src/watch.rs", &lines);
-    }
+    assert_eq!(ask(&mut highlighter), 1, "the first ask parses");
+    // The walk that overshot, and the one that replaced it.
+    drop(highlighter.pass());
     assert_eq!(
-        highlighter.stats().quoted - before,
-        1,
-        "the swept quote was still in the cache"
+        ask(&mut highlighter),
+        0,
+        "one missed pass threw the parse away"
     );
+
+    // Two passes with nothing on them, which is the pane with `c` pressed.
+    drop(highlighter.pass());
+    drop(highlighter.pass());
+    assert_eq!(ask(&mut highlighter), 1, "the quote was never swept at all");
 }

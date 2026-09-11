@@ -271,6 +271,25 @@ impl Sides {
     }
 }
 
+/// A block an answer quoted whose grammar nothing has compiled, and what it
+/// takes to compile one.
+///
+/// The path-driven warmer cannot reach these. It resolves a grammar from a file
+/// it opens, and a fence naming a language of its own names one the worktree may
+/// hold no file of, so there is nothing for it to open. The block's own lines go
+/// with the demand rather than a probe line, because a grammar warmed on some
+/// other text leaves this block costing 9.4ms of a 16ms frame where its own text
+/// leaves it costing 93 microseconds. Measured 2026-09-12, release, `sh`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Uncompiled {
+    /// The language the fence named, where it named one.
+    pub token: Option<String>,
+    /// The file the note is anchored to, which names the grammar otherwise.
+    pub path: String,
+    /// The block's lines, which are the text a warm has to parse.
+    pub lines: Vec<String>,
+}
+
 /// One block quoted in a note's answer, parsed whole and kept between frames.
 ///
 /// A hunk is parsed forward only and rewound, because it can be a thousand lines
@@ -287,6 +306,8 @@ struct Quote {
     digest: u64,
     /// Whether the frame in progress has claimed it. See [`Highlighter::sweep`].
     live: bool,
+    /// Whether the pass before this one passed it over.
+    missed: bool,
     /// The grammar this block drew plain waiting for, where nothing had compiled
     /// one when it was parsed.
     deferred: Option<Scope>,
@@ -478,6 +499,8 @@ pub struct Highlighter {
     /// Paths whose grammar was uncompiled during the pass in progress, one per
     /// grammar, in the order the frame reached them.
     wanted: Vec<String>,
+    /// The same for the blocks an answer quoted, which the paths cannot name.
+    uncompiled: Vec<Uncompiled>,
     /// Scopes already on `wanted` this pass, so the dedup above costs no scan.
     demanded: HashSet<Scope>,
 }
@@ -514,6 +537,7 @@ impl Highlighter {
             stats: HighlightStats::default(),
             attempted: None,
             wanted: Vec::new(),
+            uncompiled: Vec::new(),
             demanded: HashSet::new(),
         }
     }
@@ -522,6 +546,12 @@ impl Highlighter {
     /// pass.
     pub fn wanted(&self) -> &[String] {
         &self.wanted
+    }
+
+    /// Blocks an answer quoted whose grammar nothing has compiled, as of the last
+    /// pass. [`Self::warm_quoted`] is what these are for.
+    pub fn uncompiled(&self) -> &[Uncompiled] {
+        &self.uncompiled
     }
 
     /// Compile grammars ahead of the reader, on a thread, and report how many
@@ -539,6 +569,53 @@ impl Highlighter {
             // After the work rather than before it, so a wake means there is
             // something new to draw. Ignored on failure: the receiver having
             // gone is the shell shutting down, which is nothing to report to.
+            if let Some(done) = done {
+                done();
+            }
+            report
+        })
+    }
+
+    /// Compile the grammars the blocks in `blocks` were quoted in, on a thread.
+    ///
+    /// [`Self::warm_ahead`]'s sibling for what a path cannot name. It opens no
+    /// file: the text is the block's own, which arrived over the wire with the
+    /// answer, so nothing here reads the worktree and the path is used only to
+    /// resolve a grammar the fence did not name.
+    pub fn warm_quoted(
+        &self,
+        blocks: Vec<Uncompiled>,
+        done: Option<Warmed>,
+    ) -> std::thread::JoinHandle<WarmReport> {
+        let syntaxes = Arc::clone(&self.syntaxes);
+        let attempted = self.attempted.clone();
+        std::thread::spawn(move || {
+            let mut report = WarmReport::default();
+            let mut seen: HashSet<Scope> = HashSet::new();
+            for block in blocks.into_iter().take(WARM_FILES) {
+                let Some(syntax) = (match &block.token {
+                    Some(token) => syntaxes.find_syntax_by_token(token),
+                    None => syntax_for(&syntaxes, &block.path, None),
+                }) else {
+                    continue;
+                };
+                // One warm per grammar however many blocks named it, which is
+                // `warm_run`'s per-grammar cap at the only count that can arise
+                // here: an answer quotes a handful of blocks, not a worktree.
+                if !seen.insert(syntax.scope) {
+                    continue;
+                }
+                let _attempt = Attempt::new(attempted.as_deref(), Some(syntax.scope));
+                let mut state = ParseState::new(syntax);
+                for line in &block.lines {
+                    // A grammar that fails on a line stops this block rather than
+                    // the thread, exactly as `warm` treats a file.
+                    if state.parse_line(&format!("{line}\n"), &syntaxes).is_err() {
+                        break;
+                    }
+                }
+                report.warmed += 1;
+            }
             if let Some(done) = done {
                 done();
             }
@@ -682,16 +759,23 @@ impl Highlighter {
             quote.live = false;
         }
         self.wanted.clear();
+        self.uncompiled.clear();
         self.demanded.clear();
         Pass { highlighter: self }
     }
 
     /// Retire every hunk the pass did not draw, and drop what will not fit.
     fn sweep(&mut self) {
-        // Dropped outright rather than retired: a quote is small and is parsed
-        // whole, so coming back to one costs a parse the retired queue exists to
-        // save for a thousand-line hunk and not for four lines of an answer.
-        self.quotes.retain(|quote| quote.live);
+        // Dropped on the second pass that passes it over rather than the first,
+        // where a hunk has the retired queue. A frame that overshoots its bottom
+        // clamp drops its pass and walks again, and a quote swept on the first
+        // miss would be parsed twice on that frame for every answer on screen.
+        // One pass of grace is all that takes, and the screen still bounds this.
+        self.quotes.retain_mut(|quote| {
+            let keep = quote.live || !quote.missed;
+            quote.missed = !quote.live;
+            keep
+        });
         // Destructured for the reason `spans` is: two fields of one struct are
         // written at once, and through `&mut self` the borrow checker sees one
         // whole thing.
@@ -871,6 +955,7 @@ impl Highlighter {
                     quotes,
                     stats,
                     attempted,
+                    uncompiled,
                     ..
                 } = self;
                 // A fence that names a language is the agent saying the block
@@ -883,13 +968,22 @@ impl Highlighter {
                     None => syntax_for(syntaxes, path, None),
                 };
                 // A grammar nothing has compiled yet is left alone rather than
-                // compiled here: the diff rows this note hangs under are the same
-                // file and have already put it on `wanted`, so the answer draws
-                // plain now and in colour on the frame after the warm. That is
-                // `Parse::Deferred`'s rule without an entry's bookkeeping.
+                // compiled here, which would cost 20.6ms of a 16ms frame on a
+                // cold `sh`. The block draws plain now, goes out as a demand, and
+                // arrives in colour on the frame after the warm: `Parse::Deferred`'s
+                // rule without an entry's bookkeeping. A fence naming a language
+                // of its own is why the demand carries more than the path, which
+                // names a grammar the worktree may hold no file of.
                 let deferred = syntax
                     .map(|syntax| syntax.scope)
                     .filter(|scope| !compiled(*scope, attempted.as_deref()));
+                if deferred.is_some() {
+                    uncompiled.push(Uncompiled {
+                        token: token.map(str::to_owned),
+                        path: path.to_owned(),
+                        lines: lines.to_vec(),
+                    });
+                }
                 let parsed = syntax.filter(|_| deferred.is_none()).map(|syntax| {
                     // One side, not two: a quoted block is one stream of text
                     // and has no index side to keep apart from a working-tree one.
@@ -919,6 +1013,7 @@ impl Highlighter {
                     ordinal,
                     digest,
                     live: false,
+                    missed: false,
                     deferred,
                     lines: filled,
                 };

@@ -567,6 +567,15 @@ impl Answer {
                 }
             }
         }
+        // A resolved note draws its answer and nothing else, so an answer with
+        // no rows of its own is the whole note gone from the pane.
+        if out.is_empty() {
+            out.push(CodeRow {
+                text: String::new(),
+                runs: Vec::new(),
+                indent: 0,
+            });
+        }
         out
     }
 }
@@ -575,7 +584,7 @@ impl Answer {
 /// Beside it rather than replacing it: the reader's own words go through that
 /// one, and a backtick they typed is a character they typed.
 fn prose_runs(text: &str, room: usize) -> Vec<CodeRow> {
-    text.split('\n')
+    crate::quote::lines_of(text)
         .flat_map(|paragraph| {
             let paragraph = crate::render::detabbed(paragraph);
             let (paragraph, runs) = crate::quote::inline(&paragraph);
@@ -597,7 +606,7 @@ fn prose_runs(text: &str, room: usize) -> Vec<CodeRow> {
 /// neither row. Empty text is one empty row, so a note with no body still has a
 /// row for its word.
 fn prose_rows(text: &str, room: usize) -> Vec<String> {
-    text.split('\n')
+    crate::quote::lines_of(text)
         .flat_map(|paragraph| {
             let paragraph = crate::render::detabbed(paragraph);
             prose_pieces(&paragraph, room)

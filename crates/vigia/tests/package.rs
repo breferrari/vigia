@@ -1949,17 +1949,19 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 ///
-/// `SPEC.md` rose 1,158 bytes for B21's quoted code. A fenced block in an answer is a
-/// second way a note row is drawn, and what it costs the contract is the four rules a
-/// reader cannot see in the code: which shapes count as code, that a code row breaks at
-/// the column where every other row here breaks at a blank, which grammar answers and
-/// what happens when none does, and that the copy still carries the markup the pane
-/// dropped. The last is the one that would be re-derived: a pane that stopped drawing
-/// backticks and a clipboard that keeps them look like a defect until something says
-/// they are one rule. A raise with no new surface behind it is the thing this number is
-/// for.
+/// `SPEC.md` rose 1,289 bytes for B21's quoted code. A fenced block in an answer is a
+/// second way a note row is drawn, and what it costs the contract is the rules a reader
+/// cannot see in the code: what counts as a fence, that a code row breaks at the column
+/// where every other row here breaks at a blank, which grammar answers and what happens
+/// when none does, and that the copy still carries the markup the pane dropped. The last
+/// is the one that would be re-derived: a pane that stopped drawing backticks and a
+/// clipboard that keeps them look like a defect until something says they are one rule.
+/// The clause a few sentences earlier gained four words in the same pass, because the
+/// answer being unmarked stopped being true the moment it could be coloured, and a
+/// contract that contradicts itself in one paragraph is worse than a longer one. A raise
+/// with no new surface behind it is the thing this number is for.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 406570),
+    ("SPEC.md", 406701),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

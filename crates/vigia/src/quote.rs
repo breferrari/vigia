@@ -39,11 +39,23 @@ pub enum Chunk {
 /// The fewest backticks that open a fence.
 const FENCE: usize = 3;
 
-/// What a fence names after it, or `None` where `line` is not one.
-fn fence(line: &str) -> Option<&str> {
+/// How many backticks a fence opens with and what it names after them, or
+/// `None` where `line` is not one.
+fn fence(line: &str) -> Option<(usize, &str)> {
     let trimmed = line.trim();
     let named = trimmed.trim_start_matches('`');
-    (trimmed.len() - named.len() >= FENCE).then(|| named.trim())
+    let ticks = trimmed.len() - named.len();
+    (ticks >= FENCE).then(|| (ticks, named.trim()))
+}
+
+/// `text`'s lines, each without the carriage return a store round-trip keeps.
+///
+/// An agent writes over a pipe rather than into a file, so its line endings
+/// are its own platform's, and one left on the end draws as the unprintable
+/// mark at the end of every line it wrote.
+pub fn lines_of(text: &str) -> impl Iterator<Item = &str> {
+    text.split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
 }
 
 /// `reply` split into what the agent wrote as words and what it fenced.
@@ -58,26 +70,30 @@ pub fn chunks(reply: &str) -> Vec<Chunk> {
     let mut token: Option<String> = None;
     let mut lines: Vec<String> = Vec::new();
     let mut fenced = false;
+    let mut opened = FENCE;
 
-    for line in reply.split('\n') {
+    for line in lines_of(reply) {
         let marker = fence(line);
+        // A block closes on a fence at least as long as the one that opened
+        // it, which is what lets a block of four quote a block of three whole.
+        let closes = marker.is_some_and(|(ticks, _)| ticks >= opened);
         if fenced {
-            match marker {
-                Some(_) => {
-                    out.push(Chunk::Code {
-                        token: token.take(),
-                        lines: std::mem::take(&mut lines),
-                    });
-                    fenced = false;
-                }
-                None => lines.push(line.to_owned()),
+            if closes {
+                out.push(Chunk::Code {
+                    token: token.take(),
+                    lines: std::mem::take(&mut lines),
+                });
+                fenced = false;
+            } else {
+                lines.push(line.to_owned());
             }
-        } else if let Some(named) = marker {
+        } else if let Some((ticks, named)) = marker {
             if !prose.is_empty() {
                 out.push(Chunk::Prose(prose.join("\n")));
                 prose.clear();
             }
             token = (!named.is_empty()).then(|| named.to_owned());
+            opened = ticks;
             fenced = true;
         } else {
             prose.push(line);
