@@ -3,7 +3,7 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use vigia_core::Landmark;
+use vigia_core::{Landmark, Reading};
 
 use crate::input::Sheet;
 
@@ -60,7 +60,15 @@ pub struct Places {
 impl Places {
     /// Rows naming a place rather than a commit, read by both the row count and the
     /// index arithmetic so a third cannot arrive in one and not the other.
-    fn named(&self) -> usize {
+    ///
+    /// **None of them under `only`.** There is no *only the working tree*, and the
+    /// commit this branch left another one at is a commit that branch made, so
+    /// drawing it alone would show work this branch did not do. The list losing two
+    /// rows as the title changes is the whole explanation, and it costs no text.
+    fn named(&self, reading: Reading) -> usize {
+        if !reading.is_live() {
+            return 0;
+        }
         1 + usize::from(self.point.is_some())
     }
 
@@ -70,23 +78,24 @@ impl Places {
     /// for one row, and a `Vec` of every row walked would grow with how far the reader
     /// scrolled rather than with the window.
     #[must_use]
-    pub fn row_at(&self, at: usize) -> Option<Row> {
-        if at >= self.rows() {
+    pub fn row_at(&self, at: usize, reading: Reading) -> Option<Row> {
+        let named = self.named(reading);
+        if at >= self.rows(reading) {
             return None;
         }
         Some(match at {
+            _ if named == 0 => Row::Commit(at),
             0 => Row::Current,
             1 if self.point.is_some() => Row::Point,
-            _ => Row::Commit(at - self.named()),
+            _ => Row::Commit(at - named),
         })
     }
 
-    /// How many rows there are. Never zero: the live pane is always one of them, which
-    /// is why this is not spelled `len`, a length carrying an `is_empty` that could only
-    /// ever answer no.
+    /// How many rows there are. Zero only where the reading names no place and the
+    /// history has not been walked, which is the first frame a box is open for.
     #[must_use]
-    pub fn rows(&self) -> usize {
-        self.named() + self.commits.len()
+    pub fn rows(&self, reading: Reading) -> usize {
+        self.named(reading) + self.commits.len()
     }
 
     /// Take `page`, freshly walked from HEAD, as the front of this list, and say whether
@@ -157,8 +166,8 @@ impl Places {
 /// It hands back the commit rather than a bool so the decision and the place it names
 /// are one answer; two would let a caret near the end resume from the wrong place.
 #[must_use]
-pub fn resume_from(caret: Caret, places: &Places) -> Option<&Landmark> {
-    if !places.more || caret.at + 2 < places.rows() {
+pub fn resume_from(caret: Caret, places: &Places, reading: Reading) -> Option<&Landmark> {
+    if !places.more || caret.at + 2 < places.rows(reading) {
         return None;
     }
     places.commits.last()
@@ -167,10 +176,9 @@ pub fn resume_from(caret: Caret, places: &Places) -> Option<&Landmark> {
 /// What the title bar spells, which is the reading rather than a name for the box.
 ///
 /// The list documents what choosing a row will do and spends no row saying it.
-/// There is one reading today, and this is where a second would be spelled.
 #[must_use]
-pub fn title() -> &'static str {
-    vigia_core::Standing::SINCE
+pub fn title(reading: Reading) -> &'static str {
+    reading.word()
 }
 
 /// Where the reader is inside the list.
@@ -227,6 +235,10 @@ pub struct Positions {
     pub caret: Caret,
     /// What the rows say.
     pub places: Places,
+    /// Which reading the box is titled with, and so which rows it has. Stamped from
+    /// the request as the frame is built rather than kept on [`Places`], which the
+    /// shell fills from a walk on its own schedule.
+    pub reading: Reading,
 }
 
 /// What one terminal event means while the list is open.

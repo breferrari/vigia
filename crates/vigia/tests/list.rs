@@ -10,7 +10,7 @@ use vigia::{
     Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Row, Theme, View, Viewport,
     body_layout, regions, render,
 };
-use vigia_core::{Highlighter, History, Origin};
+use vigia_core::{Highlighter, History, Origin, Standing};
 
 use support::{Scratch, materialise};
 
@@ -39,7 +39,7 @@ fn chrome(app: &App) -> vigia::Chrome {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -537,7 +537,7 @@ fn the_region_at_fifty_files() {
                 "vigia",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -557,7 +557,7 @@ fn the_region_at_fifty_files() {
             "vigia",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1509,7 +1509,7 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             vigia::Pointing::default(),

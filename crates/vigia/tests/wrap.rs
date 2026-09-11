@@ -13,7 +13,7 @@ use vigia::{
     Action, App, Body, Glyphs, Pointing, Row, TRACK_SCALE, Theme, View, Viewport, body_layout,
     diff_height, regions, render,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, materialise, settle_spans};
 
@@ -64,7 +64,7 @@ fn chrome_of(app: &App) -> vigia::Chrome {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),

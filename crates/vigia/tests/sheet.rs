@@ -16,7 +16,7 @@ use vigia::{
     Action, App, Chrome, Glyphs, Grabbed, Hovered, Pointing, Regions, Sheet, Theme, action_for,
     body_layout, regions, render,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use screen::candidate_keys;
 use support::{Scratch, materialise};
@@ -55,7 +55,7 @@ fn chrome(app: &App) -> Chrome {
         "fixture",
         Some("main"),
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -660,7 +660,7 @@ fn drawn_close(
         "fixture",
         Some("main"),
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing {
@@ -981,7 +981,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 }
 
 /// One value of every [`Action`] variant, for the two gates that walk them.
-const ALL_ACTIONS: [Action; 37] = [
+const ALL_ACTIONS: [Action; 38] = [
     Action::Quit,
     Action::Escape,
     Action::Scroll(1),
@@ -999,6 +999,7 @@ const ALL_ACTIONS: [Action; 37] = [
     Action::ToggleWrap,
     Action::ToggleNotes,
     Action::ToggleStanding,
+    Action::ToggleReading,
     Action::TogglePositions,
     Action::ClosePositions,
     Action::PositionsMove(1),
@@ -1055,6 +1056,8 @@ fn reach_of(action: &Action) -> Reach {
         // `c`, the same way.
         Action::ToggleNotes => Reach::Keyboard,
         Action::ToggleStanding => Reach::Keyboard,
+        // `O`, and the sheet's own row for it, shared with the two above.
+        Action::ToggleReading => Reach::Keyboard,
         // `B`, and a press on the header's position token, which is the one piece of
         // chrome outside the two regions that answers a click.
         Action::TogglePositions => Reach::Both,
@@ -1187,6 +1190,7 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::ToggleWrap
             | Action::ToggleNotes
             | Action::ToggleStanding
+            | Action::ToggleReading
             | Action::ToggleSingle
             | Action::ToggleOverview
             | Action::ToggleSheet

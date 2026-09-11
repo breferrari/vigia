@@ -14,7 +14,9 @@ use vigia::{
     Chrome, FileEntry, FileNotes, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow,
     Mode, Position, Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
+use vigia_core::{
+    Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Reading, Recency, Span,
+};
 
 /// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
 fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
@@ -169,6 +171,7 @@ fn chrome() -> Chrome {
     Chrome {
         menu: None,
         position: "current".to_owned(),
+        reading: Reading::Since,
         pressed: None,
         gripped: None,
         hovered: None,

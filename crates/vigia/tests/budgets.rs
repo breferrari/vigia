@@ -16,7 +16,7 @@ use vigia::{
 };
 use vigia_core::{
     CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
-    Samples, Side, Status,
+    Samples, Side, Standing, Status,
 };
 
 use support::{
@@ -85,7 +85,7 @@ fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -136,7 +136,7 @@ fn frame_body(
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -265,7 +265,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -645,7 +645,7 @@ fn frame_budget_on(
                 "fixture",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -1447,7 +1447,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1879,7 +1879,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -2378,7 +2378,7 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
                 "fixture",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -2457,7 +2457,7 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -2703,7 +2703,7 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                     "fixture",
                     None,
                     vigia::Stood {
-                        position: "current",
+                        standing: &Standing::Current,
                         now: 0,
                     },
                     Pointing::default(),

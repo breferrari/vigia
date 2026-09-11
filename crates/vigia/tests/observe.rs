@@ -15,7 +15,7 @@ use ratatui::layout::Rect;
 use vigia::{App, Body, Glyphs, Pointing, Theme, View, body_layout, regions, render};
 use vigia_core::{
     ChangeKind, FrameStats, HISTORY_PATHS, HighlightStats, Highlighter, History, HistoryStats,
-    WARM_FILES, WatchOptions, WatchStats, Worktree,
+    Standing, WARM_FILES, WatchOptions, WatchStats, Worktree,
 };
 
 /// Worktree to watch. Defaults to the checkout the test runs in.
@@ -672,7 +672,7 @@ impl Pane<'_> {
             &self.name,
             self.branch.as_deref(),
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -704,7 +704,7 @@ impl Pane<'_> {
             &self.name,
             self.branch.as_deref(),
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -730,7 +730,7 @@ impl Pane<'_> {
                 &self.name,
                 self.branch.as_deref(),
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),

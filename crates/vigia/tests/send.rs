@@ -15,7 +15,7 @@ use vigia::{
     App, Carrier, NOTICE_LINGER, Pointing, Route, View, Voice, body_layout, plan, put, remote,
     settled, system_tools, tmux_command,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, materialise};
 
@@ -42,7 +42,7 @@ fn painted(app: &mut App, frame: &mut Frame) -> View {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -246,7 +246,7 @@ fn what_the_footer_is_handed_is_what_the_pane_is_showing() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0
             },
             Pointing::default(),

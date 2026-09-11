@@ -20,7 +20,7 @@ use vigia::{
 fn press(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
-use vigia_core::{Origin, Recency};
+use vigia_core::{Origin, Recency, Standing};
 
 /// The block one heat slice is drawn as, restated rather than imported.
 const HEAT_SLICE: char = '■';
@@ -76,7 +76,7 @@ fn stacked_chrome() -> Chrome {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -1014,7 +1014,7 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
                 "f",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -1034,7 +1034,7 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
             "f",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1089,7 +1089,7 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
                 "f",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -1138,7 +1138,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
             "f",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1157,7 +1157,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
             "f",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1199,7 +1199,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
                 "f",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0
                 },
                 Pointing::default(),
@@ -1247,7 +1247,7 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
             "f",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1271,7 +1271,7 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
             "f",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1332,7 +1332,7 @@ fn a_rail_draws_the_tail_of_the_staged_run() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

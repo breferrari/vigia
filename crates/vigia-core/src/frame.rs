@@ -393,7 +393,11 @@ impl<'w> Frame<'w> {
         let mut hidden = walk.hidden();
         // Unstaged first, then staged, and the order is the product.
         let staged_at = files.len();
-        if self.staged {
+        // The staged run is the index against `HEAD`, which is only definable where
+        // the pane's own comparison has the index in it. Beside a commit's own diff
+        // it would draw a live run against a historical one and count both on one
+        // header. `SPEC.md` §11.1.
+        if self.staged && self.standing.reading().is_live() {
             let mut walk = self.worktree.changes_of(Origin::Staged, options)?;
             for change in &mut walk {
                 files.push(change?);

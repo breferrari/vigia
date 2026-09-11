@@ -22,7 +22,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Body, Pointing, Position, View, Viewport, diff_height};
-use vigia_core::{Highlighter, History};
+use vigia_core::{Highlighter, History, Standing};
 
 use support::{Scratch, materialise};
 
@@ -39,7 +39,7 @@ fn body() -> usize {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

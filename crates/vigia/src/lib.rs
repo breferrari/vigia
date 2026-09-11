@@ -712,6 +712,28 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // not a change this pane is having: it must reach neither the
                     // arrival marks below nor the history store under them.
                     let paths = shown(paths, shell.hide.as_ref());
+                    // A tick is the world changing, so a demand that could not be
+                    // served a moment ago is worth offering again.
+                    shell.written = true;
+                    // The list's facts describe runs, so a write moves them too.
+                    shell.places_stale = true;
+                    // Sampled here and nowhere else, which is the whole of I10's
+                    // relationship with I1: the window is real time and only a wake the
+                    // loop was having moves it. Parked too, so the sparkline is whole
+                    // the moment the reading goes back.
+                    shell
+                        .history
+                        .record_sized(sized(worktree.workdir(), &paths), began);
+                    // Standing at one commit the body is two trees, so nothing below
+                    // could move it. I5 says correct with zero interaction, so what the
+                    // reader is owed is that it happened, in the unasked-for-news voice.
+                    // Nothing else runs, so a parked pane wakes for less.
+                    if !shell.app.live() {
+                        if let Some(said) = arrival_line(paths.len()) {
+                            shell.say(said, Voice::Arrived, began);
+                        }
+                        continue;
+                    }
                     shell.app.clear_notice();
                     // Armed here rather than in `App::follow`, because a change
                     // arrives whether or not the viewport moves to it.
@@ -720,17 +742,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             .effects
                             .add_unique_effect(path.clone(), motion::coalescing(ARRIVING));
                     }
-                    // A tick is the world changing, so a demand that could not be
-                    // served a moment ago is worth offering again.
-                    shell.written = true;
-                    // The list's facts describe runs, so a write moves them too.
-                    shell.places_stale = true;
-                    // Sampled here and nowhere else, which is the whole of I10's
-                    // relationship with I1: the window is real time, and the only thing
-                    // that moves it is a wake the loop was already having.
-                    shell
-                        .history
-                        .record_sized(sized(worktree.workdir(), &paths), began);
                     // A walk that fails describes the whole tree rather than one
                     // path in it, so the previous frame is still the best thing to
                     // draw and the footer says why. One file's own failure never
@@ -897,6 +908,18 @@ fn travels_from(voice: Voice, theme: &Theme) -> Option<ratatui::style::Color> {
     theme::contrast(theme.chrome_dim, voice_style(voice, theme))
 }
 
+/// What the footer says while the pane is parked and the tree moves under it. The
+/// burst's count is the one number free: walking to learn more is what parking saves.
+#[doc(hidden)]
+#[must_use]
+pub fn arrival_line(written: usize) -> Option<String> {
+    match written {
+        0 => None,
+        1 => Some("1 file written in the working tree".to_owned()),
+        many => Some(format!("{many} files written in the working tree")),
+    }
+}
+
 /// How long a voice takes, arriving or leaving. One table: copies drift.
 const fn duration_for(voice: Voice) -> std::time::Duration {
     match voice {
@@ -1038,7 +1061,7 @@ impl Shell {
             &self.name,
             self.branch.as_deref(),
             crate::app::Stood {
-                position: &frame.standing().label(),
+                standing: frame.standing(),
                 now: epoch_now(),
             },
             self.pointing(),
@@ -1443,7 +1466,9 @@ impl Shell {
 
     /// Walk a page on from where the caret asks; a caret with room asks for none.
     fn extend_places(&mut self, worktree: &Worktree, caret: positions::Caret) {
-        let Some(from) = positions::resume_from(caret, self.app.places()).map(|at| at.id) else {
+        let Some(from) =
+            positions::resume_from(caret, self.app.places(), self.app.reading()).map(|at| at.id)
+        else {
             return;
         };
         match worktree.commits_from(Some(from), self.positions_page()) {
@@ -1494,13 +1519,20 @@ impl Shell {
             Err(e) => self.app.warn(e.to_string()),
         }
 
+        // Neither named row is drawn under `only`, so I4's aside frame is not built.
+        if !self.app.live() {
+            *aside = None;
+            self.app.set_places(places);
+            return;
+        }
+
         // The name alone, from the resolution the shell holds: a place a reader can go
         // is worth naming before it is worth counting.
         let point = match branch_point_of(&mut self.branch_point, worktree) {
             Ok(vigia_core::Standing::Since { at, named }) => Some((at, named)),
             // A branch with no point to measure from draws no row for it, which is
             // the same answer `b` gives: nothing to stand at rather than an empty run.
-            Ok(vigia_core::Standing::Current) | Err(_) => None,
+            Ok(vigia_core::Standing::Current | vigia_core::Standing::Only { .. }) | Err(_) => None,
         };
         let here = frame.standing().at();
         let drawn = Some(Facts {
@@ -1899,6 +1931,7 @@ impl Shell {
         // That is the whole of I4 for this read.
         self.branch = worktree.branch();
         let position = frame.standing().label();
+        let reading = frame.standing().reading();
 
         // The chrome is built before the layout, not after, because the footer takes a
         // second line at narrow widths and `body_layout` has to know whether this frame
@@ -1907,7 +1940,7 @@ impl Shell {
             &self.name,
             self.branch.as_deref(),
             crate::app::Stood {
-                position: &position,
+                standing: frame.standing(),
                 now: epoch_now(),
             },
             self.pointing(),
@@ -1949,8 +1982,9 @@ impl Shell {
         // drawing holds, and both are owed only by the frames that draw the answer.
         self.refresh_places(frame, worktree, aside);
 
-        // On a frame with nothing to draw, where the work went.
-        self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
+        // On a frame with nothing to draw, where the work went, which for a commit
+        // that changed nothing is not whatever happens to be staged now.
+        self.elsewhere = if self.screen.files == 0 && !self.app.staged() && self.app.live() {
             worktree
                 .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
                 .unwrap_or_default()
@@ -1966,7 +2000,7 @@ impl Shell {
             &self.name,
             self.branch.as_deref(),
             crate::app::Stood {
-                position: &position,
+                standing: frame.standing(),
                 now: epoch_now(),
             },
             self.pointing(),

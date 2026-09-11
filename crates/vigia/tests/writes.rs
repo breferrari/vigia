@@ -15,7 +15,8 @@ use vigia::{
     commit, config, opening, regions, render, state_root,
 };
 use vigia_core::{
-    Frame, Highlighter, History, Note, Registry, Store, WARM_FILES, WatchOptions, Worktree,
+    Frame, Highlighter, History, Note, Registry, Standing, Store, WARM_FILES, WatchOptions,
+    Worktree,
 };
 
 use support::{Scratch, TempDir, made_link, note, registration, settle_tree};
@@ -220,7 +221,7 @@ impl Rig<'_> {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -422,7 +423,7 @@ fn one_gesture_writes_exactly_one_file() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),

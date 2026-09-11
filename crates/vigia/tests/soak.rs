@@ -16,7 +16,7 @@ use vigia::{
 };
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
-    RETAINED_HUNKS, Store, WatchOptions, Worktree,
+    RETAINED_HUNKS, Standing, Store, WatchOptions, Worktree,
 };
 
 use support::{Scratch, generated};
@@ -800,7 +800,7 @@ fn drive(
                 NAME,
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -828,7 +828,7 @@ fn drive(
             NAME,
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

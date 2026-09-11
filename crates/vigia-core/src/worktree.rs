@@ -339,13 +339,63 @@ impl Worktree {
         standing: &Standing,
         options: ChangeOptions<'h>,
     ) -> Result<Changes<'h>> {
-        match standing.at() {
-            None => self.changes_with(options),
-            Some(base) => Ok(Changes::over(
-                Inner::Collected(self.since(base, options)?.into_iter()),
-                options.hide,
-            )),
-        }
+        let collected = match standing {
+            Standing::Current => return self.changes_with(options),
+            Standing::Since { at, .. } => self.since(*at, options)?,
+            Standing::Only { at, .. } => self.only(*at, options)?,
+        };
+        Ok(Changes::over(
+            Inner::Collected(collected.into_iter()),
+            options.hide,
+        ))
+    }
+
+    /// One commit alone: its first parent's tree against its own.
+    ///
+    /// The first parent and not a merge of all of them, which is what `git show`
+    /// does: a merge's other parents are the branch it took in, and drawing them
+    /// would report work this commit did not do as work it did. A root commit has
+    /// no parent and is measured against the empty tree, so the commit that
+    /// created the repository reads as the additions it made.
+    ///
+    /// Nothing here touches the working tree, and that is the whole of what makes
+    /// this reading a still picture: both ends are trees the object database
+    /// already holds, so a write while the pane is parked changes nothing under
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// The commit, either tree, or the diff between them cannot be read.
+    fn only(&self, at: gix::ObjectId, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
+        let commit = self
+            .repo
+            .find_object(at)
+            .map_err(|e| Error::Standing(Box::new(e)))?
+            .peel_to_commit()
+            .map_err(|e| Error::Standing(Box::new(e)))?;
+        let parent = commit.parent_ids().next().map(gix::Id::detach);
+        let tree = commit.tree().map_err(|e| Error::Standing(Box::new(e)))?;
+        let before = parent
+            .map(|parent| {
+                self.repo
+                    .find_object(parent)
+                    .map_err(|e| Error::Standing(Box::new(e)))?
+                    .peel_to_tree()
+                    .map_err(|e| Error::Standing(Box::new(e)))
+            })
+            .transpose()?;
+
+        let rewrites = options.track_renames.then(gix::diff::Rewrites::default);
+        let changes = self
+            .repo
+            .diff_tree_to_tree(
+                before.as_ref(),
+                Some(&tree),
+                gix::diff::Options::default().with_rewrites(rewrites),
+            )
+            .map_err(|e| Error::Standing(Box::new(e)))?;
+
+        Ok(changes.iter().filter_map(committed_change).collect())
     }
 
     /// Everything since `base`: that commit's tree against the working tree.
@@ -784,6 +834,107 @@ fn touches_gitlink(change: &gix::diff::index::ChangeRef<'_, '_>) -> bool {
             ..
         } => commit(source_entry_mode) || commit(entry_mode),
     }
+}
+
+/// Whether either side of a tree-to-tree change is something this pane can draw.
+///
+/// A tree diff reports the **directories** whose contents moved as changes in
+/// their own right, and `git show --name-status` prints none of them. A gitlink
+/// is a commit rather than content, and the index walk drops those already. One
+/// predicate answers both, on every side each kind of change has.
+fn drawable(change: &gix::diff::tree_with_rewrites::Change) -> bool {
+    use gix::diff::tree_with_rewrites::Change;
+    let content = gix::object::tree::EntryMode::is_blob_or_symlink;
+    match change {
+        Change::Addition { entry_mode, .. } | Change::Deletion { entry_mode, .. } => {
+            content(entry_mode)
+        }
+        Change::Modification {
+            previous_entry_mode,
+            entry_mode,
+            ..
+        } => content(previous_entry_mode) && content(entry_mode),
+        Change::Rewrite {
+            source_entry_mode,
+            entry_mode,
+            ..
+        } => content(source_entry_mode) && content(entry_mode),
+    }
+}
+
+/// One tree-to-tree change, as this crate spells changes.
+///
+/// [`staged_change`]'s shape over a different walk. `Origin::Unstaged` for the
+/// reason `since` gives it: the gutter column names which of the two live
+/// comparisons found a change, neither found this one, and a run drawn as the
+/// pane's own is what a reader standing at a commit asked for.
+fn committed_change(change: &gix::diff::tree_with_rewrites::Change) -> Option<FileChange> {
+    use gix::diff::tree_with_rewrites::Change;
+
+    if !drawable(change) {
+        return None;
+    }
+
+    let (path, kind, before, after) = match change {
+        Change::Addition { location, id, .. } => (
+            path_of(location.as_ref()),
+            ChangeKind::Added,
+            None,
+            Some(Side::Blob(*id)),
+        ),
+        Change::Deletion { location, id, .. } => (
+            path_of(location.as_ref()),
+            ChangeKind::Removed,
+            Some(*id),
+            None,
+        ),
+        Change::Modification {
+            location,
+            previous_id,
+            id,
+            ..
+        } => (
+            path_of(location.as_ref()),
+            ChangeKind::Modified,
+            Some(*previous_id),
+            Some(Side::Blob(*id)),
+        ),
+        // The *destination* names the change, as it does for both other walks: the
+        // row a reader sees is the path the content is at now, and `from` is what
+        // it says about where it came from.
+        Change::Rewrite {
+            source_location,
+            source_id,
+            location,
+            id,
+            copy,
+            ..
+        } => {
+            let from = path_of(source_location.as_ref());
+            let kind = if *copy {
+                ChangeKind::Copied { from }
+            } else {
+                ChangeKind::Renamed { from }
+            };
+            (
+                path_of(location.as_ref()),
+                kind,
+                Some(*source_id),
+                Some(Side::Blob(*id)),
+            )
+        }
+    };
+
+    Some(FileChange {
+        path,
+        kind,
+        origin: Origin::Unstaged,
+        before,
+        after,
+        // Both sides are blobs the object database holds, so nothing here reads a
+        // link off disk and the answer cannot reach anything.
+        maybe_symlink: false,
+    })
 }
 
 /// One tree-index change, as this crate spells changes.

@@ -17,7 +17,7 @@ use vigia::{
     Action, App, Asked, Chrome, Glyphs, Pointing, Position, Regions, Theme, View, Viewport,
     branch_point_of, render,
 };
-use vigia_core::{Frame, Highlighter, History, Standing, Worktree};
+use vigia_core::{Frame, Highlighter, History, Reading, Standing, Worktree};
 
 /// What joins two facts about one subject on a line of chrome.
 const FACT_JOIN: &str = " · ";
@@ -68,30 +68,33 @@ fn since(worktree: &Worktree) -> Standing {
 }
 
 /// The body's first row, which on an empty pane is B3's one line.
-fn body_line(view: &View, position: &str, app: &App) -> String {
-    drawn_row(view, position, app, 1, 120)
+fn body_line(view: &View, standing: &Standing, app: &App) -> String {
+    drawn_row(view, standing, app, 1, 120)
 }
 
 /// The header a `View` and a position draw together, as one line of text.
-fn header(view: &View, position: &str, app: &App) -> String {
-    drawn_row(view, position, app, 0, 120)
+fn header(view: &View, standing: &Standing, app: &App) -> String {
+    drawn_row(view, standing, app, 0, 120)
 }
 
 /// The same header on a pane `width` columns across.
-fn header_at(view: &View, position: &str, app: &App, width: u16) -> String {
-    drawn_row(view, position, app, 0, width)
+fn header_at(view: &View, standing: &Standing, app: &App, width: u16) -> String {
+    drawn_row(view, standing, app, 0, width)
 }
 
-/// Row `y` of a `width`-column pane drawing `view` while standing where
-/// `position` says.
-fn drawn_row(view: &View, position: &str, app: &App, y: u16, width: u16) -> String {
+/// Row `y` of a `width`-column pane drawing `view` from where `standing` says.
+///
+/// The position goes in whole rather than as the word it draws. The word and the
+/// reading are two answers about one place, and a helper that set the first by hand
+/// could hand the painter a header reading `only` beside an empty state naming a
+/// range, which is the disagreement these gates exist to catch.
+fn drawn_row(view: &View, standing: &Standing, app: &App, y: u16, width: u16) -> String {
     let chrome = Chrome {
         menu: None,
-        position: position.to_owned(),
         ..app.chrome(
             "fixture",
             Some("work"),
-            vigia::Stood { position, now: 0 },
+            vigia::Stood { standing, now: 0 },
             Pointing::default(),
             Default::default(),
             "",
@@ -149,7 +152,7 @@ fn the_token_reads_current_on_a_live_pane() {
         "the default position spells itself something else, so the token below \
          is not the one a pane opens on"
     );
-    let drawn = header(&view, &Standing::Current.label(), &app);
+    let drawn = header(&view, &Standing::Current, &app);
     assert!(
         drawn.contains(&format!("fixture{FACT_JOIN}work{FACT_JOIN}current")),
         "a pane nobody has moved does not say where it is standing: {drawn:?}"
@@ -176,8 +179,8 @@ fn the_token_names_the_branch_point_under_since() {
 
     let mut frame = worktree.frame();
     let app = App::new();
-    let view = drawn(&mut frame, standing);
-    let drawn = header(&view, &label, &app);
+    let view = drawn(&mut frame, standing.clone());
+    let drawn = header(&view, &standing, &app);
     assert!(
         drawn.contains(&format!("fixture{FACT_JOIN}work{FACT_JOIN}{label}")),
         "the header does not carry where the pane is standing: {drawn:?}"
@@ -197,12 +200,12 @@ fn the_headers_facts_describe_what_the_token_names() {
     let mut frame = worktree.frame();
 
     let live = drawn(&mut frame, Standing::Current);
-    let (live_files, live_header) = (live.files, header(&live, "current", &app));
+    let (live_files, live_header) = (live.files, header(&live, &Standing::Current, &app));
 
     let standing = since(&worktree);
     let label = standing.label();
-    let parked = drawn(&mut frame, standing);
-    let (parked_files, parked_header) = (parked.files, header(&parked, &label, &app));
+    let parked = drawn(&mut frame, standing.clone());
+    let (parked_files, parked_header) = (parked.files, header(&parked, &standing, &app));
 
     // Non-vacuity: the two runs have to differ, or one number satisfies both
     // assertions and the gate proves nothing.
@@ -348,7 +351,7 @@ fn an_empty_since_run_says_what_it_found_nothing_since() {
     let app = App::new();
     let mut frame = worktree.frame();
 
-    let view = drawn(&mut frame, standing);
+    let view = drawn(&mut frame, standing.clone());
     assert_eq!(
         view.files, 0,
         "the fixture has {} changed files, so the pane below is not the empty \
@@ -356,7 +359,7 @@ fn an_empty_since_run_says_what_it_found_nothing_since() {
         view.files
     );
 
-    let line = body_line(&view, &label, &app);
+    let line = body_line(&view, &standing, &app);
     assert!(
         line.contains(&format!("no changes {label}")),
         "the empty pane says {line:?} while standing {label:?}, so it names a \
@@ -366,7 +369,7 @@ fn an_empty_since_run_says_what_it_found_nothing_since() {
     // Non-vacuity: the same empty pane, read the other way, keeps today's words.
     let live = drawn(&mut frame, Standing::Current);
     assert_eq!(live.files, 0, "the live pane is not empty either");
-    let line = body_line(&live, "current", &app);
+    let line = body_line(&live, &Standing::Current, &app);
     assert!(
         line.contains("no unstaged changes"),
         "the live pane stopped saying which comparison it is empty for: {line:?}"
@@ -387,11 +390,11 @@ fn narrowing_a_since_pane_never_reads_like_the_current_one() {
     let label = standing.label();
     let app = App::new();
     let mut frame = worktree.frame();
-    let view = drawn(&mut frame, standing);
+    let view = drawn(&mut frame, standing.clone());
 
     let mut carried = 0usize;
     for width in 40u16..=120 {
-        let drawn = header_at(&view, &label, &app, width);
+        let drawn = header_at(&view, &standing, &app, width);
         let left = drawn
             .split("  ")
             .next()
@@ -495,12 +498,12 @@ fn deep(name: &str, count: usize) -> Scratch {
 
 /// A pane `width` by `height` drawing `view` with `app`'s chrome, as the buffer.
 fn screen(view: &View, app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
-    let position = Standing::Current.label();
+    let standing = Standing::Current;
     let chrome = app.chrome(
         "fixture",
         Some("work"),
         vigia::Stood {
-            position: &position,
+            standing: &standing,
             now: 0,
         },
         Pointing::default(),
@@ -546,7 +549,7 @@ fn chrome_of(app: &App) -> Chrome {
         "fixture",
         Some("work"),
         vigia::Stood {
-            position: &Standing::Current.label(),
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -968,8 +971,8 @@ fn the_headers_facts_follow_the_row_that_was_chosen() {
         named: newest.named.clone(),
     };
     let label = chosen.label();
-    let parked = drawn(&mut frame, chosen);
-    let header = header(&parked, &label, &app);
+    let parked = drawn(&mut frame, chosen.clone());
+    let header = header(&parked, &chosen, &app);
 
     assert!(
         header.contains(&format!(
@@ -1084,19 +1087,19 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
 
     let top = vigia::positions::Caret { at: 0, top: 0 };
     assert!(
-        vigia::resume_from(top, &places).is_none(),
+        vigia::resume_from(top, &places, Reading::Since).is_none(),
         "a caret at the top asked for another page, so opening the list walks the \
          whole history"
     );
     let last = vigia::positions::Caret {
-        at: places.rows() - 1,
+        at: places.rows(Reading::Since) - 1,
         top: 0,
     };
     // The commit as well as the decision: a caret near the end that resumed from the
     // wrong place would draw a second page that is not behind the first, and nothing
     // on screen would say so.
     assert_eq!(
-        vigia::resume_from(last, &places).map(|at| at.id),
+        vigia::resume_from(last, &places, Reading::Since).map(|at| at.id),
         places.commits.last().map(|at| at.id),
         "the walk resumes from something other than the last commit it holds"
     );
@@ -1106,7 +1109,7 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
         ..places.clone()
     };
     assert!(
-        vigia::resume_from(last, &exhausted).is_none(),
+        vigia::resume_from(last, &exhausted, Reading::Since).is_none(),
         "a walk with nothing left behind it still asks for another page"
     );
 
@@ -1114,20 +1117,20 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
     // comes from the page that knows it, and a tip handed back twice is dropped rather
     // than drawn twice.
     let mut grown = places.clone();
-    let from = vigia::resume_from(last, &places)
+    let from = vigia::resume_from(last, &places, Reading::Since)
         .expect("a resume point")
         .id;
     let next = worktree
         .commits_from(Some(from), page)
         .expect("a second page");
-    let (was, coming) = (grown.rows(), next.commits.len());
+    let (was, coming) = (grown.rows(Reading::Since), next.commits.len());
     assert!(
         coming > 0,
         "the second page is empty, so the append is unasserted"
     );
     grown.extend(next);
     assert_eq!(
-        grown.rows(),
+        grown.rows(Reading::Since),
         was + coming,
         "the second page did not go onto the end of the first"
     );
@@ -1145,10 +1148,10 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
     let repeat = worktree
         .commits_from(None, page)
         .expect("the first page again");
-    let held = grown.rows();
+    let held = grown.rows(Reading::Since);
     grown.extend(repeat);
     assert_eq!(
-        grown.rows(),
+        grown.rows(Reading::Since),
         held,
         "a page of commits already held was appended a second time"
     );
@@ -1385,7 +1388,7 @@ fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
     };
     let from = first.commits.last().expect("three commits").id;
     places.extend(worktree.commits_from(Some(from), 3).expect("a second page"));
-    let scrolled = places.rows();
+    let scrolled = places.rows(Reading::Since);
     let deepest = places.commits.last().expect("commits").id;
     assert!(
         scrolled > 3,
@@ -1399,7 +1402,7 @@ fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
         "a page of the history already held was read as another branch"
     );
     assert_eq!(
-        places.rows(),
+        places.rows(Reading::Since),
         scrolled,
         "an unchanged history moved the rows"
     );
@@ -1414,7 +1417,7 @@ fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
         "a commit on the branch the list is already on replaced every row"
     );
     assert_eq!(
-        places.rows(),
+        places.rows(Reading::Since),
         scrolled + 1,
         "the new commit did not go onto the front of what was already walked"
     );

@@ -65,7 +65,7 @@ fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
         "fixture",
         None,
         vigia::Stood {
-            position: &standing.label(),
+            standing: &standing,
             now: 0,
         },
         Pointing::default(),
@@ -97,7 +97,7 @@ fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
         "fixture",
         None,
         vigia::Stood {
-            position: &standing.label(),
+            standing: &standing,
             now: 0,
         },
         Pointing::default(),
@@ -406,7 +406,7 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),

@@ -11,6 +11,7 @@ use vigia::{
     ARRIVED_LINGER, App, Glyphs, NOTICE_ARRIVING, NOTICE_LINGER, Pointing, Theme, View, Voice,
     linger_for, render,
 };
+use vigia_core::Standing;
 
 /// The notice is unasked for, so it stays long enough to be seen by a reader whose
 /// eyes are on the other pane: a minute, where a receipt answers a gesture and
@@ -236,7 +237,7 @@ fn the_footer_carries_the_version_it_was_told() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

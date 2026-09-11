@@ -24,7 +24,7 @@ use vigia::{
     commit, count_cell, edge_at, effect_interval, has_room, hover_after, note_cells, opening,
     press_at, regions, render, repainted, selection_after, withdraw,
 };
-use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Status, Store, key};
+use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Standing, Status, Store, key};
 
 use support::{Scratch, TempDir, files_in, note, numbered_lines};
 
@@ -302,7 +302,7 @@ impl Rig {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             pointing,
@@ -320,7 +320,7 @@ impl Rig {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             pointing,
@@ -1721,7 +1721,7 @@ fn a_box_opened_at_the_top_of_a_bottom_anchored_screen_stays_on_it() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -2576,7 +2576,7 @@ fn a_note_the_box_holds_stands_aside_in_the_run_the_box_is_not_drawn_in() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -3385,7 +3385,7 @@ fn a_pane_with_no_notes_draws_todays_frame() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -3496,7 +3496,7 @@ fn the_bottom_clamp_counts_note_rows() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -3543,7 +3543,7 @@ fn the_notes_count_never_buys_the_footer_a_second_line() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -6059,7 +6059,7 @@ fn a_screen_opening_inside_a_note_counts_no_line_for_it() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

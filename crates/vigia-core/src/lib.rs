@@ -61,7 +61,7 @@ pub use notes::{
     run_of,
 };
 pub use session::{Registration, Registry};
-pub use standing::Standing;
+pub use standing::{Reading, Standing};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{

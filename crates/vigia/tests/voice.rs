@@ -15,6 +15,7 @@ use vigia::{
     ARRIVING_FRAME, App, Depth, Glyphs, NOTICE_ARRIVING, NOTICE_LINGER, Pointing, Theme, View,
     Voice, arrival, departure, notice_area, render,
 };
+use vigia_core::Standing;
 
 /// An ordinary pane.
 const PANE: Rect = Rect {
@@ -39,7 +40,7 @@ fn drawn(voice: Voice) -> (Buffer, App) {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -79,7 +80,7 @@ fn area_of(app: &App) -> Rect {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -117,7 +118,7 @@ fn a_message_is_not_drawn_in_the_hints_own_style() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -146,7 +147,7 @@ fn a_message_is_not_drawn_in_the_hints_own_style() {
                 "fixture",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
@@ -269,7 +270,7 @@ fn a_pane_with_no_message_has_no_area() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -286,7 +287,7 @@ fn a_pane_with_no_room_has_no_area() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -321,7 +322,7 @@ fn a_long_message_stops_where_the_readouts_begin() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -403,7 +404,7 @@ fn a_depth_with_no_colour_still_gets_the_message() {
                 "fixture",
                 None,
                 vigia::Stood {
-                    position: "current",
+                    standing: &Standing::Current,
                     now: 0,
                 },
                 Pointing::default(),
