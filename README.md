@@ -129,7 +129,7 @@ A running process follows its image through a rename, so the servers keep answer
            │    39 +      if self.pending.is_empty() {
            │    40 +          self.deadline = Instant::now() + DEBOUNCE;
      rule  │  ──────────────────────────────────────────────────────────────
-   status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
+   status  │  q quit · f follow · m config · ? keys   3.1ms frame  25MiB  follow ▶  1/3
 ```
 
 The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 139 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 139 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
