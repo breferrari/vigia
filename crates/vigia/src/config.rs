@@ -327,16 +327,15 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 /// The reader's file with the lines this pane owns brought up to date.
 ///
 /// **Only the value is replaced, never the line.** A line carries the reader's
-/// alignment before its `=`, their comment after the value, and their own ending,
-/// and all three are theirs: a rewrite that rebuilt the line would reformat the
-/// file on every flip and their editor would put it back on every save. Comments,
-/// blank lines, key order and `hide` survive untouched, and a key the file lacks is
-/// appended rather than inserted, so a hand-written file only grows at the end.
+/// alignment before its `=`, their comment after the value and their own ending,
+/// and rebuilding it would reformat the file on every flip while their editor put
+/// it back on every save. Comments, blank lines, key order and `hide` survive, and
+/// a key the file lacks is appended, so a hand-written file only grows at the end.
 #[must_use]
 pub fn rewrite(source: &str, config: &Config) -> String {
-    // Taken off the front and put back, for the reason `parse` strips it: U+FEFF is
-    // `Cf` rather than `White_Space`, so it survives every trim and lands inside the
-    // first key, which would then be unrecognised and appended a second time.
+    // Off the front and back on, for the reason `parse` strips it: U+FEFF is `Cf`
+    // rather than `White_Space`, so it survives every trim and lands inside the first
+    // key, which would then be unrecognised and appended a second time.
     let mark = source.starts_with('\u{FEFF}');
     let body = if mark {
         &source['\u{FEFF}'.len_utf8()..]
@@ -349,15 +348,17 @@ pub fn rewrite(source: &str, config: &Config) -> String {
         out.push('\u{FEFF}');
     }
     let mut written: Vec<&str> = Vec::with_capacity(KEYS.len());
-    // Taken from the first line that has one, so a file written on Windows stays
-    // one and an appended key takes the ending the rest of the file has.
-    let mut ending = "\n";
+    // The first line's ending, so a file written on Windows stays one and an
+    // appended key takes what the rest of it has. The first rather than the last
+    // because a file carrying both is already inconsistent, and the first is the
+    // one the reader's editor goes on using.
+    let mut ending = None;
 
     for piece in body.split_inclusive('\n') {
         let raw = piece.trim_end_matches('\n').trim_end_matches('\r');
         let tail = &piece[raw.len()..];
-        if !tail.is_empty() {
-            ending = tail;
+        if !tail.is_empty() && ending.is_none() {
+            ending = Some(tail);
         }
         match owned_key(raw, &written)
             .and_then(|(key, at)| KEYS.iter().find(|name| **name == key).map(|key| (*key, at)))
@@ -367,8 +368,8 @@ pub fn rewrite(source: &str, config: &Config) -> String {
                 out.push_str(&raw[..=at]);
                 out.push(' ');
                 out.push_str(word_for(key, config));
-                // What the reader wrote after their own value, which is a comment
-                // or nothing: `comment_in` is what says where the value ended.
+                // What the reader wrote after their value, which is a comment or
+                // nothing.
                 if let Some(said) = comment_in(&raw[at + 1..]) {
                     out.push(' ');
                     out.push_str(said.trim_end());
@@ -385,7 +386,11 @@ pub fn rewrite(source: &str, config: &Config) -> String {
         .map(|key| format!("{key} = {}", word_for(key, config)))
         .collect();
     if !missing.is_empty() {
-        if !out.is_empty() && !out.ends_with(ending) {
+        let ending = ending.unwrap_or("\n");
+        // The body rather than the output, or a file that is only a byte order mark
+        // takes a blank line it never had, and *an* ending rather than this one,
+        // because a file carrying both ends with whichever its last line used.
+        if !body.is_empty() && !out.ends_with('\n') {
             out.push_str(ending);
         }
         for line in missing {
@@ -395,8 +400,8 @@ pub fn rewrite(source: &str, config: &Config) -> String {
     }
     out
 }
-/// The key one line sets and the offset of its `=`, where the line sets one this
-/// pane owns and has not already written.
+/// The key one line sets and the offset of its `=`, where it sets one this pane
+/// owns and has not written yet.
 fn owned_key<'a>(raw: &'a str, written: &[&str]) -> Option<(&'a str, usize)> {
     let text = raw.trim_start();
     if text.is_empty() || text.starts_with('#') {
@@ -442,9 +447,8 @@ fn word_for(key: &str, config: &Config) -> &'static str {
 /// Write `config` back into the reader's own file.
 ///
 /// Temp-and-rename, the note store's shape and for its reason: a reader who quits
-/// mid-write has a whole file either way. The temp carries this process's id, so
-/// two panes cannot land on each other's, and the directory is made where a reader
-/// never had one.
+/// mid-write has a whole file either way. The temp carries this process's id so two
+/// panes cannot land on each other's, and the directory is made where none was.
 ///
 /// **A file that no longer parses is refused rather than rewritten**, because it
 /// means a reader is editing it by hand or it already holds what the next launch

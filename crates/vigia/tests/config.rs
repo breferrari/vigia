@@ -1019,6 +1019,60 @@ fn a_save_refuses_a_file_that_no_longer_parses() {
 }
 
 #[test]
+fn a_rewrite_adds_no_line_the_reader_did_not_have() {
+    // The shapes a real file arrives in, each one a reader's editor rather than a
+    // hypothetical. Every one must parse, and none may gain a blank line: a file
+    // that grows one on every flip is a file this program is slowly rewriting.
+    for (what, source, ends) in [
+        // An editor that saved a mark and nothing else.
+        ("a mark alone", "\u{FEFF}", "\n"),
+        ("a mark and a comment", "\u{FEFF}# mine\n", "\n"),
+        // The reader's last line with no ending, which every editor allows.
+        ("no trailing ending", "rail = off", "\n"),
+        (
+            "no trailing ending on Windows",
+            "rail = off\r\nsingle = off",
+            "\r\n",
+        ),
+        // Both kinds in one file, which is what a repository shared between two
+        // machines produces. The first is the one the appended keys take.
+        ("both kinds", "rail = off\r\nsingle = off\n", "\r\n"),
+    ] {
+        let config = Config::default();
+        let out = config::rewrite(source, &config);
+        assert!(
+            config::parse(&out).is_ok(),
+            "{what}: the rewrite made a file the next launch refuses:\n{out:?}"
+        );
+        assert!(
+            !out.contains("\n\n") && !out.contains("\r\n\r\n"),
+            "{what}: the rewrite added a blank line:\n{out:?}"
+        );
+        // And the mark keeps the line it was on. A file that is nothing but a mark
+        // has no line to end, so ending one leaves the mark alone on the first row
+        // and every flip after it has a blank first line to carry.
+        assert!(
+            !out.lines()
+                .next()
+                .is_some_and(|first| first.trim_matches('\u{FEFF}').trim().is_empty()),
+            "{what}: the rewrite left the first line with nothing on it:\n{out:?}"
+        );
+        assert!(
+            out.ends_with(&format!("persist = off{ends}")),
+            "{what}: the appended keys did not take the {ends:?} the file opens \
+             with:\n{out:?}"
+        );
+        // And a second pass is the first, so a flip a minute later changes nothing
+        // but the word the reader flipped.
+        assert_eq!(
+            config::rewrite(&out, &config),
+            out,
+            "{what}: the rewrite is not settled after one pass"
+        );
+    }
+}
+
+#[test]
 fn a_repeated_key_is_the_readers_mistake_and_the_rewrite_leaves_it() {
     // `parse` refuses a file that sets a key twice, and says which lines. A rewrite
     // must not quietly repair that: the reader has to see the line they wrote when
