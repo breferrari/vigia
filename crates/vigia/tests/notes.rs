@@ -760,6 +760,7 @@ fn the_hover_icon_clears_by_b10s_ladder() {
     assert_eq!(hover_after(&Event::FocusLost, painted.laid, mark), None);
     // A repaint that moved the regions retires it, and one that did not keeps it.
     let shifted = Regions {
+        menu: None,
         diff: Region {
             top: painted.laid.diff.top + 1,
             ..painted.laid.diff

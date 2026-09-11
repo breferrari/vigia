@@ -668,7 +668,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 19;
+const VARIANTS: usize = 26;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -696,6 +696,13 @@ fn tag(action: Action) -> usize {
         Action::DiffTo(_) => 15,
         Action::Redraw => 16,
         Action::Escape => 17,
+        Action::ToggleIcons => 19,
+        Action::ToggleLinks => 20,
+        Action::ToggleMenu => 21,
+        Action::CloseMenu => 22,
+        Action::MenuMove(_) => 23,
+        Action::MenuFlip => 24,
+        Action::MenuRow(_) => 25,
     }
 }
 
@@ -737,6 +744,15 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::ToggleOverview,
         Action::ToggleSheet,
         Action::CloseSheet,
+        // The config menu's seven, none of which reads a height either: the box is
+        // drawn over rows the diff keeps, so it does not even resize a region.
+        Action::ToggleIcons,
+        Action::ToggleLinks,
+        Action::ToggleMenu,
+        Action::CloseMenu,
+        Action::MenuMove(1),
+        Action::MenuFlip,
+        Action::MenuRow(0),
         // Mid-track, for the reason `DiffTo` below is: `ListTo(0)` resolves
         // to the first row under any height and could not fail.
         Action::ListTo(vigia::TRACK_SCALE / 2),

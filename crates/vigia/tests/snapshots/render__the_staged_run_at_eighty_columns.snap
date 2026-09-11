@@ -1,6 +1,6 @@
 ---
 source: crates/vigia/tests/render.rs
-expression: "screen(80, 12, &both_runs(), &Chrome { staged: Some(2), ..chrome() })"
+expression: "screen(80, 12, &both_runs(), &Chrome\n{ menu: None, staged: Some(2), ..chrome() })"
 ---
 "  vigia · current · 4 changed · 2 staged                              watching  "
 "                                                                                "
@@ -13,4 +13,4 @@ expression: "screen(80, 12, &both_runs(), &Chrome { staged: Some(2), ..chrome() 
 "  M src/render.rs                        ■■■■■■■■■■■■ ____________    +4    -1  "
 "  M tests/staged.rs                      ■■■■■■■■■■■■ ____________   +64    -0  "
 "────────────────────────────────────────────────────────────────────────────────"
-"  q quit · f follow · ? keys                                               1/4  "
+"  q quit · f follow · m config · ? keys                                    1/4  "

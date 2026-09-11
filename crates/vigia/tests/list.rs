@@ -48,6 +48,7 @@ fn chrome(app: &App) -> vigia::Chrome {
 /// The same, with the rail asked for.
 fn railed(app: &App) -> vigia::Chrome {
     vigia::Chrome {
+        menu: None,
         rail: true,
         ..chrome(app)
     }
@@ -55,6 +56,7 @@ fn railed(app: &App) -> vigia::Chrome {
 
 fn watching(app: &App) -> vigia::Chrome {
     vigia::Chrome {
+        menu: None,
         overview: true,
         ..chrome(app)
     }
@@ -1492,6 +1494,7 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
     frame.advance().expect("advance");
 
     let chrome = vigia::Chrome {
+        menu: None,
         staged: Some(3),
         ..vigia::App::new().chrome(
             "fixture",

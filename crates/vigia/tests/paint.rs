@@ -346,6 +346,7 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
         ..View::default()
     };
     let chrome = Chrome {
+        menu: None,
         pressed: None,
         gripped: None,
         scrolling: None,

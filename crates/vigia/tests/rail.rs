@@ -508,6 +508,7 @@ fn a_hover_in_the_rail_does_not_light_the_diff() {
     );
 
     let hovered = Chrome {
+        menu: None,
         hovered: Some(Hovered::Row(row)),
         ..chrome()
     };
@@ -1297,6 +1298,7 @@ fn a_rail_draws_the_tail_of_the_staged_run() {
     // Wide enough for the rail and tall enough for every file plus both labels.
     let at = Rect::new(0, 0, 200, 30);
     let chrome = Chrome {
+        menu: None,
         rail: true,
         staged: Some(3),
         ..App::new().chrome(

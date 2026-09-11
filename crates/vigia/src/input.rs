@@ -149,6 +149,9 @@ pub struct Regions {
     pub diff: Region,
     /// The gestures sheet, when it is drawn.
     pub sheet: Option<Sheet>,
+    /// The config menu, when it is drawn. Never beside the sheet: B22 draws one
+    /// overlay at a time.
+    pub menu: Option<Sheet>,
 }
 
 /// Where the gestures sheet is, so a pointer can be told it is over one.
@@ -182,10 +185,20 @@ impl Regions {
         self.list.covers(column, row)
     }
 
+    /// Whether either overlay is drawn over this cell. One predicate, asked by every
+    /// guard below: two would let a later one cover the sheet and miss the menu, which
+    /// is what a pointer finds pressing a step button an overlay is drawn over.
+    fn covered(self, column: u16, row: u16) -> bool {
+        self.sheet
+            .into_iter()
+            .chain(self.menu)
+            .any(|over| over.covers(column, row))
+    }
+
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
-        // Before the columns, because the sheet is drawn over them.
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        // Before the columns, because an overlay is drawn over them.
+        if self.covered(column, row) {
             return None;
         }
         if self.list.bar == Some(column)
@@ -202,17 +215,19 @@ impl Regions {
     /// Whether a press at `column`, `row` begins a selection: a row of the diff
     /// itself, off its bar, and not under the sheet drawn over it.
     fn selectable(self, column: u16, row: u16) -> bool {
-        // Its presence and not its box: a wash beside it would take `Esc` off the
-        // frontmost thing, which §11.1 gives to the sheet.
-        self.sheet.is_none() && self.diff.covers(column, row) && !self.diff.on_bar(column, row)
+        // Their presence and not their boxes: a wash beside one would take `Esc`
+        // off the frontmost thing, which §11.1 gives to the overlay.
+        self.sheet.is_none()
+            && self.menu.is_none()
+            && self.diff.covers(column, row)
+            && !self.diff.on_bar(column, row)
     }
 
     /// The bar a press at `column`, `row` takes hold of, or `None` off them.
     pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
-        // The sheet first, for [`Regions::step_at`]'s reason and in the same
-        // words: it is drawn over the bars, and it swallows what lands on it
-        // rather than passing it down.
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        // The overlay first, for [`Regions::step_at`]'s reason: it is drawn over the
+        // bars and swallows what lands on it rather than passing it down.
+        if self.covered(column, row) {
             return None;
         }
         if self.list.bar == Some(column) && self.list.along(row).is_some() {
@@ -224,7 +239,7 @@ impl Regions {
     /// The screen row a pointer at `column`, `row` rests on when it is on the
     /// diff's gutter, B21's target. Which rows are content rows is the screen's to say.
     pub fn gutter_at(self, column: u16, row: u16) -> Option<u16> {
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        if self.covered(column, row) {
             return None;
         }
         self.diff.on_gutter(column, row).then_some(row)
@@ -233,7 +248,7 @@ impl Regions {
     /// The screen row a pointer at `column`, `row` rests on when it is on a note's
     /// left side. Which rows are note rows is the screen's to say.
     pub fn note_edge_at(self, column: u16, row: u16) -> Option<u16> {
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        if self.covered(column, row) {
             return None;
         }
         self.diff.on_content_origin(column, row).then_some(row)
@@ -242,7 +257,15 @@ impl Regions {
     /// What a pointer at `column`, `row` is over, for the mark `SPEC.md`
     /// §11.2 B10 adopts.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
-        // The sheet first, because it is drawn over everything.
+        // Either overlay first, because one is drawn over everything.
+        if let Some(menu) = self.menu
+            && menu.covers(column, row)
+        {
+            if (column, row) == menu.close {
+                return Some(Hovered::Button(column, row));
+            }
+            return crate::menu::row_at(menu, row).map(|_| Hovered::MenuRow(row));
+        }
         if let Some(sheet) = self.sheet
             && sheet.covers(column, row)
         {
@@ -380,6 +403,10 @@ pub enum Hovered {
     Track(Grabbed),
     /// A listed file, by the screen row it is drawn on.
     Row(u16),
+    /// A config menu row, by the screen row. Its own variant rather than
+    /// [`Hovered::Row`]'s: one for both would mark a listed file under a pointer
+    /// resting on the overlay drawn over it.
+    MenuRow(u16),
     /// The diff's gutter, by the screen row; drawn only where that row is a line.
     Gutter(u16),
     /// A note's left side, by the screen row; drawn only on a row of a note's own.
@@ -467,8 +494,15 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleWrap
         | Action::ToggleNotes
         | Action::ToggleStanding
+        | Action::ToggleIcons
+        | Action::ToggleLinks
         | Action::ToggleSheet
         | Action::CloseSheet
+        | Action::ToggleMenu
+        | Action::CloseMenu
+        | Action::MenuMove(_)
+        | Action::MenuFlip
+        | Action::MenuRow(_)
         | Action::Escape
         | Action::Redraw
         | Action::Quit => return None,
@@ -635,10 +669,25 @@ pub enum Action {
     ToggleNotes,
     /// Stand at the branch point, or come back.
     ToggleStanding,
+    /// Draw a file-type icon before every listed path, or stop. No key: the menu
+    /// and the file are the two ways to it.
+    ToggleIcons,
+    /// Wrap every listed path in an OSC 8 hyperlink, or stop. No key either.
+    ToggleLinks,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ToggleSheet,
     /// Stop drawing the gestures sheet, whatever page it is on.
     CloseSheet,
+    /// Draw the config menu, or stop drawing it.
+    ToggleMenu,
+    /// Stop drawing it, whatever the caret is on.
+    CloseMenu,
+    /// Move its caret by this many rows, negative for up.
+    MenuMove(isize),
+    /// Flip the row its caret is on.
+    MenuFlip,
+    /// Flip the row this many rows down its drawn window.
+    MenuRow(u16),
     /// Leave the frontmost thing: the gestures sheet if one is up, and the
     /// program if none is. `Esc`.
     Escape,
@@ -679,11 +728,19 @@ impl Action {
             | Self::ToggleWrap
             | Self::ToggleNotes
             | Self::ToggleStanding
+            | Self::ToggleIcons
+            | Self::ToggleLinks
             | Self::ToggleSheet
             | Self::CloseSheet
+            | Self::ToggleMenu
+            | Self::CloseMenu
+            | Self::MenuFlip
+            | Self::MenuRow(_)
             | Self::Escape
             | Self::Redraw
             | Self::Quit => self,
+            // The caret steps, so `n` steps is one action with `n` in it.
+            Self::MenuMove(by) => Self::MenuMove(by.saturating_mul(times)),
         }
     }
 
@@ -723,10 +780,19 @@ impl Action {
             | Self::ToggleNotes
             // Standing elsewhere remakes the body and moves no viewport.
             | Self::ToggleStanding
+            // Neither reaches a key, so neither can be a reader moving anything.
+            | Self::ToggleIcons
+            | Self::ToggleLinks
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
             | Self::CloseSheet
+            // The menu's caret moves inside the box, not inside the diff. B22.
+            | Self::ToggleMenu
+            | Self::CloseMenu
+            | Self::MenuMove(_)
+            | Self::MenuFlip
+            | Self::MenuRow(_)
             | Self::ScrollList(_) => false,
             // Dragging the list's bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the diff's
@@ -762,8 +828,15 @@ impl Action {
             | Self::ToggleWrap
             | Self::ToggleNotes
             | Self::ToggleStanding
+            | Self::ToggleIcons
+            | Self::ToggleLinks
             | Self::ToggleSheet
-            | Self::CloseSheet => false,
+            | Self::CloseSheet
+            | Self::ToggleMenu
+            | Self::CloseMenu
+            | Self::MenuMove(_)
+            | Self::MenuFlip
+            | Self::MenuRow(_) => false,
         }
     }
 }
@@ -857,6 +930,9 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Char('w') => Some(Action::ToggleWrap),
         // `c` for the comments the notes are, free below `Ctrl`, in `w`'s family. B21.
         KeyCode::Char('c') => Some(Action::ToggleNotes),
+        // `m` for the menu: every accurate noun's initial was taken, so the key
+        // carries the mnemonic and the bar carries the destination. B22.
+        KeyCode::Char('m') => Some(Action::ToggleMenu),
         // `?` and nothing else, which is `SPEC.md` §11.2's B12: `btop`, `bottom` and
         // `rtop` all open help on it, it was unbound here, and `h` is refused because
         // it is a vi motion everywhere else on a pane with no horizontal scroll.
@@ -874,6 +950,8 @@ fn row_of(digit: char) -> u16 {
 
 fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     // The sheet is checked before everything, because it is drawn over everything.
+    // The menu, which is never up at the same time, answers its own events in
+    // `menu::menu_route` before this is reached.
     // `SPEC.md` §11.2's B12: the close control dismisses, and any other event landing
     // on the sheet does nothing at all.
     if let Some(sheet) = regions.sheet

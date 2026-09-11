@@ -14,6 +14,7 @@ use vigia_core::{
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
+use crate::menu::{MENU_FRAME, Menu, OFF, ON, SETTINGS, STATE_WIDTH, Setting};
 use crate::theme::Theme;
 use crate::view::{
     BOX_FRAME, BoxPart, FileEntry, FileNotes, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead,
@@ -81,7 +82,8 @@ pub(crate) fn edge_width(word: &str) -> usize {
 }
 
 /// The footer's left-hand side when there is nothing wrong, widest rung first.
-const HINT_RUNGS: [&str; 4] = [
+const HINT_RUNGS: [&str; 5] = [
+    "q quit · f follow · m config · ? keys",
     "q quit · f follow · ? keys",
     "f follow · ? keys",
     "f follow",
@@ -89,7 +91,12 @@ const HINT_RUNGS: [&str; 4] = [
 ];
 
 /// The rung whose fit decides whether the footer takes a second line.
-const HINT_BASELINE: usize = 0;
+///
+/// One below the widest, because `m config` is a **bonus**: drawn where the line
+/// has room to spare and never where it would cost the body a row. It is why the
+/// bar gives `m config` up before `q quit` too: `? keys` is still on the line at
+/// that rung, and the sheet is where `m` is written down.
+const HINT_BASELINE: usize = 1;
 
 /// What joins two hints.
 pub const HINT_SEPARATOR: &str = " · ";
@@ -519,6 +526,8 @@ pub struct Chrome {
     pub overview: bool,
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     pub sheet: Option<usize>,
+    /// The config menu, when `m` has drawn it. `SPEC.md` §11.2 B22.
+    pub menu: Option<Menu>,
     /// Whether listed paths carry a file-type icon, from the config file's
     /// `icons` key.
     pub icons: bool,
@@ -1613,6 +1622,9 @@ pub struct Body {
     /// Pages the gestures sheet takes on this pane, `Some(0)` on a pane too small
     /// to draw one, and `None` when nothing measured it.
     pub sheet_pages: Option<usize>,
+    /// Rows the config menu's window has on this pane, `Some(0)` on a pane too
+    /// small to draw one, and `None` when nothing measured it.
+    pub menu_rows: Option<usize>,
 }
 
 impl Body {
@@ -1631,6 +1643,7 @@ impl Body {
             // Attached by `body_layout`, which is the only caller that has the
             // pane. A `Body` built for a diff walk has no sheet to count.
             sheet_pages: None,
+            menu_rows: None,
         }
     }
 
@@ -1693,6 +1706,7 @@ impl Body {
             overview: false,
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
+            menu_rows: None,
         }
     }
 
@@ -1714,6 +1728,7 @@ impl Body {
             rail: false,
             overview: true,
             sheet_pages: None,
+            menu_rows: None,
         }
     }
 
@@ -1744,6 +1759,7 @@ impl Body {
             overview: false,
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
+            menu_rows: None,
         }
     }
 
@@ -1770,6 +1786,7 @@ impl Body {
                 // The page count survives the collapse.
                 return Self {
                     sheet_pages: self.sheet_pages,
+                    menu_rows: self.menu_rows,
                     ..Self::diff_only(self.rows())
                 };
             }
@@ -1799,6 +1816,7 @@ impl Body {
             // the rows this body already has and does not re-measure the pane, so
             // the sheet it could draw is the same sheet.
             sheet_pages: self.sheet_pages,
+            menu_rows: self.menu_rows,
         }
     }
 }
@@ -1895,6 +1913,12 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
     // sheet is not a region and takes no row from one, so it has no place in the split
     // that divides the body between them.
     body.sheet_pages = Some(sheet_pages_of(area, footer, margins_of(area.width)));
+    // Attached for the line above's reason, measured against a full menu so the count
+    // does not follow the caret, and only while one is drawn: on a short pane it
+    // allocates the counter, which a closed menu would pay for on every frame.
+    body.menu_rows = chrome
+        .menu
+        .map(|menu| menu_rows_of(area, footer, margins_of(area.width), menu));
     body
 }
 
@@ -1984,6 +2008,11 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
             .sheet
             .and_then(|page| sheet_plan(area, footer.height(), margins_of(area.width), page))
             .map(|plan| plan.target()),
+        // From the plan the painter draws, for the line above's reason.
+        menu: chrome.menu.and_then(|menu| {
+            menu_drawn(area, footer.height(), margins_of(area.width), menu)
+                .map(|plan| plan.target())
+        }),
     }
 }
 
@@ -2107,6 +2136,9 @@ pub fn render(
     let sheet = chrome
         .sheet
         .and_then(|page| sheet_plan(area, footer.height(), margins, page));
+    let drawn_menu = chrome
+        .menu
+        .and_then(|menu| menu_drawn(area, footer.height(), margins, menu).map(|plan| (plan, menu)));
 
     let mut painter = Painter {
         buf,
@@ -2127,7 +2159,12 @@ pub fn render(
         selected: chrome.selected.map(Selection::rows),
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
-        covered: sheet.as_ref().map(|plan| plan.area),
+        // Whichever overlay is up, and never both: an effect must not run over
+        // cells an overlay is drawn on.
+        covered: drawn_menu
+            .as_ref()
+            .map(|(plan, _)| plan.area)
+            .or_else(|| sheet.as_ref().map(|plan| plan.area)),
         icons: chrome.icons,
         link_root: (chrome.links && !chrome.root.is_empty()).then(|| chrome.root.clone()),
     };
@@ -2211,6 +2248,9 @@ pub fn render(
     }
 
     // Last, over everything, and only if a reader asked.
+    if let Some((plan, menu)) = drawn_menu {
+        painter.menu(&plan, &menu);
+    }
     if let Some(plan) = sheet {
         painter.sheet(&plan);
     }
@@ -2228,7 +2268,7 @@ struct Gesture {
 
 /// The keyboard half, in the order a reader reads it, which is not the order
 /// the ladder drops it in.
-const KEYBOARD: [Gesture; 18] = [
+const KEYBOARD: [Gesture; 19] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -2305,6 +2345,14 @@ const KEYBOARD: [Gesture; 18] = [
         keys: ["Enter  Esc", "Enter  Esc"],
         verb: ["send the note, or cancel", "send the note"],
     },
+    // Both cells sit inside the field maxima this table already had, so no rung's
+    // width moves: the wide verb field is 28 on `next / previous changed file` and the
+    // tight one is 19 on the mouse group's `a row, held repeats`, where these are 15
+    // and 11.
+    Gesture {
+        keys: ["m  Esc", "m  Esc"],
+        verb: ["the config menu", "config menu"],
+    },
     Gesture {
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
@@ -2321,14 +2369,18 @@ const KEYBOARD: [Gesture; 18] = [
 /// into [`KEYBOARD`].
 ///
 /// The two toggles that change what the frame *walks* outlive the body's other
-/// rows, and between them the older outlives the newer.
+/// rows, and between them the older outlives the newer. **The config menu's row
+/// outlives every view toggle**, on the rule the ladder is sorted by: the rail
+/// cannot fire below [`RAIL_FROM`] and the menu draws wherever its box fits, so a
+/// narrow pane keeping `r` over `m` would keep the one it cannot honour.
 ///
 /// The box's keys rank second for the reason `q` ranks first: the box writes
 /// `Enter sends · Esc cancels` along its own bottom edge, so the moment they can be
 /// pressed is the moment they are on screen. They are also the widest keys cell a
 /// dropping rung keeps, so ranking them later costs a narrow pane `J K`.
-const DROP_ORDER: [usize; KEYBOARD.len()] =
-    [17, 15, 0, 1, 2, 3, 4, 5, 6, 14, 8, 9, 10, 13, 12, 11, 7, 16];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [
+    18, 15, 0, 1, 2, 3, 4, 5, 6, 14, 8, 9, 10, 13, 12, 16, 11, 7, 17,
+];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
@@ -2456,7 +2508,7 @@ const SECTIONS: [Section; 6] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 16, to: 18 },
+        rows: Rows::Keyboard { from: 16, to: 19 },
     },
 ];
 
@@ -2757,6 +2809,195 @@ fn shown_of(page: Column) -> Option<(usize, usize)> {
 /// [`PURPOSE_ROWS`] because a rule separates as well as a blank does.
 fn sheet_beside_rows(purpose: bool) -> usize {
     usize::from(purpose) + 1 + KEYBOARD.len().max(MOUSE.len())
+}
+
+/// What the config menu's title bar spells, corner excluded.
+const MENU_TITLE: &str = "─ config menu ";
+
+/// The same word, spliced into a rounded frame.
+const MENU_SPLICE: &str = " config menu ";
+
+/// What the menu's bottom edge spells, widest rung first: the note box's ladder
+/// one overlay over, so the keys that change meaning are written where they are
+/// pressed rather than remembered from a sheet somewhere else.
+const MENU_HINT_RUNGS: [&str; 3] = [
+    " ↑↓ move · Space toggles · Esc closes ",
+    " ↑↓ · Space · Esc ",
+    "",
+];
+
+/// Columns between the widest label and the state cell at the tight rung. One would
+/// let a full-width label touch the word beside it, and they would read as one run.
+const MENU_GAP: usize = 2;
+
+/// The gap the roomy rung wants, which is what buys the wider inset.
+const MENU_AIR: usize = 6;
+
+/// Rule cells the bottom edge keeps after its legend, at least. Without them the
+/// widest rung fills the edge and the foot stops reading as a frame.
+const MENU_EDGE_RULE: usize = 2;
+
+/// The widest the box ever gets: the bottom edge's widest rung, its two corners
+/// and a dozen columns of rule. Past it the row's gap grows and the box says
+/// nothing more for it, which is air a glance crosses for free.
+const MENU_WIDEST: usize = 52;
+
+/// The widest label any row draws, which sets the label field.
+const MENU_LABEL: usize = {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < SETTINGS.len() {
+        let len = SETTINGS[at].label().len();
+        if len > widest {
+            widest = len;
+        }
+        at += 1;
+    }
+    widest
+};
+
+/// Where a row's label starts, counted from the box's own left edge, and the gap
+/// that rung wants beside the state cell. Widest first. The caret hangs two
+/// columns inside the inset rather than widening it, so the names keep their
+/// column whichever row is marked.
+const MENU_INSETS: [(usize, usize); 2] = [(5, MENU_AIR), (4, MENU_GAP)];
+
+/// What one rung costs: the inset at both ends, the widest label, its gap and the
+/// state cell. The frame is inside the inset rather than beside it.
+const fn menu_span(rung: (usize, usize)) -> usize {
+    rung.0 * 2 + MENU_LABEL + rung.1 + STATE_WIDTH
+}
+
+/// The narrowest box that can carry a row at all.
+const MENU_FLOOR: usize = menu_span(MENU_INSETS[1]);
+
+/// Where the config menu goes, or `None` on a pane that cannot hold one.
+///
+/// It takes the pane and the footer's height, as [`sheet_plan`] does, and never the
+/// body's split. That is what makes `SPEC.md` §11.2 B22's *nothing moves the box* a
+/// property of the code: the toggles that reshape the body reach no argument here.
+fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> Option<MenuPlan> {
+    let body = area.height.saturating_sub(1 + footer_rows);
+    let room = usize::from(area.width.saturating_sub(margins.0 + margins.1));
+    if room < MENU_FLOOR {
+        return None;
+    }
+    // One row is a legal menu: it draws a name and the title bar says the rest are
+    // there.
+    let capacity = usize::from(body).saturating_sub(MENU_FRAME);
+    if capacity == 0 {
+        return None;
+    }
+    let rows = capacity.min(SETTINGS.len());
+
+    // The title bar's own floor, so a box wide enough for its rows is never too
+    // narrow for the word on its edge.
+    let counter = (rows < SETTINGS.len()).then(|| menu_counter(top, rows));
+    let titled = width_of(MENU_TITLE) + counter.as_deref().map_or(0, width_of) + 5;
+    // Grown with the pane, which puts the names and their states at the two ends of
+    // the box rather than side by side in the middle of it.
+    let total = room.clamp(MENU_FLOOR, MENU_WIDEST).max(titled);
+    if total > room {
+        return None;
+    }
+    let inset = MENU_INSETS
+        .iter()
+        .find(|rung| menu_span(**rung) <= total)
+        .unwrap_or(&MENU_INSETS[1])
+        .0;
+
+    let width = u16::try_from(total).unwrap_or(u16::MAX);
+    let height = u16::try_from(rows + MENU_FRAME).unwrap_or(u16::MAX);
+    let left = area.x + margins.0 + (u16::try_from(room).unwrap_or(u16::MAX) - width) / 2;
+    let top_row = area.y + 1 + (body - height) / 2;
+    Some(MenuPlan {
+        area: Rect {
+            x: left,
+            y: top_row,
+            width,
+            height,
+        },
+        inset,
+        rows,
+        counter,
+        // Three in from the right edge: the corner, the space before it, and this.
+        close: (left + width - 3, top_row),
+    })
+}
+
+/// The state cell of the row the caret is on, for its receipt to run over. Planned
+/// from the pane rather than off the painted screen, so both read one derivation.
+#[must_use]
+pub fn menu_cell(area: Rect, chrome: &Chrome, files: usize) -> Option<Rect> {
+    let menu = chrome.menu?;
+    let footer = Footer::plan(area, chrome, files).height();
+    let plan = menu_drawn(area, footer, margins_of(area.width), menu)?;
+    let window = menu.caret.window(plan.rows);
+    Some(plan.state_cell(menu.caret.at.checked_sub(window)?))
+}
+
+/// The plan for one open menu on this pane, or `None` where it draws none.
+///
+/// Twice inside, because the counter the title bar draws is a fact about the
+/// window rather than about the caret. **Every caller comes through here**: the
+/// drawn box, the region the pointer is told about and the cell an effect runs
+/// over are one derivation, and two of them would disagree in silence.
+fn menu_drawn(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -> Option<MenuPlan> {
+    let rows = menu_plan(area, footer_rows, margins, 0)?.rows;
+    menu_plan(area, footer_rows, margins, menu.caret.window(rows))
+}
+
+/// How many rows the config menu's window has on this pane, and zero where it
+/// draws none.
+fn menu_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -> usize {
+    menu_drawn(area, footer_rows, margins, menu).map_or(0, |plan| plan.rows)
+}
+
+/// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw
+/// everything it holds says so the same way wherever it happens.
+fn menu_counter(top: usize, rows: usize) -> String {
+    format!("{}-{} of {} ", top + 1, top + rows, SETTINGS.len())
+}
+
+/// Where the config menu is drawn and how its rows are laid out inside it.
+struct MenuPlan {
+    /// The whole box, frame included.
+    area: Rect,
+    /// Columns in from the frame where a label starts.
+    inset: usize,
+    /// Rows of names it draws, which is every setting on a pane with room.
+    rows: usize,
+    /// The counter its title bar carries, where it cannot draw them all.
+    counter: Option<String>,
+    /// The close control's cell.
+    close: (u16, u16),
+}
+
+impl MenuPlan {
+    /// What a pointer needs to know about it.
+    fn target(&self) -> Sheet {
+        Sheet {
+            left: self.area.x,
+            top: self.area.y,
+            width: self.area.width,
+            height: self.area.height,
+            close: self.close,
+        }
+    }
+
+    /// The state cell of the row `offset` rows down the drawn window. It ends
+    /// `inset` columns from the right edge where a label begins `inset` from the
+    /// left, so the two margins stay equal however wide the box is.
+    fn state_cell(&self, offset: usize) -> Rect {
+        let x =
+            self.area.x + self.area.width - u16::try_from(self.inset + STATE_WIDTH).unwrap_or(0);
+        Rect {
+            x,
+            y: self.area.y + 2 + u16::try_from(offset).unwrap_or(0),
+            width: u16::try_from(STATE_WIDTH).unwrap_or(0),
+            height: 1,
+        }
+    }
 }
 
 /// Where the gestures sheet goes, or `None` on a pane that cannot hold one.
@@ -3583,79 +3824,114 @@ impl Painter<'_> {
     }
 
     /// Draw the gestures sheet over whatever the regions already drew.
+    /// The config menu, drawn over cells the regions have already painted.
+    /// `SPEC.md` §11.2 B22. It shares the sheet's frame, splice, counter and close
+    /// control, so the two read as one kind of thing.
+    fn menu(&mut self, plan: &MenuPlan, menu: &Menu) {
+        let area = plan.area;
+        let frame = self.theme.chrome_dim;
+        let width = usize::from(area.width);
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
+
+        self.overlay_head(
+            area,
+            MENU_TITLE,
+            MENU_SPLICE,
+            plan.counter.as_deref().unwrap_or_default(),
+            plan.close,
+        );
+        self.sheet_pipes_over(area, area.y + 1);
+
+        let window = menu.caret.window(plan.rows);
+        for offset in 0..plan.rows {
+            let Some(setting) = SETTINGS.get(window + offset).copied() else {
+                break;
+            };
+            self.menu_row(plan, menu, offset, setting, window);
+        }
+
+        let hint =
+            widest_fitting_or_last(&MENU_HINT_RUNGS, width.saturating_sub(2 + MENU_EDGE_RULE));
+        let corners = if rounded {
+            ('╰', '╯')
+        } else {
+            ('└', '┘')
+        };
+        self.box_edge(
+            area.x,
+            area.y + area.height - 1,
+            width,
+            corners,
+            (hint, ""),
+            frame,
+        );
+        if !hint.is_empty() {
+            self.put(
+                area.x + 1,
+                area.y + area.height - 1,
+                hint,
+                width_of(hint),
+                frame,
+            );
+        }
+    }
+
+    /// One row: its mark, its name, and the word for where it stands.
+    fn menu_row(
+        &mut self,
+        plan: &MenuPlan,
+        menu: &Menu,
+        offset: usize,
+        setting: Setting,
+        window: usize,
+    ) {
+        let area = plan.area;
+        let y = area.y + 2 + u16::try_from(offset).unwrap_or(0);
+        let at = window + offset;
+        let carets = at == menu.caret.at;
+        // The pointer marks its row in the ink the caret's row takes, and the caret
+        // glyph is what tells the two apart.
+        let pointed = self.hovered == Some(Hovered::MenuRow(y));
+        let name = if carets || pointed {
+            self.theme.path_hover
+        } else {
+            self.theme.chrome
+        };
+
+        if carets {
+            self.put(
+                area.x + u16::try_from(plan.inset).unwrap_or(0) - 2,
+                y,
+                CARET,
+                1,
+                name,
+            );
+        }
+        let label_at = area.x + u16::try_from(plan.inset).unwrap_or(0);
+        let room = usize::from(area.width).saturating_sub(plan.inset * 2 + STATE_WIDTH);
+        self.put(label_at, y, setting.label(), room, name);
+
+        let on = setting.of(menu.settings);
+        let (word, ink) = if on {
+            (ON, self.theme.added)
+        } else {
+            (OFF, self.theme.removed)
+        };
+        // Right-aligned by placing it: the field and both words are constants, so
+        // the pad is arithmetic rather than an allocation per drawn row.
+        let cell = plan.state_cell(offset);
+        let pad = u16::try_from(STATE_WIDTH - width_of(word)).unwrap_or(0);
+        self.put(cell.x + pad, y, word, width_of(word), ink);
+    }
+
     fn sheet(&mut self, plan: &SheetPlan) {
         let area = plan.area;
         let frame = self.theme.chrome_dim;
-        let lit = self.theme.chrome;
         let width = usize::from(area.width);
-
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                // Clipped rather than assumed, for the reason the heat strip is:
-                // any area is legal here, including one the buffer has shrunk
-                // under.
-                if let Some(cell) = self.buf.cell_mut((x, y)) {
-                    // Reset first, then style.
-                    cell.reset();
-                    cell.set_symbol(" ").set_style(frame);
-                }
-            }
-        }
-
-        // The title bar, with the close control's cell left blank and written after it
-        // in its own weight: a control is not part of the frame it sits in, which is
-        // the step buttons' rule one element over.
-        let counter = plan.shape.shown().map(sheet_counter).unwrap_or_default();
-        // The corners follow the glyph rung, and the splice goes with them (`SPEC.md`
-        // §11.2 B18).
         let rounded = !matches!(self.glyphs, Glyphs::Block);
-        let mut top = String::with_capacity(width * 3);
-        if rounded {
-            top.push('╭');
-            top.push('┐');
-            top.push_str(SHEET_SPLICE);
-            top.push_str(&counter);
-            top.push('┌');
-            // Corner, splice brackets, the title, the counter, then the three
-            // cells the control sits in and the closing corner: the same
-            // sixteen fixed cells the square spelling costs, which is what
-            // keeps every width rung where it was.
-            let fixed = 3 + width_of(SHEET_SPLICE) + width_of(&counter) + 4;
-            for _ in 0..width.saturating_sub(fixed) {
-                top.push(RULE);
-            }
-            top.push_str("   ╮");
-        } else {
-            top.push('┌');
-            top.push_str(SHEET_TITLE);
-            top.push_str(&counter);
-            // Corner, title, counter, dashes, then the three cells the control
-            // sits in and the closing corner. The rule cannot go negative
-            // because `sheet_floor` charges `sheet_counter_floor` on every rung.
-            for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + width_of(&counter) + 5) {
-                top.push(RULE);
-            }
-            top.push_str("   ┐");
-        }
-        self.put(area.x, area.y, &top, width, frame);
-        if rounded {
-            // The spliced word in the chrome's own weight, over the border's
-            // reserved gap: the splice is what makes the title read as a label
-            // on the box rather than a break in it.
-            self.put(
-                area.x + 2,
-                area.y,
-                SHEET_SPLICE,
-                width_of(SHEET_SPLICE),
-                lit,
-            );
-        }
-        // The control takes a hover rung, which is what says it is clickable. B10's
-        // ladder, minus its top rung: chrome at rest and [`Theme::bar_hover`] under the
-        // pointer.
-        let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
-        let control = if hovered { self.theme.bar_hover } else { lit };
-        self.put(plan.close.0, plan.close.1, DISMISS, 1, control);
+
+        let counter = plan.shape.shown().map(sheet_counter).unwrap_or_default();
+        self.overlay_head(area, SHEET_TITLE, SHEET_SPLICE, &counter, plan.close);
 
         match plan.shape {
             Shape::Roomy { group } => self.sheet_roomy(plan, group),
@@ -3816,6 +4092,71 @@ impl Painter<'_> {
     fn sheet_pipes(&mut self, area: Rect, y: u16) {
         self.put(area.x, y, "│", 1, self.theme.chrome_dim);
         self.put(area.x + area.width - 1, y, "│", 1, self.theme.chrome_dim);
+    }
+
+    /// An overlay's ground and its title bar: the cells blanked, the frame's top
+    /// edge with the word spliced into it, and the close control. Shared, because
+    /// the glyph rung decides the corners and the splice together (`SPEC.md` §11.2
+    /// B18) and a second copy would be left behind by the next rung.
+    fn overlay_head(
+        &mut self,
+        area: Rect,
+        title: &str,
+        splice: &str,
+        counter: &str,
+        close: (u16, u16),
+    ) {
+        let frame = self.theme.chrome_dim;
+        let lit = self.theme.chrome;
+        let width = usize::from(area.width);
+
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                // Clipped rather than assumed: any area is legal here, including
+                // one the buffer has shrunk under.
+                if let Some(cell) = self.buf.cell_mut((x, y)) {
+                    cell.reset();
+                    cell.set_symbol(" ").set_style(frame);
+                }
+            }
+        }
+
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
+        let mut top = String::with_capacity(width * 3);
+        if rounded {
+            top.push('╭');
+            top.push('┐');
+            top.push_str(splice);
+            top.push_str(counter);
+            top.push('┌');
+            // The same fixed cells the square spelling costs, which is what keeps
+            // every width rung where it was.
+            let fixed = 3 + width_of(splice) + width_of(counter) + 4;
+            for _ in 0..width.saturating_sub(fixed) {
+                top.push(RULE);
+            }
+            top.push_str("   ╮");
+        } else {
+            top.push('┌');
+            top.push_str(title);
+            top.push_str(counter);
+            // The rule cannot go negative because each plan's own floor charges
+            // the title and the counter before it chooses a width.
+            for _ in 0..width.saturating_sub(width_of(title) + width_of(counter) + 5) {
+                top.push(RULE);
+            }
+            top.push_str("   ┐");
+        }
+        self.put(area.x, area.y, &top, width, frame);
+        if rounded {
+            // In the chrome's own weight, which is what makes the title read as a
+            // label on the box rather than a break in it.
+            self.put(area.x + 2, area.y, splice, width_of(splice), lit);
+        }
+        // A hover rung says it is clickable: B10's ladder minus its top one.
+        let hovered = self.hovered == Some(Hovered::Button(close.0, close.1));
+        let control = if hovered { self.theme.bar_hover } else { lit };
+        self.put(close.0, close.1, DISMISS, 1, control);
     }
 
     /// One row of a group: the keys cell lit, the verb dim.
@@ -5379,7 +5720,8 @@ mod sheet_tables {
     fn the_rows_given_up_last_are_the_view_toggles_under_the_standing_one() {
         // Addressed by the cell it draws, not by its index. View toggles outlive
         // notes, and the standing toggle outlives them: it changes what is walked.
-        const EXPECTED: [&str; 5] = ["r", "s", "o", "w", "b"];
+        // The menu's door outlives all of them, which is `DROP_ORDER`'s own rule.
+        const EXPECTED: [&str; 5] = ["s", "o", "w", "b", "m  Esc"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
@@ -5388,9 +5730,9 @@ mod sheet_tables {
         assert_eq!(
             outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail, then the pin, then the overview, then the wrap, then the branch \
-             point, so a pane at the floor is spending it on a gesture that could \
-             have fired there"
+             pin, then the overview, then the wrap, then the branch point, then \
+             the config menu, so a pane at the floor is spending it on a gesture \
+             that could have fired there"
         );
     }
 

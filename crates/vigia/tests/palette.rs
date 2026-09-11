@@ -34,6 +34,7 @@ fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
 
 fn chrome() -> Chrome {
     Chrome {
+        menu: None,
         position: "current".to_owned(),
         pressed: None,
         gripped: None,

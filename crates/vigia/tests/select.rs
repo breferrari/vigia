@@ -40,6 +40,7 @@ const DEEP: &str = "crates/vigia-core/src/very/deeply/nested/module/frame.rs";
 /// A diff region with no bar, so a press anywhere in it opens a selection.
 fn regions_at(top: u16, rows: u16) -> Regions {
     Regions {
+        menu: None,
         diff: Region::bare(top, rows, 0, PANE.width, None),
         ..Regions::default()
     }
