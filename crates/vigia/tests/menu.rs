@@ -238,6 +238,42 @@ fn the_menu_draws_every_view_toggle_and_the_word_for_where_it_stands() {
 }
 
 #[test]
+fn every_settings_action_moves_its_own_row_and_no_other() {
+    // `Setting` carries a label and an action in one table, and a row wired to its
+    // neighbour's action is invisible to every per-row check: flipping it still
+    // changes *a* setting, and the assertion that some state moved still passes.
+    // Found by mutation, not by reading: pointing `Icons` at `Action::ToggleLinks`
+    // left all twelve gates green.
+    let mut pane = Pane::open("menu-wiring");
+    pane.with(|app, frame, highlighter, _history| {
+        let _ = highlighter;
+        for setting in SETTINGS {
+            let before = app.settings();
+            apply(app, frame, area(), setting.action());
+            let after = app.settings();
+            for other in SETTINGS {
+                let moved = other.of(before) != other.of(after);
+                assert_eq!(
+                    moved,
+                    other == setting,
+                    "flipping {:?} moved {:?}, so the two rows do not have                      disjoint state",
+                    setting.label(),
+                    other.label()
+                );
+            }
+            // Back, so each setting is measured from the same pane.
+            apply(app, frame, area(), setting.action());
+            assert_eq!(
+                app.settings(),
+                before,
+                "flipping {:?} twice did not put the pane back",
+                setting.label()
+            );
+        }
+    });
+}
+
+#[test]
 fn the_caret_moves_and_space_flips_the_row_it_is_on() {
     let mut pane = Pane::open("menu-caret");
     pane.with(|app, frame, highlighter, history| {
