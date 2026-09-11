@@ -25,8 +25,8 @@ pub mod menu;
 /// safe to ship.
 pub mod motion;
 mod notes;
-/// `SPEC.md` §11.1's position list, behind the header's token. Public for [`menu`]'s
-/// reason: the suite drives the overlay as the loop does.
+/// `SPEC.md` §11.1's position list. Public for [`menu`]'s reason: the suite drives the
+/// overlay as the loop does.
 pub mod positions;
 /// `SPEC.md` §11.2 B21's send rung: what Enter puts on the agent session's
 /// socket. Public because the wire is the whole subject and no drawn cell shows
@@ -49,9 +49,9 @@ pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
-    Action, Deadlines, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT,
-    Selection, Sheet, TRACK_SCALE, Token, WHEEL_ROWS, action_for, drag_action, hover_after,
-    patience, repainted, scroll_mark, selection_after, settled,
+    Action, Deadlines, Grabbed, Held, Hovered, OVERLAY_FRAME, Pointing, Region, Regions,
+    STEP_DELAY, STEP_REPEAT, Selection, Sheet, TRACK_SCALE, Token, WHEEL_ROWS, action_for,
+    drag_action, hover_after, patience, repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
     Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH, Setting, Settings,
@@ -67,7 +67,7 @@ pub use notes::{
     box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
     resolve_arrival, withdraw, word_arrival,
 };
-pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, wants_more};
+pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
@@ -101,11 +101,9 @@ use vigia_core::{
 /// Anything that stops the shell from starting or from drawing.
 pub type Failure = Box<dyn std::error::Error>;
 
-/// The frame behind the position list's other named row, and where it stands.
-///
-/// Beside the pane's own frame rather than on [`Shell`], a [`vigia_core::Frame`]
-/// borrowing the worktree, and kept rather than rebuilt so its re-diff is incremental
-/// through the machinery I2a already holds the first one to.
+/// The frame behind the list's other named row, and where it stands. Beside the pane's
+/// own rather than on [`Shell`], a [`vigia_core::Frame`] borrowing the worktree, and
+/// kept rather than rebuilt so its re-diff is incremental through I2a's machinery.
 type Aside<'w> = Option<(vigia_core::Standing, vigia_core::Frame<'w>)>;
 
 /// Why the shell woke up.
@@ -266,7 +264,7 @@ pub fn branch_point_of(
 }
 
 /// Now, in seconds since the epoch, or zero on a clock set before it: every age then
-/// reads as a moment ago, wrong in a way a reader can see, where a dead pane is not.
+/// reads as a moment ago, which a reader can see, where a dead pane cannot.
 #[doc(hidden)]
 #[must_use]
 pub fn epoch_now() -> i64 {
@@ -277,10 +275,10 @@ pub fn epoch_now() -> i64 {
         })
 }
 
-/// The request that names where a frame already stands, put back after a failed walk
-/// so the token names what the body is drawing. A position reached through the branch
-/// point returns as the commit: re-asking a repository question to restate an answer
-/// it has given is how a rebase turns a restore into a move.
+/// The request that names where a frame already stands, put back after a failed walk so
+/// the token names what the body is drawing. A position reached through the branch point
+/// returns as the commit: re-asking a repository question to restate its own answer is
+/// how a rebase turns a restore into a move.
 #[doc(hidden)]
 #[must_use]
 pub fn asked_of(standing: &vigia_core::Standing) -> crate::app::Asked {
@@ -738,7 +736,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // A tick is the world changing, so a demand that could not be
                     // served a moment ago is worth offering again.
                     shell.written = true;
-                    // And the list's facts describe runs, so a write moves them too.
+                    // The list's facts describe runs, so a write moves them too.
                     shell.places_stale = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only thing
@@ -1220,8 +1218,8 @@ impl Shell {
         let stood = frame.standing().clone();
         let carried = self.app.apply(action, frame, height)?;
         self.stand(frame, worktree);
-        // Owed where the list opened or the pane moved, and on no other keystroke:
-        // the facts are a walk, and the caret crossing a row re-measures nothing.
+        // Owed where the list opened or the pane moved and on no other keystroke: the
+        // facts are a walk, and a caret crossing a row re-measures nothing.
         self.places_stale |= opened != self.app.positions_open() || &stood != frame.standing();
         // Every flip is written back at once, whichever gesture made it: `r` from the
         // map and the rail's row in the menu are one change to one setting. The press
@@ -1427,34 +1425,29 @@ impl Shell {
         }
     }
 
-    /// Move the list's caret, extending the walk where it reached the end of one. The
-    /// extension is the shell's because a walk is a repository question.
+    /// Move the list's caret, extending the walk where it reached the end of one.
     fn move_positions(&mut self, rows: isize, frame: &mut vigia_core::Frame, worktree: &Worktree) {
         self.apply_menu(Action::PositionsMove(rows), frame, worktree);
         let Some(caret) = self.app.positions_caret() else {
             return;
         };
-        if positions::wants_more(caret, self.app.places()) {
-            self.extend_places(worktree);
-        }
+        self.extend_places(worktree, caret);
     }
 
-    /// Rows a page of the walk takes, floored at one so a pane that measured nothing
-    /// still extends.
+    /// Rows a page takes, floored at one so a pane that measured nothing still extends.
     fn positions_page(&self) -> usize {
         self.app.positions_rows().max(1)
     }
 
-    /// Walk one more page behind what the list already holds.
-    fn extend_places(&mut self, worktree: &Worktree) {
-        let mut places = self.app.places().clone();
-        let Some(last) = places.commits.last().map(|commit| commit.id) else {
+    /// Walk one more page on from where the caret asks. A caret with room asks none.
+    fn extend_places(&mut self, worktree: &Worktree, caret: positions::Caret) {
+        let Some(from) = positions::resume_from(caret, self.app.places()).map(|at| at.id) else {
             return;
         };
-        match worktree.commits_from(Some(last), self.positions_page()) {
+        match worktree.commits_from(Some(from), self.positions_page()) {
             Ok(page) => {
-                places.commits.extend(page.commits);
-                places.more = page.more;
+                let mut places = self.app.places().clone();
+                places.extend(page);
                 self.app.set_places(places);
             }
             // Said rather than swallowed: a page that will not walk is no reason to
@@ -1463,12 +1456,11 @@ impl Shell {
         }
     }
 
-    /// Put the list's rows where the repository has them, while one is open.
-    ///
-    /// The first page waits a frame, a page being measured in the rows the box holds.
-    /// The row the pane stands on takes its facts off the view the header drew, so the
-    /// two cannot disagree about one run; the other is walked, and `places_stale` is
-    /// what keeps that off a keypress.
+    /// Put the list's rows where the repository has them, while one is open. The first
+    /// page waits a frame, a page being measured in the rows the box holds. The row the
+    /// pane stands on takes its facts off the view the header drew, so the two cannot
+    /// disagree about one run; the other is walked, and `places_stale` keeps that off a
+    /// keypress.
     fn refresh_places<'w>(
         &mut self,
         frame: &vigia_core::Frame<'_>,
@@ -1482,21 +1474,20 @@ impl Shell {
             self.places_stale = false;
             return;
         }
+        // One gate and not two. Deriving *never walked* from the collection's own
+        // emptiness bypasses this one, and then a history that will not walk is walked
+        // again on every keypress rather than on every wake, saying so each time.
+        if !std::mem::take(&mut self.places_stale) {
+            return;
+        }
         let mut places = self.app.places().clone();
-        let first = places.commits.is_empty();
-        if first {
+        if places.commits.is_empty() {
             match worktree.commits_from(None, self.positions_page()) {
-                Ok(page) => {
-                    places.commits = page.commits;
-                    places.more = page.more;
-                }
+                Ok(page) => places.extend(page),
                 // Said rather than swallowed: a history that will not walk still leaves
                 // the two named rows, which are the places a reader came for.
                 Err(e) => self.app.warn(e.to_string()),
             }
-        }
-        if !std::mem::take(&mut self.places_stale) && !first {
-            return;
         }
 
         // The name alone, from the resolution the shell holds: a place a reader can go

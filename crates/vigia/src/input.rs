@@ -152,17 +152,15 @@ pub struct Regions {
     /// The config menu, when it is drawn. Never beside the sheet: B22 draws one
     /// overlay at a time.
     pub menu: Option<Sheet>,
-    /// The list of places the pane can stand, when it is drawn. Never beside
-    /// either of the others, for the same rule.
+    /// The position list, when it is drawn. Never beside either of the others.
     pub positions: Option<Sheet>,
     /// The header's position token, which a click opens the list from.
     pub position: Option<Token>,
 }
 
-/// Where the header's position token is, so a pointer can be told it is over one.
-///
-/// A span on one row rather than a box, because the header is one row and a fact
-/// inside it moves along the ladder as the pane narrows.
+/// Where the header's position token is, so a pointer can be told it is over one. A
+/// span on one row, the header being one row and a fact inside it moving along the
+/// ladder as the pane narrows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     /// Left column, inclusive.
@@ -196,7 +194,21 @@ pub struct Sheet {
     pub close: (u16, u16),
 }
 
+/// Rows an overlay's frame and the air inside it cost: two borders and a blank row at
+/// each end, the blank being what stops a name touching the edge it is written under.
+/// One number for every box, the two that had their own being the same number.
+pub const OVERLAY_FRAME: usize = 4;
+
 impl Sheet {
+    /// The drawn row a screen row falls on, from the top of the window.
+    #[must_use]
+    pub fn row_at(self, row: u16) -> Option<u16> {
+        let first = self.top.saturating_add(2);
+        let rows = usize::from(self.height).saturating_sub(OVERLAY_FRAME);
+        let offset = row.checked_sub(first)?;
+        (usize::from(offset) < rows).then_some(offset)
+    }
+
     /// Whether this cell is the sheet's, control included.
     pub fn covers(self, column: u16, row: u16) -> bool {
         column >= self.left
@@ -293,7 +305,7 @@ impl Regions {
             if (column, row) == list.close {
                 return Some(Hovered::Button(column, row));
             }
-            return crate::positions::row_at(list, row).map(|_| Hovered::PositionRow(row));
+            return list.row_at(row).map(|_| Hovered::PositionRow(row));
         }
         if let Some(menu) = self.menu
             && menu.covers(column, row)
@@ -301,7 +313,7 @@ impl Regions {
             if (column, row) == menu.close {
                 return Some(Hovered::Button(column, row));
             }
-            return crate::menu::row_at(menu, row).map(|_| Hovered::MenuRow(row));
+            return menu.row_at(row).map(|_| Hovered::MenuRow(row));
         }
         // The token is on the header, which no region covers, so it is asked
         // before the bars rather than after them.

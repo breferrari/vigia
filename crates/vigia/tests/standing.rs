@@ -532,8 +532,8 @@ fn screen(view: &View, app: &App, width: u16, height: u16) -> ratatui::buffer::B
 /// several of them at once.
 fn list_rows(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
     let rows = box_rows(buffer);
-    let air = vigia::positions::POSITIONS_FRAME / 2;
-    if rows.len() <= vigia::positions::POSITIONS_FRAME {
+    let air = vigia::OVERLAY_FRAME / 2;
+    if rows.len() <= vigia::OVERLAY_FRAME {
         return Vec::new();
     }
     rows[air..rows.len() - air].to_vec()
@@ -1084,7 +1084,7 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
 
     let top = vigia::positions::Caret { at: 0, top: 0 };
     assert!(
-        !vigia::wants_more(top, &places),
+        vigia::resume_from(top, &places).is_none(),
         "a caret at the top asked for another page, so opening the list walks the \
          whole history"
     );
@@ -1092,19 +1092,65 @@ fn the_list_extends_before_the_caret_reaches_its_end() {
         at: places.len() - 1,
         top: 0,
     };
-    assert!(
-        vigia::wants_more(last, &places),
-        "a caret at the last row walked does not extend, so the box stalls where the \
-         history does not"
+    // The commit as well as the decision: a caret near the end that resumed from the
+    // wrong place would draw a second page that is not behind the first, and nothing
+    // on screen would say so.
+    assert_eq!(
+        vigia::resume_from(last, &places).map(|at| at.id),
+        places.commits.last().map(|at| at.id),
+        "the walk resumes from something other than the last commit it holds"
     );
 
     let exhausted = vigia::Places {
         more: false,
-        ..places
+        ..places.clone()
     };
     assert!(
-        !vigia::wants_more(last, &exhausted),
+        vigia::resume_from(last, &exhausted).is_none(),
         "a walk with nothing left behind it still asks for another page"
+    );
+
+    // And the append, which is the other half: the next page goes on the end, `more`
+    // comes from the page that knows it, and a tip handed back twice is dropped rather
+    // than drawn twice.
+    let mut grown = places.clone();
+    let from = vigia::resume_from(last, &places)
+        .expect("a resume point")
+        .id;
+    let next = worktree
+        .commits_from(Some(from), page)
+        .expect("a second page");
+    let (was, coming) = (grown.len(), next.commits.len());
+    assert!(
+        coming > 0,
+        "the second page is empty, so the append is unasserted"
+    );
+    grown.extend(next);
+    assert_eq!(
+        grown.len(),
+        was + coming,
+        "the second page did not go onto the end of the first"
+    );
+    let ids: Vec<String> = grown.commits.iter().map(|at| at.named.clone()).collect();
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        ids.len(),
+        unique.len(),
+        "a commit is in the list twice, so a resumed walk repeated its own tip"
+    );
+
+    // A page of commits already held changes nothing but the tail.
+    let repeat = worktree
+        .commits_from(None, page)
+        .expect("the first page again");
+    let held = grown.len();
+    grown.extend(repeat);
+    assert_eq!(
+        grown.len(),
+        held,
+        "a page of commits already held was appended a second time"
     );
 }
 

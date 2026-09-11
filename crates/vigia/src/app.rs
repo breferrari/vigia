@@ -685,27 +685,26 @@ impl App {
     /// the walk can have grown since, and an index into a list that changed names a
     /// different commit.
     fn standing_row(&self) -> usize {
-        let rows = self.places.rows();
-        let wanted = |row: &positions::Row| match (&self.asked, row) {
-            (Asked::Current, positions::Row::Current)
-            | (Asked::BranchPoint, positions::Row::Point) => true,
-            (Asked::At(standing), positions::Row::Commit(at)) => self
+        let wanted = |at: usize| match (&self.asked, self.places.row_at(at)) {
+            (Asked::Current, Some(positions::Row::Current))
+            | (Asked::BranchPoint, Some(positions::Row::Point)) => true,
+            (Asked::At(standing), Some(positions::Row::Commit(nth))) => self
                 .places
                 .commits
-                .get(*at)
+                .get(nth)
                 .is_some_and(|commit| Some(commit.id) == standing.at()),
             _ => false,
         };
-        rows.iter().position(wanted).unwrap_or(0)
+        (0..self.places.len()).find(|at| wanted(*at)).unwrap_or(0)
     }
 
     /// What standing the row at `at` asks for.
     fn asked_at(&self, at: usize) -> Option<Asked> {
-        match self.places.rows().get(at)? {
+        match self.places.row_at(at)? {
             positions::Row::Current => Some(Asked::Current),
             positions::Row::Point => Some(Asked::BranchPoint),
             positions::Row::Commit(nth) => {
-                let commit = self.places.commits.get(*nth)?;
+                let commit = self.places.commits.get(nth)?;
                 Some(Asked::At(vigia_core::Standing::Since {
                     at: commit.id,
                     named: commit.named.clone(),

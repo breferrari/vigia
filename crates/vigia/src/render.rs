@@ -13,8 +13,8 @@ use vigia_core::{
 
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
-use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet, Token};
-use crate::menu::{self, MENU_FRAME, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
+use crate::input::{Grabbed, Hovered, OVERLAY_FRAME, Region, Regions, Selection, Sheet, Token};
+use crate::menu::{self, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
 use crate::positions::{self, Positions};
 use crate::theme::Theme;
 use crate::view::{
@@ -194,12 +194,10 @@ const BAR_TRACK: char = '│';
 const STEP_UP: char = '▲';
 const STEP_DOWN: char = '▼';
 
-/// The mark after the position token, saying a list lives behind it.
-///
-/// The small sibling of [`STEP_DOWN`] on purpose: the step buttons have already taught
-/// that a solid triangle is a thing to press, and a glyph earns its cell by being on
-/// screen at rest, which is what a hover mark cannot do. No degradation rung, for
-/// [`DISMISS`]'s reason.
+/// The mark after the position token, saying a list lives behind it: the small sibling
+/// of [`STEP_DOWN`], the step buttons having taught that a solid triangle is a thing to
+/// press. A glyph earns its cell by being on screen at rest, which a hover mark cannot
+/// do. No degradation rung, for [`DISMISS`]'s reason.
 const OPENS: char = '▾';
 
 /// The same while it is open, so the token says how to put it away.
@@ -678,12 +676,10 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
 /// is what leaves an empty tree the word rather than `+0 -0`, and a total wider
 /// than the room falls to the word rather than to nothing, so a pane too narrow
 /// to count still says whether it is live.
-/// What the header's right side says, decided before any of it is inked.
-///
-/// Split from the drawing because the left ladder is chosen against the columns this
-/// takes, and [`regions`] has to reach that answer with no theme in hand. Ink never
-/// changes a width, and a derivation that believed otherwise is how the token's drawn
-/// cells would stop being the cells a click lands on.
+/// What the header's right side says, decided before any of it is inked. Split from the
+/// drawing because the left ladder is chosen against the columns this takes and
+/// [`regions`] reaches that answer with no theme: ink never changes a width, and a
+/// derivation believing otherwise is how the token's cells stop being a click's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Right {
     /// The mode word.
@@ -900,12 +896,22 @@ fn header_left(chrome: &Chrome, view: &View) -> Vec<(String, Option<usize>)> {
     rungs
 }
 
-/// Where the header's position token lands, or `None` on a rung that dropped it.
-///
-/// **The one derivation.** The painter marks these cells and [`regions`] tells the
-/// pointer about these cells, so a token the reader can see is one a click reaches.
-/// Two answers would disagree in silence, and invisibly at eighty columns.
+/// Where the header's position token lands, or `None` on a rung that dropped it. **The
+/// one derivation**: the painter marks these cells and [`regions`] tells the pointer
+/// about them, and two answers would disagree in silence, invisibly at eighty columns.
 fn position_token(area: Rect, chrome: &Chrome, view: &View, margins: (u16, u16)) -> Option<Token> {
+    token_in(area, chrome, view, margins, &header_left(chrome, view))
+}
+
+/// The same, for a caller holding the ladder already. The painter is one: letting it
+/// rebuild the ladder to find the token put a third build on every hovered frame.
+fn token_in(
+    area: Rect,
+    chrome: &Chrome,
+    view: &View,
+    margins: (u16, u16),
+    rungs: &[(String, Option<usize>)],
+) -> Option<Token> {
     if area.width == 0 || area.height == 0 {
         return None;
     }
@@ -917,8 +923,7 @@ fn position_token(area: Rect, chrome: &Chrome, view: &View, margins: (u16, u16))
     // the left side's ladder is chosen against what is left.
     let right = Right::of(view, chrome, room, edge).width(chrome, edge);
     let taken = flush_right(text, right).map_or(0, |_| right + 1);
-    let rungs = header_left(chrome, view);
-    let (drawn, at) = chosen_rung(&rungs, room.saturating_sub(taken))?;
+    let (drawn, at) = chosen_rung(rungs, room.saturating_sub(taken))?;
     let at = u16::try_from(at).ok()?;
     let token = token_of(chrome);
     let width = u16::try_from(width_of(&token)).ok()?;
@@ -946,16 +951,11 @@ fn token_of(chrome: &Chrome) -> String {
     )
 }
 
-/// The rung a ladder draws in `room`, and where its token sits.
-///
-/// By index rather than by content, which is what [`widest_fitting_or_last`] hands
-/// back: two rungs can spell the same thing and only one carries the offset that
-/// applies. Same rule, widest first and the last rung when nothing fits.
+/// The rung a ladder draws in `room`, and where its token sits. By index, which
+/// [`widest_fitting_or_last`] cannot hand back: two rungs can spell the same thing and
+/// only one carries the offset that applies.
 fn chosen_rung(rungs: &[(String, Option<usize>)], room: usize) -> Option<(&str, usize)> {
-    let at = rungs
-        .iter()
-        .position(|(text, _)| width_of(text) <= room)
-        .unwrap_or(rungs.len().saturating_sub(1));
+    let at = fitting_at(rungs.len(), |at| width_of(&rungs[at].0), room);
     let (text, token) = rungs.get(at)?;
     Some((text.as_str(), (*token)?))
 }
@@ -1567,11 +1567,18 @@ fn fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> Option<&str> {
         .find(|rung| width_of(rung) <= room)
 }
 
+/// The index the ladder rule picks: widest first, the last rung where none fits. Taken
+/// by width so the token's ladder, whose rungs carry an offset, reads the same rule.
+fn fitting_at(rungs: usize, width: impl Fn(usize) -> usize, room: usize) -> usize {
+    (0..rungs)
+        .find(|at| width(*at) <= room)
+        .unwrap_or(rungs.saturating_sub(1))
+}
+
 /// The widest rung of `ladder` that fits, or its last rung when none does.
 fn widest_fitting_or_last<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
-    fitting(ladder, room)
-        .or_else(|| ladder.last().map(AsRef::as_ref))
-        .unwrap_or("")
+    let at = fitting_at(ladder.len(), |at| width_of(ladder[at].as_ref()), room);
+    ladder.get(at).map_or("", AsRef::as_ref)
 }
 
 /// What the footer will draw, and how many rows it needs.
@@ -3078,7 +3085,7 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
     }
     // One row is a legal menu: it draws a name and the title bar says the rest are
     // there.
-    let capacity = usize::from(body).saturating_sub(MENU_FRAME);
+    let capacity = usize::from(body).saturating_sub(OVERLAY_FRAME);
     if capacity == 0 {
         return None;
     }
@@ -3086,7 +3093,7 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
 
     // The title bar's own floor, so a box wide enough for its rows is never too
     // narrow for the word on its edge.
-    let counter = (rows < ROWS.len()).then(|| menu_counter(top, rows));
+    let counter = (rows < ROWS.len()).then(|| overlay_counter(top, rows, ROWS.len()));
     let titled = width_of(MENU_TITLE) + counter.as_deref().map_or(0, width_of) + 5;
     // Grown with the pane, which puts the names and their states at the two ends of
     // the box rather than side by side in the middle of it.
@@ -3101,7 +3108,7 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
         .0;
 
     let width = u16::try_from(total).unwrap_or(u16::MAX);
-    let height = u16::try_from(rows + MENU_FRAME).unwrap_or(u16::MAX);
+    let height = u16::try_from(rows + OVERLAY_FRAME).unwrap_or(u16::MAX);
     let left = area.x + margins.0 + (u16::try_from(room).unwrap_or(u16::MAX) - width) / 2;
     let top_row = area.y + 1 + (body - height) / 2;
     Some(MenuPlan {
@@ -3119,8 +3126,8 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
     })
 }
 
-/// What the list's title bar spells, corner excluded: the reading, so the box
-/// documents what a chosen row does and spends no row on it.
+/// The list's title bar, corner excluded: the reading, so the box documents what a
+/// chosen row does and spends no row on it.
 fn positions_title() -> String {
     format!("{RULE} {} ", positions::title())
 }
@@ -3130,29 +3137,29 @@ fn positions_splice() -> String {
     format!(" {} ", positions::title())
 }
 
-/// What the list's bottom edge spells, widest rung first.
+/// The list's bottom edge, widest rung first.
 const POSITIONS_HINT_RUNGS: [&str; 3] = [
     " ↑↓ move · Space stands here · Esc closes ",
     " ↑↓ · Space · Esc ",
     "",
 ];
 
-/// Columns a commit's abbreviation takes, which [`vigia_core::SHORT_ID`] fixes.
+/// Columns a commit's abbreviation takes, fixed by [`vigia_core::SHORT_ID`].
 const POSITIONS_ID: usize = vigia_core::SHORT_ID;
 
 /// Columns the age cell takes: three digits and a unit, the widest [`spelled_age`]
 /// produces, fixed so the subjects beside it do not shuffle as the rows age.
 const POSITIONS_AGE: usize = 4;
 
-/// Columns a named row's facts take: `18 changed` and the two totals, which are the
-/// header's own fields, so the list and the header agree on a width.
+/// Columns a named row's facts take: the count and the two totals, on the header's own
+/// fields so the list and the header agree on a width.
 const POSITIONS_FACTS: usize = 11 + COUNT_CELL + 1 + COUNT_CELL;
 
-/// Columns between cells inside a row.
+/// Columns between a row's cells.
 const POSITIONS_GAP: usize = 2;
 
-/// The widest the box gets: its bottom edge's widest rung, two corners and a dozen
-/// columns of rule, which is the menu's own reasoning at this box's width.
+/// The widest the box gets: its widest bottom rung, two corners and a dozen columns of
+/// rule, which is the menu's reasoning at this box's width.
 const POSITIONS_WIDEST: usize = 58;
 
 /// The narrowest box that carries a row: two insets, an abbreviation, an age, a gap.
@@ -3178,13 +3185,13 @@ fn positions_plan(
     if room < POSITIONS_FLOOR {
         return None;
     }
-    let capacity = usize::from(body).saturating_sub(positions::POSITIONS_FRAME);
+    let capacity = usize::from(body).saturating_sub(OVERLAY_FRAME);
     if capacity == 0 {
         return None;
     }
     let rows = capacity.min(of.max(1));
 
-    let counter = (rows < of).then(|| positions_counter(top, rows, of));
+    let counter = (rows < of).then(|| overlay_counter(top, rows, of));
     let titled = width_of(&positions_title()) + counter.as_deref().map_or(0, width_of) + 5;
     let total = room.clamp(POSITIONS_FLOOR, POSITIONS_WIDEST).max(titled);
     if total > room {
@@ -3192,7 +3199,7 @@ fn positions_plan(
     }
 
     let width = u16::try_from(total).unwrap_or(u16::MAX);
-    let height = u16::try_from(rows + positions::POSITIONS_FRAME).unwrap_or(u16::MAX);
+    let height = u16::try_from(rows + OVERLAY_FRAME).unwrap_or(u16::MAX);
     let left = area.x + margins.0 + (u16::try_from(room).unwrap_or(u16::MAX) - width) / 2;
     let top_row = area.y + 1 + (body - height) / 2;
     Some(PositionsPlan {
@@ -3209,7 +3216,7 @@ fn positions_plan(
     })
 }
 
-/// Where the position list is drawn and how many rows it holds.
+/// Where the list is drawn and how many rows it holds.
 struct PositionsPlan {
     /// The whole box, frame included.
     area: Rect,
@@ -3224,20 +3231,25 @@ struct PositionsPlan {
 impl PositionsPlan {
     /// The cells a pointer is told the box occupies.
     fn target(&self) -> Sheet {
-        Sheet {
-            left: self.area.x,
-            top: self.area.y,
-            width: self.area.width,
-            height: self.area.height,
-            close: self.close,
-        }
+        overlay_target(self.area, self.close)
     }
 }
 
-/// The plan for one open list on this pane, or `None` where it draws none.
-///
-/// Twice inside, for [`menu_drawn`]'s reason. **Every caller comes through here**, so
-/// the drawn box and the box the pointer is told about are one derivation.
+/// The cells a pointer is told an overlay occupies. One derivation for all three
+/// boxes: a field added to [`Sheet`] otherwise needs the same edit three times.
+fn overlay_target(area: Rect, close: (u16, u16)) -> Sheet {
+    Sheet {
+        left: area.x,
+        top: area.y,
+        width: area.width,
+        height: area.height,
+        close,
+    }
+}
+
+/// The plan for one open list, or `None` where the pane draws none. Twice inside, for
+/// [`menu_drawn`]'s reason. **Every caller comes through here**, so the drawn box and
+/// the box the pointer is told about are one derivation.
 fn positions_drawn(
     area: Rect,
     footer_rows: u16,
@@ -3254,16 +3266,9 @@ fn positions_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), list: &P
     positions_drawn(area, footer_rows, margins, list).map_or(0, |plan| plan.rows)
 }
 
-/// `1-6 of 9`, in the gestures sheet's own words, which the menu already borrows.
-fn positions_counter(top: usize, rows: usize, of: usize) -> String {
-    format!("{}-{} of {of} ", top + 1, top + rows)
-}
-
-/// How long ago `when` was, in the widest unit that leaves it two digits.
-///
-/// An age rather than a stamp: the question a reader asks of a commit list is how
-/// recent, never which calendar day. `now` is passed in because a clock read twice in
-/// one frame gives two rows different ideas of the present.
+/// How long ago `when` was, in the widest unit that leaves it two digits. An age rather
+/// than a stamp, the question being how recent and never which day, and `now` is passed
+/// in because a clock read twice in one frame gives two rows two presents.
 fn spelled_age(when: i64, now: i64) -> String {
     let since = now.saturating_sub(when).max(0);
     for (unit, each) in [
@@ -3312,10 +3317,10 @@ fn menu_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -
     menu_drawn(area, footer_rows, margins, menu).map_or(0, |plan| plan.rows)
 }
 
-/// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw
-/// everything it holds says so the same way wherever it happens.
-fn menu_counter(top: usize, rows: usize) -> String {
-    format!("{}-{} of {} ", top + 1, top + rows, ROWS.len())
+/// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw everything it
+/// holds says so the same way wherever it happens.
+fn overlay_counter(top: usize, rows: usize, of: usize) -> String {
+    format!("{}-{} of {of} ", top + 1, top + rows)
 }
 
 /// Where the config menu is drawn and how its rows are laid out inside it.
@@ -3335,13 +3340,7 @@ struct MenuPlan {
 impl MenuPlan {
     /// What a pointer needs to know about it.
     fn target(&self) -> Sheet {
-        Sheet {
-            left: self.area.x,
-            top: self.area.y,
-            width: self.area.width,
-            height: self.area.height,
-            close: self.close,
-        }
+        overlay_target(self.area, self.close)
     }
 
     /// The state cell of the row `offset` rows down the drawn window. It ends
@@ -3592,13 +3591,7 @@ struct SheetPlan {
 impl SheetPlan {
     /// What a pointer needs to know about it.
     fn target(&self) -> Sheet {
-        Sheet {
-            left: self.area.x,
-            top: self.area.y,
-            width: self.area.width,
-            height: self.area.height,
-            close: self.close,
-        }
+        overlay_target(self.area, self.close)
     }
 }
 
@@ -3832,7 +3825,7 @@ impl Painter<'_> {
         // the same cells the pointer was told about. B10's ladder minus its top rung,
         // which is the close control's rule: a hover says clickable, nothing more.
         if self.hovered == Some(Hovered::Position)
-            && let Some(token) = position_token(area, chrome, view, (self.inset, self.trailing))
+            && let Some(token) = token_in(area, chrome, view, (self.inset, self.trailing), &rungs)
         {
             self.put(
                 token.left,
@@ -4316,10 +4309,10 @@ impl Painter<'_> {
         );
         self.sheet_pipes_over(area, area.y + 1);
 
-        let rows = list.places.rows();
-        let window = list.caret.window(plan.rows, rows.len());
+        let of = list.places.len();
+        let window = list.caret.window(plan.rows, of);
         for offset in 0..plan.rows {
-            let Some(row) = rows.get(window + offset).copied() else {
+            let Some(row) = list.places.row_at(window + offset) else {
                 break;
             };
             self.position_row(plan, list, offset, row, window, now);
@@ -4353,7 +4346,7 @@ impl Painter<'_> {
         }
     }
 
-    /// One row of the list: a named place and its facts, or a commit.
+    /// One row: a named place and its facts, or a commit.
     fn position_row(
         &mut self,
         plan: &PositionsPlan,
@@ -4422,7 +4415,7 @@ impl Painter<'_> {
         self.put(area.x + subject_at, y, &commit.subject, left, ink);
     }
 
-    /// A named row's two facts, on the cells the header draws its own in.
+    /// A named row's facts, on the cells the header draws its own in.
     fn position_facts(&mut self, plan: &PositionsPlan, y: u16, facts: positions::Facts) {
         let area = plan.area;
         let right = area.x + area.width - u16::try_from(POSITIONS_INSET).unwrap_or(0);

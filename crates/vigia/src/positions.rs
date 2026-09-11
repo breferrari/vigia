@@ -58,22 +58,37 @@ pub struct Places {
 }
 
 impl Places {
-    /// Every row the list draws, top to bottom.
+    /// Rows that name a place rather than a commit: the live pane always, and the
+    /// branch point wherever one resolved.
     ///
-    /// Rebuilt per frame rather than stored, because the rows are a projection of
-    /// what has been walked and a stored copy is a second thing to keep in step.
-    #[must_use]
-    pub fn rows(&self) -> Vec<Row> {
-        let named = std::iter::once(Row::Current).chain(self.point.is_some().then_some(Row::Point));
-        named
-            .chain((0..self.commits.len()).map(Row::Commit))
-            .collect()
+    /// The one derivation of that number. Both the row count and the arithmetic that
+    /// turns an index into a row read it, so a third named row cannot arrive in one and
+    /// not the other.
+    fn named(&self) -> usize {
+        1 + usize::from(self.point.is_some())
     }
 
-    /// How many rows there are, without building them.
+    /// The row `at` draws, or `None` past the end.
+    ///
+    /// Arithmetic rather than a built list: the caret, the painter and the pick all ask
+    /// for one row, and a `Vec` of every row walked would grow with how far the reader
+    /// scrolled rather than with the window.
+    #[must_use]
+    pub fn row_at(&self, at: usize) -> Option<Row> {
+        if at >= self.len() {
+            return None;
+        }
+        Some(match at {
+            0 => Row::Current,
+            1 if self.point.is_some() => Row::Point,
+            _ => Row::Commit(at - self.named()),
+        })
+    }
+
+    /// How many rows there are.
     #[must_use]
     pub fn len(&self) -> usize {
-        1 + usize::from(self.point.is_some()) + self.commits.len()
+        self.named() + self.commits.len()
     }
 
     /// Whether there is nothing to draw, which no repository with a commit in it
@@ -81,6 +96,22 @@ impl Places {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Take `page` onto the end of what is already walked.
+    ///
+    /// The page's own `more` replaces this one's, because what is behind the history is
+    /// a fact about the last commit walked and the new page holds it. A page whose
+    /// first commit is already here is dropped rather than appended: a resumed walk
+    /// skips the tip it was given, so a repeat means the resume point was wrong and
+    /// appending it would draw one commit twice.
+    pub fn extend(&mut self, page: vigia_core::Page) {
+        for commit in page.commits {
+            if !self.commits.iter().any(|held| held.id == commit.id) {
+                self.commits.push(commit);
+            }
+        }
+        self.more = page.more;
     }
 
     /// The standing `row` names, or `None` for the branch point, which only the
@@ -94,15 +125,23 @@ impl Places {
     }
 }
 
-/// Whether the caret has come close enough to the end of the walk to extend it.
+/// The commit to walk on from, where the caret has come close enough to the end of
+/// what is walked to want another page, and `None` while it has not.
 ///
 /// One row of margin rather than one page: the caret moves a row at a time, so a row
-/// in hand is all it takes for the box never to stall, and a page of margin would
-/// make the first page trigger the second before the reader had scrolled at all,
-/// which is the laziness this exists to keep.
+/// in hand is all it takes for the box never to stall, and a page of margin would make
+/// the first page ask for the second before the reader had scrolled at all, which is
+/// the laziness this exists to keep.
+///
+/// It hands back the commit rather than a bool so that the decision and the place it
+/// names are one answer. Two would let a caret near the end resume from the wrong
+/// place, and nothing drawn would say so.
 #[must_use]
-pub fn wants_more(caret: Caret, places: &Places) -> bool {
-    places.more && caret.at + 2 >= places.len()
+pub fn resume_from(caret: Caret, places: &Places) -> Option<&Landmark> {
+    if !places.more || caret.at + 2 < places.len() {
+        return None;
+    }
+    places.commits.last()
 }
 
 /// What the title bar spells, which is the reading rather than a name for the box.
@@ -251,7 +290,8 @@ fn mouse_route(mouse: &MouseEvent, over: Option<Sheet>) -> PositionsRoute {
             if (mouse.column, mouse.row) == over.close {
                 return PositionsRoute::Close;
             }
-            row_at(over, mouse.row).map_or(PositionsRoute::Inert, PositionsRoute::Row)
+            over.row_at(mouse.row)
+                .map_or(PositionsRoute::Inert, PositionsRoute::Row)
         }
         MouseEventKind::Down(_) if !inside => PositionsRoute::Close,
         // The wheel passes through, so the diff still scrolls behind the list,
@@ -259,20 +299,4 @@ fn mouse_route(mouse: &MouseEvent, over: Option<Sheet>) -> PositionsRoute {
         // overlay feeling modal in a way it is not.
         _ => PositionsRoute::Through,
     }
-}
-
-/// Rows the frame and the air inside it cost, top and bottom.
-///
-/// The config menu's number and for its reason: two border rows and one blank row
-/// at each end, the blank being what stops a name touching the edge it is written
-/// under.
-pub const POSITIONS_FRAME: usize = 4;
-
-/// The drawn row a screen row falls on, counted from the top of the window.
-#[must_use]
-pub fn row_at(over: Sheet, row: u16) -> Option<u16> {
-    let first = over.top.saturating_add(2);
-    let rows = usize::from(over.height).saturating_sub(POSITIONS_FRAME);
-    let offset = row.checked_sub(first)?;
-    (usize::from(offset) < rows).then_some(offset)
 }
