@@ -4,6 +4,12 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.47.0] - 2026-09-11
+
+- Nothing keeps a toggle the reader flipped, and remember between runs is what does
+- Nothing shows the reader their own settings, and the config menu is what does
+- The pane remembers a toggle, and the config menu is where the reader sees it
+
 ## [0.46.0] - 2026-09-10
 
 - The pane can stand at the branch point, and the header says where it is
