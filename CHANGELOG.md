@@ -4,6 +4,10 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.48.0] - 2026-09-11
+
+- The pack card leads with what vigia is, so the description reads for a newcomer
+
 ## [0.47.0] - 2026-09-11
 
 - Nothing keeps a toggle the reader flipped, and remember between runs is what does
