@@ -6,6 +6,7 @@ Before 1.0, a minor release can change behaviour. Anything that moves a key, a g
 
 ## [0.48.0] - 2026-09-11
 
+- A list behind the token puts the pane at any commit
 - The pack card leads with what vigia is, so the description reads for a newcomer
 
 ## [0.47.0] - 2026-09-11

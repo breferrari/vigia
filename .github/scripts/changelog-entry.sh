@@ -65,24 +65,39 @@ fi
 # the allow pass below wins over this list, and why an emptied range is reported
 # rather than summarised.
 #
-# `token` is bounded the long way round rather than with `\b`, which is a GNU
-# extension that POSIX ERE does not define. The release runs this on one runner
-# whose grep has it, but the test that drives the filter is `cfg(unix)` and so
-# runs wherever the suite does. Unbounded, the word would swallow `tokenizer`,
-# which in a syntax highlighter is a subject a reader can see.
+# **`token` is not on that list, because the pane draws one.** The header's
+# position token is pressed, so the word carries a credential sense and a visible
+# one at once, and a word carrying both cannot sit in a list whose mistakes are
+# the expensive ones. The release's own token subjects name the release or the
+# bump as well, which is what catches them instead. One of them names neither and
+# reaches a reader as an odd line, which is the direction this file is willing to
+# be wrong in.
+#
+# An entry needing a word boundary writes it the long way round, as
+# `(^|[^a-zA-Z])word([^a-zA-Z]|$)`. `\b` is a GNU extension POSIX ERE does not
+# define, and while the release runs on one runner whose grep has it, the test
+# driving this filter is `cfg(unix)` and runs wherever the suite does.
 internal_prefix='^(roadmap|spec|docs?|ci|chore|deps?|take-next|skill|test|refactor|perf|style|build|process|steering|mockup|harden|release|vault writes)(\([^)]*\))?: '
-internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|written layer|phase [0-9]|the shelf|shelved|readme|claude\.md|clippy|cargo doc|ci complete|workflow|pre-flight|version raise|release note|the release |the bump |(^|[^a-zA-Z])tokens?([^a-zA-Z]|$)|take-next|the skill|the harness|the record|budget table|mutation|audit|ceiling|proposal|declined|adopted|review agent|assertion|the mockup|funding|\.yml|§|^track the |^#[0-9]|^b[0-9]+[ :]|^[0-9]+\.[0-9]+,)'
+internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|written layer|phase [0-9]|the shelf|shelved|readme|claude\.md|clippy|cargo doc|ci complete|workflow|pre-flight|version raise|release note|the release |the bump |take-next|the skill|the harness|the record|budget table|mutation|audit|ceiling|proposal|declined|adopted|review agent|assertion|the mockup|funding|\.yml|§|^track the |^#[0-9]|^b[0-9]+[ :]|^[0-9]+\.[0-9]+,)'
 
-# **A subject naming something a reader can press or set survives that list.**
-# The list matches anywhere in a subject, so one internal word decides a whole
-# sentence, and the rule that a revoked ruling is deleted alongside the change it
-# governed makes that sentence ordinary: the subject removing a key names the
-# ruling too. The backticks are what make `single`, `wrap` and `links` safe to
-# name.
+# **A subject naming something a reader can press or set survives that list, and
+# so does one naming the pane.** The list matches anywhere in a subject, so one
+# internal word decides a whole sentence, and the rule that a revoked ruling is
+# deleted alongside the change it governed makes that sentence ordinary: the
+# subject removing a key names the ruling too. The backticks are what make
+# `single`, `wrap` and `links` safe to name.
+#
+# `the pane` is that rule reaching a sentence with no key in it. A change a reader
+# can see is a change to the pane, and measured over every first-parent subject to
+# 0.48.0, no subject naming it carries an internal word, while two that shipped
+# visible work were dropped for a word elsewhere in the sentence. The cost runs the
+# other way: a subject about this machinery that names the pane survives too, and
+# takes one of the prefixes above to stay out, the prefix pass running before this
+# one.
 #
 # The character class cannot go stale and the settings are held to `config.rs` by
 # a test. The named keys are typed here, and a new one reaches this file by hand.
-visible_subject='`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|follow|rail|single|overview|staged|wrap|notes|icons|links|persist|hide)`'
+visible_subject='([Tt]he pane|`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|follow|rail|single|overview|staged|wrap|notes|icons|links|persist|hide)`)'
 
 # Read once, because the emptied-range branch below writes the range out and
 # cannot go back to stdin for it.
