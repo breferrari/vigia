@@ -935,6 +935,43 @@ fn a_rewrite_appends_a_key_the_file_lacks_and_never_writes_hide() {
 }
 
 #[test]
+fn a_repeated_key_is_the_readers_mistake_and_the_rewrite_leaves_it() {
+    // `parse` refuses a file that sets a key twice, and says which lines. A rewrite
+    // must not quietly repair that: the reader has to see the line they wrote when
+    // the next launch names it, so only the first occurrence takes the new value and
+    // the second is theirs, byte for byte.
+    let doubled = "rail = off
+single = on
+rail = off
+";
+    let config = Config {
+        rail: true,
+        ..Config::default()
+    };
+    let out = config::rewrite(doubled, &config);
+    let rails: Vec<&str> = out
+        .lines()
+        .filter(|line| line.trim_start().starts_with("rail"))
+        .collect();
+    assert_eq!(
+        rails,
+        vec!["rail = on", "rail = off"],
+        "the rewrite did not leave the reader's second line alone:
+{out}"
+    );
+    // And the file is still the one the next launch will refuse, so nothing was
+    // repaired behind their back.
+    assert!(
+        matches!(
+            config::parse(&out),
+            Err(ConfigError::RepeatedKey { key, .. }) if key == "rail"
+        ),
+        "the rewrite made a file `parse` accepts out of one it refuses:
+{out}"
+    );
+}
+
+#[test]
 fn a_rewrite_of_a_file_it_wrote_is_the_same_file() {
     // Idempotence, which is what stops a file growing a line every time a reader
     // flips a row.
