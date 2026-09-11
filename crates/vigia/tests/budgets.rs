@@ -1878,7 +1878,7 @@ const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
     width: 120,
-    height: 49,
+    height: 48,
 };
 
 /// I9 with the roomy rung drawn over the frame.

@@ -640,7 +640,7 @@ impl App {
             Action::ToggleStanding => self.standing = !self.standing,
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
-                let was = self.staged;
+                let (was, had) = (self.staged, self.position);
                 self.staged = !was;
                 frame.show_staged(self.staged);
                 self.position = Position::default();
@@ -653,6 +653,10 @@ impl App {
                     self.warn(e.to_string());
                     self.staged = was;
                     frame.show_staged(was);
+                    // The viewport with it: the frame is the one the reader was
+                    // already reading, so sending them to its first row would be
+                    // this gesture moving them for a walk that never happened.
+                    self.position = had;
                 }
             }
             // No jump and no move at all, and unlike the toggles above it does not

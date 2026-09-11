@@ -1918,7 +1918,7 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
     // allocates the counter, which a closed menu would pay for on every frame.
     body.menu_rows = chrome
         .menu
-        .map(|_| menu_rows_of(area, footer, margins_of(area.width)));
+        .map(|menu| menu_rows_of(area, footer, margins_of(area.width), menu));
     body
 }
 
@@ -2371,7 +2371,7 @@ const KEYBOARD: [Gesture; 19] = [
 /// The two toggles that change what the frame *walks* outlive the body's other
 /// rows, and between them the older outlives the newer. **The config menu's row
 /// outlives every view toggle**, on the rule the ladder is sorted by: the rail
-/// cannot fire below 134 columns and the menu draws wherever its box fits, so a
+/// cannot fire below [`RAIL_FROM`] and the menu draws wherever its box fits, so a
 /// narrow pane keeping `r` over `m` would keep the one it cannot honour.
 ///
 /// The box's keys rank second for the reason `q` ranks first: the box writes
@@ -2949,8 +2949,8 @@ fn menu_drawn(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -> 
 
 /// How many rows the config menu's window has on this pane, and zero where it
 /// draws none.
-fn menu_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16)) -> usize {
-    menu_plan(area, footer_rows, margins, 0).map_or(0, |plan| plan.rows)
+fn menu_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -> usize {
+    menu_drawn(area, footer_rows, margins, menu).map_or(0, |plan| plan.rows)
 }
 
 /// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw

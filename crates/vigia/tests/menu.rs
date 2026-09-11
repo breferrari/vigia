@@ -760,6 +760,10 @@ fn a_row_whose_walk_failed_goes_back_rather_than_lying() {
     pane.with(|app, frame, _highlighter, _history| {
         apply(app, frame, area(), Action::ToggleMenu);
         assert!(!app.settings().staged, "the staged run started drawn");
+        // Off the first row, or the restore below has nothing to restore.
+        apply(app, frame, area(), Action::File(1));
+        let deep = app.position();
+        assert_ne!(deep, Default::default(), "the fixture has one file");
 
         // A repository with no HEAD is one `Frame::advance` cannot walk.
         std::fs::remove_file(root.join(".git/HEAD")).expect("remove HEAD");
@@ -774,6 +778,11 @@ fn a_row_whose_walk_failed_goes_back_rather_than_lying() {
         assert!(
             app.notice().is_some(),
             "the walk failed and the footer says nothing"
+        );
+        assert_eq!(
+            app.position(),
+            deep,
+            "the walk failed and the reader was sent to the top of a frame they              were already reading"
         );
     });
 }
