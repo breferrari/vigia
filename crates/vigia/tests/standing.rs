@@ -1182,3 +1182,75 @@ fn current_keeps_counting_while_the_list_is_open() {
          {after:?}"
     );
 }
+
+/// Every pane the box could be asked to draw in, including the ones below its floor.
+///
+/// The bounds are the drawer's rather than the product's, which is the config menu's
+/// sweep and its reason: I6 names forty columns, `positions_plan` is asked for a box at
+/// every size a terminal can be, and the region below forty is exactly where an
+/// underflow or a rect past the buffer hides from every other gate here. Zero is in
+/// both ranges because a pane can be reported at zero between a resize and the frame
+/// after it.
+const SWEEP_WIDTHS: std::ops::RangeInclusive<u16> = 0..=160;
+const SWEEP_HEIGHTS: std::ops::RangeInclusive<u16> = 0..=48;
+
+/// The box never leaves the pane, and never covers the row the header owns.
+#[test]
+fn the_list_never_leaves_the_pane_at_any_size_a_terminal_can_be() {
+    let scratch = deep("standing-sweep", 9);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 12);
+
+    let chrome = chrome_of(&app);
+    let (mut drew, mut declined) = (0usize, 0usize);
+    for w in SWEEP_WIDTHS {
+        for h in SWEEP_HEIGHTS {
+            let at = ratatui::layout::Rect::new(0, 0, w, h);
+            let laid = vigia::regions(at, &chrome, &view);
+            let Some(box_at) = laid.positions else {
+                declined += 1;
+                continue;
+            };
+            drew += 1;
+            assert!(
+                box_at.left + box_at.width <= w && box_at.top + box_at.height <= h,
+                "at {w}x{h} the box runs from ({}, {}) for {}x{}, past the pane",
+                box_at.left,
+                box_at.top,
+                box_at.width,
+                box_at.height
+            );
+            // The header owns row zero, so a box over it covers the one fact a reader
+            // cannot recover from the body.
+            assert!(box_at.top >= 1, "at {w}x{h} the box covers the header row");
+
+            // And what was published is what was painted: the box has to be on the
+            // screen rather than only in a rect, or the pointer is told about cells
+            // nothing drew.
+            let buffer = screen(&view, &app, w, h);
+            let edges: Vec<u16> = (box_at.top..box_at.top + box_at.height)
+                .filter(|y| {
+                    (box_at.left..box_at.left + box_at.width)
+                        .any(|x| buffer[(x, *y)].symbol() != " ")
+                })
+                .collect();
+            assert_eq!(
+                edges.len(),
+                usize::from(box_at.height),
+                "at {w}x{h} the published box has {} rows and the painted one has {}",
+                box_at.height,
+                edges.len()
+            );
+        }
+    }
+    // Non-vacuity both ways: a sweep that drew nothing passes every assertion above,
+    // and one that drew everywhere never reaches the floor this exists to cross.
+    assert!(
+        drew > 0 && declined > 0,
+        "the sweep drew {drew} boxes and declined {declined}, so it never crossed the \
+         floor it exists to cross"
+    );
+}
