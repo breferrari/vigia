@@ -2535,14 +2535,30 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`Shell::effects_running` is gone");
-        for manager in [
-            "self.effects.is_running()",
-            "self.notice_effects.is_running()",
-            "self.note_effects.is_running()",
-            "self.box_effect.as_ref().is_some_and(Timed::is_running)",
-        ] {
+        // Read off `Shell`'s own fields rather than listed here: a list goes stale
+        // the moment a fifth effect lands, and the gate then passes over exactly
+        // the manager nobody thought to add to it.
+        let fields = code
+            .split("struct Shell {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .expect("`Shell` is gone");
+        let managers: Vec<&str> = fields
+            .lines()
+            .filter_map(|line| line.trim().strip_suffix(','))
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, _)| name)
+            .filter(|name| name.ends_with("effect") || name.ends_with("effects"))
+            .collect();
+        assert!(
+            managers.len() >= 5,
+            "`Shell` declares {} effect fields, so this gate is reading its shape \
+             wrongly rather than its fields: {managers:?}",
+            managers.len()
+        );
+        for manager in managers {
             assert!(
-                running.contains(manager),
+                running.contains(&format!("self.{manager}")),
                 "`{manager}` is no longer one of the effects `effects_running` \
                  answers for, so the loop stops offering it frames: {running}"
             );
