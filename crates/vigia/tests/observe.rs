@@ -671,7 +671,10 @@ impl Pane<'_> {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -700,7 +703,10 @@ impl Pane<'_> {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -723,7 +729,10 @@ impl Pane<'_> {
             .chrome(
                 &self.name,
                 self.branch.as_deref(),
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",

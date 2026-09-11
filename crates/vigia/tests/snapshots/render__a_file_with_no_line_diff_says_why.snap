@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/render.rs
+assertion_line: 1936
 expression: "screen(60, 8, &view, &chrome())"
 ---
-" vigia · current · 3 changed                       watching "
+" vigia · current ▾ · 3 changed                     watching "
 " M …s/banner.jpg                  ____________              "
 "   binary                                                   "
 " U src/merge.rs                   ____________              "

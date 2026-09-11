@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/follow.rs
+assertion_line: 209
 expression: terminal.backend()
 ---
-" fixture · current · 3 changed                        +3    -3  "
+" fixture · current ▾ · 3 changed                      +3    -3  "
 "                                                                "
 " M README.md             ■■■■■■■■■■■■ ____________    +1    -1  "
 " M src/first.rs          ■■■■■■■■■■■■ ____________    +1    -1  "

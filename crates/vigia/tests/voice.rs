@@ -38,7 +38,10 @@ fn drawn(voice: Voice) -> (Buffer, App) {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -75,7 +78,10 @@ fn area_of(app: &App) -> Rect {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -110,7 +116,10 @@ fn a_message_is_not_drawn_in_the_hints_own_style() {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -136,7 +145,10 @@ fn a_message_is_not_drawn_in_the_hints_own_style() {
             let chrome = app.chrome(
                 "fixture",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -256,7 +268,10 @@ fn a_pane_with_no_message_has_no_area() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -270,7 +285,10 @@ fn a_pane_with_no_room_has_no_area() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -302,7 +320,10 @@ fn a_long_message_stops_where_the_readouts_begin() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -381,7 +402,10 @@ fn a_depth_with_no_colour_still_gets_the_message() {
             let chrome = app.chrome(
                 "fixture",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",

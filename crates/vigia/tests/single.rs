@@ -40,7 +40,10 @@ fn body() -> usize {
         &App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -62,7 +65,10 @@ fn listed() -> Body {
         &App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -370,7 +376,10 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -838,7 +847,10 @@ fn a_pinned_pane_draws_and_its_bar_is_the_files() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -921,7 +933,10 @@ fn the_pin_and_the_rail_do_not_fight() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -1090,7 +1105,10 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
         let before = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1102,7 +1120,10 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
         let after = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

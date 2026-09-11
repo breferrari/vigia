@@ -235,7 +235,10 @@ fn the_footer_carries_the_version_it_was_told() {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

@@ -30,7 +30,10 @@ fn body() -> usize {
         &App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -52,7 +55,10 @@ fn listed() -> Body {
         &App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -689,6 +695,11 @@ fn tag(action: Action) -> usize {
         Action::ToggleWrap => 112,
         Action::ToggleNotes => 113,
         Action::ToggleStanding => 114,
+        Action::TogglePositions => 115,
+        Action::ClosePositions => 116,
+        Action::PositionsMove(_) => 117,
+        Action::PositionsPick => 118,
+        Action::PositionsRow(_) => 119,
         Action::ToggleSheet => 11,
         Action::CloseSheet => 12,
         Action::ListTo(_) => 13,

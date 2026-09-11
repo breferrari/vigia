@@ -642,6 +642,8 @@ fn two_regions() -> Regions {
             text: 0,
         },
         sheet: None,
+        positions: None,
+        position: None,
     }
 }
 
@@ -653,6 +655,8 @@ fn beside() -> Regions {
         list: Region::bare(1, 18, 0, 30, Some(29)),
         diff: Region::bare(1, 18, 30, 70, Some(99)),
         sheet: None,
+        positions: None,
+        position: None,
     }
 }
 
@@ -712,6 +716,8 @@ fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
         // A bar: the diff runs past the pane.
         diff: Region::bare(5, 15, 0, 80, Some(79)),
         sheet: None,
+        positions: None,
+        position: None,
     };
     // The list's last row, in the column the diff's bar occupies further down.
     let (column, row) = (79, 3);
@@ -972,6 +978,8 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             text: 0,
         },
         sheet: None,
+        positions: None,
+        position: None,
     };
     let press = MouseEventKind::Down(MouseButton::Left);
 
@@ -1434,6 +1442,8 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
             text: 0,
         },
         sheet: None,
+        positions: None,
+        position: None,
     };
     let press = MouseEventKind::Down(MouseButton::Left);
 
@@ -2086,6 +2096,8 @@ fn a_region_with_no_rows_lights_nothing() {
         list: Region::bare(1, 0, 0, 80, Some(79)),
         diff: Region::bare(1, 20, 0, 80, Some(79)),
         sheet: None,
+        positions: None,
+        position: None,
     };
     assert_eq!(
         regions.list.top, regions.diff.top,

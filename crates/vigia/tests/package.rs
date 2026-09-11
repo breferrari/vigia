@@ -1937,8 +1937,14 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// times in the skill costs the pass the room it needs to reason.
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
+///
+/// `SPEC.md` rose 2,494 bytes for §11.1's position list, which is a surface the pane
+/// did not have: a new gesture, a new overlay and a cost rule, none of which any
+/// sentence already there was saying. The `b` paragraph gave back what the new text
+/// now covers, and the rest is the price of the contract rather than room made for
+/// prose. A raise with no new surface behind it is the thing this number is for.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 398985),
+    ("SPEC.md", 401479),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

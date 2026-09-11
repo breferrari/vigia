@@ -51,6 +51,12 @@ pub enum Error {
     /// This branch has no other branch to measure from, or no commit in common
     /// with one.
     NoBranchPoint,
+    /// A page of the commit history could not be walked.
+    ///
+    /// Separate from [`Error::Standing`] deliberately: that one means the commit
+    /// the pane is measuring from is gone, and the shell answers it by bringing
+    /// the pane home. A page that will not walk leaves the pane where it is.
+    History(Box<dyn std::error::Error + Send + Sync>),
     /// One file could not be normalised the way git's clean filter would.
     Filter {
         /// Repository-relative path that could not be normalised.
@@ -85,6 +91,7 @@ impl Error {
             | Error::Store { .. }
             | Error::Standing(_)
             | Error::NoBranchPoint
+            | Error::History(_)
             | Error::Canonicalise { .. } => None,
         }
     }
@@ -164,6 +171,7 @@ impl fmt::Display for Error {
             Error::NoBranchPoint => f.write_str(
                 "this branch has no other branch to measure from, so there is no point to stand at",
             ),
+            Error::History(e) => write!(f, "could not read the commits behind this branch: {e}"),
         }
     }
 }
@@ -172,9 +180,11 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Discover(e) => Some(e),
-            Error::Status(e) | Error::Watch(e) | Error::FilterSetup(e) | Error::Standing(e) => {
-                Some(e.as_ref())
-            }
+            Error::Status(e)
+            | Error::Watch(e)
+            | Error::FilterSetup(e)
+            | Error::Standing(e)
+            | Error::History(e) => Some(e.as_ref()),
             Error::Read { source, .. }
             | Error::Store { source, .. }
             | Error::Canonicalise { source, .. } => Some(source),

@@ -499,3 +499,109 @@ fn standing_somewhere_else_drops_what_the_old_position_measured() {
         "standing still counted as moving, so every frame would clear its caches"
     );
 }
+
+/// A history with `count` commits on one branch, newest last.
+fn deep(name: &str, count: usize) -> Scratch {
+    let scratch = Scratch::new(name);
+    for nth in 0..count {
+        scratch.write(KEPT, format!("line {nth}\n"));
+        scratch.git(&["add", "-A"]);
+        scratch.git(&["commit", "-m", &format!("step {nth}")]);
+    }
+    scratch
+}
+
+/// The walk stops at the rows it was asked for.
+///
+/// `visited` is the whole point of this gate: a page whose length is right can
+/// still have cost the whole history, and buffering it is the one thing here that
+/// would breach I4. Drain the iterator before taking from it and this reads
+/// twelve.
+#[test]
+fn a_page_stops_at_the_rows_it_was_asked_for() {
+    let scratch = deep("history-page", 12);
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+
+    let page = worktree.commits_from(None, 6).expect("a page");
+
+    assert_eq!(page.commits.len(), 6, "the page is not the size asked for");
+    assert_eq!(
+        page.visited, 6,
+        "the walk stepped over {} commits to hand back 6, so it is draining the \
+         history rather than paging it",
+        page.visited
+    );
+    assert!(page.more, "twelve commits behind a page of six is more");
+}
+
+/// A resumed page continues rather than repeating.
+#[test]
+fn a_page_resumes_where_the_last_one_ended() {
+    let scratch = deep("history-resume", 8);
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+
+    let first = worktree.commits_from(None, 3).expect("a page");
+    let last = first.commits.last().expect("three commits").id;
+    let next = worktree.commits_from(Some(last), 3).expect("a second page");
+
+    assert_eq!(next.visited, 3);
+    assert!(
+        !next.commits.iter().any(|commit| commit.id == last),
+        "the resume tip came back a second time"
+    );
+    let walked: Vec<&str> = first
+        .commits
+        .iter()
+        .chain(&next.commits)
+        .map(|commit| commit.subject.as_str())
+        .collect();
+    assert_eq!(
+        walked,
+        vec!["step 7", "step 6", "step 5", "step 4", "step 3", "step 2"],
+        "the two pages are not one history"
+    );
+}
+
+/// A row carries what it draws: the abbreviation, the subject and the time.
+#[test]
+fn a_landmark_carries_the_subject_and_the_time() {
+    let scratch = deep("history-landmark", 2);
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+
+    let page = worktree.commits_from(None, 1).expect("a page");
+    let commit = page.commits.first().expect("one commit");
+
+    assert_eq!(commit.subject, "step 1");
+    assert_eq!(
+        commit.named.len(),
+        vigia_core::SHORT_ID,
+        "the abbreviation is not the width the column was laid out for"
+    );
+    assert!(
+        commit.id.to_string().starts_with(&commit.named),
+        "the abbreviation is not a prefix of the id it abbreviates"
+    );
+    assert!(
+        commit.when > 0,
+        "the commit has no time, so no row can spell its age"
+    );
+}
+
+/// The root commit ends the walk, and says so rather than erroring.
+#[test]
+fn a_root_commit_ends_the_walk() {
+    let scratch = deep("history-root", 2);
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+
+    let page = worktree.commits_from(None, 9).expect("a page");
+
+    assert_eq!(
+        page.commits.len(),
+        2,
+        "a two-commit history gave more than two"
+    );
+    assert!(
+        !page.more,
+        "the root commit has no parent, so there is nothing behind it"
+    );
+}

@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/render.rs
+assertion_line: 534
 expression: "screen(40, 6, &nothing_changed(), &empty_chrome())"
 ---
-"vigia · main · current          watching"
+"vigia · main · current ▾        watching"
 "no unstaged changes                     "
 "                                        "
 "                                        "

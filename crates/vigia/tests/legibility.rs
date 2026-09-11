@@ -38,6 +38,10 @@ const FOLLOW_MARK: char = '▶';
 /// What joins two facts about one subject on a line of chrome.
 const FACT_JOIN: &str = " · ";
 
+/// The chevron the position token carries, added by the painter rather than the
+/// caller, so a gate modelling the header has to add it too.
+const OPENS: &str = " ▾";
+
 /// Widths every sweep covers. One column to well past the widest snapshot.
 /// Rows the rule above the footer takes.
 const FOOTER_RULE_ROWS: usize = 1;
@@ -329,6 +333,8 @@ fn chrome() -> Chrome {
         following: false,
         rail: false,
         sheet: None,
+        positions: None,
+        now: 0,
         // Absent in the base fixture, so every sweep that inherits it keeps measuring
         // the chrome it measured before the status readouts existed.
         frame: None,
@@ -1106,7 +1112,7 @@ fn the_header_ladder_keeps_the_mode_word_last() {
             // thing a narrowing header gives up. Either is whole; anything else
             // is a count that was cut.
             let full = format!(
-                "{}{FACT_JOIN}{}{FACT_JOIN}{files} changed",
+                "{}{FACT_JOIN}{}{OPENS}{FACT_JOIN}{files} changed",
                 chrome.worktree, chrome.position
             );
             let without = format!("{}{FACT_JOIN}{files} changed", chrome.worktree);
@@ -1195,7 +1201,7 @@ fn the_header_count_sits_with_the_worktree_at_every_width() {
         // Nothing is drawn *beside* the count, meaning the mode word on its
         // right. Its left carries the branch, and now the position token.
         let through_token = format!(
-            "{}{FACT_JOIN}{}{FACT_JOIN}",
+            "{}{FACT_JOIN}{}{OPENS}{FACT_JOIN}",
             chrome.worktree, chrome.position
         );
         for width in WIDTHS {

@@ -75,7 +75,10 @@ fn stacked_chrome() -> Chrome {
     App::new().chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -1010,7 +1013,10 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
             &app.chrome(
                 "f",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -1027,7 +1033,10 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
         &app.chrome(
             "f",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1079,7 +1088,10 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
             &app.chrome(
                 "f",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -1125,7 +1137,10 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
         &app.chrome(
             "f",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1141,7 +1156,10 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
         let chrome = app.chrome(
             "f",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1180,7 +1198,10 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
             &app.chrome(
                 "f",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0
+                },
                 Pointing::default(),
                 Default::default(),
                 ""
@@ -1225,7 +1246,10 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
         let chrome = app.chrome(
             "f",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1246,7 +1270,10 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
         &app.chrome(
             "f",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1304,7 +1331,10 @@ fn a_rail_draws_the_tail_of_the_staged_run() {
         ..App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

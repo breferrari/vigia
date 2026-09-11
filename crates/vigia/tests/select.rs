@@ -106,7 +106,10 @@ fn sent_on(
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -143,7 +146,10 @@ fn drawn_on(app: &mut App, frame: &mut Frame, pane: Rect) -> String {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -349,7 +355,10 @@ fn the_cheap_answer_agrees_with_the_lines_it_stands_for() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -459,7 +468,10 @@ fn a_wrapped_line_is_sent_once_and_whole() {
     let chrome = probe.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -550,7 +562,10 @@ fn washes(
     let mut chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -748,7 +763,10 @@ fn a_wrapped_line_at_the_foot_of_the_pane_is_still_sent_whole() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -847,7 +865,10 @@ fn the_footer_counts_lines_and_not_rows() {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -894,7 +915,10 @@ fn a_span_ending_on_a_blank_row_is_still_counted_whole() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -949,7 +973,10 @@ fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -991,7 +1018,10 @@ fn a_span_the_walk_had_no_rows_for_holds_no_selection() {
         let chrome = app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1054,7 +1084,10 @@ fn view_rows_on(app: &mut App, frame: &mut Frame, pane: Rect) -> Vec<Row> {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",

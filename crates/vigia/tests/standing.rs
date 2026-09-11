@@ -9,14 +9,23 @@ mod support;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use support::Scratch;
 use vigia::{
-    Action, App, Chrome, Glyphs, Pointing, Position, Theme, View, Viewport, branch_point_of, render,
+    Action, App, Asked, Chrome, Glyphs, Pointing, Position, Regions, Theme, View, Viewport,
+    branch_point_of, render,
 };
 use vigia_core::{Frame, Highlighter, History, Standing, Worktree};
 
 /// What joins two facts about one subject on a line of chrome.
 const FACT_JOIN: &str = " · ";
+
+/// The chevron the token carries while the list is closed, which travels with the
+/// word rather than sitting outside it: the cells a click opens the list from are
+/// the word and the mark together.
+const OPENS: &str = " ▾";
 
 fn viewport() -> Viewport {
     Viewport {
@@ -82,7 +91,7 @@ fn drawn_row(view: &View, position: &str, app: &App, y: u16, width: u16) -> Stri
         ..app.chrome(
             "fixture",
             Some("work"),
-            position,
+            vigia::Stood { position, now: 0 },
             Pointing::default(),
             Default::default(),
             "",
@@ -208,7 +217,7 @@ fn the_headers_facts_describe_what_the_token_names() {
         (parked_files, label.as_str(), &parked_header),
     ] {
         assert!(
-            drawn.contains(&format!("{position}{FACT_JOIN}{files} changed")),
+            drawn.contains(&format!("{position}{OPENS}{FACT_JOIN}{files} changed")),
             "standing {position:?} the header does not count the run it names: \
              {drawn:?}"
         );
@@ -224,15 +233,16 @@ fn one_key_flips_the_reading_and_is_a_toggle() {
     frame.advance().expect("advance");
 
     let mut app = App::new();
-    assert!(
-        !app.standing(),
+    assert_eq!(
+        *app.asked(),
+        Asked::Current,
         "a pane opens standing somewhere other than the working tree"
     );
-    for wanted in [true, false, true] {
+    for wanted in [Asked::BranchPoint, Asked::Current, Asked::BranchPoint] {
         app.apply(Action::ToggleStanding, &mut frame, 20)
             .expect("the toggle asked the shell to quit");
         assert_eq!(
-            app.standing(),
+            *app.asked(),
             wanted,
             "the key does not flip the reading, so it is a switch rather than a \
              toggle"
@@ -300,9 +310,10 @@ fn the_branch_point_is_taken_once_and_a_refusal_keeps_nothing() {
     frame.advance().expect("advance");
     app.apply(Action::ToggleStanding, &mut frame, 20)
         .expect("the toggle asked the shell to quit");
-    app.stands(false);
-    assert!(
-        !app.standing(),
+    app.stands(Asked::Current);
+    assert_eq!(
+        *app.asked(),
+        Asked::Current,
         "the reading stayed at the branch point the shell could not resolve"
     );
 }
@@ -462,5 +473,712 @@ fn a_branch_with_nothing_to_measure_from_says_so_in_its_own_words() {
     assert!(
         said.contains("no other branch to measure from"),
         "the refusal reads {said:?}, which does not tell a reader what is missing"
+    );
+}
+
+/// A worktree with `count` commits behind the branch point, so the list has
+/// history to page through as well as its two named rows.
+fn deep(name: &str, count: usize) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/base.rs", "one\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    scratch.git(&["checkout", "-b", "work"]);
+    for nth in 0..count {
+        scratch.write("src/base.rs", format!("line {nth}\n"));
+        scratch.git(&["add", "-A"]);
+        scratch.git(&["commit", "-m", &format!("step {nth}")]);
+    }
+    scratch.write("src/written.rs", "four\n");
+    scratch
+}
+
+/// A pane `width` by `height` drawing `view` with `app`'s chrome, as the buffer.
+fn screen(view: &View, app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    let position = Standing::Current.label();
+    let chrome = app.chrome(
+        "fixture",
+        Some("work"),
+        vigia::Stood {
+            position: &position,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    let theme = Theme::default();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
+        })
+        .expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+/// The rows of places the list drew, frame and the air inside it taken off.
+///
+/// Indexed the way the caret is, so a gate naming a row names the row the caret would
+/// land on. Counting the frame by hand in each gate is how one off-by-one lands in
+/// several of them at once.
+fn list_rows(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+    let rows = box_rows(buffer);
+    let air = vigia::positions::POSITIONS_FRAME / 2;
+    if rows.len() <= vigia::positions::POSITIONS_FRAME {
+        return Vec::new();
+    }
+    rows[air..rows.len() - air].to_vec()
+}
+
+/// The chrome a pane draws with, so a gate asking `regions` asks about the screen it
+/// just read rather than about one nobody drew.
+fn chrome_of(app: &App) -> Chrome {
+    app.chrome(
+        "fixture",
+        Some("work"),
+        vigia::Stood {
+            position: &Standing::Current.label(),
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    )
+}
+
+/// The same pane with the pointer resting on `on`.
+fn marked(view: &View, app: &App, on: vigia::Hovered) -> ratatui::buffer::Buffer {
+    let chrome = Chrome {
+        hovered: Some(on),
+        ..chrome_of(app)
+    };
+    let mut terminal = Terminal::new(TestBackend::new(80, 20)).expect("terminal");
+    let theme = Theme::default();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
+        })
+        .expect("draw");
+    terminal.backend().buffer().clone()
+}
+
+/// Every row of a drawn pane, trailing blanks trimmed.
+fn rows_of(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+    (buffer.area.top()..buffer.area.bottom())
+        .map(|y| {
+            (buffer.area.left()..buffer.area.right())
+                .map(|x| buffer[(x, y)].symbol().to_owned())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// The rows the list's box drew, frame included, or an empty vector on a pane that
+/// drew none.
+///
+/// Found from its own top edge downwards rather than by matching any row that carries
+/// a pipe: the box is drawn over rows that are already there, so a diff row it half
+/// covers carries one too.
+fn box_rows(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+    let rows = rows_of(buffer);
+    let Some(top) = rows
+        .iter()
+        .position(|row| row.contains('┌') || row.contains('╭'))
+    else {
+        return Vec::new();
+    };
+    let bottom = rows
+        .iter()
+        .rposition(|row| row.contains('└') || row.contains('╰'))
+        .unwrap_or(rows.len() - 1);
+    rows[top..=bottom].to_vec()
+}
+
+/// An app with the list open over `worktree`'s history, as the shell fills it.
+fn opened(worktree: &Worktree, frame: &mut Frame, app: &mut App, page: usize) {
+    app.apply(Action::TogglePositions, frame, 20)
+        .expect("the key asked the shell to quit");
+    let walk = worktree.commits_from(None, page).expect("a page");
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    let _ = at;
+    app.set_places(vigia::Places {
+        commits: walk.commits,
+        more: walk.more,
+        current: Some(vigia::Facts {
+            files: 1,
+            added: 1,
+            removed: 0,
+        }),
+        point: Some((
+            named,
+            Some(vigia::Facts {
+                files: 2,
+                added: 3,
+                removed: 0,
+            }),
+        )),
+    });
+}
+
+/// The cells the header's token occupies, read off the drawn buffer rather than off
+/// the layout the pointer is told about.
+///
+/// The two have to agree, and a gate that asked `Regions` would be asking one of them
+/// about itself: a published span over cells the painter never inked passes that way
+/// and fails under a finger.
+fn token_cells(buffer: &ratatui::buffer::Buffer, word: &str) -> (u16, u16, u16) {
+    let row = rows_of(buffer)[0].clone();
+    let at = row.find(word).expect("the header draws no position token");
+    let before: u16 = row[..at].chars().count().try_into().expect("a narrow pane");
+    let wide: u16 = word.chars().count().try_into().expect("a narrow pane");
+    (before, 0, wide)
+}
+
+/// A left press at one cell.
+fn press(column: u16, row: u16) -> Event {
+    Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+}
+
+/// A bare key.
+fn key(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+/// `B` and a press on the drawn token both ask for the list.
+///
+/// The click is resolved against the cells the painter actually inked, so the one
+/// derivation behind the token's ink and its hit span is what this holds: publish a
+/// span the header never drew and the press below lands on nothing.
+#[test]
+fn the_key_and_the_token_both_open_the_list() {
+    let scratch = deep("standing-open", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+
+    assert_eq!(
+        vigia::action_for(&key(KeyCode::Char('B')), Regions::default()),
+        Some(Action::TogglePositions),
+        "`B` does not open the list, so a pane tmux sends no mouse events to cannot \
+         reach it at all"
+    );
+
+    let buffer = screen(&view, &app, 80, 20);
+    let token = format!("{}{OPENS}", Standing::Current.label());
+    let (left, row, wide) = token_cells(&buffer, &token);
+    let regions = vigia::regions(
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+        &chrome_of(&app),
+        &view,
+    );
+    let published = regions.position.expect("the header publishes no token");
+    assert_eq!(
+        (published.left, published.row, published.width),
+        (left, row, wide),
+        "the cells a click is told about are not the cells the header drew, so the \
+         token is a target somewhere the reader cannot see"
+    );
+    for column in [left, left + wide - 1] {
+        assert_eq!(
+            vigia::action_for(&press(column, row), regions),
+            Some(Action::TogglePositions),
+            "a press on column {column} of the drawn token does not open the list"
+        );
+    }
+    assert_eq!(
+        vigia::action_for(&press(left + wide, row), regions),
+        None,
+        "the cell past the token opens the list, so the target is wider than the word"
+    );
+}
+
+/// The chevron says a list lives there, and says which way it will go.
+#[test]
+fn the_token_carries_the_chevron_and_it_flips() {
+    let scratch = deep("standing-chevron", 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+
+    let closed = rows_of(&screen(&view, &app, 80, 20))[0].clone();
+    assert!(
+        closed.contains("current ▾"),
+        "a closed list draws no chevron after the token, so nothing at rest says the \
+         word can be pressed: {closed:?}"
+    );
+
+    opened(&worktree, &mut frame, &mut app, 8);
+    let open = rows_of(&screen(&view, &app, 80, 20))[0].clone();
+    assert!(
+        open.contains("current ▴"),
+        "the chevron does not turn over while the list is open, so the token does not \
+         say how to put it away: {open:?}"
+    );
+}
+
+/// The pointer marks the token, and marks nothing beside it.
+#[test]
+fn the_token_carries_the_hover_mark() {
+    let scratch = deep("standing-hover", 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+
+    let buffer = screen(&view, &app, 80, 20);
+    let token = format!("{}{OPENS}", Standing::Current.label());
+    let (left, row, wide) = token_cells(&buffer, &token);
+    let regions = vigia::regions(
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+        &chrome_of(&app),
+        &view,
+    );
+    assert_eq!(
+        regions.hover_at(left, row),
+        Some(vigia::Hovered::Position),
+        "the pointer resting on the token is not told it is on anything, so nothing \
+         invites the press"
+    );
+    assert_eq!(
+        regions.hover_at(left + wide, row),
+        None,
+        "the cell past the token marks itself, so the mark is wider than the target"
+    );
+
+    let lit = rows_of(&marked(&view, &app, vigia::Hovered::Position))[0].clone();
+    assert_eq!(
+        lit,
+        rows_of(&buffer)[0],
+        "the mark changed the header's text rather than its weight"
+    );
+    let plain = screen(&view, &app, 80, 20);
+    let hovered = marked(&view, &app, vigia::Hovered::Position);
+    assert_ne!(
+        (
+            plain[(left, row)].style(),
+            plain[(left + wide - 1, row)].style()
+        ),
+        (
+            hovered[(left, row)].style(),
+            hovered[(left + wide - 1, row)].style()
+        ),
+        "the token's cells take the same ink under a pointer as at rest, so the mark \
+         is invisible"
+    );
+}
+
+/// Its title is the reading, so the list says what a chosen row will do.
+#[test]
+fn the_title_is_the_reading() {
+    let scratch = deep("standing-title", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    let drawn_box = box_rows(&screen(&view, &app, 80, 20));
+    let top = drawn_box.first().expect("the pane draws no box at all");
+    assert!(
+        top.contains(Standing::SINCE),
+        "the box's title is not the reading, so nothing says what choosing a row \
+         does: {top:?}"
+    );
+}
+
+/// `current` and the branch point lead the list, and the point is named by the
+/// branch rather than by a hash.
+#[test]
+fn current_and_the_branch_point_are_the_top_two_rows() {
+    let scratch = deep("standing-named", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    let rows = list_rows(&screen(&view, &app, 80, 20));
+    let named: Vec<&String> = rows.iter().take(2).collect();
+    assert!(
+        named[0].contains(Standing::CURRENT),
+        "the first row is not the live pane: {:?}",
+        named[0]
+    );
+    let (_, point) = worktree.branch_point().expect("a branch point");
+    assert!(
+        named[1].contains(&point),
+        "the second row does not name the branch point by its branch: {:?}",
+        named[1]
+    );
+    assert!(
+        point.chars().any(|c| !c.is_ascii_hexdigit()),
+        "the branch point is named {point:?}, which is a hash rather than something a \
+         reader would type"
+    );
+}
+
+/// Each named row carries the facts of the run it names, and a commit row carries
+/// its own three cells instead.
+#[test]
+fn a_named_row_carries_the_facts_of_the_run_it_names() {
+    let scratch = deep("standing-facts-rows", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    let rows = list_rows(&screen(&view, &app, 80, 20));
+    assert!(
+        rows[0].contains("1 changed") && rows[0].contains("+1") && rows[0].contains("-0"),
+        "the live row does not carry the run's count and total: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].contains("2 changed") && rows[1].contains("+3"),
+        "the branch point row does not carry its own run's facts: {:?}",
+        rows[1]
+    );
+    let walked = worktree.commits_from(None, 1).expect("a page");
+    let newest = walked.commits.first().expect("a commit");
+    assert!(
+        rows[2].contains(&newest.named) && rows[2].contains(&newest.subject),
+        "a commit row does not carry its abbreviation and its subject: {:?}",
+        rows[2]
+    );
+    assert!(
+        !rows[2].contains("changed"),
+        "a commit row counts a run, and a commit is a point rather than a run: {:?}",
+        rows[2]
+    );
+}
+
+/// The caret opens where the pane is standing, so the list says where you are.
+#[test]
+fn the_caret_opens_on_the_row_the_pane_stands_on() {
+    let scratch = deep("standing-caret", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+
+    opened(&worktree, &mut frame, &mut app, 8);
+    assert_eq!(
+        app.positions_caret().expect("no caret").at,
+        0,
+        "a pane standing at `current` opens the list somewhere other than its own row"
+    );
+
+    // And standing elsewhere moves it, by the commit rather than by a remembered index.
+    let walked = worktree.commits_from(None, 3).expect("a page");
+    let third = walked.commits[1].clone();
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("close");
+    app.stands(Asked::At(Standing::Since {
+        at: third.id,
+        named: third.named.clone(),
+    }));
+    opened(&worktree, &mut frame, &mut app, 8);
+    let at = app.positions_caret().expect("no caret").at;
+    let rows = list_rows(&screen(&view, &app, 80, 20));
+    assert!(
+        rows[at].contains(&third.named),
+        "the caret opened on row {at}, which is not the commit the pane is standing \
+         on: {:?}",
+        rows[at]
+    );
+}
+
+/// Choosing a row moves where the pane stands.
+#[test]
+fn choosing_a_row_moves_the_position() {
+    let scratch = deep("standing-pick", 4);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let _ = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    // Down twice from `current` lands on the newest commit, past the branch point.
+    for _ in 0..2 {
+        app.apply(Action::PositionsMove(1), &mut frame, 20)
+            .expect("move");
+    }
+    app.apply(Action::PositionsPick, &mut frame, 20)
+        .expect("pick");
+
+    let newest = worktree.commits_from(None, 1).expect("a page").commits[0].clone();
+    assert_eq!(
+        *app.asked(),
+        Asked::At(Standing::Since {
+            at: newest.id,
+            named: newest.named.clone(),
+        }),
+        "choosing a commit row did not ask the pane to stand there"
+    );
+    assert!(
+        !app.positions_open(),
+        "the list stayed up over the body it just sent the reader to look at"
+    );
+}
+
+/// The header's facts follow the row that was chosen.
+#[test]
+fn the_headers_facts_follow_the_row_that_was_chosen() {
+    let scratch = deep("standing-follows", 4);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let app = App::new();
+
+    let live = drawn(&mut frame, Standing::Current);
+    let live_files = live.files;
+
+    // Three commits back rather than the newest, so the range holds what those
+    // commits changed as well as the unstaged write and the two counts differ.
+    let walked = worktree.commits_from(None, 3).expect("a page");
+    let newest = walked.commits.last().expect("three commits").clone();
+    let chosen = Standing::Since {
+        at: newest.id,
+        named: newest.named.clone(),
+    };
+    let label = chosen.label();
+    let parked = drawn(&mut frame, chosen);
+    let header = header(&parked, &label, &app);
+
+    assert!(
+        header.contains(&format!(
+            "{label}{OPENS}{FACT_JOIN}{} changed",
+            parked.files
+        )),
+        "the header does not count the run the chosen row named: {header:?}"
+    );
+    assert!(
+        label.contains(&newest.named),
+        "the token does not name the commit that was chosen: {label:?}"
+    );
+    assert_ne!(
+        parked.files, live_files,
+        "the two runs hold the same count, so this gate cannot tell them apart"
+    );
+}
+
+/// Every way out of the list is the way out of the gestures sheet.
+#[test]
+fn the_list_closes_the_way_the_sheet_closes() {
+    let scratch = deep("standing-close", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    let regions = vigia::regions(
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+        &chrome_of(&app),
+        &view,
+    );
+    let over = regions.positions.expect("the pane drew no box");
+    assert_eq!(
+        vigia::positions_route(&key(KeyCode::Esc), Some(over)),
+        vigia::PositionsRoute::Close,
+        "`Esc` does not close the list"
+    );
+    assert_eq!(
+        vigia::positions_route(&press(over.close.0, over.close.1), Some(over)),
+        vigia::PositionsRoute::Close,
+        "the close control does not close the list"
+    );
+    assert_eq!(
+        vigia::positions_route(&press(0, 0), Some(over)),
+        vigia::PositionsRoute::Close,
+        "a press outside the box does not close it, which is the sheet's own rule"
+    );
+    assert_eq!(
+        vigia::positions_route(&key(KeyCode::Char('r')), Some(over)),
+        vigia::PositionsRoute::Through,
+        "`r` stopped reaching the map underneath, so the mode is wider than its edge \
+         says it is"
+    );
+}
+
+/// One overlay at a time, whichever one the reader asks for.
+#[test]
+fn only_one_overlay_is_ever_up() {
+    let scratch = deep("standing-one-overlay", 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let _ = drawn(&mut frame, Standing::Current);
+
+    app.apply(Action::ToggleMenu, &mut frame, 20).expect("menu");
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("list");
+    assert!(
+        app.positions_open() && !app.menu_open(),
+        "opening the list left the config menu up beside it, which B22 refuses"
+    );
+
+    app.apply(Action::ToggleMenu, &mut frame, 20).expect("menu");
+    assert!(
+        app.menu_open() && !app.positions_open(),
+        "opening the menu left the list up beside it"
+    );
+
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("list");
+    app.apply(Action::ToggleSheet, &mut frame, 20)
+        .expect("sheet");
+    assert!(
+        !app.positions_open(),
+        "opening the gestures sheet left the list up beside it"
+    );
+}
+
+/// The walk extends one page before the caret runs out of rows.
+///
+/// The extension itself needs a repository, so the decision is what this holds: a
+/// caret inside the last page asks for more, and one that has everything does not.
+#[test]
+fn the_list_extends_before_the_caret_reaches_its_end() {
+    let scratch = deep("standing-extend", 12);
+    let worktree = scratch.worktree();
+    let page = 6;
+    let walk = worktree.commits_from(None, page).expect("a page");
+    assert!(
+        walk.more,
+        "the fixture's history is not longer than one page, so this gate cannot see \
+         the walk extend"
+    );
+    let places = vigia::Places {
+        commits: walk.commits,
+        more: walk.more,
+        current: None,
+        point: None,
+    };
+
+    let top = vigia::positions::Caret { at: 0, top: 0 };
+    assert!(
+        !vigia::wants_more(top, &places),
+        "a caret at the top asked for another page, so opening the list walks the \
+         whole history"
+    );
+    let last = vigia::positions::Caret {
+        at: places.len() - 1,
+        top: 0,
+    };
+    assert!(
+        vigia::wants_more(last, &places),
+        "a caret at the last row walked does not extend, so the box stalls where the \
+         history does not"
+    );
+
+    let exhausted = vigia::Places {
+        more: false,
+        ..places
+    };
+    assert!(
+        !vigia::wants_more(last, &exhausted),
+        "a walk with nothing left behind it still asks for another page"
+    );
+}
+
+/// Nothing goes inert while the list is open. The second reading is what changes
+/// that, and the first must not.
+#[test]
+fn nothing_is_inert_while_the_list_is_open() {
+    let scratch = deep("standing-live", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let _ = drawn(&mut frame, Standing::Current);
+    let before = app.settings();
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    // The letters the list does not own still reach the map, and still do their work.
+    for action in [
+        Action::ToggleFollow,
+        Action::ToggleNotes,
+        Action::ToggleStaged,
+    ] {
+        app.apply(action, &mut frame, 20).expect("the toggle quit");
+    }
+    let after = app.settings();
+    assert!(
+        after.follow != before.follow
+            && after.notes != before.notes
+            && after.staged != before.staged,
+        "a toggle went inert while the list was open, which is #509's rule and not \
+         this one's"
+    );
+    assert!(
+        app.positions_open(),
+        "a toggle underneath the list put the list away"
+    );
+}
+
+/// `current` keeps counting while the list is open, under either standing.
+///
+/// Under `since` the live row is a run this frame is not drawing, so it is the one
+/// the shell walks; the gate drives the same seam by handing the app what a walk of
+/// that run holds and asserting the row moved.
+#[test]
+fn current_keeps_counting_while_the_list_is_open() {
+    let scratch = deep("standing-counting", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    let before = list_rows(&screen(&view, &app, 80, 20))[0].clone();
+    assert!(
+        before.contains("1 changed"),
+        "the live row does not count the tree the fixture wrote: {before:?}"
+    );
+
+    // A second write to the tree, and the row the shell refreshes moves with it.
+    scratch.write("src/second.rs", "five\n");
+    let mut places = app.places().clone();
+    let walked = worktree
+        .count_of(vigia_core::Origin::Unstaged, None)
+        .expect("a count");
+    places.current = Some(vigia::Facts {
+        files: walked.shown,
+        added: 2,
+        removed: 0,
+    });
+    app.set_places(places);
+
+    let after = list_rows(&screen(&view, &app, 80, 20))[0].clone();
+    assert!(
+        after.contains("2 changed"),
+        "the live row did not count the write that arrived while the list was open: \
+         {after:?}"
     );
 }

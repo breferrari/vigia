@@ -29,7 +29,10 @@ fn layout() -> Body {
         &App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -167,7 +170,10 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -184,7 +190,10 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -494,7 +503,10 @@ fn tall_layout(app: &App) -> Body {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -789,7 +801,10 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -944,7 +959,10 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1019,7 +1037,10 @@ fn a_refused_landing_is_settled_rather_than_deferred() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1090,7 +1111,10 @@ fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
         &app.chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

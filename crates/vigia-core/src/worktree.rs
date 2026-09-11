@@ -265,6 +265,66 @@ impl Worktree {
         out
     }
 
+    /// `want` commits, newest first, from HEAD or from the one after `after`.
+    ///
+    /// Resumed by id rather than by keeping the iterator. A `gix` walk borrows the
+    /// repository, so one held between frames would have to live beside the
+    /// `Worktree` it borrows; walking again from the last commit handed out costs a
+    /// page, because the history behind a tip is the same history whenever it is
+    /// asked for.
+    ///
+    /// # Errors
+    ///
+    /// HEAD is unborn, or the walk fails, which is [`Error::History`].
+    pub fn commits_from(&self, after: Option<gix::ObjectId>, want: usize) -> Result<Page> {
+        let tip = match after {
+            Some(id) => id,
+            None => self
+                .repo
+                .head_id()
+                .map_err(|e| Error::History(Box::new(e)))?
+                .detach(),
+        };
+        let walk = self
+            .repo
+            .rev_walk([tip])
+            .all()
+            .map_err(|e| Error::History(Box::new(e)))?;
+        // The tip a resumed page starts from was handed out by the page before it.
+        let skip = usize::from(after.is_some());
+        let mut page = Page::default();
+        for info in walk.skip(skip).take(want) {
+            let info = info.map_err(|e| Error::History(Box::new(e)))?;
+            page.visited += 1;
+            // Read off the last commit walked rather than by stepping one further:
+            // a commit with a parent is a history with more in it, and the walk's
+            // own traversal has already filled this in.
+            page.more = info.parent_ids.iter().next().is_some();
+            page.commits.push(Self::landmark(&info)?);
+        }
+        Ok(page)
+    }
+
+    /// What a row draws of one commit the walk handed back.
+    fn landmark(info: &gix::revision::walk::Info<'_>) -> Result<Landmark> {
+        let commit = info.object().map_err(|e| Error::History(Box::new(e)))?;
+        let subject = commit
+            .message()
+            .map_err(|e| Error::History(Box::new(e)))?
+            .summary()
+            .to_string();
+        let when = commit
+            .time()
+            .map_err(|e| Error::History(Box::new(e)))?
+            .seconds;
+        Ok(Landmark {
+            id: info.id,
+            named: info.id.to_hex_with_len(SHORT_ID).to_string(),
+            subject,
+            when,
+        })
+    }
+
     /// The run this standing names, which for `Current` is the pane's own walk.
     ///
     /// # Errors
@@ -545,6 +605,45 @@ pub struct Counted {
     pub shown: usize,
     /// Changes the pattern kept out of it.
     pub hidden: usize,
+}
+
+/// How many hex digits a commit row spells of an id.
+///
+/// Fixed rather than `gix`'s own `short_id`, which is however many digits
+/// disambiguate the commit in *this* object database: the same commit would draw a
+/// different width on a clone with more objects in it, and a column whose width
+/// moves between machines is worse than one that is occasionally ambiguous.
+pub const SHORT_ID: usize = 6;
+
+/// One commit a row of the position list names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Landmark {
+    /// The commit itself, which is what a position measures from.
+    pub id: gix::ObjectId,
+    /// The abbreviation a row draws, [`SHORT_ID`] digits of the id.
+    pub named: String,
+    /// The commit message's first line.
+    pub subject: String,
+    /// Seconds since the epoch, spelled as an age by whoever draws it: how long
+    /// ago this was depends on when the question is asked, and the engine has no
+    /// business answering that twice.
+    pub when: i64,
+}
+
+/// A page of history, and what the walk spent taking it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Page {
+    /// The commits, newest first.
+    pub commits: Vec<Landmark>,
+    /// Whether there is history behind the last of them.
+    pub more: bool,
+    /// Commits the walk stepped over.
+    ///
+    /// It is here so a gate can watch the walk stop. It equals `commits.len()`
+    /// while the walk is lazy, and becomes the whole history the moment anything
+    /// drains the iterator before taking from it, which is the one way this can
+    /// start costing what `SPEC.md` §3's I4 forbids.
+    pub visited: usize,
 }
 
 /// Iterator over one comparison's changes, less the ones the reader hid.

@@ -799,7 +799,10 @@ fn drive(
             let chrome = app.chrome(
                 NAME,
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -824,7 +827,10 @@ fn drive(
         let chrome = app.chrome(
             NAME,
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",

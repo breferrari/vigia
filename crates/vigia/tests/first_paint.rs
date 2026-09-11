@@ -64,7 +64,10 @@ fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
     let chrome = app.chrome(
         "fixture",
         None,
-        &standing.label(),
+        vigia::Stood {
+            position: &standing.label(),
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -93,7 +96,10 @@ fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
     let chrome = app.chrome(
         "fixture",
         None,
-        &standing.label(),
+        vigia::Stood {
+            position: &standing.label(),
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -399,7 +405,10 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
     let chrome = app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",

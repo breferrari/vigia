@@ -40,7 +40,10 @@ fn chrome(app: &App) -> Chrome {
     app.chrome(
         "fixture",
         Some("main"),
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",

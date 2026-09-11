@@ -1,8 +1,9 @@
 ---
 source: crates/vigia/tests/render.rs
+assertion_line: 1969
 expression: "screen(40, 4, &view, &chrome())"
 ---
-"vigia · current · 1 changed     watching"
+"vigia · current ▾ · 1 changed   watching"
 "M …ule/frame.rs              +12    -3  "
 "                                        "
 "q quit · f follow · ? keys           1/1"

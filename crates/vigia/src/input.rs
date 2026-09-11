@@ -152,6 +152,33 @@ pub struct Regions {
     /// The config menu, when it is drawn. Never beside the sheet: B22 draws one
     /// overlay at a time.
     pub menu: Option<Sheet>,
+    /// The list of places the pane can stand, when it is drawn. Never beside
+    /// either of the others, for the same rule.
+    pub positions: Option<Sheet>,
+    /// The header's position token, which a click opens the list from.
+    pub position: Option<Token>,
+}
+
+/// Where the header's position token is, so a pointer can be told it is over one.
+///
+/// A span on one row rather than a box, because the header is one row and a fact
+/// inside it moves along the ladder as the pane narrows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Token {
+    /// Left column, inclusive.
+    pub left: u16,
+    /// The row it is drawn on.
+    pub row: u16,
+    /// Columns it occupies, the glyph included.
+    pub width: u16,
+}
+
+impl Token {
+    /// Whether this cell is the token's.
+    #[must_use]
+    pub fn covers(self, column: u16, row: u16) -> bool {
+        row == self.row && column >= self.left && column < self.left.saturating_add(self.width)
+    }
 }
 
 /// Where the gestures sheet is, so a pointer can be told it is over one.
@@ -192,6 +219,7 @@ impl Regions {
         self.sheet
             .into_iter()
             .chain(self.menu)
+            .chain(self.positions)
             .any(|over| over.covers(column, row))
     }
 
@@ -219,6 +247,7 @@ impl Regions {
         // off the frontmost thing, which §11.1 gives to the overlay.
         self.sheet.is_none()
             && self.menu.is_none()
+            && self.positions.is_none()
             && self.diff.covers(column, row)
             && !self.diff.on_bar(column, row)
     }
@@ -257,7 +286,15 @@ impl Regions {
     /// What a pointer at `column`, `row` is over, for the mark `SPEC.md`
     /// §11.2 B10 adopts.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
-        // Either overlay first, because one is drawn over everything.
+        // Whichever overlay is up first, because one is drawn over everything.
+        if let Some(list) = self.positions
+            && list.covers(column, row)
+        {
+            if (column, row) == list.close {
+                return Some(Hovered::Button(column, row));
+            }
+            return crate::positions::row_at(list, row).map(|_| Hovered::PositionRow(row));
+        }
         if let Some(menu) = self.menu
             && menu.covers(column, row)
         {
@@ -265,6 +302,13 @@ impl Regions {
                 return Some(Hovered::Button(column, row));
             }
             return crate::menu::row_at(menu, row).map(|_| Hovered::MenuRow(row));
+        }
+        // The token is on the header, which no region covers, so it is asked
+        // before the bars rather than after them.
+        if let Some(token) = self.position
+            && token.covers(column, row)
+        {
+            return Some(Hovered::Position);
         }
         if let Some(sheet) = self.sheet
             && sheet.covers(column, row)
@@ -407,6 +451,12 @@ pub enum Hovered {
     /// [`Hovered::Row`]'s: one for both would mark a listed file under a pointer
     /// resting on the overlay drawn over it.
     MenuRow(u16),
+    /// A row of the position list, by the screen row, for [`Hovered::MenuRow`]'s
+    /// reason.
+    PositionRow(u16),
+    /// The header's position token. It carries no cell, because the one
+    /// derivation that says where the token is drawn is what marks it.
+    Position,
     /// The diff's gutter, by the screen row; drawn only where that row is a line.
     Gutter(u16),
     /// A note's left side, by the screen row; drawn only on a row of a note's own.
@@ -505,6 +555,11 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::MenuMove(_)
         | Action::MenuFlip
         | Action::MenuRow(_)
+        | Action::TogglePositions
+        | Action::ClosePositions
+        | Action::PositionsMove(_)
+        | Action::PositionsPick
+        | Action::PositionsRow(_)
         | Action::Escape
         | Action::Redraw
         | Action::Quit => return None,
@@ -694,6 +749,17 @@ pub enum Action {
     MenuFlip,
     /// Flip the row this many rows down its drawn window.
     MenuRow(u16),
+    /// Draw the list of places the pane can stand, or stop drawing it. `B`, and
+    /// the header's position token under a click.
+    TogglePositions,
+    /// Stop drawing it, wherever the caret is.
+    ClosePositions,
+    /// Move its caret by this many rows, negative for up.
+    PositionsMove(isize),
+    /// Stand where its caret is.
+    PositionsPick,
+    /// Stand where the row this many rows down its drawn window names.
+    PositionsRow(u16),
     /// Leave the frontmost thing: the gestures sheet if one is up, and the
     /// program if none is. `Esc`.
     Escape,
@@ -744,11 +810,16 @@ impl Action {
             | Self::CloseMenu
             | Self::MenuFlip
             | Self::MenuRow(_)
+            | Self::TogglePositions
+            | Self::ClosePositions
+            | Self::PositionsPick
+            | Self::PositionsRow(_)
             | Self::Escape
             | Self::Redraw
             | Self::Quit => self,
-            // The caret steps, so `n` steps is one action with `n` in it.
+            // A caret steps, so `n` steps is one action with `n` in it.
             Self::MenuMove(by) => Self::MenuMove(by.saturating_mul(times)),
+            Self::PositionsMove(by) => Self::PositionsMove(by.saturating_mul(times)),
         }
     }
 
@@ -803,6 +874,12 @@ impl Action {
             | Self::MenuMove(_)
             | Self::MenuFlip
             | Self::MenuRow(_)
+            // And the list's caret moves inside its own box, the same way.
+            | Self::TogglePositions
+            | Self::ClosePositions
+            | Self::PositionsMove(_)
+            | Self::PositionsPick
+            | Self::PositionsRow(_)
             | Self::ScrollList(_) => false,
             // Dragging the list's bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the diff's
@@ -848,7 +925,12 @@ impl Action {
             | Self::CloseMenu
             | Self::MenuMove(_)
             | Self::MenuFlip
-            | Self::MenuRow(_) => false,
+            | Self::MenuRow(_)
+            | Self::TogglePositions
+            | Self::ClosePositions
+            | Self::PositionsMove(_)
+            | Self::PositionsPick
+            | Self::PositionsRow(_) => false,
         }
     }
 }
@@ -934,8 +1016,12 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // `o` for overview. `l` is refused where `h` is: a vi motion everywhere else.
         KeyCode::Char('o') => Some(Action::ToggleOverview),
         KeyCode::Char('a') => Some(Action::ToggleStaged),
-        // `b` for the branch point, the only place it can stand so far.
+        // `b` for the branch point, which is the one place a key alone reaches.
         KeyCode::Char('b') => Some(Action::ToggleStanding),
+        // `B` for the list behind it, which is the same family a rung up: `g`/`G`
+        // and `j`/`J` have already taught that case is load bearing here, and the
+        // menu's arrival is the precedent for the letter staying where it was.
+        KeyCode::Char('B') => Some(Action::TogglePositions),
         // `w`, and it is the reflex rather than what was free. `ov` binds `[w]`, `[W]`
         // to a character-based wrap toggle, `bat` spells the opposite state `-S` /
         // `--chop-long-lines`, and `less` toggles the same state with `-S`.
@@ -973,6 +1059,16 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
             .then_some(())
             .filter(|()| (mouse.column, mouse.row) == sheet.close)
             .map(|()| Action::CloseSheet);
+    }
+
+    // The position token, on the header, which no region covers: a press on it opens
+    // the list, which is the same act `B` performs and the one the chevron promises.
+    // A press rather than a release, for the step buttons' reason.
+    if let Some(token) = regions.position
+        && token.covers(mouse.column, mouse.row)
+    {
+        return matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            .then_some(Action::TogglePositions);
     }
 
     // The bar is checked before the region it sits in. A press on the scrollbar column

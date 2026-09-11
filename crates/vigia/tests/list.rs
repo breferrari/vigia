@@ -38,7 +38,10 @@ fn chrome(app: &App) -> vigia::Chrome {
     app.chrome(
         "fixture",
         None,
-        "current",
+        vigia::Stood {
+            position: "current",
+            now: 0,
+        },
         Pointing::default(),
         Default::default(),
         "",
@@ -533,7 +536,10 @@ fn the_region_at_fifty_files() {
             &app.chrome(
                 "vigia",
                 None,
-                "current",
+                vigia::Stood {
+                    position: "current",
+                    now: 0,
+                },
                 Pointing::default(),
                 Default::default(),
                 "",
@@ -550,7 +556,10 @@ fn the_region_at_fifty_files() {
         let chrome = app.chrome(
             "vigia",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
@@ -1499,7 +1508,10 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
         ..vigia::App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             vigia::Pointing::default(),
             Default::default(),
             "",

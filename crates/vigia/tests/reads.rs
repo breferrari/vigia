@@ -60,7 +60,10 @@ fn layout_on(width: u16, height: u16) -> Body {
         &railed(App::new().chrome(
             "fixture",
             None,
-            "current",
+            vigia::Stood {
+                position: "current",
+                now: 0,
+            },
             Pointing::default(),
             Default::default(),
             "",
