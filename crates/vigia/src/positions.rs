@@ -94,14 +94,37 @@ impl Places {
         self.len() == 0
     }
 
-    /// Whether `page` is the history this list already holds, by its newest commit.
+    /// Take `page`, freshly walked from HEAD, as the front of this list, and say whether
+    /// the rows were replaced rather than grown.
     ///
-    /// A checkout moves HEAD, and the rows walked from one branch are not the rows of
-    /// another. Compared by the newest rather than by the whole list, because the older
-    /// end of two branches is usually the same and says nothing about which one this is.
-    #[must_use]
-    pub fn anchored_at(&self, page: &vigia_core::Page) -> bool {
-        self.commits.first().map(|at| at.id) == page.commits.first().map(|at| at.id)
+    /// A commit landing on the branch the list is already on leaves the page reaching
+    /// what is held, so only what sits in front of that is new and the reader keeps the
+    /// depth they scrolled to. That is the ordinary case here: the pane watches a tree an
+    /// agent is committing into, and clearing the rows on every commit would take the
+    /// reader's place away several times a minute.
+    ///
+    /// A checkout reaches nothing held, and then these rows are another branch's.
+    /// Replacing them is the only honest answer, because two histories interleaved by
+    /// date are a list that is neither, and the caller is told so it can put the caret
+    /// back where the pane stands.
+    pub fn re_anchor(&mut self, page: vigia_core::Page) -> bool {
+        let held = self.commits.first().map(|at| at.id);
+        if held == page.commits.first().map(|at| at.id) {
+            return false;
+        }
+        match held.and_then(|id| page.commits.iter().position(|at| at.id == id)) {
+            Some(at) => {
+                // `more` is a fact about the oldest row held, which gained nothing.
+                self.commits
+                    .splice(0..0, page.commits[..at].iter().cloned());
+                false
+            }
+            None => {
+                self.commits = page.commits;
+                self.more = page.more;
+                true
+            }
+        }
     }
 
     /// Take `page` onto the end of what is already walked.

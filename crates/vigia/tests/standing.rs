@@ -1343,66 +1343,112 @@ fn the_caret_lands_on_the_branch_point_once_its_row_is_walked() {
          branch point, so it says the reader is somewhere they are not"
     );
 
-    // And a reader who has moved the caret keeps it: the next page must not drag them
-    // back to where the pane happens to stand.
+    // And a reader who moves the caret keeps it. Moved while the caret is still owed,
+    // which is the order that makes the clearing load bearing: rows arriving after would
+    // otherwise land it back on the row the pane stands on.
+    app.apply(Action::ToggleStanding, &mut frame, 20)
+        .expect("b");
+    assert_eq!(*app.asked(), Asked::Current);
     app.apply(Action::PositionsMove(2), &mut frame, 20)
         .expect("move");
     let moved = app.positions_caret().expect("no caret").at;
-    let mut places = app.places().clone();
-    let from =
-        vigia::resume_from(app.positions_caret().expect("no caret"), &places).map(|at| at.id);
-    if let Some(from) = from {
-        places.extend(worktree.commits_from(Some(from), 8).expect("a page"));
-    }
-    app.set_places(places);
+    assert_ne!(
+        moved, 0,
+        "the move went nowhere, so the assertion below is vacuous"
+    );
+    app.set_places(app.places().clone());
     assert_eq!(
         app.positions_caret().expect("no caret").at,
         moved,
-        "a page arriving moved the caret the reader had put somewhere"
+        "rows arriving moved the caret the reader had put somewhere, so scrolling the          list fights whatever the pane happens to be standing on"
     );
 }
 
-/// A checkout re-anchors the list, rather than leaving it on the branch it opened on.
+/// A commit on the branch the list is on grows it; a checkout replaces it.
 ///
-/// The two named rows always recompute, so the defect this holds shut is silent: the
-/// rows above would tell the truth while every commit row named another branch's
-/// history for the life of the process.
+/// The first is the ordinary case and the one worth protecting: the pane watches a
+/// tree an agent is committing into, so clearing the rows whenever HEAD moves would
+/// take the reader's scroll depth away several times a minute. The second shares no
+/// history, and two branches interleaved by date are a list that is neither.
 #[test]
-fn the_list_re_anchors_when_the_history_moves() {
-    let scratch = deep("standing-anchor", 4);
+fn a_commit_grows_the_list_and_a_checkout_replaces_it() {
+    let scratch = deep("standing-anchor", 6);
     let worktree = scratch.worktree();
-    let page = worktree.commits_from(None, 8).expect("a page");
+
+    // A reader who has scrolled: two pages walked, not one.
+    let first = worktree.commits_from(None, 3).expect("a page");
     let mut places = vigia::Places {
-        commits: page.commits.clone(),
-        more: page.more,
+        commits: first.commits.clone(),
+        more: first.more,
         current: None,
         point: None,
     };
+    let from = first.commits.last().expect("three commits").id;
+    places.extend(worktree.commits_from(Some(from), 3).expect("a second page"));
+    let scrolled = places.len();
+    let deepest = places.commits.last().expect("commits").id;
     assert!(
-        places.anchored_at(&page),
-        "a list holding exactly the page it was filled from says it is somewhere else"
+        scrolled > 3,
+        "the fixture did not scroll, so nothing here is at risk"
     );
 
-    // A second branch off the same point, with its own commits on top.
-    scratch.git(&["checkout", "-b", "other", "HEAD~2"]);
+    // The same history again changes nothing at all.
+    let again = worktree.commits_from(None, 3).expect("a page");
+    assert!(
+        !places.re_anchor(again),
+        "a page of the history already held was read as another branch"
+    );
+    assert_eq!(
+        places.len(),
+        scrolled,
+        "an unchanged history moved the rows"
+    );
+
+    // One commit lands on the same branch: it goes on the front and the rest stays.
+    scratch.write("src/base.rs", "one more\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "the agent committed"]);
+    let grown = worktree.commits_from(None, 3).expect("a page");
+    assert!(
+        !places.re_anchor(grown),
+        "a commit on the branch the list is already on replaced every row"
+    );
+    assert_eq!(
+        places.len(),
+        scrolled + 1,
+        "the new commit did not go onto the front of what was already walked"
+    );
+    assert_eq!(
+        places.commits.first().map(|at| at.subject.clone()),
+        Some("the agent committed".to_owned()),
+        "the list does not lead with the commit that just landed"
+    );
+    assert_eq!(
+        places.commits.last().map(|at| at.id),
+        Some(deepest),
+        "the reader's scroll depth was discarded by a commit on their own branch"
+    );
+
+    // A checkout onto a divergent branch shares no head, so the rows are replaced.
+    scratch.git(&["checkout", "-b", "other", "HEAD~4"]);
     scratch.write("src/base.rs", "elsewhere\n");
     scratch.git(&["add", "-A"]);
     scratch.git(&["commit", "-m", "on the other branch"]);
-    let moved = worktree.commits_from(None, 8).expect("a page");
+    let moved = worktree.commits_from(None, 3).expect("a page");
     assert!(
-        !places.anchored_at(&moved),
-        "the list says it is anchored to a history whose newest commit it has never \
-         seen, so a checkout would leave every commit row naming the old branch"
+        places.re_anchor(moved),
+        "a checkout onto a branch the list shares no head with grew the list instead \
+         of replacing it, so it now draws two histories interleaved by date"
     );
-
-    // And re-anchoring replaces the rows rather than interleaving two branches.
-    places.commits.clear();
-    places.extend(moved.clone());
-    assert!(places.anchored_at(&moved));
     assert_eq!(
         places.commits.first().map(|at| at.subject.clone()),
         Some("on the other branch".to_owned()),
-        "the re-anchored list does not lead with the branch it is now on"
+        "the replaced list does not lead with the branch it is now on"
+    );
+    assert_eq!(
+        places.commits.len(),
+        3,
+        "the replaced list is not the page it was replaced by"
     );
 }
 
@@ -1486,6 +1532,15 @@ fn a_named_rows_totals_stand_in_the_columns_the_header_counts_in() {
         "+1".len() + vigia::COUNT_CELL - "-0".len() + 1,
         "the gap between the two totals is not the count cell the header lays its own \
          out against, so the sigils no longer line up down the column: {row:?}"
+    );
+
+    // The count sits a gap left of the added total, so the three cells are one field
+    // rather than two that happen to be near each other.
+    let changed = row.find("1 changed").expect("the live row draws no count");
+    assert_eq!(
+        plus - (changed + "1 changed".len()),
+        vigia::positions_gap(),
+        "the count is not a gap from the totals, so the row reads as two fields: {row:?}"
     );
 
     // And the right edge: `-0` ends on the box's inset, whatever the numbers spell.

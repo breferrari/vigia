@@ -421,10 +421,21 @@ impl App {
         &self.asked
     }
 
-    /// Put the request where the frame actually is, which is what a refusal or a
-    /// failed walk leaves the reader with.
+    /// Put the request somewhere, and owe the caret its row while a list is open.
+    ///
+    /// Every path that moves where the pane stands comes through here: the key, a
+    /// refusal, a failed walk, and a base lost under a parked pane. Which row the caret
+    /// is on is the list's only mark for where the pane is standing, so a standing that
+    /// moves under an open box and leaves the caret behind is a box pointing at the
+    /// wrong row.
     pub fn stands(&mut self, asked: Asked) {
         self.asked = asked;
+        self.caret_owed = self.positions.is_some();
+    }
+
+    /// Owe the caret its row, for a caller that moved the rows rather than the standing.
+    pub const fn owe_caret(&mut self) {
+        self.caret_owed = true;
     }
 
     /// The pane moved somewhere else and the walk that took it there succeeded.
@@ -829,12 +840,12 @@ impl App {
             // and a request that is refused or fails to walk must leave the reader
             // where they were rather than at the top of a run they never left.
             Action::ToggleStanding => {
-                self.asked = match self.asked {
+                // Anywhere else comes home, so the key stays a toggle rather than
+                // becoming a cycle once the list can name a third place.
+                self.stands(match self.asked {
                     Asked::Current => Asked::BranchPoint,
-                    // Anywhere else comes home, so the key stays a toggle rather
-                    // than becoming a cycle once the list can name a third place.
                     Asked::BranchPoint | Asked::At(_) => Asked::Current,
-                };
+                });
             }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
@@ -972,12 +983,12 @@ impl App {
             }
             Action::PositionsPick => {
                 if let Some(asked) = self.positions.and_then(|caret| self.asked_at(caret.at)) {
-                    self.asked = asked;
-                    // Closed on the pick, which is where this parts from the menu: a
-                    // flip is one of several a reader makes, and a place is the whole
-                    // gesture, so leaving the box up would cover the body they just
-                    // asked to look at.
+                    // Closed before the standing moves, which is where this parts from
+                    // the menu: a flip is one of several a reader makes and a place is
+                    // the whole gesture, so leaving the box up would cover the body they
+                    // just asked to look at, and a closed box owes its caret nothing.
                     self.positions = None;
+                    self.stands(asked);
                 }
             }
             Action::PositionsRow(offset) => {

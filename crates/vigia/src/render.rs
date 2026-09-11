@@ -3152,6 +3152,14 @@ const POSITIONS_AGE: usize = 4;
 /// field widths.
 const POSITIONS_FACTS: usize = 11 + COUNT_CELL + 1 + COUNT_CELL;
 
+/// Columns between a row's cells. Read by the suite, which holds the three cells of a
+/// named row's facts against it as one field rather than as cells that happen to be near
+/// each other.
+#[must_use]
+pub const fn positions_gap() -> usize {
+    POSITIONS_GAP
+}
+
 /// Columns between a row's cells.
 const POSITIONS_GAP: usize = 2;
 

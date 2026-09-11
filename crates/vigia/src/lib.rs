@@ -73,7 +73,7 @@ pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, COUNT_CELL, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells,
     NoteCount, PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell,
-    diff_height, menu_cell, note_cells, notice_area, regions, render, voice_style,
+    diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
@@ -1484,11 +1484,11 @@ impl Shell {
         // Re-anchored rather than only filled: a checkout moves HEAD, and a list walked
         // from one branch would name its commits for the life of the process.
         match worktree.commits_from(None, self.positions_page()) {
-            Ok(page) if !places.anchored_at(&page) => {
-                places.commits.clear();
-                places.extend(page);
+            Ok(page) => {
+                if places.re_anchor(page) {
+                    self.app.owe_caret();
+                }
             }
-            Ok(_) => {}
             // Said rather than swallowed: a history that will not walk still leaves the
             // two named rows, which are the places a reader came for.
             Err(e) => self.app.warn(e.to_string()),
@@ -2362,7 +2362,7 @@ mod tests {
             // And one walk per wake while it is up, rather than one per keypress.
             "if !std::mem::take(&mut self.places_stale) {",
             // Re-anchored, or a checkout leaves every commit row on the old branch.
-            "if !places.anchored_at(&page)",
+            "if places.re_anchor(page)",
         ] {
             assert!(
                 refresh.contains(rule),
