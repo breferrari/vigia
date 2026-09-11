@@ -447,8 +447,7 @@ fn word_for(key: &str, config: &Config) -> &'static str {
 /// Write `config` back into the reader's own file.
 ///
 /// Temp-and-rename, the note store's shape and for its reason: a reader who quits
-/// mid-write has a whole file either way. The temp carries this process's id so two
-/// panes cannot land on each other's, and the directory is made where none was.
+/// mid-write has a whole file either way, and the id in the temp keeps two panes apart.
 ///
 /// **A file that no longer parses is refused rather than rewritten**, because it
 /// means a reader is editing it by hand or it already holds what the next launch
@@ -458,8 +457,8 @@ fn word_for(key: &str, config: &Config) -> &'static str {
 ///
 /// # Errors
 ///
-/// The directory cannot be made, the file cannot be read, the file no longer
-/// parses, or the write cannot land.
+/// The directory cannot be made, the file cannot be read or no longer parses, or
+/// the write cannot land.
 pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
     let refuse = |why: std::io::Error| ConfigError::Unwritable {
         path: path.to_owned(),
@@ -474,12 +473,17 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
         Err(why) => return Err(refuse(why)),
     };
     parse(&source)?;
-    let temp = path.with_extension(format!("writing-{}", std::process::id()));
-    std::fs::write(&temp, rewrite(&source, config)).map_err(refuse)?;
-    std::fs::rename(&temp, path).map_err(|why| {
+    // A rename lands on the entry rather than what it points at, and a reader whose
+    // dotfiles are managed elsewhere has this path as a link into that tree. The
+    // temp goes beside the target, so the rename stays on one filesystem.
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    let temp = target.with_extension(format!("writing-{}", std::process::id()));
+    let wipe = |why: std::io::Error| {
         let _ = std::fs::remove_file(&temp);
         refuse(why)
-    })
+    };
+    std::fs::write(&temp, rewrite(&source, config)).map_err(wipe)?;
+    std::fs::rename(&temp, &target).map_err(wipe)
 }
 
 /// Read and parse a config file.

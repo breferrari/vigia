@@ -166,7 +166,7 @@ fn the_key_still_toggles_from_the_configured_state() {
     assert!(rail, "the configured shell did not start configured");
     assert!(
         following,
-        "a config file turned follow off, which is I5 and no key of this file"
+        "a config file with `follow` on did not start the pane following"
     );
 
     let scratch = support::Scratch::large_diff("config-toggles", 6, 1);
@@ -1177,5 +1177,47 @@ fn a_save_lands_whole_and_says_which_file_it_could_not_write() {
     assert!(
         refused.to_string().contains("config"),
         "the refusal does not name the file: {refused}"
+    );
+}
+
+/// A link is the reader's own arrangement, and a rename lands on the entry
+/// rather than on what it points at.
+#[test]
+fn a_save_writes_through_a_link_rather_than_over_it() {
+    // A dotfile manager owns the entry in the config directory and points it at a
+    // file in the tree it tracks. Replacing the entry orphans that file, and the
+    // pane then writes somewhere the reader does not keep, with nothing on screen
+    // to say the arrangement is gone.
+    let scratch = support::Scratch::new("config-link");
+    let kept = scratch.root().join("dotfiles/config");
+    std::fs::create_dir_all(kept.parent().expect("a parent")).expect("the tracked tree");
+    std::fs::write(&kept, "# mine\nrail = off\n").expect("seed the tracked file");
+
+    let link = scratch.root().join("config");
+    if !support::linked_file(&kept, &link) {
+        return;
+    }
+
+    let config = Config {
+        rail: true,
+        ..Config::default()
+    };
+    config::save(&link, &config).expect("a save through the link");
+
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .expect("the link")
+            .is_symlink(),
+        "the save replaced the reader's link with a file of its own"
+    );
+    let written = std::fs::read_to_string(&kept).expect("the tracked file");
+    assert!(
+        written.starts_with("# mine\n") && written.contains("rail = on"),
+        "the file the link points at was not the file that was written: {written:?}"
+    );
+    assert_eq!(
+        config::load(&link).expect("the saved file parses"),
+        config,
+        "what was saved is not what reads back through the link"
     );
 }

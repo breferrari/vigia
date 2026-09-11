@@ -2763,7 +2763,8 @@ mod tests {
         );
         assert!(
             applied < wrote,
-            "`flip_menu` writes before it flips, so the file keeps the state the              reader just left: {body}"
+            "`flip_menu` writes before it flips, so the file keeps the state the \
+             reader just left: {body}"
         );
 
         let settle = code

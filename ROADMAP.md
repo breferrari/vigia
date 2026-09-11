@@ -191,7 +191,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | The third word is `only`, and it is the reading that goes inert. **Blocked by [#508](https://github.com/breferrari/vigia/issues/508)** | [#509](https://github.com/breferrari/vigia/issues/509) |
 | ✅ | decision: whether the pane remembers a toggle, and where it writes it. **Ruled: the config menu, and remembering is one of its rows** | [#494](https://github.com/breferrari/vigia/issues/494) |
 | ✅ | Nothing shows the reader their own settings, and the config menu is what does | [#511](https://github.com/breferrari/vigia/issues/511) |
-| ⬜ | Nothing keeps a toggle the reader flipped, and remember between runs is what does | [#512](https://github.com/breferrari/vigia/issues/512) |
+| ✅ | Nothing keeps a toggle the reader flipped, and remember between runs is what does | [#512](https://github.com/breferrari/vigia/issues/512) |
 | ✅ | A reply shifts the note box and leaves the arrow off the rule it should hang from. **Reported from use** | [#466](https://github.com/breferrari/vigia/issues/466) |
 | ✅ | The resolve line is required so the reader can read it, and it leaves before they can. **Reported from use** | [#465](https://github.com/breferrari/vigia/issues/465) |
 | ✅ | Dragging over a note copies the diff line above it. **Reported from use** | [#468](https://github.com/breferrari/vigia/issues/468) |
