@@ -1178,6 +1178,14 @@ fn a_save_lands_whole_and_says_which_file_it_could_not_write() {
         refused.to_string().contains("config"),
         "the refusal does not name the file: {refused}"
     );
+    // And it says why before it says where. The footer takes a notice's tail off at
+    // the width it has, and a path is longer than the reason on every machine.
+    assert!(
+        !refused
+            .to_string()
+            .starts_with(&blocked.display().to_string()),
+        "the refusal leads with the path, so a narrow pane cuts the reason off it: {refused}"
+    );
 }
 
 /// A link is the reader's own arrangement, and a rename lands on the entry
@@ -1228,36 +1236,47 @@ fn a_save_through_a_link_with_nothing_behind_it_makes_what_it_names() {
     // A dotfiles tree whose links are made before it is checked out, which is the
     // one shape the path resolving above cannot answer: nothing to resolve to, and
     // the fallback it would otherwise take is the link itself.
-    let scratch = support::Scratch::new("config-dangling");
-    let kept = scratch.root().join("dotfiles/config");
-    let link = scratch.root().join("config");
-    if !support::linked_file(&kept, &link) {
-        return;
+    // Both shapes a link is written in. A tool that manages a tree writes the
+    // relative one as often as the whole path, and only one of them is resolved
+    // against the directory the link itself sits in.
+    for (what, from_its_own_directory) in [("a whole path", false), ("a relative path", true)] {
+        let scratch = support::Scratch::new(&format!("config-dangling-{from_its_own_directory}"));
+        let kept = scratch.root().join("dotfiles/config");
+        let link = scratch.root().join("config");
+        let relative = std::path::Path::new("dotfiles").join("config");
+        let names: &std::path::Path = if from_its_own_directory {
+            &relative
+        } else {
+            &kept
+        };
+        if !support::linked_file(names, &link) {
+            return;
+        }
+        assert!(
+            !kept.exists(),
+            "{what}: the fixture made the file it is about to write"
+        );
+
+        let config = Config {
+            rail: true,
+            ..Config::default()
+        };
+        config::save(&link, &config).expect("a save through a link with nothing behind it");
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .expect("the link")
+                .is_symlink(),
+            "{what}: the save replaced the reader's link with a file of its own"
+        );
+        assert!(
+            kept.exists(),
+            "{what}: the file the link names was not the file that was made"
+        );
+        assert_eq!(
+            config::load(&link).expect("the saved file parses"),
+            config,
+            "{what}: what was saved is not what reads back through the link"
+        );
     }
-    assert!(
-        !kept.exists(),
-        "the fixture made the file it is about to write"
-    );
-
-    let config = Config {
-        rail: true,
-        ..Config::default()
-    };
-    config::save(&link, &config).expect("a save through a link with nothing behind it");
-
-    assert!(
-        std::fs::symlink_metadata(&link)
-            .expect("the link")
-            .is_symlink(),
-        "the save replaced the reader's link with a file of its own"
-    );
-    assert!(
-        kept.exists(),
-        "the file the link names was not the file that was made"
-    );
-    assert_eq!(
-        config::load(&link).expect("the saved file parses"),
-        config,
-        "what was saved is not what reads back through the link"
-    );
 }

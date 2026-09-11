@@ -160,9 +160,10 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unreadable { path, why } | Self::Unwritable { path, why } => {
-                write!(f, "{}: {why}", path.display())
-            }
+            Self::Unreadable { path, why } => write!(f, "{}: {why}", path.display()),
+            // The footer cuts a notice's tail and a path is the long half, so at I6's
+            // forty columns the reason is what a refused write has to say first.
+            Self::Unwritable { path, why } => write!(f, "{why}: {}", path.display()),
             Self::UnknownKey { line, key } => write!(
                 f,
                 "line {line}: {key:?} is not a view setting. There are {}: {}",
