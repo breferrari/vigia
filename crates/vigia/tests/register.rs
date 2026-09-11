@@ -498,25 +498,51 @@ fn markdown() -> Vec<(String, String)> {
         .collect()
 }
 
-/// No prose paragraph in a tracked markdown file spans more than one line.
+/// The fragment of every `](#...)` link in `body`.
+fn in_page_targets(body: &str) -> Vec<String> {
+    body.match_indices("](#")
+        .filter_map(|(at, _)| {
+            let rest = &body[at + 3..];
+            let end = rest.find(')')?;
+            Some(rest[..end].to_owned())
+        })
+        .filter(|target| !target.is_empty())
+        .collect()
+}
+
+/// Every in-page link lands on an anchor the document writes itself.
 ///
-/// A wall rather than a ratchet, because the tree is clean and the class is
-/// mechanical: GitHub renders a single newline inside a paragraph as a real
-/// line break, so a body wrapped at eighty arrives at its reader broken
-/// mid-sentence. 811 forced breaks across sixteen of this repository's own pull
-/// requests before anyone measured it.
+/// A heading's anchor cannot be derived by reading the heading. `## ✍️ Notes
+/// to the agent` loses the writing hand and keeps the variation selector behind
+/// it, so what GitHub generates is that invisible character followed by
+/// `-notes-to-the-agent`. A link typed from the heading looks right on the page
+/// and goes nowhere, and the two spellings cannot be told apart by eye. Five
+/// headings in `README.md` carry an emoji of that shape.
 ///
-/// **Gated rather than written down, because it had been written down twice
-/// and lost twice.** An instruction cannot beat a corpus: these documents held
-/// 7,351 hard-wrapped lines, and a session reads them before it writes
-/// anything. Removing the examples is what makes the rule hold.
-///
-/// Code comments are deliberately out of scope. Nothing renders them, so a
-/// break there corrupts nothing, and they sit beside code held near a hundred
-/// columns where one long line reads worse.
-///
-/// Structure is not prose and is never counted: YAML frontmatter, fenced code,
-/// tables, list items, headings, blockquotes and thematic breaks.
+/// So the rule is the target rather than the spelling. A link to `#x` needs an
+/// `<a id="x">` in the same document, which GitHub rewrites to `user-content-x`
+/// and resolves the fragment against, the path its own heading anchors take.
+#[test]
+fn every_in_page_link_lands_on_an_anchor() {
+    let mut seen = 0usize;
+    for (name, body) in markdown() {
+        for target in in_page_targets(&body) {
+            seen += 1;
+            let written = format!("<a id=\"{target}\">");
+            assert!(
+                body.contains(&written),
+                "{name} links to #{target} and carries no {written}, so the link \
+                 is resolving against a heading slug nobody here can spell"
+            );
+        }
+    }
+    assert!(
+        seen > 0,
+        "no tracked document carries an in-page link, so this gate is passing \
+         over anything"
+    );
+}
+
 /// Every row of a markdown table has the cells its header declared.
 ///
 /// A row one cell short renders as a table with a hole in it, and nothing else
@@ -598,6 +624,25 @@ fn no_table_row_is_missing_a_cell() {
     );
 }
 
+/// No prose paragraph in a tracked markdown file spans more than one line.
+///
+/// A wall rather than a ratchet, because the tree is clean and the class is
+/// mechanical: GitHub renders a single newline inside a paragraph as a real
+/// line break, so a body wrapped at eighty arrives at its reader broken
+/// mid-sentence. 811 forced breaks across sixteen of this repository's own pull
+/// requests before anyone measured it.
+///
+/// **Gated rather than written down, because it had been written down twice
+/// and lost twice.** An instruction cannot beat a corpus: these documents held
+/// 7,351 hard-wrapped lines, and a session reads them before it writes
+/// anything. Removing the examples is what makes the rule hold.
+///
+/// Code comments are deliberately out of scope. Nothing renders them, so a
+/// break there corrupts nothing, and they sit beside code held near a hundred
+/// columns where one long line reads worse.
+///
+/// Structure is not prose and is never counted: YAML frontmatter, fenced code,
+/// tables, list items, headings, blockquotes and thematic breaks.
 #[test]
 fn no_prose_paragraph_is_hard_wrapped() {
     let files = markdown();
