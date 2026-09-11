@@ -1957,7 +1957,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// clause that named one reading. A raise with no new surface behind it is the thing
 /// this number is for.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 405430),
+    ("SPEC.md", 405412),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

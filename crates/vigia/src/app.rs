@@ -429,10 +429,9 @@ impl App {
         &self.asked
     }
 
-    /// Which of the two readings of a position is on.
-    ///
-    /// Derived from the request and never kept beside it: a second copy is how a
-    /// token saying one word and a list titled with the other come about.
+    /// Which of the two readings of a position is on. Derived from the request and
+    /// never kept beside it: a second copy is how a token saying one word and a list
+    /// titled with the other come about.
     pub fn reading(&self) -> Reading {
         match &self.asked {
             Asked::Current | Asked::BranchPoint => Reading::Since,
@@ -677,11 +676,14 @@ impl App {
     /// that stopped resolving changes how many rows there are.
     pub fn set_places(&mut self, places: Places) {
         self.places = places;
-        if std::mem::take(&mut self.caret_owed) {
-            let at = self.standing_row();
-            if let Some(caret) = self.positions.as_mut() {
-                caret.at = at;
-            }
+        // Only where the list holds the row: a checkout takes the pane's commit off
+        // the branch the list walks without taking the pane off it, and a caret sent
+        // to row 0 there marks a commit the reader is not at as the one they are.
+        if std::mem::take(&mut self.caret_owed)
+            && let Some(at) = self.standing_row()
+            && let Some(caret) = self.positions.as_mut()
+        {
+            caret.at = at;
         }
         self.settle_positions();
     }
@@ -730,12 +732,10 @@ impl App {
             .then_some(top + offset)
     }
 
-    /// The row the pane is currently standing on, which is where the list opens.
-    ///
-    /// A commit the reader picked is found by id rather than by a remembered index:
-    /// the walk can have grown since, and an index into a list that changed names a
-    /// different commit.
-    fn standing_row(&self) -> usize {
+    /// The row the pane is standing on, where the list opens, or `None` where the
+    /// list does not hold it. Found by id rather than by a remembered index: the walk
+    /// can have grown, and an index into a changed list names a different commit.
+    fn standing_row(&self) -> Option<usize> {
         let reading = self.reading();
         let wanted = |at: usize| match (&self.asked, self.places.row_at(at, reading)) {
             (Asked::Current, Some(positions::Row::Current))
@@ -747,13 +747,11 @@ impl App {
                 .is_some_and(|commit| Some(commit.id) == standing.at()),
             _ => false,
         };
-        (0..self.places.rows(reading))
-            .find(|at| wanted(*at))
-            .unwrap_or(0)
+        (0..self.places.rows(reading)).find(|at| wanted(*at))
     }
 
     /// What standing the row at `at` asks for, under the reading the list is titled
-    /// with: choosing a second commit does not quietly put the reader back.
+    /// with, so a second commit does not put the reader quietly back in the other.
     fn asked_at(&self, at: usize) -> Option<Asked> {
         let reading = self.reading();
         match self.places.row_at(at, reading)? {
@@ -1006,7 +1004,7 @@ impl App {
                     // Opened on the row the pane is standing on, so a list of
                     // destinations says where you are in no ink at all.
                     None => Some(positions::Caret {
-                        at: self.standing_row(),
+                        at: self.standing_row().unwrap_or(0),
                         top: 0,
                     }),
                     Some(_) => None,

@@ -2343,3 +2343,105 @@ fn a_parked_tick_reaches_no_frame() {
          parked pane cannot be told apart from a tree that stopped changing"
     );
 }
+
+/// A checkout takes the parked commit off the branch the list walks, and the caret
+/// does not go and mark a different one as where the pane is.
+///
+/// The caret is the only ink saying *you are here*, so a caret sent to row 0 when
+/// the standing is nowhere in the list claims the newest commit of a branch the
+/// reader never asked for. Under `only` that row is a commit and looks exactly like
+/// a correct answer.
+#[test]
+fn a_caret_never_marks_a_row_the_pane_is_not_standing_on() {
+    let scratch = history("only-checkout");
+    let worktree = scratch.worktree();
+    let page = worktree.commits_from(None, 9).expect("a page");
+    let commit = page.commits[1].clone();
+
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    app.set_places(vigia::Places {
+        commits: page.commits.clone(),
+        more: page.more,
+        current: None,
+        point: None,
+    });
+    app.apply(Action::TogglePositions, &mut frame, 0)
+        .expect("open the list");
+    assert_eq!(
+        app.positions_caret().map(|caret| caret.at),
+        Some(1),
+        "the caret did not open on the commit the pane is standing at, so the \
+         move below is unasserted"
+    );
+
+    // The rows the shell would hand over after a checkout to a branch this commit
+    // is not on: a page that reaches nothing held, which is what `re_anchor`
+    // replaces wholesale.
+    let elsewhere = history("only-checkout-elsewhere");
+    let other = elsewhere
+        .worktree()
+        .commits_from(None, 9)
+        .expect("another branch's page");
+    let mut places = app.places().clone();
+    assert!(
+        places.re_anchor(other.clone()),
+        "the second page reaches a commit the first held, so this is not the \
+         checkout case the gate is named for"
+    );
+    app.owe_caret();
+    app.set_places(places);
+
+    assert_eq!(
+        app.positions_caret().map(|caret| caret.at),
+        Some(1),
+        "the caret moved to a row of a branch the pane is not standing on, so \
+         the box marks a commit the reader never chose as the one they are at"
+    );
+}
+
+/// The three inert keys say nothing, and that is a decision rather than an
+/// oversight.
+///
+/// `O` refuses out loud because nothing on screen changes when it cannot act. These
+/// three are the opposite: the token reads `only`, the note marks are gone, the
+/// staged count is gone and the follow indicator is gone, so the pane is already
+/// answering, and a line per press would be noise on a surface whose whole thesis is
+/// that it can be glanced at.
+#[test]
+fn the_inert_keys_say_nothing_because_the_pane_already_does() {
+    let scratch = history("only-silence");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+
+    for action in [
+        Action::ToggleNotes,
+        Action::ToggleStaged,
+        Action::ToggleFollow,
+    ] {
+        app.clear_notice();
+        app.apply(action, &mut frame, 0).expect("the key");
+        assert_eq!(
+            app.notice(),
+            None,
+            "{action:?} put a line on the footer, and the pane below it is \
+             already saying the same thing in every surface the reading silenced"
+        );
+    }
+
+    // Non-vacuity: the footer is reachable from this pane, so the silence above is
+    // the keys' and not the fixture's.
+    app.apply(Action::ToggleStanding, &mut frame, 0)
+        .expect("come home");
+    app.apply(Action::ToggleReading, &mut frame, 0)
+        .expect("the key with no commit to flip");
+    assert!(
+        app.notice().is_some(),
+        "nothing reaches the footer from this pane at all, so the assertions \
+         above hold whatever the inert keys do"
+    );
+}

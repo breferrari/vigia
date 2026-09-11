@@ -367,21 +367,28 @@ impl Worktree {
     ///
     /// The commit, either tree, or the diff between them cannot be read.
     fn only(&self, at: gix::ObjectId, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
+        // Where the line between the two errors falls, and it decides whether a
+        // failure moves the reader. [`Error::Standing`] is what the shell answers by
+        // bringing the pane home, so it covers this position's own object and
+        // nothing else: a commit that cannot be read is a place nobody can stand.
+        // The parent and the diff between them are the *comparison*, which fails the
+        // way any walk fails and leaves the reader where they are.
         let commit = self
             .repo
             .find_object(at)
             .map_err(|e| Error::Standing(Box::new(e)))?
             .peel_to_commit()
             .map_err(|e| Error::Standing(Box::new(e)))?;
-        let parent = commit.parent_ids().next().map(gix::Id::detach);
         let tree = commit.tree().map_err(|e| Error::Standing(Box::new(e)))?;
+
+        let parent = commit.parent_ids().next().map(gix::Id::detach);
         let before = parent
             .map(|parent| {
                 self.repo
                     .find_object(parent)
-                    .map_err(|e| Error::Standing(Box::new(e)))?
+                    .map_err(|e| Error::Status(Box::new(e)))?
                     .peel_to_tree()
-                    .map_err(|e| Error::Standing(Box::new(e)))
+                    .map_err(|e| Error::Status(Box::new(e)))
             })
             .transpose()?;
 
@@ -393,7 +400,7 @@ impl Worktree {
                 Some(&tree),
                 gix::diff::Options::default().with_rewrites(rewrites),
             )
-            .map_err(|e| Error::Standing(Box::new(e)))?;
+            .map_err(|e| Error::Status(Box::new(e)))?;
 
         Ok(changes.iter().filter_map(committed_change).collect())
     }

@@ -253,6 +253,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `a` | show or hide staged changes |
 | `b` | stand at the branch point |
 | `B` | everywhere else it can stand |
+| `O` | that commit alone, or everything since it |
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide note rows |
 | `Enter` `Esc` | in a box: send, or cancel |

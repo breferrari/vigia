@@ -1160,6 +1160,49 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
     found
 }
 
+/// Every letter the map binds is taught by `README.md`'s key table.
+///
+/// Letters, because the page folds what the sheet spells out: `Home` reaches it
+/// through `g`, `Ctrl+D` through `q`, `Shift+↑` through `J`, and the digits through
+/// the range `1` to `6`. A letter has nothing to be folded into, so one the page
+/// never names is one a reader has to guess.
+///
+/// The other direction is [`every_gesture_the_readme_teaches_is_named_on_the_sheet`],
+/// and neither it nor the config file's own gate could see this: that one filters to
+/// the gestures a setting reaches, and a key deliberately kept out of the file
+/// reaches the page by hand alone. `O` was bound, drawn on the sheet and ruled into
+/// `SPEC.md` while absent from the document a reader meets first.
+#[test]
+fn every_letter_the_map_binds_is_taught_by_the_readme() {
+    let taught: Vec<String> = readme_gestures()
+        .iter()
+        .flat_map(|cell| {
+            cell.split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Non-vacuity: an extractor reading the document's shape wrongly finds nothing
+    // and every assertion below passes.
+    assert!(
+        taught.len() > 20,
+        "README.md's tables parsed to {} cells, so this gate is reading the          document rather than its rows",
+        taught.len()
+    );
+
+    let unnamed: Vec<String> = bound_keys()
+        .into_iter()
+        .map(|(_, token)| token)
+        .filter(|token| token.chars().all(|c| c.is_ascii_alphabetic()) && token.len() == 1)
+        .filter(|token| !taught.iter().any(|cell| cell == token))
+        .collect();
+    assert!(
+        unnamed.is_empty(),
+        "the key map binds {unnamed:?} and README.md never teaches them, so the          page a reader meets first is short of a gesture they would have to guess"
+    );
+}
+
 /// The phrases the sheet must carry for the gestures a pointer produces.
 fn mouse_phrases() -> Vec<&'static str> {
     let mut phrases: Vec<&'static str> = Vec::new();

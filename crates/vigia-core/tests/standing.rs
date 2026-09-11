@@ -989,3 +989,67 @@ fn an_only_run_comes_back_in_one_order() {
         );
     }
 }
+
+/// A position that names no commit is a place nobody can stand, and says so with
+/// the error the shell answers by coming home.
+#[test]
+fn only_at_something_that_is_not_a_commit_cannot_be_stood_at() {
+    let scratch = commits("only-not-a-commit");
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let blob = scratch
+        .git(&["rev-parse", "HEAD:src/moved.rs"])
+        .trim()
+        .to_owned();
+    let tree = scratch.git(&["rev-parse", "HEAD^{tree}"]).trim().to_owned();
+
+    for (what, id) in [("a blob", &blob), ("a tree", &tree)] {
+        let mut frame = worktree.frame();
+        frame.stand(only(id));
+        let failed = frame.advance().expect_err(&format!(
+            "{what} was accepted as a commit to stand at, so the pane would draw \
+             whatever the peel happened to produce"
+        ));
+        assert!(
+            matches!(failed, vigia_core::Error::Standing(_)),
+            "{what} failed as {failed:?} rather than as a position that will not \
+             resolve, so the shell would leave the pane parked on it forever"
+        );
+    }
+}
+
+/// A commit whose *parent* the object database has lost is a comparison that
+/// failed, not a position that is gone.
+///
+/// The difference is what the shell does next: `Error::Standing` brings the reader
+/// home, and every other walk failure leaves them where they are and is retried by
+/// the next wake. Collapsing the two evicts a reader from a commit that is intact.
+#[test]
+fn a_commit_whose_parent_is_gone_is_a_failed_walk_rather_than_a_lost_position() {
+    let scratch = commits("only-parent-gone");
+    let at = scratch.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let parent = scratch.git(&["rev-parse", "HEAD~2"]).trim().to_owned();
+
+    // Non-vacuity: the run walks before the parent is taken away.
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    assert!(
+        !only_at(&worktree, &at).files().is_empty(),
+        "the commit under test draws nothing even with its parent in place"
+    );
+
+    // Loose, because the fixture has never been packed.
+    let (dir, rest) = parent.split_at(2);
+    let object = scratch.root().join(".git/objects").join(dir).join(rest);
+    std::fs::remove_file(&object).expect("the parent object is not loose");
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.stand(only(&at));
+    let failed = frame
+        .advance()
+        .expect_err("the walk found a parent tree the object database no longer has");
+    assert!(
+        !matches!(failed, vigia_core::Error::Standing(_)),
+        "a lost parent reads as a position that will not resolve, so the shell \
+         takes a reader off a commit that is still there: {failed:?}"
+    );
+}
