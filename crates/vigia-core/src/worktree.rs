@@ -293,15 +293,19 @@ impl Worktree {
         // The tip a resumed page starts from was handed out by the page before it.
         let skip = usize::from(after.is_some());
         let mut page = Page::default();
-        for info in walk.skip(skip).take(want) {
+        // Counted at the walk rather than in the loop, which is the whole of what makes
+        // the number mean anything: a loop over a drained iterator still runs `want`
+        // times, so a counter inside the body cannot tell a page from a drain.
+        let mut visited = 0usize;
+        for info in walk.skip(skip).inspect(|_| visited += 1).take(want) {
             let info = info.map_err(|e| Error::History(Box::new(e)))?;
-            page.visited += 1;
             // Read off the last commit walked rather than by stepping one further:
             // a commit with a parent is a history with more in it, and the walk's
             // own traversal has already filled this in.
             page.more = info.parent_ids.iter().next().is_some();
             page.commits.push(Self::landmark(&info)?);
         }
+        page.visited = visited;
         Ok(page)
     }
 
@@ -637,12 +641,11 @@ pub struct Page {
     pub commits: Vec<Landmark>,
     /// Whether there is history behind the last of them.
     pub more: bool,
-    /// Commits the walk stepped over.
+    /// Commits the walk stepped over, counted at the walk and not in the loop over it.
     ///
-    /// It is here so a gate can watch the walk stop. It equals `commits.len()`
-    /// while the walk is lazy, and becomes the whole history the moment anything
-    /// drains the iterator before taking from it, which is the one way this can
-    /// start costing what `SPEC.md` §3's I4 forbids.
+    /// It is here so a gate can watch the walk stop. It equals `commits.len()` while the
+    /// walk is lazy and becomes the whole history the moment anything drains the
+    /// iterator first, which is the one way this starts costing what I4 forbids.
     pub visited: usize,
 }
 
