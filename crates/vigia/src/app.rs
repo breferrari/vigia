@@ -16,11 +16,11 @@ use crate::view::{Anchor, Position, View, Viewport, rows_in};
 /// Completed frames the status bar's p99 is taken over.
 const FRAME_SAMPLES: usize = 128;
 
-/// What the footer says where the reading has no commit to flip. The gesture comes
-/// first because the footer clips a notice from the right: sharing its row with a
-/// note count and a position leaves it around twenty columns in the forties, and
-/// whichever half is second is the half a reader does not get.
-const NOTHING_TO_READ: &str = "B lists commits; only reads one";
+/// What the footer says where the reading has no commit to flip. *Places* rather
+/// than commits, because this fires under `since`, where `B`'s top rows are the live
+/// pane and the branch point; and the gesture comes first because the footer clips a
+/// notice from the right, which leaves it eighteen columns in the forties.
+const NOTHING_TO_READ: &str = "B lists places; only reads one";
 
 /// Where the pane stands and when, as one frame draws it.
 ///

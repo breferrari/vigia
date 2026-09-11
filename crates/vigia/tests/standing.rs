@@ -37,7 +37,7 @@ const PULSE: &str = "●";
 
 /// The half of the footer's refusal a reader acts on. The footer clips a notice
 /// from the right, so the second half is the one that goes and this is the first.
-const GESTURE: &str = "B lists commits";
+const GESTURE: &str = "B lists places";
 
 /// The mark the footer leaves where it cut a notice, from `render`'s `CONTINUES`.
 ///
