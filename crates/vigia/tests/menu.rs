@@ -9,7 +9,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, Glyphs, MenuRoute, Pointing, Regions, SETTINGS, Setting, Theme,
+    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, Regions, SETTINGS, Setting, Theme,
     action_for, body_layout, menu_route, regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
@@ -374,6 +374,73 @@ fn a_click_anywhere_on_a_row_flips_that_row() {
         // somewhere stale.
         apply(app, frame, area(), Action::MenuFlip);
         assert!(!app.settings().rail, "the caret did not follow the click");
+    });
+}
+
+#[test]
+fn a_pointer_marks_the_row_it_rests_on_and_leaves_the_caret_where_it_was() {
+    let mut pane = Pane::open("menu-hover");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (_, laid) = paint(app, frame, highlighter, history, area());
+        let menu = laid.menu.expect("a menu region");
+
+        // The third drawn row, which the caret is not on.
+        let row = menu.top + 4;
+        let over = Regions {
+            menu: Some(menu),
+            ..Regions::default()
+        };
+        assert_eq!(
+            over.hover_at(menu.left + 6, row),
+            Some(Hovered::MenuRow(row)),
+            "a pointer resting on a row is not told it is over one"
+        );
+        // Its own variant, so a listed file underneath the overlay is not marked
+        // by a pointer that is nowhere near the list.
+        assert_ne!(
+            over.hover_at(menu.left + 6, row),
+            Some(Hovered::Row(row)),
+            "the menu's rows report themselves as listed files"
+        );
+        // And the frame is not a row.
+        assert_eq!(
+            over.hover_at(menu.left, menu.top + 1),
+            None,
+            "the box's own frame reports itself as a row"
+        );
+
+        let mut ink = |hovered: Option<Hovered>| {
+            let chrome = Chrome {
+                hovered,
+                ..chrome(app)
+            };
+            let body = body_layout(area(), &chrome, FILES, FILES);
+            let view = app
+                .view(frame, highlighter, history, body)
+                .expect("collect a view");
+            let mut buf = Buffer::empty(area());
+            render(
+                &mut buf,
+                area(),
+                &view,
+                &Theme::default(),
+                Glyphs::default(),
+                &chrome,
+            );
+            buf[(menu.left + 6, row)].fg
+        };
+        let theme = Theme::default();
+        assert_eq!(
+            ink(Some(Hovered::MenuRow(row))),
+            theme.path_hover.fg.expect("the hover ink names a colour"),
+            "a pointer resting on a row does not mark it"
+        );
+        assert_ne!(
+            ink(None),
+            theme.path_hover.fg.expect("the hover ink names a colour"),
+            "the row is drawn in the hover ink with no pointer on it, so the              assertion above proves nothing"
+        );
     });
 }
 
