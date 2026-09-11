@@ -51,8 +51,8 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
-    Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, Row as MenuRow, SETTINGS, STATE_WIDTH, Setting,
-    Settings, menu_route,
+    Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH, Setting, Settings,
+    menu_route,
 };
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
@@ -1140,8 +1140,17 @@ impl Shell {
         if action != Action::Redraw {
             self.deselect();
         }
+        let before = self.app.settings();
         let carried = self.app.apply(action, frame, height)?;
         self.stand(frame, worktree);
+        // Every flip is written back at once, whichever gesture made it: `r` from the
+        // map and the rail's row in the menu are one change to one setting. The press
+        // that turns remembering off is written too, or the file keeps `persist = on`
+        // and the next launch brings back the state the reader just left.
+        let after = self.app.settings();
+        if after != before && (before.persist || after.persist) {
+            self.remember();
+        }
         Ok(carried)
     }
 
@@ -1343,8 +1352,8 @@ impl Shell {
     fn flip_menu(&mut self, action: Action, frame: &mut vigia_core::Frame, worktree: &Worktree) {
         let before = self.app.settings();
         self.apply_menu(action, frame, worktree);
-        // A pointer can land on the rule and the air around it, and `SPEC.md` §11.1
-        // writes the file for a toggle the reader pressed and nothing else ever.
+        // A pointer can land on the rule and the air around it, and a receipt over a
+        // cell that did not change is a receipt for nothing.
         if self.app.settings() == before {
             return;
         }
@@ -1352,7 +1361,6 @@ impl Shell {
             motion::coalescing(SAID_ARRIVING),
             Instant::now(),
         ));
-        self.remember();
     }
 
     /// Write what the reader flipped into their own file, on the flip rather than
@@ -1363,9 +1371,6 @@ impl Shell {
     /// over nothing being written is the invisible state the menu exists to remove,
     /// and one alert a reader may have looked away from is not enough to remove it.
     fn remember(&mut self) {
-        if !self.app.settings().persist {
-            return;
-        }
         let Some(path) = self.config_path.clone() else {
             self.app
                 .warn("no home directory, so there is nowhere to remember");
@@ -2726,11 +2731,46 @@ mod tests {
              stale is read one frame late"
         );
 
-        // Every route that flips a menu row writes the reader's file, where they
-        // asked for it. `Shell` is private and no test can build one, so this is the
-        // join read rather than driven: `SPEC.md` §11.2 B22 puts the write on the
-        // flip, and a `flip_menu` that stopped calling `remember` would leave every
-        // gate over the writer and over the state green while nothing reached disk.
+        // Every flip writes the reader's file, whichever gesture made it. `Shell` is
+        // private and no test can build one, so this is the join read rather than
+        // driven: `SPEC.md` §11.1 writes back every flip while remembering is on, and
+        // a write hung off the menu's own route would leave every gate over the
+        // writer and over the state green while `r` and `f` reached no disk.
+        let applies = code
+            .find("fn apply(\n        &mut self,\n        action: Action,")
+            .expect("`Shell::apply` is gone");
+        let body = &code[applies..];
+        let body = &body[..body
+            .find(
+                "
+    }
+",
+            )
+            .expect("`Shell::apply` never closes")];
+        assert!(
+            body.contains("self.remember()"),
+            "the one place every action lands no longer writes the reader's file, so remembering is a row that says `on` and reaches nothing: {body}"
+        );
+        // Nothing is written for a press that moved nothing, and the press that turns
+        // remembering off is written: a file still reading `persist = on` brings back
+        // the state the reader just left.
+        assert!(
+            body.contains("if after != before && (before.persist || after.persist) {"),
+            "the write is read off the state the press left alone, so a press that moved nothing writes and the press that turns remembering off does not: {body}"
+        );
+        // And after the action rather than before it: a write ahead of the flip would
+        // keep the state the reader just left.
+        let (applied, wrote) = (
+            body.find("self.app.apply(action, frame, height)?")
+                .expect("`Shell::apply` no longer applies"),
+            body.find("self.remember()").expect("checked above"),
+        );
+        assert!(
+            applied < wrote,
+            "the write runs before the flip, so the file keeps the state the reader just left: {body}"
+        );
+        // The menu arms its receipt for a press that moved something and no other: the
+        // rule and the air around it are rows a pointer can land on.
         let flip = code
             .find("fn flip_menu(&mut self, action: Action")
             .expect("`Shell::flip_menu` is gone");
@@ -2743,28 +2783,8 @@ mod tests {
             )
             .expect("`flip_menu` never closes")];
         assert!(
-            body.contains("self.remember()"),
-            "`flip_menu` no longer writes the reader's file, so remembering is a row that says `on` and reaches nothing: {body}"
-        );
-        // And nothing is written for a press that moved nothing: the rule and the
-        // air around it are rows a pointer can land on, and a write there would
-        // clobber a hand-edit with a click that showed no sign of happening.
-        assert!(
             body.contains("if self.app.settings() == before {"),
-            "`flip_menu` writes whatever the press did, so a click on the menu's own \
-             furniture reaches the reader's file: {body}"
-        );
-        // And the write is the last thing it does, after the flip has landed: a
-        // write ahead of the action would keep the state the reader just left.
-        let (applied, wrote) = (
-            body.find("self.apply_menu(")
-                .expect("`flip_menu` no longer applies"),
-            body.find("self.remember()").expect("checked above"),
-        );
-        assert!(
-            applied < wrote,
-            "`flip_menu` writes before it flips, so the file keeps the state the \
-             reader just left: {body}"
+            "the menu arms a receipt over a cell no press changed: {body}"
         );
 
         let settle = code
