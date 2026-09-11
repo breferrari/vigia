@@ -27,6 +27,10 @@ const FACT_JOIN: &str = " · ";
 /// the word and the mark together.
 const OPENS: &str = " ▾";
 
+/// The footer's follow indicator, which is the state rather than the key: the hint
+/// bar names `f` whether or not the mode is acting.
+const FOLLOWING: &str = "follow ▶";
+
 fn viewport() -> Viewport {
     Viewport {
         position: Position { file: 0, row: 0 },
@@ -1552,5 +1556,793 @@ fn a_named_rows_totals_stand_in_the_columns_the_header_counts_in() {
         edge - (minus + "-0".len()),
         vigia::OVERLAY_FRAME / 2 + 1,
         "the removed total does not end on the box's own inset: {row:?}"
+    );
+}
+
+/// A branch with three commits on it, one staged file and one written, so the
+/// three readings hold three different runs and none can satisfy another's
+/// assertion by accident.
+fn history(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/base.rs", "one\ntwo\nthree\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-q", "-m", "init"]);
+    scratch.git(&["branch", "-M", "main"]);
+    scratch.git(&["checkout", "-q", "-b", "work"]);
+    scratch.write("src/first.rs", "first\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-q", "-m", "the first commit on the branch"]);
+    scratch.write("src/second.rs", "second\nand another line\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-q", "-m", "the second commit on the branch"]);
+    scratch.write("src/staged.rs", "staged\n");
+    scratch.git(&["add", "src/staged.rs"]);
+    scratch.write("src/written.rs", "written\n");
+    scratch
+}
+
+/// The newest commit on the branch, as a row of the position list names it.
+fn tip(worktree: &Worktree) -> vigia_core::Landmark {
+    worktree
+        .commits_from(None, 1)
+        .expect("a page of history")
+        .commits
+        .into_iter()
+        .next()
+        .expect("a commit")
+}
+
+/// Stand the app at `commit` under `reading`, the way choosing a row of the list
+/// does, and walk the frame there.
+fn stand_at(app: &mut App, frame: &mut Frame, commit: &vigia_core::Landmark, reading: Reading) {
+    let (at, named) = (commit.id, commit.named.clone());
+    app.stands(Asked::At(match reading {
+        Reading::Since => Standing::Since { at, named },
+        Reading::Only => Standing::Only { at, named },
+    }));
+    frame.stand(match app.asked() {
+        Asked::At(standing) => standing.clone(),
+        other => panic!("the request is {other:?} rather than the commit just asked for"),
+    });
+    frame.advance().expect("advance");
+}
+
+/// Everything one pane draws, through `App::view` and the painter rather than
+/// through a hand-built `View`: the gates below are about cells, and the
+/// assignment that fills a field from the engine is invisible to a literal.
+struct Painted {
+    text: String,
+    view: View,
+}
+
+impl Painted {
+    /// Whether any drawn cell carries `mark`.
+    fn draws(&self, mark: &str) -> bool {
+        self.text.contains(mark)
+    }
+
+    /// The file rows of the pinned list, without the run separators between them.
+    fn entries(&self) -> impl Iterator<Item = &vigia::FileEntry> {
+        self.view.list.iter().filter_map(vigia::ListRow::entry)
+    }
+}
+
+/// One pane, painted. `history` is the watch's store, which the sparkline, the
+/// pulse and the recency ramp are read from.
+fn painted(app: &mut App, frame: &mut Frame, watch: &History) -> Painted {
+    const PANE: ratatui::layout::Rect = ratatui::layout::Rect {
+        x: 0,
+        y: 0,
+        width: 120,
+        height: 30,
+    };
+    let mut highlighter = Highlighter::eager();
+    let standing = frame.standing().clone();
+    let chrome = app.chrome(
+        "fixture",
+        Some("work"),
+        vigia::Stood {
+            standing: &standing,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let body = vigia::body_layout(PANE, &chrome, frame.files().len(), frame.files().len());
+    let view = app
+        .view(frame, &mut highlighter, watch, body)
+        .expect("collect a view");
+    // Rebuilt after the collect the way the shell rebuilds it, so a count this
+    // frame placed reaches this frame's footer.
+    let chrome = app.chrome(
+        "fixture",
+        Some("work"),
+        vigia::Stood {
+            standing: &standing,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let mut terminal = Terminal::new(TestBackend::new(PANE.width, PANE.height)).expect("terminal");
+    let theme = Theme::default();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
+        })
+        .expect("draw");
+    let backend = terminal.backend().clone();
+    let buffer = backend.buffer();
+    let text = (buffer.area.top()..buffer.area.bottom())
+        .map(|y| {
+            (buffer.area.left()..buffer.area.right())
+                .map(|x| buffer[(x, y)].symbol().to_owned())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Painted { text, view }
+}
+
+/// A watch store that has just seen every path in `frame` written.
+fn watched(frame: &Frame) -> History {
+    let mut watch = History::new();
+    let paths: Vec<String> = frame
+        .files()
+        .iter()
+        .map(|change| change.path.clone())
+        .collect();
+    watch.record(paths.iter().map(String::as_str), std::time::Instant::now());
+    watch
+}
+
+/// A note on the first line of the first file the pane draws.
+fn note_on(frame: &mut Frame) -> Vec<vigia_core::Note> {
+    let (_, diff) = frame.diff(0).expect("a diff");
+    let (line, text) = diff.rows_on(vigia_core::Side::New)[0];
+    vec![vigia_core::Note {
+        id: "n0".to_owned(),
+        path: diff.path.clone(),
+        side: vigia_core::Side::New,
+        line,
+        text: text.to_owned(),
+        body: "a question for the agent".to_owned(),
+        status: vigia_core::Status::Open,
+        reply: None,
+        written: std::time::SystemTime::now(),
+    }]
+}
+
+/// The token spells the second reading and the commit it names.
+#[test]
+fn the_token_reads_only_and_the_id() {
+    let scratch = history("only-token");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+
+    let standing = frame.standing().clone();
+    let mut highlighter = Highlighter::eager();
+    let watch = History::new();
+    let view = View::collect(&mut frame, &mut highlighter, &watch, viewport()).expect("collect");
+
+    assert_eq!(standing.label(), format!("only {}", commit.named));
+    let drawn = header(&view, &standing, &app);
+    assert!(
+        drawn.contains(&format!(
+            "fixture{FACT_JOIN}work{FACT_JOIN}only {}",
+            commit.named
+        )),
+        "the header does not name the commit the pane is reading alone: {drawn:?}"
+    );
+}
+
+/// One key flips the reading, and the token and the body follow it together.
+#[test]
+fn the_key_flips_the_reading_with_the_list_closed() {
+    let scratch = history("only-flip");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Since);
+    let since_files = frame.files().len();
+
+    app.apply(Action::ToggleReading, &mut frame, 0)
+        .expect("the key");
+    assert_eq!(app.reading(), Reading::Only, "the key flipped nothing");
+    let Asked::At(standing) = app.asked().clone() else {
+        panic!("the flip moved the pane off the commit it was standing at");
+    };
+    assert_eq!(standing.at(), Some(commit.id), "the flip moved the commit");
+    frame.stand(standing);
+    frame.advance().expect("advance");
+
+    // Non-vacuity, and the point of the reading: one commit is not everything
+    // since it, and the fixture is built so the two cannot be the same number.
+    assert!(
+        frame.files().len() < since_files,
+        "the commit alone holds {} files against the range's {since_files}, so \
+         the two readings are drawing one run and the flip is unasserted",
+        frame.files().len()
+    );
+
+    app.apply(Action::ToggleReading, &mut frame, 0)
+        .expect("the key again");
+    assert_eq!(
+        app.reading(),
+        Reading::Since,
+        "the key is a mode rather than a toggle: it does not read back"
+    );
+}
+
+/// The same key with the box open, which is where a reader meets the two words.
+#[test]
+fn the_key_flips_the_reading_with_the_list_open() {
+    let scratch = history("only-flip-open");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Since);
+    app.apply(Action::TogglePositions, &mut frame, 0)
+        .expect("open the list");
+    assert!(app.positions_open(), "the list did not open");
+
+    app.apply(Action::ToggleReading, &mut frame, 0)
+        .expect("the key");
+
+    assert_eq!(app.reading(), Reading::Only, "the key flipped nothing");
+    assert!(
+        app.positions_open(),
+        "flipping the reading closed the list, so the reader has to reopen it to \
+         see what the word now lists"
+    );
+}
+
+/// Where no commit is named there is no reading to flip, and the footer says so.
+///
+/// `current` has no commit at all, and the branch point's is one the *other*
+/// branch made: reading it alone would draw work this branch did not do.
+#[test]
+fn the_key_refuses_where_no_commit_is_named() {
+    let scratch = history("only-refusal");
+    let worktree = scratch.worktree();
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    for asked in [Asked::Current, Asked::BranchPoint] {
+        app.stands(asked.clone());
+        app.clear_notice();
+        app.apply(Action::ToggleReading, &mut frame, 0)
+            .expect("the key");
+        assert_eq!(
+            *app.asked(),
+            asked,
+            "the key moved the pane off {asked:?}, which is not a reading it can \
+             be read the other way"
+        );
+        assert_eq!(app.reading(), Reading::Since);
+        let said = app.notice().unwrap_or_default().to_owned();
+        assert!(
+            said.contains("only") && said.contains('B'),
+            "the footer says {said:?} from {asked:?}, which does not say what \
+             could not be done or which gesture leads to a commit"
+        );
+    }
+}
+
+/// Under `only` the list is commit rows alone, and its title is the reading.
+#[test]
+fn the_list_under_only_draws_commits_alone() {
+    let scratch = history("only-list");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let page = worktree.commits_from(None, 9).expect("a page");
+    let places = vigia::Places {
+        commits: page.commits.clone(),
+        more: page.more,
+        current: Some(vigia::Facts::default()),
+        point: Some(("main".to_owned(), None)),
+    };
+
+    let live = places.rows(Reading::Since);
+    let parked = places.rows(Reading::Only);
+    assert_eq!(
+        parked,
+        page.commits.len(),
+        "the list under `only` draws something other than the commits"
+    );
+    assert_eq!(
+        live - parked,
+        2,
+        "the list lost {} rows rather than the two named places, which is the \
+         explanation the box gives instead of a line of text",
+        live - parked
+    );
+    assert!(
+        matches!(
+            places.row_at(0, Reading::Only),
+            Some(vigia::positions::Row::Commit(0))
+        ),
+        "the first row under `only` is not the newest commit"
+    );
+    assert_eq!(
+        vigia::positions::title(Reading::Only),
+        "only",
+        "the box is titled with something other than the reading it will apply"
+    );
+
+    // And the caret opens on the row the pane stands on, under the reading it
+    // stands in: a list of destinations says where you are in no ink at all.
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    app.set_places(places);
+    app.apply(Action::TogglePositions, &mut frame, 0)
+        .expect("open the list");
+    assert_eq!(
+        app.positions_caret().map(|caret| caret.at),
+        Some(0),
+        "the caret did not open on the commit the pane is standing at"
+    );
+}
+
+/// Choosing a row keeps the reading the box is titled with.
+#[test]
+fn a_chosen_row_keeps_the_reading() {
+    let scratch = history("only-pick");
+    let worktree = scratch.worktree();
+    let page = worktree.commits_from(None, 9).expect("a page");
+    let commit = page.commits[0].clone();
+    let second = page.commits[1].clone();
+
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    app.set_places(vigia::Places {
+        commits: page.commits,
+        more: page.more,
+        current: None,
+        point: None,
+    });
+    app.apply(Action::TogglePositions, &mut frame, 0)
+        .expect("open the list");
+    app.apply(Action::PositionsMove(1), &mut frame, 0)
+        .expect("move the caret");
+    app.apply(Action::PositionsPick, &mut frame, 0)
+        .expect("stand there");
+
+    let Asked::At(standing) = app.asked().clone() else {
+        panic!("choosing a commit row did not stand the pane at a commit");
+    };
+    assert_eq!(
+        standing.at(),
+        Some(second.id),
+        "the caret moved one row and the pane stood somewhere else"
+    );
+    assert_eq!(
+        standing.reading(),
+        Reading::Only,
+        "choosing a second commit put the reader back into the other reading, \
+         which the box's own title said it would not"
+    );
+}
+
+/// A commit that changed nothing names itself rather than the reading.
+///
+/// `no changes only a1b2c3` is not a sentence, and the id is on the header
+/// directly above, so the line points rather than repeats.
+#[test]
+fn the_empty_state_names_the_commit_rather_than_the_reading() {
+    let scratch = Scratch::new("only-empty");
+    scratch.write("src/base.rs", "one\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-q", "-m", "init"]);
+    scratch.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "a commit that did nothing",
+    ]);
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    let standing = frame.standing().clone();
+    let mut highlighter = Highlighter::eager();
+    let watch = History::new();
+    let view = View::collect(&mut frame, &mut highlighter, &watch, viewport()).expect("collect");
+
+    assert_eq!(view.files, 0, "the empty commit drew rows");
+    let line = body_line(&view, &standing, &app);
+    assert!(
+        line.contains("nothing in this commit"),
+        "the empty pane says {line:?} while reading one commit alone"
+    );
+    assert!(
+        !line.contains("only "),
+        "the line repeats the reading, so it reads as a phrase rather than a \
+         sentence: {line:?}"
+    );
+}
+
+/// `b` brings a parked pane home, as it does from anywhere else.
+#[test]
+fn b_comes_home_from_only() {
+    let scratch = history("only-home");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+
+    app.apply(Action::ToggleStanding, &mut frame, 0)
+        .expect("the key");
+
+    assert_eq!(
+        *app.asked(),
+        Asked::Current,
+        "`b` from a commit read alone does not come home, so the reader has no \
+         one key back to the pane they started on"
+    );
+}
+
+/// Nothing goes inert under `since`, which is the half no `only` gate can see.
+///
+/// A lever that fired in both readings would satisfy every assertion below about
+/// the parked pane and silence the live one too, and nothing there would say so.
+#[test]
+fn nothing_goes_inert_under_since() {
+    let scratch = history("since-live");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Since);
+    let watch = watched(&frame);
+    app.set_notes(note_on(&mut frame));
+
+    let before = app.settings();
+    for action in [
+        Action::ToggleFollow,
+        Action::ToggleStaged,
+        Action::ToggleNotes,
+    ] {
+        app.apply(action, &mut frame, 0).expect("the key");
+    }
+    let after = app.settings();
+    assert_ne!(
+        after.follow, before.follow,
+        "`f` reached nothing under `since`"
+    );
+    assert_ne!(
+        after.staged, before.staged,
+        "`a` reached nothing under `since`"
+    );
+    assert_ne!(
+        after.notes, before.notes,
+        "`c` reached nothing under `since`"
+    );
+
+    // Put the three back, so the pane below is the one a reader opens on.
+    for action in [
+        Action::ToggleFollow,
+        Action::ToggleStaged,
+        Action::ToggleNotes,
+    ] {
+        app.apply(action, &mut frame, 0).expect("the key");
+    }
+    let drawn = painted(&mut app, &mut frame, &watch);
+    assert!(
+        drawn.view.notes.writable,
+        "a note cannot be written on a live pane"
+    );
+    assert!(
+        drawn.draws("✎"),
+        "the reader's note has no mark:\n{}",
+        drawn.text
+    );
+    assert!(
+        drawn.draws("1 note"),
+        "the footer does not count the reader's note on a live pane, so the \
+         parked gate's count assertion would be satisfied by a footer that \
+         never counts:\n{}",
+        drawn.text
+    );
+    assert!(
+        drawn.entries().any(|entry| entry.newest),
+        "no row carries the pulse, so the watch's own marks are unasserted here"
+    );
+    assert!(
+        drawn
+            .entries()
+            .any(|entry| entry.spark.iter().any(|bucket| *bucket > 0)),
+        "no sparkline has a sample in it on a live pane"
+    );
+}
+
+/// Under `only` the notes are not drawn, and `c` reaches nothing.
+#[test]
+fn the_notes_go_inert_under_only() {
+    let scratch = history("only-notes");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    let watch = History::new();
+    app.set_notes(note_on(&mut frame));
+
+    let drawn = painted(&mut app, &mut frame, &watch);
+    assert!(
+        !drawn.draws("✎"),
+        "a note is marked on a line the agent beside the pane cannot act \
+         on:\n{}",
+        drawn.text
+    );
+    assert!(
+        !drawn.view.notes.writable,
+        "the screen still offers to open a box on a historical line"
+    );
+    assert!(
+        drawn.view.anchor_at(1).is_none(),
+        "a press on a content row would still anchor a note into history"
+    );
+    assert!(
+        !drawn.draws("1 note"),
+        "the footer counts a conversation about a tree the body is not \
+         drawing:\n{}",
+        drawn.text
+    );
+
+    let before = app.settings();
+    app.apply(Action::ToggleNotes, &mut frame, 0)
+        .expect("the key");
+    assert_eq!(
+        app.settings().notes,
+        before.notes,
+        "`c` flipped the note rows on a pane that draws none"
+    );
+}
+
+/// Under `only` the staged run is neither walked nor counted, and `a` is inert.
+#[test]
+fn the_staged_run_goes_inert_under_only() {
+    let scratch = history("only-staged");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    let watch = History::new();
+
+    let before = app.settings();
+    app.apply(Action::ToggleStaged, &mut frame, 0)
+        .expect("the key");
+    assert_eq!(
+        app.settings().staged,
+        before.staged,
+        "`a` asked for a run that is only definable against the index"
+    );
+
+    // And with the toggle already on, which is a reader who pressed `a` before
+    // they moved: the run must not follow them into history.
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    app.apply(Action::ToggleStaged, &mut frame, 0)
+        .expect("the key on a live pane");
+    assert!(app.staged(), "`a` reached nothing on the live pane");
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+
+    assert!(
+        !frame
+            .files()
+            .iter()
+            .any(|change| change.path == "src/staged.rs"),
+        "the staged run is walked beside a commit's own diff"
+    );
+    let drawn = painted(&mut app, &mut frame, &watch);
+    assert!(
+        !drawn.draws("staged"),
+        "the header counts a staged run beside a historical one:\n{}",
+        drawn.text
+    );
+}
+
+/// Under `only` follow reaches nothing, and the flag returns as it was.
+#[test]
+fn follow_goes_inert_under_only_and_returns_as_it_was() {
+    let scratch = history("only-follow");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    // The pane opens following, which is I5, so this is the state a reader is in
+    // when they stand somewhere else rather than one the gate had to arrange.
+    assert!(
+        app.settings().follow,
+        "the pane no longer opens following, so the gate below arranges its own          starting state and says nothing about the one a reader has"
+    );
+
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    let watch = History::new();
+    app.apply(Action::ToggleFollow, &mut frame, 0)
+        .expect("the key");
+    assert!(
+        app.settings().follow,
+        "`f` disengaged follow while the pane was parked, so what the reader \
+         left running is not what they come back to"
+    );
+
+    // The indicator rather than the word: the hint bar names the key either way,
+    // and a gate that could not tell the two apart would pass on a pane drawing
+    // no hints at all.
+    let drawn = painted(&mut app, &mut frame, &watch);
+    assert!(
+        !drawn.draws(FOLLOWING),
+        "the footer says the pane is following while `f` reaches nothing:\n{}",
+        drawn.text
+    );
+
+    // And it is still on when the reading goes back, which is what keeping the
+    // flag is for.
+    app.apply(Action::ToggleReading, &mut frame, 0)
+        .expect("the key");
+    assert!(
+        app.settings().follow,
+        "follow did not return as it was when the reading went back"
+    );
+}
+
+/// Under `only` the watch's time series describes another moment, so it is not
+/// drawn. The heat strip is positional within a file and survives.
+#[test]
+fn the_sparkline_and_the_pulse_go_inert_under_only_and_the_heat_strip_survives() {
+    let scratch = history("only-watch");
+    let worktree = scratch.worktree();
+    let commit = tip(&worktree);
+    let mut app = App::new();
+    let mut frame = worktree.frame();
+    stand_at(&mut app, &mut frame, &commit, Reading::Only);
+    // The store holds every path the commit touched, so a pane reading it would
+    // draw a sparkline and a pulse on every row. That is what must not happen.
+    let watch = watched(&frame);
+
+    let drawn = painted(&mut app, &mut frame, &watch);
+    assert!(
+        drawn.entries().next().is_some(),
+        "the parked pane lists no files, so nothing below is asserted"
+    );
+    for entry in drawn.entries() {
+        assert!(
+            entry.spark.iter().all(|bucket| *bucket == 0),
+            "{} draws a sparkline of writes that happened after the commit it \
+             is a row of",
+            entry.path
+        );
+        assert!(
+            !entry.newest,
+            "{} carries the pulse, which says the watch just saw it written",
+            entry.path
+        );
+        assert_eq!(
+            entry.recency,
+            vigia_core::Recency::Cold,
+            "{} is drawn on a recency rung the watch cannot know about here",
+            entry.path
+        );
+    }
+    assert!(
+        drawn
+            .entries()
+            .any(|entry| entry.heat.iter().any(|bucket| bucket.total() > 0)),
+        "no heat strip has a bucket in it, so the half that survives is \
+         unasserted and this gate would pass on a pane that drew nothing"
+    );
+}
+
+/// A write to the tree under `only` says so once and moves nothing.
+#[test]
+fn a_write_under_only_says_so_and_the_count_is_the_bursts() {
+    assert_eq!(vigia::arrival_line(0), None, "an empty burst is not news");
+    assert_eq!(
+        vigia::arrival_line(1).as_deref(),
+        Some("1 file written in the working tree"),
+        "the line does not read as a sentence at one file"
+    );
+    assert_eq!(
+        vigia::arrival_line(3).as_deref(),
+        Some("3 files written in the working tree"),
+        "the line does not say how much moved, or does not name the tree"
+    );
+    // It has to name the tree rather than the pane: a reader standing at a
+    // commit reads `3 files changed` as the commit's own count.
+    for said in [vigia::arrival_line(1), vigia::arrival_line(9)] {
+        let said = said.expect("a burst says something");
+        assert!(
+            said.contains("working tree"),
+            "{said:?} does not say which of the two the count is about"
+        );
+    }
+}
+
+/// The tick reaches the frame on a live pane and no frame on a parked one.
+///
+/// The predicate rather than the arm, and then the arm read for the call: a walk
+/// under `only` re-diffs two commits that cannot have changed, and the arriving
+/// marks it feeds would pulse rows the watch was never describing.
+#[test]
+fn a_parked_tick_reaches_no_frame() {
+    assert!(
+        Standing::Current.reading().is_live(),
+        "the live pane's tick would skip its own walk"
+    );
+    let at = tip(&history("only-tick").worktree()).id;
+    let named = "a1b2c3".to_owned();
+    assert!(
+        Standing::Since {
+            at,
+            named: named.clone()
+        }
+        .reading()
+        .is_live(),
+        "a range ending at the working tree stopped walking on a write"
+    );
+    assert!(
+        !Standing::Only { at, named }.reading().is_live(),
+        "a commit read alone still walks on every write to the tree"
+    );
+
+    let source = include_str!("../src/lib.rs");
+    let arm = source
+        .split("Wake::Tick(paths) => {")
+        .nth(1)
+        .expect("the tick arm is gone");
+    let arm = &arm[..arm
+        .find("Wake::WatchLost")
+        .expect("the tick arm never ends")];
+    // The guard whole, not the call inside it. A search for `shell.app.live()`
+    // alone is answered by any expression that mentions it, `if false && ...`
+    // included, and that mutant leaves a parked pane walking on every write with
+    // every assertion here green.
+    let (parked, walked) = (
+        arm.find("if !shell.app.live() {")
+            .expect("the tick no longer branches on where the pane stands"),
+        arm.find("frame.advance()")
+            .expect("the tick no longer walks"),
+    );
+    assert!(
+        parked < walked,
+        "the tick walks before it asks whether anything it walks for is drawn, \
+         so a parked pane pays a status walk on every write"
+    );
+    // And the branch has to leave, or the lines below it run anyway.
+    let branch = &arm[parked..walked];
+    assert!(
+        branch.contains("continue;"),
+        "the parked branch falls through into the live path, so a parked pane \
+         draws arrival marks on rows the watch is not describing:\n{branch}"
+    );
+    assert!(
+        arm.contains("arrival_line"),
+        "the tick no longer says anything on a write it does not act on, so a \
+         parked pane cannot be told apart from a tree that stopped changing"
     );
 }

@@ -1930,8 +1930,6 @@ impl Shell {
         // file count so the read happens on exactly the frames that draw the answer.
         // That is the whole of I4 for this read.
         self.branch = worktree.branch();
-        let position = frame.standing().label();
-        let reading = frame.standing().reading();
 
         // The chrome is built before the layout, not after, because the footer takes a
         // second line at narrow widths and `body_layout` has to know whether this frame

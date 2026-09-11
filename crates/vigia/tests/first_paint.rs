@@ -64,10 +64,7 @@ fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
     let chrome = app.chrome(
         "fixture",
         None,
-        vigia::Stood {
-            standing: &standing,
-            now: 0,
-        },
+        vigia::Stood { standing, now: 0 },
         Pointing::default(),
         Default::default(),
         "",
@@ -96,10 +93,7 @@ fn cold_start_at(root: &std::path::Path, standing: &Standing) -> FirstPaint {
     let chrome = app.chrome(
         "fixture",
         None,
-        vigia::Stood {
-            standing: &standing,
-            now: 0,
-        },
+        vigia::Stood { standing, now: 0 },
         Pointing::default(),
         Default::default(),
         "",

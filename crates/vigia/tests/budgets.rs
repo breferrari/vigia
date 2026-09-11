@@ -1938,6 +1938,120 @@ fn a_frame_under_the_position_list_holds_the_frame_budget() {
     );
 }
 
+/// I9 with the pane standing at one commit alone. `SPEC.md` §11.1.
+///
+/// The frame path is a different shape here rather than a cheaper one by
+/// assertion: no status walk, no read of the working tree, no history and no
+/// notes. That it is cheaper is what the numbers below say; what they are here to
+/// catch is a still picture that stopped being still, because a walk reappearing
+/// on this path costs the whole run on every write while nothing on screen moves.
+#[test]
+fn a_parked_frame_holds_the_frame_budget() {
+    let scratch = Scratch::large_diff("shell-i9-parked", FILES, LINES);
+    let worktree = scratch.worktree();
+    let commit = worktree
+        .commits_from(None, 1)
+        .expect("a page of history")
+        .commits
+        .into_iter()
+        .next()
+        .expect("the fixture committed its baseline");
+
+    let mut app = App::new();
+    app.stands(vigia::Asked::At(Standing::Only {
+        at: commit.id,
+        named: commit.named.clone(),
+    }));
+    let mut frame = worktree.frame();
+    frame.stand(Standing::Only {
+        at: commit.id,
+        named: commit.named,
+    });
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        FILES,
+        "the commit the pane is parked at does not hold the fixture's files, so \
+         the frames below are timing a pane with nothing on it"
+    );
+
+    let pane = area();
+    let screen = layout_of(&app, pane, FILES);
+    let mut highlighter = Highlighter::eager();
+    // The watch's own store, full, so a frame that went back to reading it would
+    // pay for that here rather than being timed on an empty one.
+    let mut history = History::new();
+    for change in frame.files() {
+        sample(&mut history, scratch.root(), &change.path);
+    }
+
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+
+    let _timed = exclusively_timed();
+
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(pane);
+    // `frame_body` rather than `shell_frame`, because the walk is exactly what a
+    // parked tick does not do: the two ends are commits and nothing can move them.
+    let mut next_frame =
+        |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &History| {
+            time_cpu(|| {
+                frame_body(frame, app, highlighter, history, &mut buf, &theme, screen);
+            })
+        };
+
+    for _ in 0..WARMUP_FRAMES {
+        next_frame(&mut frame, &mut app, &mut highlighter, &history);
+    }
+
+    let before = highlighter.stats();
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(next_frame(&mut frame, &mut app, &mut highlighter, &history).0);
+    }
+    let cost = highlight_delta(before, highlighter.stats());
+
+    // The screen has to have been full, or a frame that drew two rows is cheap for
+    // a reason that is not the code.
+    drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
+        screen.diff,
+    );
+    // And the still picture has to still be still, in both directions. Nothing may
+    // be re-parsed, because nothing moved; and the hunk on screen has to be reached
+    // on every frame, or these numbers belong to a pane that drew from a cache
+    // nobody asked and would stay green with the highlighter cut out of the path.
+    assert_eq!(
+        cost.parsed, 0,
+        "{} hunks were re-parsed over a commit that cannot change, so the frame \
+         path is rebuilding a picture nothing moved",
+        cost.parsed
+    );
+    assert_eq!(
+        cost.reused, SAMPLED_FRAMES as u64,
+        "{} of {SAMPLED_FRAMES} frames reached the highlighter, so the rest drew \
+         without one and the cost below is not a whole frame's",
+        cost.reused
+    );
+
+    holds_p99(
+        &format!(
+            "I9: a frame parked at one commit over {FILES} files on a {}x{} pane",
+            pane.width, pane.height
+        ),
+        budget(I9_FRAME),
+        &frames,
+        || format!("({} hunks reused, {} lines)", cost.reused, cost.lines),
+        || next_frame(&mut frame, &mut app, &mut highlighter, &history),
+    );
+}
+
 /// The pane the roomy rung's own budget is measured on.
 const ROOMY_PANE: Rect = Rect {
     x: 0,
