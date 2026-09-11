@@ -214,7 +214,7 @@ pub fn place_of(action: &Action) -> Place {
             gesture: "m",
         },
         Action::MenuReset => Place::Neither(
-            "putting every toggle back is an act rather than a state, so there is no              pane a launch could start inside one of",
+            "putting every toggle back is an act rather than a state, so there is no pane a launch could start inside one of",
         ),
         Action::Scroll(_)
         | Action::ScrollList(_)

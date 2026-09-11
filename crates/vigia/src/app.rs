@@ -723,17 +723,35 @@ impl App {
             // file, which is the one thing this row must not do without being asked
             // a second time.
             Action::MenuReset => {
-                let shipped = crate::Config::default();
-                self.following = shipped.follow;
-                self.rail = shipped.rail;
-                self.single = shipped.single;
-                self.overview = shipped.overview;
-                self.wrap = shipped.wrap;
-                self.notes_shown = shipped.notes;
-                self.icons = shipped.icons;
-                self.links = shipped.links;
-                self.persist = shipped.persist;
-                if self.staged != shipped.staged {
+                // Destructured with no `..`, so an eleventh setting stops this
+                // compiling rather than being silently left where the reader put it:
+                // a reset that misses a row is a reset nothing on screen can show.
+                let crate::Config {
+                    follow,
+                    rail,
+                    single,
+                    overview,
+                    staged,
+                    wrap,
+                    notes,
+                    icons,
+                    links,
+                    persist,
+                    // No gesture reaches it, so no reset does either.
+                    hide: _,
+                } = crate::Config::default();
+                self.following = follow;
+                self.rail = rail;
+                self.single = single;
+                self.overview = overview;
+                self.wrap = wrap;
+                self.notes_shown = notes;
+                self.icons = icons;
+                self.links = links;
+                self.persist = persist;
+                // The one that changes what the frame walks, so it goes through the
+                // arm that walks it and can fail.
+                if self.staged != staged {
                     return self.apply(Action::ToggleStaged, frame, height);
                 }
             }

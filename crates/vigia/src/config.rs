@@ -326,21 +326,39 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 
 /// The reader's file with the lines this pane owns brought up to date.
 ///
-/// Every other byte survives: comments, blank lines, the order they chose, the
-/// spacing they aligned their `=` with, and `hide`, which no gesture reaches and
-/// which the menu therefore never writes. A key the file lacks is appended rather
-/// than inserted, so a hand-written file keeps its author's shape and only grows
-/// at the end.
-///
-/// **Only the value is replaced**, never the line: a line carries the reader's own
-/// alignment before the `=` and may carry their comment after the value, and both
-/// are theirs. A rewrite that rebuilt the line would reformat a file on every flip.
+/// **Only the value is replaced, never the line.** A line carries the reader's
+/// alignment before its `=`, their comment after the value, and their own ending,
+/// and all three are theirs: a rewrite that rebuilt the line would reformat the
+/// file on every flip and their editor would put it back on every save. Comments,
+/// blank lines, key order and `hide` survive untouched, and a key the file lacks is
+/// appended rather than inserted, so a hand-written file only grows at the end.
 #[must_use]
 pub fn rewrite(source: &str, config: &Config) -> String {
-    let mut out = String::with_capacity(source.len() + KEYS.len() * 16);
-    let mut written: Vec<&str> = Vec::with_capacity(KEYS.len());
+    // Taken off the front and put back, for the reason `parse` strips it: U+FEFF is
+    // `Cf` rather than `White_Space`, so it survives every trim and lands inside the
+    // first key, which would then be unrecognised and appended a second time.
+    let mark = source.starts_with('\u{FEFF}');
+    let body = if mark {
+        &source['\u{FEFF}'.len_utf8()..]
+    } else {
+        source
+    };
 
-    for raw in source.lines() {
+    let mut out = String::with_capacity(source.len() + KEYS.len() * 16);
+    if mark {
+        out.push('\u{FEFF}');
+    }
+    let mut written: Vec<&str> = Vec::with_capacity(KEYS.len());
+    // Taken from the first line that has one, so a file written on Windows stays
+    // one and an appended key takes the ending the rest of the file has.
+    let mut ending = "\n";
+
+    for piece in body.split_inclusive('\n') {
+        let raw = piece.trim_end_matches('\n').trim_end_matches('\r');
+        let tail = &piece[raw.len()..];
+        if !tail.is_empty() {
+            ending = tail;
+        }
         match owned_key(raw, &written)
             .and_then(|(key, at)| KEYS.iter().find(|name| **name == key).map(|key| (*key, at)))
         {
@@ -350,16 +368,15 @@ pub fn rewrite(source: &str, config: &Config) -> String {
                 out.push(' ');
                 out.push_str(word_for(key, config));
                 // What the reader wrote after their own value, which is a comment
-                // or nothing: `value_of` is what says where the value ended.
-                let after = &raw[at + 1..];
-                if let Some(mark) = comment_in(after) {
+                // or nothing: `comment_in` is what says where the value ended.
+                if let Some(said) = comment_in(&raw[at + 1..]) {
                     out.push(' ');
-                    out.push_str(mark.trim_end());
+                    out.push_str(said.trim_end());
                 }
             }
             None => out.push_str(raw),
         }
-        out.push('\n');
+        out.push_str(tail);
     }
 
     let missing: Vec<String> = KEYS
@@ -368,15 +385,16 @@ pub fn rewrite(source: &str, config: &Config) -> String {
         .map(|key| format!("{key} = {}", word_for(key, config)))
         .collect();
     if !missing.is_empty() {
-        if !out.is_empty() && !out.ends_with("\n\n") {
-            out.push('\n');
+        if !out.is_empty() && !out.ends_with(ending) {
+            out.push_str(ending);
         }
-        out.push_str(&missing.join("\n"));
-        out.push('\n');
+        for line in missing {
+            out.push_str(&line);
+            out.push_str(ending);
+        }
     }
     out
 }
-
 /// The key one line sets and the offset of its `=`, where the line sets one this
 /// pane owns and has not already written.
 fn owned_key<'a>(raw: &'a str, written: &[&str]) -> Option<(&'a str, usize)> {
@@ -423,14 +441,21 @@ fn word_for(key: &str, config: &Config) -> &'static str {
 
 /// Write `config` back into the reader's own file.
 ///
-/// Temp-and-rename, which is the note store's shape and for its reason: a reader
-/// who quits mid-write has a whole file either way. The directory is created
-/// where a reader has never had one, so the first flip with remembering on does
-/// not fail for a path nobody made.
+/// Temp-and-rename, the note store's shape and for its reason: a reader who quits
+/// mid-write has a whole file either way. The temp carries this process's id, so
+/// two panes cannot land on each other's, and the directory is made where a reader
+/// never had one.
+///
+/// **A file that no longer parses is refused rather than rewritten**, because it
+/// means a reader is editing it by hand or it already holds what the next launch
+/// will refuse, and writing over either decides for them what their file says.
+/// What is left is two panes writing in turn, where the last flip wins: closing
+/// that needs a lock, and a lock is a file nobody asked this program to write.
 ///
 /// # Errors
 ///
-/// The directory cannot be made, the file cannot be read, or the write cannot land.
+/// The directory cannot be made, the file cannot be read, the file no longer
+/// parses, or the write cannot land.
 pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
     let refuse = |why: std::io::Error| ConfigError::Unwritable {
         path: path.to_owned(),
@@ -444,7 +469,8 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
         Err(why) if why.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(why) => return Err(refuse(why)),
     };
-    let temp = path.with_extension("writing");
+    parse(&source)?;
+    let temp = path.with_extension(format!("writing-{}", std::process::id()));
     std::fs::write(&temp, rewrite(&source, config)).map_err(refuse)?;
     std::fs::rename(&temp, path).map_err(|why| {
         let _ = std::fs::remove_file(&temp);

@@ -2722,6 +2722,38 @@ mod tests {
              stale is read one frame late"
         );
 
+        // Every route that flips a menu row writes the reader's file, where they
+        // asked for it. `Shell` is private and no test can build one, so this is the
+        // join read rather than driven: `SPEC.md` §11.2 B22 puts the write on the
+        // flip, and a `flip_menu` that stopped calling `remember` would leave every
+        // gate over the writer and over the state green while nothing reached disk.
+        let flip = code
+            .find("fn flip_menu(&mut self, action: Action")
+            .expect("`Shell::flip_menu` is gone");
+        let body = &code[flip..];
+        let body = &body[..body
+            .find(
+                "
+    }
+",
+            )
+            .expect("`flip_menu` never closes")];
+        assert!(
+            body.contains("self.remember()"),
+            "`flip_menu` no longer writes the reader's file, so remembering is a row that says `on` and reaches nothing: {body}"
+        );
+        // And the write is the last thing it does, after the flip has landed: a
+        // write ahead of the action would keep the state the reader just left.
+        let (applied, wrote) = (
+            body.find("self.apply_menu(")
+                .expect("`flip_menu` no longer applies"),
+            body.find("self.remember()").expect("checked above"),
+        );
+        assert!(
+            applied < wrote,
+            "`flip_menu` writes before it flips, so the file keeps the state the              reader just left: {body}"
+        );
+
         let settle = code
             .find("fn settle_notes(&mut self, now: Instant)")
             .expect("`Shell::settle_notes` is gone");

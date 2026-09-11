@@ -935,6 +935,90 @@ fn a_rewrite_appends_a_key_the_file_lacks_and_never_writes_hide() {
 }
 
 #[test]
+fn a_file_notepad_saved_survives_a_rewrite() {
+    // U+FEFF is `Cf` rather than `White_Space`, so it survives every trim and lands
+    // inside the first key. `parse` has stripped it since the first Windows reader
+    // hit it. Left in place here, the first key would be unrecognised, appended a
+    // second time, and the next launch would refuse the reader's own file with a
+    // repeated key it never wrote. The pane would then not start at all.
+    let saved = "\u{FEFF}rail = off\nsingle = on\n";
+    let config = Config {
+        rail: true,
+        ..config::parse(saved).expect("the fixture parses")
+    };
+    let out = config::rewrite(saved, &config);
+
+    assert!(
+        out.starts_with('\u{FEFF}'),
+        "the mark the reader's editor writes is gone, so their editor puts it back \
+         and every flip churns the first line: {out:?}"
+    );
+    assert_eq!(
+        out.matches("rail").count(),
+        1,
+        "the first key was appended a second time:\n{out}"
+    );
+    assert!(
+        config::parse(&out).expect("the rewrite still parses").rail,
+        "the flip did not land"
+    );
+}
+
+#[test]
+fn a_file_written_on_windows_stays_written_on_windows() {
+    // Every line ending is the reader's, kept as they wrote it. Converting them
+    // would be a whole-file diff on the first flip, and their editor would convert
+    // it back on the first save, so the two would churn the file between them
+    // forever.
+    let theirs = "# mine\r\nrail = off\r\nsingle = on\r\n";
+    let config = Config {
+        rail: true,
+        ..config::parse(theirs).expect("the fixture parses")
+    };
+    let out = config::rewrite(theirs, &config);
+
+    assert!(
+        !out.contains('\n') || out.matches("\r\n").count() == out.matches('\n').count(),
+        "a line lost its ending, so the file is half one kind and half the \
+         other: {out:?}"
+    );
+    assert!(
+        out.contains("rail = on\r\n"),
+        "the flip did not land, or landed without the reader's ending: {out:?}"
+    );
+    assert!(
+        out.contains("# mine\r\n"),
+        "the comment lost its ending: {out:?}"
+    );
+    // And the keys it had to append took the reader's ending too.
+    assert!(
+        out.contains("persist = off\r\n"),
+        "an appended key was written with the wrong ending: {out:?}"
+    );
+}
+
+#[test]
+fn a_save_refuses_a_file_that_no_longer_parses() {
+    // Between the launch and the flip a reader may have edited the file by hand.
+    // Writing over that is this program deciding what their file should say, and
+    // the error it hands back is the parser's own, so the footer names the line.
+    let home = support::Scratch::new("config-refuse-bad");
+    let path = home.root().join("config");
+    std::fs::write(&path, "rail = off\nrail = on\n").expect("seed a file it refuses");
+
+    let refused = config::save(&path, &Config::default()).expect_err("a save over a bad file");
+    assert!(
+        matches!(&refused, ConfigError::RepeatedKey { key, .. } if key == "rail"),
+        "the refusal is not the parser's own: {refused:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read it back"),
+        "rail = off\nrail = on\n",
+        "the reader's file was written over anyway"
+    );
+}
+
+#[test]
 fn a_repeated_key_is_the_readers_mistake_and_the_rewrite_leaves_it() {
     // `parse` refuses a file that sets a key twice, and says which lines. A rewrite
     // must not quietly repair that: the reader has to see the line they wrote when
