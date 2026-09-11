@@ -640,11 +640,11 @@ impl App {
     /// that stopped resolving changes how many rows there are.
     pub fn set_places(&mut self, places: Places) {
         self.places = places;
-        if std::mem::take(&mut self.caret_owed)
-            && let at = self.standing_row()
-            && let Some(caret) = self.positions.as_mut()
-        {
-            caret.at = at;
+        if std::mem::take(&mut self.caret_owed) {
+            let at = self.standing_row();
+            if let Some(caret) = self.positions.as_mut() {
+                caret.at = at;
+            }
         }
         self.settle_positions();
     }
