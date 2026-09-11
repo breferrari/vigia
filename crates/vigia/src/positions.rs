@@ -235,10 +235,6 @@ pub struct Positions {
     pub caret: Caret,
     /// What the rows say.
     pub places: Places,
-    /// Which reading the box is titled with, and so which rows it has. Stamped from
-    /// the request as the frame is built rather than kept on [`Places`], which the
-    /// shell fills from a walk on its own schedule.
-    pub reading: Reading,
 }
 
 /// What one terminal event means while the list is open.

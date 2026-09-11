@@ -978,8 +978,8 @@ fn empty_state_with(
     elsewhere: usize,
     hidden: usize,
 ) -> String {
-    let elsewhere_in_history = position != vigia_core::Standing::CURRENT;
-    let held = match (hidden, staged, elsewhere_in_history) {
+    let historic = position != vigia_core::Standing::CURRENT;
+    let held = match (hidden, staged, historic) {
         // The words name the comparison: `no unstaged changes` under `since main`
         // describes a walk this frame did not make. Only one of the two tokens reads
         // as a clause, and the id is on the header above, so the other points.
@@ -2098,7 +2098,7 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
     body.positions_rows = chrome
         .positions
         .as_ref()
-        .map(|list| positions_rows_of(area, footer, margins_of(area.width), list));
+        .map(|list| positions_rows_of(area, footer, margins_of(area.width), list, chrome.reading));
     body
 }
 
@@ -2194,8 +2194,14 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
                 .map(|plan| plan.target())
         }),
         positions: chrome.positions.as_ref().and_then(|list| {
-            positions_drawn(area, footer.height(), margins_of(area.width), list)
-                .map(|plan| plan.target())
+            positions_drawn(
+                area,
+                footer.height(),
+                margins_of(area.width),
+                list,
+                chrome.reading,
+            )
+            .map(|plan| plan.target())
         }),
         // The token, from the derivation the painter marks it with.
         position: position_token(area, chrome, view, margins_of(area.width)),
@@ -2326,7 +2332,8 @@ pub fn render(
         .menu
         .and_then(|menu| menu_drawn(area, footer.height(), margins, menu).map(|plan| (plan, menu)));
     let drawn_list = chrome.positions.as_ref().and_then(|list| {
-        positions_drawn(area, footer.height(), margins, list).map(|plan| (plan, list))
+        positions_drawn(area, footer.height(), margins, list, chrome.reading)
+            .map(|plan| (plan, list))
     });
 
     let mut painter = Painter {
@@ -2440,7 +2447,7 @@ pub fn render(
 
     // Last, over everything, and only if a reader asked.
     if let Some((plan, list)) = drawn_list {
-        painter.positions(&plan, list, chrome.now);
+        painter.positions(&plan, list, chrome.reading, chrome.now);
     }
     if let Some((plan, menu)) = drawn_menu {
         painter.menu(&plan, &menu);
@@ -3271,22 +3278,29 @@ fn positions_drawn(
     footer_rows: u16,
     margins: (u16, u16),
     list: &Positions,
+    reading: Reading,
 ) -> Option<PositionsPlan> {
-    let of = list.places.rows(list.reading);
-    let rows = positions_plan(area, footer_rows, margins, 0, of, list.reading)?.rows;
+    let of = list.places.rows(reading);
+    let rows = positions_plan(area, footer_rows, margins, 0, of, reading)?.rows;
     positions_plan(
         area,
         footer_rows,
         margins,
         list.caret.window(rows, of),
         of,
-        list.reading,
+        reading,
     )
 }
 
 /// How many rows the list's window has on this pane, and zero where it draws none.
-fn positions_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), list: &Positions) -> usize {
-    positions_drawn(area, footer_rows, margins, list).map_or(0, |plan| plan.rows)
+fn positions_rows_of(
+    area: Rect,
+    footer_rows: u16,
+    margins: (u16, u16),
+    list: &Positions,
+    reading: Reading,
+) -> usize {
+    positions_drawn(area, footer_rows, margins, list, reading).map_or(0, |plan| plan.rows)
 }
 
 /// How long ago `when` was, in the widest unit that leaves it two digits. An age rather
@@ -4317,7 +4331,7 @@ impl Painter<'_> {
         self.put(cell.x + pad, y, word, width_of(word), ink);
     }
 
-    fn positions(&mut self, plan: &PositionsPlan, list: &Positions, now: i64) {
+    fn positions(&mut self, plan: &PositionsPlan, list: &Positions, reading: Reading, now: i64) {
         let area = plan.area;
         let frame = self.theme.chrome_dim;
         let width = usize::from(area.width);
@@ -4325,17 +4339,17 @@ impl Painter<'_> {
 
         self.overlay_head(
             area,
-            &positions_title(list.reading),
-            &positions_splice(list.reading),
+            &positions_title(reading),
+            &positions_splice(reading),
             plan.counter.as_deref().unwrap_or_default(),
             plan.close,
         );
         self.sheet_pipes_over(area, area.y + 1);
 
-        let of = list.places.rows(list.reading);
+        let of = list.places.rows(reading);
         let window = list.caret.window(plan.rows, of);
         for offset in 0..plan.rows {
-            let Some(row) = list.places.row_at(window + offset, list.reading) else {
+            let Some(row) = list.places.row_at(window + offset, reading) else {
                 break;
             };
             self.position_row(plan, list, offset, row, window, now);

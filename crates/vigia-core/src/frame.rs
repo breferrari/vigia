@@ -397,7 +397,7 @@ impl<'w> Frame<'w> {
         // the pane's own comparison has the index in it. Beside a commit's own diff
         // it would draw a live run against a historical one and count both on one
         // header. `SPEC.md` §11.1.
-        if self.staged && self.standing.reading().is_live() {
+        if self.staged && self.is_live() {
             let mut walk = self.worktree.changes_of(Origin::Staged, options)?;
             for change in &mut walk {
                 files.push(change?);
@@ -472,6 +472,16 @@ impl<'w> Frame<'w> {
     /// Where this frame is standing.
     pub fn standing(&self) -> &Standing {
         &self.standing
+    }
+
+    /// Whether the working tree is one of the two ends this frame diffs.
+    ///
+    /// Asked by everything that describes the tree as it is now: the notes, the
+    /// staged run, follow, and the watch's own time series. Off the frame rather
+    /// than off whatever asked for it, because the frame is what the rows came
+    /// from and a request can be one walk ahead of them.
+    pub const fn is_live(&self) -> bool {
+        self.standing.reading().is_live()
     }
 
     /// Stand somewhere else, from the next [`Frame::advance`] on.

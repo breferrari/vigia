@@ -728,7 +728,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // could move it. I5 says correct with zero interaction, so what the
                     // reader is owed is that it happened, in the unasked-for-news voice.
                     // Nothing else runs, so a parked pane wakes for less.
-                    if !shell.app.live() {
+                    if !frame.is_live() {
                         if let Some(said) = arrival_line(paths.len()) {
                             shell.say(said, Voice::Arrived, began);
                         }
@@ -1520,7 +1520,7 @@ impl Shell {
         }
 
         // Neither named row is drawn under `only`, so I4's aside frame is not built.
-        if !self.app.live() {
+        if !frame.is_live() {
             *aside = None;
             self.app.set_places(places);
             return;
@@ -1982,7 +1982,7 @@ impl Shell {
 
         // On a frame with nothing to draw, where the work went, which for a commit
         // that changed nothing is not whatever happens to be staged now.
-        self.elsewhere = if self.screen.files == 0 && !self.app.staged() && self.app.live() {
+        self.elsewhere = if self.screen.files == 0 && !self.app.staged() && frame.is_live() {
             worktree
                 .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
                 .unwrap_or_default()

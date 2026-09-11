@@ -51,14 +51,29 @@ fn viewport() -> Viewport {
 /// The tree every gate here reads: one file committed on a branch, one staged,
 /// one written and not staged, so the two readings cannot agree by accident.
 fn scratch(name: &str) -> Scratch {
+    branched(name, 1)
+}
+
+/// The same tree with `commits` commits on the branch rather than one.
+///
+/// A second commit is what separates the three readings: one commit alone holds
+/// less than everything since the branch point, so a gate about the reading
+/// cannot be satisfied by a run that would answer either question.
+fn branched(name: &str, commits: usize) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write("src/base.rs", "one\n");
     scratch.git(&["add", "-A"]);
     scratch.git(&["commit", "-m", "init"]);
+    scratch.git(&["branch", "-M", "main"]);
     scratch.git(&["checkout", "-b", "work"]);
-    scratch.write("src/committed.rs", "two\n");
-    scratch.git(&["add", "-A"]);
-    scratch.git(&["commit", "-m", "on the branch"]);
+    for nth in 0..commits {
+        scratch.write(
+            &format!("src/committed_{nth}.rs"),
+            "two\nand a second line\n",
+        );
+        scratch.git(&["add", "-A"]);
+        scratch.git(&["commit", "-m", &format!("on the branch, {nth}")]);
+    }
     scratch.write("src/staged.rs", "three\n");
     scratch.git(&["add", "src/staged.rs"]);
     scratch.write("src/written.rs", "four\n");
@@ -1563,22 +1578,7 @@ fn a_named_rows_totals_stand_in_the_columns_the_header_counts_in() {
 /// three readings hold three different runs and none can satisfy another's
 /// assertion by accident.
 fn history(name: &str) -> Scratch {
-    let scratch = Scratch::new(name);
-    scratch.write("src/base.rs", "one\ntwo\nthree\n");
-    scratch.git(&["add", "-A"]);
-    scratch.git(&["commit", "-q", "-m", "init"]);
-    scratch.git(&["branch", "-M", "main"]);
-    scratch.git(&["checkout", "-q", "-b", "work"]);
-    scratch.write("src/first.rs", "first\n");
-    scratch.git(&["add", "-A"]);
-    scratch.git(&["commit", "-q", "-m", "the first commit on the branch"]);
-    scratch.write("src/second.rs", "second\nand another line\n");
-    scratch.git(&["add", "-A"]);
-    scratch.git(&["commit", "-q", "-m", "the second commit on the branch"]);
-    scratch.write("src/staged.rs", "staged\n");
-    scratch.git(&["add", "src/staged.rs"]);
-    scratch.write("src/written.rs", "written\n");
-    scratch
+    branched(name, 2)
 }
 
 /// The newest commit on the branch, as a row of the position list names it.
@@ -1682,16 +1682,13 @@ fn painted(app: &mut App, frame: &mut Frame, watch: &History) -> Painted {
         })
         .expect("draw");
     let backend = terminal.backend().clone();
-    let buffer = backend.buffer();
-    let text = (buffer.area.top()..buffer.area.bottom())
-        .map(|y| {
-            (buffer.area.left()..buffer.area.right())
-                .map(|x| buffer[(x, y)].symbol().to_owned())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    Painted { text, view }
+    Painted {
+        text: rows_of(backend.buffer()).join(
+            "
+",
+        ),
+        view,
+    }
 }
 
 /// A watch store that has just seen every path in `frame` written.
@@ -2323,7 +2320,7 @@ fn a_parked_tick_reaches_no_frame() {
     // included, and that mutant leaves a parked pane walking on every write with
     // every assertion here green.
     let (parked, walked) = (
-        arm.find("if !shell.app.live() {")
+        arm.find("if !frame.is_live() {")
             .expect("the tick no longer branches on where the pane stands"),
         arm.find("frame.advance()")
             .expect("the tick no longer walks"),

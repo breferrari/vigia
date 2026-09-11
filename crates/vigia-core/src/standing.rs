@@ -61,15 +61,6 @@ impl Reading {
         matches!(self, Self::Since)
     }
 
-    /// The other one, which is what the key that flips the reading asks for.
-    #[must_use]
-    pub const fn flipped(self) -> Self {
-        match self {
-            Self::Since => Self::Only,
-            Self::Only => Self::Since,
-        }
-    }
-
     /// The word the token spells and the list titles itself with.
     #[must_use]
     pub const fn word(self) -> &'static str {

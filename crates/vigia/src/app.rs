@@ -440,13 +440,6 @@ impl App {
         }
     }
 
-    /// Whether anything the watch feeds still describes what the pane is drawing.
-    /// Under `only` both ends of the diff are trees, so the notes, the staged run,
-    /// follow, the sparkline and the pulse all describe another moment.
-    pub fn live(&self) -> bool {
-        self.reading().is_live()
-    }
-
     /// Put the request somewhere, and owe the caret its row while a list is open.
     ///
     /// Every path that moves where the pane stands comes through here: the key, a
@@ -614,7 +607,6 @@ impl App {
             positions: self.positions.map(|caret| Positions {
                 caret,
                 places: self.places.clone(),
-                reading,
             }),
             menu: self.menu.map(|caret| Menu {
                 caret,
@@ -843,7 +835,7 @@ impl App {
 
         // Above the match rather than inside three arms, so the menu's rows go inert
         // with the keys: both arrive here as the same action.
-        if !self.live() && action.needs_the_working_tree() {
+        if !frame.is_live() && action.needs_the_working_tree() {
             return Ok(true);
         }
 
