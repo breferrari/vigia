@@ -342,12 +342,12 @@ fn a_copy_does_not_take_the_row_belonging_to_what_it_copied() {
         .iter()
         .find(|change| change.path == "src/copy.rs")
         .expect("the copy is in the run");
-    assert_ne!(
-        copy.kind,
-        ChangeKind::Renamed {
-            from: KEPT.to_owned()
-        },
-        "the copy wears the rename belonging to the file it was copied from"
+    // Any rename at all, not one spelling of one: a copy mislabelled as renamed
+    // from its neighbour is the same defect and passes a check against a literal.
+    assert!(
+        !matches!(copy.kind, ChangeKind::Renamed { .. }),
+        "the copy wears a rename, and the only file that moved here is another          one: {:?}",
+        copy.kind
     );
 }
 

@@ -31,6 +31,10 @@ const OPENS: &str = " ▾";
 /// bar names `f` whether or not the mode is acting.
 const FOLLOWING: &str = "follow ▶";
 
+/// The mark a row takes while the newest burst named its file. The painter reads its
+/// own copy of the flag, so a gate over the entry alone cannot see it go missing.
+const PULSE: &str = "●";
+
 fn viewport() -> Viewport {
     Viewport {
         position: Position { file: 0, row: 0 },
@@ -1630,10 +1634,15 @@ impl Painted {
 /// One pane, painted. `history` is the watch's store, which the sparkline, the
 /// pulse and the recency ramp are read from.
 fn painted(app: &mut App, frame: &mut Frame, watch: &History) -> Painted {
-    const PANE: ratatui::layout::Rect = ratatui::layout::Rect {
+    painted_at(app, frame, watch, 120)
+}
+
+/// The same, on a pane `width` columns across.
+fn painted_at(app: &mut App, frame: &mut Frame, watch: &History, width: u16) -> Painted {
+    let pane = ratatui::layout::Rect {
         x: 0,
         y: 0,
-        width: 120,
+        width,
         height: 30,
     };
     let mut highlighter = Highlighter::eager();
@@ -1649,7 +1658,7 @@ fn painted(app: &mut App, frame: &mut Frame, watch: &History) -> Painted {
         Default::default(),
         "",
     );
-    let body = vigia::body_layout(PANE, &chrome, frame.files().len(), frame.files().len());
+    let body = vigia::body_layout(pane, &chrome, frame.files().len(), frame.files().len());
     let view = app
         .view(frame, &mut highlighter, watch, body)
         .expect("collect a view");
@@ -1666,7 +1675,7 @@ fn painted(app: &mut App, frame: &mut Frame, watch: &History) -> Painted {
         Default::default(),
         "",
     );
-    let mut terminal = Terminal::new(TestBackend::new(PANE.width, PANE.height)).expect("terminal");
+    let mut terminal = Terminal::new(TestBackend::new(pane.width, pane.height)).expect("terminal");
     let theme = Theme::default();
     terminal
         .draw(|f| {
@@ -1840,6 +1849,23 @@ fn the_key_refuses_where_no_commit_is_named() {
              could not be done or which gesture leads to a commit"
         );
     }
+
+    // And whole at I6's forty columns. The footer cuts from the right, and the half
+    // it takes is the half naming the gesture that answers the refusal.
+    let said = app.notice().unwrap_or_default().to_owned();
+    let drawn = painted_at(&mut app, &mut frame, &History::new(), 40);
+    let footer = drawn
+        .text
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    assert!(
+        footer.starts_with(&said),
+        "the refusal is cut at forty columns, so the pane every width rung is \
+         measured from answers with half a sentence: {footer:?}"
+    );
 }
 
 /// Under `only` the list is commit rows alone, and its title is the reading.
@@ -2068,6 +2094,12 @@ fn nothing_goes_inert_under_since() {
         "no row carries the pulse, so the watch's own marks are unasserted here"
     );
     assert!(
+        drawn.draws(PULSE),
+        "no row draws the pulse, so the parked gate's absence of one is satisfied \
+         by a painter that never draws it at all:\n{}",
+        drawn.text
+    );
+    assert!(
         drawn
             .entries()
             .any(|entry| entry.spark.iter().any(|bucket| *bucket > 0)),
@@ -2246,6 +2278,12 @@ fn the_sparkline_and_the_pulse_go_inert_under_only_and_the_heat_strip_survives()
             entry.path
         );
     }
+    assert!(
+        !drawn.draws(PULSE),
+        "the pane draws the pulse over a commit the watch was never describing,          which the field above cannot see: the painter reads its own copy:
+{}",
+        drawn.text
+    );
     assert!(
         drawn
             .entries()
