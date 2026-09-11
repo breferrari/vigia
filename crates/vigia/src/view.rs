@@ -8,7 +8,7 @@ use vigia_core::{
     run_of,
 };
 
-use crate::quote::{Chunk, Run};
+use crate::quote::{Chunk, CodeRow, Run};
 
 /// One changed file, as everything a row about it needs to be drawn.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,10 +310,11 @@ pub enum Row {
         /// This row's piece of the body or of the reply, already broken at the
         /// content width less the lead.
         text: String,
-        /// What each run of `text` means where some of it is quoted code, covering
-        /// it exactly. Empty is the whole row in the lead's own ink, which is
-        /// every row the reader wrote and every answer that quoted nothing.
+        /// What each run of `text` means, covering it exactly. Empty is the whole
+        /// row in the lead's own ink, which is every answer that quoted nothing.
         runs: Vec<Run>,
+        /// [`Row::Wrap`]'s indent, so wrapped code keeps its block shape.
+        indent: usize,
         /// The note's state: every row's `▎` takes its ink, the last draws the word.
         state: &'static str,
         /// Whether this is that last row.
@@ -533,27 +534,22 @@ struct Pin {
     resolved: bool,
 }
 
-/// The agent's line as the walk resolved it, before the display pass wraps it.
-///
-/// Resolved once where the notes are placed rather than in [`Pin::rows`], which
-/// the layout calls more than once a frame while it clamps: a quoted block's
-/// grammar is asked for on the frame the agent writes and on no other.
+/// Resolved where the notes are placed rather than in [`Pin::rows`], which the
+/// layout calls more than once a frame while it clamps: a quoted block's grammar
+/// is asked for on the frame the agent writes it and on no other.
 #[derive(Debug, Clone)]
 struct Answer {
-    /// What the agent wrote, whole. The fences and the backticks are markup and
-    /// are not drawn, and B20 sends what was written rather than what was drawn,
-    /// so the copy reads this and never the rows.
+    /// What the agent wrote, whole. B20 sends that rather than what was drawn,
+    /// so the copy reads this and never the rows, which dropped the markup.
     text: String,
     parts: Vec<Part>,
 }
 
-/// One stretch of an answer, with what the grammar said about it.
+/// A [`crate::quote::Chunk`] once its block has been through the highlighter.
 #[derive(Debug, Clone)]
 enum Part {
-    /// Words, to be broken the way prose is.
     Prose(String),
-    /// A fenced block and the classes covering each of its lines, which are
-    /// empty where no grammar answered.
+    /// Spans are empty where no grammar answered.
     Code {
         lines: Vec<String>,
         spans: Vec<Vec<Span>>,
@@ -561,9 +557,7 @@ enum Part {
 }
 
 impl Answer {
-    /// The rows this answer takes at a room of `room` columns, each with the runs
-    /// its ink follows.
-    fn rows(&self, room: usize) -> Vec<(String, Vec<Run>)> {
+    fn rows(&self, room: usize) -> Vec<CodeRow> {
         let mut out = Vec::new();
         for part in &self.parts {
             match part {
@@ -578,18 +572,19 @@ impl Answer {
 }
 
 /// [`prose_rows`] with each paragraph's backticked runs unwrapped and marked.
-fn prose_runs(text: &str, room: usize) -> Vec<(String, Vec<Run>)> {
+/// Beside it rather than replacing it: the reader's own words go through that
+/// one, and a backtick they typed is a character they typed.
+fn prose_runs(text: &str, room: usize) -> Vec<CodeRow> {
     text.split('\n')
         .flat_map(|paragraph| {
             let paragraph = crate::render::detabbed(paragraph);
             let (paragraph, runs) = crate::quote::inline(&paragraph);
             prose_pieces(&paragraph, room)
                 .into_iter()
-                .map(|piece| {
-                    (
-                        paragraph[piece.clone()].to_owned(),
-                        crate::quote::rebase(&runs, &piece),
-                    )
+                .map(|piece| CodeRow {
+                    text: paragraph[piece.clone()].to_owned(),
+                    runs: crate::quote::rebase(&runs, &piece),
+                    indent: 0,
                 })
                 .collect::<Vec<_>>()
         })
@@ -718,13 +713,29 @@ fn box_rows(pin: &BoxPin, content: usize) -> (Vec<Row>, usize) {
     (rows, 1 + caret_row - top)
 }
 
-/// One row of `pin`'s; `last` marks where its status word is drawn.
-fn row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, text: String, runs: Vec<Run>, last: bool) {
+/// One row of `pin`'s in the note's own ink; `last` marks where its status word
+/// is drawn. Every row but the agent's line, the only one that can hold code.
+fn row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, text: String, last: bool) {
+    answer_row(
+        rows,
+        pin,
+        lead,
+        CodeRow {
+            text,
+            runs: Vec::new(),
+            indent: 0,
+        },
+        last,
+    );
+}
+
+fn answer_row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, drawn: CodeRow, last: bool) {
     rows.push(Row::Note {
         id: pin.id.clone(),
         lead,
-        text,
-        runs,
+        text: drawn.text,
+        runs: drawn.runs,
+        indent: drawn.indent,
         state: pin.word,
         last,
         faded: pin.faded,
@@ -741,23 +752,15 @@ impl Pin {
         let mut rows = Vec::new();
         if !self.resolved || self.reply.is_none() {
             if boxed {
-                row(
-                    &mut rows,
-                    self,
-                    NoteLead::Top,
-                    String::new(),
-                    Vec::new(),
-                    false,
-                );
+                row(&mut rows, self, NoteLead::Top, String::new(), false);
                 for text in prose_rows(&self.body, inner) {
-                    row(&mut rows, self, NoteLead::Body, text, Vec::new(), false);
+                    row(&mut rows, self, NoteLead::Body, text, false);
                 }
                 row(
                     &mut rows,
                     self,
                     NoteLead::Bottom,
                     self.word.to_owned(),
-                    Vec::new(),
                     true,
                 );
             } else {
@@ -773,25 +776,18 @@ impl Pin {
                 }
                 let count = body.len();
                 for (piece, text) in body.into_iter().enumerate() {
-                    row(
-                        &mut rows,
-                        self,
-                        NoteLead::Bar,
-                        text,
-                        Vec::new(),
-                        piece + 1 == count,
-                    );
+                    row(&mut rows, self, NoteLead::Bar, text, piece + 1 == count);
                 }
             }
         }
         if let Some(reply) = &self.reply {
-            for (piece, (text, runs)) in reply.rows(room).into_iter().enumerate() {
+            for (piece, drawn) in reply.rows(room).into_iter().enumerate() {
                 let lead = if piece == 0 {
                     NoteLead::Reply
                 } else {
                     NoteLead::Blank
                 };
-                row(&mut rows, self, lead, text, runs, false);
+                answer_row(&mut rows, self, lead, drawn, false);
             }
         }
         rows
@@ -882,10 +878,8 @@ fn notes_at<'n>(
 }
 
 /// `reply` split into words and quoted blocks, each block through the grammar
-/// its fence names or the note's own file's.
-///
-/// The block's ordinal is its place among this answer's blocks, which is what
-/// lets an answer quote twice and each half keep its own parse.
+/// its fence names or the note's own file's. The ordinal is the block's place
+/// among this answer's, so an answer can quote twice and each half keep a parse.
 fn answer_of(note: &Note, reply: &str, mut highlighter: Option<&mut Pass<'_>>) -> Answer {
     let mut parts = Vec::new();
     let mut ordinal = 0usize;
@@ -893,8 +887,6 @@ fn answer_of(note: &Note, reply: &str, mut highlighter: Option<&mut Pass<'_>>) -
         match chunk {
             Chunk::Prose(text) => parts.push(Part::Prose(text)),
             Chunk::Code { token, lines } => {
-                // `None` is the plain first frame, and empty spans are already a
-                // legal, drawn state: it is what a block with no grammar produces.
                 let spans = match highlighter.as_deref_mut() {
                     Some(pass) => pass
                         .quoted(&note.id, ordinal, token.as_deref(), &note.path, &lines)
@@ -1165,24 +1157,7 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
 
 /// The syntax runs covering one byte range of a line, re-based onto it.
 fn spans_in(spans: &[Span], from: usize, to: usize) -> Vec<Span> {
-    let mut kept = Vec::with_capacity(spans.len());
-    let mut pos = 0usize;
-    for span in spans {
-        let end = pos + span.len;
-        let start = pos.max(from);
-        let stop = end.min(to);
-        if stop > start {
-            kept.push(Span {
-                len: stop - start,
-                class: span.class,
-            });
-        }
-        pos = end;
-        if pos >= to {
-            break;
-        }
-    }
-    kept
+    crate::quote::rebase(spans, &(from..to))
 }
 
 /// The word-emphasis ranges covering one byte range of a line, re-based onto it.
@@ -1949,6 +1924,9 @@ impl View {
             crate::render::content_width(gutter, width)
         };
         let mut under: usize = if drawn {
+            // Counted by building, where a diff line is counted by its breaks
+            // alone: a note's row shape follows its text, its state and its width
+            // at once, and a second expression of it is one the clamp can differ on.
             walked.pins.iter().map(|pin| pin.rows(content).len()).sum()
         } else {
             0

@@ -862,9 +862,6 @@ impl Highlighter {
         let slot = match hit {
             Some(at) => at,
             None => {
-                if let Some(at) = found {
-                    self.quotes.remove(at);
-                }
                 // Destructured for the reason `spans` is: the syntax set is read
                 // while the quotes and the counters are written, and through
                 // `&mut self` alone the borrow checker sees one whole thing.
@@ -917,15 +914,26 @@ impl Highlighter {
                     }
                     None => lines.iter().map(|text| plain(text.len())).collect(),
                 };
-                quotes.push(Quote {
+                let built = Quote {
                     id: id.to_owned(),
                     ordinal,
                     digest,
                     live: false,
                     deferred,
                     lines: filled,
-                });
-                quotes.len() - 1
+                };
+                // Over the stale entry where there was one, so a note whose answer
+                // the agent keeps rewriting does not walk down the vector.
+                match found {
+                    Some(at) => {
+                        quotes[at] = built;
+                        at
+                    }
+                    None => {
+                        quotes.push(built);
+                        quotes.len() - 1
+                    }
+                }
             }
         };
 

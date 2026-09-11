@@ -6410,6 +6410,13 @@ fn a_press_on_the_left_side_begins_no_selection_and_the_body_beside_it_still_doe
 const FENCED: &str =
     "swapped it:\n```\nlet margin = margin.saturating_mul(2);\n```\nthe unwrap_or went with it";
 
+/// The painted row holding `line`, wherever in the frame it landed.
+fn row_holding(painted: &Painted, line: &str) -> u16 {
+    (0..painted.backend.buffer().area.height)
+        .find(|y| painted.text(*y).contains(line))
+        .unwrap_or_else(|| panic!("no row holds {line:?}:\n{}", painted.rows().join("\n")))
+}
+
 /// Note `n1` on the edited line, answered with `reply`.
 fn answered(rig: &mut Rig, reply: &str) {
     let mut note = note("n1", 5, EDITED, "short");
@@ -6420,7 +6427,7 @@ fn answered(rig: &mut Rig, reply: &str) {
 }
 
 /// The rows of note `n1`'s answer, as the view built them.
-fn answer_rows(painted: &Painted) -> Vec<(String, Vec<vigia::Run>)> {
+fn answer_rows(painted: &Painted) -> Vec<vigia::CodeRow> {
     painted
         .view
         .rows
@@ -6430,8 +6437,13 @@ fn answer_rows(painted: &Painted) -> Vec<(String, Vec<vigia::Run>)> {
                 lead: NoteLead::Reply | NoteLead::Blank,
                 text,
                 runs,
+                indent,
                 ..
-            } => Some((text.clone(), runs.clone())),
+            } => Some(vigia::CodeRow {
+                text: text.clone(),
+                runs: runs.clone(),
+                indent: *indent,
+            }),
             _ => None,
         })
         .collect()
@@ -6489,8 +6501,8 @@ fn a_quoted_line_breaks_at_the_column_and_not_at_a_blank() {
     let rows = answer_rows(&painted);
     let quoted: Vec<&String> = rows
         .iter()
-        .filter(|(_, runs)| !runs.is_empty())
-        .map(|(text, _)| text)
+        .filter(|row| !row.runs.is_empty())
+        .map(|row| &row.text)
         .collect();
     assert!(
         quoted.len() > 1,
@@ -6515,6 +6527,11 @@ fn a_quoted_line_breaks_at_the_column_and_not_at_a_blank() {
 }
 
 /// And its continuation stands in by its own indent, so the block keeps shape.
+///
+/// The row model carries the indent as a number and the painter draws the
+/// blanks, which is how a wrapped diff line already works, so both halves are
+/// asserted: a row whose text quietly held its own padding would pass the first
+/// and a painter that dropped it would pass the second.
 #[test]
 fn a_quoted_continuation_stands_in_by_its_own_indent() {
     let scratch = fixture("notes-quoted-indent");
@@ -6527,28 +6544,54 @@ fn a_quoted_continuation_stands_in_by_its_own_indent() {
     let painted = rig.paint(&mut frame, NARROW, Pointing::default());
 
     let rows = answer_rows(&painted);
-    let quoted: Vec<&String> = rows.iter().map(|(text, _)| text).collect();
-    assert!(quoted.len() > 1, "the fixture did not wrap: {quoted:?}");
+    assert!(rows.len() > 1, "the fixture did not wrap: {rows:?}");
     let indent = line.len() - line.trim_start().len();
-    for row in &quoted[1..] {
-        assert!(
-            row.starts_with(&" ".repeat(indent)),
+    assert_eq!(rows[0].indent, 0, "the line's first row stands in");
+    for row in &rows[1..] {
+        assert_eq!(
+            row.indent, indent,
             "a continuation lost the block's shape: {row:?}"
         );
     }
     assert_eq!(
-        quoted
-            .iter()
-            .enumerate()
-            .map(|(at, row)| if at == 0 {
-                row.as_str()
-            } else {
-                &row[indent..]
-            })
+        rows.iter()
+            .map(|row| row.text.as_str())
             .collect::<Vec<_>>()
             .concat(),
         line,
-        "the standing-in blanks were counted as content: {quoted:?}"
+        "the standing-in blanks were counted as content: {rows:?}"
+    );
+
+    // And the painter spends them, which the row model alone cannot say. Found
+    // through the view rather than by the anchored line's text, which this pane
+    // is too narrow to draw whole.
+    let at = painted
+        .view
+        .rows
+        .iter()
+        .rposition(|row| {
+            matches!(
+                row,
+                Row::Note {
+                    lead: NoteLead::Reply | NoteLead::Blank,
+                    ..
+                }
+            )
+        })
+        .expect("the answer's last row");
+    let (_, _, origin) = painted.gutter();
+    let drawn: String = painted
+        .text(painted.laid.diff.top + at as u16)
+        .chars()
+        .skip(usize::from(origin) + 2)
+        .collect();
+    assert!(
+        drawn.starts_with(&" ".repeat(indent)),
+        "the painter drew no standing-in blanks: {drawn:?}"
+    );
+    assert!(
+        drawn[indent..].starts_with(rows.last().expect("the last row").text.trim_end()),
+        "the tail does not follow the blanks: {drawn:?}"
     );
 }
 
@@ -6563,14 +6606,7 @@ fn hash_ink(name: &str, token: &str, line: &str) -> Option<Color> {
     answered(&mut rig, &format!("```{token}\n{line}\n```"));
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     let (_, _, origin) = painted.gutter();
-    let row = (0..painted.backend.buffer().area.height)
-        .find(|y| painted.text(*y).contains(line))
-        .unwrap_or_else(|| {
-            panic!(
-                "the quoted line was not drawn:\n{}",
-                painted.rows().join("\n")
-            )
-        });
+    let row = row_holding(&painted, line);
     let at = painted.text(row).find('#').expect("the quoted hash") as u16;
     assert!(at >= origin, "the hash is left of the content origin");
     painted.fg(at, row)
@@ -6681,7 +6717,7 @@ fn a_reply_with_no_fence_draws_exactly_as_it_did() {
     let rows = answer_rows(&painted);
     assert!(!rows.is_empty(), "the answer drew no rows");
     assert!(
-        rows.iter().all(|(_, runs)| runs.is_empty()),
+        rows.iter().all(|row| row.runs.is_empty()),
         "a plain answer picked up runs: {rows:?}"
     );
 }
@@ -6752,9 +6788,7 @@ fn a_quoted_block_draws_plain_where_no_grammar_answers() {
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     let theme = Theme::default();
 
-    let row = (0..painted.backend.buffer().area.height)
-        .find(|y| painted.text(*y).contains(line))
-        .expect("the quoted line");
+    let row = row_holding(&painted, line);
     let at = painted.text(row).find("let").expect("its keyword") as u16;
     assert_eq!(
         painted.fg(at, row),

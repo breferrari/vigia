@@ -4895,6 +4895,7 @@ impl Painter<'_> {
                     lead,
                     text,
                     runs,
+                    indent,
                     state,
                     last,
                     faded,
@@ -4910,6 +4911,7 @@ impl Painter<'_> {
                         *lead,
                         text,
                         runs,
+                        *indent,
                         state,
                         *last,
                         *faded,
@@ -5444,6 +5446,7 @@ impl Painter<'_> {
         lead: NoteLead,
         text: &str,
         runs: &[Run],
+        indent: usize,
         state: &str,
         last: bool,
         faded: bool,
@@ -5539,11 +5542,19 @@ impl Painter<'_> {
                     _ => self.theme.chrome_dim.add_modifier(dim),
                 };
                 let limit = left.saturating_sub(spent);
-                if runs.is_empty() {
+                if runs.is_empty() && indent == 0 {
                     self.put_marked(next, glyphs.y, text, limit, body);
                 } else {
-                    let painted = self.note_runs(text, runs, body, dim);
-                    self.put_runs_marked(next, glyphs.y, &painted, width_of(text) > limit, limit);
+                    // Neovim's `'breakindent'`, paid out of the tail's own budget,
+                    // which is `line_row`'s rule over a wrapped diff line.
+                    let indent = indent.min(limit);
+                    let mut painted = Vec::with_capacity(runs.len() + 2);
+                    if indent > 0 {
+                        painted.push((" ".repeat(indent), Style::new()));
+                    }
+                    painted.extend(self.note_runs(text, runs, body, dim));
+                    let room = limit - indent;
+                    self.put_runs_marked(next, glyphs.y, &painted, width_of(text) > room, limit);
                 }
             }
         }

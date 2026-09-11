@@ -7,6 +7,7 @@
 //! breaks at the column and never at the last blank, which is right for a
 //! sentence and cuts a statement where nobody would.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use vigia_core::{Class, Span};
@@ -97,7 +98,7 @@ pub fn chunks(reply: &str) -> Vec<Chunk> {
 /// it is code, an unclosed backtick is a character the agent wrote, and a
 /// paragraph with no pair in it comes back with no runs at all.
 #[must_use]
-pub fn inline(paragraph: &str) -> (String, Vec<Run>) {
+pub fn inline(paragraph: &str) -> (Cow<'_, str>, Vec<Run>) {
     let mut out = String::new();
     let mut runs: Vec<Run> = Vec::new();
     let mut rest = paragraph;
@@ -112,44 +113,95 @@ pub fn inline(paragraph: &str) -> (String, Vec<Run>) {
         out.push_str(&rest[open + 1..close]);
         rest = &rest[close + 1..];
     }
+    // No pair, so nothing was unwrapped and the paragraph is its own answer. The
+    // empty run list is what the painter reads as "this row is all one voice",
+    // which is the cheap path every answer that quoted nothing takes.
     if runs.is_empty() {
-        return (paragraph.to_owned(), Vec::new());
+        return (Cow::Borrowed(paragraph), Vec::new());
     }
     push(&mut runs, rest.len(), None);
     out.push_str(rest);
-    (out, runs)
+    (Cow::Owned(out), runs)
 }
 
-/// `runs` re-based onto the `piece` of the text they cover, and clipped to it.
+/// A run of bytes within one line, which a wrapped row has to clip and re-base.
+///
+/// Two vocabularies for one walk: [`Span`] is what a grammar said about a line of
+/// the diff, and [`Run`] is that plus the answer's own voice, which no `Span` can
+/// say. The walk itself is the same either way.
+pub trait Sliced: Copy {
+    /// Bytes this run covers.
+    fn bytes(self) -> usize;
+    /// The same run over `bytes` bytes instead.
+    fn resized(self, bytes: usize) -> Self;
+}
+
+impl Sliced for Run {
+    fn bytes(self) -> usize {
+        self.len
+    }
+
+    fn resized(self, bytes: usize) -> Self {
+        Self { len: bytes, ..self }
+    }
+}
+
+impl Sliced for Span {
+    fn bytes(self) -> usize {
+        self.len
+    }
+
+    fn resized(self, bytes: usize) -> Self {
+        Self { len: bytes, ..self }
+    }
+}
+
+/// `runs` clipped to the byte range `piece` and re-based onto it.
 #[must_use]
-pub fn rebase(runs: &[Run], piece: &Range<usize>) -> Vec<Run> {
-    let mut out = Vec::new();
+pub fn rebase<T: Sliced>(runs: &[T], piece: &Range<usize>) -> Vec<T> {
+    let mut out = Vec::with_capacity(runs.len());
     let mut at = 0usize;
     for run in runs {
         let from = at.max(piece.start);
-        let to = (at + run.len).min(piece.end);
+        let to = (at + run.bytes()).min(piece.end);
         if to > from {
-            push(&mut out, to - from, run.class);
+            out.push(run.resized(to - from));
         }
-        at += run.len;
+        at += run.bytes();
+        if at >= piece.end {
+            break;
+        }
     }
     out
 }
 
+/// One display row of a quoted block: its bytes, what each run of them means,
+/// and the columns a continuation stands in by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRow {
+    /// This row's piece of the line.
+    pub text: String,
+    /// What each run of `text` means, covering it exactly.
+    pub runs: Vec<Run>,
+    /// Columns of leading blank before the text, so nested code keeps its block
+    /// shape. Zero on the row a line starts on.
+    pub indent: usize,
+}
+
 /// A quoted block's lines as rows of at most `room` columns, with `spans` from
 /// the grammar covering each line.
-///
-/// A continuation stands in by the line's own indent, the rule a wrapped diff
-/// line already follows, and those blanks are written into the row because a
-/// note row draws one string where a diff row hands its indent to the painter.
 #[must_use]
-pub fn code_rows(lines: &[String], spans: &[Vec<Span>], room: usize) -> Vec<(String, Vec<Run>)> {
+pub fn code_rows(lines: &[String], spans: &[Vec<Span>], room: usize) -> Vec<CodeRow> {
     let mut out = Vec::new();
     for (at, line) in lines.iter().enumerate() {
         let runs = runs_of(spans.get(at).map_or(&[][..], Vec::as_slice), line.len());
         // No room to break into, so the row is the line and the painter clips it.
         if room == 0 {
-            out.push((line.clone(), runs));
+            out.push(CodeRow {
+                text: line.clone(),
+                runs,
+                indent: 0,
+            });
             continue;
         }
         // There is never a cut per byte, so the line's own length bounds the walk
@@ -157,23 +209,14 @@ pub fn code_rows(lines: &[String], spans: &[Vec<Span>], room: usize) -> Vec<(Str
         let cuts = crate::render::breaks_of(line, room, line.len());
         let indent = crate::render::indent_of(line, room);
         let mut start = 0usize;
-        for (piece, cut) in cuts
-            .iter()
-            .copied()
-            .chain(std::iter::once(line.len()))
-            .enumerate()
-        {
-            let mut text = String::new();
-            let mut drawn = Vec::new();
-            if piece > 0 && indent > 0 {
-                text.extend(std::iter::repeat_n(' ', indent));
-                push(&mut drawn, indent, Some(Class::Plain));
-            }
-            text.push_str(&line[start..cut]);
-            for run in rebase(&runs, &(start..cut)) {
-                push(&mut drawn, run.len, run.class);
-            }
-            out.push((text, drawn));
+        for cut in cuts.iter().copied().chain(std::iter::once(line.len())) {
+            out.push(CodeRow {
+                text: line[start..cut].to_owned(),
+                runs: merged(rebase(&runs, &(start..cut))),
+                // Every row but the one the line starts on, which is what
+                // `start` already says.
+                indent: if start > 0 { indent } else { 0 },
+            });
             start = cut;
         }
     }
@@ -193,6 +236,16 @@ fn runs_of(spans: &[Span], len: usize) -> Vec<Run> {
         }
     }
     push(&mut out, len - at, Some(Class::Plain));
+    out
+}
+
+/// `runs` with adjacent runs of one class folded together, which a clip can
+/// leave behind.
+fn merged(runs: Vec<Run>) -> Vec<Run> {
+    let mut out = Vec::with_capacity(runs.len());
+    for run in runs {
+        push(&mut out, run.len, run.class);
+    }
     out
 }
 
