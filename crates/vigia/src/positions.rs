@@ -58,12 +58,8 @@ pub struct Places {
 }
 
 impl Places {
-    /// Rows that name a place rather than a commit: the live pane always, and the
-    /// branch point wherever one resolved.
-    ///
-    /// The one derivation of that number. Both the row count and the arithmetic that
-    /// turns an index into a row read it, so a third named row cannot arrive in one and
-    /// not the other.
+    /// Rows naming a place rather than a commit, read by both the row count and the
+    /// index arithmetic so a third cannot arrive in one and not the other.
     fn named(&self) -> usize {
         1 + usize::from(self.point.is_some())
     }
@@ -98,6 +94,16 @@ impl Places {
         self.len() == 0
     }
 
+    /// Whether `page` is the history this list already holds, by its newest commit.
+    ///
+    /// A checkout moves HEAD, and the rows walked from one branch are not the rows of
+    /// another. Compared by the newest rather than by the whole list, because the older
+    /// end of two branches is usually the same and says nothing about which one this is.
+    #[must_use]
+    pub fn anchored_at(&self, page: &vigia_core::Page) -> bool {
+        self.commits.first().map(|at| at.id) == page.commits.first().map(|at| at.id)
+    }
+
     /// Take `page` onto the end of what is already walked.
     ///
     /// The page's own `more` replaces this one's, because what is behind the history is
@@ -125,17 +131,12 @@ impl Places {
     }
 }
 
-/// The commit to walk on from, where the caret has come close enough to the end of
-/// what is walked to want another page, and `None` while it has not.
+/// The commit to walk on from, where the caret is within a row of the end of what is
+/// walked, and `None` while it is not. A page of margin would make the first page ask
+/// for the second before the reader had scrolled, which is the laziness this keeps.
 ///
-/// One row of margin rather than one page: the caret moves a row at a time, so a row
-/// in hand is all it takes for the box never to stall, and a page of margin would make
-/// the first page ask for the second before the reader had scrolled at all, which is
-/// the laziness this exists to keep.
-///
-/// It hands back the commit rather than a bool so that the decision and the place it
-/// names are one answer. Two would let a caret near the end resume from the wrong
-/// place, and nothing drawn would say so.
+/// It hands back the commit rather than a bool so the decision and the place it names
+/// are one answer; two would let a caret near the end resume from the wrong place.
 #[must_use]
 pub fn resume_from(caret: Caret, places: &Places) -> Option<&Landmark> {
     if !places.more || caret.at + 2 < places.len() {

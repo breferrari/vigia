@@ -1137,8 +1137,10 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
     buckets.iter().any(|bucket| bucket.total() > 0)
 }
 
-/// Columns one half of the counts cell occupies, whatever that half says.
-const COUNT_CELL: usize = 5;
+/// Columns one half of the counts cell occupies, whatever that half says. Public
+/// because the suite holds the list's own totals against it, the two being laid out
+/// against one field and drawn a dozen rows apart.
+pub const COUNT_CELL: usize = 5;
 
 /// Every shape a file row's right-hand side may take, widest first.
 const ROW_LAYOUTS: [Columns; 10] = [
@@ -2509,16 +2511,11 @@ const KEYBOARD: [Gesture; 19] = [
         keys: ["a", "a"],
         verb: ["show or hide staged changes", "staged changes"],
     },
-    // Two senses of one concept in one row, which is the shape `g  Home  /  G  End`
-    // already has: `b` is the place a key alone reaches and `B` is every place. A row
-    // of its own would add a row to a table whose height is ruled, for a gesture that
-    // is the same gesture a rung further out. Both cells sit inside the field maxima
-    // this table already had, so no rung's width moves either: the wide verb field is
-    // 28 on `next / previous changed file` and the tight one is 19 on the mouse
-    // group's `a row, held repeats`, where these are 23 and 12. The tight verb keeps
-    // the word it had, which is two rules at once: `branch point` stays the half both
-    // spellings share, and the tight keyboard column's field is set by `jump to a list
-    // row` at eighteen, which §11.1's *71 narrowest two-column* is measured from.
+    // Two senses of one concept in one row, the shape `g  Home  /  G  End` already has:
+    // a row of its own would grow a table whose rung figures are ruled. The tight verb
+    // keeps `branch point`, which stays the half both spellings share and leaves the
+    // column's field where `jump to a list row` set it, at the eighteen §11.1's
+    // *71 narrowest two-column* is measured from.
     Gesture {
         keys: ["b  /  B", "b  /  B"],
         verb: ["branch point / the list", "branch point"],
@@ -3151,8 +3148,8 @@ const POSITIONS_ID: usize = vigia_core::SHORT_ID;
 /// produces, fixed so the subjects beside it do not shuffle as the rows age.
 const POSITIONS_AGE: usize = 4;
 
-/// Columns a named row's facts take: the count and the two totals, on the header's own
-/// fields so the list and the header agree on a width.
+/// Columns a named row's facts take: the count, then the two totals on the header's own
+/// field widths.
 const POSITIONS_FACTS: usize = 11 + COUNT_CELL + 1 + COUNT_CELL;
 
 /// Columns between a row's cells.
@@ -4375,15 +4372,12 @@ impl Painter<'_> {
         let room = usize::from(area.width).saturating_sub(POSITIONS_INSET * 2);
 
         let Some(commit) = list.places.commit_at(row) else {
-            // A named place: the word, then its facts where a run has measured them.
-            let (name, facts) = match row {
-                positions::Row::Point => list
-                    .places
-                    .point
-                    .as_ref()
-                    .map_or((vigia_core::Standing::CURRENT, None), |(named, facts)| {
-                        (named.as_str(), *facts)
-                    }),
+            // A named place: the word, then its facts where a run has measured them. The
+            // branch point's row exists only where its name does, which is
+            // `Places::row_at`'s own rule, so there is no row here without one.
+            let point = list.places.point.as_ref();
+            let (name, facts) = match (row, point) {
+                (positions::Row::Point, Some((named, facts))) => (named.as_str(), *facts),
                 _ => (vigia_core::Standing::CURRENT, list.places.current),
             };
             let label = room.saturating_sub(POSITIONS_FACTS + POSITIONS_GAP);
@@ -4422,8 +4416,11 @@ impl Painter<'_> {
         let changed = format!("{} changed", facts.files);
         let minus = format!("-{}", facts.removed);
         let plus = format!("+{}", facts.added);
-        // Laid out from the right edge inwards, so the two totals sit under the
-        // header's own columns whatever the counts spell.
+        // `-N` on the box's own right edge and `+N` a count cell to its left, which is
+        // the header's arithmetic rather than its columns: the box is centred and
+        // narrower, so the two can read against each other by their sigils without
+        // sitting under anything. A total wider than a cell grows left and pushes the
+        // other, drawn whole, which is [`header_right`]'s rule one surface over.
         let tail =
             width_of(&plus) + COUNT_CELL.saturating_sub(width_of(&minus)) + 1 + width_of(&minus);
         let Some(from) = right.checked_sub(u16::try_from(tail).unwrap_or(u16::MAX)) else {

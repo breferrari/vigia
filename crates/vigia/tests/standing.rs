@@ -1300,3 +1300,199 @@ fn the_list_never_leaves_the_pane_at_any_size_a_terminal_can_be() {
          floor it exists to cross"
     );
 }
+
+/// `b` then `B` opens the list on the branch point's row, not on the first one.
+///
+/// The rows are walked on the frame after the key, so at the moment `B` arrives the
+/// branch point's row does not exist to land on. The caret is owed its row until the
+/// walk hands one over, and this is the path where that matters: it is how a reader
+/// who pressed `b` and then wanted somewhere else gets there.
+#[test]
+fn the_caret_lands_on_the_branch_point_once_its_row_is_walked() {
+    let scratch = deep("standing-owed", 4);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let _ = drawn(&mut frame, Standing::Current);
+
+    // `b`, then `B`, on a pane that has never drawn a list: no rows are walked yet.
+    app.apply(Action::ToggleStanding, &mut frame, 20)
+        .expect("b");
+    assert_eq!(*app.asked(), Asked::BranchPoint);
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("B");
+    assert!(
+        app.places().point.is_none(),
+        "the fixture walked a branch point before the shell did, so this gate is not \
+         standing where the defect was"
+    );
+
+    // The walk arrives, and the caret lands on the row it was owed.
+    let (_, named) = worktree.branch_point().expect("a branch point");
+    let walk = worktree.commits_from(None, 8).expect("a page");
+    app.set_places(vigia::Places {
+        commits: walk.commits,
+        more: walk.more,
+        current: Some(vigia::Facts::default()),
+        point: Some((named, Some(vigia::Facts::default()))),
+    });
+    assert_eq!(
+        app.positions_caret().expect("no caret").at,
+        1,
+        "the list opened on the live pane's row while the pane was standing at the \
+         branch point, so it says the reader is somewhere they are not"
+    );
+
+    // And a reader who has moved the caret keeps it: the next page must not drag them
+    // back to where the pane happens to stand.
+    app.apply(Action::PositionsMove(2), &mut frame, 20)
+        .expect("move");
+    let moved = app.positions_caret().expect("no caret").at;
+    let mut places = app.places().clone();
+    let from =
+        vigia::resume_from(app.positions_caret().expect("no caret"), &places).map(|at| at.id);
+    if let Some(from) = from {
+        places.extend(worktree.commits_from(Some(from), 8).expect("a page"));
+    }
+    app.set_places(places);
+    assert_eq!(
+        app.positions_caret().expect("no caret").at,
+        moved,
+        "a page arriving moved the caret the reader had put somewhere"
+    );
+}
+
+/// A checkout re-anchors the list, rather than leaving it on the branch it opened on.
+///
+/// The two named rows always recompute, so the defect this holds shut is silent: the
+/// rows above would tell the truth while every commit row named another branch's
+/// history for the life of the process.
+#[test]
+fn the_list_re_anchors_when_the_history_moves() {
+    let scratch = deep("standing-anchor", 4);
+    let worktree = scratch.worktree();
+    let page = worktree.commits_from(None, 8).expect("a page");
+    let mut places = vigia::Places {
+        commits: page.commits.clone(),
+        more: page.more,
+        current: None,
+        point: None,
+    };
+    assert!(
+        places.anchored_at(&page),
+        "a list holding exactly the page it was filled from says it is somewhere else"
+    );
+
+    // A second branch off the same point, with its own commits on top.
+    scratch.git(&["checkout", "-b", "other", "HEAD~2"]);
+    scratch.write("src/base.rs", "elsewhere\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "on the other branch"]);
+    let moved = worktree.commits_from(None, 8).expect("a page");
+    assert!(
+        !places.anchored_at(&moved),
+        "the list says it is anchored to a history whose newest commit it has never \
+         seen, so a checkout would leave every commit row naming the old branch"
+    );
+
+    // And re-anchoring replaces the rows rather than interleaving two branches.
+    places.commits.clear();
+    places.extend(moved.clone());
+    assert!(places.anchored_at(&moved));
+    assert_eq!(
+        places.commits.first().map(|at| at.subject.clone()),
+        Some("on the other branch".to_owned()),
+        "the re-anchored list does not lead with the branch it is now on"
+    );
+}
+
+/// A row the pane stands on that the list does not hold opens on the first row.
+///
+/// Reachable: a commit picked from the list and then garbage-collected, or a walk
+/// re-anchored by a checkout while the pane stands on the old branch's commit. The
+/// fallback has to be the live pane's row, which is the one row that always exists.
+#[test]
+fn a_standing_commit_the_list_does_not_hold_opens_on_the_first_row() {
+    let scratch = deep("standing-absent", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let _ = drawn(&mut frame, Standing::Current);
+
+    // A short page on purpose: the branch point has to sit behind what the list holds,
+    // or the fallback below is never reached.
+    let walk = worktree.commits_from(None, 2).expect("a page");
+    let held = walk.commits[1].clone();
+    app.set_places(vigia::Places {
+        commits: walk.commits.clone(),
+        more: walk.more,
+        current: None,
+        point: None,
+    });
+    app.stands(Asked::At(Standing::Since {
+        at: held.id,
+        named: held.named.clone(),
+    }));
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("B");
+    assert_eq!(
+        app.positions_caret().expect("no caret").at,
+        2,
+        "the caret did not find the commit the pane is standing on, so the fallback \
+         below is not being told apart from a match"
+    );
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("close");
+
+    // And one it does not hold: the branch point's own commit, which is behind every
+    // row the page walked.
+    let (at, named) = worktree.branch_point().expect("a branch point");
+    assert!(
+        !walk.commits.iter().any(|commit| commit.id == at),
+        "the fixture's page holds the branch point, so this gate is not standing on a \
+         commit the list is missing"
+    );
+    app.stands(Asked::At(Standing::Since { at, named }));
+    app.apply(Action::TogglePositions, &mut frame, 20)
+        .expect("B");
+    assert_eq!(
+        app.positions_caret().expect("no caret").at,
+        0,
+        "a pane standing on a commit the list does not hold opened somewhere other \
+         than the live pane's row, which is the one row that is always there"
+    );
+}
+
+/// A named row's totals hold the header's own field widths, not just its words.
+///
+/// `-N` ends on the box's right inset and `+N` sits a count cell to its left, so the
+/// two are read against each other by their sigils. Asserting the words alone leaves
+/// the arithmetic free: drop a column from the field and every number still appears.
+#[test]
+fn a_named_rows_totals_stand_in_the_columns_the_header_counts_in() {
+    let scratch = deep("standing-columns", 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let view = drawn(&mut frame, Standing::Current);
+    opened(&worktree, &mut frame, &mut app, 8);
+
+    let buffer = screen(&view, &app, 80, 20);
+    let row = list_rows(&buffer)[0].clone();
+    let plus = row.find("+1").expect("the live row draws no added total");
+    let minus = row.find("-0").expect("the live row draws no removed total");
+    assert_eq!(
+        minus - plus,
+        "+1".len() + vigia::COUNT_CELL - "-0".len() + 1,
+        "the gap between the two totals is not the count cell the header lays its own \
+         out against, so the sigils no longer line up down the column: {row:?}"
+    );
+
+    // And the right edge: `-0` ends on the box's inset, whatever the numbers spell.
+    let edge = row.rfind('│').expect("the row draws no frame");
+    assert_eq!(
+        edge - (minus + "-0".len()),
+        vigia::OVERLAY_FRAME / 2 + 1,
+        "the removed total does not end on the box's own inset: {row:?}"
+    );
+}

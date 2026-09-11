@@ -71,9 +71,9 @@ pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, r
 pub use post::Posted;
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
-    Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells, NoteCount,
-    PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell, diff_height,
-    menu_cell, note_cells, notice_area, regions, render, voice_style,
+    Areas, Band, Body, COUNT_CELL, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells,
+    NoteCount, PaintStats, SHEET_PURPOSE, WORD_INSET, body_layout, box_cells, count_cell,
+    diff_height, menu_cell, note_cells, notice_area, regions, render, voice_style,
 };
 pub use state::state_root;
 pub use terminal::{Background, Screen, Session, background_of};
@@ -102,8 +102,8 @@ use vigia_core::{
 pub type Failure = Box<dyn std::error::Error>;
 
 /// The frame behind the list's other named row, and where it stands. Beside the pane's
-/// own rather than on [`Shell`], a [`vigia_core::Frame`] borrowing the worktree, and
-/// kept rather than rebuilt so its re-diff is incremental through I2a's machinery.
+/// own because a [`vigia_core::Frame`] borrows the worktree, and kept rather than
+/// rebuilt so its re-diff is incremental through I2a's machinery. §3's I4 carries it.
 type Aside<'w> = Option<(vigia_core::Standing, vigia_core::Frame<'w>)>;
 
 /// Why the shell woke up.
@@ -273,19 +273,6 @@ pub fn epoch_now() -> i64 {
         .map_or(0, |since| {
             i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
         })
-}
-
-/// The request that names where a frame already stands, put back after a failed walk so
-/// the token names what the body is drawing. A position reached through the branch point
-/// returns as the commit: re-asking a repository question to restate its own answer is
-/// how a rebase turns a restore into a move.
-#[doc(hidden)]
-#[must_use]
-pub fn asked_of(standing: &vigia_core::Standing) -> crate::app::Asked {
-    match standing {
-        vigia_core::Standing::Current => crate::app::Asked::Current,
-        other => crate::app::Asked::At(other.clone()),
-    }
 }
 
 /// The paths in one wake's burst that the pane is actually having.
@@ -1016,8 +1003,8 @@ struct Shell {
     store_watch: Option<StoreWatch>,
     /// A wake said the store changed and no paint has read it back yet.
     notes_stale: bool,
-    /// Whether the list's facts are owed a walk: set when the tree moves, the list
-    /// opens or the pane does, so the arrows re-measure nothing.
+    /// Whether the list's facts are owed a walk: set when the tree moves, the list opens
+    /// or the pane does, so the arrows re-measure nothing.
     places_stale: bool,
     /// What the pane holds of the store between wakes: the notes as listed and
     /// the ones on their way off the screen.
@@ -1177,6 +1164,9 @@ impl Shell {
         }
         self.branch_point = None;
         self.app.stands(crate::app::Asked::Current);
+        // Owed here as well as in `apply`, which this path does not reach: an open list
+        // would keep drawing the branch it was measuring from.
+        self.places_stale = true;
         frame.stand(vigia_core::Standing::Current);
         match frame.advance() {
             Ok(()) => self.app.stood(),
@@ -1285,7 +1275,7 @@ impl Shell {
                 if reaching {
                     self.branch_point = None;
                 }
-                self.app.stands(asked_of(&previous));
+                self.app.stands(self.asked_of(&previous));
                 frame.stand(previous);
             }
         }
@@ -1425,6 +1415,18 @@ impl Shell {
         }
     }
 
+    /// The request naming where a frame already stands, put back after a failed walk so
+    /// the token names what the body is drawing. A position that *is* the held branch
+    /// point comes back as the request for it: the commit would be the same diff today
+    /// and a frozen one tomorrow, and the list could not tell which row it was on.
+    fn asked_of(&self, standing: &vigia_core::Standing) -> crate::app::Asked {
+        match standing {
+            vigia_core::Standing::Current => crate::app::Asked::Current,
+            other if self.branch_point.as_ref() == Some(other) => crate::app::Asked::BranchPoint,
+            other => crate::app::Asked::At(other.clone()),
+        }
+    }
+
     /// Move the list's caret, extending the walk where it reached the end of one.
     fn move_positions(&mut self, rows: isize, frame: &mut vigia_core::Frame, worktree: &Worktree) {
         self.apply_menu(Action::PositionsMove(rows), frame, worktree);
@@ -1439,7 +1441,7 @@ impl Shell {
         self.app.positions_rows().max(1)
     }
 
-    /// Walk one more page on from where the caret asks. A caret with room asks none.
+    /// Walk a page on from where the caret asks; a caret with room asks for none.
     fn extend_places(&mut self, worktree: &Worktree, caret: positions::Caret) {
         let Some(from) = positions::resume_from(caret, self.app.places()).map(|at| at.id) else {
             return;
@@ -1459,8 +1461,7 @@ impl Shell {
     /// Put the list's rows where the repository has them, while one is open. The first
     /// page waits a frame, a page being measured in the rows the box holds. The row the
     /// pane stands on takes its facts off the view the header drew, so the two cannot
-    /// disagree about one run; the other is walked, and `places_stale` keeps that off a
-    /// keypress.
+    /// disagree; the other is walked, and `places_stale` keeps that off a keypress.
     fn refresh_places<'w>(
         &mut self,
         frame: &vigia_core::Frame<'_>,
@@ -1474,20 +1475,23 @@ impl Shell {
             self.places_stale = false;
             return;
         }
-        // One gate and not two. Deriving *never walked* from the collection's own
-        // emptiness bypasses this one, and then a history that will not walk is walked
-        // again on every keypress rather than on every wake, saying so each time.
+        // One gate and not two: deriving *never walked* from the collection's emptiness
+        // bypasses this one, and a history that will not walk is then retried per key.
         if !std::mem::take(&mut self.places_stale) {
             return;
         }
         let mut places = self.app.places().clone();
-        if places.commits.is_empty() {
-            match worktree.commits_from(None, self.positions_page()) {
-                Ok(page) => places.extend(page),
-                // Said rather than swallowed: a history that will not walk still leaves
-                // the two named rows, which are the places a reader came for.
-                Err(e) => self.app.warn(e.to_string()),
+        // Re-anchored rather than only filled: a checkout moves HEAD, and a list walked
+        // from one branch would name its commits for the life of the process.
+        match worktree.commits_from(None, self.positions_page()) {
+            Ok(page) if !places.anchored_at(&page) => {
+                places.commits.clear();
+                places.extend(page);
             }
+            Ok(_) => {}
+            // Said rather than swallowed: a history that will not walk still leaves the
+            // two named rows, which are the places a reader came for.
+            Err(e) => self.app.warn(e.to_string()),
         }
 
         // The name alone, from the resolution the shell holds: a place a reader can go
@@ -1533,10 +1537,9 @@ impl Shell {
         self.app.set_places(places);
     }
 
-    /// What one run holds, walked by a frame thrown away rather than kept: a
-    /// [`vigia_core::Frame`] borrows the worktree, so keeping one holds that borrow
-    /// beside the pane's own for the life of the shell. Armed the way the pane's frame
-    /// is, so `a` and `hide` reach it: a row counting hidden files is a second answer.
+    /// What one run holds, from the frame kept beside the pane's own. Armed the way that
+    /// one is, so `a` and `hide` reach it: a row counting hidden files is a second
+    /// answer about one tree.
     fn facts_at<'w>(
         &self,
         worktree: &'w Worktree,
@@ -1544,8 +1547,7 @@ impl Shell {
         standing: &vigia_core::Standing,
     ) -> Option<Facts> {
         // Rebuilt only where the position changed, which is what makes it incremental:
-        // a frame made fresh each wake costs the run, 20.21ms on two hundred files,
-        // where a kept one costs the edit, 5.93ms.
+        // fresh each wake costs the run, 20.21ms over two hundred files, kept 5.93ms.
         if aside.as_ref().is_none_or(|(at, _)| at != standing) {
             let mut made = worktree.frame();
             made.stand(standing.clone());
@@ -2326,7 +2328,7 @@ mod tests {
             "Ok(()) => self.app.stood(),",
             // A failed one puts the request, the frame and the base back.
             "frame.stand(previous);",
-            "self.app.stands(asked_of(&previous));",
+            "self.app.stands(self.asked_of(&previous));",
             "if reaching {\n                    self.branch_point = None;\n                }",
             // A branch with nothing to measure from says so and stays put.
             "self.app.stands(crate::app::Asked::Current);",
@@ -2339,6 +2341,35 @@ mod tests {
                  that resolved nothing, or keeps a token the body is not drawing"
             );
         }
+        // What the list's rows cost, which is a frequency rather than a value and so is
+        // read here: no test can build a `Shell`, and a refresh running on every frame
+        // draws exactly what a correct one draws.
+        let refresh = shipped
+            .split("fn refresh_places<")
+            .nth(1)
+            .expect("`Shell::refresh_places` is gone");
+        let refresh = refresh
+            .split(
+                "
+    }
+",
+            )
+            .next()
+            .expect("`refresh_places` never closes");
+        for rule in [
+            // Nothing at all while the box is away.
+            "if !self.app.positions_open() {",
+            // And one walk per wake while it is up, rather than one per keypress.
+            "if !std::mem::take(&mut self.places_stale) {",
+            // Re-anchored, or a checkout leaves every commit row on the old branch.
+            "if !places.anchored_at(&page)",
+        ] {
+            assert!(
+                refresh.contains(rule),
+                "`{rule}` is gone from `Shell::refresh_places`, so the list's rows cost                  a walk of a whole run on frames that asked for nothing, or name a                  branch the pane is no longer on"
+            );
+        }
+
         // A base that goes away under a parked pane brings it home, on the one
         // walk that runs with nobody there to notice.
         let failed = shipped
@@ -2356,6 +2387,8 @@ mod tests {
             // Coming home is a move like any other, and the row the pane was on
             // names an unrelated file in the run it lands in.
             "Ok(()) => self.app.stood(),",
+            // And an open list is measuring from the base that just went away.
+            "self.places_stale = true;",
         ] {
             assert!(
                 failed.contains(rule),

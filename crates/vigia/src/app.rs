@@ -186,6 +186,13 @@ pub struct App {
     /// question. Kept here so one frame's rows and the caret over them are one
     /// answer.
     places: Places,
+    /// Whether the caret is still owed the row the pane is standing on.
+    ///
+    /// The rows are walked on the frame after the key, so a list opened on a pane that
+    /// has never drawn one has nothing to land on yet. Owed rather than derived on
+    /// demand, for [`App::landing`]'s reason: the answer arrives later than the ask, and
+    /// deriving it every frame would drag the caret back under a reader who moved it.
+    caret_owed: bool,
     /// Pages the sheet has on the pane last drawn for. One frame stale after a
     /// resize, which `sheet_plan` clamps.
     sheet_pages: usize,
@@ -250,6 +257,7 @@ impl Default for App {
             positions: None,
             positions_rows: 0,
             places: Places::default(),
+            caret_owed: false,
             anchored: false,
             list_top: 0,
             list_follows: true,
@@ -632,6 +640,12 @@ impl App {
     /// that stopped resolving changes how many rows there are.
     pub fn set_places(&mut self, places: Places) {
         self.places = places;
+        if std::mem::take(&mut self.caret_owed)
+            && let at = self.standing_row()
+            && let Some(caret) = self.positions.as_mut()
+        {
+            caret.at = at;
+        }
         self.settle_positions();
     }
 
@@ -937,11 +951,18 @@ impl App {
                     }),
                     Some(_) => None,
                 };
+                // And asked again once the rows arrive: pressing `b` then `B` opens the
+                // list on a pane whose branch point row has not been walked yet, so the
+                // row the pane stands on does not exist to land on.
+                self.caret_owed = self.positions.is_some();
                 self.settle_positions();
             }
             Action::ClosePositions => self.positions = None,
             Action::PositionsMove(rows) => {
                 let of = self.places.len();
+                // The reader has moved it, so it is no longer owed a row: landing it
+                // again when the next page arrives would drag them back up.
+                self.caret_owed = false;
                 if let Some(caret) = self.positions.as_mut() {
                     caret.at = caret.stepped(rows, of);
                 }
