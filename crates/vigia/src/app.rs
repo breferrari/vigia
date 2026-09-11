@@ -16,10 +16,11 @@ use crate::view::{Anchor, Position, View, Viewport, rows_in};
 /// Completed frames the status bar's p99 is taken over.
 const FRAME_SAMPLES: usize = 128;
 
-/// What the footer says where the reading has no commit to flip. It names the
-/// gesture that gives it one and fits I6's forty columns whole: the footer cuts from
-/// the right, and a refusal a reader cannot act on is one that did not answer.
-const NOTHING_TO_READ: &str = "only needs a commit; B lists them";
+/// What the footer says where the reading has no commit to flip. The gesture comes
+/// first because the footer clips a notice from the right: sharing its row with a
+/// note count and a position leaves it around twenty columns in the forties, and
+/// whichever half is second is the half a reader does not get.
+const NOTHING_TO_READ: &str = "B picks a commit; only reads one";
 
 /// Where the pane stands and when, as one frame draws it.
 ///

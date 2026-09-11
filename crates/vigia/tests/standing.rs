@@ -35,6 +35,20 @@ const FOLLOWING: &str = "follow ▶";
 /// own copy of the flag, so a gate over the entry alone cannot see it go missing.
 const PULSE: &str = "●";
 
+/// The whole of the footer's refusal, and the half of it a reader acts on. The
+/// footer clips a notice from the right, so the second half is the one that goes.
+const NOTHING_TO_READ: &str = "B picks a commit; only reads one";
+const GESTURE: &str = "B picks a commit";
+
+/// The last row a pane drew anything on, trimmed.
+fn last_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .rfind(|row| !row.is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
 fn viewport() -> Viewport {
     Viewport {
         position: Position { file: 0, row: 0 },
@@ -1850,21 +1864,32 @@ fn the_key_refuses_where_no_commit_is_named() {
         );
     }
 
-    // And whole at I6's forty columns. The footer cuts from the right, and the half
-    // it takes is the half naming the gesture that answers the refusal.
-    let said = app.notice().unwrap_or_default().to_owned();
-    let drawn = painted_at(&mut app, &mut frame, &History::new(), 40);
-    let footer = drawn
-        .text
-        .lines()
-        .last()
-        .unwrap_or_default()
-        .trim()
-        .to_owned();
+    // And the gesture reaches the footer at every width the pane has, which one
+    // width cannot say: a notice is one token the footer clips from the right, and
+    // between forty-five and fifty-seven it shares its row with a note count and a
+    // position, which leaves it around twenty columns. At forty it has the row to
+    // itself, so a gate that asked only there would have passed on a line cut in
+    // half everywhere above it.
+    app.set_notes(note_on(&mut frame));
+    app.clear_notice();
+    app.apply(Action::ToggleReading, &mut frame, 0)
+        .expect("the key");
+    let mut whole = 0usize;
+    for width in 40u16..=140 {
+        let drawn = painted_at(&mut app, &mut frame, &History::new(), width);
+        let footer = last_line(&drawn.text);
+        assert!(
+            footer.contains(GESTURE),
+            "the refusal at {width} columns is {footer:?}, which has lost the \
+             gesture that answers it"
+        );
+        whole += usize::from(footer.contains(NOTHING_TO_READ));
+    }
+    // Non-vacuity: a line nothing ever draws whole would satisfy the sweep.
     assert!(
-        footer.starts_with(&said),
-        "the refusal is cut at forty columns, so the pane every width rung is \
-         measured from answers with half a sentence: {footer:?}"
+        whole > 40,
+        "the whole refusal was drawn at only {whole} of the widths swept, so the \
+         sweep is about a line the pane never finds room for"
     );
 }
 
