@@ -20,7 +20,7 @@ const FRAME_SAMPLES: usize = 128;
 /// first because the footer clips a notice from the right: sharing its row with a
 /// note count and a position leaves it around twenty columns in the forties, and
 /// whichever half is second is the half a reader does not get.
-const NOTHING_TO_READ: &str = "B picks a commit; only reads one";
+const NOTHING_TO_READ: &str = "B lists commits; only reads one";
 
 /// Where the pane stands and when, as one frame draws it.
 ///

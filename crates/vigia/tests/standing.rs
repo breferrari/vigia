@@ -35,10 +35,16 @@ const FOLLOWING: &str = "follow ▶";
 /// own copy of the flag, so a gate over the entry alone cannot see it go missing.
 const PULSE: &str = "●";
 
-/// The whole of the footer's refusal, and the half of it a reader acts on. The
-/// footer clips a notice from the right, so the second half is the one that goes.
-const NOTHING_TO_READ: &str = "B picks a commit; only reads one";
-const GESTURE: &str = "B picks a commit";
+/// The half of the footer's refusal a reader acts on. The footer clips a notice
+/// from the right, so the second half is the one that goes and this is the first.
+const GESTURE: &str = "B lists commits";
+
+/// The mark the footer leaves where it cut a notice, from `render`'s `CONTINUES`.
+///
+/// What a whole line is asserted by, rather than by the line itself: a gate holding
+/// its own copy of the text passes on a longer line that merely begins with it,
+/// which is the truncation it exists to catch.
+const CUT: &str = "›";
 
 /// The last row a pane drew anything on, trimmed.
 fn last_line(text: &str) -> String {
@@ -1874,8 +1880,9 @@ fn the_key_refuses_where_no_commit_is_named() {
     app.clear_notice();
     app.apply(Action::ToggleReading, &mut frame, 0)
         .expect("the key");
-    let mut whole = 0usize;
+    let (mut whole, mut swept) = (0usize, 0usize);
     for width in 40u16..=140 {
+        swept += 1;
         let drawn = painted_at(&mut app, &mut frame, &History::new(), width);
         let footer = last_line(&drawn.text);
         assert!(
@@ -1883,13 +1890,22 @@ fn the_key_refuses_where_no_commit_is_named() {
             "the refusal at {width} columns is {footer:?}, which has lost the \
              gesture that answers it"
         );
-        whole += usize::from(footer.contains(NOTHING_TO_READ));
+        whole += usize::from(!footer.contains(CUT));
     }
-    // Non-vacuity: a line nothing ever draws whole would satisfy the sweep.
+    // Non-vacuity, and it names a width rather than only a count: a count alone is
+    // met by the widest panes on their own, which is the band a regression leaves
+    // behind. Forty is where the notice has the footer row to itself, so a line
+    // that will not fit there will not fit anywhere.
+    let narrowest = last_line(&painted_at(&mut app, &mut frame, &History::new(), 40).text);
     assert!(
-        whole > 40,
-        "the whole refusal was drawn at only {whole} of the widths swept, so the \
-         sweep is about a line the pane never finds room for"
+        !narrowest.contains(CUT),
+        "the refusal is cut at forty columns, where it has the footer row to \
+         itself: {narrowest:?}"
+    );
+    assert!(
+        whole * 2 > swept,
+        "the whole refusal was drawn at {whole} of {swept} widths, so it fits the \
+         wide panes and arrives as a fragment on most of the rest"
     );
 }
 
