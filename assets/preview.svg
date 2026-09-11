@@ -273,9 +273,13 @@
     <!-- status bar -->
     <rect x="8" y="458" width="884" height="30" fill="#161b22"/>
     <line x1="8" y1="458" x2="892" y2="458" stroke="#21262d" stroke-width="1"/>
-    <!-- #80: the bar keeps q, f and ? and nothing else. It drew four hints, two
-         of which named keys a reader can now find on the ? sheet instead. -->
-    <text class="m faint" x="32" y="478" font-size="12.5">q quit  &#183;  f follow  &#183;  ? keys</text>
+    <!-- #80 cut this to q, f and ? from four hints that named keys the ? sheet
+         carries. `m config` rejoined it with the config menu: HINT_RUNGS' widest
+         rung holds all four and the ladder draws it wherever the line fits, which
+         a pane this wide does. HINT_BASELINE sits one below it and decides only
+         whether the footer takes a second line, so `m config` is the first hint
+         given up and never costs the body a row. -->
+    <text class="m faint" x="32" y="478" font-size="12.5">q quit  &#183;  f follow  &#183;  m config  &#183;  ? keys</text>
     <text class="m" x="866" y="478" font-size="12.5" text-anchor="end"><tspan class="cyn">0.8ms</tspan><tspan class="dim"> frame</tspan><tspan class="dim">&#160;&#160;&#160;</tspan><tspan class="cyn">24MiB</tspan><tspan class="dim">&#160;&#160;</tspan><tspan class="dim">follow </tspan><tspan class="grn">&#9654;</tspan><tspan class="dim">&#160;&#160;1/3</tspan></text>
   </g>
 
