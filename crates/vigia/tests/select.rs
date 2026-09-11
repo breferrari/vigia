@@ -16,7 +16,7 @@ use vigia::{
     Action, App, Glyphs, NoteLead, Pointing, Region, Regions, Row, Selection, Theme, body_layout,
     render, selection_after,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, materialise, note, numbered_lines};
 
@@ -107,7 +107,7 @@ fn sent_on(
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -147,7 +147,7 @@ fn drawn_on(app: &mut App, frame: &mut Frame, pane: Rect) -> String {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -356,7 +356,7 @@ fn the_cheap_answer_agrees_with_the_lines_it_stands_for() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -469,7 +469,7 @@ fn a_wrapped_line_is_sent_once_and_whole() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -563,7 +563,7 @@ fn washes(
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -764,7 +764,7 @@ fn a_wrapped_line_at_the_foot_of_the_pane_is_still_sent_whole() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -866,7 +866,7 @@ fn the_footer_counts_lines_and_not_rows() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -916,7 +916,7 @@ fn a_span_ending_on_a_blank_row_is_still_counted_whole() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -974,7 +974,7 @@ fn a_selection_with_no_text_in_it_never_reaches_the_clipboard() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -1019,7 +1019,7 @@ fn a_span_the_walk_had_no_rows_for_holds_no_selection() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1085,7 +1085,7 @@ fn view_rows_on(app: &mut App, frame: &mut Frame, pane: Rect) -> Vec<Row> {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),

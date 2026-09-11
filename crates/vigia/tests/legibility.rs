@@ -26,7 +26,7 @@ const BOX_LABEL: &str = "crates/vigia/src/shell.rs:2";
 /// refuse, and `notes.rs::a_pane_that_says_it_has_room_for_a_box_draws_one`
 /// is what fails if they come back.
 const BOX_FLOOR: u16 = 9;
-use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
+use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Reading, Recency};
 
 /// The mark meaning "this continues past the right edge".
 const CONTINUES: char = '›';
@@ -312,6 +312,7 @@ fn chrome() -> Chrome {
     Chrome {
         menu: None,
         position: "current".to_owned(),
+        reading: Reading::Since,
         pressed: None,
         gripped: None,
         hovered: None,

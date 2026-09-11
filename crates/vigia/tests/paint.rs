@@ -9,7 +9,7 @@ use vigia::{
     Action, App, Chrome, Glyphs, PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout,
     render,
 };
-use vigia_core::{Highlighter, History};
+use vigia_core::{Highlighter, History, Standing};
 
 use support::{
     PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNIT_CHARS, WIDE_UNIT_COLUMNS, WIDE_UNITS,
@@ -49,7 +49,7 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -296,7 +296,7 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -361,7 +361,7 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -417,7 +417,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

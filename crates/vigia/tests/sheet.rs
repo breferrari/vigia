@@ -16,7 +16,7 @@ use vigia::{
     Action, App, Chrome, Glyphs, Grabbed, Hovered, Pointing, Regions, Sheet, Theme, action_for,
     body_layout, regions, render,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use screen::candidate_keys;
 use support::{Scratch, materialise};
@@ -55,7 +55,7 @@ fn chrome(app: &App) -> Chrome {
         "fixture",
         Some("main"),
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -660,7 +660,7 @@ fn drawn_close(
         "fixture",
         Some("main"),
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing {
@@ -981,7 +981,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 }
 
 /// One value of every [`Action`] variant, for the two gates that walk them.
-const ALL_ACTIONS: [Action; 37] = [
+const ALL_ACTIONS: [Action; 38] = [
     Action::Quit,
     Action::Escape,
     Action::Scroll(1),
@@ -999,6 +999,7 @@ const ALL_ACTIONS: [Action; 37] = [
     Action::ToggleWrap,
     Action::ToggleNotes,
     Action::ToggleStanding,
+    Action::ToggleReading,
     Action::TogglePositions,
     Action::ClosePositions,
     Action::PositionsMove(1),
@@ -1055,6 +1056,8 @@ fn reach_of(action: &Action) -> Reach {
         // `c`, the same way.
         Action::ToggleNotes => Reach::Keyboard,
         Action::ToggleStanding => Reach::Keyboard,
+        // `O`, and the sheet's own row for it, shared with the two above.
+        Action::ToggleReading => Reach::Keyboard,
         // `B`, and a press on the header's position token, which is the one piece of
         // chrome outside the two regions that answers a click.
         Action::TogglePositions => Reach::Both,
@@ -1157,6 +1160,49 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
     found
 }
 
+/// Every letter the map binds is taught by `README.md`'s key table.
+///
+/// Letters, because the page folds what the sheet spells out: `Home` reaches it
+/// through `g`, `Ctrl+D` through `q`, `Shift+↑` through `J`, and the digits through
+/// the range `1` to `6`. A letter has nothing to be folded into, so one the page
+/// never names is one a reader has to guess.
+///
+/// The other direction is [`every_gesture_the_readme_teaches_is_named_on_the_sheet`],
+/// and neither it nor the config file's own gate could see this: that one filters to
+/// the gestures a setting reaches, and a key deliberately kept out of the file
+/// reaches the page by hand alone. `O` was bound, drawn on the sheet and ruled into
+/// `SPEC.md` while absent from the document a reader meets first.
+#[test]
+fn every_letter_the_map_binds_is_taught_by_the_readme() {
+    let taught: Vec<String> = readme_gestures()
+        .iter()
+        .flat_map(|cell| {
+            cell.split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Non-vacuity: an extractor reading the document's shape wrongly finds nothing
+    // and every assertion below passes.
+    assert!(
+        taught.len() > 20,
+        "README.md's tables parsed to {} cells, so this gate is reading the          document rather than its rows",
+        taught.len()
+    );
+
+    let unnamed: Vec<String> = bound_keys()
+        .into_iter()
+        .map(|(_, token)| token)
+        .filter(|token| token.chars().all(|c| c.is_ascii_alphabetic()) && token.len() == 1)
+        .filter(|token| !taught.iter().any(|cell| cell == token))
+        .collect();
+    assert!(
+        unnamed.is_empty(),
+        "the key map binds {unnamed:?} and README.md never teaches them, so the          page a reader meets first is short of a gesture they would have to guess"
+    );
+}
+
 /// The phrases the sheet must carry for the gestures a pointer produces.
 fn mouse_phrases() -> Vec<&'static str> {
     let mut phrases: Vec<&'static str> = Vec::new();
@@ -1187,6 +1233,7 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::ToggleWrap
             | Action::ToggleNotes
             | Action::ToggleStanding
+            | Action::ToggleReading
             | Action::ToggleSingle
             | Action::ToggleOverview
             | Action::ToggleSheet

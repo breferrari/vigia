@@ -1949,14 +1949,15 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 ///
-/// `SPEC.md` rose 3,054 bytes for §11.1's position list and for the third exception it
-/// put on §3's I4. The list is a surface the pane did not have, a new gesture, a new
-/// overlay and a cost rule, and the exception is an invariant admitting a case it
-/// forbade, which is the most expensive kind of sentence here and the one least able to
-/// be left out. The `b` paragraph gave back what the new text covers. A raise with no
-/// new surface behind it is the thing this number is for.
+/// `SPEC.md` rose 3,391 bytes for §11.1's second reading of the position. `only` is a
+/// second engine path, a new gesture, and five surfaces that stop describing what the
+/// reader is looking at and have to say which and why: an inert rule nobody can see in
+/// the code is the kind of sentence this document exists for, and none of the five can
+/// be left out without the next session re-deriving it. The `B` paragraph gave back the
+/// clause that named one reading. A raise with no new surface behind it is the thing
+/// this number is for.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 402039),
+    ("SPEC.md", 405412),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

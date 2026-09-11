@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use ratatui_textarea::Input;
-use vigia_core::{Counted, Frame, Highlighter, History, Note, Result, Samples};
+use vigia_core::{Counted, Frame, Highlighter, History, Note, Reading, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
@@ -16,14 +16,24 @@ use crate::view::{Anchor, Position, View, Viewport, rows_in};
 /// Completed frames the status bar's p99 is taken over.
 const FRAME_SAMPLES: usize = 128;
 
+/// What the footer says where the reading has no commit to flip. *Places* rather
+/// than commits, because this fires under `since`, where `B`'s top rows are the live
+/// pane and the branch point; and the gesture comes first because the footer clips a
+/// notice from the right, which leaves it eighteen columns in the forties.
+const NOTHING_TO_READ: &str = "B lists places; only reads one";
+
 /// Where the pane stands and when, as one frame draws it.
 ///
 /// One argument rather than two because the position and the clock are one subject:
 /// the token spells the first and the list's ages are measured from the second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stood<'p> {
-    /// The token's word, as the frame spells it.
-    pub position: &'p str,
+    /// Where the frame this chrome describes is standing.
+    ///
+    /// The position rather than the word it draws, because the chrome needs two
+    /// answers off it and the word can only give the first. Deriving both here is
+    /// what stops a header saying `only` beside an empty state naming a range.
+    pub standing: &'p vigia_core::Standing,
     /// Now, in seconds since the epoch, for the ages the list draws. Passed in rather
     /// than read where it is drawn: a clock read twice in one frame gives two rows
     /// different ideas of the present.
@@ -421,13 +431,23 @@ impl App {
         &self.asked
     }
 
+    /// Which of the two readings of a position is on. Derived from the request and
+    /// never kept beside it: a second copy is how a token saying one word and a list
+    /// titled with the other come about.
+    pub fn reading(&self) -> Reading {
+        match &self.asked {
+            Asked::Current | Asked::BranchPoint => Reading::Since,
+            Asked::At(standing) => standing.reading(),
+        }
+    }
+
     /// Put the request somewhere, and owe the caret its row while a list is open.
     ///
     /// Every path that moves where the pane stands comes through here: the key, a
-    /// refusal, a failed walk, and a base lost under a parked pane. Which row the caret
-    /// is on is the list's only mark for where the pane is standing, so a standing that
-    /// moves under an open box and leaves the caret behind is a box pointing at the
-    /// wrong row.
+    /// refusal, a failed walk, and a base lost under a pane standing at one. Which row
+    /// the caret is on is the list's only mark for where the pane stands, so a standing
+    /// that moves under an open box and leaves the caret behind points at the wrong
+    /// row.
     pub fn stands(&mut self, asked: Asked) {
         self.asked = asked;
         self.caret_owed = self.positions.is_some();
@@ -545,7 +565,9 @@ impl App {
         elsewhere: Counted,
         root: &str,
     ) -> Chrome {
-        let Stood { position, now } = stood;
+        let Stood { standing, now } = stood;
+        let reading = standing.reading();
+        let live = reading.is_live();
         let Pointing {
             pressed,
             gripped,
@@ -557,8 +579,9 @@ impl App {
             pressed,
             selected,
             // `Some` even at zero: that is the only acknowledgment pressing
-            // `a` on a worktree with nothing staged can give.
-            staged: self.staged.then_some(self.staged_files),
+            // `a` on a worktree with nothing staged can give. Under `only` the run is
+            // not walked, so the header counts nothing rather than a run it has not.
+            staged: (self.staged && live).then_some(self.staged_files),
             elsewhere,
             gripped,
             hovered,
@@ -566,11 +589,15 @@ impl App {
             notes: self.note_count,
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
-            position: position.to_owned(),
+            position: standing.label(),
+            reading,
             mode: self.mode,
             notice: self.notice().map(str::to_owned),
             voice: self.voice(),
-            following: self.following,
+            // The flag is kept and the word is not drawn: `f` reaches nothing while
+            // the pane stands at a commit, so the indicator would name a mode that is
+            // not acting. Kept, so it returns as it was when the reading goes back.
+            following: self.following && live,
             rail: self.rail,
             overview: self.overview,
             icons: self.icons,
@@ -618,7 +645,7 @@ impl App {
 
     /// The same, for the position list, whose row count is its own.
     fn settle_positions(&mut self) {
-        let (rows, of) = (self.positions_rows, self.places.rows());
+        let (rows, of) = (self.positions_rows, self.places.rows(self.reading()));
         if let Some(caret) = self.positions.as_mut() {
             caret.at = caret.at.min(of.saturating_sub(1));
             caret.top = caret.window(rows, of);
@@ -651,11 +678,14 @@ impl App {
     /// that stopped resolving changes how many rows there are.
     pub fn set_places(&mut self, places: Places) {
         self.places = places;
-        if std::mem::take(&mut self.caret_owed) {
-            let at = self.standing_row();
-            if let Some(caret) = self.positions.as_mut() {
-                caret.at = at;
-            }
+        // Only where the list holds the row: a checkout takes the pane's commit off
+        // the branch the list walks without taking the pane off it, and a caret sent
+        // to row 0 there marks a commit the reader is not at as the one they are.
+        if std::mem::take(&mut self.caret_owed)
+            && let Some(at) = self.standing_row()
+            && let Some(caret) = self.positions.as_mut()
+        {
+            caret.at = at;
         }
         self.settle_positions();
     }
@@ -704,13 +734,12 @@ impl App {
             .then_some(top + offset)
     }
 
-    /// The row the pane is currently standing on, which is where the list opens.
-    ///
-    /// A commit the reader picked is found by id rather than by a remembered index:
-    /// the walk can have grown since, and an index into a list that changed names a
-    /// different commit.
-    fn standing_row(&self) -> usize {
-        let wanted = |at: usize| match (&self.asked, self.places.row_at(at)) {
+    /// The row the pane is standing on, where the list opens, or `None` where the
+    /// list does not hold it. Found by id rather than by a remembered index: the walk
+    /// can have grown, and an index into a changed list names a different commit.
+    fn standing_row(&self) -> Option<usize> {
+        let reading = self.reading();
+        let wanted = |at: usize| match (&self.asked, self.places.row_at(at, reading)) {
             (Asked::Current, Some(positions::Row::Current))
             | (Asked::BranchPoint, Some(positions::Row::Point)) => true,
             (Asked::At(standing), Some(positions::Row::Commit(nth))) => self
@@ -720,19 +749,22 @@ impl App {
                 .is_some_and(|commit| Some(commit.id) == standing.at()),
             _ => false,
         };
-        (0..self.places.rows()).find(|at| wanted(*at)).unwrap_or(0)
+        (0..self.places.rows(reading)).find(|at| wanted(*at))
     }
 
-    /// What standing the row at `at` asks for.
+    /// What standing the row at `at` asks for, under the reading the list is titled
+    /// with, so a second commit does not put the reader quietly back in the other.
     fn asked_at(&self, at: usize) -> Option<Asked> {
-        match self.places.row_at(at)? {
+        let reading = self.reading();
+        match self.places.row_at(at, reading)? {
             positions::Row::Current => Some(Asked::Current),
             positions::Row::Point => Some(Asked::BranchPoint),
             positions::Row::Commit(nth) => {
                 let commit = self.places.commits.get(nth)?;
-                Some(Asked::At(vigia_core::Standing::Since {
-                    at: commit.id,
-                    named: commit.named.clone(),
+                let (at, named) = (commit.id, commit.named.clone());
+                Some(Asked::At(match reading {
+                    Reading::Since => vigia_core::Standing::Since { at, named },
+                    Reading::Only => vigia_core::Standing::Only { at, named },
                 }))
             }
         }
@@ -740,7 +772,7 @@ impl App {
 
     /// The same for the position list, where every row is selectable.
     fn positions_at(&self, offset: usize) -> Option<usize> {
-        let of = self.places.rows();
+        let of = self.places.rows(self.reading());
         let top = self.positions?.window(self.positions_rows, of);
         (offset < self.positions_rows && top + offset < of).then_some(top + offset)
     }
@@ -801,6 +833,12 @@ impl App {
             self.list_follows = true;
         }
 
+        // Above the match rather than inside three arms, so the menu's rows go inert
+        // with the keys: both arrive here as the same action.
+        if !frame.is_live() && action.needs_the_working_tree() {
+            return Ok(true);
+        }
+
         match action {
             Action::Quit => return Ok(false),
             // `Esc` leaves the frontmost thing, and the sheet is a thing. Reported from
@@ -846,6 +884,20 @@ impl App {
                     Asked::Current => Asked::BranchPoint,
                     Asked::BranchPoint | Asked::At(_) => Asked::Current,
                 });
+            }
+            // The same place read the other way, so only what the diff is measured
+            // *between* changes. A position with no commit in it has none to flip,
+            // and the branch point's is a commit this branch did not make, so both
+            // refuse rather than move a reader somewhere unasked. §11.1.
+            Action::ToggleReading => {
+                let flipped = match &self.asked {
+                    Asked::At(standing) => standing.flipped().map(Asked::At),
+                    Asked::Current | Asked::BranchPoint => None,
+                };
+                match flipped {
+                    Some(asked) => self.stands(asked),
+                    None => self.warn(NOTHING_TO_READ.to_owned()),
+                }
             }
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
@@ -957,7 +1009,7 @@ impl App {
                     // Opened on the row the pane is standing on, so a list of
                     // destinations says where you are in no ink at all.
                     None => Some(positions::Caret {
-                        at: self.standing_row(),
+                        at: self.standing_row().unwrap_or(0),
                         top: 0,
                     }),
                     Some(_) => None,
@@ -970,7 +1022,7 @@ impl App {
             }
             Action::ClosePositions => self.positions = None,
             Action::PositionsMove(rows) => {
-                let of = self.places.rows();
+                let of = self.places.rows(self.reading());
                 // The reader has moved it, so it is no longer owed a row: landing it
                 // again when the next page arrives would drag them back up.
                 self.caret_owed = false;
@@ -1287,8 +1339,14 @@ impl App {
             self.notes_shown,
             self.note_box.as_ref(),
         )?;
+        // Off the screen the collect built rather than off the store: under `only`
+        // nothing is placed, and a store count would name another tree's notes.
         self.note_count = NoteCount {
-            total: self.notes.len(),
+            total: if view.notes.writable {
+                self.notes.len()
+            } else {
+                0
+            },
             adrift: view.notes.adrift,
         };
         // Advanced here rather than by the caller, because this is the call
@@ -1368,7 +1426,7 @@ mod tests {
             "fixture",
             None,
             Stood {
-                position: "current",
+                standing: &vigia_core::Standing::Current,
                 now: 0,
             },
             Pointing {
@@ -1407,7 +1465,7 @@ mod tests {
                 "fixture",
                 None,
                 Stood {
-                    position: "current",
+                    standing: &vigia_core::Standing::Current,
                     now: 0
                 },
                 Pointing::default(),
@@ -1424,7 +1482,7 @@ mod tests {
                 "fixture",
                 None,
                 Stood {
-                    position: "current",
+                    standing: &vigia_core::Standing::Current,
                     now: 0
                 },
                 Pointing::default(),
@@ -1445,7 +1503,7 @@ mod tests {
                 "fixture",
                 None,
                 Stood {
-                    position: "current",
+                    standing: &vigia_core::Standing::Current,
                     now: 0
                 },
                 Pointing::default(),
@@ -1468,7 +1526,7 @@ mod tests {
                 "fixture",
                 Some("main"),
                 Stood {
-                    position: "current",
+                    standing: &vigia_core::Standing::Current,
                     now: 0
                 },
                 Pointing::default(),
@@ -1484,7 +1542,7 @@ mod tests {
                 "fixture",
                 None,
                 Stood {
-                    position: "current",
+                    standing: &vigia_core::Standing::Current,
                     now: 0
                 },
                 Pointing::default(),

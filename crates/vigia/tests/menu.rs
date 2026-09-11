@@ -13,7 +13,7 @@ use vigia::{
     Setting, Sheet, Theme, action_for, body_layout, menu_cell, menu_route, regions, render,
     scroll_mark,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, materialise};
 
@@ -41,7 +41,7 @@ fn chrome(app: &App) -> Chrome {
         "fixture",
         Some("main"),
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),

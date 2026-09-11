@@ -10,7 +10,7 @@ use vigia::{
     Action, App, Body, Glyphs, Pointing, Position, Regions, Row, TRACK_SCALE, Theme, View,
     Viewport, action_for, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, materialise};
 
@@ -41,7 +41,7 @@ fn body() -> usize {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -66,7 +66,7 @@ fn listed() -> Body {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -377,7 +377,7 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -848,7 +848,7 @@ fn a_pinned_pane_draws_and_its_bar_is_the_files() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -934,7 +934,7 @@ fn the_pin_and_the_rail_do_not_fight() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -1106,7 +1106,7 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1121,7 +1121,7 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

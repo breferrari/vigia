@@ -9,7 +9,7 @@ use vigia::{
     Band, Chrome, Depth, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, Heat, HeatBucket, Mode,
     Position, Row, Scale, Theme, View, render,
 };
-use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency, Status};
+use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Reading, Recency, Status};
 
 /// Buckets a sparkline draws on the panes this file renders at.
 const DRAWN_BUCKETS: usize = 12;
@@ -38,6 +38,7 @@ fn chrome() -> Chrome {
         positions: None,
         now: 0,
         position: "current".to_owned(),
+        reading: Reading::Since,
         pressed: None,
         gripped: None,
         hovered: None,

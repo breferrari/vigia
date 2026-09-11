@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{
-    Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span,
+    Churn, Class, Counted, HISTORY_BUCKETS, LineKind, Origin, Reading, Recency, SPARK_GROUPS, Span,
 };
 
 use crate::app::Voice;
@@ -472,6 +472,9 @@ const NOTHING_CHANGED: &str = "no unstaged changes";
 /// The same, for a pane showing both runs.
 const NOTHING_ANYWHERE: &str = "no staged or unstaged changes";
 
+/// The same, for a pane standing at one commit that changed nothing.
+const NOTHING_IN_THE_COMMIT: &str = "nothing in this commit";
+
 /// The narrowest the text column may get before line numbers are dropped.
 const MIN_TEXT_WIDTH: usize = 24;
 
@@ -505,6 +508,9 @@ pub struct Chrome {
     pub branch: Option<String>,
     /// Where in the history the pane is standing, as the token draws it.
     pub position: String,
+    /// Which reading that word is, which the word cannot say: the empty state names
+    /// the same place with a different preposition.
+    pub reading: Reading,
     /// How many files the staged run holds, or `None` when it is not drawn.
     pub staged: Option<usize>,
     /// How many changes the run that is not drawn holds.
@@ -967,14 +973,17 @@ fn chosen_rung(rungs: &[(String, Option<usize>)], room: usize) -> Option<(&str, 
 /// that drops the header's count this row is the only thing left on screen.
 fn empty_state_with(
     position: &str,
+    reading: Reading,
     staged: Option<usize>,
     elsewhere: usize,
     hidden: usize,
 ) -> String {
-    let parked = position != vigia_core::Standing::CURRENT;
-    let held = match (hidden, staged, parked) {
+    let historic = position != vigia_core::Standing::CURRENT;
+    let held = match (hidden, staged, historic) {
         // The words name the comparison: `no unstaged changes` under `since main`
-        // describes a walk this frame did not make.
+        // describes a walk this frame did not make. Only one of the two tokens reads
+        // as a clause, and the id is on the header above, so the other points.
+        (0, _, true) if !reading.is_live() => NOTHING_IN_THE_COMMIT.to_owned(),
         (0, _, true) => format!("no changes {position}"),
         (0, Some(_), false) => NOTHING_ANYWHERE.to_owned(),
         (0, None, false) => NOTHING_CHANGED.to_owned(),
@@ -2089,7 +2098,7 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
     body.positions_rows = chrome
         .positions
         .as_ref()
-        .map(|list| positions_rows_of(area, footer, margins_of(area.width), list));
+        .map(|list| positions_rows_of(area, footer, margins_of(area.width), list, chrome.reading));
     body
 }
 
@@ -2185,8 +2194,14 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
                 .map(|plan| plan.target())
         }),
         positions: chrome.positions.as_ref().and_then(|list| {
-            positions_drawn(area, footer.height(), margins_of(area.width), list)
-                .map(|plan| plan.target())
+            positions_drawn(
+                area,
+                footer.height(),
+                margins_of(area.width),
+                list,
+                chrome.reading,
+            )
+            .map(|plan| plan.target())
         }),
         // The token, from the derivation the painter marks it with.
         position: position_token(area, chrome, view, margins_of(area.width)),
@@ -2317,7 +2332,8 @@ pub fn render(
         .menu
         .and_then(|menu| menu_drawn(area, footer.height(), margins, menu).map(|plan| (plan, menu)));
     let drawn_list = chrome.positions.as_ref().and_then(|list| {
-        positions_drawn(area, footer.height(), margins, list).map(|plan| (plan, list))
+        positions_drawn(area, footer.height(), margins, list, chrome.reading)
+            .map(|plan| (plan, list))
     });
 
     let mut painter = Painter {
@@ -2411,6 +2427,7 @@ pub fn render(
             area,
             &empty_state_with(
                 &chrome.position,
+                chrome.reading,
                 chrome.staged,
                 chrome.elsewhere.shown,
                 hidden_of(view, chrome),
@@ -2430,7 +2447,7 @@ pub fn render(
 
     // Last, over everything, and only if a reader asked.
     if let Some((plan, list)) = drawn_list {
-        painter.positions(&plan, list, chrome.now);
+        painter.positions(&plan, list, chrome.reading, chrome.now);
     }
     if let Some((plan, menu)) = drawn_menu {
         painter.menu(&plan, &menu);
@@ -2511,14 +2528,14 @@ const KEYBOARD: [Gesture; 19] = [
         keys: ["a", "a"],
         verb: ["show or hide staged changes", "staged changes"],
     },
-    // Two senses of one concept in one row, the shape `g  Home  /  G  End` already has:
-    // a row of its own would grow a table whose rung figures are ruled. The tight verb
-    // keeps `branch point`, which stays the half both spellings share and leaves the
-    // column's field where `jump to a list row` set it, at the eighteen §11.1's
-    // *71 narrowest two-column* is measured from.
+    // Three senses of one concept in one row, the shape `g  Home  /  G  End` already
+    // has: a row of its own would grow a table whose rung figures are ruled. The tight
+    // keys cell drops the separators rather than a key, because twelve columns is what
+    // §11.1's *71 narrowest two-column* is measured from and `Space  PgDn` spends
+    // them all. The tight verb keeps `branch point`, the half both spellings share.
     Gesture {
-        keys: ["b  /  B", "b  /  B"],
-        verb: ["branch point / the list", "branch point"],
+        keys: ["b  /  B  /  O", "b  B  O"],
+        verb: ["branch point, list, reading", "branch point"],
     },
     Gesture {
         keys: ["w", "w"],
@@ -3125,13 +3142,13 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
 
 /// The list's title bar, corner excluded: the reading, so the box documents what a
 /// chosen row does and spends no row on it.
-fn positions_title() -> String {
-    format!("{RULE} {} ", positions::title())
+fn positions_title(reading: Reading) -> String {
+    format!("{RULE} {} ", positions::title(reading))
 }
 
 /// The same word, spliced into a rounded frame.
-fn positions_splice() -> String {
-    format!(" {} ", positions::title())
+fn positions_splice(reading: Reading) -> String {
+    format!(" {} ", positions::title(reading))
 }
 
 /// The list's bottom edge, widest rung first.
@@ -3184,6 +3201,7 @@ fn positions_plan(
     margins: (u16, u16),
     top: usize,
     of: usize,
+    reading: Reading,
 ) -> Option<PositionsPlan> {
     let body = area.height.saturating_sub(1 + footer_rows);
     let room = usize::from(area.width.saturating_sub(margins.0 + margins.1));
@@ -3197,7 +3215,7 @@ fn positions_plan(
     let rows = capacity.min(of.max(1));
 
     let counter = (rows < of).then(|| overlay_counter(top, rows, of));
-    let titled = width_of(&positions_title()) + counter.as_deref().map_or(0, width_of) + 5;
+    let titled = width_of(&positions_title(reading)) + counter.as_deref().map_or(0, width_of) + 5;
     let total = room.clamp(POSITIONS_FLOOR, POSITIONS_WIDEST).max(titled);
     if total > room {
         return None;
@@ -3260,15 +3278,29 @@ fn positions_drawn(
     footer_rows: u16,
     margins: (u16, u16),
     list: &Positions,
+    reading: Reading,
 ) -> Option<PositionsPlan> {
-    let of = list.places.rows();
-    let rows = positions_plan(area, footer_rows, margins, 0, of)?.rows;
-    positions_plan(area, footer_rows, margins, list.caret.window(rows, of), of)
+    let of = list.places.rows(reading);
+    let rows = positions_plan(area, footer_rows, margins, 0, of, reading)?.rows;
+    positions_plan(
+        area,
+        footer_rows,
+        margins,
+        list.caret.window(rows, of),
+        of,
+        reading,
+    )
 }
 
 /// How many rows the list's window has on this pane, and zero where it draws none.
-fn positions_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), list: &Positions) -> usize {
-    positions_drawn(area, footer_rows, margins, list).map_or(0, |plan| plan.rows)
+fn positions_rows_of(
+    area: Rect,
+    footer_rows: u16,
+    margins: (u16, u16),
+    list: &Positions,
+    reading: Reading,
+) -> usize {
+    positions_drawn(area, footer_rows, margins, list, reading).map_or(0, |plan| plan.rows)
 }
 
 /// How long ago `when` was, in the widest unit that leaves it two digits. An age rather
@@ -4299,7 +4331,7 @@ impl Painter<'_> {
         self.put(cell.x + pad, y, word, width_of(word), ink);
     }
 
-    fn positions(&mut self, plan: &PositionsPlan, list: &Positions, now: i64) {
+    fn positions(&mut self, plan: &PositionsPlan, list: &Positions, reading: Reading, now: i64) {
         let area = plan.area;
         let frame = self.theme.chrome_dim;
         let width = usize::from(area.width);
@@ -4307,17 +4339,17 @@ impl Painter<'_> {
 
         self.overlay_head(
             area,
-            &positions_title(),
-            &positions_splice(),
+            &positions_title(reading),
+            &positions_splice(reading),
             plan.counter.as_deref().unwrap_or_default(),
             plan.close,
         );
         self.sheet_pipes_over(area, area.y + 1);
 
-        let of = list.places.rows();
+        let of = list.places.rows(reading);
         let window = list.caret.window(plan.rows, of);
         for offset in 0..plan.rows {
-            let Some(row) = list.places.row_at(window + offset) else {
+            let Some(row) = list.places.row_at(window + offset, reading) else {
                 break;
             };
             self.position_row(plan, list, offset, row, window, now);
@@ -6248,7 +6280,7 @@ mod sheet_tables {
         // Addressed by the cell it draws, not by its index. View toggles outlive
         // notes, and the standing toggle outlives them: it changes what is walked.
         // The menu's door outlives all of them, which is `DROP_ORDER`'s own rule.
-        const EXPECTED: [&str; 5] = ["s", "o", "w", "b  /  B", "m  Esc"];
+        const EXPECTED: [&str; 5] = ["s", "o", "w", "b  /  B  /  O", "m  Esc"];
         let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())

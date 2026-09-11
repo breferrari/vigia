@@ -53,7 +53,7 @@ fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -197,6 +197,7 @@ mod support;
 mod screen;
 
 use screen::{Place, actions_keys_reach, place_of};
+use vigia_core::Standing;
 
 #[test]
 fn a_key_this_file_does_not_have_names_its_line_and_refuses() {
@@ -414,7 +415,7 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -485,7 +486,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

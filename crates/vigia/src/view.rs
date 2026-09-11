@@ -468,6 +468,8 @@ pub struct Marked {
 /// What this screen knows about the reader's notes beyond the rows themselves.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Noted {
+    /// Whether a note can be written here: B21's agent cannot act on a past commit.
+    pub writable: bool,
     /// Every row carrying a mark, in row order.
     pub marked: Vec<Marked>,
     /// The first row of each file's rows on this screen, that file's path and
@@ -1211,7 +1213,7 @@ fn entry_of(
     kind: &ChangeKind,
     origin: Origin,
     diff: &FileDiff,
-    history: &History,
+    history: Option<&History>,
     notes: FileNotes,
 ) -> FileEntry {
     FileEntry {
@@ -1220,9 +1222,11 @@ fn entry_of(
         from: kind.source().map(str::to_owned),
         kind: letter(kind),
         churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
-        spark: history.level(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
-        recency: history.recency(&diff.path),
-        newest: history.newest(&diff.path),
+        spark: history
+            .and_then(|watch| watch.level(&diff.path))
+            .unwrap_or([0; HISTORY_BUCKETS]),
+        recency: history.map_or(Recency::Cold, |watch| watch.recency(&diff.path)),
+        newest: history.is_some_and(|watch| watch.newest(&diff.path)),
         heat: heat_of(diff),
         notes,
     }
@@ -1339,6 +1343,12 @@ impl View {
             highlight,
             single,
         } = viewport;
+        // Off the frame, so a row and the sparkline beside it cannot describe two
+        // moments. §11.1 says what a still picture silences and what survives it.
+        let watched = frame.standing().reading().is_live();
+        let history = watched.then_some(history);
+        let notes: &[Note] = if watched { notes } else { &[] };
+        let note_box = note_box.filter(|_| watched);
         // One pass, dropped at every exit including the `?`s below, which is what keeps
         // the highlight cache bounded by the viewport. The guard rather than a pair of
         // calls is `vigia_core::Highlighter::pass`'s business and its doc says why.
@@ -1379,8 +1389,11 @@ impl View {
             landed: false,
             read: 0,
             recorded: 0,
-            scale: Scale(history.scales()),
-            notes: Noted::default(),
+            scale: Scale(history.map_or_else(Default::default, History::scales)),
+            notes: Noted {
+                writable: watched,
+                ..Noted::default()
+            },
         };
         // Keyed by path, so a file the walk draws costs one probe for its notes
         // and a file with none costs nothing more. Empty when there are no notes,
@@ -1664,11 +1677,12 @@ impl View {
         Ok(view)
     }
 
-    /// What a note written from row `offset` would pin to: the line's own row, or
-    /// the head of a continuation. `None` off a content row, which is a heading,
-    /// a hunk header, a note row and the blank rows.
+    /// What a note written from row `offset` would pin to: the line's own row, or the
+    /// head of a continuation. `None` off a content row (a heading, a hunk header, a
+    /// note row, a blank) and on every row of a screen no note can be written on.
     pub fn anchor_at(&self, offset: usize) -> Option<Anchor> {
-        if offset >= self.rows.len()
+        if !self.notes.writable
+            || offset >= self.rows.len()
             || matches!(self.rows[offset], Row::Note { .. } | Row::Box { .. })
         {
             return None;
@@ -1752,7 +1766,7 @@ impl View {
     fn take_list(
         &mut self,
         frame: &mut Frame,
-        history: &History,
+        history: Option<&History>,
         rows: usize,
         follows: bool,
         drawn: &[(usize, FileEntry)],
@@ -2238,7 +2252,7 @@ impl View {
         &mut self,
         file: Changed<'_>,
         mut highlighter: Option<&mut Pass<'_>>,
-        history: &History,
+        history: Option<&History>,
         skip: usize,
         height: usize,
         walked: &mut Walked,

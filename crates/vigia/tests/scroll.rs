@@ -5,7 +5,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Body, Pointing, Position, Row, View, body_layout, diff_height};
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, generated, materialise};
 
@@ -31,7 +31,7 @@ fn body() -> usize {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -56,7 +56,7 @@ fn listed() -> Body {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -695,6 +695,7 @@ fn tag(action: Action) -> usize {
         Action::ToggleWrap => 112,
         Action::ToggleNotes => 113,
         Action::ToggleStanding => 114,
+        Action::ToggleReading => 120,
         Action::TogglePositions => 115,
         Action::ClosePositions => 116,
         Action::PositionsMove(_) => 117,

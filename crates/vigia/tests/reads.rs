@@ -10,7 +10,7 @@ use vigia::{
     Action, App, Body, Deadlines, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Pointing, Position, Row,
     body_layout, diff_rows, patience,
 };
-use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency};
+use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency, Standing};
 
 use support::{Scratch, arm_settle, delta, materialise, settle, settle_spans};
 
@@ -61,7 +61,7 @@ fn layout_on(width: u16, height: u16) -> Body {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

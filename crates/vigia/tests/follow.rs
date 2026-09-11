@@ -7,7 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use vigia::{Action, App, Body, Glyphs, Pointing, Position, Row, Theme, body_layout, render};
-use vigia_core::{Frame, Highlighter, History};
+use vigia_core::{Frame, Highlighter, History, Standing};
 
 use support::{Scratch, delta};
 
@@ -30,7 +30,7 @@ fn layout() -> Body {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -171,7 +171,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -191,7 +191,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -504,7 +504,7 @@ fn tall_layout(app: &App) -> Body {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -802,7 +802,7 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -960,7 +960,7 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1038,7 +1038,7 @@ fn a_refused_landing_is_settled_rather_than_deferred() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -1112,7 +1112,7 @@ fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

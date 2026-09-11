@@ -180,10 +180,12 @@ pub fn place_of(action: &Action) -> Place {
              `b` is how a session says otherwise, which is a session's choice \
              about a session. `SPEC.md` §11.2 B6",
         ),
-        // Every gesture of the position list, for `b`'s reason one step out: where
-        // the pane stands is a state, and a file that could open it somewhere else
-        // would make the thesis a setting. The list is how a session says otherwise.
-        Action::TogglePositions
+        // Every gesture of the position list and the key that reads a place the
+        // other way, for `b`'s reason one step out: where the pane stands is a
+        // state, and a file that could open it somewhere else would make the thesis
+        // a setting. The list is how a session says otherwise.
+        Action::ToggleReading
+        | Action::TogglePositions
         | Action::ClosePositions
         | Action::PositionsMove(_)
         | Action::PositionsPick

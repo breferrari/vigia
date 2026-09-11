@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use vigia::{
     App, Body, Glyphs, Pointing, Position, Row, Scale, Theme, View, Viewport, body_layout, render,
 };
-use vigia_core::{HISTORY_SAMPLE, Highlighter, History, LineKind};
+use vigia_core::{HISTORY_SAMPLE, Highlighter, History, LineKind, Standing};
 
 use support::Scratch;
 
@@ -381,7 +381,7 @@ fn a_real_repository_draws() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -409,7 +409,7 @@ fn a_real_repository_draws() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -477,7 +477,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),
@@ -504,7 +504,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
         "fixture",
         None,
         vigia::Stood {
-            position: "current",
+            standing: &Standing::Current,
             now: 0,
         },
         Pointing::default(),
@@ -580,7 +580,7 @@ fn every_rung_draws_from_the_stores_own_figures() {
             "fixture",
             None,
             vigia::Stood {
-                position: "current",
+                standing: &Standing::Current,
                 now: 0,
             },
             Pointing::default(),

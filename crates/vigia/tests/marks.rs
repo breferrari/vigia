@@ -13,7 +13,7 @@ use vigia::{
     Chrome, Depth, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, NoteMark,
     Position, Row, Scale, Theme, View, render,
 };
-use vigia_core::{Origin, Recency};
+use vigia_core::{Origin, Reading, Recency};
 
 /// A pane wide enough for the widest heat rung, which needs 139 columns once the
 /// mark has taken its own.
@@ -35,6 +35,7 @@ fn chrome() -> Chrome {
     Chrome {
         menu: None,
         position: "current".to_owned(),
+        reading: Reading::Since,
         pressed: None,
         gripped: None,
         hovered: None,

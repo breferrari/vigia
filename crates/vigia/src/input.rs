@@ -556,6 +556,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleWrap
         | Action::ToggleNotes
         | Action::ToggleStanding
+        | Action::ToggleReading
         | Action::ToggleIcons
         | Action::ToggleLinks
         | Action::TogglePersist
@@ -738,6 +739,8 @@ pub enum Action {
     ToggleNotes,
     /// Stand at the branch point, or come back.
     ToggleStanding,
+    /// Read the commit the pane stands at the other way. `SPEC.md` §11.1.
+    ToggleReading,
     /// Draw a file-type icon before every listed path, or stop. No key: the menu
     /// and the file are the two ways to it.
     ToggleIcons,
@@ -812,6 +815,7 @@ impl Action {
             | Self::ToggleWrap
             | Self::ToggleNotes
             | Self::ToggleStanding
+            | Self::ToggleReading
             | Self::ToggleIcons
             | Self::ToggleLinks
             | Self::TogglePersist
@@ -869,8 +873,10 @@ impl Action {
             | Self::ToggleWrap
             // Display rows too, so hiding them moves nothing the bar counts.
             | Self::ToggleNotes
-            // Standing elsewhere remakes the body and moves no viewport.
+            // Standing elsewhere remakes the body and moves no viewport, and
+            // reading the same place the other way is the same shape.
             | Self::ToggleStanding
+            | Self::ToggleReading
             // Neither reaches a key, so neither can be a reader moving anything.
             | Self::ToggleIcons
             | Self::ToggleLinks
@@ -927,6 +933,7 @@ impl Action {
             | Self::ToggleWrap
             | Self::ToggleNotes
             | Self::ToggleStanding
+            | Self::ToggleReading
             | Self::ToggleIcons
             | Self::ToggleLinks
             | Self::TogglePersist
@@ -944,6 +951,19 @@ impl Action {
             | Self::PositionsPick
             | Self::PositionsRow(_) => false,
         }
+    }
+
+    /// Whether this gesture is about the tree the reader has right now.
+    ///
+    /// A note goes to the agent beside the pane and a historical line gives it
+    /// nothing to act on; the staged run is the index against `HEAD`; and a still
+    /// picture has no newest change to follow. `SPEC.md` §11.1.
+    #[must_use]
+    pub const fn needs_the_working_tree(self) -> bool {
+        matches!(
+            self,
+            Self::ToggleNotes | Self::ToggleStaged | Self::ToggleFollow
+        )
     }
 }
 
@@ -1034,6 +1054,9 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // and `j`/`J` have already taught that case is load bearing here, and the
         // menu's arrival is the precedent for the letter staying where it was.
         KeyCode::Char('B') => Some(Action::TogglePositions),
+        // `O` for the word it puts in the token. `Ctrl+B` is tmux's own prefix on a
+        // tool built to sit in a tmux pane, and no two terminals deliver `Alt` alike.
+        KeyCode::Char('O') => Some(Action::ToggleReading),
         // `w`, and it is the reflex rather than what was free. `ov` binds `[w]`, `[W]`
         // to a character-based wrap toggle, `bat` spells the opposite state `-S` /
         // `--chop-long-lines`, and `less` toggles the same state with `-S`.
