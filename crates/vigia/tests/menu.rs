@@ -9,8 +9,8 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, Regions, SETTINGS, Setting, Theme,
-    action_for, body_layout, menu_route, regions, render,
+    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, Regions, SETTINGS, Setting, Sheet,
+    Theme, action_for, body_layout, menu_route, regions, render, scroll_mark,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -350,7 +350,16 @@ fn the_caret_moves_and_space_flips_the_row_it_is_on() {
 
 #[test]
 fn space_and_enter_are_the_menus_and_every_letter_still_reaches_the_pane() {
-    let over = None;
+    // A box on screen, because the four keys below are the menu's only while one
+    // is drawn: `a_menu_with_no_room_to_draw_takes_no_keys_but_still_closes` is
+    // the other side of that.
+    let over = Some(Sheet {
+        left: 0,
+        top: 1,
+        width: 40,
+        height: 13,
+        close: (36, 1),
+    });
     assert_eq!(
         menu_route(&press(KeyCode::Char(' ')), over),
         MenuRoute::Flip
@@ -642,10 +651,11 @@ fn the_menu_draws_inside_the_pane_at_forty_columns() {
 ///
 /// The bounds are the drawer's, not the product's: `SPEC.md` I6 names forty
 /// columns, and `menu_plan` is asked for a box at every size a terminal can be,
-/// so the region between one column and forty is exactly where an underflow or a
-/// rect past the buffer would hide from every other gate here.
-const SWEEP_WIDTHS: std::ops::RangeInclusive<u16> = 1..=144;
-const SWEEP_HEIGHTS: std::ops::RangeInclusive<u16> = 1..=40;
+/// so the region below forty is exactly where an underflow or a rect past the
+/// buffer would hide from every other gate here. Zero is in both ranges because a
+/// pane can be reported at zero between a resize and the frame after it.
+const SWEEP_WIDTHS: std::ops::RangeInclusive<u16> = 0..=160;
+const SWEEP_HEIGHTS: std::ops::RangeInclusive<u16> = 0..=48;
 
 #[test]
 fn the_box_never_leaves_the_pane_at_any_size_a_terminal_can_be() {
@@ -690,6 +700,185 @@ fn the_box_never_leaves_the_pane_at_any_size_a_terminal_can_be() {
         assert!(
             drew > 0 && declined > 0,
             "the sweep drew {drew} boxes and declined {declined}, so it never              crossed the floor it exists to cross"
+        );
+    });
+}
+
+#[test]
+fn a_menu_with_no_room_to_draw_takes_no_keys_but_still_closes() {
+    // A pane too short for the box keeps the request, the way `rail on` below 134
+    // columns does. What it may not do is take the arrows: a reader who pressed
+    // `m`, saw nothing, and then found scrolling gone has no way to learn why.
+    let mut pane = Pane::open("menu-no-room");
+    pane.with(|app, frame, highlighter, history| {
+        let cramped = Rect::new(0, 0, WIDE, 5);
+        apply(app, frame, cramped, Action::ToggleMenu);
+        let (_, laid) = paint(app, frame, highlighter, history, cramped);
+        assert!(
+            laid.menu.is_none(),
+            "this pane is not short enough to refuse the box, so the assertions \n             below are about a pane that draws one"
+        );
+        assert!(app.menu_open(), "the request did not survive the short pane");
+
+        for code in [
+            KeyCode::Down,
+            KeyCode::Up,
+            KeyCode::Char(' '),
+            KeyCode::Enter,
+        ] {
+            assert_eq!(
+                menu_route(&press(code), laid.menu),
+                MenuRoute::Through,
+                "{code:?} was taken by a menu that is not on screen"
+            );
+        }
+        // And the state is still reachable, or a reader would be holding a mode
+        // they can neither see nor put down.
+        assert_eq!(menu_route(&press(KeyCode::Esc), laid.menu), MenuRoute::Close);
+
+        // The same keys are the menu's again the moment there is room for it.
+        let (_, laid) = paint(app, frame, highlighter, history, area());
+        assert!(
+            laid.menu.is_some(),
+            "the request did not come back with the room"
+        );
+        assert_eq!(
+            menu_route(&press(KeyCode::Down), laid.menu),
+            MenuRoute::Move(1)
+        );
+    });
+}
+
+#[test]
+fn a_row_whose_walk_failed_goes_back_rather_than_lying() {
+    // `a` is the one row that changes what the frame walks, and a walk can fail.
+    // Before the menu nothing on screen said which run was drawn, so the state
+    // could disagree with the pane in silence; a row spelling `on` over a run the
+    // pane is not drawing is the disagreement the word makes visible.
+    let mut pane = Pane::open("menu-walk-fails");
+    let root = pane.scratch.root().to_owned();
+    pane.with(|app, frame, _highlighter, _history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        assert!(!app.settings().staged, "the staged run started drawn");
+
+        // A repository with no HEAD is one `Frame::advance` cannot walk.
+        std::fs::remove_file(root.join(".git/HEAD")).expect("remove HEAD");
+        let height = body_layout(area(), &chrome(app), FILES, FILES).diff;
+        app.apply(Setting::Staged.action(), frame, height)
+            .expect("a failed walk is not a reason to quit");
+
+        assert!(
+            !app.settings().staged,
+            "the walk failed and the row still reads on, so the menu is telling \n             the reader about a run the pane is not drawing"
+        );
+        assert!(
+            app.notice().is_some(),
+            "the walk failed and the footer says nothing"
+        );
+    });
+}
+
+#[test]
+fn the_menus_own_actions_move_nothing_but_the_menu() {
+    // Every new variant answers three exhaustive tables, and an exhaustive match
+    // only proves an arm exists. These are the answers.
+    let every = [
+        Action::ToggleMenu,
+        Action::CloseMenu,
+        Action::MenuMove(1),
+        Action::MenuFlip,
+        Action::MenuRow(0),
+        Action::ToggleIcons,
+        Action::ToggleLinks,
+    ];
+    for action in every {
+        assert!(
+            !action.is_manual_scroll(),
+            "{action:?} counts as the reader moving the viewport, so it would \n             disengage follow"
+        );
+        assert!(
+            !action.needs_height(),
+            "{action:?} asks the shell for a height, which walks the diff to \n             answer a question about a box drawn over it"
+        );
+        assert_eq!(
+            scroll_mark(action, Regions::default()),
+            None,
+            "{action:?} lights a scrollbar it does not move"
+        );
+    }
+    // The caret steps, so `n` presses is one action carrying `n`; the rest repeat
+    // as themselves.
+    assert_eq!(Action::MenuMove(1).repeated(3), Action::MenuMove(3));
+    assert_eq!(Action::MenuFlip.repeated(3), Action::MenuFlip);
+    assert_eq!(Action::ToggleMenu.repeated(3), Action::ToggleMenu);
+
+    // And follow survives the menu, which is what `is_manual_scroll` above buys:
+    // I5's promise is about the pane, and opening a box over it changes nothing.
+    let mut pane = Pane::open("menu-follow");
+    pane.with(|app, frame, _highlighter, _history| {
+        assert!(app.following(), "the pane did not start following");
+        for action in [
+            Action::ToggleMenu,
+            Action::MenuMove(1),
+            Action::MenuRow(0),
+            Action::CloseMenu,
+        ] {
+            apply(app, frame, area(), action);
+            assert!(
+                app.following(),
+                "{action:?} disengaged follow, which is I5's promise about a pane \n                 nobody scrolled"
+            );
+        }
+    });
+}
+
+/// Whether a region answers for the cell at a column and row.
+type Answers = fn(Regions, u16, u16) -> bool;
+
+#[test]
+fn an_overlay_swallows_the_bars_and_the_gutter_under_it() {
+    // The menu is drawn over the regions, so a press it does not answer must not
+    // fall through to one: a step button under the box would arm a repeat that
+    // scrolls a region the reader cannot see, and a grab is worse, since the drag
+    // that follows ignores the column by design.
+    //
+    // The cells are found rather than guessed. A cell chosen by hand is usually
+    // one the bare pane answers `None` for anyway, and then every assertion below
+    // passes whatever the guard does: a narrow pane is what puts the box over the
+    // bar at all.
+    let mut pane = Pane::open("menu-swallows");
+    pane.with(|app, frame, highlighter, history| {
+        let narrow = Rect::new(0, 0, 40, 40);
+        let (_, bare) = paint(app, frame, highlighter, history, narrow);
+        apply(app, frame, narrow, Action::ToggleMenu);
+        let (_, laid) = paint(app, frame, highlighter, history, narrow);
+        let menu = laid.menu.expect("a menu region");
+
+        let answers: [(&str, Answers); 4] = [
+            ("a step button", |r, x, y| r.step_at(x, y).is_some()),
+            ("a bar to grab", |r, x, y| r.grab_at(x, y).is_some()),
+            ("a note gutter", |r, x, y| r.gutter_at(x, y).is_some()),
+            ("a note's left side", |r, x, y| r.note_edge_at(x, y).is_some()),
+        ];
+        let mut swallowed = 0usize;
+        for (what, answered) in answers {
+            let under = (menu.top..menu.top + menu.height)
+                .flat_map(|y| (menu.left..menu.left + menu.width).map(move |x| (x, y)))
+                .filter(|&(x, y)| answered(bare, x, y))
+                .collect::<Vec<_>>();
+            for (x, y) in &under {
+                assert!(
+                    !answered(laid, *x, *y),
+                    "({x}, {y}) is {what} under the box, and the pane still \n                     answers for it"
+                );
+            }
+            swallowed += under.len();
+        }
+        // Non-vacuity: a box covering none of the four would pass every assertion
+        // above without the guard doing anything at all.
+        assert!(
+            swallowed > 0,
+            "the box covers no cell the bare pane answers for, so this gate is \n             about a pane where the guard cannot fire"
         );
     });
 }

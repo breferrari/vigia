@@ -208,14 +208,20 @@ pub enum MenuRoute {
 #[must_use]
 pub fn menu_route(event: &Event, over: Option<Sheet>) -> MenuRoute {
     match event {
-        Event::Key(key) => key_route(key),
+        Event::Key(key) => key_route(key, over.is_some()),
         Event::Mouse(mouse) => mouse_route(mouse, over),
         _ => MenuRoute::Through,
     }
 }
 
 /// The four keys the mode owns, and everything else passing through.
-fn key_route(key: &KeyEvent) -> MenuRoute {
+///
+/// `drawn` is the whole of what makes this a mode rather than a state: a pane too
+/// short for the box keeps the request the way `rail on` below 134 columns does,
+/// and a request that is not on screen may not take the arrows. Otherwise a reader
+/// presses `m`, sees nothing, and loses scrolling with no way to know why. `Esc`
+/// is the exception and closes either way, so the state cannot be stuck.
+fn key_route(key: &KeyEvent, drawn: bool) -> MenuRoute {
     if key.kind == KeyEventKind::Release {
         return MenuRoute::Inert;
     }
@@ -228,13 +234,14 @@ fn key_route(key: &KeyEvent) -> MenuRoute {
         return MenuRoute::Through;
     }
     match key.code {
+        KeyCode::Esc => MenuRoute::Close,
+        _ if !drawn => MenuRoute::Through,
         KeyCode::Down => MenuRoute::Move(1),
         KeyCode::Up => MenuRoute::Move(-1),
         // `Space` toggles a list row in every toolkit there is. `Enter` is
         // universal for the same act and stays bound, but the edge names
         // `Space`, because `Enter` already means *commit* on this pane.
         KeyCode::Char(' ') | KeyCode::Enter => MenuRoute::Flip,
-        KeyCode::Esc => MenuRoute::Close,
         // `j` and `k` are not the caret's. They scroll the diff behind the menu,
         // which is what every other letter does too, and taking them would make
         // the mode wider than the edge says it is.

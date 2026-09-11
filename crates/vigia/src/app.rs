@@ -640,12 +640,19 @@ impl App {
             Action::ToggleStanding => self.standing = !self.standing,
             // The one toggle that changes what the frame *walks*.
             Action::ToggleStaged => {
-                self.staged = !self.staged;
+                let was = self.staged;
+                self.staged = !was;
                 frame.show_staged(self.staged);
                 self.position = Position::default();
-                // And the frame is walked here, which no other toggle needs.
+                // And the frame is walked here, which no other toggle needs. A walk
+                // that fails leaves the previous frame whole, so the state goes back
+                // with it: `SPEC.md` §11.2 B22's menu draws this one as a word, and a
+                // row reading `on` over a run the pane is not drawing is the
+                // disagreement `stand` already refuses one gesture over.
                 if let Err(e) = frame.advance() {
                     self.warn(e.to_string());
+                    self.staged = was;
+                    frame.show_staged(was);
                 }
             }
             // No jump and no move at all, and unlike the toggles above it does not
@@ -702,6 +709,10 @@ impl App {
                     {
                         caret.at = at;
                     }
+                    // The click landed on a drawn row, so the window already holds
+                    // it, but settling here is what keeps that a fact rather than an
+                    // unstated invariant `MenuMove` happens to maintain alone.
+                    self.settle_menu();
                     return self.apply(setting.action(), frame, height);
                 }
             }

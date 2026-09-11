@@ -2697,6 +2697,7 @@ mod tests {
             "self.note_effects.settle(now)",
             "self.app.settle_box(now)",
             "self.box_effect.take_if(|armed| armed.spent(now))",
+            "self.menu_effect.take_if(|armed| armed.spent(now))",
             "if self.app.box_open() && !notes::has_room(self.regions) {",
         ] {
             assert!(

@@ -246,7 +246,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide the note rows |
 | `Enter` `Esc` | in the note box: send the note, or close it and send nothing |
-| `m` `Esc` | **every setting above, in one box**, with `↑` `↓` to move and `Space` to flip. `Esc` puts it away |
+| `m` `Esc` | **every view setting in one box**, the ones above and the two the config file sets, with `↑` `↓` to move and `Space` to flip. `Esc` puts it away |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 

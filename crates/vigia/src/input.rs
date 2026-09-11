@@ -185,10 +185,20 @@ impl Regions {
         self.list.covers(column, row)
     }
 
+    /// Whether either overlay is drawn over this cell. One predicate, asked by every
+    /// guard below: two would let a later one cover the sheet and miss the menu, which
+    /// is what a pointer finds pressing a step button an overlay is drawn over.
+    fn covered(self, column: u16, row: u16) -> bool {
+        self.sheet
+            .into_iter()
+            .chain(self.menu)
+            .any(|over| over.covers(column, row))
+    }
+
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
-        // Before the columns, because the sheet is drawn over them.
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        // Before the columns, because an overlay is drawn over them.
+        if self.covered(column, row) {
             return None;
         }
         if self.list.bar == Some(column)
@@ -205,17 +215,19 @@ impl Regions {
     /// Whether a press at `column`, `row` begins a selection: a row of the diff
     /// itself, off its bar, and not under the sheet drawn over it.
     fn selectable(self, column: u16, row: u16) -> bool {
-        // Its presence and not its box: a wash beside it would take `Esc` off the
-        // frontmost thing, which §11.1 gives to the sheet.
-        self.sheet.is_none() && self.diff.covers(column, row) && !self.diff.on_bar(column, row)
+        // Their presence and not their boxes: a wash beside one would take `Esc`
+        // off the frontmost thing, which §11.1 gives to the overlay.
+        self.sheet.is_none()
+            && self.menu.is_none()
+            && self.diff.covers(column, row)
+            && !self.diff.on_bar(column, row)
     }
 
     /// The bar a press at `column`, `row` takes hold of, or `None` off them.
     pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
-        // The sheet first, for [`Regions::step_at`]'s reason and in the same
-        // words: it is drawn over the bars, and it swallows what lands on it
-        // rather than passing it down.
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        // The overlay first, for [`Regions::step_at`]'s reason: it is drawn over the
+        // bars and swallows what lands on it rather than passing it down.
+        if self.covered(column, row) {
             return None;
         }
         if self.list.bar == Some(column) && self.list.along(row).is_some() {
@@ -227,7 +239,7 @@ impl Regions {
     /// The screen row a pointer at `column`, `row` rests on when it is on the
     /// diff's gutter, B21's target. Which rows are content rows is the screen's to say.
     pub fn gutter_at(self, column: u16, row: u16) -> Option<u16> {
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        if self.covered(column, row) {
             return None;
         }
         self.diff.on_gutter(column, row).then_some(row)
@@ -236,7 +248,7 @@ impl Regions {
     /// The screen row a pointer at `column`, `row` rests on when it is on a note's
     /// left side. Which rows are note rows is the screen's to say.
     pub fn note_edge_at(self, column: u16, row: u16) -> Option<u16> {
-        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+        if self.covered(column, row) {
             return None;
         }
         self.diff.on_content_origin(column, row).then_some(row)
