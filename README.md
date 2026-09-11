@@ -541,10 +541,11 @@ set -ga terminal-features ",*:clipboard"
 
 ### 🪟 The pane you want, every time
 
-`r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. If you always want one of them, say so once:
+`f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there, or say so once by hand:
 
 ```sh
 # ~/.config/vigia/config
+follow   = off    # stop the pane moving to the newest change; this is the off switch
 rail     = on     # the file list beside the diff, from 139 columns
 single   = on     # one file at a time
 overview = on     # the file list alone, with no diff under it
@@ -553,10 +554,11 @@ wrap     = on     # a long line continues on the row below
 notes    = off    # the note rows under their lines; this is the off switch
 icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
 links    = off    # paths are clickable file:// links; this is the off switch
+persist  = on     # write what you flip in the menu back into this file
 hide     = ^target/|\.lock$   # paths to keep out of the pane entirely
 ```
 
-Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
+Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it. With `persist` on, the menu writes your flips back here and leaves every other line exactly as you wrote it, `hide` and your comments included.
 
 **`hide` is the one setting that takes a value rather than `on` or `off`.** It is a regular expression, and it is *searched* rather than anchored, so `^target/|\.lock$` reads the way it looks and a bare `target` hides every path with that word anywhere in it. A matching file is gone from the list, the diff and the counts, and the header says `12 hidden` beside the changed count so you always know something is being kept from you. If your pattern covers everything that changed, the empty pane says `12 hidden` rather than pretending the tree is clean. The notes server does not take the pattern: it is about what the pane draws, and your agent has no pane. A pattern that does not compile is an error with its line on it, before the screen is taken. `#` still opens a comment, so a pattern that needs a literal one writes `[#]`. There is no key for it, deliberately: a gesture is for what changes while you are watching, and a file is for what was true before you opened the pane.
 

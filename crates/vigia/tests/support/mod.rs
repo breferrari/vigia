@@ -180,11 +180,13 @@ pub fn place_of(action: &Action) -> Place {
              `b` is how a session says otherwise, which is a session's choice \
              about a session. `SPEC.md` §11.2 B6",
         ),
-        Action::ToggleFollow => Place::Excluded(
-            "correct with zero interaction is a promise about the program, and a \
-             file able to turn follow off would make it a promise about one \
-             reader's configuration instead. I5, and `SPEC.md` §11.2 B6",
-        ),
+        // A key of the file since `SPEC.md` §11.2 B22, whose exclusion
+        // `REVOCATIONS.md` holds: remembering what this reader pressed is not a
+        // file configuring I5 away for one who never asked.
+        Action::ToggleFollow => Place::Key {
+            key: "follow",
+            gesture: "f",
+        },
         Action::ToggleSheet | Action::CloseSheet => Place::Neither(
             "the sheet is drawn over the pane and put away again, so there is no \
              pane a launch could start inside one of",
@@ -207,6 +209,13 @@ pub fn place_of(action: &Action) -> Place {
             key: "links",
             gesture: "m",
         },
+        Action::TogglePersist => Place::Key {
+            key: "persist",
+            gesture: "m",
+        },
+        Action::MenuReset => Place::Neither(
+            "putting every toggle back is an act rather than a state, so there is no              pane a launch could start inside one of",
+        ),
         Action::Scroll(_)
         | Action::ScrollList(_)
         | Action::Page(_)

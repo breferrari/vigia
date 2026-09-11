@@ -11,8 +11,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::post::{content, post_each};
 use vigia::{
-    Action, App, Committed, Glyphs, Input, Key, PaintStats, Pointing, Theme, body_layout, commit,
-    opening, regions, render, state_root,
+    Action, App, Committed, Config, Glyphs, Input, Key, PaintStats, Pointing, Theme, body_layout,
+    commit, config, opening, regions, render, state_root,
 };
 use vigia_core::{
     Frame, Highlighter, History, Note, Registry, Store, WARM_FILES, WatchOptions, Worktree,
@@ -548,4 +548,87 @@ fn a_registered_session_is_read_and_never_written() {
         vec![registration],
         "the registration did not survive the gesture unchanged"
     );
+}
+
+#[test]
+fn a_flip_with_remembering_off_writes_nothing_at_all() {
+    // The half B22 turns on: remembering is opt-in, so the shipped pane writes
+    // nothing whatever the reader presses. The gate is over the file rather than
+    // over the flag, because a flag read the wrong way round still passes a test
+    // that asks the flag.
+    let home = Scratch::new("persist-off-home");
+    let path = home.root().join(".config/vigia/config");
+    let mut app = App::new();
+    assert!(!app.settings().persist, "the shipped pane remembers");
+
+    let mut frame_scratch = Scratch::large_diff("persist-off", FILES, LINES);
+    let worktree = frame_scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    for action in [Action::ToggleRail, Action::ToggleWrap] {
+        app.apply(action, &mut frame, 0).expect("flip");
+        if app.settings().persist {
+            config::save(&path, &app.config()).expect("save");
+        }
+    }
+    assert!(
+        !path.exists(),
+        "a flip with remembering off wrote {}",
+        path.display()
+    );
+    let _ = &mut frame_scratch;
+}
+
+#[test]
+fn remembering_writes_what_the_reader_flipped_and_nothing_else() {
+    let home = Scratch::new("persist-on-home");
+    let path = home.root().join(".config/vigia/config");
+    std::fs::create_dir_all(path.parent().expect("a parent")).expect("make the directory");
+    std::fs::write(&path, "# mine\nhide = ^target/\nrail = off\n").expect("seed the file");
+
+    let mut config = config::load(&path).expect("the seed parses");
+    config.persist = true;
+    let mut app = App::configured(&config);
+
+    let mut frame_scratch = Scratch::large_diff("persist-on", FILES, LINES);
+    let worktree = frame_scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    app.apply(Action::ToggleRail, &mut frame, 0).expect("flip");
+    config::save(
+        &path,
+        &Config {
+            hide: config.hide.clone(),
+            ..app.config()
+        },
+    )
+    .expect("save");
+
+    let written = std::fs::read_to_string(&path).expect("read it back");
+    assert!(
+        written.contains("# mine"),
+        "the comment is gone:\n{written}"
+    );
+    assert!(
+        written.contains("hide = ^target/"),
+        "the pattern is gone:\n{written}"
+    );
+    assert!(
+        written.contains("rail = on"),
+        "the flip did not land:\n{written}"
+    );
+    // And exactly one file, with no temp left beside it.
+    let beside: Vec<String> = std::fs::read_dir(path.parent().expect("a parent"))
+        .expect("read the directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        beside,
+        vec!["config".to_owned()],
+        "the save left a file behind"
+    );
+    let _ = &mut frame_scratch;
 }

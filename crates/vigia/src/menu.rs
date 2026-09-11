@@ -30,6 +30,9 @@ pub enum Setting {
     Icons,
     /// No key either.
     Links,
+    /// Write what the reader flips back into the file. No key: the menu's own row
+    /// and nothing else, which is what keeps it a thing the reader asked for.
+    Persist,
 }
 
 /// Every toggle, in the order the menu draws them.
@@ -37,7 +40,7 @@ pub enum Setting {
 /// The order is the reader's drawing: what the body is made of first, then what
 /// a listed path carries. `b` is absent because where the pane stands is a
 /// state rather than a setting, which is `SPEC.md` §11.2 B22's rule.
-pub const SETTINGS: [Setting; 9] = [
+pub const SETTINGS: [Setting; 10] = [
     Setting::Follow,
     Setting::Rail,
     Setting::Single,
@@ -47,6 +50,7 @@ pub const SETTINGS: [Setting; 9] = [
     Setting::Notes,
     Setting::Icons,
     Setting::Links,
+    Setting::Persist,
 ];
 
 /// What the state cell spells when a setting is on.
@@ -76,6 +80,7 @@ impl Setting {
             Self::Notes => "the note rows",
             Self::Icons => "file icons",
             Self::Links => "path links",
+            Self::Persist => "remember between runs",
         }
     }
 
@@ -92,6 +97,7 @@ impl Setting {
             Self::Notes => Action::ToggleNotes,
             Self::Icons => Action::ToggleIcons,
             Self::Links => Action::ToggleLinks,
+            Self::Persist => Action::TogglePersist,
         }
     }
 
@@ -108,6 +114,7 @@ impl Setting {
             Self::Notes => settings.notes,
             Self::Icons => settings.icons,
             Self::Links => settings.links,
+            Self::Persist => settings.persist,
         }
     }
 }
@@ -136,6 +143,55 @@ pub struct Settings {
     pub icons: bool,
     /// Whether a listed path is an OSC 8 hyperlink.
     pub links: bool,
+    /// Whether a flip is written back into the reader's own file.
+    pub persist: bool,
+}
+
+/// One drawn row of the menu, in the order it draws them.
+///
+/// Not [`SETTINGS`], because two of the rows are neither: `SPEC.md` §11.2 B22 puts
+/// remembering and the reset under a rule of their own, and the rule and the air
+/// around it are rows a caret may not land on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Row {
+    /// A toggle, with its state beside it.
+    Toggle(Setting),
+    /// Air. Drawn blank and skipped.
+    Gap,
+    /// The rule that separates what the pane is from what is kept.
+    Rule,
+    /// The one row that throws something away, drawn as the act it is and with no
+    /// state cell.
+    Reset,
+}
+
+/// Every drawn row, top to bottom.
+pub const ROWS: [Row; 14] = [
+    Row::Toggle(Setting::Follow),
+    Row::Toggle(Setting::Rail),
+    Row::Toggle(Setting::Single),
+    Row::Toggle(Setting::Overview),
+    Row::Toggle(Setting::Staged),
+    Row::Toggle(Setting::Wrap),
+    Row::Toggle(Setting::Notes),
+    Row::Toggle(Setting::Icons),
+    Row::Toggle(Setting::Links),
+    Row::Gap,
+    Row::Rule,
+    Row::Gap,
+    Row::Toggle(Setting::Persist),
+    Row::Reset,
+];
+
+/// What the reset row spells.
+pub const RESET: &str = "reset to defaults";
+
+impl Row {
+    /// Whether the caret may land here.
+    #[must_use]
+    pub const fn selectable(self) -> bool {
+        matches!(self, Self::Toggle(_) | Self::Reset)
+    }
 }
 
 /// Where the reader is inside the menu, which is all that survives between frames.
@@ -164,10 +220,10 @@ impl Caret {
     /// anything.
     #[must_use]
     pub fn window(self, rows: usize) -> usize {
-        if rows == 0 || rows >= SETTINGS.len() {
+        if rows == 0 || rows >= ROWS.len() {
             return 0;
         }
-        let top = self.top.min(SETTINGS.len() - rows);
+        let top = self.top.min(ROWS.len() - rows);
         if self.at < top {
             self.at
         } else if self.at >= top + rows {
@@ -175,6 +231,31 @@ impl Caret {
         } else {
             top
         }
+    }
+}
+
+impl Caret {
+    /// Where `by` rows from here lands, skipping the rows a caret may not sit on.
+    ///
+    /// A step is a step over *selectable* rows, so the rule and the air around it
+    /// cost the reader no keystroke, and the ends clamp rather than wrap: a list
+    /// that jumps from its last row to its first moves the eye further than the key
+    /// asked to.
+    #[must_use]
+    pub fn stepped(self, by: isize) -> usize {
+        let mut at = self.at;
+        for _ in 0..by.unsigned_abs() {
+            let next = (at..ROWS.len())
+                .skip(1)
+                .chain(std::iter::empty())
+                .find(|row| ROWS[*row].selectable());
+            let back = (0..at).rev().find(|row| ROWS[*row].selectable());
+            match if by > 0 { next } else { back } {
+                Some(landed) => at = landed,
+                None => break,
+            }
+        }
+        at
     }
 }
 

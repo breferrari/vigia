@@ -51,7 +51,8 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
-    Caret, Menu, MenuRoute, OFF, ON, SETTINGS, STATE_WIDTH, Setting, Settings, menu_route,
+    Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, Row as MenuRow, SETTINGS, STATE_WIDTH, Setting,
+    Settings, menu_route,
 };
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
@@ -293,6 +294,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
+    // Resolved beside the read rather than at the first flip: a reader with no home
+    // has nowhere to keep settings, and that is a fact about the environment the
+    // launch already knows. `SPEC.md` §11.2 B22.
+    let config_path = theme::home_file(config::CONFIG_FILE, &|key| std::env::var(key).ok());
+
     // Read here for that same reason, and acted on after the first paint.
     let update = update::wanted(|key| std::env::var(key).ok())?;
 
@@ -324,6 +330,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         session: Session::enter()?,
         app: App::configured(&config),
         hide: config.hide.clone(),
+        config_path,
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
@@ -899,6 +906,9 @@ struct Shell {
     /// The reader's `hide` pattern, kept because two things outside the frame ask
     /// it: the count of the run this pane is not drawing, and the wake's burst.
     hide: Option<vigia_core::Hidden>,
+    /// The reader's own config file, where one can be found. `None` with no home,
+    /// which is what a refused write says rather than the launch.
+    config_path: Option<PathBuf>,
     /// The last view collected successfully.
     screen: View,
     /// Where the last painted screen's regions and scrollbars were.
@@ -1336,6 +1346,36 @@ impl Shell {
             Instant::now(),
         ));
         self.apply_menu(action, frame, worktree);
+        self.remember();
+    }
+
+    /// Write what the reader flipped back into their own file, where they asked.
+    ///
+    /// On the flip rather than on exit, which `SPEC.md` §11.2 B22 rules and I8 is
+    /// the reason for: the process can be ended in ways it runs no code for, so a
+    /// write deferred to the end is a write a reader cannot rely on.
+    ///
+    /// A refusal turns remembering **off** as well as saying so. A row reading `on`
+    /// over nothing being written is the invisible state the menu exists to remove,
+    /// and one alert a reader may have looked away from is not enough to remove it.
+    fn remember(&mut self) {
+        if !self.app.settings().persist {
+            return;
+        }
+        let Some(path) = self.config_path.clone() else {
+            self.app
+                .warn("no home directory, so there is nowhere to remember");
+            self.app.apply_persist(false);
+            return;
+        };
+        let wanted = Config {
+            hide: self.hide.clone(),
+            ..self.app.config()
+        };
+        if let Err(e) = config::save(&path, &wanted) {
+            self.app.warn(e.to_string());
+            self.app.apply_persist(false);
+        }
     }
 
     fn cancel_box(&mut self, now: Instant) {

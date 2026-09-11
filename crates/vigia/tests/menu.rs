@@ -9,8 +9,8 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, Regions, SETTINGS, Setting, Sheet,
-    Theme, action_for, body_layout, menu_route, regions, render, scroll_mark,
+    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, RESET, ROWS, Regions, SETTINGS,
+    Setting, Sheet, Theme, action_for, body_layout, menu_route, regions, render, scroll_mark,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -334,15 +334,15 @@ fn the_caret_moves_and_space_flips_the_row_it_is_on() {
         apply(app, frame, area(), Action::MenuFlip);
         assert!(app.settings().rail, "the flip did not reach the rail");
 
-        // And it clamps rather than wrapping.
-        for _ in 0..SETTINGS.len() * 2 {
+        // And it clamps rather than wrapping, on the last row a caret may sit on.
+        for _ in 0..ROWS.len() * 2 {
             apply(app, frame, area(), Action::MenuMove(1));
         }
         let (buf, laid) = paint(app, frame, highlighter, history, area());
         let (text, _) = drawn(&buf, &laid);
         assert_eq!(
             carets(&text),
-            first + SETTINGS.len() - 1,
+            first + ROWS.len() - 1,
             "the caret wrapped past the last row instead of stopping:\n{text}"
         );
     });
@@ -598,7 +598,7 @@ fn a_pane_too_short_scrolls_and_says_how_many_rows_it_is_hiding() {
             "the pane was not short enough to hide a row:\n{text}"
         );
         assert!(
-            text.contains(&format!("of {}", SETTINGS.len())),
+            text.contains(&format!("of {}", ROWS.len())),
             "the menu is hiding rows and its title bar does not say so:\n{text}"
         );
 
@@ -609,7 +609,7 @@ fn a_pane_too_short_scrolls_and_says_how_many_rows_it_is_hiding() {
         let (buf, laid) = paint(app, frame, highlighter, history, short);
         let (text, _) = drawn(&buf, &laid);
         assert!(
-            text.contains(SETTINGS[SETTINGS.len() - 1].label()),
+            text.contains(RESET),
             "the caret reached the last row and the window did not follow:\n{text}"
         );
         assert!(
@@ -888,6 +888,105 @@ fn an_overlay_swallows_the_bars_and_the_gutter_under_it() {
         assert!(
             swallowed > 0,
             "the box covers no cell the bare pane answers for, so this gate is \n             about a pane where the guard cannot fire"
+        );
+    });
+}
+
+#[test]
+fn the_caret_steps_over_the_rule_and_the_air_around_it() {
+    // The rule and its air are rows a caret may not sit on, so a step is a step over
+    // the rows that answer to one: three keystrokes from `path links` would otherwise
+    // land on a blank and do nothing twice.
+    let mut pane = Pane::open("menu-steps");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let selectable = ROWS.iter().filter(|row| row.selectable()).count();
+        let mut landed: Vec<usize> = Vec::with_capacity(selectable);
+        for _ in 0..ROWS.len() * 2 {
+            let (buf, laid) = paint(app, frame, highlighter, history, area());
+            let (text, _) = drawn(&buf, &laid);
+            let row = text
+                .lines()
+                .position(|line| line.contains(CARET))
+                .expect("no caret is drawn");
+            if landed.last() != Some(&row) {
+                landed.push(row);
+            }
+            apply(app, frame, area(), Action::MenuMove(1));
+        }
+        assert_eq!(
+            landed.len(),
+            selectable,
+            "the caret visited {} rows where {selectable} answer to it, so it sat on \
+             the rule or on the air around it",
+            landed.len()
+        );
+
+        // And the rule is drawn, or the gate above is about a box with no furniture
+        // in it. It is the one row whose glyphs are the frame's and whose ends are
+        // not the frame.
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let (text, _) = drawn(&buf, &laid);
+        assert!(
+            text.lines().any(|line| {
+                let inside = line.trim_matches(['\u{2502}', ' ']);
+                !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
+            }),
+            "the menu draws no rule between the toggles and what is kept:\n{text}"
+        );
+    });
+}
+
+#[test]
+fn reset_to_defaults_puts_every_row_back_including_remembering() {
+    // The one row that throws something away. It puts remembering back too, or a
+    // reset with it still on would write the shipped pane over the reader's file
+    // without being asked a second time.
+    let mut pane = Pane::open("menu-reset");
+    pane.with(|app, frame, _highlighter, _history| {
+        let shipped = app.settings();
+        for setting in SETTINGS {
+            apply(app, frame, area(), setting.action());
+        }
+        assert_ne!(
+            app.settings(),
+            shipped,
+            "nothing moved, so the reset below has nothing to undo"
+        );
+        apply(app, frame, area(), Action::MenuReset);
+        assert_eq!(
+            app.settings(),
+            shipped,
+            "the reset did not put the pane back where it shipped"
+        );
+    });
+}
+
+#[test]
+fn a_refused_write_turns_remembering_off_rather_than_only_saying_so() {
+    // B22's ruling: one alert is not enough, because a reader who looked away is
+    // left with a row reading `on` over a file nothing is reaching. No test can build
+    // the shell that joins them, so this is the two halves it joins:
+    // the write refuses and names the file, and the state moves.
+    let home = support::Scratch::new("menu-refused-write");
+    let blocked = home.root().join("config");
+    std::fs::create_dir_all(&blocked).expect("a directory where the file should be");
+
+    let mut pane = Pane::open("menu-refused");
+    pane.with(|app, frame, _highlighter, _history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        apply(app, frame, area(), Action::TogglePersist);
+        assert!(app.settings().persist, "remembering did not turn on");
+
+        let refused = vigia::config::save(&blocked, &app.config()).expect_err("a blocked save");
+        assert!(
+            refused.to_string().contains("config"),
+            "the refusal does not name the file: {refused}"
+        );
+        app.apply_persist(false);
+        assert!(
+            !app.settings().persist,
+            "the write was refused and the row still reads on"
         );
     });
 }

@@ -11,6 +11,12 @@ pub const CONFIG_FILE: &str = ".config/vigia/config";
 /// The state a pane starts in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
+    /// Move the viewport to what just changed. `f`.
+    ///
+    /// A key of this file only since `SPEC.md` §11.2 B22: the ruling that made the
+    /// config menu the way in also made what a reader flips here worth keeping, and
+    /// `f` is a toggle like any other once the writing is theirs.
+    pub follow: bool,
     /// Ask for the pinned list beside the diff. `r`.
     pub rail: bool,
     /// Pin the diff to one file. `s`.
@@ -27,15 +33,19 @@ pub struct Config {
     pub icons: bool,
     /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
     pub links: bool,
+    /// Write what the reader flips back into this file. The config menu's own row,
+    /// and the only key here that is about the file rather than about the pane.
+    pub persist: bool,
     /// Paths to keep out of the pane entirely. No gesture: a pattern is a
     /// decision about a repository rather than about a moment.
     pub hide: Option<Hidden>,
 }
 
-/// Every toggle off but the notes and the links, which is the shipped pane.
+/// Every toggle off but follow, the notes and the links, which is the shipped pane.
 impl Default for Config {
     fn default() -> Self {
         Self {
+            follow: true,
             rail: false,
             single: false,
             overview: false,
@@ -44,14 +54,15 @@ impl Default for Config {
             notes: true,
             icons: false,
             links: true,
+            persist: false,
             hide: None,
         }
     }
 }
 
 /// Every toggle this file accepts, in the order the gestures sheet lists them.
-pub const KEYS: [&str; 8] = [
-    "rail", "single", "overview", "staged", "wrap", "notes", "icons", "links",
+pub const KEYS: [&str; 10] = [
+    "follow", "rail", "single", "overview", "staged", "wrap", "notes", "icons", "links", "persist",
 ];
 
 /// Every setting that takes a value rather than `on` or `off`.
@@ -65,6 +76,7 @@ impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
     fn set(&mut self, key: &str, on: bool) -> bool {
         match key {
+            "follow" => self.follow = on,
             "rail" => self.rail = on,
             "single" => self.single = on,
             "overview" => self.overview = on,
@@ -73,6 +85,7 @@ impl Config {
             "notes" => self.notes = on,
             "icons" => self.icons = on,
             "links" => self.links = on,
+            "persist" => self.persist = on,
             _ => return false,
         }
         true
@@ -82,6 +95,14 @@ impl Config {
 /// What is wrong with a config file, and which line it is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
+    /// The file could not be written, which is only ever reached on the reader's
+    /// own gesture with `persist` on.
+    Unwritable {
+        /// Where the write was aimed.
+        path: PathBuf,
+        /// What the filesystem said.
+        why: String,
+    },
     /// The file exists and could not be read.
     Unreadable {
         /// Where it was looked for.
@@ -139,7 +160,7 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unreadable { path, why } => {
+            Self::Unreadable { path, why } | Self::Unwritable { path, why } => {
                 write!(f, "{}: {why}", path.display())
             }
             Self::UnknownKey { line, key } => write!(
@@ -301,6 +322,134 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
     }
 
     Ok(config)
+}
+
+/// The reader's file with the lines this pane owns brought up to date.
+///
+/// Every other byte survives: comments, blank lines, the order they chose, the
+/// spacing they aligned their `=` with, and `hide`, which no gesture reaches and
+/// which the menu therefore never writes. A key the file lacks is appended rather
+/// than inserted, so a hand-written file keeps its author's shape and only grows
+/// at the end.
+///
+/// **Only the value is replaced**, never the line: a line carries the reader's own
+/// alignment before the `=` and may carry their comment after the value, and both
+/// are theirs. A rewrite that rebuilt the line would reformat a file on every flip.
+#[must_use]
+pub fn rewrite(source: &str, config: &Config) -> String {
+    let mut out = String::with_capacity(source.len() + KEYS.len() * 16);
+    let mut written: Vec<&str> = Vec::with_capacity(KEYS.len());
+
+    for raw in source.lines() {
+        match owned_key(raw, &written)
+            .and_then(|(key, at)| KEYS.iter().find(|name| **name == key).map(|key| (*key, at)))
+        {
+            Some((key, at)) => {
+                written.push(key);
+                out.push_str(&raw[..=at]);
+                out.push(' ');
+                out.push_str(word_for(key, config));
+                // What the reader wrote after their own value, which is a comment
+                // or nothing: `value_of` is what says where the value ended.
+                let after = &raw[at + 1..];
+                if let Some(mark) = comment_in(after) {
+                    out.push(' ');
+                    out.push_str(mark.trim_end());
+                }
+            }
+            None => out.push_str(raw),
+        }
+        out.push('\n');
+    }
+
+    let missing: Vec<String> = KEYS
+        .iter()
+        .filter(|key| !written.contains(key))
+        .map(|key| format!("{key} = {}", word_for(key, config)))
+        .collect();
+    if !missing.is_empty() {
+        if !out.is_empty() && !out.ends_with("\n\n") {
+            out.push('\n');
+        }
+        out.push_str(&missing.join("\n"));
+        out.push('\n');
+    }
+    out
+}
+
+/// The key one line sets and the offset of its `=`, where the line sets one this
+/// pane owns and has not already written.
+fn owned_key<'a>(raw: &'a str, written: &[&str]) -> Option<(&'a str, usize)> {
+    let text = raw.trim_start();
+    if text.is_empty() || text.starts_with('#') {
+        return None;
+    }
+    let at = raw.find('=')?;
+    let key = raw[..at].trim();
+    (KEYS.contains(&key) && !written.contains(&key)).then_some((key, at))
+}
+
+/// The comment a value carries, from its `#` to the line's end.
+fn comment_in(after: &str) -> Option<&str> {
+    let mut opens = true;
+    for (at, c) in after.char_indices() {
+        if c == '#' && opens {
+            return Some(&after[at..]);
+        }
+        opens = c.is_whitespace();
+    }
+    None
+}
+
+/// What a key's value spells, given where it stands.
+fn word_for(key: &str, config: &Config) -> &'static str {
+    let on = match key {
+        "follow" => config.follow,
+        "rail" => config.rail,
+        "single" => config.single,
+        "overview" => config.overview,
+        "staged" => config.staged,
+        "wrap" => config.wrap,
+        "notes" => config.notes,
+        "icons" => config.icons,
+        "links" => config.links,
+        "persist" => config.persist,
+        // Unreachable through `owned_key`, which filters on `KEYS`; a valued
+        // setting reaches no gesture and so is never rewritten.
+        _ => return "off",
+    };
+    if on { "on" } else { "off" }
+}
+
+/// Write `config` back into the reader's own file.
+///
+/// Temp-and-rename, which is the note store's shape and for its reason: a reader
+/// who quits mid-write has a whole file either way. The directory is created
+/// where a reader has never had one, so the first flip with remembering on does
+/// not fail for a path nobody made.
+///
+/// # Errors
+///
+/// The directory cannot be made, the file cannot be read, or the write cannot land.
+pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
+    let refuse = |why: std::io::Error| ConfigError::Unwritable {
+        path: path.to_owned(),
+        why: why.to_string(),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(refuse)?;
+    }
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(why) => return Err(refuse(why)),
+    };
+    let temp = path.with_extension("writing");
+    std::fs::write(&temp, rewrite(&source, config)).map_err(refuse)?;
+    std::fs::rename(&temp, path).map_err(|why| {
+        let _ = std::fs::remove_file(&temp);
+        refuse(why)
+    })
 }
 
 /// Read and parse a config file.

@@ -84,6 +84,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         (
             "rail",
             Config {
+                follow: true,
+                persist: false,
                 rail: true,
                 ..Config::default()
             },
@@ -91,6 +93,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         (
             "single",
             Config {
+                follow: true,
+                persist: false,
                 single: true,
                 ..Config::default()
             },
@@ -98,6 +102,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         (
             "overview",
             Config {
+                follow: true,
+                persist: false,
                 overview: true,
                 ..Config::default()
             },
@@ -113,6 +119,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
     assert_eq!(
         config::from_env(home_env(&home)).expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             rail: true,
             single: true,
             overview: false,
@@ -140,6 +148,8 @@ fn the_key_still_toggles_from_the_configured_state() {
     // A setting is a starting point rather than a decision, which is the sentence the
     // README makes and the one a reader would notice broken.
     let config = Config {
+        follow: true,
+        persist: false,
         rail: true,
         single: true,
         overview: false,
@@ -208,16 +218,6 @@ fn a_key_this_file_does_not_have_names_its_line_and_refuses() {
     assert!(
         said.contains("sidebar"),
         "the error does not name the key: {said}"
-    );
-}
-
-#[test]
-fn follow_is_not_a_key_this_file_accepts() {
-    // I5 as a gate rather than as a paragraph.
-    let err = config::parse("follow = off\n").expect_err("follow is not a key");
-    assert!(
-        matches!(&err, ConfigError::UnknownKey { key, .. } if key == "follow"),
-        "follow was accepted, or refused as something other than an unknown key: {err:?}"
     );
 }
 
@@ -300,6 +300,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
     assert_eq!(
         config::parse(source).expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             rail: true,
             single: true,
             overview: false,
@@ -318,6 +320,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
     assert_eq!(
         config::parse("\u{FEFF}rail = on\n").expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             rail: true,
             ..Config::default()
         }
@@ -336,6 +340,8 @@ fn an_empty_home_falls_through_rather_than_being_taken_as_one() {
     assert_eq!(
         config::from_env(lookup).expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             single: true,
             ..Config::default()
         },
@@ -396,6 +402,8 @@ fn absent_is_not_an_error_and_unreadable_is() {
 fn a_railed_default_below_the_arrival_width_keeps_the_request() {
     // §11.2 B14 unchanged, reached from the file instead of from `r`.
     let app = App::configured(&Config {
+        follow: true,
+        persist: false,
         rail: true,
         ..Config::default()
     });
@@ -437,6 +445,8 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     }
 
     let mut configured = App::configured(&Config {
+        follow: true,
+        persist: false,
         rail: true,
         single: true,
         overview: false,
@@ -505,6 +515,8 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
     assert_eq!(
         config::parse(&source).expect("every key in KEYS parses"),
         Config {
+            follow: true,
+            persist: true,
             rail: true,
             single: true,
             overview: true,
@@ -566,6 +578,8 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
 
     // What `main` does for a reader whose file says `staged = on`.
     let config = Config {
+        follow: true,
+        persist: false,
         staged: true,
         ..Config::default()
     };
@@ -641,20 +655,29 @@ fn every_view_toggle_has_a_key_or_a_reason() {
          not walking the keymap and the assertions above are over an empty set"
     );
 
-    for (action, gesture) in [(Action::ToggleFollow, "f"), (Action::ToggleStanding, "b")] {
-        assert!(
-            matches!(place_of(&action), Place::Excluded(_)),
-            "`{gesture}` left the exclusion list, and `SPEC.md` §11.2 B6 is what \
-             has to change before this does"
-        );
-    }
+    // `b` is the whole exclusion list since B22: `f` left it when the menu made
+    // what a reader flips worth keeping, and `REVOCATIONS.md` holds what its
+    // exclusion said.
+    assert!(
+        matches!(place_of(&Action::ToggleStanding), Place::Excluded(_)),
+        "`b` left the exclusion list, and `SPEC.md` §11.2 B6 is what has to change \
+         before this does"
+    );
+    assert!(
+        matches!(
+            place_of(&Action::ToggleFollow),
+            Place::Key { key: "follow", .. }
+        ),
+        "`f` is not a key of the file, which B22 ruled it is"
+    );
 }
 
 #[test]
 fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
-    // The two `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
-    // they cannot come out of the sweep.
-    const CONFIG_ONLY: [&str; 2] = ["icons", "links"];
+    // The three `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
+    // they cannot come out of the sweep. `persist` joined them with B22: it is a row
+    // of the config menu and no key of its own.
+    const CONFIG_ONLY: [&str; 3] = ["icons", "links", "persist"];
 
     let mut reachable: Vec<&str> = actions_keys_reach()
         .iter()
@@ -844,4 +867,140 @@ fn a_configured_pattern_is_applied_on_the_first_frame() {
     frame.advance().expect("advance");
     assert_eq!(frame.files().len(), 2, "the fixture changed two files");
     assert_eq!(frame.hidden(), 0);
+}
+
+/// A file the reader wrote by hand, with everything a rewrite must not touch.
+const HAND_WRITTEN: &str = "\
+# the pane I want
+rail     = on    # from 134 columns
+single   = off
+
+hide = ^target/|\\.lock$
+notes = off
+";
+
+#[test]
+fn a_rewrite_keeps_every_comment_and_every_line_it_does_not_own() {
+    let mut config = config::parse(HAND_WRITTEN).expect("the fixture parses");
+    config.single = true;
+    let out = config::rewrite(HAND_WRITTEN, &config);
+
+    for kept in [
+        "# the pane I want",
+        "# from 134 columns",
+        "hide = ^target/|\\.lock$",
+    ] {
+        assert!(
+            out.contains(kept),
+            "the rewrite lost {kept:?}, which is the reader's and not the pane's:\n{out}"
+        );
+    }
+    // The blank line the reader left, in the place they left it.
+    assert!(
+        out.contains("single   = on\n\nhide"),
+        "the rewrite closed up the reader's blank line:\n{out}"
+    );
+    assert!(
+        out.contains("single   = on"),
+        "the key the pane owns did not move:\n{out}"
+    );
+    assert!(
+        !out.contains("single   = off"),
+        "the old value is still there:\n{out}"
+    );
+}
+
+#[test]
+fn a_rewrite_appends_a_key_the_file_lacks_and_never_writes_hide() {
+    let config = config::parse(HAND_WRITTEN).expect("the fixture parses");
+    let out = config::rewrite(HAND_WRITTEN, &config);
+    let back = config::parse(&out).expect("the rewrite parses");
+    assert_eq!(back, config, "the file no longer round trips");
+
+    for key in config::KEYS {
+        assert!(
+            out.lines().any(|line| line.trim_start().starts_with(key)),
+            "the rewrite never writes {key:?}, so a reader cannot see where it stands:\n{out}"
+        );
+    }
+    // `hide` is written exactly once, which is the reader's own line kept rather
+    // than a second one appended: the menu owns no pattern and writes none.
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.trim_start().starts_with("hide"))
+            .count(),
+        1,
+        "the rewrite wrote `hide`, which no gesture reaches:\n{out}"
+    );
+}
+
+#[test]
+fn a_rewrite_of_a_file_it_wrote_is_the_same_file() {
+    // Idempotence, which is what stops a file growing a line every time a reader
+    // flips a row.
+    let config = config::parse(HAND_WRITTEN).expect("the fixture parses");
+    let once = config::rewrite(HAND_WRITTEN, &config);
+    let twice = config::rewrite(&once, &config);
+    assert_eq!(once, twice, "a second rewrite is not the first:\n{once}");
+
+    // And from nothing: a reader who never had a file gets one that parses back to
+    // the same pane. `hide` is the one thing that does not survive, because the menu
+    // never writes a pattern and a file written from nothing has none to keep.
+    let fresh = config::rewrite("", &config);
+    assert_eq!(
+        config::parse(&fresh).expect("the fresh file parses"),
+        Config {
+            hide: None,
+            ..config.clone()
+        },
+        "a file written from nothing does not read back:\n{fresh}"
+    );
+    assert!(
+        !fresh.contains("hide"),
+        "a file written from nothing carries a pattern nobody wrote:\n{fresh}"
+    );
+    assert_eq!(
+        config::rewrite(&fresh, &config),
+        fresh,
+        "rewriting a file it wrote from nothing changed it"
+    );
+}
+
+#[test]
+fn a_save_lands_whole_and_says_which_file_it_could_not_write() {
+    let scratch = support::Scratch::new("config-save");
+    let path = scratch.root().join("nested/vigia/config");
+    let config = Config {
+        persist: true,
+        rail: true,
+        ..Config::default()
+    };
+
+    config::save(&path, &config).expect("a save into a directory nobody made");
+    assert_eq!(
+        config::load(&path).expect("the saved file parses"),
+        config,
+        "what was saved is not what reads back"
+    );
+    // Nothing beside it: temp-and-rename leaves no temp behind.
+    let beside: Vec<String> = std::fs::read_dir(path.parent().expect("a parent"))
+        .expect("read the directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        beside,
+        vec!["config".to_owned()],
+        "the save left a file behind"
+    );
+
+    // A directory where the file should be is a write that cannot land, and the
+    // error names the path rather than only the reason.
+    let blocked = scratch.root().join("blocked");
+    std::fs::create_dir_all(blocked.join("config")).expect("make the blocking directory");
+    let refused = config::save(&blocked.join("config"), &config).expect_err("a blocked save");
+    assert!(
+        refused.to_string().contains("config"),
+        "the refusal does not name the file: {refused}"
+    );
 }

@@ -668,7 +668,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 26;
+const VARIANTS: usize = 28;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -703,6 +703,8 @@ fn tag(action: Action) -> usize {
         Action::MenuMove(_) => 23,
         Action::MenuFlip => 24,
         Action::MenuRow(_) => 25,
+        Action::TogglePersist => 26,
+        Action::MenuReset => 27,
     }
 }
 
@@ -753,6 +755,8 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::MenuMove(1),
         Action::MenuFlip,
         Action::MenuRow(0),
+        Action::TogglePersist,
+        Action::MenuReset,
         // Mid-track, for the reason `DiffTo` below is: `ListTo(0)` resolves
         // to the first row under any height and could not fail.
         Action::ListTo(vigia::TRACK_SCALE / 2),
