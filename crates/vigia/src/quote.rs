@@ -1,10 +1,11 @@
 //! What of an agent's answer is code, and how a quoted line is drawn.
 //!
-//! An answer arrives as free text an agent wrote with no schema, so the only
-//! code this finds is code the agent declared: a fenced block, and a run between
-//! backticks. An indented block is words, because it cannot be told from a list
-//! item's continuation, and colouring prose as code reads worse than colouring
-//! nothing.
+//! An answer is free text an agent wrote with no schema, so the only code found
+//! here is code the agent declared: a fenced block, and a run between backticks.
+//! An indented block is words, that being the shape a continued list item also
+//! has, and colouring prose as code reads worse than colouring nothing. Code
+//! breaks at the column and never at the last blank, which is right for a
+//! sentence and cuts a statement where nobody would.
 
 use std::ops::Range;
 
@@ -15,9 +16,8 @@ use vigia_core::{Class, Span};
 pub struct Run {
     /// Bytes this run covers.
     pub len: usize,
-    /// `None` is the row's own voice, the reader's ink or the answer's. `Some`
-    /// is quoted code, in the class a grammar gave it or [`Class::Plain`] where
-    /// none did.
+    /// `None` is the row's own voice; `Some` is quoted code, in the class a
+    /// grammar gave it or [`Class::Plain`] where none did.
     pub class: Option<Class>,
 }
 
@@ -28,8 +28,7 @@ pub enum Chunk {
     Prose(String),
     /// A fenced block, its fences dropped.
     Code {
-        /// What the opening fence called the language, where it called it
-        /// anything.
+        /// What the opening fence called the language, where it called it one.
         token: Option<String>,
         /// The block's lines, in order.
         lines: Vec<String>,
@@ -48,10 +47,9 @@ fn fence(line: &str) -> Option<&str> {
 
 /// `reply` split into what the agent wrote as words and what it fenced.
 ///
-/// A line of three or more backticks opens a block and the next such line closes
-/// it; one left open runs to the end. A reply with no fence in it is one
-/// [`Chunk::Prose`] holding the reply exactly, so the answer nobody quoted
-/// anything in is broken by the rule it has always been broken by.
+/// A fence left open runs to the end. A reply with no fence is one
+/// [`Chunk::Prose`] holding it exactly, so an answer that quoted nothing is
+/// broken by the rule it always was.
 #[must_use]
 pub fn chunks(reply: &str) -> Vec<Chunk> {
     let mut out = Vec::new();
@@ -95,10 +93,9 @@ pub fn chunks(reply: &str) -> Vec<Chunk> {
 
 /// `paragraph` with its backticked runs unwrapped, and where they landed.
 ///
-/// A backtick opens a run and the next one closes it; anything left unclosed is
-/// a character the agent wrote. The run takes no grammar, since a backticked
-/// word in an answer is as often a path or a flag as it is code, and no runs at
-/// all where the paragraph held no pair.
+/// A run takes no grammar, a backticked word being as often a path or a flag as
+/// it is code, an unclosed backtick is a character the agent wrote, and a
+/// paragraph with no pair in it comes back with no runs at all.
 #[must_use]
 pub fn inline(paragraph: &str) -> (String, Vec<Run>) {
     let mut out = String::new();
@@ -142,12 +139,9 @@ pub fn rebase(runs: &[Run], piece: &Range<usize>) -> Vec<Run> {
 /// A quoted block's lines as rows of at most `room` columns, with `spans` from
 /// the grammar covering each line.
 ///
-/// Broken at the column and never at a blank: a blank inside a statement is not
-/// somewhere a reader would cut it, and `guard country == .BE else { return }`
-/// wrapped as a sentence stops reading as one line of anything. A continuation
-/// stands in by the line's own indent, which is the rule a wrapped diff line
-/// already follows, and those blanks are written into the row because a note row
-/// draws one string where a diff row carries the indent beside it.
+/// A continuation stands in by the line's own indent, the rule a wrapped diff
+/// line already follows, and those blanks are written into the row because a
+/// note row draws one string where a diff row hands its indent to the painter.
 #[must_use]
 pub fn code_rows(lines: &[String], spans: &[Vec<Span>], room: usize) -> Vec<(String, Vec<Run>)> {
     let mut out = Vec::new();

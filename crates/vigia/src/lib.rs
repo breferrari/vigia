@@ -70,7 +70,7 @@ pub use notes::{
 };
 pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
-pub use quote::{Chunk, Run, chunks, inline};
+pub use quote::Run;
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, COUNT_CELL, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells,

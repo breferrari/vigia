@@ -1949,15 +1949,17 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 ///
-/// `SPEC.md` rose 3,391 bytes for §11.1's second reading of the position. `only` is a
-/// second engine path, a new gesture, and five surfaces that stop describing what the
-/// reader is looking at and have to say which and why: an inert rule nobody can see in
-/// the code is the kind of sentence this document exists for, and none of the five can
-/// be left out without the next session re-deriving it. The `B` paragraph gave back the
-/// clause that named one reading. A raise with no new surface behind it is the thing
-/// this number is for.
+/// `SPEC.md` rose 1,158 bytes for B21's quoted code. A fenced block in an answer is a
+/// second way a note row is drawn, and what it costs the contract is the four rules a
+/// reader cannot see in the code: which shapes count as code, that a code row breaks at
+/// the column where every other row here breaks at a blank, which grammar answers and
+/// what happens when none does, and that the copy still carries the markup the pane
+/// dropped. The last is the one that would be re-derived: a pane that stopped drawing
+/// backticks and a clipboard that keeps them look like a defect until something says
+/// they are one rule. A raise with no new surface behind it is the thing this number is
+/// for.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 405412),
+    ("SPEC.md", 406570),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

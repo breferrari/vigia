@@ -1209,3 +1209,46 @@ fn a_hunk_recovered_after_its_warm_comes_back_coloured() {
         "the recovered hunk asked for a warm it has already been given"
     );
 }
+
+/// A block quoted in an answer draws plain until the warmer has been over its
+/// grammar, and in colour on the frame after.
+///
+/// The frame path's own rule reaching the note rows: compiling a grammar beside
+/// the frame is what `Highlighter::new`'s deferral exists to stop, and an answer
+/// arriving is a wake like any other. Nothing new is asked of the warmer, since
+/// the diff rows this note hangs under are the same file and have already put it
+/// on `wanted`.
+#[test]
+fn a_quote_whose_grammar_is_uncompiled_draws_plain() {
+    let scratch = Scratch::large_diff("warm-quoted", 1, 4);
+    let mut highlighter = Highlighter::new();
+    let lines = vec!["let margin = 2;".to_owned()];
+
+    let classes = |highlighter: &mut Highlighter| -> Vec<Class> {
+        let mut pass = highlighter.pass();
+        pass.quoted("n1", 0, None, "src/mod_0.rs", &lines)[0]
+            .iter()
+            .map(|span| span.class)
+            .collect()
+    };
+
+    assert_eq!(
+        classes(&mut highlighter),
+        vec![Class::Plain],
+        "a cold grammar was compiled on the frame that drew the answer"
+    );
+
+    highlighter
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["src/mod_0.rs".to_owned()],
+            None,
+        )
+        .join()
+        .expect("the warmer thread");
+
+    assert!(
+        classes(&mut highlighter).contains(&Class::Keyword),
+        "the answer stayed plain after its grammar was compiled"
+    );
+}
