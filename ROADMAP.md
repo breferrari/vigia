@@ -200,7 +200,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The file list never says which file holds a note. **Reported from use** | [#471](https://github.com/breferrari/vigia/issues/471) |
 | ✅ | The header counts files but never lines. **Reported from use** | [#472](https://github.com/breferrari/vigia/issues/472) |
 | ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
-| ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
+| ✅ | The agent's reply draws code as prose. **Reported from use** | [#452](https://github.com/breferrari/vigia/issues/452) |
 | ✅ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
 | ✅ | A note with no reply still draws the answer's stem. **Reported from use** | [#459](https://github.com/breferrari/vigia/issues/459) |
 | ✅ | Remove the masthead, and revoke the ruling that kept it. **Reported from use** | [#457](https://github.com/breferrari/vigia/issues/457) |
