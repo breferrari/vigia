@@ -2500,14 +2500,7 @@ impl View {
             self.notes.segments.push((first, diff.path.clone(), origin));
         }
         if !notes.is_empty() {
-            pin(
-                pins,
-                &notes,
-                diff,
-                heading,
-                &placed,
-                highlighter.as_deref_mut(),
-            );
+            pin(pins, &notes, diff, heading, &placed, highlighter);
         }
         if let Some(stand_in) = boxed {
             *box_pin = place_box(stand_in, diff, heading, &placed);
