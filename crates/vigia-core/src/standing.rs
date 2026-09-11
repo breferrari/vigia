@@ -80,7 +80,7 @@ impl Standing {
     /// list spells on its own title bar.
     pub const SINCE: &'static str = "since";
 
-    /// The other one.
+    /// The other one, which the token spells before a commit read on its own.
     pub const ONLY: &'static str = "only";
 
     /// Which reading this is.

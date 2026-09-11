@@ -1253,9 +1253,9 @@ mod reading {
     /// `Error::Standing` takes the reader home and `Error::Status` says *working
     /// tree* on the footer, and a commit against a commit has neither a position
     /// that is gone nor a working tree in it. The source rather than a fixture,
-    /// because two of the three mappings need an object database broken in a way
-    /// no test can arrange: a tree whose entries are there and whose diff still
-    /// will not walk.
+    /// because two of these mappings need an object database broken in a way no
+    /// test can arrange: a tree whose entries are there and whose diff still will
+    /// not walk.
     #[test]
     fn only_maps_every_failure_past_the_commit_to_the_comparison() {
         let source = include_str!("worktree.rs");
@@ -1274,10 +1274,16 @@ mod reading {
             .split_once("let parent =")
             .expect("`only` no longer takes the parent after the commit it names");
 
-        assert_eq!(
-            position.matches("Error::Standing(Box::new").count(),
-            3,
-            "the commit, its peel and its tree are what a reader cannot stand at,              and {position} maps some other number of them home"
+        // Which kinds each half names, never how many times. A count would fail the
+        // day the three identical `map_err` calls in either half became one helper,
+        // which changes nothing about where a failure sends the reader.
+        assert!(
+            position.contains("Error::Standing(Box::new"),
+            "nothing before the parent brings a reader home, so a commit that              cannot be read leaves them standing at it:{position}"
+        );
+        assert!(
+            comparison.contains("Error::Comparison(Box::new"),
+            "nothing past the commit reads as the comparison, so this gate has              lost the half it is about:{comparison}"
         );
         assert!(
             !comparison.contains("Error::Standing(Box::new"),
@@ -1286,11 +1292,6 @@ mod reading {
         assert!(
             !comparison.contains("Error::Status(Box::new"),
             "a failure past the commit says the working tree could not be read,              and neither end of this comparison is one:{comparison}"
-        );
-        assert_eq!(
-            comparison.matches("Error::Comparison(Box::new").count(),
-            3,
-            "the parent, its peel and the diff between the two trees are the              comparison, and{comparison} maps some other number of them"
         );
     }
 }
