@@ -444,6 +444,22 @@ fn word_for(key: &str, config: &Config) -> &'static str {
     if on { "on" } else { "off" }
 }
 
+/// Where a write to `path` has to land: what a link points at, never the link.
+/// `canonicalize` refuses a path with anything missing in it, which is a first save
+/// and also a link laid down before what it names exists, and that is still a link.
+fn landing(path: &Path) -> PathBuf {
+    if let Ok(whole) = std::fs::canonicalize(path) {
+        return whole;
+    }
+    let Ok(to) = std::fs::read_link(path) else {
+        return path.to_owned();
+    };
+    match path.parent() {
+        Some(dir) if to.is_relative() => dir.join(to),
+        _ => to,
+    }
+}
+
 /// Write `config` back into the reader's own file.
 ///
 /// Temp-and-rename, the note store's shape and for its reason: a reader who quits
@@ -464,7 +480,8 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
         path: path.to_owned(),
         why: why.to_string(),
     };
-    if let Some(parent) = path.parent() {
+    let target = landing(path);
+    if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(refuse)?;
     }
     let source = match std::fs::read_to_string(path) {
@@ -473,10 +490,6 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
         Err(why) => return Err(refuse(why)),
     };
     parse(&source)?;
-    // A rename lands on the entry rather than what it points at, and a reader whose
-    // dotfiles are managed elsewhere has this path as a link into that tree. The
-    // temp goes beside the target, so the rename stays on one filesystem.
-    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
     let temp = target.with_extension(format!("writing-{}", std::process::id()));
     let wipe = |why: std::io::Error| {
         let _ = std::fs::remove_file(&temp);

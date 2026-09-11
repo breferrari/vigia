@@ -1221,3 +1221,43 @@ fn a_save_writes_through_a_link_rather_than_over_it() {
         "what was saved is not what reads back through the link"
     );
 }
+
+/// A link laid down before what it points at exists is still the reader's link.
+#[test]
+fn a_save_through_a_link_with_nothing_behind_it_makes_what_it_names() {
+    // A dotfiles tree whose links are made before it is checked out, which is the
+    // one shape the path resolving above cannot answer: nothing to resolve to, and
+    // the fallback it would otherwise take is the link itself.
+    let scratch = support::Scratch::new("config-dangling");
+    let kept = scratch.root().join("dotfiles/config");
+    let link = scratch.root().join("config");
+    if !support::linked_file(&kept, &link) {
+        return;
+    }
+    assert!(
+        !kept.exists(),
+        "the fixture made the file it is about to write"
+    );
+
+    let config = Config {
+        rail: true,
+        ..Config::default()
+    };
+    config::save(&link, &config).expect("a save through a link with nothing behind it");
+
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .expect("the link")
+            .is_symlink(),
+        "the save replaced the reader's link with a file of its own"
+    );
+    assert!(
+        kept.exists(),
+        "the file the link names was not the file that was made"
+    );
+    assert_eq!(
+        config::load(&link).expect("the saved file parses"),
+        config,
+        "what was saved is not what reads back through the link"
+    );
+}
