@@ -496,6 +496,8 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleStanding
         | Action::ToggleIcons
         | Action::ToggleLinks
+        | Action::TogglePersist
+        | Action::MenuReset
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::ToggleMenu
@@ -674,6 +676,10 @@ pub enum Action {
     ToggleIcons,
     /// Wrap every listed path in an OSC 8 hyperlink, or stop. No key either.
     ToggleLinks,
+    /// Write what the reader flips back into their config file, or stop. B22.
+    TogglePersist,
+    /// Put every toggle back where the shipped pane has it.
+    MenuReset,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ToggleSheet,
     /// Stop drawing the gestures sheet, whatever page it is on.
@@ -730,6 +736,8 @@ impl Action {
             | Self::ToggleStanding
             | Self::ToggleIcons
             | Self::ToggleLinks
+            | Self::TogglePersist
+            | Self::MenuReset
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::ToggleMenu
@@ -783,6 +791,8 @@ impl Action {
             // Neither reaches a key, so neither can be a reader moving anything.
             | Self::ToggleIcons
             | Self::ToggleLinks
+            | Self::TogglePersist
+            | Self::MenuReset
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
@@ -830,6 +840,8 @@ impl Action {
             | Self::ToggleStanding
             | Self::ToggleIcons
             | Self::ToggleLinks
+            | Self::TogglePersist
+            | Self::MenuReset
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::ToggleMenu

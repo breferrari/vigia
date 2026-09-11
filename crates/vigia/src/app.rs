@@ -7,7 +7,7 @@ use vigia_core::{Counted, Frame, Highlighter, History, Note, Result, Samples};
 
 use crate::input::{Action, Pointing};
 use crate::memory;
-use crate::menu::{Caret, Menu, SETTINGS, Setting, Settings};
+use crate::menu::{Caret, Menu, ROWS, Row, Settings};
 use crate::notes::NoteBox;
 use crate::render::{Body, Chrome, Mode, NoteCount};
 use crate::view::{Anchor, Position, View, Viewport, rows_in};
@@ -70,6 +70,15 @@ pub enum Voice {
     Alert,
 }
 
+/// What pressing the row at `at` asks for, or `None` where the caret cannot sit.
+fn flips(at: usize) -> Option<Action> {
+    match ROWS.get(at)? {
+        Row::Toggle(setting) => Some(setting.action()),
+        Row::Reset => Some(Action::MenuReset),
+        Row::Gap | Row::Rule => None,
+    }
+}
+
 /// The shell's state.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -92,6 +101,9 @@ pub struct App {
     icons: bool,
     /// Whether listed paths are OSC 8 hyperlinks. Config only; on by default.
     links: bool,
+    /// Whether a flip is written back into the reader's own file. `SPEC.md` §11.2
+    /// B22, and the one setting that is about the file rather than about the pane.
+    persist: bool,
     /// Whether the reader has asked for the list beside the diff. What the pane
     /// can give is [`Body::rail`].
     rail: bool,
@@ -186,6 +198,7 @@ impl Default for App {
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
             links: true,
+            persist: false,
             staged_files: 0,
             sheet: None,
             sheet_pages: 1,
@@ -224,8 +237,10 @@ impl App {
             notes_shown: config.notes,
             shown: 0,
             staged: config.staged,
+            following: config.follow,
             icons: config.icons,
             links: config.links,
+            persist: config.persist,
             ..Self::new()
         }
     }
@@ -518,6 +533,7 @@ impl App {
             notes: self.notes_shown,
             icons: self.icons,
             links: self.links,
+            persist: self.persist,
         }
     }
 
@@ -529,18 +545,42 @@ impl App {
         }
     }
 
+    /// The pane's view settings as a [`crate::Config`], less the `hide` the shell
+    /// launched with, which no gesture reaches and the menu never writes.
+    #[must_use]
+    pub fn config(&self) -> crate::Config {
+        let it = self.settings();
+        crate::Config {
+            follow: it.follow,
+            rail: it.rail,
+            single: it.single,
+            overview: it.overview,
+            staged: it.staged,
+            wrap: it.wrap,
+            notes: it.notes,
+            icons: it.icons,
+            links: it.links,
+            persist: it.persist,
+            hide: None,
+        }
+    }
+
+    /// Put remembering where a refused write leaves it.
+    pub const fn apply_persist(&mut self, on: bool) {
+        self.persist = on;
+    }
+
     /// Whether the config menu is drawn.
     #[must_use]
     pub const fn menu_open(&self) -> bool {
         self.menu.is_some()
     }
 
-    /// The setting a click `offset` rows down the drawn window landed on.
-    fn menu_at(&self, offset: usize) -> Option<Setting> {
+    /// The row a click `offset` rows down the drawn window landed on.
+    fn menu_at(&self, offset: usize) -> Option<usize> {
         let top = self.menu?.window(self.menu_rows);
-        (offset < self.menu_rows)
-            .then(|| SETTINGS.get(top + offset).copied())
-            .flatten()
+        (offset < self.menu_rows && ROWS.get(top + offset).is_some_and(|row| row.selectable()))
+            .then_some(top + offset)
     }
 
     /// Record what changed most recently, and move to it if following (I5).
@@ -677,6 +717,44 @@ impl App {
             // is what B22 gives B18's two config-only settings.
             Action::ToggleIcons => self.icons = !self.icons,
             Action::ToggleLinks => self.links = !self.links,
+            Action::TogglePersist => self.persist = !self.persist,
+            // Every toggle back to the shipped pane, remembering included: a reset
+            // that kept remembering on would write the defaults over the reader's
+            // file, which is the one thing this row must not do without being asked
+            // a second time.
+            Action::MenuReset => {
+                // Destructured with no `..`, so an eleventh setting stops this
+                // compiling rather than being silently left where the reader put it:
+                // a reset that misses a row is a reset nothing on screen can show.
+                let crate::Config {
+                    follow,
+                    rail,
+                    single,
+                    overview,
+                    staged,
+                    wrap,
+                    notes,
+                    icons,
+                    links,
+                    persist,
+                    // No gesture reaches it, so no reset does either.
+                    hide: _,
+                } = crate::Config::default();
+                self.following = follow;
+                self.rail = rail;
+                self.single = single;
+                self.overview = overview;
+                self.wrap = wrap;
+                self.notes_shown = notes;
+                self.icons = icons;
+                self.links = links;
+                self.persist = persist;
+                // The one that changes what the frame walks, so it goes through the
+                // arm that walks it and can fail.
+                if self.staged != staged {
+                    return self.apply(Action::ToggleStaged, frame, height);
+                }
+            }
             // One overlay at a time, so opening either puts the other away. B22.
             Action::ToggleMenu => {
                 self.sheet = None;
@@ -688,36 +766,31 @@ impl App {
             Action::CloseMenu => self.menu = None,
             Action::MenuMove(rows) => {
                 if let Some(caret) = self.menu.as_mut() {
-                    // Clamped rather than wrapped: a list that jumps from its last row
-                    // to its first moves the eye further than the key asked to.
-                    caret.at = caret
-                        .at
-                        .saturating_add_signed(rows)
-                        .min(SETTINGS.len().saturating_sub(1));
+                    caret.at = caret.stepped(rows);
                 }
                 // Resolved here so the state and the screen agree about which rows are
                 // drawn, which is `sheet_pages`' rule one overlay over.
                 self.settle_menu();
             }
             Action::MenuFlip => {
-                if let Some(setting) = self.menu.and_then(|caret| SETTINGS.get(caret.at).copied()) {
-                    return self.apply(setting.action(), frame, height);
+                if let Some(action) = self.menu.and_then(|caret| flips(caret.at)) {
+                    return self.apply(action, frame, height);
                 }
             }
             Action::MenuRow(offset) => {
-                if let Some(setting) = self.menu_at(usize::from(offset)) {
+                if let Some(at) = self.menu_at(usize::from(offset)) {
                     // The caret follows the pointer, so the mouse and the keyboard
                     // cannot disagree about which row is live.
-                    if let Some(at) = SETTINGS.iter().position(|row| *row == setting)
-                        && let Some(caret) = self.menu.as_mut()
-                    {
+                    if let Some(caret) = self.menu.as_mut() {
                         caret.at = at;
                     }
                     // The click landed on a drawn row, so the window already holds
                     // it, but settling here is what keeps that a fact rather than an
                     // unstated invariant `MenuMove` happens to maintain alone.
                     self.settle_menu();
-                    return self.apply(setting.action(), frame, height);
+                    if let Some(action) = flips(at) {
+                        return self.apply(action, frame, height);
+                    }
                 }
             }
             Action::Scroll(rows) => {

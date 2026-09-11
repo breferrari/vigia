@@ -82,7 +82,7 @@ internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|writt
 #
 # The character class cannot go stale and the settings are held to `config.rs` by
 # a test. The named keys are typed here, and a new one reaches this file by hand.
-visible_subject='`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|rail|single|overview|staged|wrap|notes|icons|links|hide)`'
+visible_subject='`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|follow|rail|single|overview|staged|wrap|notes|icons|links|persist|hide)`'
 
 # Read once, because the emptied-range branch below writes the range out and
 # cannot go back to stdin for it.

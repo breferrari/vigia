@@ -14,7 +14,7 @@ use vigia_core::{
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Selection, Sheet};
-use crate::menu::{MENU_FRAME, Menu, OFF, ON, SETTINGS, STATE_WIDTH, Setting};
+use crate::menu::{self, MENU_FRAME, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
 use crate::theme::Theme;
 use crate::view::{
     BOX_FRAME, BoxPart, FileEntry, FileNotes, HEAT_BUCKETS, HeatBucket, ListRow, NoteLead,
@@ -2844,7 +2844,7 @@ const MENU_WIDEST: usize = 52;
 
 /// The widest label any row draws, which sets the label field.
 const MENU_LABEL: usize = {
-    let mut widest = 0;
+    let mut widest = RESET.len();
     let mut at = 0;
     while at < SETTINGS.len() {
         let len = SETTINGS[at].label().len();
@@ -2888,11 +2888,11 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
     if capacity == 0 {
         return None;
     }
-    let rows = capacity.min(SETTINGS.len());
+    let rows = capacity.min(ROWS.len());
 
     // The title bar's own floor, so a box wide enough for its rows is never too
     // narrow for the word on its edge.
-    let counter = (rows < SETTINGS.len()).then(|| menu_counter(top, rows));
+    let counter = (rows < ROWS.len()).then(|| menu_counter(top, rows));
     let titled = width_of(MENU_TITLE) + counter.as_deref().map_or(0, width_of) + 5;
     // Grown with the pane, which puts the names and their states at the two ends of
     // the box rather than side by side in the middle of it.
@@ -2930,6 +2930,10 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
 #[must_use]
 pub fn menu_cell(area: Rect, chrome: &Chrome, files: usize) -> Option<Rect> {
     let menu = chrome.menu?;
+    // The reset spells no state, so there is no cell for a receipt to run over.
+    if !matches!(menu::ROWS.get(menu.caret.at)?, menu::Row::Toggle(_)) {
+        return None;
+    }
     let footer = Footer::plan(area, chrome, files).height();
     let plan = menu_drawn(area, footer, margins_of(area.width), menu)?;
     let window = menu.caret.window(plan.rows);
@@ -2956,7 +2960,7 @@ fn menu_rows_of(area: Rect, footer_rows: u16, margins: (u16, u16), menu: Menu) -
 /// `1-6 of 9`, in the gestures sheet's own words: a box that cannot draw
 /// everything it holds says so the same way wherever it happens.
 fn menu_counter(top: usize, rows: usize) -> String {
-    format!("{}-{} of {} ", top + 1, top + rows, SETTINGS.len())
+    format!("{}-{} of {} ", top + 1, top + rows, ROWS.len())
 }
 
 /// Where the config menu is drawn and how its rows are laid out inside it.
@@ -3844,10 +3848,10 @@ impl Painter<'_> {
 
         let window = menu.caret.window(plan.rows);
         for offset in 0..plan.rows {
-            let Some(setting) = SETTINGS.get(window + offset).copied() else {
+            let Some(row) = ROWS.get(window + offset).copied() else {
                 break;
             };
-            self.menu_row(plan, menu, offset, setting, window);
+            self.menu_row(plan, menu, offset, row, window);
         }
 
         let hint =
@@ -3882,12 +3886,29 @@ impl Painter<'_> {
         plan: &MenuPlan,
         menu: &Menu,
         offset: usize,
-        setting: Setting,
+        row: menu::Row,
         window: usize,
     ) {
         let area = plan.area;
         let y = area.y + 2 + u16::try_from(offset).unwrap_or(0);
         let at = window + offset;
+        let inset = u16::try_from(plan.inset).unwrap_or(0);
+        if matches!(row, menu::Row::Gap) {
+            return;
+        }
+        if matches!(row, menu::Row::Rule) {
+            // To the label's own column at both ends, so it separates the rows
+            // rather than the box: a rule to the frame would read as a second edge.
+            let room = usize::from(area.width).saturating_sub(plan.inset * 2);
+            self.put(
+                area.x + inset,
+                y,
+                &RULE.to_string().repeat(room),
+                room,
+                self.theme.chrome_dim,
+            );
+            return;
+        }
         let carets = at == menu.caret.at;
         // The pointer marks its row in the ink the caret's row takes, and the caret
         // glyph is what tells the two apart.
@@ -3899,17 +3920,15 @@ impl Painter<'_> {
         };
 
         if carets {
-            self.put(
-                area.x + u16::try_from(plan.inset).unwrap_or(0) - 2,
-                y,
-                CARET,
-                1,
-                name,
-            );
+            self.put(area.x + inset - 2, y, CARET, 1, name);
         }
-        let label_at = area.x + u16::try_from(plan.inset).unwrap_or(0);
         let room = usize::from(area.width).saturating_sub(plan.inset * 2 + STATE_WIDTH);
-        self.put(label_at, y, setting.label(), room, name);
+        let menu::Row::Toggle(setting) = row else {
+            // The reset, which throws something away and so has no state to spell.
+            self.put(area.x + inset, y, RESET, room, name);
+            return;
+        };
+        self.put(area.x + inset, y, setting.label(), room, name);
 
         let on = setting.of(menu.settings);
         let (word, ink) = if on {

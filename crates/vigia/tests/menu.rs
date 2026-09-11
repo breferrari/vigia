@@ -9,8 +9,9 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, Regions, SETTINGS, Setting, Sheet,
-    Theme, action_for, body_layout, menu_route, regions, render, scroll_mark,
+    Action, App, Chrome, Glyphs, Hovered, MenuRoute, Pointing, RESET, ROWS, Regions, SETTINGS,
+    Setting, Sheet, Theme, action_for, body_layout, menu_cell, menu_route, regions, render,
+    scroll_mark,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -334,15 +335,15 @@ fn the_caret_moves_and_space_flips_the_row_it_is_on() {
         apply(app, frame, area(), Action::MenuFlip);
         assert!(app.settings().rail, "the flip did not reach the rail");
 
-        // And it clamps rather than wrapping.
-        for _ in 0..SETTINGS.len() * 2 {
+        // And it clamps rather than wrapping, on the last row a caret may sit on.
+        for _ in 0..ROWS.len() * 2 {
             apply(app, frame, area(), Action::MenuMove(1));
         }
         let (buf, laid) = paint(app, frame, highlighter, history, area());
         let (text, _) = drawn(&buf, &laid);
         assert_eq!(
             carets(&text),
-            first + SETTINGS.len() - 1,
+            first + ROWS.len() - 1,
             "the caret wrapped past the last row instead of stopping:\n{text}"
         );
     });
@@ -598,7 +599,7 @@ fn a_pane_too_short_scrolls_and_says_how_many_rows_it_is_hiding() {
             "the pane was not short enough to hide a row:\n{text}"
         );
         assert!(
-            text.contains(&format!("of {}", SETTINGS.len())),
+            text.contains(&format!("of {}", ROWS.len())),
             "the menu is hiding rows and its title bar does not say so:\n{text}"
         );
 
@@ -609,7 +610,7 @@ fn a_pane_too_short_scrolls_and_says_how_many_rows_it_is_hiding() {
         let (buf, laid) = paint(app, frame, highlighter, history, short);
         let (text, _) = drawn(&buf, &laid);
         assert!(
-            text.contains(SETTINGS[SETTINGS.len() - 1].label()),
+            text.contains(RESET),
             "the caret reached the last row and the window did not follow:\n{text}"
         );
         assert!(
@@ -893,6 +894,160 @@ fn an_overlay_swallows_the_bars_and_the_gutter_under_it() {
 }
 
 #[test]
+fn the_caret_steps_over_the_rule_and_the_air_around_it() {
+    // The rule and its air are rows a caret may not sit on, so a step is a step over
+    // the rows that answer to one: three keystrokes from `path links` would otherwise
+    // land on a blank and do nothing twice.
+    let mut pane = Pane::open("menu-steps");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let selectable = ROWS.iter().filter(|row| row.selectable()).count();
+        let mut landed: Vec<usize> = Vec::with_capacity(selectable);
+        for _ in 0..ROWS.len() * 2 {
+            let (buf, laid) = paint(app, frame, highlighter, history, area());
+            let (text, _) = drawn(&buf, &laid);
+            let row = text
+                .lines()
+                .position(|line| line.contains(CARET))
+                .expect("no caret is drawn");
+            if landed.last() != Some(&row) {
+                landed.push(row);
+            }
+            apply(app, frame, area(), Action::MenuMove(1));
+        }
+        assert_eq!(
+            landed.len(),
+            selectable,
+            "the caret visited {} rows where {selectable} answer to it, so it sat on \
+             the rule or on the air around it",
+            landed.len()
+        );
+
+        // And the rule is drawn, or the gate above is about a box with no furniture
+        // in it. It is the one row whose glyphs are the frame's and whose ends are
+        // not the frame.
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let (text, _) = drawn(&buf, &laid);
+        assert!(
+            text.lines().any(|line| {
+                let inside = line.trim_matches(['\u{2502}', ' ']);
+                !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
+            }),
+            "the menu draws no rule between the toggles and what is kept:\n{text}"
+        );
+    });
+}
+
+#[test]
+fn reset_to_defaults_puts_every_row_back_including_remembering() {
+    // The one row that throws something away. It puts remembering back too, or a
+    // reset with it still on would write the shipped pane over the reader's file
+    // without being asked a second time.
+    let mut pane = Pane::open("menu-reset");
+    pane.with(|app, frame, _highlighter, _history| {
+        let shipped = app.settings();
+        for setting in SETTINGS {
+            apply(app, frame, area(), setting.action());
+        }
+        assert_ne!(
+            app.settings(),
+            shipped,
+            "nothing moved, so the reset below has nothing to undo"
+        );
+        apply(app, frame, area(), Action::MenuReset);
+        assert_eq!(
+            app.settings(),
+            shipped,
+            "the reset did not put the pane back where it shipped"
+        );
+    });
+}
+
+#[test]
+fn a_refused_write_turns_remembering_off_rather_than_only_saying_so() {
+    // B22's ruling: one alert is not enough, because a reader who looked away is
+    // left with a row reading `on` over a file nothing is reaching. No test can build
+    // the shell that joins them, so this is the two halves it joins:
+    // the write refuses and names the file, and the state moves.
+    let home = support::Scratch::new("menu-refused-write");
+    let blocked = home.root().join("config");
+    std::fs::create_dir_all(&blocked).expect("a directory where the file should be");
+
+    let mut pane = Pane::open("menu-refused");
+    pane.with(|app, frame, _highlighter, _history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        apply(app, frame, area(), Action::TogglePersist);
+        assert!(app.settings().persist, "remembering did not turn on");
+
+        let refused = vigia::config::save(&blocked, &app.config()).expect_err("a blocked save");
+        assert!(
+            refused.to_string().contains("config"),
+            "the refusal does not name the file: {refused}"
+        );
+        app.apply_persist(false);
+        assert!(
+            !app.settings().persist,
+            "the write was refused and the row still reads on"
+        );
+    });
+}
+
+#[test]
+fn a_press_on_the_rule_or_the_air_around_it_moves_nothing() {
+    // The caret cannot land on them, but a pointer can: they are drawn rows inside
+    // the box, and `row_at` answers by arithmetic on the window. With remembering
+    // on, a press that flipped nothing would still have written the reader's file,
+    // clobbering a hand-edit with a click that showed no sign of happening.
+    let mut pane = Pane::open("menu-furniture");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let menu = laid.menu.expect("a menu region");
+        let (text, at) = drawn(&buf, &laid);
+
+        // The rule's own row, found by what it draws rather than by its index.
+        let rule = text
+            .lines()
+            .position(|line| {
+                let inside = line.trim_matches(['\u{2502}', ' ']);
+                !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
+            })
+            .expect("the menu draws no rule");
+        let furniture = [rule - 1, rule, rule + 1];
+
+        let before = app.settings();
+        for row in furniture {
+            let screen = at.y + u16::try_from(row).expect("a small row");
+            let offset = screen - menu.top - 2;
+            assert_eq!(
+                menu_route(&click(menu.left + 6, screen), Some(menu)),
+                MenuRoute::Row(offset),
+                "a press on row {row} is not reported as a row at all, so this gate \
+                 is about a cell the pointer cannot reach"
+            );
+            apply(app, frame, area(), Action::MenuRow(offset));
+            assert_eq!(
+                app.settings(),
+                before,
+                "a press on row {row}, which is the rule or the air around it, moved \
+                 a setting"
+            );
+        }
+
+        // Non-vacuity: the same press on a row that is a toggle does move one, so
+        // the loop above is about the furniture rather than about a dead action.
+        let real = u16::try_from(rule - 3).expect("a small row");
+        apply(app, frame, area(), Action::MenuRow(real - 2));
+        assert_ne!(
+            app.settings(),
+            before,
+            "no press in this box moves anything, so the assertions above prove \
+             nothing"
+        );
+    });
+}
+
+#[test]
 fn every_label_is_one_column_per_byte() {
     // `render::MENU_LABEL` sizes the label field with `str::len`, which is bytes,
     // because `width_of` is not const. That is only the same number while every
@@ -905,4 +1060,41 @@ fn every_label_is_one_column_per_byte() {
             setting.label()
         );
     }
+}
+
+/// The reset is an act rather than a state, and the menu's one motion is a
+/// flipped cell.
+#[test]
+fn the_reset_spells_no_state_and_no_receipt_runs_over_it() {
+    // `SPEC.md` §11.1 draws the reset "as the act it is and with no state cell", and
+    // the receipt is planned from the row the caret is on. Asked for on this row it
+    // answers with three blank cells at the right margin, which is a flash over
+    // nothing on the one press that changes every other row.
+    let mut pane = Pane::open("menu-reset-cell");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        assert!(
+            menu_cell(area(), &chrome(app), FILES).is_some(),
+            "the menu opens on a toggle, and that row's receipt has no cell to run \
+             over, so the assertion below is about the wrong thing"
+        );
+
+        let past_the_end = isize::try_from(ROWS.len()).expect("a short list");
+        apply(app, frame, area(), Action::MenuMove(past_the_end));
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let (text, _) = drawn(&buf, &laid);
+        let row = text
+            .lines()
+            .find(|line| line.contains(RESET))
+            .expect("the menu draws no reset row");
+        assert_eq!(
+            row.trim_matches(['│', ' ', CARET]),
+            RESET,
+            "the reset row spells something beside its own label: {row:?}"
+        );
+        assert!(
+            menu_cell(area(), &chrome(app), FILES).is_none(),
+            "a receipt is planned over a row that draws no state"
+        );
+    });
 }

@@ -51,7 +51,8 @@ pub use input::{
     repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
-    Caret, Menu, MenuRoute, OFF, ON, SETTINGS, STATE_WIDTH, Setting, Settings, menu_route,
+    Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH, Setting, Settings,
+    menu_route,
 };
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
@@ -293,6 +294,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
+    // Resolved beside the read rather than at the first flip: a reader with no home
+    // has nowhere to keep settings, and that is a fact about the environment the
+    // launch already knows. `SPEC.md` §11.2 B22.
+    let config_path = theme::home_file(config::CONFIG_FILE, &|key| std::env::var(key).ok());
+
     // Read here for that same reason, and acted on after the first paint.
     let update = update::wanted(|key| std::env::var(key).ok())?;
 
@@ -324,6 +330,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         session: Session::enter()?,
         app: App::configured(&config),
         hide: config.hide.clone(),
+        config_path,
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
@@ -899,6 +906,9 @@ struct Shell {
     /// The reader's `hide` pattern, kept because two things outside the frame ask
     /// it: the count of the run this pane is not drawing, and the wake's burst.
     hide: Option<vigia_core::Hidden>,
+    /// The reader's own config file, where one can be found. `None` with no home,
+    /// which is what a refused write says rather than the launch.
+    config_path: Option<PathBuf>,
     /// The last view collected successfully.
     screen: View,
     /// Where the last painted screen's regions and scrollbars were.
@@ -1130,8 +1140,17 @@ impl Shell {
         if action != Action::Redraw {
             self.deselect();
         }
+        let before = self.app.settings();
         let carried = self.app.apply(action, frame, height)?;
         self.stand(frame, worktree);
+        // Every flip is written back at once, whichever gesture made it: `r` from the
+        // map and the rail's row in the menu are one change to one setting. The press
+        // that turns remembering off is written too, or the file keeps `persist = on`
+        // and the next launch brings back the state the reader just left.
+        let after = self.app.settings();
+        if after != before && (before.persist || after.persist) {
+            self.remember();
+        }
         Ok(carried)
     }
 
@@ -1331,11 +1350,41 @@ impl Shell {
     /// The cell is armed before the action rather than after it, so the effect runs
     /// over the row the reader aimed at even when flipping it moves the caret.
     fn flip_menu(&mut self, action: Action, frame: &mut vigia_core::Frame, worktree: &Worktree) {
+        let before = self.app.settings();
+        self.apply_menu(action, frame, worktree);
+        // A pointer can land on the rule and the air around it, and a receipt over a
+        // cell that did not change is a receipt for nothing.
+        if self.app.settings() == before {
+            return;
+        }
         self.menu_effect = Some(Timed::armed(
             motion::coalescing(SAID_ARRIVING),
             Instant::now(),
         ));
-        self.apply_menu(action, frame, worktree);
+    }
+
+    /// Write what the reader flipped into their own file, on the flip rather than
+    /// on exit, which `SPEC.md` §11.2 B22 rules and I8 is the reason for: the
+    /// process can be ended in ways it runs no code for.
+    ///
+    /// A refusal turns remembering **off** as well as saying so. A row reading `on`
+    /// over nothing being written is the invisible state the menu exists to remove,
+    /// and one alert a reader may have looked away from is not enough to remove it.
+    fn remember(&mut self) {
+        let Some(path) = self.config_path.clone() else {
+            self.app
+                .warn("no home directory, so there is nowhere to remember");
+            self.app.apply_persist(false);
+            return;
+        };
+        let wanted = Config {
+            hide: self.hide.clone(),
+            ..self.app.config()
+        };
+        if let Err(e) = config::save(&path, &wanted) {
+            self.app.warn(e.to_string());
+            self.app.apply_persist(false);
+        }
     }
 
     fn cancel_box(&mut self, now: Instant) {
@@ -2680,6 +2729,62 @@ mod tests {
             paints.iter().any(|paint| arm < *paint),
             "the wake's arm sits after the batch's paint, so the listing it marks \
              stale is read one frame late"
+        );
+
+        // Every flip writes the reader's file, whichever gesture made it. `Shell` is
+        // private and no test can build one, so this is the join read rather than
+        // driven: `SPEC.md` §11.1 writes back every flip while remembering is on, and
+        // a write hung off the menu's own route would leave every gate over the
+        // writer and over the state green while `r` and `f` reached no disk.
+        let applies = code
+            .find("fn apply(\n        &mut self,\n        action: Action,")
+            .expect("`Shell::apply` is gone");
+        let body = &code[applies..];
+        let body = &body[..body
+            .find(
+                "
+    }
+",
+            )
+            .expect("`Shell::apply` never closes")];
+        assert!(
+            body.contains("self.remember()"),
+            "the one place every action lands no longer writes the reader's file, so remembering is a row that says `on` and reaches nothing: {body}"
+        );
+        // Nothing is written for a press that moved nothing, and the press that turns
+        // remembering off is written: a file still reading `persist = on` brings back
+        // the state the reader just left.
+        assert!(
+            body.contains("if after != before && (before.persist || after.persist) {"),
+            "the write is read off the state the press left alone, so a press that moved nothing writes and the press that turns remembering off does not: {body}"
+        );
+        // And after the action rather than before it: a write ahead of the flip would
+        // keep the state the reader just left.
+        let (applied, wrote) = (
+            body.find("self.app.apply(action, frame, height)?")
+                .expect("`Shell::apply` no longer applies"),
+            body.find("self.remember()").expect("checked above"),
+        );
+        assert!(
+            applied < wrote,
+            "the write runs before the flip, so the file keeps the state the reader just left: {body}"
+        );
+        // The menu arms its receipt for a press that moved something and no other: the
+        // rule and the air around it are rows a pointer can land on.
+        let flip = code
+            .find("fn flip_menu(&mut self, action: Action")
+            .expect("`Shell::flip_menu` is gone");
+        let body = &code[flip..];
+        let body = &body[..body
+            .find(
+                "
+    }
+",
+            )
+            .expect("`flip_menu` never closes")];
+        assert!(
+            body.contains("if self.app.settings() == before {"),
+            "the menu arms a receipt over a cell no press changed: {body}"
         );
 
         let settle = code

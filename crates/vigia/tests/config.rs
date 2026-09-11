@@ -84,6 +84,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         (
             "rail",
             Config {
+                follow: true,
+                persist: false,
                 rail: true,
                 ..Config::default()
             },
@@ -91,6 +93,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         (
             "single",
             Config {
+                follow: true,
+                persist: false,
                 single: true,
                 ..Config::default()
             },
@@ -98,6 +102,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         (
             "overview",
             Config {
+                follow: true,
+                persist: false,
                 overview: true,
                 ..Config::default()
             },
@@ -113,6 +119,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
     assert_eq!(
         config::from_env(home_env(&home)).expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             rail: true,
             single: true,
             overview: false,
@@ -140,6 +148,8 @@ fn the_key_still_toggles_from_the_configured_state() {
     // A setting is a starting point rather than a decision, which is the sentence the
     // README makes and the one a reader would notice broken.
     let config = Config {
+        follow: true,
+        persist: false,
         rail: true,
         single: true,
         overview: false,
@@ -156,7 +166,7 @@ fn the_key_still_toggles_from_the_configured_state() {
     assert!(rail, "the configured shell did not start configured");
     assert!(
         following,
-        "a config file turned follow off, which is I5 and no key of this file"
+        "a config file with `follow` on did not start the pane following"
     );
 
     let scratch = support::Scratch::large_diff("config-toggles", 6, 1);
@@ -208,16 +218,6 @@ fn a_key_this_file_does_not_have_names_its_line_and_refuses() {
     assert!(
         said.contains("sidebar"),
         "the error does not name the key: {said}"
-    );
-}
-
-#[test]
-fn follow_is_not_a_key_this_file_accepts() {
-    // I5 as a gate rather than as a paragraph.
-    let err = config::parse("follow = off\n").expect_err("follow is not a key");
-    assert!(
-        matches!(&err, ConfigError::UnknownKey { key, .. } if key == "follow"),
-        "follow was accepted, or refused as something other than an unknown key: {err:?}"
     );
 }
 
@@ -300,6 +300,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
     assert_eq!(
         config::parse(source).expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             rail: true,
             single: true,
             overview: false,
@@ -318,6 +320,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
     assert_eq!(
         config::parse("\u{FEFF}rail = on\n").expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             rail: true,
             ..Config::default()
         }
@@ -336,6 +340,8 @@ fn an_empty_home_falls_through_rather_than_being_taken_as_one() {
     assert_eq!(
         config::from_env(lookup).expect("a config"),
         Config {
+            follow: true,
+            persist: false,
             single: true,
             ..Config::default()
         },
@@ -396,6 +402,8 @@ fn absent_is_not_an_error_and_unreadable_is() {
 fn a_railed_default_below_the_arrival_width_keeps_the_request() {
     // §11.2 B14 unchanged, reached from the file instead of from `r`.
     let app = App::configured(&Config {
+        follow: true,
+        persist: false,
         rail: true,
         ..Config::default()
     });
@@ -437,6 +445,8 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     }
 
     let mut configured = App::configured(&Config {
+        follow: true,
+        persist: false,
         rail: true,
         single: true,
         overview: false,
@@ -505,6 +515,8 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
     assert_eq!(
         config::parse(&source).expect("every key in KEYS parses"),
         Config {
+            follow: true,
+            persist: true,
             rail: true,
             single: true,
             overview: true,
@@ -566,6 +578,8 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
 
     // What `main` does for a reader whose file says `staged = on`.
     let config = Config {
+        follow: true,
+        persist: false,
         staged: true,
         ..Config::default()
     };
@@ -641,20 +655,29 @@ fn every_view_toggle_has_a_key_or_a_reason() {
          not walking the keymap and the assertions above are over an empty set"
     );
 
-    for (action, gesture) in [(Action::ToggleFollow, "f"), (Action::ToggleStanding, "b")] {
-        assert!(
-            matches!(place_of(&action), Place::Excluded(_)),
-            "`{gesture}` left the exclusion list, and `SPEC.md` §11.2 B6 is what \
-             has to change before this does"
-        );
-    }
+    // `b` is the whole exclusion list since B22: `f` left it when the menu made
+    // what a reader flips worth keeping, and `REVOCATIONS.md` holds what its
+    // exclusion said.
+    assert!(
+        matches!(place_of(&Action::ToggleStanding), Place::Excluded(_)),
+        "`b` left the exclusion list, and `SPEC.md` §11.2 B6 is what has to change \
+         before this does"
+    );
+    assert!(
+        matches!(
+            place_of(&Action::ToggleFollow),
+            Place::Key { key: "follow", .. }
+        ),
+        "`f` is not a key of the file, which B22 ruled it is"
+    );
 }
 
 #[test]
 fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
-    // The two `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
-    // they cannot come out of the sweep.
-    const CONFIG_ONLY: [&str; 2] = ["icons", "links"];
+    // The three `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
+    // they cannot come out of the sweep. `persist` joined them with B22: it is a row
+    // of the config menu and no key of its own.
+    const CONFIG_ONLY: [&str; 3] = ["icons", "links", "persist"];
 
     let mut reachable: Vec<&str> = actions_keys_reach()
         .iter()
@@ -844,4 +867,416 @@ fn a_configured_pattern_is_applied_on_the_first_frame() {
     frame.advance().expect("advance");
     assert_eq!(frame.files().len(), 2, "the fixture changed two files");
     assert_eq!(frame.hidden(), 0);
+}
+
+/// A file the reader wrote by hand, with everything a rewrite must not touch.
+const HAND_WRITTEN: &str = "\
+# the pane I want
+rail     = on    # from 134 columns
+single   = off
+
+hide = ^target/|\\.lock$
+notes = off
+";
+
+#[test]
+fn a_rewrite_keeps_every_comment_and_every_line_it_does_not_own() {
+    let mut config = config::parse(HAND_WRITTEN).expect("the fixture parses");
+    config.single = true;
+    let out = config::rewrite(HAND_WRITTEN, &config);
+
+    for kept in [
+        "# the pane I want",
+        "# from 134 columns",
+        "hide = ^target/|\\.lock$",
+    ] {
+        assert!(
+            out.contains(kept),
+            "the rewrite lost {kept:?}, which is the reader's and not the pane's:\n{out}"
+        );
+    }
+    // The blank line the reader left, in the place they left it.
+    assert!(
+        out.contains("single   = on\n\nhide"),
+        "the rewrite closed up the reader's blank line:\n{out}"
+    );
+    assert!(
+        out.contains("single   = on"),
+        "the key the pane owns did not move:\n{out}"
+    );
+    assert!(
+        !out.contains("single   = off"),
+        "the old value is still there:\n{out}"
+    );
+}
+
+#[test]
+fn a_rewrite_appends_a_key_the_file_lacks_and_never_writes_hide() {
+    let config = config::parse(HAND_WRITTEN).expect("the fixture parses");
+    let out = config::rewrite(HAND_WRITTEN, &config);
+    let back = config::parse(&out).expect("the rewrite parses");
+    assert_eq!(back, config, "the file no longer round trips");
+
+    for key in config::KEYS {
+        assert!(
+            out.lines().any(|line| line.trim_start().starts_with(key)),
+            "the rewrite never writes {key:?}, so a reader cannot see where it stands:\n{out}"
+        );
+    }
+    // `hide` is written exactly once, which is the reader's own line kept rather
+    // than a second one appended: the menu owns no pattern and writes none.
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.trim_start().starts_with("hide"))
+            .count(),
+        1,
+        "the rewrite wrote `hide`, which no gesture reaches:\n{out}"
+    );
+}
+
+#[test]
+fn a_file_notepad_saved_survives_a_rewrite() {
+    // U+FEFF is `Cf` rather than `White_Space`, so it survives every trim and lands
+    // inside the first key. `parse` has stripped it since the first Windows reader
+    // hit it. Left in place here, the first key would be unrecognised, appended a
+    // second time, and the next launch would refuse the reader's own file with a
+    // repeated key it never wrote. The pane would then not start at all.
+    let saved = "\u{FEFF}rail = off\nsingle = on\n";
+    let config = Config {
+        rail: true,
+        ..config::parse(saved).expect("the fixture parses")
+    };
+    let out = config::rewrite(saved, &config);
+
+    assert!(
+        out.starts_with('\u{FEFF}'),
+        "the mark the reader's editor writes is gone, so their editor puts it back \
+         and every flip churns the first line: {out:?}"
+    );
+    assert_eq!(
+        out.matches("rail").count(),
+        1,
+        "the first key was appended a second time:\n{out}"
+    );
+    assert!(
+        config::parse(&out).expect("the rewrite still parses").rail,
+        "the flip did not land"
+    );
+}
+
+#[test]
+fn a_file_written_on_windows_stays_written_on_windows() {
+    // Every line ending is the reader's, kept as they wrote it. Converting them
+    // would be a whole-file diff on the first flip, and their editor would convert
+    // it back on the first save, so the two would churn the file between them
+    // forever.
+    let theirs = "# mine\r\nrail = off\r\nsingle = on\r\n";
+    let config = Config {
+        rail: true,
+        ..config::parse(theirs).expect("the fixture parses")
+    };
+    let out = config::rewrite(theirs, &config);
+
+    assert!(
+        !out.contains('\n') || out.matches("\r\n").count() == out.matches('\n').count(),
+        "a line lost its ending, so the file is half one kind and half the \
+         other: {out:?}"
+    );
+    assert!(
+        out.contains("rail = on\r\n"),
+        "the flip did not land, or landed without the reader's ending: {out:?}"
+    );
+    assert!(
+        out.contains("# mine\r\n"),
+        "the comment lost its ending: {out:?}"
+    );
+    // And the keys it had to append took the reader's ending too.
+    assert!(
+        out.contains("persist = off\r\n"),
+        "an appended key was written with the wrong ending: {out:?}"
+    );
+}
+
+#[test]
+fn a_save_refuses_a_file_that_no_longer_parses() {
+    // Between the launch and the flip a reader may have edited the file by hand.
+    // Writing over that is this program deciding what their file should say, and
+    // the error it hands back is the parser's own, so the footer names the line.
+    let home = support::Scratch::new("config-refuse-bad");
+    let path = home.root().join("config");
+    std::fs::write(&path, "rail = off\nrail = on\n").expect("seed a file it refuses");
+
+    let refused = config::save(&path, &Config::default()).expect_err("a save over a bad file");
+    assert!(
+        matches!(&refused, ConfigError::RepeatedKey { key, .. } if key == "rail"),
+        "the refusal is not the parser's own: {refused:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read it back"),
+        "rail = off\nrail = on\n",
+        "the reader's file was written over anyway"
+    );
+}
+
+#[test]
+fn a_rewrite_adds_no_line_the_reader_did_not_have() {
+    // The shapes a real file arrives in, each one a reader's editor rather than a
+    // hypothetical. Every one must parse, and none may gain a blank line: a file
+    // that grows one on every flip is a file this program is slowly rewriting.
+    for (what, source, ends) in [
+        // An editor that saved a mark and nothing else.
+        ("a mark alone", "\u{FEFF}", "\n"),
+        ("a mark and a comment", "\u{FEFF}# mine\n", "\n"),
+        // The reader's last line with no ending, which every editor allows.
+        ("no trailing ending", "rail = off", "\n"),
+        (
+            "no trailing ending on Windows",
+            "rail = off\r\nsingle = off",
+            "\r\n",
+        ),
+        // Both kinds in one file, which is what a repository shared between two
+        // machines produces. The first is the one the appended keys take.
+        ("both kinds", "rail = off\r\nsingle = off\n", "\r\n"),
+    ] {
+        let config = Config::default();
+        let out = config::rewrite(source, &config);
+        assert!(
+            config::parse(&out).is_ok(),
+            "{what}: the rewrite made a file the next launch refuses:\n{out:?}"
+        );
+        assert!(
+            !out.contains("\n\n") && !out.contains("\r\n\r\n"),
+            "{what}: the rewrite added a blank line:\n{out:?}"
+        );
+        // And the mark keeps the line it was on. A file that is nothing but a mark
+        // has no line to end, so ending one leaves the mark alone on the first row
+        // and every flip after it has a blank first line to carry.
+        assert!(
+            !out.lines()
+                .next()
+                .is_some_and(|first| first.trim_matches('\u{FEFF}').trim().is_empty()),
+            "{what}: the rewrite left the first line with nothing on it:\n{out:?}"
+        );
+        assert!(
+            out.ends_with(&format!("persist = off{ends}")),
+            "{what}: the appended keys did not take the {ends:?} the file opens \
+             with:\n{out:?}"
+        );
+        // And a second pass is the first, so a flip a minute later changes nothing
+        // but the word the reader flipped.
+        assert_eq!(
+            config::rewrite(&out, &config),
+            out,
+            "{what}: the rewrite is not settled after one pass"
+        );
+    }
+}
+
+#[test]
+fn a_repeated_key_is_the_readers_mistake_and_the_rewrite_leaves_it() {
+    // `parse` refuses a file that sets a key twice, and says which lines. A rewrite
+    // must not quietly repair that: the reader has to see the line they wrote when
+    // the next launch names it, so only the first occurrence takes the new value and
+    // the second is theirs, byte for byte.
+    let doubled = "rail = off
+single = on
+rail = off
+";
+    let config = Config {
+        rail: true,
+        ..Config::default()
+    };
+    let out = config::rewrite(doubled, &config);
+    let rails: Vec<&str> = out
+        .lines()
+        .filter(|line| line.trim_start().starts_with("rail"))
+        .collect();
+    assert_eq!(
+        rails,
+        vec!["rail = on", "rail = off"],
+        "the rewrite did not leave the reader's second line alone:
+{out}"
+    );
+    // And the file is still the one the next launch will refuse, so nothing was
+    // repaired behind their back.
+    assert!(
+        matches!(
+            config::parse(&out),
+            Err(ConfigError::RepeatedKey { key, .. }) if key == "rail"
+        ),
+        "the rewrite made a file `parse` accepts out of one it refuses:
+{out}"
+    );
+}
+
+#[test]
+fn a_rewrite_of_a_file_it_wrote_is_the_same_file() {
+    // Idempotence, which is what stops a file growing a line every time a reader
+    // flips a row.
+    let config = config::parse(HAND_WRITTEN).expect("the fixture parses");
+    let once = config::rewrite(HAND_WRITTEN, &config);
+    let twice = config::rewrite(&once, &config);
+    assert_eq!(once, twice, "a second rewrite is not the first:\n{once}");
+
+    // And from nothing: a reader who never had a file gets one that parses back to
+    // the same pane. `hide` is the one thing that does not survive, because the menu
+    // never writes a pattern and a file written from nothing has none to keep.
+    let fresh = config::rewrite("", &config);
+    assert_eq!(
+        config::parse(&fresh).expect("the fresh file parses"),
+        Config {
+            hide: None,
+            ..config.clone()
+        },
+        "a file written from nothing does not read back:\n{fresh}"
+    );
+    assert!(
+        !fresh.contains("hide"),
+        "a file written from nothing carries a pattern nobody wrote:\n{fresh}"
+    );
+    assert_eq!(
+        config::rewrite(&fresh, &config),
+        fresh,
+        "rewriting a file it wrote from nothing changed it"
+    );
+}
+
+#[test]
+fn a_save_lands_whole_and_says_which_file_it_could_not_write() {
+    let scratch = support::Scratch::new("config-save");
+    let path = scratch.root().join("nested/vigia/config");
+    let config = Config {
+        persist: true,
+        rail: true,
+        ..Config::default()
+    };
+
+    config::save(&path, &config).expect("a save into a directory nobody made");
+    assert_eq!(
+        config::load(&path).expect("the saved file parses"),
+        config,
+        "what was saved is not what reads back"
+    );
+    // Nothing beside it: temp-and-rename leaves no temp behind.
+    let beside: Vec<String> = std::fs::read_dir(path.parent().expect("a parent"))
+        .expect("read the directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        beside,
+        vec!["config".to_owned()],
+        "the save left a file behind"
+    );
+
+    // A directory where the file should be is a write that cannot land, and the
+    // error names the path rather than only the reason.
+    let blocked = scratch.root().join("blocked");
+    std::fs::create_dir_all(blocked.join("config")).expect("make the blocking directory");
+    let refused = config::save(&blocked.join("config"), &config).expect_err("a blocked save");
+    assert!(
+        refused.to_string().contains("config"),
+        "the refusal does not name the file: {refused}"
+    );
+    // And it says why before it says where. The footer takes a notice's tail off at
+    // the width it has, and a path is longer than the reason on every machine.
+    assert!(
+        !refused
+            .to_string()
+            .starts_with(&blocked.display().to_string()),
+        "the refusal leads with the path, so a narrow pane cuts the reason off it: {refused}"
+    );
+}
+
+/// A link is the reader's own arrangement, and a rename lands on the entry
+/// rather than on what it points at.
+#[test]
+fn a_save_writes_through_a_link_rather_than_over_it() {
+    // A dotfile manager owns the entry in the config directory and points it at a
+    // file in the tree it tracks. Replacing the entry orphans that file, and the
+    // pane then writes somewhere the reader does not keep, with nothing on screen
+    // to say the arrangement is gone.
+    let scratch = support::Scratch::new("config-link");
+    let kept = scratch.root().join("dotfiles/config");
+    std::fs::create_dir_all(kept.parent().expect("a parent")).expect("the tracked tree");
+    std::fs::write(&kept, "# mine\nrail = off\n").expect("seed the tracked file");
+
+    let link = scratch.root().join("config");
+    if !support::linked_file(&kept, &link) {
+        return;
+    }
+
+    let config = Config {
+        rail: true,
+        ..Config::default()
+    };
+    config::save(&link, &config).expect("a save through the link");
+
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .expect("the link")
+            .is_symlink(),
+        "the save replaced the reader's link with a file of its own"
+    );
+    let written = std::fs::read_to_string(&kept).expect("the tracked file");
+    assert!(
+        written.starts_with("# mine\n") && written.contains("rail = on"),
+        "the file the link points at was not the file that was written: {written:?}"
+    );
+    assert_eq!(
+        config::load(&link).expect("the saved file parses"),
+        config,
+        "what was saved is not what reads back through the link"
+    );
+}
+
+/// A link laid down before what it points at exists is still the reader's link.
+#[test]
+fn a_save_through_a_link_with_nothing_behind_it_makes_what_it_names() {
+    // A dotfiles tree whose links are made before it is checked out, which is the
+    // one shape the path resolving above cannot answer: nothing to resolve to, and
+    // the fallback it would otherwise take is the link itself.
+    // Both shapes a link is written in. A tool that manages a tree writes the
+    // relative one as often as the whole path, and only one of them is resolved
+    // against the directory the link itself sits in.
+    for (what, from_its_own_directory) in [("a whole path", false), ("a relative path", true)] {
+        let scratch = support::Scratch::new(&format!("config-dangling-{from_its_own_directory}"));
+        let kept = scratch.root().join("dotfiles/config");
+        let link = scratch.root().join("config");
+        let relative = std::path::Path::new("dotfiles").join("config");
+        let names: &std::path::Path = if from_its_own_directory {
+            &relative
+        } else {
+            &kept
+        };
+        if !support::linked_file(names, &link) {
+            return;
+        }
+        assert!(
+            !kept.exists(),
+            "{what}: the fixture made the file it is about to write"
+        );
+
+        let config = Config {
+            rail: true,
+            ..Config::default()
+        };
+        config::save(&link, &config).expect("a save through a link with nothing behind it");
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .expect("the link")
+                .is_symlink(),
+            "{what}: the save replaced the reader's link with a file of its own"
+        );
+        assert!(
+            kept.exists(),
+            "{what}: the file the link names was not the file that was made"
+        );
+        assert_eq!(
+            config::load(&link).expect("the saved file parses"),
+            config,
+            "{what}: what was saved is not what reads back through the link"
+        );
+    }
 }
