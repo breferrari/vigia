@@ -96,7 +96,12 @@ fn branched(name: &str, commits: usize) -> Scratch {
             "two\nand a second line\n",
         );
         scratch.git(&["add", "-A"]);
-        scratch.git(&["commit", "-m", &format!("on the branch, {nth}")]);
+        // The fixture's name goes in the message, so two of them built inside one
+        // second cannot hash to the same commit: everything else a commit id is made
+        // of is identical between them, and a gate comparing ids across two fixtures
+        // then fails on whichever platform spawns `git` fast enough to share a
+        // second. Windows was slow enough to hide it and the other two were not.
+        scratch.git(&["commit", "-m", &format!("on the branch, {name} {nth}")]);
     }
     scratch.write("src/staged.rs", "three\n");
     scratch.git(&["add", "src/staged.rs"]);
