@@ -212,7 +212,7 @@
       <rect x="8" y="272" width="884" height="24" fill="#0f2c1c"/>
       <rect x="8" y="272" width="3" height="24" fill="#3fb950"/>
       <rect x="28" y="272" width="40" height="24" fill="#0a2013"/>
-      <text class="m faint" x="60" y="290" text-anchor="end">40</text>
+      <text class="m cyn" x="60" y="290" text-anchor="end">40</text>
       <text class="m grn" x="72" y="290">+</text>
       <text class="m" x="152.8" y="290"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="var">deadline</tspan><tspan class="fg"> = </tspan><tspan class="typ">Instant</tspan><tspan class="fg">::</tspan><tspan class="fnn">now</tspan><tspan class="fg">() + </tspan><tspan class="con">DEBOUNCE</tspan><tspan class="fg">;</tspan></text>
 
@@ -222,12 +222,12 @@
            the line and the words. Drawn here because a picture of a monitor that
            only ever watches describes half the product.
 
-           The line's own number stays lit while the box is under it, which is what
-           says which line the sentence is about once the box is closed. The frame
+           The number of the line the note is about stays lit, one row up, which is
+           what says which line the sentence is about. The box's own row carries no
+           number, because it is not a line of the file. The frame
            is drawn rather than spelled in box characters: SPEC.md 5.1 binds this
            picture to the element set and its promises, never to glyph-for-glyph
            fidelity, and a stroked rect is what a cell grid is approximating. -->
-      <text class="m cyn" x="60" y="316" text-anchor="end">40</text>
       <rect x="88" y="306" width="700" height="68" rx="4" fill="none" stroke="#30363d"/>
       <rect x="100" y="298" width="222" height="16" fill="#0d1117"/>
       <text class="m dim" x="108" y="311" font-size="12">note &#183; src/engine/watch.rs:40</text>
