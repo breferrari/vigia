@@ -45,7 +45,12 @@ fn fence(line: &str) -> Option<(usize, &str)> {
     let trimmed = line.trim();
     let named = trimmed.trim_start_matches('`');
     let ticks = trimmed.len() - named.len();
-    (ticks >= FENCE).then(|| (ticks, named.trim()))
+    // A name holding a backtick names nothing, which is what keeps a fence that
+    // opens and closes on one line from asking the dump for a language spelled
+    // with the fence that closed it, and drawing plain for the want of one.
+    let named = named.trim();
+    let named = if named.contains('`') { "" } else { named };
+    (ticks >= FENCE).then_some((ticks, named))
 }
 
 /// `text`'s lines, each without the carriage return a store round-trip keeps.

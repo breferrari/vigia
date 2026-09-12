@@ -6774,6 +6774,30 @@ fn the_copy_of_an_answer_still_carries_its_fences() {
     assert_eq!(copied, vec![FENCED.to_owned()], "{copied:?}");
 }
 
+/// A fence whose name holds a backtick names nothing, so the block falls to the
+/// anchored file's grammar rather than asking the dump for a language spelled
+/// with the fence that closed it.
+#[test]
+fn a_fence_name_holding_a_backtick_names_nothing() {
+    let scratch = fixture("notes-fence-name");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let line = "let margin = 2;";
+    answered(&mut rig, &format!("```rust```\n{line}\n```"));
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let theme = Theme::default();
+
+    let row = row_holding(&painted, line);
+    let at = painted.text(row).find("let").expect("its keyword") as u16;
+    assert_ne!(
+        painted.fg(at, row),
+        theme.context.fg,
+        "the name carried a backtick into the dump, so nothing resolved and the          block drew plain where the anchored file's grammar was there to use"
+    );
+}
+
 /// A fence naming a language nothing in the dump holds draws plain, and is still
 /// drawn as code.
 #[test]
