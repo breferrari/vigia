@@ -1177,3 +1177,117 @@ fn op_stream(set: &SyntaxSet, ext: &str, body: &str) -> Vec<String> {
     }
     ops
 }
+
+/// A block quoted in a note's answer takes the grammar its fence names.
+///
+/// The anchored path is a Rust file and the token says Swift, which is the case
+/// the fence exists for: an answer about a build script quoted inside a note on
+/// a source file is not that file's language.
+#[test]
+fn a_quote_takes_the_grammar_its_token_names() {
+    use vigia_core::{Class, Highlighter};
+
+    let mut highlighter = Highlighter::eager();
+    let lines = vec!["guard x else { return }".to_owned()];
+
+    let swift: Vec<Class> = {
+        let mut pass = highlighter.pass();
+        pass.quoted("n1", 0, Some("swift"), "src/watch.rs", &lines)[0]
+            .iter()
+            .map(|span| span.class)
+            .collect()
+    };
+    let rust: Vec<Class> = {
+        let mut pass = highlighter.pass();
+        pass.quoted("n2", 0, None, "src/watch.rs", &lines)[0]
+            .iter()
+            .map(|span| span.class)
+            .collect()
+    };
+    assert!(
+        swift.contains(&Class::Keyword),
+        "Swift's guard is not a keyword: {swift:?}"
+    );
+    assert_ne!(swift, rust, "the token and the path resolved the same way");
+}
+
+/// A token nothing in the dump holds draws plain rather than borrowing the
+/// anchored file's grammar, which would be wrong on every token.
+#[test]
+fn a_quote_naming_no_known_language_draws_plain() {
+    use vigia_core::{Class, Highlighter};
+
+    let set = embedded();
+    assert!(
+        set.find_syntax_by_token("nonesuch").is_none(),
+        "the dump grew a nonesuch grammar and this gate now asserts nothing"
+    );
+
+    let mut highlighter = Highlighter::eager();
+    let lines = vec!["let margin = 2;".to_owned()];
+    let mut pass = highlighter.pass();
+    let classes: Vec<Class> = pass.quoted("n1", 0, Some("nonesuch"), "src/watch.rs", &lines)[0]
+        .iter()
+        .map(|span| span.class)
+        .collect();
+    assert_eq!(classes, vec![Class::Plain], "{classes:?}");
+}
+
+/// A quote is parsed when its content changes and reused when it does not.
+#[test]
+fn a_quote_is_reparsed_only_when_its_content_changes() {
+    use vigia_core::Highlighter;
+
+    let mut highlighter = Highlighter::eager();
+    let first = vec!["let margin = 2;".to_owned()];
+    let second = vec!["let margin = 3;".to_owned()];
+
+    let parses = |highlighter: &mut Highlighter, lines: &[String], times: usize| {
+        let before = highlighter.stats().quoted;
+        for _ in 0..times {
+            let mut pass = highlighter.pass();
+            let _ = pass.quoted("n1", 0, None, "src/watch.rs", lines);
+        }
+        highlighter.stats().quoted - before
+    };
+
+    assert_eq!(parses(&mut highlighter, &first, 4), 1, "reused four frames");
+    assert_eq!(parses(&mut highlighter, &second, 1), 1, "rewritten once");
+    assert_eq!(parses(&mut highlighter, &second, 3), 0, "reused again");
+}
+
+/// A quote survives one pass that passes it over and not two.
+///
+/// The one pass of grace is for the frame that overshoots its bottom clamp,
+/// drops its pass and walks again: without it every answer on such a frame is
+/// parsed twice. The second miss is what keeps the cache bounded by what a frame
+/// drew rather than by how many notes a store holds.
+#[test]
+fn a_quote_survives_one_pass_that_passes_it_over_and_not_two() {
+    use vigia_core::Highlighter;
+
+    let mut highlighter = Highlighter::eager();
+    let lines = vec!["let margin = 2;".to_owned()];
+    let ask = |highlighter: &mut Highlighter| {
+        let before = highlighter.stats().quoted;
+        {
+            let mut pass = highlighter.pass();
+            let _ = pass.quoted("n1", 0, None, "src/watch.rs", &lines);
+        }
+        highlighter.stats().quoted - before
+    };
+
+    assert_eq!(ask(&mut highlighter), 1, "the first ask parses");
+    // The walk that overshot, and the one that replaced it.
+    drop(highlighter.pass());
+    assert_eq!(
+        ask(&mut highlighter),
+        0,
+        "one missed pass threw the parse away"
+    );
+
+    // Two passes with nothing on them, which is the pane with `c` pressed.
+    drop(highlighter.pass());
+    drop(highlighter.pass());
+    assert_eq!(ask(&mut highlighter), 1, "the quote was never swept at all");
+}

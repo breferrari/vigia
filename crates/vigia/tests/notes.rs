@@ -6405,3 +6405,593 @@ fn a_press_on_the_left_side_begins_no_selection_and_the_body_beside_it_still_doe
         "a drag over the note's body no longer copies the note"
     );
 }
+
+/// An answer holding one fenced block, the shape the reader reported from use.
+const FENCED: &str =
+    "swapped it:\n```\nlet margin = margin.saturating_mul(2);\n```\nthe unwrap_or went with it";
+
+/// The painted row holding `line`, wherever in the frame it landed.
+fn row_holding(painted: &Painted, line: &str) -> u16 {
+    (0..painted.backend.buffer().area.height)
+        .find(|y| painted.text(*y).contains(line))
+        .unwrap_or_else(|| panic!("no row holds {line:?}:\n{}", painted.rows().join("\n")))
+}
+
+/// Note `n1` on the edited line, answered with `reply`.
+fn answered(rig: &mut Rig, reply: &str) {
+    let mut note = note("n1", 5, EDITED, "short");
+    note.status = Status::Seen;
+    note.reply = Some(reply.to_owned());
+    rig.store.put(&note).expect("put");
+    rig.reload();
+}
+
+/// The rows of note `n1`'s answer, as the view built them.
+fn answer_rows(painted: &Painted) -> Vec<vigia::CodeRow> {
+    painted
+        .view
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::Note {
+                lead: NoteLead::Reply | NoteLead::Blank,
+                text,
+                runs,
+                indent,
+                ..
+            } => Some(vigia::CodeRow {
+                text: text.clone(),
+                runs: runs.clone(),
+                indent: *indent,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `SPEC.md` §11.2 B21: a fenced block is drawn as its code, and the fences that
+/// declared it are markup rather than anything the agent said.
+#[test]
+fn a_fenced_block_draws_its_code_and_not_its_fences() {
+    let scratch = fixture("notes-fenced");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, FENCED);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let under = painted.notes_under(painted.row_of(EDITED));
+
+    assert!(
+        under
+            .iter()
+            .any(|row| row.contains("let margin = margin.saturating_mul(2);")),
+        "the quoted line is not drawn: {under:?}"
+    );
+    assert!(
+        !under.iter().any(|row| row.contains("``")),
+        "a fence reached the pane: {under:?}"
+    );
+    assert!(
+        under.iter().any(|row| row.contains("swapped it")),
+        "the words before the block went with it: {under:?}"
+    );
+    assert!(
+        under.iter().any(|row| row.contains("the unwrap_or went")),
+        "the words after the block went with it: {under:?}"
+    );
+}
+
+/// A quoted line is broken at the column, so nothing it holds is dropped.
+///
+/// The blank a prose break lands on is drawn on neither row, which is right for
+/// a sentence and loses a space out of a statement. Rejoining the rows is what
+/// says so: under the prose rule the pieces do not add back up to the line.
+#[test]
+fn a_quoted_line_breaks_at_the_column_and_not_at_a_blank() {
+    let scratch = fixture("notes-quoted-wrap");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let line = "let x = veryLongIdentifierWithNoSpacesInIt_and_then_some_more_of_it;";
+    answered(&mut rig, &format!("like this:\n```rust\n{line}\n```"));
+    let painted = rig.paint(&mut frame, NARROW, Pointing::default());
+
+    let rows = answer_rows(&painted);
+    let quoted: Vec<&String> = rows
+        .iter()
+        .filter(|row| !row.runs.is_empty())
+        .map(|row| &row.text)
+        .collect();
+    assert!(
+        quoted.len() > 1,
+        "the fixture did not wrap, so this gate asserted nothing: {rows:?}"
+    );
+    assert_eq!(
+        quoted
+            .iter()
+            .map(|row| row.as_str())
+            .collect::<Vec<_>>()
+            .concat(),
+        line,
+        "the pieces do not add back up to the line: {quoted:?}"
+    );
+    // And the cut fell inside a word, which is what says it fell at the column:
+    // a break that found the blank and kept it would still add back up.
+    let head = quoted[0].len();
+    assert!(
+        !quoted[0].ends_with(' ') && !line[head..].starts_with(' '),
+        "the break landed on a blank rather than on the column: {quoted:?}"
+    );
+}
+
+/// And its continuation stands in by its own indent, so the block keeps shape.
+///
+/// The row model carries the indent as a number and the painter draws the
+/// blanks, which is how a wrapped diff line already works, so both halves are
+/// asserted: a row whose text quietly held its own padding would pass the first
+/// and a painter that dropped it would pass the second.
+#[test]
+fn a_quoted_continuation_stands_in_by_its_own_indent() {
+    let scratch = fixture("notes-quoted-indent");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let line = "        let margin = margin.saturating_mul(2).unwrap_or(margin);";
+    answered(&mut rig, &format!("```rust\n{line}\n```"));
+    let painted = rig.paint(&mut frame, NARROW, Pointing::default());
+
+    let rows = answer_rows(&painted);
+    assert!(rows.len() > 1, "the fixture did not wrap: {rows:?}");
+    let indent = line.len() - line.trim_start().len();
+    assert_eq!(rows[0].indent, 0, "the line's first row stands in");
+    for row in &rows[1..] {
+        assert_eq!(
+            row.indent, indent,
+            "a continuation lost the block's shape: {row:?}"
+        );
+    }
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .concat(),
+        line,
+        "the standing-in blanks were counted as content: {rows:?}"
+    );
+
+    // And the painter spends them, which the row model alone cannot say. Found
+    // through the view rather than by the anchored line's text, which this pane
+    // is too narrow to draw whole.
+    let at = painted
+        .view
+        .rows
+        .iter()
+        .rposition(|row| {
+            matches!(
+                row,
+                Row::Note {
+                    lead: NoteLead::Reply | NoteLead::Blank,
+                    ..
+                }
+            )
+        })
+        .expect("the answer's last row");
+    let (_, _, origin) = painted.gutter();
+    let drawn: String = painted
+        .text(painted.laid.diff.top + at as u16)
+        .chars()
+        .skip(usize::from(origin) + 2)
+        .collect();
+    assert!(
+        drawn.starts_with(&" ".repeat(indent)),
+        "the painter drew no standing-in blanks: {drawn:?}"
+    );
+    assert!(
+        drawn[indent..].starts_with(rows.last().expect("the last row").text.trim_end()),
+        "the tail does not follow the blanks: {drawn:?}"
+    );
+}
+
+/// The ink the hash of `line` took, in a pane of its own so the answer arrives
+/// once rather than crossfading over one already drawn.
+fn hash_ink(name: &str, token: &str, line: &str) -> Option<Color> {
+    let scratch = fixture(name);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, &format!("```{token}\n{line}\n```"));
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let (_, _, origin) = painted.gutter();
+    let row = row_holding(&painted, line);
+    let at = painted.text(row).find('#').expect("the quoted hash") as u16;
+    assert!(at >= origin, "the hash is left of the content origin");
+    painted.fg(at, row)
+}
+
+/// The fence names the grammar, and the anchored file names it where the fence
+/// says nothing.
+///
+/// A hash opens a comment in a shell and opens nothing in Rust, so one line
+/// drawn twice separates the two answers without this knowing a palette.
+#[test]
+fn the_fence_names_the_grammar_and_the_anchored_file_names_it_otherwise() {
+    let theme = Theme::default();
+    let line = "# not a comment in rust";
+    assert_eq!(
+        hash_ink("notes-fence-shell", "sh", line),
+        theme.comment.fg,
+        "the fence said shell and the line is not drawn as a comment"
+    );
+    assert_ne!(
+        hash_ink("notes-fence-bare", "", line),
+        theme.comment.fg,
+        "with no token the anchored Rust file should not read a comment"
+    );
+}
+
+/// A run between backticks loses them and leaves the answer's own ink.
+#[test]
+fn a_run_between_backticks_loses_them_and_leaves_the_replys_ink() {
+    let scratch = fixture("notes-inline-code");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, "swapped it for `saturating_mul` here");
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let theme = Theme::default();
+
+    let row = painted.reply_row(painted.row_of(EDITED));
+    let drawn = painted.text(row);
+    assert!(
+        !drawn.contains('`'),
+        "a backtick reached the pane: {drawn:?}"
+    );
+    let at = drawn.find("saturating_mul").expect("the quoted word") as u16;
+    assert_eq!(
+        painted.fg(at, row),
+        theme.context.fg,
+        "the quoted word is not in the plain ink"
+    );
+    assert_ne!(
+        painted.fg(at, row),
+        theme.note_reply.fg,
+        "the quoted word is still the answer's own ink"
+    );
+    // And the words around it are, which is what makes the run read as a run.
+    let prose = drawn.find("swapped").expect("the words before it") as u16;
+    assert_eq!(painted.fg(prose, row), theme.note_reply.fg);
+}
+
+/// The block is parsed when the agent writes and never because a frame drew.
+///
+/// A counter rather than a clock: the claim is that the cost follows the write,
+/// and a timing gate would answer a different question on every machine.
+#[test]
+fn a_quoted_block_is_parsed_once_however_many_frames_draw_it() {
+    let scratch = fixture("notes-quoted-once");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, FENCED);
+
+    let before = rig.highlighter.stats().quoted;
+    for _ in 0..5 {
+        rig.paint(&mut frame, PANE, Pointing::default());
+    }
+    assert_eq!(
+        rig.highlighter.stats().quoted - before,
+        1,
+        "the block was parsed more than once over five frames"
+    );
+
+    answered(&mut rig, "```\nlet margin = margin.saturating_mul(3);\n```");
+    rig.paint(&mut frame, PANE, Pointing::default());
+    assert_eq!(
+        rig.highlighter.stats().quoted - before,
+        2,
+        "a rewritten answer was not parsed again"
+    );
+}
+
+/// An answer that quoted nothing carries no runs at all, so it goes down the
+/// path it always did.
+#[test]
+fn a_reply_with_no_fence_draws_exactly_as_it_did() {
+    let scratch = fixture("notes-plain-reply");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "swapped for saturating_mul; the unwrap_or went with it",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    let rows = answer_rows(&painted);
+    assert!(!rows.is_empty(), "the answer drew no rows");
+    assert!(
+        rows.iter().all(|row| row.runs.is_empty()),
+        "a plain answer picked up runs: {rows:?}"
+    );
+}
+
+/// `SPEC.md` §11.2 B20: the copy is the agent's text, so it carries the fences
+/// the pane declined to draw.
+#[test]
+fn the_copy_of_an_answer_still_carries_its_fences() {
+    let scratch = fixture("notes-fenced-copy");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, FENCED);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    let first = painted
+        .view
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                Row::Note {
+                    lead: NoteLead::Reply,
+                    ..
+                }
+            )
+        })
+        .expect("the answer's first row");
+    let last = painted
+        .view
+        .rows
+        .iter()
+        .rposition(|row| {
+            matches!(
+                row,
+                Row::Note {
+                    lead: NoteLead::Blank,
+                    ..
+                }
+            )
+        })
+        .expect("the answer's last row");
+    assert!(
+        last > first,
+        "the answer drew one row and cannot be spanned"
+    );
+
+    let copied = painted
+        .view
+        .lines_in((first, last))
+        .expect("the rows the answer covers");
+    assert_eq!(copied, vec![FENCED.to_owned()], "{copied:?}");
+}
+
+/// A fence whose name holds a backtick names nothing, so the block falls to the
+/// anchored file's grammar rather than asking the dump for a language spelled
+/// with the fence that closed it.
+#[test]
+fn a_fence_name_holding_a_backtick_names_nothing() {
+    let scratch = fixture("notes-fence-name");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let line = "let margin = 2;";
+    answered(&mut rig, &format!("```rust```\n{line}\n```"));
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let theme = Theme::default();
+
+    let row = row_holding(&painted, line);
+    let at = painted.text(row).find("let").expect("its keyword") as u16;
+    assert_ne!(
+        painted.fg(at, row),
+        theme.context.fg,
+        "the name carried a backtick into the dump, so nothing resolved and the          block drew plain where the anchored file's grammar was there to use"
+    );
+}
+
+/// A fence naming a language nothing in the dump holds draws plain, and is still
+/// drawn as code.
+#[test]
+fn a_quoted_block_draws_plain_where_no_grammar_answers() {
+    let scratch = fixture("notes-no-grammar");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let line = "let margin = margin.saturating_mul(2);";
+    answered(&mut rig, &format!("```nonesuch\n{line}\n```"));
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let theme = Theme::default();
+
+    let row = row_holding(&painted, line);
+    let at = painted.text(row).find("let").expect("its keyword") as u16;
+    assert_eq!(
+        painted.fg(at, row),
+        theme.context.fg,
+        "a block whose language the dump does not hold took a grammar anyway"
+    );
+    assert_ne!(
+        painted.fg(at, row),
+        theme.keyword.fg,
+        "the anchored file's Rust grammar reached a block that said it was not Rust"
+    );
+}
+
+/// An answer that quoted an empty fence still draws, because a note the agent
+/// answered has to show that it did.
+///
+/// A resolved note draws its answer and nothing else, so an answer with no rows
+/// is the whole note gone from the pane while the store says it was answered.
+#[test]
+fn an_answer_of_nothing_but_a_fence_still_draws_a_row() {
+    let scratch = fixture("notes-empty-fence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, "```\n```");
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert_eq!(
+        answer_rows(&painted).len(),
+        1,
+        "an emptied answer drew no row at all"
+    );
+    let y = painted.row_of(EDITED);
+    assert_eq!(
+        painted
+            .text(painted.reply_row(y))
+            .chars()
+            .nth(usize::from(painted.gutter().2)),
+        Some('↳'),
+        "the arrow that says the agent answered is not drawn"
+    );
+}
+
+/// And a resolved one, which draws its answer alone, still departs visibly.
+#[test]
+fn a_resolved_note_whose_answer_is_a_fence_still_draws() {
+    let scratch = fixture("notes-empty-fence-resolved");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut note = note("n1", 5, EDITED, "short");
+    note.status = Status::Resolved;
+    note.reply = Some("```".to_owned());
+    rig.store.put(&note).expect("put");
+    rig.reload();
+    rig.advance(RESOLVE_ARRIVING);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert_eq!(
+        note_rows(&painted, "n1"),
+        1,
+        "a resolved note whose answer quoted nothing vanished from the pane"
+    );
+}
+
+/// A block of four backticks holds a block of three whole.
+#[test]
+fn a_longer_fence_holds_a_shorter_one_inside_it() {
+    let scratch = fixture("notes-nested-fence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "like this:\n````\nbefore\n```\ninside\n```\nafter\n````",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = answer_rows(&painted);
+    let drawn: Vec<&str> = rows.iter().map(|row| row.text.as_str()).collect();
+
+    for line in ["before", "inside", "after"] {
+        assert!(
+            drawn.iter().any(|row| row.contains(line)),
+            "the inner fence closed the outer block early: {drawn:?}"
+        );
+    }
+    assert!(
+        drawn.iter().any(|row| row.contains("```")),
+        "the inner fence is content of the outer block and is not drawn: {drawn:?}"
+    );
+}
+
+/// An indented block is words, which is the shape a continued list item has too.
+#[test]
+fn an_indented_block_in_an_answer_stays_prose() {
+    let scratch = fixture("notes-indented-block");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "swapped it:\n\n    let margin = 2;\n\nand that was all",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+
+    assert!(
+        answer_rows(&painted).iter().all(|row| row.runs.is_empty()),
+        "an indented block was read as code"
+    );
+    // And the same fixture with a fence, so this cannot pass by nothing being
+    // read as code at all.
+    answered(
+        &mut rig,
+        "swapped it:\n```rust\nlet margin = 2;\n```\nand that was all",
+    );
+    let fenced = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        answer_rows(&fenced).iter().any(|row| !row.runs.is_empty()),
+        "the control quoted nothing either, so this gate asserts nothing"
+    );
+}
+
+/// And a tilde fence is words, for the same reason: what is not recognised draws
+/// exactly as it drew before there was any of this.
+#[test]
+fn a_tilde_fence_is_not_a_fence() {
+    let scratch = fixture("notes-tilde-fence");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(&mut rig, "~~~\nlet margin = 2;\n~~~");
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = answer_rows(&painted);
+
+    assert!(
+        rows.iter().all(|row| row.runs.is_empty()),
+        "a tilde fence was read as a fence: {rows:?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.text.contains("~~~")),
+        "the tildes were dropped as though they were markup: {rows:?}"
+    );
+    // And the same fixture with backticks, for the reason above.
+    answered(&mut rig, "```\nlet margin = 2;\n```");
+    let fenced = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        answer_rows(&fenced).iter().any(|row| !row.runs.is_empty()),
+        "the control quoted nothing either, so this gate asserts nothing"
+    );
+}
+
+/// An answer written on a platform whose lines end in two characters draws no
+/// stray mark at the end of each of them.
+#[test]
+fn an_answer_with_carriage_returns_draws_no_stray_mark() {
+    let scratch = fixture("notes-crlf");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    answered(
+        &mut rig,
+        "swapped it:\r\n```rust\r\nlet margin = 2;\r\n```\r\nand that was all",
+    );
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = answer_rows(&painted);
+
+    assert!(
+        rows.iter().all(|row| !row.text.contains('\r')),
+        "a carriage return survived into a drawn row: {rows:?}"
+    );
+    let under = painted.notes_under(painted.row_of(EDITED));
+    assert!(
+        !under.iter().any(|row| row.contains('·')),
+        "the unprintable mark reached the pane: {under:?}"
+    );
+}

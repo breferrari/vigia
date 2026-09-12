@@ -32,6 +32,7 @@ pub mod positions;
 /// socket. Public because the wire is the whole subject and no drawn cell shows
 /// it, so the suite drives it as the pane does.
 pub mod post;
+mod quote;
 mod render;
 mod signal;
 mod state;
@@ -69,6 +70,7 @@ pub use notes::{
 };
 pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
+pub use quote::{CodeRow, Run};
 pub use ratatui_textarea::{Input, Key};
 pub use render::{
     Areas, Band, Body, COUNT_CELL, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, NoteCells,
@@ -383,6 +385,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         next: None,
         leaving: None,
         served: Vec::new(),
+        served_quotes: Vec::new(),
         written: false,
         warming: None,
         store,
@@ -1023,6 +1026,8 @@ struct Shell {
     /// The demand the last warm was handed, so a demand nothing can serve is
     /// asked for once rather than on every frame.
     served: Vec<String>,
+    /// The same for the blocks an answer quoted, whose grammar a path cannot name.
+    served_quotes: Vec<vigia_core::Uncompiled>,
     /// Whether the tree has changed since the last warm was spawned.
     written: bool,
     /// The warm this shell last asked for, if any.
@@ -1893,6 +1898,16 @@ impl Shell {
             if self.highlighter.wanted().is_empty() {
                 self.served.clear();
                 self.written = false;
+            }
+            // After the paths, never instead of them: the diff is what the reader
+            // is looking at. A fence naming a language of its own is the only
+            // demand no path can carry, so this is the only way it is ever warmed.
+            let quoted = self.highlighter.uncompiled().to_vec();
+            if !quoted.is_empty() && quoted != self.served_quotes {
+                self.served_quotes.clone_from(&quoted);
+                self.warming = Some(self.highlighter.warm_quoted(quoted, Some(warmed(tx))));
+            } else if quoted.is_empty() {
+                self.served_quotes.clear();
             }
             return;
         }

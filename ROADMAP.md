@@ -200,7 +200,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The file list never says which file holds a note. **Reported from use** | [#471](https://github.com/breferrari/vigia/issues/471) |
 | ✅ | The header counts files but never lines. **Reported from use** | [#472](https://github.com/breferrari/vigia/issues/472) |
 | ✅ | The agent's reply draws in the reader's own ink. **Reported from use** | [#451](https://github.com/breferrari/vigia/issues/451) |
-| ⬜ | The agent's reply draws code as prose | [#452](https://github.com/breferrari/vigia/issues/452) |
+| ✅ | The agent's reply draws code as prose. **Reported from use** | [#452](https://github.com/breferrari/vigia/issues/452) |
 | ✅ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
 | ✅ | A note with no reply still draws the answer's stem. **Reported from use** | [#459](https://github.com/breferrari/vigia/issues/459) |
 | ✅ | Remove the masthead, and revoke the ruling that kept it. **Reported from use** | [#457](https://github.com/breferrari/vigia/issues/457) |
@@ -337,6 +337,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | `SHEET_KEEP` names two things, so removing a gesture reassigns the never-drop set by rank | [#464](https://github.com/breferrari/vigia/issues/464) |
 | ✅ | A release that removes a key can be filed as internal, and 0.42.0 was | [#467](https://github.com/breferrari/vigia/issues/467) |
 | ⬜ | A hidden path still wakes the watch. **Deferred by [#495](https://github.com/breferrari/vigia/issues/495): it changes what I1 measures** | [#501](https://github.com/breferrari/vigia/issues/501) |
+| ⬜ | A note's rows are built whole before the clamp trims them. **Deferred by [#452](https://github.com/breferrari/vigia/issues/452): the steady frame is 12.557ms against 12.483ms as prose, and it is the frame an answer arrives on that scales** | [#530](https://github.com/breferrari/vigia/issues/530) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | Three overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511) and again by [#508](https://github.com/breferrari/vigia/issues/508): a refactor of the two that predate the branches that found it.** [#519](https://github.com/breferrari/vigia/issues/519) is its duplicate, filed before this row was found and closed against it | [#515](https://github.com/breferrari/vigia/issues/515) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |

@@ -315,6 +315,8 @@ Point at a line number in the diff and it becomes a pencil `✎`. Click it, type
 
 It goes to the agent in the other pane carrying the file, the line and your words. The answer comes back on a row under yours.
 
+**Code in that answer is drawn as code.** A fenced block loses its fences, keeps its indentation where the pane has to wrap it, and takes the same colours the diff above it takes, from the grammar the fence names or the file the note is pinned to. A word in backticks loses them too. A fence means backticks, three or more, closed by at least as many, so a longer fence holds a shorter one whole; an indented block is left as words, because nothing can tell one from a list item that ran on. A fence naming a language the bundled grammars do not have is left uncoloured rather than coloured as the file it is pinned to, which the agent has just said it is not. What you copy is still what the agent wrote, backticks and all.
+
 That is the whole of it. `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
 
 ### What a note says while it waits

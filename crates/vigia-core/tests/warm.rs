@@ -1209,3 +1209,159 @@ fn a_hunk_recovered_after_its_warm_comes_back_coloured() {
         "the recovered hunk asked for a warm it has already been given"
     );
 }
+
+/// A block quoted in an answer draws plain until the warmer has been over its
+/// grammar, and in colour on the frame after.
+///
+/// The frame path's own rule reaching the note rows: compiling a grammar beside
+/// the frame is what `Highlighter::new`'s deferral exists to stop, and an answer
+/// arriving is a wake like any other. Nothing new is asked of the warmer, since
+/// the diff rows this note hangs under are the same file and have already put it
+/// on `wanted`.
+#[test]
+fn a_quote_whose_grammar_is_uncompiled_draws_plain() {
+    let scratch = Scratch::large_diff("warm-quoted", 1, 4);
+    let mut highlighter = Highlighter::new();
+    let lines = vec!["let margin = 2;".to_owned()];
+
+    let classes = |highlighter: &mut Highlighter| -> Vec<Class> {
+        let mut pass = highlighter.pass();
+        pass.quoted("n1", 0, None, "src/mod_0.rs", &lines)[0]
+            .iter()
+            .map(|span| span.class)
+            .collect()
+    };
+
+    assert_eq!(
+        classes(&mut highlighter),
+        vec![Class::Plain],
+        "a cold grammar was compiled on the frame that drew the answer"
+    );
+
+    highlighter
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["src/mod_0.rs".to_owned()],
+            None,
+        )
+        .join()
+        .expect("the warmer thread");
+
+    assert!(
+        classes(&mut highlighter).contains(&Class::Keyword),
+        "the answer stayed plain after its grammar was compiled"
+    );
+}
+
+/// A block quoted in a language the worktree holds no file of is still warmed.
+///
+/// The path-driven warmer cannot reach one: it resolves a grammar from a file it
+/// opens, and a fence naming a language of its own names a grammar no path here
+/// carries. Without a demand of its own such a block draws plain for the life of
+/// the session, which is the half of the fence feature it exists for.
+#[test]
+fn a_quote_naming_a_language_no_path_carries_is_still_warmed() {
+    let mut highlighter = Highlighter::new();
+    let lines = vec![
+        "if [ -f /etc/hosts ]; then".to_owned(),
+        "  exit 0".to_owned(),
+    ];
+
+    let classes = |highlighter: &mut Highlighter| -> Vec<Class> {
+        let mut pass = highlighter.pass();
+        pass.quoted("n1", 0, Some("sh"), "src/mod_0.rs", &lines)
+            .iter()
+            .flat_map(|line| line.iter().map(|span| span.class))
+            .collect()
+    };
+
+    assert_eq!(
+        classes(&mut highlighter)
+            .iter()
+            .filter(|class| **class != Class::Plain)
+            .count(),
+        0,
+        "a cold grammar was compiled on the frame that drew the answer"
+    );
+
+    let demand = highlighter.uncompiled().to_vec();
+    assert_eq!(demand.len(), 1, "the block raised no demand: {demand:?}");
+    // And again on the frame after, which hits the cache. The shell reads this
+    // after a paint, so a demand raised only where the parse happens is gone by
+    // the time anything offers it a warmer and the block stays plain for good.
+    let _ = classes(&mut highlighter);
+    assert_eq!(
+        highlighter.uncompiled().to_vec(),
+        demand,
+        "a cached block stopped asking, so the demand lasts one frame"
+    );
+    assert_eq!(demand[0].token.as_deref(), Some("sh"));
+    assert_eq!(
+        demand[0].lines, lines,
+        "the demand carries no text, so a warm would compile the wrong patterns"
+    );
+
+    let report = highlighter
+        .warm_quoted(demand, None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(report.warmed, 1, "the warmer compiled nothing");
+
+    assert!(
+        classes(&mut highlighter).contains(&Class::Keyword),
+        "the block stayed plain after its own grammar was warmed"
+    );
+}
+
+/// A block with no lines compiles nothing, so it marks nothing.
+///
+/// `Attempt` marks a scope when it drops, however little ran under it, and a
+/// scope marked is a scope the frame path will parse under. An empty fence that
+/// marked its grammar would hand the next hunk of that language the whole cold
+/// compile on the frame it draws.
+#[test]
+fn an_empty_block_does_not_mark_its_grammar_compiled() {
+    let mut highlighter = Highlighter::new();
+    let empty = vigia_core::Uncompiled {
+        token: Some("sh".to_owned()),
+        path: "src/mod_0.rs".to_owned(),
+        lines: Vec::new(),
+    };
+    let report = highlighter
+        .warm_quoted(vec![empty], None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        report.warmed, 0,
+        "a block with no lines was counted as warmed"
+    );
+
+    // And the grammar is still cold, which is what the frame path reads.
+    let mut pass = highlighter.pass();
+    let classes: Vec<Class> =
+        pass.quoted("n1", 0, Some("sh"), "src/mod_0.rs", &["exit 0".to_owned()])[0]
+            .iter()
+            .map(|span| span.class)
+            .collect();
+    assert_eq!(
+        classes,
+        vec![Class::Plain],
+        "an empty block marked its grammar compiled, so this parsed on the frame"
+    );
+}
+
+/// One warm per grammar, however many blocks of an answer named it.
+#[test]
+fn two_blocks_of_one_language_warm_once() {
+    let highlighter = Highlighter::new();
+    let block = |ordinal: usize| vigia_core::Uncompiled {
+        token: Some("sh".to_owned()),
+        path: format!("src/mod_{ordinal}.rs"),
+        lines: vec!["exit 0".to_owned()],
+    };
+    let report = highlighter
+        .warm_quoted(vec![block(0), block(1), block(2)], None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(report.warmed, 1, "one grammar was compiled three times");
+}

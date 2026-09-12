@@ -15,8 +15,8 @@ use vigia::{
     note_cells, opening, regions, render,
 };
 use vigia_core::{
-    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
-    Samples, Side, Standing, Status,
+    CHECKPOINT_STRIDE, Class, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
+    Note, Samples, Side, Standing, Status,
 };
 
 use support::{
@@ -2891,5 +2891,193 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
         &frames,
         String::new,
         || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
+    );
+}
+
+/// I9 with every note's answer quoting code: the wrap, the run building and the
+/// painting of a quoted block, on the frame path, in steady state.
+///
+/// Interleaved against the same answers written as prose, so a loaded machine
+/// moves both arms and the number that matters is what the quoting costs over
+/// the path that already shipped. The parse itself is not in here and cannot be:
+/// it follows the agent's write, and `a_quoted_block_is_parsed_once_however_many
+/// _frames_draw_it` is what holds that. What I9 gates is the steady frame, which
+/// is what this times.
+#[test]
+fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("notes-quoted", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+    let screen = layout_of(&app, NOTED_PANE, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(NOTED_PANE);
+
+    app.apply(
+        Action::Scroll(isize::try_from(LINES + 2).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll to the working-tree side");
+
+    // The same bytes twice: once fenced, once as the words they would have been.
+    const BLOCK: &str = "let margin = margin.saturating_mul(2);\n\
+                         if margin > CEILING {\n\
+                         \x20   return Err(Error::TooWide { margin });\n\
+                         }";
+    let answer = |fenced: bool| {
+        if fenced {
+            format!(
+                "swapped it for `saturating_mul`:\n```rust\n{BLOCK}\n```\nthe caller is unchanged"
+            )
+        } else {
+            format!("swapped it for saturating_mul:\n{BLOCK}\nthe caller is unchanged")
+        }
+    };
+
+    let mut notes = |fenced: bool| -> Vec<Note> {
+        let (_, diff) = frame.diff(0).expect("diff");
+        diff.rows_on(Side::New)
+            .iter()
+            .take(20)
+            .enumerate()
+            .map(|(i, (line, text))| Note {
+                id: format!("q{i}"),
+                path: diff.path.clone(),
+                side: Side::New,
+                line: *line,
+                text: (*text).to_owned(),
+                body: "the reader's words".to_owned(),
+                status: Status::Seen,
+                reply: Some(answer(fenced)),
+                written: std::time::SystemTime::now(),
+            })
+            .collect()
+    };
+    let (quoted, plain) = (notes(true), notes(false));
+    assert_eq!(
+        quoted.len(),
+        20,
+        "the first file's diff has fewer than twenty lines"
+    );
+
+    // One highlighter per arm, which is what makes this time the steady frame it
+    // claims to. A quote lives in the highlighter and is swept by any pass that
+    // does not ask for it, so a single one alternating between the two note sets
+    // drops all twenty blocks on every prose frame and the fenced arm pays twenty
+    // parses a sample. Measured that way it read 16.09ms p50 against 12.47ms,
+    // which is the parse this cache exists to pay once per write.
+    let mut warm = Highlighter::eager();
+    let mut edits = 0usize;
+    let mut next_frame = |frame: &mut Frame,
+                          app: &mut App,
+                          cold: &mut Highlighter,
+                          warm: &mut Highlighter,
+                          history: &mut History,
+                          fenced: bool| {
+        scratch.edit_line(
+            EDITED_PATH,
+            0,
+            &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
+        );
+        edits += 1;
+        app.set_notes(if fenced {
+            quoted.clone()
+        } else {
+            plain.clone()
+        });
+        let held = if fenced { warm } else { cold };
+        time_cpu(|| {
+            sample(history, scratch.root(), EDITED_PATH);
+            shell_frame(frame, app, held, history, &mut buf, &theme, screen);
+        })
+    };
+
+    for _ in 0..WARMUP_FRAMES {
+        for fenced in [true, false] {
+            next_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &mut warm,
+                &mut history,
+                fenced,
+            );
+        }
+    }
+    let (mut fenced_frames, mut prose_frames) =
+        (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
+    for _ in 0..SAMPLED_FRAMES {
+        for fenced in [true, false] {
+            let (wall, _) = next_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &mut warm,
+                &mut history,
+                fenced,
+            );
+            if fenced {
+                fenced_frames.push(wall);
+            } else {
+                prose_frames.push(wall);
+            }
+        }
+    }
+
+    // Non-vacuity: the timed screen really did draw quoted code, in colour.
+    app.set_notes(quoted.clone());
+    let view = app
+        .view(&mut frame, &mut warm, &history, screen)
+        .expect("view");
+    // A run the grammar never coloured is still a run, so this asks for a class
+    // the grammar had to produce: a pane of blocks drawn plain would satisfy a
+    // gate named for what quoting costs.
+    let coloured = view
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(row, Row::Note { runs, .. }
+                if runs
+                    .iter()
+                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
+        })
+        .count();
+    assert!(
+        coloured >= 20,
+        "{coloured} rows on the timed screen carry a class the grammar gave \
+         them, so this gate timed a pane whose answers were not highlighted"
+    );
+
+    let fenced_p50 = fenced_frames.percentile(0.5).expect("a sampled frame");
+    let prose_p50 = prose_frames.percentile(0.5).expect("a sampled frame");
+    println!(
+        "quoted: frame p50 {fenced_p50:?} with the answers fenced, {prose_p50:?} with \
+         the same bytes as prose, over {FILES} files on an {}x{} pane",
+        NOTED_PANE.width, NOTED_PANE.height
+    );
+    holds_p99(
+        "I9: a frame whose answers quote code",
+        budget(I9_FRAME),
+        &fenced_frames,
+        || format!("({prose_p50:?} p50 with the same bytes as prose)"),
+        || {
+            next_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &mut warm,
+                &mut history,
+                true,
+            )
+        },
     );
 }

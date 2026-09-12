@@ -48,8 +48,8 @@ pub use error::{Error, Result};
 pub use frame::{Churn, Frame, FrameStats};
 pub use hidden::{Hidden, NotAPattern};
 pub use highlight::{
-    CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_BYTES,
-    WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport, Warmed,
+    CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, Uncompiled,
+    WARM_BYTES, WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport, Warmed,
 };
 pub use history::{
     HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,

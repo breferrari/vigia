@@ -116,6 +116,9 @@ pub struct HighlightStats {
     pub bytes: u64,
     /// Hunks dropped because they left the viewport.
     pub evicted: u64,
+    /// Blocks quoted in a note's answer that were parsed. One per block per
+    /// write, since the parse outlives every frame that draws the same text.
+    pub quoted: u64,
 }
 
 /// Scope prefixes and what each one means, most specific first.
@@ -196,14 +199,17 @@ impl Side {
     }
 
     /// Run a line through this side and turn its scope changes into spans.
+    ///
+    /// `text` rather than the [`Line`] it usually comes from, because a block
+    /// quoted in a note's answer has no side of a diff to be on.
     fn spans(
         &mut self,
         buf: &str,
-        line: &Line,
+        text: &str,
         syntaxes: &SyntaxSet,
         table: &[(Scope, Class)],
     ) -> Vec<Span> {
-        let text_len = line.text.len();
+        let text_len = text.len();
         // A grammar that fails on a line leaves that line uncoloured rather than
         // failing the frame.
         let Ok(ops) = self.state.parse_line(buf, syntaxes) else {
@@ -255,14 +261,58 @@ impl Sides {
         buf.push('\n');
 
         match line.kind {
-            LineKind::Removed => self.old.spans(buf, line, syntaxes, table),
-            LineKind::Added => self.new.spans(buf, line, syntaxes, table),
+            LineKind::Removed => self.old.spans(buf, &line.text, syntaxes, table),
+            LineKind::Added => self.new.spans(buf, &line.text, syntaxes, table),
             LineKind::Context => {
                 self.old.advance(buf, syntaxes);
-                self.new.spans(buf, line, syntaxes, table)
+                self.new.spans(buf, &line.text, syntaxes, table)
             }
         }
     }
+}
+
+/// A block an answer quoted whose grammar nothing has compiled, and what it
+/// takes to compile one.
+///
+/// The path-driven warmer cannot reach these. It resolves a grammar from a file
+/// it opens, and a fence naming a language of its own names one the worktree may
+/// hold no file of, so there is nothing for it to open. The block's own lines go
+/// with the demand rather than a probe line, because a grammar warmed on some
+/// other text leaves this block costing 9.4ms of a 16ms frame where its own text
+/// leaves it costing 93 microseconds. Measured 2026-09-12, release, `sh`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Uncompiled {
+    /// The language the fence named, where it named one.
+    pub token: Option<String>,
+    /// The file the note is anchored to, which names the grammar otherwise.
+    pub path: String,
+    /// The block's lines, which are the text a warm has to parse.
+    pub lines: Vec<String>,
+}
+
+/// One block quoted in a note's answer, parsed whole and kept between frames.
+///
+/// A hunk is parsed forward only and rewound, because it can be a thousand lines
+/// and one of them changes before every frame. A quote is neither: the agent
+/// writes an answer once and rewrites it whole, so the checkpoints and the
+/// rewind buy nothing and the block is parsed in one go the frame its content
+/// first appears.
+struct Quote {
+    /// The note this block belongs to.
+    id: String,
+    /// Which block of that answer, in the order they were written.
+    ordinal: usize,
+    /// Content digest of the block this parse describes.
+    digest: u64,
+    /// Whether the frame in progress has claimed it. See [`Highlighter::sweep`].
+    live: bool,
+    /// Whether the pass before this one passed it over.
+    missed: bool,
+    /// The grammar this block drew plain waiting for, where nothing had compiled
+    /// one when it was parsed.
+    deferred: Option<Scope>,
+    /// Spans per line, covering each line's bytes exactly.
+    lines: Vec<Vec<Span>>,
 }
 
 /// One hunk's parse, kept between frames.
@@ -440,12 +490,17 @@ pub struct Highlighter {
     /// Hunks that have left the screen, newest last, capped at
     /// [`RETAINED_HUNKS`].
     retired: VecDeque<Entry>,
+    /// Blocks quoted in the answers the frame drew, bounded the same way the
+    /// entries are: what this frame did not ask for is swept.
+    quotes: Vec<Quote>,
     stats: HighlightStats,
     /// Grammars the warmer has run over, shared with every thread it spawns.
     attempted: Option<Arc<Mutex<HashSet<Scope>>>>,
     /// Paths whose grammar was uncompiled during the pass in progress, one per
     /// grammar, in the order the frame reached them.
     wanted: Vec<String>,
+    /// The same for the blocks an answer quoted, which the paths cannot name.
+    uncompiled: Vec<Uncompiled>,
     /// Scopes already on `wanted` this pass, so the dedup above costs no scan.
     demanded: HashSet<Scope>,
 }
@@ -478,9 +533,11 @@ impl Highlighter {
                 .collect(),
             entries: Vec::new(),
             retired: VecDeque::with_capacity(RETAINED_HUNKS),
+            quotes: Vec::new(),
             stats: HighlightStats::default(),
             attempted: None,
             wanted: Vec::new(),
+            uncompiled: Vec::new(),
             demanded: HashSet::new(),
         }
     }
@@ -489,6 +546,12 @@ impl Highlighter {
     /// pass.
     pub fn wanted(&self) -> &[String] {
         &self.wanted
+    }
+
+    /// Blocks an answer quoted whose grammar nothing has compiled, as of the last
+    /// pass. [`Self::warm_quoted`] is what these are for.
+    pub fn uncompiled(&self) -> &[Uncompiled] {
+        &self.uncompiled
     }
 
     /// Compile grammars ahead of the reader, on a thread, and report how many
@@ -506,6 +569,61 @@ impl Highlighter {
             // After the work rather than before it, so a wake means there is
             // something new to draw. Ignored on failure: the receiver having
             // gone is the shell shutting down, which is nothing to report to.
+            if let Some(done) = done {
+                done();
+            }
+            report
+        })
+    }
+
+    /// Compile the grammars the blocks in `blocks` were quoted in, on a thread.
+    ///
+    /// [`Self::warm_ahead`]'s sibling for what a path cannot name. It opens no
+    /// file: the text is the block's own, which arrived over the wire with the
+    /// answer, so nothing here reads the worktree and the path is used only to
+    /// resolve a grammar the fence did not name.
+    pub fn warm_quoted(
+        &self,
+        blocks: Vec<Uncompiled>,
+        done: Option<Warmed>,
+    ) -> std::thread::JoinHandle<WarmReport> {
+        let syntaxes = Arc::clone(&self.syntaxes);
+        let attempted = self.attempted.clone();
+        std::thread::spawn(move || {
+            let mut report = WarmReport::default();
+            let mut seen: HashSet<Scope> = HashSet::new();
+            for block in blocks.into_iter().take(WARM_FILES) {
+                // Nothing to parse is nothing compiled, and `Attempt` marks a
+                // scope attempted when it drops however little ran under it. A
+                // block with no lines that marked its grammar would tell the
+                // frame path the warmer had been over it, and the next hunk of
+                // that language would pay the whole compile where it draws.
+                if block.lines.is_empty() {
+                    continue;
+                }
+                let Some(syntax) = (match &block.token {
+                    Some(token) => syntaxes.find_syntax_by_token(token),
+                    None => syntax_for(&syntaxes, &block.path, None),
+                }) else {
+                    continue;
+                };
+                // One warm per grammar however many blocks named it, which is
+                // `warm_run`'s per-grammar cap at the only count that can arise
+                // here: an answer quotes a handful of blocks, not a worktree.
+                if !seen.insert(syntax.scope) {
+                    continue;
+                }
+                let _attempt = Attempt::new(attempted.as_deref(), Some(syntax.scope));
+                let mut state = ParseState::new(syntax);
+                for line in &block.lines {
+                    // A grammar that fails on a line stops this block rather than
+                    // the thread, exactly as `warm` treats a file.
+                    if state.parse_line(&format!("{line}\n"), &syntaxes).is_err() {
+                        break;
+                    }
+                }
+                report.warmed += 1;
+            }
             if let Some(done) = done {
                 done();
             }
@@ -645,13 +763,28 @@ impl Highlighter {
         for entry in &mut self.entries {
             entry.live = false;
         }
+        for quote in &mut self.quotes {
+            quote.live = false;
+        }
         self.wanted.clear();
+        self.uncompiled.clear();
         self.demanded.clear();
         Pass { highlighter: self }
     }
 
     /// Retire every hunk the pass did not draw, and drop what will not fit.
     fn sweep(&mut self) {
+        // Dropped on the second pass that passes it over rather than the first,
+        // where a hunk has the retired queue. A frame that overshoots its bottom
+        // clamp drops its pass and walks again, and a quote swept on the first
+        // miss would be parsed twice on that frame for every answer on screen.
+        // One pass of grace is all that takes, so what is held is what the last
+        // two passes drew rather than what the last one did.
+        self.quotes.retain_mut(|quote| {
+            let keep = quote.live || !quote.missed;
+            quote.missed = !quote.live;
+            keep
+        });
         // Destructured for the reason `spans` is: two fields of one struct are
         // written at once, and through `&mut self` the borrow checker sees one
         // whole thing.
@@ -799,6 +932,128 @@ impl Highlighter {
         &entry.lines[index]
     }
 
+    fn quoted(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+    ) -> &[Vec<Span>] {
+        let digest = digest_of(token, lines);
+        let found = self
+            .quotes
+            .iter()
+            .position(|quote| quote.ordinal == ordinal && quote.id == id);
+        let hit = found.filter(|&at| {
+            let thaw = self.quotes[at]
+                .deferred
+                .is_some_and(|scope| compiled(scope, self.attempted.as_deref()));
+            self.quotes[at].digest == digest && !thaw
+        });
+
+        let slot = match hit {
+            Some(at) => at,
+            None => {
+                // Destructured for the reason `spans` is: the syntax set is read
+                // while the quotes and the counters are written, and through
+                // `&mut self` alone the borrow checker sees one whole thing.
+                let Self {
+                    syntaxes,
+                    table,
+                    quotes,
+                    stats,
+                    attempted,
+                    ..
+                } = self;
+                // A fence that names a language is the agent saying the block
+                // is not the file's, so a name the dump does not hold draws
+                // plain rather than falling through to the anchored path's
+                // grammar, which would be wrong on every token in exactly the
+                // case something told us it would be.
+                let syntax = match token {
+                    Some(token) => syntaxes.find_syntax_by_token(token),
+                    None => syntax_for(syntaxes, path, None),
+                };
+                // A grammar nothing has compiled yet is left alone rather than
+                // compiled here, which would cost 20.6ms of a 16ms frame on a
+                // cold `sh`. The block draws plain now, goes out as a demand, and
+                // arrives in colour on the frame after the warm: `Parse::Deferred`'s
+                // rule without an entry's bookkeeping. A fence naming a language
+                // of its own is why the demand carries more than the path, which
+                // names a grammar the worktree may hold no file of.
+                let deferred = syntax
+                    .map(|syntax| syntax.scope)
+                    .filter(|scope| !compiled(*scope, attempted.as_deref()));
+                let parsed = syntax.filter(|_| deferred.is_none()).map(|syntax| {
+                    // One side, not two: a quoted block is one stream of text
+                    // and has no index side to keep apart from a working-tree one.
+                    let mut side = Side::new(syntax);
+                    let mut buf = String::new();
+                    lines
+                        .iter()
+                        .map(|text| {
+                            stats.lines += 1;
+                            stats.bytes += text.len() as u64;
+                            buf.clear();
+                            buf.push_str(text);
+                            buf.push('\n');
+                            side.spans(&buf, text, syntaxes, table)
+                        })
+                        .collect()
+                });
+                let filled = match parsed {
+                    Some(filled) => {
+                        stats.quoted += 1;
+                        filled
+                    }
+                    None => lines.iter().map(|text| plain(text.len())).collect(),
+                };
+                let built = Quote {
+                    id: id.to_owned(),
+                    ordinal,
+                    digest,
+                    live: false,
+                    missed: false,
+                    deferred,
+                    lines: filled,
+                };
+                // Over the stale entry where there was one, so a note whose answer
+                // the agent keeps rewriting does not walk down the vector.
+                match found {
+                    Some(at) => {
+                        quotes[at] = built;
+                        at
+                    }
+                    None => {
+                        quotes.push(built);
+                        quotes.len() - 1
+                    }
+                }
+            }
+        };
+
+        // The demand, renewed every frame it is still true, which is `spans`'
+        // own rule and not a flourish: every frame after the first hits the
+        // cache, so a demand raised only where the parse happens is raised once
+        // and cleared by the next pass before anything has offered it a warmer.
+        // Shared with the paths' own dedup, so a grammar both want is warmed by
+        // whichever the shell serves first rather than twice.
+        if let Some(scope) = self.quotes[slot].deferred
+            && !lines.is_empty()
+            && self.demanded.insert(scope)
+        {
+            self.uncompiled.push(Uncompiled {
+                token: token.map(str::to_owned),
+                path: path.to_owned(),
+                lines: lines.to_vec(),
+            });
+        }
+
+        self.quotes[slot].live = true;
+        &self.quotes[slot].lines
+    }
+
     /// Counters for what this highlighter has done.
     pub fn stats(&self) -> HighlightStats {
         self.stats
@@ -832,6 +1087,28 @@ impl Pass<'_> {
     ) -> &[Span] {
         self.highlighter
             .spans(path, ordinal, hunk, index, first_line)
+    }
+
+    /// Spans for each line of block `ordinal` quoted in note `id`'s answer,
+    /// one `Vec` per line, covering that line's bytes exactly.
+    ///
+    /// The grammar is the one `token` names when the dump holds it, and `path`'s
+    /// otherwise, so a block that says what language it is in is taken at its
+    /// word and one that says nothing takes the anchored file's. Every line is
+    /// plain where neither answers, and where the grammar is not compiled yet.
+    ///
+    /// Parsed on the frame the block's content first appears and kept until a
+    /// frame stops asking for it, so an answer that nothing has rewritten costs
+    /// a digest a frame rather than a parse.
+    pub fn quoted(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+    ) -> &[Vec<Span>] {
+        self.highlighter.quoted(id, ordinal, token, path, lines)
     }
 
     /// Counters for what the highlighter has done, mid-pass.
@@ -1132,6 +1409,15 @@ struct Content {
     digest: u64,
     /// Digest of the first `(i + 1) * CHECKPOINT_STRIDE` lines, deepest last.
     marks: Vec<u64>,
+}
+
+/// Content digest of a quoted block, the grammar it named included: a fence that
+/// changes language over the same lines is a different block.
+fn digest_of(token: Option<&str>, lines: &[String]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    token.hash(&mut hasher);
+    lines.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Hash a hunk, keeping the running value at every stride boundary.
