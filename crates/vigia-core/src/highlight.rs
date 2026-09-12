@@ -593,6 +593,14 @@ impl Highlighter {
             let mut report = WarmReport::default();
             let mut seen: HashSet<Scope> = HashSet::new();
             for block in blocks.into_iter().take(WARM_FILES) {
+                // Nothing to parse is nothing compiled, and `Attempt` marks a
+                // scope attempted when it drops however little ran under it. A
+                // block with no lines that marked its grammar would tell the
+                // frame path the warmer had been over it, and the next hunk of
+                // that language would pay the whole compile where it draws.
+                if block.lines.is_empty() {
+                    continue;
+                }
                 let Some(syntax) = (match &block.token {
                     Some(token) => syntaxes.find_syntax_by_token(token),
                     None => syntax_for(&syntaxes, &block.path, None),
@@ -770,7 +778,8 @@ impl Highlighter {
         // where a hunk has the retired queue. A frame that overshoots its bottom
         // clamp drops its pass and walks again, and a quote swept on the first
         // miss would be parsed twice on that frame for every answer on screen.
-        // One pass of grace is all that takes, and the screen still bounds this.
+        // One pass of grace is all that takes, so what is held is what the last
+        // two passes drew rather than what the last one did.
         self.quotes.retain_mut(|quote| {
             let keep = quote.live || !quote.missed;
             quote.missed = !quote.live;
@@ -955,7 +964,6 @@ impl Highlighter {
                     quotes,
                     stats,
                     attempted,
-                    uncompiled,
                     ..
                 } = self;
                 // A fence that names a language is the agent saying the block
@@ -977,13 +985,6 @@ impl Highlighter {
                 let deferred = syntax
                     .map(|syntax| syntax.scope)
                     .filter(|scope| !compiled(*scope, attempted.as_deref()));
-                if deferred.is_some() {
-                    uncompiled.push(Uncompiled {
-                        token: token.map(str::to_owned),
-                        path: path.to_owned(),
-                        lines: lines.to_vec(),
-                    });
-                }
                 let parsed = syntax.filter(|_| deferred.is_none()).map(|syntax| {
                     // One side, not two: a quoted block is one stream of text
                     // and has no index side to keep apart from a working-tree one.
@@ -1031,6 +1032,23 @@ impl Highlighter {
                 }
             }
         };
+
+        // The demand, renewed every frame it is still true, which is `spans`'
+        // own rule and not a flourish: every frame after the first hits the
+        // cache, so a demand raised only where the parse happens is raised once
+        // and cleared by the next pass before anything has offered it a warmer.
+        // Shared with the paths' own dedup, so a grammar both want is warmed by
+        // whichever the shell serves first rather than twice.
+        if let Some(scope) = self.quotes[slot].deferred
+            && !lines.is_empty()
+            && self.demanded.insert(scope)
+        {
+            self.uncompiled.push(Uncompiled {
+                token: token.map(str::to_owned),
+                path: path.to_owned(),
+                lines: lines.to_vec(),
+            });
+        }
 
         self.quotes[slot].live = true;
         &self.quotes[slot].lines

@@ -15,8 +15,8 @@ use vigia::{
     note_cells, opening, regions, render,
 };
 use vigia_core::{
-    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind, Note,
-    Samples, Side, Standing, Status,
+    CHECKPOINT_STRIDE, Class, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
+    Note, Samples, Side, Standing, Status,
 };
 
 use support::{
@@ -3038,15 +3038,23 @@ fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
     let view = app
         .view(&mut frame, &mut warm, &history, screen)
         .expect("view");
+    // A run the grammar never coloured is still a run, so this asks for a class
+    // the grammar had to produce: a pane of blocks drawn plain would satisfy a
+    // gate named for what quoting costs.
     let coloured = view
         .rows
         .iter()
-        .filter(|row| matches!(row, Row::Note { runs, .. } if !runs.is_empty()))
+        .filter(|row| {
+            matches!(row, Row::Note { runs, .. }
+                if runs
+                    .iter()
+                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
+        })
         .count();
     assert!(
         coloured >= 20,
-        "{coloured} rows on the timed screen carry runs, so this gate timed a \
-         pane whose answers were not drawn as code"
+        "{coloured} rows on the timed screen carry a class the grammar gave \
+         them, so this gate timed a pane whose answers were not highlighted"
     );
 
     let fenced_p50 = fenced_frames.percentile(0.5).expect("a sampled frame");

@@ -1286,6 +1286,15 @@ fn a_quote_naming_a_language_no_path_carries_is_still_warmed() {
 
     let demand = highlighter.uncompiled().to_vec();
     assert_eq!(demand.len(), 1, "the block raised no demand: {demand:?}");
+    // And again on the frame after, which hits the cache. The shell reads this
+    // after a paint, so a demand raised only where the parse happens is gone by
+    // the time anything offers it a warmer and the block stays plain for good.
+    let _ = classes(&mut highlighter);
+    assert_eq!(
+        highlighter.uncompiled().to_vec(),
+        demand,
+        "a cached block stopped asking, so the demand lasts one frame"
+    );
     assert_eq!(demand[0].token.as_deref(), Some("sh"));
     assert_eq!(
         demand[0].lines, lines,
@@ -1301,6 +1310,43 @@ fn a_quote_naming_a_language_no_path_carries_is_still_warmed() {
     assert!(
         classes(&mut highlighter).contains(&Class::Keyword),
         "the block stayed plain after its own grammar was warmed"
+    );
+}
+
+/// A block with no lines compiles nothing, so it marks nothing.
+///
+/// `Attempt` marks a scope when it drops, however little ran under it, and a
+/// scope marked is a scope the frame path will parse under. An empty fence that
+/// marked its grammar would hand the next hunk of that language the whole cold
+/// compile on the frame it draws.
+#[test]
+fn an_empty_block_does_not_mark_its_grammar_compiled() {
+    let mut highlighter = Highlighter::new();
+    let empty = vigia_core::Uncompiled {
+        token: Some("sh".to_owned()),
+        path: "src/mod_0.rs".to_owned(),
+        lines: Vec::new(),
+    };
+    let report = highlighter
+        .warm_quoted(vec![empty], None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        report.warmed, 0,
+        "a block with no lines was counted as warmed"
+    );
+
+    // And the grammar is still cold, which is what the frame path reads.
+    let mut pass = highlighter.pass();
+    let classes: Vec<Class> =
+        pass.quoted("n1", 0, Some("sh"), "src/mod_0.rs", &["exit 0".to_owned()])[0]
+            .iter()
+            .map(|span| span.class)
+            .collect();
+    assert_eq!(
+        classes,
+        vec![Class::Plain],
+        "an empty block marked its grammar compiled, so this parsed on the frame"
     );
 }
 

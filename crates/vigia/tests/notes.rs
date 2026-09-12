@@ -6902,6 +6902,17 @@ fn an_indented_block_in_an_answer_stays_prose() {
         answer_rows(&painted).iter().all(|row| row.runs.is_empty()),
         "an indented block was read as code"
     );
+    // And the same fixture with a fence, so this cannot pass by nothing being
+    // read as code at all.
+    answered(
+        &mut rig,
+        "swapped it:\n```rust\nlet margin = 2;\n```\nand that was all",
+    );
+    let fenced = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        answer_rows(&fenced).iter().any(|row| !row.runs.is_empty()),
+        "the control quoted nothing either, so this gate asserts nothing"
+    );
 }
 
 /// And a tilde fence is words, for the same reason: what is not recognised draws
@@ -6924,6 +6935,13 @@ fn a_tilde_fence_is_not_a_fence() {
     assert!(
         rows.iter().any(|row| row.text.contains("~~~")),
         "the tildes were dropped as though they were markup: {rows:?}"
+    );
+    // And the same fixture with backticks, for the reason above.
+    answered(&mut rig, "```\nlet margin = 2;\n```");
+    let fenced = rig.paint(&mut frame, PANE, Pointing::default());
+    assert!(
+        answer_rows(&fenced).iter().any(|row| !row.runs.is_empty()),
+        "the control quoted nothing either, so this gate asserts nothing"
     );
 }
 
