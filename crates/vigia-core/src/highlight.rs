@@ -1411,7 +1411,6 @@ struct Content {
     marks: Vec<u64>,
 }
 
-/// Hash a hunk, keeping the running value at every stride boundary.
 /// Content digest of a quoted block, the grammar it named included: a fence that
 /// changes language over the same lines is a different block.
 fn digest_of(token: Option<&str>, lines: &[String]) -> u64 {
@@ -1421,6 +1420,7 @@ fn digest_of(token: Option<&str>, lines: &[String]) -> u64 {
     hasher.finish()
 }
 
+/// Hash a hunk, keeping the running value at every stride boundary.
 fn content_of(hunk: &Hunk) -> Content {
     let mut hasher = DefaultHasher::new();
     let mut marks = Vec::with_capacity(hunk.lines.len() / CHECKPOINT_STRIDE);

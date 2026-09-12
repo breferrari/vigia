@@ -1949,7 +1949,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 ///
-/// `SPEC.md` rose 1,555 bytes for B21's quoted code. A fenced block in an answer is a
+/// `SPEC.md` rose 1,706 bytes for B21's quoted code. A fenced block in an answer is a
 /// second way a note row is drawn, and what it costs the contract is the rules a reader
 /// cannot see in the code: what counts as a fence, that a code row breaks at the column
 /// where every other row here breaks at a blank, which grammar answers and what happens
@@ -1961,10 +1961,11 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// and a contract that contradicts itself in one paragraph is worse than a longer one.
 /// §6's count of what parses moved from two to three, which is a correction rather than a
 /// raise: the sentence is how `compiled` is knowable at all, and a third parser it did not
-/// name makes it false. A raise with no new surface behind it is the thing this number is
-/// for.
+/// name makes it false. Two clauses under it went with the count, because a warmer that
+/// opens no file cannot be described by a paragraph that says a real file is the only way
+/// in. A raise with no new surface behind it is the thing this number is for.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 406967),
+    ("SPEC.md", 407118),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),

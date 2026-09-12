@@ -257,6 +257,10 @@ fn runs_of(spans: &[Span], len: usize) -> Vec<Run> {
 
 /// `runs` with adjacent runs of one class folded together, which a clip can
 /// leave behind.
+///
+/// The core folds spans the same way and keeps it private, which is where it
+/// belongs: eight lines shared across a crate boundary costs the core a public
+/// item, and this one folds a class the core has no word for.
 fn merged(runs: Vec<Run>) -> Vec<Run> {
     let mut out = Vec::with_capacity(runs.len());
     for run in runs {
