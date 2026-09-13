@@ -4,6 +4,11 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.49.0] - 2026-09-13
+
+- The agent's answer draws its quoted code as code
+- The third word is only, and it is the reading that goes inert
+
 ## [0.48.0] - 2026-09-11
 
 - A list behind the token puts the pane at any commit
