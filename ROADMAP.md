@@ -275,7 +275,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
 | ✅ | Turning wrap off measures a page step in the pane's height, so it walks over unseen lines. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
 | ✅ | a change arriving coalesces into place | [#365](https://github.com/breferrari/vigia/issues/365) |
-| ⬜ | watch.rs evicts an arbitrary path from a HashSet | [#368](https://github.com/breferrari/vigia/issues/368) |
+| ✅ | watch.rs evicts an arbitrary path from a HashSet | [#368](https://github.com/breferrari/vigia/issues/368) |
 | ✅ | `cargo install vigia` fails on a yanked `bisync` pinned through gix 0.86 | [#349](https://github.com/breferrari/vigia/issues/349) |
 | ✅ | `cargo install vigia` fails: tinyvec 1.13.0 does not compile and a fresh resolve takes it | [#396](https://github.com/breferrari/vigia/issues/396) |
 | ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
