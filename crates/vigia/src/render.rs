@@ -2316,7 +2316,9 @@ pub fn render(
     glyphs: Glyphs,
     chrome: &Chrome,
 ) -> PaintStats {
-    if area.width == 0 || area.height == 0 {
+    // Intersect with the buffer. Indexing a cell panics past it; `set_stringn` only clipped x.
+    let area = buf.area.intersection(area);
+    if area.is_empty() {
         return PaintStats::default();
     }
 

@@ -5657,13 +5657,18 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
 
 #[test]
 fn render_clips_to_the_buffer_rather_than_the_area() {
-    // `render`'s own contract is that any area is legal, and most writers here reach
-    // the cells through `Buffer::set_stringn` or `set_style`, which clip.
+    // `render`'s contract is that any area is legal. Most writers clip through
+    // `Buffer::set_stringn` or `set_style`, but the paths that index a cell
+    // panicked when `area` was taller than `buf`. The sweep covers both axes.
     let theme = Theme::default();
     for (buffer, area) in [
         ((40u16, 10u16), (60u16, 10u16)),
         ((40, 10), (200, 10)),
         ((10, 6), (80, 6)),
+        ((40, 10), (40, 20)),
+        ((40, 10), (40, 40)),
+        ((80, 24), (80, 40)),
+        ((40, 10), (60, 20)),
     ] {
         for view in [
             one_file(),

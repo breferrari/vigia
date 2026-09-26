@@ -372,7 +372,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ✅ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
 | ⬜ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
 | ⬜ | The worktree name skips the control-character transformation content rows get | [#89](https://github.com/breferrari/vigia/issues/89) |
-| ⬜ | `render` promises any area is legal, and an area taller than its buffer panics | [#91](https://github.com/breferrari/vigia/issues/91) |
+| ✅ | `render` promises any area is legal, and an area taller than its buffer panics | [#91](https://github.com/breferrari/vigia/issues/91) |
 | ✅ | The diff's total height is taken from the cache by presence, not by validity | [#84](https://github.com/breferrari/vigia/issues/84) |
 | ⬜ | `FrameStats::bytes` conflates bytes counted with bytes diffed | [#85](https://github.com/breferrari/vigia/issues/85) |
 | ⬜ | `Worktree::measure` has no test over a real repository | [#86](https://github.com/breferrari/vigia/issues/86) |
