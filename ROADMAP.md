@@ -370,7 +370,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | A wider pane can take a row off the body, and the diff pays it | [#283](https://github.com/breferrari/vigia/issues/283) |
 | ⬜ | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ✅ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
-| ⬜ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
+| ✅ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
 | ⬜ | The worktree name skips the control-character transformation content rows get | [#89](https://github.com/breferrari/vigia/issues/89) |
 | ⬜ | `render` promises any area is legal, and an area taller than its buffer panics | [#91](https://github.com/breferrari/vigia/issues/91) |
 | ✅ | The diff's total height is taken from the cache by presence, not by validity | [#84](https://github.com/breferrari/vigia/issues/84) |

@@ -1921,3 +1921,60 @@ fn a_noted_line_stays_brighter_than_a_pointer_resting_on_it() {
         );
     }
 }
+
+/// A lost continuation backslash turns the next line's indentation into spaces
+/// inside the message, and that string is only read when the error is printed.
+/// Every variant is named, so a new one fails to compile until it is checked.
+fn theme_error_renders_without_a_run_of_spaces(err: &ThemeError) {
+    let msg = match err {
+        ThemeError::UnknownKey { .. }
+        | ThemeError::UnknownColour { .. }
+        | ThemeError::UnknownModifier { .. }
+        | ThemeError::MissingValue { .. }
+        | ThemeError::MissingSeparator { .. }
+        | ThemeError::UnknownBase { .. }
+        | ThemeError::RepeatedBase { .. }
+        | ThemeError::LateBase { .. }
+        | ThemeError::Unreadable { .. } => err.to_string(),
+    };
+    assert!(
+        !msg.contains("  "),
+        "{err:?} renders with a double space: {msg:?}"
+    );
+}
+
+#[test]
+fn no_theme_error_carries_its_indentation_into_the_message() {
+    let errors = [
+        ThemeError::UnknownKey {
+            line: 12,
+            key: "foo".to_owned(),
+        },
+        ThemeError::UnknownColour {
+            line: 12,
+            value: "bar".to_owned(),
+        },
+        ThemeError::UnknownModifier {
+            line: 12,
+            value: "baz".to_owned(),
+        },
+        ThemeError::MissingValue { line: 12 },
+        ThemeError::MissingSeparator {
+            line: 12,
+            text: "x".to_owned(),
+        },
+        ThemeError::UnknownBase {
+            line: 12,
+            name: "nope".to_owned(),
+        },
+        ThemeError::RepeatedBase { line: 12 },
+        ThemeError::LateBase { line: 12 },
+        ThemeError::Unreadable {
+            path: std::path::PathBuf::from("/tmp/missing"),
+            why: "no such file".to_owned(),
+        },
+    ];
+    for err in &errors {
+        theme_error_renders_without_a_run_of_spaces(err);
+    }
+}
