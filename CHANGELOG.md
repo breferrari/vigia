@@ -4,6 +4,15 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.50.0] - 2026-09-28
+
+- Note a range of lines by dragging from the gutter
+- Rewrite the quoted watch comment in note form
+- The config menu names its settings rather than describing them
+- Skip status work that cannot change the pane
+- Every direct dependency is on its latest release, and the tinyvec bound is gone
+- The pack declares keys mcs no longer reads
+
 ## [0.49.0] - 2026-09-13
 
 - The agent's answer draws its quoted code as code
