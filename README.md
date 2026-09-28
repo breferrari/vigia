@@ -278,7 +278,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | just point | it marks itself |
 | `Shift`+drag | your terminal selects text |
 
-**`m` opens every setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `remember between runs` keeps what you flip for next time; `reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
+**`m` opens every setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `Save settings` keeps what you flip for next time, and `Reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
 
 > [!TIP]
 > Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every other key still means what it meant. On a pane too small to hold the whole table, `?` again turns the page and the last one closes it; the title bar says how many of them you are looking at.
