@@ -165,6 +165,26 @@ impl Note {
             .filter(|first| first.side == self.side && first.line != self.line)
             .map(|first| (first.line, self.line))
     }
+
+    /// The range its stored ends name: `6`, `3-6`, or `-5 +6` across sides,
+    /// for a surface with no diff to read the lines between them from.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match &self.first {
+            Some(first) if first.side != self.side => {
+                let (old, new) = if first.side == Side::Old {
+                    (first.line, self.line)
+                } else {
+                    (self.line, first.line)
+                };
+                format!("-{old} +{new}")
+            }
+            _ => match self.span() {
+                Some((first, last)) => format!("{first}-{last}"),
+                None => self.line.to_string(),
+            },
+        }
+    }
 }
 
 /// Where a note's line is among the rows in hand.

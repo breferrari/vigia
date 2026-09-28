@@ -2571,6 +2571,9 @@ struct Landed {
     faded: bool,
     marks: bool,
     from: Option<usize>,
+    /// The range's first and last lines where they stand now, when it is drawn
+    /// as one.
+    ends: Option<((Side, u32), (Side, u32))>,
 }
 
 /// The logical rows of every range on this screen above the line it hangs
@@ -2645,12 +2648,22 @@ fn placed_at(
     let from = first
         .and_then(|(side, at)| row_of(side, at.line))
         .filter(|&from| from < row);
+    let last_line = match last {
+        Placement::At(number) | Placement::Moved(number) => Some(number),
+        Placement::Changed => Some(note.line),
+        Placement::Gone => None,
+    };
+    let ends = first
+        .filter(|_| from.is_some())
+        .zip(last_line)
+        .map(|((side, at), line)| ((side, at.line), (note.side, line)));
     Some(Landed {
         row,
         word,
         faded,
         marks,
         from,
+        ends,
     })
 }
 
@@ -2663,10 +2676,11 @@ fn place_box(
 ) -> Option<BoxPin> {
     let landed = placed_at(&stand_in.note, &mut Rows::of(diff), heading, placed)?;
     let note = &stand_in.note;
-    let label = match note.span().filter(|_| landed.from.is_some()) {
-        Some((first, last)) => format!("{}:{first}-{last}", note.path),
-        None => format!("{}:{}", note.path, note.line),
-    };
+    let span = landed
+        .ends
+        .and_then(|(first, last)| diff.span_label(first, last))
+        .unwrap_or_else(|| note.line.to_string());
+    let label = format!("{}:{span}", note.path);
     Some(BoxPin {
         row: landed.row,
         marks: landed.marks,
@@ -2700,6 +2714,7 @@ fn pin(
             faded,
             marks,
             from,
+            ..
         }) = placed_at(note, &mut rows, heading, placed)
         else {
             continue;

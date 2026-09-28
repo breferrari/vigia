@@ -2047,7 +2047,7 @@ fn a_drag_from_the_gutter_opens_the_box_over_the_range_and_enter_keeps_it() {
     let opened = rig.paint(&mut frame, PANE, Pointing::default());
     let rows = opened.box_under(to);
     assert!(
-        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:3-6 ─"),
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-5 +3-6 ─"),
         "the box does not name the range it covers: {:?}",
         rows[0]
     );
@@ -2094,7 +2094,7 @@ fn a_drag_stops_at_the_edge_of_the_hunk_it_began_in() {
     let opened = rig.paint(&mut frame, PANE, Pointing::default());
     let rows = opened.box_under(opened.row_of("line 8"));
     assert!(
-        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:3-8 ─"),
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-5 +3-8 ─"),
         "the range left its hunk: {:?}",
         rows[0]
     );
@@ -2121,7 +2121,7 @@ fn a_drag_over_another_note_makes_a_second_note_and_leaves_the_first() {
     let opened = rig.paint(&mut frame, PANE, Pointing::default());
     let rows = opened.box_under(opened.row_of("line 6"));
     assert!(
-        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:3-6 ─"),
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-5 +3-6 ─"),
         "{:?}",
         rows[0]
     );

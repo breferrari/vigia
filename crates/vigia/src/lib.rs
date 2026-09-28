@@ -633,10 +633,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             MenuRoute::Through => {}
                         }
                     }
-                    // A press on a content row's gutter begins a note and never a
-                    // selection, which is B20 and B21 sharing no cell: every pointer
-                    // event of that drag is answered here and the wash below never
-                    // sees it, and the button coming up opens the box over the span.
+                    // Before the wash: a drag from a gutter is a note, never a selection.
                     let (noting, ended) =
                         notes::drag_after(&shell.screen, regions, &event, shell.noting);
                     if matches!(event, Event::Mouse(_))
@@ -2302,9 +2299,7 @@ mod tests {
 
     #[test]
     fn a_write_the_agent_makes_arms_no_motion() {
-        // An agent writing line after line would restart it on every tick, and a
-        // pane that blinks at each write is noise beside the heat that already
-        // says where the writes are.
+        // Armed per write, it blinks under an agent writing line after line.
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         let tick = shipped

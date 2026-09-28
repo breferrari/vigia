@@ -146,10 +146,8 @@ pub fn drag_after(
     }
 }
 
-/// What a drag over rows `from..=to` of `view` opens the box on: the range's
-/// anchor, and the open note already hanging under its last line when there is
-/// one, whose text the box takes. Reopened by a press on its one line, a note
-/// keeps the range it was written over. `None` when no row in it is a line.
+/// The anchor a drag over rows `from..=to` opens the box on, and the open note
+/// hanging under its last line, which a one-row press reopens with its range.
 #[must_use]
 pub fn opening(
     view: &View,

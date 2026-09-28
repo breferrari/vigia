@@ -16,8 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use vigia_core::{
-    CONTEXT, FileDiff, Frame, Hunk, Line, LineKind, Listing, Note, Placement, Registration, Side,
-    Status, Store, StoreWatch, Worktree, first_of, names_a_record, resolve, run_of,
+    CONTEXT, FileDiff, Frame, Hunk, LineKind, Listing, Note, Placement, Registration, Side, Status,
+    Store, StoreWatch, Worktree, first_of, names_a_record, resolve, run_of,
 };
 
 use crate::VERSION;
@@ -531,36 +531,15 @@ fn around_old(diff: &FileDiff, centre: u32) -> Vec<(u32, String)> {
         .collect()
 }
 
-/// The text of every line from `first` to `last`, each a side and a number, in
-/// the order the hunk holds them; empty when they are not in one hunk in that
-/// order, which a range written by the pane always is.
+/// The text of every line from `first` to `last`, in hunk order; empty off one
+/// hunk.
 fn range_lines(diff: &FileDiff, first: (Side, u32), last: (Side, u32)) -> Vec<String> {
-    let is = |(side, number): (Side, u32), (old, new, line): &(u32, u32, &Line)| {
-        Side::of(line.kind) == side
-            && match side {
-                Side::Old => *old == number,
-                Side::New => *new == number,
-            }
-    };
-    for hunk in &diff.hunks {
-        let mut lines: Option<Vec<String>> = None;
-        for at in hunk.positions() {
-            if lines.is_none() && is(first, &at) {
-                lines = Some(Vec::new());
-            }
-            if let Some(lines) = lines.as_mut() {
-                lines.push(at.2.text.clone());
-                if is(last, &at) {
-                    return std::mem::take(lines);
-                }
-            }
-        }
-    }
-    Vec::new()
+    diff.range(first, last)
+        .map(|lines| lines.iter().map(|(_, _, line)| line.text.clone()).collect())
+        .unwrap_or_default()
 }
 
-/// Where a note's line is now, as the agent is told. `None` for the placement
-/// is a file the diff does not hold, which is adrift.
+/// Where a note is now, as the agent is told; no placement is adrift.
 struct Placed {
     placement: Option<Placement>,
     current_line: Option<u32>,

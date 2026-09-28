@@ -115,11 +115,7 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     // what `encode` does for the record one crate over.
     let mut out = String::new();
     let from = note.span().map_or(note.line, |(first, _)| first);
-    if from == note.line {
-        let _ = writeln!(out, "vigia note on {}:{}", note.path, note.line);
-    } else {
-        let _ = writeln!(out, "vigia note on {}:{from}-{}", note.path, note.line);
-    }
+    let _ = writeln!(out, "vigia note on {}:{}", note.path, note.label());
     let _ = writeln!(out, "\n{}", note.body);
     if !context.is_empty() {
         let width = context
