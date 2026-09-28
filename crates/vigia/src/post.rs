@@ -272,7 +272,10 @@ pub fn post_each(
 #[must_use]
 pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
     match note.side {
-        Side::New => crate::notes::around(workdir, &note.path, note.line),
+        Side::New => {
+            let from = note.span().map_or(note.line, |(first, _)| first);
+            crate::notes::around_span(workdir, &note.path, from, note.line)
+        }
         Side::Old => Vec::new(),
     }
 }

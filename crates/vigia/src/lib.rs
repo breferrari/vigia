@@ -636,13 +636,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // Before the wash: a drag from a gutter is a note, never a selection.
                     let (noting, ended) =
                         notes::drag_after(&shell.screen, regions, &event, shell.noting);
-                    if matches!(event, Event::Mouse(_))
-                        && (shell.noting.is_some() || noting.is_some())
-                    {
-                        shell.noting = noting;
-                        if let Some(span) = ended {
-                            shell.open_box(span, Instant::now());
-                        }
+                    shell.noting = noting;
+                    if let Some(span) = ended {
+                        shell.open_box(span, Instant::now());
+                        continue;
+                    }
+                    // A drag's own pointer events stop here; a key still reaches Esc,
+                    // and the event that ended a drag goes on to its own handler.
+                    if noting.is_some() && matches!(event, Event::Mouse(_)) {
                         continue;
                     }
                     // And a press on a note's own left side takes that note back,
@@ -2052,6 +2053,7 @@ impl Shell {
             // retired here, between the layout and the paint that uses them.
             chrome.hovered = repainted(chrome.hovered, was, painted);
             chrome.selected = repainted(chrome.selected, was, painted);
+            chrome.noting = repainted(chrome.noting, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
             // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
@@ -2083,6 +2085,9 @@ impl Shell {
         self.painted = now;
         self.effects_ran = self.effects_running();
         self.hovered = chrome.hovered;
+        if chrome.noting.is_none() {
+            self.noting = None;
+        }
         if chrome.selected.is_none() {
             self.deselect();
         }
@@ -2329,6 +2334,9 @@ mod tests {
             "if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {",
             "if action != Action::Redraw {",
             "if chrome.selected.is_none() {",
+            // A note drag ends the same way when the layout moves under it.
+            "chrome.noting = repainted(chrome.noting, was, painted);",
+            "if chrome.noting.is_none() {",
             "self.screen.lines_in(span.offsets(self.regions.diff.top))",
         ] {
             assert!(

@@ -111,12 +111,15 @@ pub fn drag_after(
     was: Option<NoteDrag>,
 ) -> (Option<NoteDrag>, Option<NoteDrag>) {
     let Event::Mouse(mouse) = event else {
-        return (was, None);
+        // A window that loses focus may never see the button come up.
+        return (was.filter(|_| !matches!(event, Event::FocusLost)), None);
     };
     match (mouse.kind, was) {
+        // Motion with no button down is a release that never arrived.
+        (MouseEventKind::Moved, Some(_)) => (None, None),
         (MouseEventKind::Down(MouseButton::Left), _) => {
             let Some(offset) = press_at(view, regions, event) else {
-                return (was, None);
+                return (None, None);
             };
             let (top, bottom) = view.hunk_rows(offset).unwrap_or((offset, offset));
             let row = |offset: usize| {
@@ -466,11 +469,17 @@ pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
 /// one comes from the diff it already holds.
 #[must_use]
 pub fn around(workdir: &Path, path: &str, centre: u32) -> Vec<(u32, String)> {
+    around_span(workdir, path, centre, centre)
+}
+
+/// [`around`] for the lines `from..=to` and [`CONTEXT`] on either side.
+#[must_use]
+pub fn around_span(workdir: &Path, path: &str, from: u32, to: u32) -> Vec<(u32, String)> {
     let Ok(text) = fs::read_to_string(workdir.join(path)) else {
         return Vec::new();
     };
-    let first = centre.saturating_sub(CONTEXT).max(1);
-    let last = centre.saturating_add(CONTEXT);
+    let first = from.saturating_sub(CONTEXT).max(1);
+    let last = to.saturating_add(CONTEXT);
     text.lines()
         .enumerate()
         .map(|(at, line)| (u32::try_from(at + 1).unwrap_or(u32::MAX), line))

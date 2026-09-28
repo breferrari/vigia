@@ -427,6 +427,32 @@ fn a_note_on_the_old_side_carries_its_anchor_alone() {
     );
 }
 
+#[test]
+fn a_range_carries_every_line_it_covers_to_the_session() {
+    let scratch = Scratch::new("socket-range");
+    let text: String = (1..=40).map(|i| format!("line {i}\n")).collect();
+    scratch.write(PATH, text);
+
+    let mut note = anchored("n1", "all of these");
+    note.line = 30;
+    note.text = "line 30".to_owned();
+    note.first = Some(vigia_core::LineRef {
+        side: Side::New,
+        line: 5,
+        text: "line 5".to_owned(),
+    });
+    let around = context_for(scratch.root(), &note);
+    for line in [5, 17, 30] {
+        assert!(
+            around.iter().any(|(number, _)| *number == line),
+            "line {line} of the range never reaches the session: {around:?}"
+        );
+    }
+    let said = content(&note, &around);
+    assert!(said.contains(":5-30"), "{said}");
+    assert!(said.contains(">  5 | line 5"), "{said}");
+}
+
 /// A message builder that says how many times it was asked for one.
 fn counting(calls: &Cell<u32>) -> impl FnOnce() -> String + '_ {
     move || {

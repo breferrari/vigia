@@ -1826,8 +1826,11 @@ impl View {
         let (last, mut anchor) = (from..=to)
             .rev()
             .find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
+        // The screen may have moved under the drag, so the first line is looked
+        // for inside the last line's hunk and never past it.
+        let top = self.hunk_rows(last).map_or(last, |(top, _)| top);
         let (first, head) =
-            (from..=last).find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
+            (from.max(top)..=last).find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
         if self.head_of(first) != self.head_of(last) {
             anchor.first = Some(LineRef {
                 side: head.side,

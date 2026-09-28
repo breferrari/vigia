@@ -2146,6 +2146,56 @@ fn a_drag_over_another_note_makes_a_second_note_and_leaves_the_first() {
 }
 
 #[test]
+fn a_drag_whose_release_never_arrives_ends_on_the_next_sign_of_it() {
+    let scratch = fixture("notes-range-lost");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, _) = painted.gutter();
+    let y = painted.row_of("line 3");
+    // Motion with no button, a window that lost focus, a press somewhere else.
+    for ender in [moved(left + 1, y), Event::FocusLost, press(0, 0)] {
+        let (begun, _) = drag_after(&painted.view, painted.laid, &press(left + 1, y), None);
+        assert!(begun.is_some(), "the press began no drag");
+        let (after, ended) = drag_after(&painted.view, painted.laid, &ender, begun);
+        assert!(
+            after.is_none() && ended.is_none(),
+            "{ender:?} left the drag standing, so every click after it is swallowed"
+        );
+    }
+}
+
+#[test]
+fn a_range_never_leaves_the_hunk_of_its_last_line() {
+    // Two hunks; the ends a drag stored can fall in both once the screen moves.
+    let scratch = Scratch::new("notes-range-shifted");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let top = painted.laid.diff.top;
+    let offset = |needle: &str| usize::from(painted.row_of(needle) - top);
+    let (_, anchor) = painted
+        .view
+        .anchor_over(offset("line 3"), offset("line 23"))
+        .expect("an anchor");
+    assert_eq!(anchor.line, 23);
+    let first = anchor.first.expect("a range");
+    assert!(
+        first.line >= 22,
+        "the range reached back across a hunk to line {}",
+        first.line
+    );
+}
+
+#[test]
 fn a_press_and_release_on_one_row_is_a_note_on_one_line_as_before() {
     let scratch = fixture("notes-range-one");
     let worktree = scratch.worktree();
