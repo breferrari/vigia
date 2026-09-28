@@ -387,8 +387,7 @@ impl IndexWatch {
         {
             return false;
         }
-        // Not verified: the checksum is compared rather than trusted, and
-        // verifying it would hash the whole file on every refresh.
+        // Unverified: a check would hash the whole file on every refresh.
         let fresh = gix::index::File::at(&self.path, self.hash, true, Default::default())
             .ok()
             .map(|file| IndexPrint::of(&file));
