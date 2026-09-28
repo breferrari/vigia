@@ -1964,8 +1964,11 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// name makes it false. Two clauses under it went with the count, because a warmer that
 /// opens no file cannot be described by a paragraph that says a real file is the only way
 /// in. A raise with no new surface behind it is the thing this number is for.
+///
+/// It rose 1,163 bytes for a note over a range: the gutter drag, the anchor's two ends
+/// and what drift does to each, and the range the agent is sent.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 407118),
+    ("SPEC.md", 408202),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17304),
     (".claude/skills/take-next/SKILL.md", 25813),
