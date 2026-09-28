@@ -104,25 +104,52 @@ impl Worktree {
     ) -> Result<Changes<'h>> {
         match origin {
             Origin::Unstaged => {
-                let iter = self
-                    .repo
-                    .status(gix::progress::Discard)
-                    .map_err(|e| Error::Status(Box::new(e)))?
-                    // Collapsed would report a changed directory as one entry. A
-                    // monitor has to name the file that changed.
-                    .untracked_files(gix::status::UntrackedFiles::Files)
-                    .index_worktree_rewrites(
-                        options.track_renames.then(gix::diff::Rewrites::default),
-                    )
-                    .into_index_worktree_iter(Vec::<BString>::new())
-                    .map_err(|e| Error::Status(Box::new(e)))?;
-                Ok(Changes::over(Inner::Streamed(iter), options.hide))
+                if !options.track_renames {
+                    return Ok(Changes::over(
+                        Inner::Streamed(self.unstaged(false)?),
+                        options.hide,
+                    ));
+                }
+                // A rename pairs a deletion with an addition, so a walk that finds no
+                // deletion reads the same with tracking off. Tracking is what costs:
+                // `gix` reads and hashes every untracked file as a candidate whether
+                // or not anything was deleted, which is most of a walk over many.
+                let plain: Result<Vec<FileChange>> =
+                    Inner::Streamed(self.unstaged(false)?).collect();
+                match plain {
+                    Ok(mut plain) if !plain.iter().any(|c| c.kind == ChangeKind::Removed) => {
+                        // The tracking walk's order, which is the pane's, is path order.
+                        // The plain walk hands changes over as its threads finish them.
+                        plain.sort_by(|a, b| a.path.cmp(&b.path));
+                        Ok(Changes::over(
+                            Inner::Collected(plain.into_iter()),
+                            options.hide,
+                        ))
+                    }
+                    _ => Ok(Changes::over(
+                        Inner::Streamed(self.unstaged(true)?),
+                        options.hide,
+                    )),
+                }
             }
             Origin::Staged => Ok(Changes::over(
                 Inner::Collected(self.staged(options)?.into_iter()),
                 options.hide,
             )),
         }
+    }
+
+    /// The working tree against the index, streamed, with or without renames.
+    fn unstaged(&self, renames: bool) -> Result<gix::status::index_worktree::Iter> {
+        self.repo
+            .status(gix::progress::Discard)
+            .map_err(|e| Error::Status(Box::new(e)))?
+            // Collapsed would report a changed directory as one entry. A
+            // monitor has to name the file that changed.
+            .untracked_files(gix::status::UntrackedFiles::Files)
+            .index_worktree_rewrites(renames.then(gix::diff::Rewrites::default))
+            .into_index_worktree_iter(Vec::<BString>::new())
+            .map_err(|e| Error::Status(Box::new(e)))
     }
 
     /// How many changes one comparison holds, without keeping any of them.

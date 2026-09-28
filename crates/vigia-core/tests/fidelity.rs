@@ -108,6 +108,37 @@ fn a_moved_file_is_reported_as_one_rename() {
 }
 
 #[test]
+fn with_nothing_deleted_the_changes_arrive_in_path_order() {
+    // The order the rename-tracking walk hands changes over in, and so the order
+    // the pane draws. A tree with nothing deleted is walked without tracking,
+    // which delivers them as its threads finish, so the order is restored rather
+    // than inherited. Modified and untracked files interleave, as they do there.
+    let scratch = Scratch::new("path-order");
+    for i in 0..40 {
+        scratch.write(&format!("src/m{i:02}.txt"), "before\n");
+    }
+    scratch.commit_all("initial");
+    for i in 0..40 {
+        scratch.write(&format!("src/m{i:02}.txt"), "after\n");
+        scratch.write(&format!("new/n{i:02}.txt"), "new\n");
+    }
+    scratch.write("aaa.txt", "first\n");
+
+    let worktree = scratch.worktree();
+    for _ in 0..5 {
+        let paths: Vec<String> = worktree
+            .changes()
+            .expect("enumerate")
+            .map(|c| c.expect("change").path)
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(paths.len(), 81, "the fixture is not what this test reads");
+        assert_eq!(paths, sorted, "changes arrived out of path order");
+    }
+}
+
+#[test]
 fn disabling_rename_tracking_splits_the_move_into_two_changes() {
     let scratch = Scratch::new("renames-off");
     scratch.write("old/name.txt", numbered_lines(30));

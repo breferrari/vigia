@@ -3,7 +3,7 @@
 mod support;
 
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use support::{Scratch, budget};
 use vigia_core::{Tick, WatchOptions, Watcher};
@@ -302,6 +302,64 @@ fn staging_a_change_produces_a_tick() {
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "an index write produced no tick"
+    );
+}
+
+#[test]
+fn rewriting_the_index_unchanged_produces_no_tick() {
+    let scratch = committed_scratch("watch-index-touch");
+    let index = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // What a `touch` does: the file is written and nothing in it moves.
+    scratch.write(".git/index", &index);
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "an index rewritten byte for byte woke the monitor"
+    );
+    assert!(
+        watcher.delivered() > 0,
+        "this test proved nothing: the OS never reported the index write"
+    );
+}
+
+#[test]
+fn an_index_refresh_that_moves_only_stat_data_produces_no_tick() {
+    let scratch = Scratch::new("watch-index-refresh");
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("initial");
+    // Same bytes, an hour older, so the index's stat data for `a.txt` is stale
+    // and the next refresh rewrites it. Moved explicitly rather than by a second
+    // write, which can land inside the commit's own timestamp.
+    std::fs::File::options()
+        .write(true)
+        .open(scratch.path_of("a.txt"))
+        .and_then(|file| file.set_modified(SystemTime::now() - Duration::from_secs(3600)))
+        .expect("age a.txt");
+    let scratch = scratch.settled();
+    let before = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // What an IDE, a git GUI or a prompt does on a timer.
+    scratch.git_may_fail(&["update-index", "--refresh"]);
+    let after = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+    assert_ne!(
+        before, after,
+        "this test proved nothing: the refresh did not rewrite the index"
+    );
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a refresh that changed no entry woke the monitor"
+    );
+    assert!(
+        watcher.delivered() > 0,
+        "this test proved nothing: the OS never reported the index write"
     );
 }
 

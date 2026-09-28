@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 use std::ffi::OsStr;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -142,6 +144,10 @@ pub struct Watcher<'repo> {
     excludes: gix::AttributeStack<'repo>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
+    /// The index an event on `.git/index` is judged against, and what it held
+    /// when last judged. `None` in the print means it could not be read, so the
+    /// next event is taken.
+    index: IndexWatch,
     options: WatchOptions,
     stats: WatchStats,
     delivered: Arc<AtomicU64>,
@@ -167,6 +173,7 @@ impl<'repo> Watcher<'repo> {
             .map_err(|e| Error::Watch(Box::new(e)))?;
 
         let roots = roots_of(workdir);
+        let index = IndexWatch::new(repo.index_path(), repo.object_hash());
 
         let (tx, rx) = mpsc::channel();
 
@@ -194,6 +201,7 @@ impl<'repo> Watcher<'repo> {
             _backend: backend,
             excludes,
             roots,
+            index,
             options,
             stats: WatchStats::default(),
             delivered,
@@ -310,6 +318,9 @@ impl<'repo> Watcher<'repo> {
             .find_map(|root| path.strip_prefix(root).ok())?;
 
         if rela.components().next().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
+            if rela == Path::new(".git").join("index") {
+                return self.index.moved().then_some(rela);
+            }
             return watched_in_git_dir(rela).then_some(rela);
         }
 
@@ -334,6 +345,87 @@ impl<'repo> Watcher<'repo> {
             Err(_) => false,
         }
     }
+}
+
+/// The worktree's own index, and what it held when an event was last judged.
+///
+/// Git rewrites the index whenever a refresh updates stat data, which an IDE, a
+/// git GUI or a prompt running `git status` does on a timer, and a `touch`
+/// rewrites nothing at all. Neither changes an entry, so neither changes what
+/// the pane shows, and a walk on each of them is an idle pane doing work.
+struct IndexWatch {
+    path: PathBuf,
+    hash: gix::hash::Kind,
+    print: Option<IndexPrint>,
+}
+
+/// What an index says, cheaply: its trailing checksum, and a digest of what
+/// every entry means to status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IndexPrint {
+    /// `None` when git wrote no checksum, as `index.skipHash` does, since a
+    /// zero there matches every index and so proves nothing.
+    checksum: Option<Vec<u8>>,
+    entries: u64,
+}
+
+impl IndexWatch {
+    fn new(path: PathBuf, hash: gix::hash::Kind) -> Self {
+        let print = index_print(&path, hash);
+        Self { path, hash, print }
+    }
+
+    /// Whether the index has changed what it says since it was last asked.
+    /// Anything unreadable counts as a change: a wasted walk is cheaper than a
+    /// staged file the pane never showed.
+    fn moved(&mut self) -> bool {
+        if let (Some(print), Some(trailer)) = (&self.print, &index_trailer(&self.path, self.hash))
+            && print.checksum.as_ref() == Some(trailer)
+        {
+            return false;
+        }
+        let fresh = index_print(&self.path, self.hash);
+        let moved = fresh.is_none()
+            || self.print.as_ref().map(|p| p.entries) != fresh.as_ref().map(|p| p.entries);
+        self.print = fresh;
+        moved
+    }
+}
+
+/// The index's trailing checksum, read without parsing the rest of it.
+fn index_trailer(path: &Path, hash: gix::hash::Kind) -> Option<Vec<u8>> {
+    let len = hash.len_in_bytes();
+    let mut file = std::fs::File::open(path).ok()?;
+    file.seek(SeekFrom::End(-i64::try_from(len).ok()?)).ok()?;
+    let mut trailer = vec![0; len];
+    file.read_exact(&mut trailer).ok()?;
+    trailer.iter().any(|&b| b != 0).then_some(trailer)
+}
+
+fn index_print(path: &Path, hash: gix::hash::Kind) -> Option<IndexPrint> {
+    // The hash is not verified: the checksum is compared rather than trusted,
+    // and verifying it would hash the whole file on every refresh.
+    let file = gix::index::File::at(path, hash, true, Default::default()).ok()?;
+    // The flags that change what status reports. The rest are bookkeeping a
+    // refresh may toggle, `FSMONITOR_VALID` among them.
+    let meaning = gix::index::entry::Flags::STAGE_MASK
+        | gix::index::entry::Flags::ASSUME_VALID
+        | gix::index::entry::Flags::INTENT_TO_ADD
+        | gix::index::entry::Flags::SKIP_WORKTREE;
+    let mut digest = DefaultHasher::new();
+    for entry in file.entries() {
+        entry.path(&file).hash(&mut digest);
+        entry.id.hash(&mut digest);
+        entry.mode.bits().hash(&mut digest);
+        (entry.flags & meaning).bits().hash(&mut digest);
+    }
+    Some(IndexPrint {
+        checksum: file
+            .checksum()
+            .filter(|id| !id.is_null())
+            .map(|id| id.as_bytes().to_vec()),
+        entries: digest.finish(),
+    })
 }
 
 /// Every spelling of a watched root that an event path might carry.
