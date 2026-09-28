@@ -491,7 +491,7 @@ NO_COLOR=1 vigia                # every ladder collapses to something readable
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what *no polling timer* requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
 | [two-face](https://codeberg.org/CosmicHarper/two-face) | The 217 grammars, [bat](https://github.com/sharkdp/bat)'s curated set |
-| [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a change can be seen arriving |
+| [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a note or a message can be seen arriving |
 | [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text, its caret, its undo |
 | [fancy-regex](https://github.com/fancy-regex/fancy-regex) | The `hide` pattern |
 

@@ -599,7 +599,7 @@ pub struct Deadlines {
     pub ageing: Option<Duration>,
     /// When the last height kept waiting inside the settle margin settles.
     pub settling: Option<Duration>,
-    /// When the fade on an arriving change is done, if one is still running.
+    /// When the motion still running on the pane is done, if one is.
     pub arriving: Option<Instant>,
     /// When the next note that is leaving has its rows dropped.
     pub departing: Option<Instant>,

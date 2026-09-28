@@ -59,9 +59,9 @@ pub use menu::{
     menu_route,
 };
 pub use motion::{
-    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
-    NOTICE_ARRIVING, NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
-    SAID_ARRIVING, Timed, effect_interval, length,
+    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, NOTICE_ARRIVING,
+    NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, SAID_ARRIVING, Timed,
+    effect_interval, length,
 };
 pub use notes::{
     Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
@@ -360,7 +360,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
         // that draws something.
-        effects: EffectManager::default(),
         notice_effects: EffectManager::default(),
         painted: Instant::now(),
         highlighter: Highlighter::new(),
@@ -738,13 +737,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         continue;
                     }
                     shell.app.clear_notice();
-                    // Armed here rather than in `App::follow`, because a change
-                    // arrives whether or not the viewport moves to it.
-                    for path in &paths {
-                        shell
-                            .effects
-                            .add_unique_effect(path.clone(), motion::coalescing(ARRIVING));
-                    }
                     // A walk that fails describes the whole tree rather than one
                     // path in it, so the previous frame is still the best thing to
                     // draw and the footer says why. One file's own failure never
@@ -964,10 +956,7 @@ fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
 struct Shell {
     session: Session,
     app: App,
-    /// Keyed by path, so a second write replaces an effect rather than stacking.
-    effects: EffectManager<String>,
-    /// The footer's own: the diff's are clipped to it, and one manager processed
-    /// twice advances every effect in it twice a frame.
+    /// The footer's messages, clipped to the footer.
     notice_effects: EffectManager<String>,
     /// When the previous frame painted. The time since it is what an effect is
     /// told, through `effect_interval`, which may answer none of it.
@@ -1124,8 +1113,7 @@ impl Shell {
     /// the next frame and by the record of whether one drew, so the two cannot
     /// disagree about what counts as an effect.
     fn effects_running(&self) -> bool {
-        self.effects.is_running()
-            || self.notice_effects.is_running()
+        self.notice_effects.is_running()
             || self.note_effects.is_running()
             || self.box_effect.as_ref().is_some_and(Timed::is_running)
             || self.menu_effect.as_ref().is_some_and(Timed::is_running)
@@ -2036,7 +2024,6 @@ impl Shell {
             self.effects_ran,
             now.saturating_duration_since(self.painted),
         );
-        let effects = &mut self.effects;
         let notice_effects = &mut self.notice_effects;
         let note_effects = &mut self.note_effects;
         let box_effect = &mut self.box_effect;
@@ -2054,16 +2041,7 @@ impl Shell {
             chrome.hovered = repainted(chrome.hovered, was, painted);
             chrome.selected = repainted(chrome.selected, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
-            // After the widgets, because an effect works on the cells they drew. The
-            // diff's own region only: a heading arriving is not a reason to disturb
-            // the header, the footer or the map.
-            let over = Rect::new(
-                painted.diff.left,
-                painted.diff.top,
-                painted.diff.width,
-                painted.diff.rows,
-            );
-            effects.process_effects(since.into(), f.buffer_mut(), over);
+            // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
             // off screen draws no cells and its effect waits, and `settle_notes`
             // retires it at its own end whether it ever drew or not.
@@ -2305,6 +2283,24 @@ mod tests {
         let mut batch = Vec::new();
         drain(&mut batch, tick(0), &rx, DRAIN_CAP);
         assert_eq!(batch.len(), 2, "the queued wake was lost with the sender");
+    }
+
+    #[test]
+    fn a_write_the_agent_makes_arms_no_motion() {
+        // An agent writing line after line would restart it on every tick, and a
+        // pane that blinks at each write is noise beside the heat that already
+        // says where the writes are.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let tick = shipped
+            .split("Wake::Tick(")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost(message) =>").next())
+            .expect("the tick arm is gone");
+        assert!(
+            !tick.contains("effect"),
+            "the tick arm arms an effect, so every write draws a motion over the diff"
+        );
     }
 
     #[test]
@@ -2916,7 +2912,7 @@ mod tests {
             .filter(|name| name.ends_with("effect") || name.ends_with("effects"))
             .collect();
         assert!(
-            managers.len() >= 5,
+            managers.len() >= 4,
             "`Shell` declares {} effect fields, so this gate is reading its shape \
              wrongly rather than its fields: {managers:?}",
             managers.len()

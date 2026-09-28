@@ -18,13 +18,10 @@ use tachyonfx::dsl::EffectDsl;
 use tachyonfx::pattern::AnyPattern;
 use tachyonfx::{Effect, fx};
 
-/// How long a change is drawn arriving. Under `HISTORY_SAMPLE`; see `SPEC.md` §5.1.
-pub const ARRIVING: Duration = Duration::from_millis(250);
-
 /// A receipt's arrival.
 pub const SAID_ARRIVING: Duration = Duration::from_millis(550);
 
-/// An announcement's, its own rather than [`ARRIVING`], which is the diff's.
+/// An announcement's.
 pub const NOTICE_ARRIVING: Duration = Duration::from_millis(750);
 
 /// How long a warning takes to gather.
@@ -47,13 +44,9 @@ pub const NOTICE_LINGER: Duration = Duration::from_millis(4500);
 pub const ARRIVED_LINGER: Duration = Duration::from_secs(60);
 
 /// How long the box takes to arrive, and to leave on Esc: a receipt's own
-/// length rather than [`ARRIVING`], which is the diff's.
-///
-/// The box answers a gutter the reader pressed one moment earlier, so it is the
-/// one surface here that is certainly being looked at directly. [`ARRIVING`] is
-/// sized for a change that lands while they are reading the other pane, and at
-/// [`ARRIVING_FRAME`] it gives this effect fifteen frames, which is too few to
-/// read a radial resolve as anything but a pop.
+/// length. The box answers a gutter the reader pressed one moment earlier, so it
+/// is certainly being looked at, and a shorter length at [`ARRIVING_FRAME`] is
+/// too few frames to read a radial resolve as anything but a pop.
 pub const BOX_ARRIVING: Duration = SAID_ARRIVING;
 
 /// How long a note's rows and the agent's line take to arrive: an
@@ -122,7 +115,7 @@ const FADING_OUT: &str = r#"
     fx::fade_to_fg(ink, (over, SineInOut)).with_pattern(road)
 "#;
 
-/// A change arriving on the diff: the cells landing in their own order.
+/// Cells landing in their own order, as the menu's flipped word does.
 const COALESCING: &str = r#"
     fx::coalesce((over, QuadOut))
 "#;
@@ -176,7 +169,7 @@ pub fn fading(ink: Color, over: Duration, road: AnyPattern, out: bool) -> Effect
     )
 }
 
-/// A change arriving on the diff.
+/// Cells landing in their own order over `over`.
 #[must_use]
 pub fn coalescing(over: Duration) -> Effect {
     compiled(
@@ -280,7 +273,7 @@ mod tests {
         let settled = ratatui::buffer::Buffer::empty(over);
         let mut buf = settled.clone();
         let mut effect = effect;
-        effect.process(tachyonfx::Duration::from(ARRIVING), &mut buf, over);
+        effect.process(tachyonfx::Duration::from(SAID_ARRIVING), &mut buf, over);
         assert_eq!(buf, settled);
         assert!(effect.done());
     }
