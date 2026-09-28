@@ -52,7 +52,7 @@ vigia-core = { path = "crates/vigia-core", version = "0.49.0" }
 # `default-features = false` is deliberate. gix's defaults pull in credentials,
 # mailmap, blame, worktree-archive and worktree-mutation, none of which a
 # read-only monitor uses, and all of which cost startup against I7.
-gix = { version = "0.87", default-features = false, features = [
+gix = { version = "0.88", default-features = false, features = [
     "status",
     "max-performance-safe",
     "sha1",
@@ -61,14 +61,6 @@ gix = { version = "0.87", default-features = false, features = [
     # so this adds nothing to the graph. Measured at 213 crates either way.
     "revision",
 ] }
-# Not used here, and declared only to bound a version. `tinyvec 1.13.0` does not
-# compile at all: it imports `alloc::vec` as a module, which shadows the `vec!`
-# macro it then calls, and the crate is `alloc`-only so no feature avoids it.
-# `unicode-normalization` asks for `^1` under `gix-utils`, so a fresh resolve
-# takes the broken one and `cargo install vigia` fails while CI, which builds
-# through the committed lock, cannot see it. That is #349's shape exactly.
-# Lift this the moment a fixed release exists; the bound blocks 1.13.1 too.
-tinyvec = ">=1.12, <1.13"
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
 # Under the `ratatui` organisation, and it schedules nothing: the host passes the
 # elapsed duration in, so I1's clock stays this program's. The `dsl` feature is
@@ -118,7 +110,7 @@ syntect = { version = "5.3", default-features = false, features = [
 # exact version in it with these exact default features. `regex` would have
 # looked equally free and is not: it is in the lock as a dev-dependency of
 # `criterion` alone, so taking it would grow the shipped binary.
-fancy-regex = "0.16"
+fancy-regex = "0.19"
 # The startup update check, SPEC.md section 11.1. One request per process, and
 # the only one this program makes.
 #
@@ -221,7 +213,7 @@ windows-sys = { version = "0.61", features = [
 #
 # Adds no crate either: crossterm already pulls it into both Unix graphs through
 # ratatui. Confirmed with `cargo tree -i`, on the same rule as the pair above.
-signal-hook = { version = "0.3", default-features = false, features = [
+signal-hook = { version = "0.4", default-features = false, features = [
     "iterator",
 ] }
 
