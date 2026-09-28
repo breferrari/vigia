@@ -70,39 +70,40 @@ pub fn has_room(regions: Regions) -> bool {
     usize::from(regions.diff.text.saturating_sub(gutter)) > crate::view::BOX_FRAME
 }
 
-/// A drag from a gutter under way, in screen rows: where it began, where the
-/// pointer is, and the rows of the hunk it began in, which it may not leave.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A drag from a gutter under way: the line it was pressed on, and the screen
+/// row the pointer is on. Held by the line rather than its row, because the
+/// agent can write while the button is down and move every row under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteDrag {
-    from: u16,
+    press: Anchor,
     head: u16,
-    top: u16,
-    bottom: u16,
 }
 
 impl NoteDrag {
-    /// The rows it covers, top first.
+    /// The rows of `view` it covers, as offsets from the diff's `top`: from the
+    /// pressed line, wherever it stands now, to the pointer, inside that line's
+    /// hunk. `None` once the pressed line is off this screen.
     #[must_use]
-    pub fn rows(self) -> (u16, u16) {
-        (self.from.min(self.head), self.from.max(self.head))
+    pub fn offsets(&self, view: &View, top: u16) -> Option<(usize, usize)> {
+        let at = view.offset_of(&self.press)?;
+        let (first, last) = view.hunk_rows(at).unwrap_or((at, at));
+        let head = usize::from(self.head.saturating_sub(top)).clamp(first, last);
+        Some((at.min(head), at.max(head)))
     }
 
-    /// The same rows as offsets from the diff's top row, which is how the view
-    /// numbers them.
+    /// The same rows as screen rows, for the wash.
     #[must_use]
-    pub fn offsets(self, top: u16) -> (usize, usize) {
-        let (from, to) = self.rows();
-        (
-            usize::from(from.saturating_sub(top)),
-            usize::from(to.saturating_sub(top)),
-        )
+    pub fn rows(&self, view: &View, top: u16) -> Option<(u16, u16)> {
+        let (from, to) = self.offsets(view, top)?;
+        let row = |offset: usize| top.saturating_add(u16::try_from(offset).unwrap_or(u16::MAX));
+        Some((row(from), row(to)))
     }
 }
 
 /// The drag from a gutter this event leaves standing, and the one it ended,
 /// from what was standing before it. A press on a content row's gutter begins
-/// one, a drag moves its head inside its hunk, and the button coming up ends
-/// it; every other event leaves it as it was.
+/// one and the button coming up ends it; motion with no button, a lost focus
+/// or a press elsewhere drop it, since each means the release will not come.
 #[must_use]
 pub fn drag_after(
     view: &View,
@@ -111,41 +112,29 @@ pub fn drag_after(
     was: Option<NoteDrag>,
 ) -> (Option<NoteDrag>, Option<NoteDrag>) {
     let Event::Mouse(mouse) = event else {
-        // A window that loses focus may never see the button come up.
         return (was.filter(|_| !matches!(event, Event::FocusLost)), None);
     };
     match (mouse.kind, was) {
-        // Motion with no button down is a release that never arrived.
         (MouseEventKind::Moved, Some(_)) => (None, None),
         (MouseEventKind::Down(MouseButton::Left), _) => {
-            let Some(offset) = press_at(view, regions, event) else {
-                return (None, None);
-            };
-            let (top, bottom) = view.hunk_rows(offset).unwrap_or((offset, offset));
-            let row = |offset: usize| {
-                regions
-                    .diff
-                    .top
-                    .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX))
-            };
-            let at = row(offset);
-            let begun = NoteDrag {
-                from: at,
-                head: at,
-                top: row(top),
-                bottom: row(bottom),
-            };
-            (Some(begun), None)
+            let press = press_at(view, regions, event).and_then(|offset| view.anchor_at(offset));
+            (
+                press.map(|press| NoteDrag {
+                    press,
+                    head: mouse.row,
+                }),
+                None,
+            )
         }
         (MouseEventKind::Drag(MouseButton::Left), Some(drag)) => (
             Some(NoteDrag {
-                head: mouse.row.clamp(drag.top, drag.bottom),
+                head: mouse.row,
                 ..drag
             }),
             None,
         ),
         (MouseEventKind::Up(_), Some(drag)) => (None, Some(drag)),
-        _ => (was, None),
+        (_, was) => (was, None),
     }
 }
 

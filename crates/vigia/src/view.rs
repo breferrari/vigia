@@ -1841,6 +1841,24 @@ impl View {
         Some((last, anchor))
     }
 
+    /// The row `anchor`'s line is drawn on here: where its number still carries
+    /// its text, or failing that the first row carrying its text in its file,
+    /// since an edit above moves the number. `None` off this screen.
+    pub fn offset_of(&self, anchor: &Anchor) -> Option<usize> {
+        let same = |at: &Anchor| {
+            at.path == anchor.path
+                && at.origin == anchor.origin
+                && at.side == anchor.side
+                && at.text == anchor.text
+        };
+        let rows =
+            || (0..self.rows.len()).filter_map(|offset| Some((offset, self.anchor_at(offset)?)));
+        rows()
+            .find(|(_, at)| same(at) && at.line == anchor.line)
+            .or_else(|| rows().find(|(_, at)| same(at)))
+            .map(|(offset, _)| self.head_of(offset))
+    }
+
     /// The rows of the hunk row `offset` is in, from its first row to its last,
     /// or `None` off a hunk's rows. A note's range may not leave them.
     pub fn hunk_rows(&self, offset: usize) -> Option<(usize, usize)> {

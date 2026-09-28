@@ -394,7 +394,8 @@ impl Rig {
         assert!(standing.is_none(), "the release left the drag standing");
         let (first, last) = ended
             .expect("the release ended no drag")
-            .offsets(laid.diff.top);
+            .offsets(view, laid.diff.top)
+            .expect("the pressed line is on screen");
         let (anchor, existing) =
             opening(view, first, last, self.app.notes()).expect("the drag resolved to no anchor");
         let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
@@ -2193,6 +2194,77 @@ fn a_range_never_leaves_the_hunk_of_its_last_line() {
         "the range reached back across a hunk to line {}",
         first.line
     );
+}
+
+#[test]
+fn a_drag_upward_stops_at_the_top_of_the_hunk_it_began_in() {
+    let scratch = Scratch::new("notes-range-up");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, origin) = plain.gutter();
+    let from = plain.row_of("line 27");
+    let above = plain.row_of("line 3");
+    assert!(rig.drag_opens(&plain, left + 1, from, above));
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(opened.row_of("line 27"));
+    assert!(
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-25 +22-27 ─"),
+        "an upward drag left its hunk: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn a_drag_follows_its_line_when_a_write_moves_the_diff_under_it() {
+    let scratch = Scratch::new("notes-range-moved");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let before = rig.paint(&mut frame, TALL, Pointing::default());
+    let (left, _, _) = before.gutter();
+    let (view, laid) = (&before.view, before.laid);
+    let (begun, _) = drag_after(view, laid, &press(left + 1, before.row_of("line 27")), None);
+    let dragged = at(
+        MouseEventKind::Drag(MouseButton::Left),
+        left + 1,
+        before.row_of("line 23"),
+    );
+    let (held, _) = drag_after(view, laid, &dragged, begun);
+    let held = held.expect("the drag is standing");
+
+    // The agent writes above, and every row under the hand moves down.
+    let text = std::fs::read_to_string(scratch.path_of(PATH)).expect("read");
+    scratch.write(PATH, format!("new 1\nnew 2\nnew 3\nnew 4\n{text}"));
+    frame.advance().expect("advance after the write");
+    let after = rig.paint(&mut frame, TALL, Pointing::default());
+    let top = after.laid.diff.top;
+    let pressed = usize::from(after.row_of("line 27") - top);
+    let (first, last) = held
+        .offsets(&after.view, top)
+        .expect("the pressed line is still on screen");
+    let (hunk_top, hunk_bottom) = after.view.hunk_rows(pressed).expect("a hunk");
+    assert!(
+        hunk_top <= first && last <= hunk_bottom,
+        "the drag covers rows {first}..={last} outside its hunk {hunk_top}..={hunk_bottom}"
+    );
+    assert_eq!(
+        last, pressed,
+        "the drag no longer ends on the line it was pressed on"
+    );
+    let (_, anchor) = after.view.anchor_over(first, last).expect("an anchor");
+    assert_eq!(anchor.text, "line 27");
 }
 
 #[test]

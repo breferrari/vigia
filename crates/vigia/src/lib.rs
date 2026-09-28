@@ -635,15 +635,15 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // Before the wash: a drag from a gutter is a note, never a selection.
                     let (noting, ended) =
-                        notes::drag_after(&shell.screen, regions, &event, shell.noting);
+                        notes::drag_after(&shell.screen, regions, &event, shell.noting.take());
                     shell.noting = noting;
                     if let Some(span) = ended {
-                        shell.open_box(span, Instant::now());
+                        shell.open_box(&span, Instant::now());
                         continue;
                     }
                     // A drag's own pointer events stop here; a key still reaches Esc,
                     // and the event that ended a drag goes on to its own handler.
-                    if noting.is_some() && matches!(event, Event::Mouse(_)) {
+                    if shell.noting.is_some() && matches!(event, Event::Mouse(_)) {
                         continue;
                     }
                     // And a press on a note's own left side takes that note back,
@@ -1099,7 +1099,10 @@ impl Shell {
             gripped: self.gripped(),
             hovered: self.hovered(),
             selected: self.selected,
-            noting: self.noting.map(notes::NoteDrag::rows),
+            noting: self
+                .noting
+                .as_ref()
+                .and_then(|drag| drag.rows(&self.screen, self.regions.diff.top)),
             scrolling: self.scrolling,
         }
     }
@@ -1338,7 +1341,7 @@ impl Shell {
     /// note already there when there is one, and arm its entrance. With no store
     /// to write to, and on a pane too narrow to draw the box, there is nothing
     /// to open: the footer says so instead.
-    fn open_box(&mut self, span: notes::NoteDrag, now: Instant) {
+    fn open_box(&mut self, span: &notes::NoteDrag, now: Instant) {
         if self.store.is_none() {
             self.say(state::no_home(), Voice::Alert, now);
             return;
@@ -1351,7 +1354,9 @@ impl Shell {
             );
             return;
         }
-        let (from, to) = span.offsets(self.regions.diff.top);
+        let Some((from, to)) = span.offsets(&self.screen, self.regions.diff.top) else {
+            return;
+        };
         let Some((anchor, existing)) = notes::opening(&self.screen, from, to, self.app.notes())
         else {
             return;
@@ -2559,7 +2564,7 @@ mod tests {
             .find("if shell.app.box_open() {")
             .expect("the input arm no longer asks whether the box owns the keys");
         let press = shipped
-            .find("notes::drag_after(&shell.screen, regions, &event, shell.noting)")
+            .find("notes::drag_after(&shell.screen, regions, &event, shell.noting.take())")
             .expect("the input arm no longer routes a gutter drag to the box");
         let wash = shipped
             .find("selection_after(&event, regions, shell.selected)")
@@ -2609,7 +2614,7 @@ mod tests {
         // drawn screen can catch: without it a press on a pane too narrow to
         // draw the box still takes every key.
         let open = shipped
-            .split("fn open_box(&mut self, span: notes::NoteDrag, now: Instant) {")
+            .split("fn open_box(&mut self, span: &notes::NoteDrag, now: Instant) {")
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`open_box` is gone");
