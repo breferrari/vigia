@@ -16,8 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use vigia_core::{
-    CONTEXT, FileDiff, Frame, Hunk, LineKind, Listing, Note, Placement, Registration, Side, Status,
-    Store, StoreWatch, Worktree, names_a_record, resolve, run_of,
+    CONTEXT, FileDiff, Frame, Hunk, Line, LineKind, Listing, Note, Placement, Registration, Side,
+    Status, Store, StoreWatch, Worktree, names_a_record, resolve, resolve_first, run_of,
 };
 
 use crate::VERSION;
@@ -361,18 +361,22 @@ impl Site {
             "side": note.side.name(),
             "line": note.line,
             "text": note.text,
+            "first_line": note.first.as_ref().map(|first| first.line),
+            "first_text": note.first.as_ref().map(|first| &first.text),
             "body": note.body,
             "status": note.status.name(),
             "reply": note.reply,
             "written": written,
             "placement": placement,
             "resolves": placed.current_line.is_some(),
-            "line_changed": line_changed,
+            "line_changed": line_changed || placed.first_changed,
             "adrift": placed.placement.is_none(),
             "current_line": placed.current_line,
             "current_text": placed.current_text,
             "current_path": placed.current_path,
             "context": context,
+            "current_first_line": placed.first_line,
+            "lines": placed.lines,
         })
     }
 
@@ -401,12 +405,10 @@ impl Site {
             // A diff the frame cannot read is still a file in the diff, which the
             // pane draws with its reason and the note under its heading as gone.
             Err(_) => Placed {
-                placement: Some(Placement::Gone),
-                current_line: None,
-                current_text: None,
                 current_path: Some(frame.files()[at].path.clone()),
-                context: Vec::new(),
-            },
+                ..Placed::adrift(Vec::new())
+            }
+            .gone(),
         }
     }
 
@@ -432,12 +434,30 @@ impl Site {
             Side::New => self.around(&current_path, centre),
             Side::Old => around_old(diff, centre),
         };
+        // A range follows its last line; its first only reports where it is and
+        // whether its text moved, as the pane draws it.
+        let first = note.first.as_ref().map(|first| {
+            match resolve_first(first, &diff.rows_on(first.side)) {
+                Placement::At(number) | Placement::Moved(number) => (Some(number), false),
+                Placement::Changed => (Some(first.line), true),
+                Placement::Gone => (None, false),
+            }
+        });
+        let lines = match (&note.first, first, current_line) {
+            (Some(start), Some((Some(from), _)), Some(to)) => {
+                range_lines(diff, (start.side, from), (note.side, to))
+            }
+            _ => Vec::new(),
+        };
         Placed {
             placement: Some(placement),
             current_line,
             current_text,
             current_path: Some(current_path),
             context,
+            first_line: first.and_then(|(line, _)| line),
+            first_changed: first.is_some_and(|(_, changed)| changed),
+            lines,
         }
     }
 
@@ -519,6 +539,33 @@ fn around_old(diff: &FileDiff, centre: u32) -> Vec<(u32, String)> {
         .collect()
 }
 
+/// The text of every line from `first` to `last`, each a side and a number, in
+/// the order the hunk holds them; empty when they are not in one hunk in that
+/// order, which a range written by the pane always is.
+fn range_lines(diff: &FileDiff, first: (Side, u32), last: (Side, u32)) -> Vec<String> {
+    let is = |(side, number): (Side, u32), (old, new, line): &(u32, u32, &Line)| {
+        Side::of(line.kind) == side
+            && match side {
+                Side::Old => *old == number,
+                Side::New => *new == number,
+            }
+    };
+    for hunk in &diff.hunks {
+        let positions: Vec<(u32, u32, &Line)> = hunk.positions().collect();
+        let start = positions.iter().position(|at| is(first, at));
+        let end = positions.iter().position(|at| is(last, at));
+        if let (Some(start), Some(end)) = (start, end)
+            && start <= end
+        {
+            return positions[start..=end]
+                .iter()
+                .map(|(_, _, line)| line.text.clone())
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 /// Where a note's line is now, as the agent is told. `None` for the placement
 /// is a file the diff does not hold, which is adrift.
 struct Placed {
@@ -527,6 +574,12 @@ struct Placed {
     current_text: Option<String>,
     current_path: Option<String>,
     context: Vec<(u32, String)>,
+    /// Where a range's first line is now, when it has one and it was found.
+    first_line: Option<u32>,
+    /// Whether that line's text moved under it.
+    first_changed: bool,
+    /// Every line of the range as it stands, first to last.
+    lines: Vec<String>,
 }
 
 impl Placed {
@@ -537,6 +590,16 @@ impl Placed {
             current_text: None,
             current_path: None,
             context,
+            first_line: None,
+            first_changed: false,
+            lines: Vec::new(),
+        }
+    }
+
+    fn gone(self) -> Self {
+        Self {
+            placement: Some(Placement::Gone),
+            ..self
         }
     }
 }

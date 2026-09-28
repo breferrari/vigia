@@ -47,6 +47,7 @@ fn pinned(id: &str, path: &str, side: Side, line: u32, text: &str) -> Note {
         side,
         line,
         text: text.to_owned(),
+        first: None,
         body: format!("about {id}"),
         status: Status::Open,
         reply: None,
@@ -279,6 +280,41 @@ fn notes_on_an_empty_store_answers_an_empty_list_and_no_error() {
         !rig.store.dir().exists(),
         "a listing creates nothing: the store appears on the first write"
     );
+}
+
+#[test]
+fn notes_carries_a_ranges_first_line_and_every_line_in_it() {
+    let rig = Rig::new("mcp-range");
+    // From the removed fifth line, across its replacement, to the sixth.
+    let ranged = Note {
+        first: Some(vigia_core::LineRef {
+            side: Side::Old,
+            line: 5,
+            text: "line 5".to_owned(),
+        }),
+        ..pinned("range-1", PATH, Side::New, 6, "line 6")
+    };
+    rig.store.put(&ranged).expect("the pane writes");
+    let mut server = rig.server();
+    let first = document(&mut server, false);
+    let listed = note_named(&first, "range-1");
+    assert_eq!(listed["first_line"], 5);
+    assert_eq!(listed["first_text"], "line 5");
+    assert_eq!(listed["current_first_line"], 5);
+    assert_eq!(listed["line_changed"], false);
+    assert_eq!(
+        listed["lines"],
+        serde_json::json!(["line 5", EDITED, "line 6"]),
+        "the agent is not sent every line of the range, in order"
+    );
+
+    // A note on one line is sent no range.
+    let one = pinned("one-1", PATH, Side::New, 6, "line 6");
+    rig.store.put(&one).expect("the pane writes");
+    let again = document(&mut server, false);
+    let listed = note_named(&again, "one-1");
+    assert!(listed["first_line"].is_null(), "{listed}");
+    assert_eq!(listed["lines"], serde_json::json!([]));
 }
 
 #[test]

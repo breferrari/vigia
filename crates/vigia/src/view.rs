@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use vigia_core::{
     ChangeKind, Churn, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
-    Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
-    run_of,
+    LineRef, Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status,
+    resolve, resolve_first, run_of,
 };
 
 use crate::quote::{Chunk, CodeRow, Run};
@@ -455,6 +455,8 @@ pub struct Anchor {
     /// Its whole text, which is what finds it again after an edit above moves
     /// the number.
     pub text: String,
+    /// The first line, when a drag from the gutter covered more than this one.
+    pub first: Option<LineRef>,
     /// The run the row was drawn in. A path in both runs draws the same line
     /// twice, so nothing else says which of them the reader pressed.
     pub origin: Origin,
@@ -489,6 +491,9 @@ pub struct Noted {
     /// The row of the line the note box is open under, when that line is on
     /// this screen, so the number keeps the note's ink while the box is up.
     pub boxed: Option<usize>,
+    /// Rows inside a range above the line its note hangs under, which carry
+    /// the note's ink and are no target for reopening it.
+    pub ranged: Vec<usize>,
 }
 
 /// Columns a note row spends before its text: the lead and its gap.
@@ -507,7 +512,9 @@ struct BoxPin {
     row: usize,
     /// Whether `row` is the anchored line rather than the file's heading.
     marks: bool,
-    /// `path:line`, for the top edge.
+    /// The logical row the range begins on, when it covers more than `row`.
+    from: Option<usize>,
+    /// `path:line` or `path:first-last`, for the top edge.
     label: String,
     lines: Vec<String>,
     /// As a line and a character within it.
@@ -529,6 +536,8 @@ struct Pin {
     /// Whether `row` is the note's own line, which carries the mark, rather than
     /// the file's heading.
     marks: bool,
+    /// The logical row the range begins on, when it covers more than `row`.
+    from: Option<usize>,
     /// Whether the agent has resolved it, so its reply alone is drawn, or its
     /// body where the agent left no reply.
     resolved: bool,
@@ -1803,8 +1812,52 @@ impl View {
             side: Side::of(*kind),
             line: *number,
             text: self.line_at(head),
+            first: None,
             origin: path.1,
         })
+    }
+
+    /// What a note over rows `from..=to` would pin to, with the row its last line
+    /// is on: each end moved inward to the nearest line row, so a drag that ends
+    /// on a note's own rows still lands on code. The first line is `None` when
+    /// both ends are one line.
+    pub fn anchor_over(&self, from: usize, to: usize) -> Option<(usize, Anchor)> {
+        let (from, to) = (from.min(to), from.max(to));
+        let (last, mut anchor) = (from..=to)
+            .rev()
+            .find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
+        let (first, head) =
+            (from..=last).find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
+        if self.head_of(first) != self.head_of(last) {
+            anchor.first = Some(LineRef {
+                side: head.side,
+                line: head.line,
+                text: head.text,
+            });
+        }
+        Some((last, anchor))
+    }
+
+    /// The rows of the hunk row `offset` is in, from its first row to its last,
+    /// or `None` off a hunk's rows. A note's range may not leave them.
+    pub fn hunk_rows(&self, offset: usize) -> Option<(usize, usize)> {
+        let inside = |row: &Row| {
+            matches!(
+                row,
+                Row::Line { .. } | Row::Wrap { .. } | Row::Note { .. } | Row::Box { .. }
+            )
+        };
+        if !self.rows.get(offset).is_some_and(inside) {
+            return None;
+        }
+        let top = (0..offset)
+            .rev()
+            .find(|&at| !inside(&self.rows[at]))
+            .map_or(0, |at| at + 1);
+        let bottom = (offset + 1..self.rows.len())
+            .find(|&at| !inside(&self.rows[at]))
+            .map_or(self.rows.len() - 1, |at| at - 1);
+        Some((top, bottom))
     }
 
     /// The notes marked on the line row `offset` is on, by id.
@@ -2035,6 +2088,9 @@ impl View {
                 .as_ref()
                 .filter(|boxed| boxed.marks)
                 .map(|boxed| boxed.row);
+            self.notes.ranged = ranges(pins, walked.boxed.as_ref())
+                .flat_map(|(from, row)| from..row)
+                .collect();
             return 0;
         }
 
@@ -2217,6 +2273,9 @@ impl View {
             .as_ref()
             .filter(|boxed| boxed.marks)
             .and_then(|boxed| landed[boxed.row]);
+        self.notes.ranged = ranges(pins, walked.boxed.as_ref())
+            .flat_map(|(from, row)| (from..row).filter_map(|at| landed[at]))
+            .collect();
         // A segment names the first row of its file still on screen, which after
         // the trim may be a later row than the one the walk recorded.
         let segments = std::mem::take(&mut self.notes.segments);
@@ -2508,29 +2567,101 @@ struct Walked {
     boxed: Option<BoxPin>,
 }
 
-/// The logical row a note's line landed on, the word it carries there, whether
-/// its rows dim, and whether the row is the line rather than the heading;
-/// `None` off this screen, which is not a state.
+/// Where a note landed: the logical row of its last line, the word it carries
+/// there, whether its rows dim, whether the row is the line rather than the
+/// heading, and the logical row its range begins on. `None` off this screen,
+/// which is not a state.
+struct Landed {
+    row: usize,
+    word: &'static str,
+    faded: bool,
+    marks: bool,
+    from: Option<usize>,
+}
+
+/// Each range on this screen as the logical rows from its first line up to the
+/// line it hangs under, the box's included.
+fn ranges<'p>(
+    pins: &'p [Pin],
+    boxed: Option<&'p BoxPin>,
+) -> impl Iterator<Item = (usize, usize)> + 'p {
+    pins.iter()
+        .filter(|pin| pin.marks)
+        .filter_map(|pin| Some((pin.from?, pin.row)))
+        .chain(
+            boxed
+                .filter(|boxed| boxed.marks)
+                .and_then(|boxed| Some((boxed.from?, boxed.row))),
+        )
+}
+
+/// A file's rows on each side, taken once and only when a note asks for them.
+struct Rows<'d> {
+    diff: &'d FileDiff,
+    new: Option<Vec<(u32, &'d str)>>,
+    old: Option<Vec<(u32, &'d str)>>,
+}
+
+impl<'d> Rows<'d> {
+    fn of(diff: &'d FileDiff) -> Self {
+        Self {
+            diff,
+            new: None,
+            old: None,
+        }
+    }
+
+    fn on(&mut self, side: Side) -> &[(u32, &'d str)] {
+        let diff = self.diff;
+        match side {
+            Side::New => self.new.get_or_insert_with(|| diff.rows_on(Side::New)),
+            Side::Old => self.old.get_or_insert_with(|| diff.rows_on(Side::Old)),
+        }
+    }
+}
+
 fn placed_at(
     note: &Note,
-    rows: &[(u32, &str)],
+    rows: &mut Rows<'_>,
     heading: Option<usize>,
     placed: &[(Side, u32, usize)],
-) -> Option<(usize, &'static str, bool, bool)> {
-    let row_of = |number: u32| {
+) -> Option<Landed> {
+    let row_of = |side: Side, number: u32| {
         placed
             .iter()
-            .find(|(side, at, _)| *side == note.side && *at == number)
+            .find(|(at_side, at, _)| *at_side == side && *at == number)
             .map(|(_, _, row)| *row)
     };
-    let (row, word, faded, marks) = match resolve(note, rows) {
+    let (row, mut word, mut faded, marks) = match resolve(note, rows.on(note.side)) {
         Placement::At(number) | Placement::Moved(number) => {
-            (row_of(number), note.status.name(), false, true)
+            (row_of(note.side, number), note.status.name(), false, true)
         }
-        Placement::Changed => (row_of(note.line), "changed", true, true),
+        Placement::Changed => (row_of(note.side, note.line), "changed", true, true),
         Placement::Gone => (heading, "gone", false, false),
     };
-    row.map(|row| (row, word, faded, marks))
+    let row = row?;
+    // A range follows its last line. Its first line only widens the marks, and
+    // dims the note when its text moved; a first line not found shrinks it.
+    let from = match &note.first {
+        Some(first) if marks => match resolve_first(first, rows.on(first.side)) {
+            Placement::At(number) | Placement::Moved(number) => row_of(first.side, number),
+            Placement::Changed => {
+                word = "changed";
+                faded = true;
+                row_of(first.side, first.line)
+            }
+            Placement::Gone => None,
+        },
+        _ => None,
+    }
+    .filter(|&from| from < row);
+    Some(Landed {
+        row,
+        word,
+        faded,
+        marks,
+        from,
+    })
 }
 
 /// Place the box the way a note is placed, so it follows its line as one does.
@@ -2540,12 +2671,19 @@ fn place_box(
     heading: Option<usize>,
     placed: &[(Side, u32, usize)],
 ) -> Option<BoxPin> {
-    let rows = diff.rows_on(stand_in.note.side);
-    let (row, _, _, marks) = placed_at(&stand_in.note, &rows, heading, placed)?;
+    let landed = placed_at(&stand_in.note, &mut Rows::of(diff), heading, placed)?;
+    let note = &stand_in.note;
+    let label = match &note.first {
+        Some(first) if landed.from.is_some() => {
+            format!("{}:{}-{}", note.path, first.line, note.line)
+        }
+        _ => format!("{}:{}", note.path, note.line),
+    };
     Some(BoxPin {
-        row,
-        marks,
-        label: format!("{}:{}", stand_in.note.path, stand_in.note.line),
+        row: landed.row,
+        marks: landed.marks,
+        from: landed.from,
+        label,
         lines: stand_in.lines.to_vec(),
         cursor: stand_in.cursor,
     })
@@ -2564,16 +2702,18 @@ fn pin(
     placed: &[(Side, u32, usize)],
     mut highlighter: Option<&mut Pass<'_>>,
 ) {
-    let mut on_new: Option<Vec<(u32, &str)>> = None;
-    let mut on_old: Option<Vec<(u32, &str)>> = None;
+    let mut rows = Rows::of(diff);
     for note in notes {
-        let rows = match note.side {
-            Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
-            Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
-        };
         // Off screen this frame, which is not a state: the row it belongs on is
         // not drawn, so neither is it.
-        let Some((row, word, faded, marks)) = placed_at(note, rows, heading, placed) else {
+        let Some(Landed {
+            row,
+            word,
+            faded,
+            marks,
+            from,
+        }) = placed_at(note, &mut rows, heading, placed)
+        else {
             continue;
         };
         pins.push(Pin {
@@ -2587,6 +2727,7 @@ fn pin(
             word,
             faded,
             marks,
+            from,
             resolved: note.status == Status::Resolved,
         });
     }
@@ -2606,6 +2747,7 @@ mod tests {
         BoxPin {
             row: 0,
             marks: true,
+            from: None,
             label: "src/watch.rs:5".to_owned(),
             lines: lines.iter().map(|line| (*line).to_owned()).collect(),
             cursor,

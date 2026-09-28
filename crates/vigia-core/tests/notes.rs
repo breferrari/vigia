@@ -289,6 +289,38 @@ fn a_repeated_field_is_a_skip() {
 }
 
 #[test]
+fn a_range_is_read_back_whole_and_half_a_range_is_a_skip() {
+    let (_scratch, _root, store) = store("notes-range");
+    let ranged = Note {
+        first: Some(vigia_core::LineRef {
+            side: vigia_core::Side::Old,
+            line: 2,
+            text: "the first line, removed".to_owned(),
+        }),
+        ..note("good", 4, "the last line", "all of these")
+    };
+    store.put(&ranged).expect("put");
+    assert_eq!(store.get("good").expect("get"), Some(ranged));
+
+    // A range written without its first line's text names half of one.
+    let text = fs::read_to_string(store.dir().join("good.note")).expect("read it back");
+    let at = text.find("first-text ").expect("the range's text block");
+    let end = at + text[at..].find("body ").expect("the body after it");
+    fs::write(
+        store.dir().join("good.note"),
+        format!("{}{}", &text[..at], &text[end..]),
+    )
+    .expect("write half a range");
+    let listing = store.list().expect("list");
+    assert!(listing.notes.is_empty(), "{:?}", listing.notes);
+    assert!(
+        listing.skipped[0].1.contains("first line"),
+        "{}",
+        listing.skipped[0].1
+    );
+}
+
+#[test]
 fn trailing_bytes_are_a_skip() {
     let (_scratch, _root, store) = store("notes-trailing");
     let (_good, text) = good_note(&store);

@@ -526,6 +526,8 @@ pub struct Chrome {
     pub hovered: Option<Hovered>,
     /// The diff rows a drag has selected, when any are.
     pub selected: Option<Selection>,
+    /// The screen rows a drag from a gutter covers, when one is under way.
+    pub noting: Option<(u16, u16)>,
     /// Which bar is being scrolled and which way, when one is.
     pub scrolling: Option<(Grabbed, isize)>,
     /// The notes the footer counts beside the position.
@@ -2354,6 +2356,7 @@ pub fn render(
         gripped: chrome.gripped,
         hovered: chrome.hovered,
         selected: chrome.selected.map(Selection::rows),
+        noting: chrome.noting,
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
         // Whichever overlay is up, and never both: an effect must not run over
@@ -3656,6 +3659,7 @@ struct Painter<'a> {
     hovered: Option<Hovered>,
     /// The screen rows a drag has selected, top and bottom inclusive.
     selected: Option<(u16, u16)>,
+    noting: Option<(u16, u16)>,
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(Grabbed, isize)>,
@@ -4799,6 +4803,12 @@ impl Painter<'_> {
         let marks: Option<Vec<Option<bool>>> =
             (!view.notes.marked.is_empty() || view.notes.boxed.is_some()).then(|| {
                 let mut marks = vec![None; shown];
+                // A range's lines above the one it hangs under take the ink too.
+                for &row in &view.notes.ranged {
+                    if let Some(slot) = marks.get_mut(row) {
+                        *slot = Some(false);
+                    }
+                }
                 for mark in &view.notes.marked {
                     if let Some(slot) = marks.get_mut(mark.row) {
                         *slot = Some(slot.unwrap_or(true) && mark.bare);
@@ -4988,6 +4998,13 @@ impl Painter<'_> {
                 .is_some_and(|(top, bottom)| y >= top && y <= bottom)
             {
                 self.buf.set_style(row_wash, self.theme.selection);
+            }
+            if self
+                .noting
+                .is_some_and(|(top, bottom)| y >= top && y <= bottom)
+            {
+                self.buf
+                    .set_style(row_wash, self.theme.selection.patch(self.theme.note_line));
             }
         }
     }
@@ -6074,6 +6091,7 @@ mod tests {
             theme: &theme,
             glyphs: Glyphs::default(),
             selected: None,
+            noting: None,
             gutter: 0,
             inset: 0,
             trailing: 0,

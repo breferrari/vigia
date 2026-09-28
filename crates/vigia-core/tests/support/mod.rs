@@ -385,6 +385,7 @@ pub fn note(id: &str, line: u32, text: &str, body: &str) -> Note {
         side: Side::New,
         line,
         text: text.to_owned(),
+        first: None,
         body: body.to_owned(),
         status: Status::Open,
         reply: None,

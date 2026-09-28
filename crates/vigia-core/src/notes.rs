@@ -113,7 +113,19 @@ impl Status {
     }
 }
 
-/// One note, pinned to a line of the diff.
+/// One end of a note's range: a line by side, number and text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineRef {
+    /// The side it was on when the note was written.
+    pub side: Side,
+    /// Its 1-based number on that side then.
+    pub line: u32,
+    /// Its text then, which re-finds it after the number moves.
+    pub text: String,
+}
+
+/// One note, pinned to a line of the diff, or to a range in one hunk ending
+/// at that line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
     /// Unique across processes and restarts, and the file's name, so
@@ -128,6 +140,9 @@ pub struct Note {
     /// The line's text when the note was written, which is what re-finds it
     /// after an edit above moves the number.
     pub text: String,
+    /// The range's first line, where the note covers more than the line it
+    /// hangs under. `None` is a range of one.
+    pub first: Option<LineRef>,
     /// What the reader typed.
     pub body: String,
     /// Where it stands.
@@ -175,17 +190,27 @@ impl Placement {
 /// knowledge, so an adrift note is not a placement.
 #[must_use]
 pub fn resolve(note: &Note, rows: &[(u32, &str)]) -> Placement {
+    resolve_line(note.line, &note.text, rows)
+}
+
+/// [`resolve`] for a range's first line, among `rows` on its own side.
+#[must_use]
+pub fn resolve_first(first: &LineRef, rows: &[(u32, &str)]) -> Placement {
+    resolve_line(first.line, &first.text, rows)
+}
+
+fn resolve_line(line: u32, text: &str, rows: &[(u32, &str)]) -> Placement {
     let mut number_drawn = false;
     let mut nearest: Option<(u32, u32)> = None;
     for &(n, t) in rows {
-        number_drawn |= n == note.line;
-        if t != note.text {
+        number_drawn |= n == line;
+        if t != text {
             continue;
         }
-        if n == note.line {
+        if n == line {
             return Placement::At(n);
         }
-        let distance = n.abs_diff(note.line);
+        let distance = n.abs_diff(line);
         // Nearest wins; on a tie the earlier line does, so a repeated line
         // resolves the same way whatever order the rows arrive in.
         let closer = nearest.is_none_or(|(d, at)| distance < d || (distance == d && n < at));
@@ -606,6 +631,12 @@ fn encode(note: &Note) -> String {
     let _ = writeln!(out, "id: {}", note.id);
     let _ = writeln!(out, "side: {}", note.side.name());
     let _ = writeln!(out, "line: {}", note.line);
+    // Only a range writes these, so a note on one line reads in a version
+    // that knows nothing of ranges.
+    if let Some(first) = &note.first {
+        let _ = writeln!(out, "first-side: {}", first.side.name());
+        let _ = writeln!(out, "first-line: {}", first.line);
+    }
     let _ = writeln!(out, "status: {}", note.status.name());
     let _ = writeln!(out, "written: {secs}");
     let mut block = |name: &str, text: &str| {
@@ -615,6 +646,9 @@ fn encode(note: &Note) -> String {
     };
     block("path", &note.path);
     block("text", &note.text);
+    if let Some(first) = &note.first {
+        block("first-text", &first.text);
+    }
     block("body", &note.body);
     if let Some(reply) = &note.reply {
         block("reply", reply);
@@ -636,6 +670,8 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
     let mut id = None;
     let mut side = None;
     let mut line = None;
+    let mut first_side = None;
+    let mut first_line = None;
     let mut status = None;
     let mut written = None;
     loop {
@@ -661,11 +697,19 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
             "id" => return Err(format!("id {value:?} is not a note id")),
             "side" => {
                 twice(side.is_some())?;
-                side = Some(match value {
-                    "old" => Side::Old,
-                    "new" => Side::New,
-                    other => return Err(format!("side {other:?} is neither old nor new")),
-                });
+                side = Some(side_of(value)?);
+            }
+            "first-side" => {
+                twice(first_side.is_some())?;
+                first_side = Some(side_of(value)?);
+            }
+            "first-line" => {
+                twice(first_line.is_some())?;
+                first_line = Some(
+                    value
+                        .parse::<u32>()
+                        .map_err(|_| format!("first-line {value:?} is not a number"))?,
+                );
             }
             "line" => {
                 twice(line.is_some())?;
@@ -699,6 +743,16 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
     }
     let path = cursor.block("path")?;
     let text = cursor.block("text")?;
+    let first_text = if cursor.starts_with("first-text ") {
+        Some(cursor.block("first-text")?)
+    } else {
+        None
+    };
+    let first = match (first_side, first_line, first_text) {
+        (Some(side), Some(line), Some(text)) => Some(LineRef { side, line, text }),
+        (None, None, None) => None,
+        _ => return Err("the range's first line is missing a field".to_owned()),
+    };
     let body = cursor.block("body")?;
     let reply = if cursor.at_end() {
         None
@@ -715,11 +769,20 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
         side: side.ok_or_else(|| missing("side"))?,
         line: line.ok_or_else(|| missing("line"))?,
         text,
+        first,
         body,
         status: status.ok_or_else(|| missing("status"))?,
         reply,
         written: written.ok_or_else(|| missing("written"))?,
     })
+}
+
+fn side_of(value: &str) -> std::result::Result<Side, String> {
+    match value {
+        "old" => Ok(Side::Old),
+        "new" => Ok(Side::New),
+        other => Err(format!("side {other:?} is neither old nor new")),
+    }
 }
 
 /// A position in the bytes being decoded.

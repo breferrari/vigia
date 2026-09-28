@@ -370,11 +370,12 @@ pub struct Pointing {
     pub scrolling: Option<(Grabbed, isize)>,
     /// The rows a drag has selected, when any are.
     pub selected: Option<Selection>,
+    /// The rows a drag from a gutter covers, when one is under way.
+    pub noting: Option<(u16, u16)>,
 }
 
 /// Rows of the diff a drag is washing, which the button coming up sends. Screen
-/// rows and not row indices: the span is re-resolved against every frame, so no
-/// stored text can disagree with the wash.
+/// rows, re-resolved every frame, so no stored text can disagree with the wash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
     /// The screen row the press landed on.

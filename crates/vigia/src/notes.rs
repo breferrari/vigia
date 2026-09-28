@@ -70,14 +70,96 @@ pub fn has_room(regions: Regions) -> bool {
     usize::from(regions.diff.text.saturating_sub(gutter)) > crate::view::BOX_FRAME
 }
 
-/// What a press at row `offset` of `view` opens the box on: the line's anchor,
-/// and the open note already pinned there when there is one, whose text the
-/// box takes. `None` off a content row.
+/// A drag from a gutter under way, in screen rows: where it began, where the
+/// pointer is, and the rows of the hunk it began in, which it may not leave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteDrag {
+    from: u16,
+    head: u16,
+    top: u16,
+    bottom: u16,
+}
+
+impl NoteDrag {
+    /// The rows it covers, top first.
+    #[must_use]
+    pub fn rows(self) -> (u16, u16) {
+        (self.from.min(self.head), self.from.max(self.head))
+    }
+
+    /// The same rows as offsets from the diff's top row, which is how the view
+    /// numbers them.
+    #[must_use]
+    pub fn offsets(self, top: u16) -> (usize, usize) {
+        let (from, to) = self.rows();
+        (
+            usize::from(from.saturating_sub(top)),
+            usize::from(to.saturating_sub(top)),
+        )
+    }
+}
+
+/// The drag from a gutter this event leaves standing, and the one it ended,
+/// from what was standing before it. A press on a content row's gutter begins
+/// one, a drag moves its head inside its hunk, and the button coming up ends
+/// it; every other event leaves it as it was.
 #[must_use]
-pub fn opening(view: &View, offset: usize, notes: &[Note]) -> Option<(Anchor, Option<Note>)> {
-    let anchor = view.anchor_at(offset)?;
+pub fn drag_after(
+    view: &View,
+    regions: Regions,
+    event: &Event,
+    was: Option<NoteDrag>,
+) -> (Option<NoteDrag>, Option<NoteDrag>) {
+    let Event::Mouse(mouse) = event else {
+        return (was, None);
+    };
+    match (mouse.kind, was) {
+        (MouseEventKind::Down(MouseButton::Left), _) => {
+            let Some(offset) = press_at(view, regions, event) else {
+                return (was, None);
+            };
+            let (top, bottom) = view.hunk_rows(offset).unwrap_or((offset, offset));
+            let row = |offset: usize| {
+                regions
+                    .diff
+                    .top
+                    .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX))
+            };
+            let at = row(offset);
+            let begun = NoteDrag {
+                from: at,
+                head: at,
+                top: row(top),
+                bottom: row(bottom),
+            };
+            (Some(begun), None)
+        }
+        (MouseEventKind::Drag(MouseButton::Left), Some(drag)) => (
+            Some(NoteDrag {
+                head: mouse.row.clamp(drag.top, drag.bottom),
+                ..drag
+            }),
+            None,
+        ),
+        (MouseEventKind::Up(_), Some(drag)) => (None, Some(drag)),
+        _ => (was, None),
+    }
+}
+
+/// What a drag over rows `from..=to` of `view` opens the box on: the range's
+/// anchor, and the open note already hanging under its last line when there is
+/// one, whose text the box takes. Reopened by a press on its one line, a note
+/// keeps the range it was written over. `None` when no row in it is a line.
+#[must_use]
+pub fn opening(
+    view: &View,
+    from: usize,
+    to: usize,
+    notes: &[Note],
+) -> Option<(Anchor, Option<Note>)> {
+    let (last, mut anchor) = view.anchor_over(from, to)?;
     let existing = view
-        .marked_at(offset)
+        .marked_at(last)
         .into_iter()
         .find_map(|id| {
             notes
@@ -85,6 +167,11 @@ pub fn opening(view: &View, offset: usize, notes: &[Note]) -> Option<(Anchor, Op
                 .find(|note| note.id == id && note.status != Status::Resolved)
         })
         .cloned();
+    if anchor.first.is_none()
+        && let Some(note) = &existing
+    {
+        anchor.first.clone_from(&note.first);
+    }
     Some((anchor, existing))
 }
 
@@ -211,6 +298,7 @@ impl NoteBox {
                 side: self.anchor.side,
                 line: self.anchor.line,
                 text: self.anchor.text.clone(),
+                first: self.anchor.first.clone(),
                 body: String::new(),
                 status: Status::Open,
                 reply: None,
@@ -336,6 +424,7 @@ pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
                 body,
                 status: Status::Open,
                 written: SystemTime::now(),
+                first: open.anchor.first.clone(),
                 ..note
             };
             if store.rewrite(&rewritten)? {
@@ -358,6 +447,7 @@ pub fn commit(store: &Store, open: &NoteBox) -> Result<Committed> {
                 side: open.anchor.side,
                 line: open.anchor.line,
                 text: open.anchor.text.clone(),
+                first: open.anchor.first.clone(),
                 body,
                 status: Status::Open,
                 reply: None,

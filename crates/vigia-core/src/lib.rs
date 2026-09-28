@@ -57,8 +57,8 @@ pub use history::{
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use notes::{
-    Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, key, names_a_record, resolve,
-    run_of,
+    LineRef, Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, key, names_a_record,
+    resolve, resolve_first, run_of,
 };
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};

@@ -64,9 +64,9 @@ pub use motion::{
     effect_interval, length,
 };
 pub use notes::{
-    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
-    box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
-    resolve_arrival, withdraw, word_arrival,
+    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteDrag, NoteEffects, SWEEP, Settled,
+    TRANSITION, box_entrance, box_exit, box_route, commit, drag_after, edge_at, has_room, leaving,
+    opening, press_at, resolve_arrival, withdraw, word_arrival,
 };
 pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
@@ -379,6 +379,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         grabbed: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         scrolling_until: None,
         next: None,
@@ -632,11 +633,19 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             MenuRoute::Through => {}
                         }
                     }
-                    // A press on a content row's gutter opens the box and never begins
-                    // a selection, which is B20 and B21 sharing no cell: it is answered
-                    // here and the wash below never sees it.
-                    if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
-                        shell.open_box(offset, Instant::now());
+                    // A press on a content row's gutter begins a note and never a
+                    // selection, which is B20 and B21 sharing no cell: every pointer
+                    // event of that drag is answered here and the wash below never
+                    // sees it, and the button coming up opens the box over the span.
+                    let (noting, ended) =
+                        notes::drag_after(&shell.screen, regions, &event, shell.noting);
+                    if matches!(event, Event::Mouse(_))
+                        && (shell.noting.is_some() || noting.is_some())
+                    {
+                        shell.noting = noting;
+                        if let Some(span) = ended {
+                            shell.open_box(span, Instant::now());
+                        }
                         continue;
                     }
                     // And a press on a note's own left side takes that note back,
@@ -1001,6 +1010,8 @@ struct Shell {
     hovered: Option<Hovered>,
     /// The diff rows a drag has selected, in screen rows of the last paint.
     selected: Option<Selection>,
+    /// A drag from a gutter under way, which ends by opening the box.
+    noting: Option<notes::NoteDrag>,
     /// Which way the viewport is currently being moved, and until when.
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
@@ -1090,6 +1101,7 @@ impl Shell {
             gripped: self.gripped(),
             hovered: self.hovered(),
             selected: self.selected,
+            noting: self.noting.map(notes::NoteDrag::rows),
             scrolling: self.scrolling,
         }
     }
@@ -1218,12 +1230,14 @@ impl Shell {
     ) -> vigia_core::Result<bool> {
         // The rung `Esc` climbs over quitting, reachable only while the button is
         // down. Without it a tap mid-drag ends the program.
-        if action == Action::Escape && self.selected.is_some() {
+        if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {
             self.deselect();
+            self.noting = None;
             return Ok(true);
         }
         if action != Action::Redraw {
             self.deselect();
+            self.noting = None;
         }
         let before = self.app.settings();
         let opened = self.app.positions_open();
@@ -1326,7 +1340,7 @@ impl Shell {
     /// note already there when there is one, and arm its entrance. With no store
     /// to write to, and on a pane too narrow to draw the box, there is nothing
     /// to open: the footer says so instead.
-    fn open_box(&mut self, offset: usize, now: Instant) {
+    fn open_box(&mut self, span: notes::NoteDrag, now: Instant) {
         if self.store.is_none() {
             self.say(state::no_home(), Voice::Alert, now);
             return;
@@ -1339,7 +1353,8 @@ impl Shell {
             );
             return;
         }
-        let Some((anchor, existing)) = notes::opening(&self.screen, offset, self.app.notes())
+        let (from, to) = span.offsets(self.regions.diff.top);
+        let Some((anchor, existing)) = notes::opening(&self.screen, from, to, self.app.notes())
         else {
             return;
         };
@@ -2316,7 +2331,7 @@ mod tests {
             "shell.send_wash(span);",
             "self.app.select(None);",
             // Neither is reachable from a test, and both shipped once.
-            "if action == Action::Escape && self.selected.is_some() {",
+            "if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {",
             "if action != Action::Redraw {",
             "if chrome.selected.is_none() {",
             "self.screen.lines_in(span.offsets(self.regions.diff.top))",
@@ -2541,8 +2556,8 @@ mod tests {
             .find("if shell.app.box_open() {")
             .expect("the input arm no longer asks whether the box owns the keys");
         let press = shipped
-            .find("notes::press_at(&shell.screen, regions, &event)")
-            .expect("the input arm no longer routes a gutter press to the box");
+            .find("notes::drag_after(&shell.screen, regions, &event, shell.noting)")
+            .expect("the input arm no longer routes a gutter drag to the box");
         let wash = shipped
             .find("selection_after(&event, regions, shell.selected)")
             .expect("the input arm no longer opens a wash");
@@ -2591,7 +2606,7 @@ mod tests {
         // drawn screen can catch: without it a press on a pane too narrow to
         // draw the box still takes every key.
         let open = shipped
-            .split("fn open_box(&mut self, offset: usize, now: Instant) {")
+            .split("fn open_box(&mut self, span: notes::NoteDrag, now: Instant) {")
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`open_box` is gone");
