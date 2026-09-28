@@ -361,7 +361,7 @@ struct IndexPrint {
     /// `None` when git wrote no checksum, as `index.skipHash` does, since a
     /// zero there matches every index and so proves nothing.
     checksum: Option<Vec<u8>>,
-    entries: u64,
+    digest: u64,
 }
 
 impl IndexWatch {
@@ -390,7 +390,7 @@ impl IndexWatch {
             .ok()
             .map(|file| IndexPrint::of(&file));
         let moved = fresh.is_none()
-            || self.print.as_ref().map(|p| p.entries) != fresh.as_ref().map(|p| p.entries);
+            || self.print.as_ref().map(|p| p.digest) != fresh.as_ref().map(|p| p.digest);
         self.print = fresh;
         moved
     }
@@ -426,7 +426,7 @@ impl IndexPrint {
                 .checksum()
                 .filter(|id| !id.is_null())
                 .map(|id| id.as_bytes().to_vec()),
-            entries: digest.finish(),
+            digest: digest.finish(),
         }
     }
 }

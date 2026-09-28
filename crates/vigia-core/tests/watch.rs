@@ -305,6 +305,44 @@ fn staging_a_change_produces_a_tick() {
     );
 }
 
+/// Run `git update-index <flag> a.txt` on a clean tree and require a tick. Each
+/// flag moves one field of an entry and nothing else, so each is the only
+/// thing that can tell the watch the index changed.
+fn an_index_flag_produces_a_tick(name: &str, flag: &str) {
+    let scratch = committed_scratch(name);
+    let before = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.git(&["update-index", flag, "a.txt"]);
+    let after = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+    assert_ne!(
+        before, after,
+        "this test proved nothing: `{flag}` did not rewrite the index"
+    );
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "`git update-index {flag}` changed an entry and produced no tick"
+    );
+}
+
+#[test]
+fn a_mode_change_in_the_index_produces_a_tick() {
+    an_index_flag_produces_a_tick("watch-index-mode", "--chmod=+x");
+}
+
+#[test]
+fn marking_a_path_skip_worktree_produces_a_tick() {
+    an_index_flag_produces_a_tick("watch-index-skip", "--skip-worktree");
+}
+
+#[test]
+fn marking_a_path_assume_unchanged_produces_a_tick() {
+    an_index_flag_produces_a_tick("watch-index-assume", "--assume-unchanged");
+}
+
 #[test]
 fn rewriting_the_index_unchanged_produces_no_tick() {
     let scratch = committed_scratch("watch-index-touch");
