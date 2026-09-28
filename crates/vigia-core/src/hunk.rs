@@ -124,6 +124,57 @@ impl FileDiff {
             .collect()
     }
 
+    /// The lines from `first` to `last`, each a side and a number, in the order
+    /// their hunk holds them, as `(old, new, line)`. `None` when they are not in
+    /// one hunk in that order, which a range the pane wrote always is.
+    #[must_use]
+    pub fn range(&self, first: (Side, u32), last: (Side, u32)) -> Option<Vec<(u32, u32, &Line)>> {
+        let is = |(side, number): (Side, u32), &(old, new, line): &(u32, u32, &Line)| {
+            Side::of(line.kind) == side
+                && number
+                    == match side {
+                        Side::Old => old,
+                        Side::New => new,
+                    }
+        };
+        for hunk in &self.hunks {
+            let mut lines: Option<Vec<(u32, u32, &Line)>> = None;
+            for at in hunk.positions() {
+                if lines.is_none() && is(first, &at) {
+                    lines = Some(Vec::new());
+                }
+                if let Some(held) = lines.as_mut() {
+                    held.push(at);
+                    if is(last, &at) {
+                        return lines;
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// How a label names the lines from `first` to `last`: `3-6` where they are
+    /// all on one side, and `-5 +3-6` where they cross, old numbers with `-` and
+    /// new with `+`, as a hunk header spells them. `None` off one hunk.
+    #[must_use]
+    pub fn span_label(&self, first: (Side, u32), last: (Side, u32)) -> Option<String> {
+        let lines = self.range(first, last)?;
+        let on = |side: Side| -> Vec<u32> {
+            lines
+                .iter()
+                .filter(|(_, _, line)| Side::of(line.kind) == side)
+                .map(|&(old, new, _)| if side == Side::Old { old } else { new })
+                .collect()
+        };
+        let (old, new) = (on(Side::Old), on(Side::New));
+        Some(match (spelled(&old), spelled(&new)) {
+            (Some(old), Some(new)) => format!("-{old} +{new}"),
+            (Some(one), None) | (None, Some(one)) => one,
+            (None, None) => return None,
+        })
+    }
+
     /// A file with no hunks, and why it has none: `Some` where a side of it
     /// could not be read, `None` for a state this crate deliberately reads
     /// nothing for.
@@ -405,6 +456,16 @@ fn first_line_of(bytes: &[u8]) -> Option<String> {
     let end = head.iter().position(|&b| b == b'\n').unwrap_or(head.len());
     let line = head[..end].strip_suffix(b"\r").unwrap_or(&head[..end]);
     Some(String::from_utf8_lossy(line).into_owned())
+}
+
+/// `5`, or `3-6`, for ascending numbers; `None` for none.
+fn spelled(numbers: &[u32]) -> Option<String> {
+    let (first, last) = (numbers.first()?, numbers.last()?);
+    Some(if first == last {
+        first.to_string()
+    } else {
+        format!("{first}-{last}")
+    })
 }
 
 #[cfg(test)]

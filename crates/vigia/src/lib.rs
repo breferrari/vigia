@@ -59,14 +59,14 @@ pub use menu::{
     menu_route,
 };
 pub use motion::{
-    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
-    NOTICE_ARRIVING, NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
-    SAID_ARRIVING, Timed, effect_interval, length,
+    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, NOTICE_ARRIVING,
+    NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, SAID_ARRIVING, Timed,
+    effect_interval, length,
 };
 pub use notes::{
-    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
-    box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
-    resolve_arrival, withdraw, word_arrival,
+    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteDrag, NoteEffects, SWEEP, Settled,
+    TRANSITION, box_entrance, box_exit, box_route, commit, drag_after, edge_at, has_room, leaving,
+    opening, press_at, resolve_arrival, withdraw, word_arrival,
 };
 pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
@@ -360,7 +360,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
         // that draws something.
-        effects: EffectManager::default(),
         notice_effects: EffectManager::default(),
         painted: Instant::now(),
         highlighter: Highlighter::new(),
@@ -380,6 +379,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         grabbed: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         scrolling_until: None,
         next: None,
@@ -633,11 +633,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             MenuRoute::Through => {}
                         }
                     }
-                    // A press on a content row's gutter opens the box and never begins
-                    // a selection, which is B20 and B21 sharing no cell: it is answered
-                    // here and the wash below never sees it.
-                    if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
-                        shell.open_box(offset, Instant::now());
+                    // Before the wash: a drag from a gutter is a note, never a selection.
+                    let (noting, ended) =
+                        notes::drag_after(&shell.screen, regions, &event, shell.noting.take());
+                    shell.noting = noting;
+                    if let Some(span) = ended {
+                        shell.open_box(&span, Instant::now());
+                        continue;
+                    }
+                    // A drag's own pointer events stop here; a key still reaches Esc,
+                    // and the event that ended a drag goes on to its own handler.
+                    if shell.noting.is_some() && matches!(event, Event::Mouse(_)) {
                         continue;
                     }
                     // And a press on a note's own left side takes that note back,
@@ -738,13 +744,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         continue;
                     }
                     shell.app.clear_notice();
-                    // Armed here rather than in `App::follow`, because a change
-                    // arrives whether or not the viewport moves to it.
-                    for path in &paths {
-                        shell
-                            .effects
-                            .add_unique_effect(path.clone(), motion::coalescing(ARRIVING));
-                    }
                     // A walk that fails describes the whole tree rather than one
                     // path in it, so the previous frame is still the best thing to
                     // draw and the footer says why. One file's own failure never
@@ -964,10 +963,7 @@ fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
 struct Shell {
     session: Session,
     app: App,
-    /// Keyed by path, so a second write replaces an effect rather than stacking.
-    effects: EffectManager<String>,
-    /// The footer's own: the diff's are clipped to it, and one manager processed
-    /// twice advances every effect in it twice a frame.
+    /// The footer's messages, clipped to the footer.
     notice_effects: EffectManager<String>,
     /// When the previous frame painted. The time since it is what an effect is
     /// told, through `effect_interval`, which may answer none of it.
@@ -1012,6 +1008,8 @@ struct Shell {
     hovered: Option<Hovered>,
     /// The diff rows a drag has selected, in screen rows of the last paint.
     selected: Option<Selection>,
+    /// A drag from a gutter under way, which ends by opening the box.
+    noting: Option<notes::NoteDrag>,
     /// Which way the viewport is currently being moved, and until when.
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
@@ -1101,6 +1099,10 @@ impl Shell {
             gripped: self.gripped(),
             hovered: self.hovered(),
             selected: self.selected,
+            noting: self
+                .noting
+                .as_ref()
+                .and_then(|drag| drag.rows(&self.screen, self.regions.diff.top)),
             scrolling: self.scrolling,
         }
     }
@@ -1124,8 +1126,7 @@ impl Shell {
     /// the next frame and by the record of whether one drew, so the two cannot
     /// disagree about what counts as an effect.
     fn effects_running(&self) -> bool {
-        self.effects.is_running()
-            || self.notice_effects.is_running()
+        self.notice_effects.is_running()
             || self.note_effects.is_running()
             || self.box_effect.as_ref().is_some_and(Timed::is_running)
             || self.menu_effect.as_ref().is_some_and(Timed::is_running)
@@ -1230,12 +1231,14 @@ impl Shell {
     ) -> vigia_core::Result<bool> {
         // The rung `Esc` climbs over quitting, reachable only while the button is
         // down. Without it a tap mid-drag ends the program.
-        if action == Action::Escape && self.selected.is_some() {
+        if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {
             self.deselect();
+            self.noting = None;
             return Ok(true);
         }
         if action != Action::Redraw {
             self.deselect();
+            self.noting = None;
         }
         let before = self.app.settings();
         let opened = self.app.positions_open();
@@ -1338,7 +1341,7 @@ impl Shell {
     /// note already there when there is one, and arm its entrance. With no store
     /// to write to, and on a pane too narrow to draw the box, there is nothing
     /// to open: the footer says so instead.
-    fn open_box(&mut self, offset: usize, now: Instant) {
+    fn open_box(&mut self, span: &notes::NoteDrag, now: Instant) {
         if self.store.is_none() {
             self.say(state::no_home(), Voice::Alert, now);
             return;
@@ -1351,7 +1354,10 @@ impl Shell {
             );
             return;
         }
-        let Some((anchor, existing)) = notes::opening(&self.screen, offset, self.app.notes())
+        let Some((from, to)) = span.offsets(&self.screen, self.regions.diff.top) else {
+            return;
+        };
+        let Some((anchor, existing)) = notes::opening(&self.screen, from, to, self.app.notes())
         else {
             return;
         };
@@ -2036,7 +2042,6 @@ impl Shell {
             self.effects_ran,
             now.saturating_duration_since(self.painted),
         );
-        let effects = &mut self.effects;
         let notice_effects = &mut self.notice_effects;
         let note_effects = &mut self.note_effects;
         let box_effect = &mut self.box_effect;
@@ -2053,17 +2058,9 @@ impl Shell {
             // retired here, between the layout and the paint that uses them.
             chrome.hovered = repainted(chrome.hovered, was, painted);
             chrome.selected = repainted(chrome.selected, was, painted);
+            chrome.noting = repainted(chrome.noting, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
-            // After the widgets, because an effect works on the cells they drew. The
-            // diff's own region only: a heading arriving is not a reason to disturb
-            // the header, the footer or the map.
-            let over = Rect::new(
-                painted.diff.left,
-                painted.diff.top,
-                painted.diff.width,
-                painted.diff.rows,
-            );
-            effects.process_effects(since.into(), f.buffer_mut(), over);
+            // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
             // off screen draws no cells and its effect waits, and `settle_notes`
             // retires it at its own end whether it ever drew or not.
@@ -2093,6 +2090,9 @@ impl Shell {
         self.painted = now;
         self.effects_ran = self.effects_running();
         self.hovered = chrome.hovered;
+        if chrome.noting.is_none() {
+            self.noting = None;
+        }
         if chrome.selected.is_none() {
             self.deselect();
         }
@@ -2308,6 +2308,22 @@ mod tests {
     }
 
     #[test]
+    fn a_write_the_agent_makes_arms_no_motion() {
+        // Armed per write, it blinks under an agent writing line after line.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let tick = shipped
+            .split("Wake::Tick(")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost(message) =>").next())
+            .expect("the tick arm is gone");
+        assert!(
+            !tick.contains("effect"),
+            "the tick arm arms an effect, so every write draws a motion over the diff"
+        );
+    }
+
+    #[test]
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
         // than driven. Each of these was a defect: a span the collect resolved to
@@ -2320,9 +2336,12 @@ mod tests {
             "shell.send_wash(span);",
             "self.app.select(None);",
             // Neither is reachable from a test, and both shipped once.
-            "if action == Action::Escape && self.selected.is_some() {",
+            "if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {",
             "if action != Action::Redraw {",
             "if chrome.selected.is_none() {",
+            // A note drag ends the same way when the layout moves under it.
+            "chrome.noting = repainted(chrome.noting, was, painted);",
+            "if chrome.noting.is_none() {",
             "self.screen.lines_in(span.offsets(self.regions.diff.top))",
         ] {
             assert!(
@@ -2545,8 +2564,8 @@ mod tests {
             .find("if shell.app.box_open() {")
             .expect("the input arm no longer asks whether the box owns the keys");
         let press = shipped
-            .find("notes::press_at(&shell.screen, regions, &event)")
-            .expect("the input arm no longer routes a gutter press to the box");
+            .find("notes::drag_after(&shell.screen, regions, &event, shell.noting.take())")
+            .expect("the input arm no longer routes a gutter drag to the box");
         let wash = shipped
             .find("selection_after(&event, regions, shell.selected)")
             .expect("the input arm no longer opens a wash");
@@ -2595,7 +2614,7 @@ mod tests {
         // drawn screen can catch: without it a press on a pane too narrow to
         // draw the box still takes every key.
         let open = shipped
-            .split("fn open_box(&mut self, offset: usize, now: Instant) {")
+            .split("fn open_box(&mut self, span: &notes::NoteDrag, now: Instant) {")
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`open_box` is gone");
@@ -2916,7 +2935,7 @@ mod tests {
             .filter(|name| name.ends_with("effect") || name.ends_with("effects"))
             .collect();
         assert!(
-            managers.len() >= 5,
+            managers.len() >= 4,
             "`Shell` declares {} effect fields, so this gate is reading its shape \
              wrongly rather than its fields: {managers:?}",
             managers.len()

@@ -114,7 +114,8 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     // Writing to a String cannot fail, so the results are discarded, which is
     // what `encode` does for the record one crate over.
     let mut out = String::new();
-    let _ = writeln!(out, "vigia note on {}:{}", note.path, note.line);
+    let from = note.span().map_or(note.line, |(first, _)| first);
+    let _ = writeln!(out, "vigia note on {}:{}", note.path, note.label());
     let _ = writeln!(out, "\n{}", note.body);
     if !context.is_empty() {
         let width = context
@@ -124,7 +125,11 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
             .unwrap_or(1);
         out.push('\n');
         for (number, text) in context {
-            let mark = if *number == note.line { '>' } else { ' ' };
+            let mark = if (from..=note.line).contains(number) {
+                '>'
+            } else {
+                ' '
+            };
             let _ = writeln!(out, "{mark} {number:>width$} | {text}");
         }
     }
@@ -267,7 +272,10 @@ pub fn post_each(
 #[must_use]
 pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
     match note.side {
-        Side::New => crate::notes::around(workdir, &note.path, note.line),
+        Side::New => {
+            let from = note.span().map_or(note.line, |(first, _)| first);
+            crate::notes::around_span(workdir, &note.path, from, note.line)
+        }
         Side::Old => Vec::new(),
     }
 }

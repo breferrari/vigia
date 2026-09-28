@@ -574,10 +574,12 @@ impl App {
             hovered,
             scrolling,
             selected,
+            noting,
         } = pointing;
         Chrome {
             pressed,
             selected,
+            noting,
             // `Some` even at zero: that is the only acknowledgment pressing
             // `a` on a worktree with nothing staged can give. Under `only` the run is
             // not walked, so the header counts nothing rather than a run it has not.
@@ -1434,6 +1436,7 @@ mod tests {
                 gripped: Some(Grabbed::Diff),
                 hovered: Some(Hovered::Button(79, 19)),
                 selected: None,
+                noting: None,
                 scrolling: Some((Grabbed::List, -1)),
             },
             Counted::default(),
