@@ -43,10 +43,8 @@ pub const NOTICE_LINGER: Duration = Duration::from_millis(4500);
 /// was read.
 pub const ARRIVED_LINGER: Duration = Duration::from_secs(60);
 
-/// How long the box takes to arrive, and to leave on Esc: a receipt's own
-/// length. The box answers a gutter the reader pressed one moment earlier, so it
-/// is certainly being looked at, and a shorter length at [`ARRIVING_FRAME`] is
-/// too few frames to read a radial resolve as anything but a pop.
+/// How long the box takes to arrive and to leave on Esc: a receipt's, since any
+/// shorter is too few frames to read its resolve as anything but a pop.
 pub const BOX_ARRIVING: Duration = SAID_ARRIVING;
 
 /// How long a note's rows and the agent's line take to arrive: an

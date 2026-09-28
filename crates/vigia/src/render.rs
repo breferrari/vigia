@@ -3659,6 +3659,7 @@ struct Painter<'a> {
     hovered: Option<Hovered>,
     /// The screen rows a drag has selected, top and bottom inclusive.
     selected: Option<(u16, u16)>,
+    /// The rows a drag from a gutter covers, washed in the note's ink.
     noting: Option<(u16, u16)>,
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
@@ -5001,7 +5002,7 @@ impl Painter<'_> {
             }
             if self
                 .noting
-                .is_some_and(|(top, bottom)| y >= top && y <= bottom)
+                .is_some_and(|(top, bottom)| (top..=bottom).contains(&y))
             {
                 self.buf
                     .set_style(row_wash, self.theme.selection.patch(self.theme.note_line));

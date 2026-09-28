@@ -375,24 +375,7 @@ impl Rig {
             "the loop routes a press to the open box, so this never reaches the \
              gutter with one up"
         );
-        let Some(offset) = press_at(&painted.view, painted.laid, &press(column, row)) else {
-            return false;
-        };
-        // The loop's own refusals, in its own order.
-        if !has_room(painted.laid) {
-            return false;
-        }
-        let (anchor, existing) = opening(&painted.view, offset, offset, self.app.notes())
-            .expect("a note press resolved to no anchor");
-        let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
-        self.app.open_box(anchor, existing.as_ref());
-        self.box_effect = Some(Timed::armed(box_entrance(&self.theme), self.clock));
-        self.advance(BOX_ARRIVING + ARRIVING_FRAME);
-        // The entrance was spent by the clock and never drawn, so the next paint
-        // tells whatever it arms nothing of that spell, as the shell's
-        // `effect_interval` would.
-        self.elapsed = Duration::ZERO;
-        true
+        self.drag_opens(painted, column, row, row)
     }
 
     /// The loop's own routing of a drag from the gutter at `column`, from row
@@ -418,6 +401,8 @@ impl Rig {
         self.app.open_box(anchor, existing.as_ref());
         self.box_effect = Some(Timed::armed(box_entrance(&self.theme), self.clock));
         self.advance(BOX_ARRIVING + ARRIVING_FRAME);
+        // Spent by the clock and never drawn, so the next paint tells whatever it
+        // arms nothing of it, as the shell's `effect_interval` would.
         self.elapsed = Duration::ZERO;
         true
     }

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use vigia_core::{
     ChangeKind, Churn, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
     LineRef, Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status,
-    resolve, resolve_first, run_of,
+    first_of, resolve, run_of,
 };
 
 use crate::quote::{Chunk, CodeRow, Run};
@@ -1841,12 +1841,7 @@ impl View {
     /// The rows of the hunk row `offset` is in, from its first row to its last,
     /// or `None` off a hunk's rows. A note's range may not leave them.
     pub fn hunk_rows(&self, offset: usize) -> Option<(usize, usize)> {
-        let inside = |row: &Row| {
-            matches!(
-                row,
-                Row::Line { .. } | Row::Wrap { .. } | Row::Note { .. } | Row::Box { .. }
-            )
-        };
+        let inside = |row: &Row| matches!(row, Row::Line { .. }) || row.is_display();
         if !self.rows.get(offset).is_some_and(inside) {
             return None;
         }
@@ -2088,9 +2083,7 @@ impl View {
                 .as_ref()
                 .filter(|boxed| boxed.marks)
                 .map(|boxed| boxed.row);
-            self.notes.ranged = ranges(pins, walked.boxed.as_ref())
-                .flat_map(|(from, row)| from..row)
-                .collect();
+            self.notes.ranged = ranged_rows(pins, walked.boxed.as_ref());
             return 0;
         }
 
@@ -2273,8 +2266,9 @@ impl View {
             .as_ref()
             .filter(|boxed| boxed.marks)
             .and_then(|boxed| landed[boxed.row]);
-        self.notes.ranged = ranges(pins, walked.boxed.as_ref())
-            .flat_map(|(from, row)| (from..row).filter_map(|at| landed[at]))
+        self.notes.ranged = ranged_rows(pins, walked.boxed.as_ref())
+            .into_iter()
+            .filter_map(|at| landed[at])
             .collect();
         // A segment names the first row of its file still on screen, which after
         // the trim may be a later row than the one the walk recorded.
@@ -2579,12 +2573,9 @@ struct Landed {
     from: Option<usize>,
 }
 
-/// Each range on this screen as the logical rows from its first line up to the
-/// line it hangs under, the box's included.
-fn ranges<'p>(
-    pins: &'p [Pin],
-    boxed: Option<&'p BoxPin>,
-) -> impl Iterator<Item = (usize, usize)> + 'p {
+/// The logical rows of every range on this screen above the line it hangs
+/// under, the box's included.
+fn ranged_rows(pins: &[Pin], boxed: Option<&BoxPin>) -> Vec<usize> {
     pins.iter()
         .filter(|pin| pin.marks)
         .filter_map(|pin| Some((pin.from?, pin.row)))
@@ -2593,6 +2584,8 @@ fn ranges<'p>(
                 .filter(|boxed| boxed.marks)
                 .and_then(|boxed| Some((boxed.from?, boxed.row))),
         )
+        .flat_map(|(from, row)| from..row)
+        .collect()
 }
 
 /// A file's rows on each side, taken once and only when a note asks for them.
@@ -2632,7 +2625,8 @@ fn placed_at(
             .find(|(at_side, at, _)| *at_side == side && *at == number)
             .map(|(_, _, row)| *row)
     };
-    let (row, mut word, mut faded, marks) = match resolve(note, rows.on(note.side)) {
+    let last = resolve(note, rows.on(note.side));
+    let (row, mut word, mut faded, marks) = match last {
         Placement::At(number) | Placement::Moved(number) => {
             (row_of(note.side, number), note.status.name(), false, true)
         }
@@ -2640,21 +2634,17 @@ fn placed_at(
         Placement::Gone => (heading, "gone", false, false),
     };
     let row = row?;
-    // A range follows its last line. Its first line only widens the marks, and
-    // dims the note when its text moved; a first line not found shrinks it.
-    let from = match &note.first {
-        Some(first) if marks => match resolve_first(first, rows.on(first.side)) {
-            Placement::At(number) | Placement::Moved(number) => row_of(first.side, number),
-            Placement::Changed => {
-                word = "changed";
-                faded = true;
-                row_of(first.side, first.line)
-            }
-            Placement::Gone => None,
-        },
-        _ => None,
+    let first = note
+        .first
+        .as_ref()
+        .and_then(|start| first_of(note, rows.on(start.side), last).map(|at| (start.side, at)));
+    if first.is_some_and(|(_, at)| at.changed) {
+        word = "changed";
+        faded = true;
     }
-    .filter(|&from| from < row);
+    let from = first
+        .and_then(|(side, at)| row_of(side, at.line))
+        .filter(|&from| from < row);
     Some(Landed {
         row,
         word,
@@ -2673,11 +2663,9 @@ fn place_box(
 ) -> Option<BoxPin> {
     let landed = placed_at(&stand_in.note, &mut Rows::of(diff), heading, placed)?;
     let note = &stand_in.note;
-    let label = match &note.first {
-        Some(first) if landed.from.is_some() => {
-            format!("{}:{}-{}", note.path, first.line, note.line)
-        }
-        _ => format!("{}:{}", note.path, note.line),
+    let label = match note.span().filter(|_| landed.from.is_some()) {
+        Some((first, last)) => format!("{}:{first}-{last}", note.path),
+        None => format!("{}:{}", note.path, note.line),
     };
     Some(BoxPin {
         row: landed.row,

@@ -114,13 +114,7 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     // Writing to a String cannot fail, so the results are discarded, which is
     // what `encode` does for the record one crate over.
     let mut out = String::new();
-    // A range's numbers are on one side only when both ends are, and only then
-    // do they read as one span of the file.
-    let from = note
-        .first
-        .as_ref()
-        .filter(|first| first.side == note.side)
-        .map_or(note.line, |first| first.line);
+    let from = note.span().map_or(note.line, |(first, _)| first);
     if from == note.line {
         let _ = writeln!(out, "vigia note on {}:{}", note.path, note.line);
     } else {

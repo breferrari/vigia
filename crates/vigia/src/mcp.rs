@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 use vigia_core::{
     CONTEXT, FileDiff, Frame, Hunk, Line, LineKind, Listing, Note, Placement, Registration, Side,
-    Status, Store, StoreWatch, Worktree, names_a_record, resolve, resolve_first, run_of,
+    Status, Store, StoreWatch, Worktree, first_of, names_a_record, resolve, run_of,
 };
 
 use crate::VERSION;
@@ -405,10 +405,10 @@ impl Site {
             // A diff the frame cannot read is still a file in the diff, which the
             // pane draws with its reason and the note under its heading as gone.
             Err(_) => Placed {
+                placement: Some(Placement::Gone),
                 current_path: Some(frame.files()[at].path.clone()),
                 ..Placed::adrift(Vec::new())
-            }
-            .gone(),
+            },
         }
     }
 
@@ -434,19 +434,11 @@ impl Site {
             Side::New => self.around(&current_path, centre),
             Side::Old => around_old(diff, centre),
         };
-        // A range follows its last line; its first only reports where it is and
-        // whether its text moved, as the pane draws it.
-        let first = note.first.as_ref().map(|first| {
-            match resolve_first(first, &diff.rows_on(first.side)) {
-                Placement::At(number) | Placement::Moved(number) => (Some(number), false),
-                Placement::Changed => (Some(first.line), true),
-                Placement::Gone => (None, false),
-            }
+        let first = note.first.as_ref().and_then(|start| {
+            first_of(note, &diff.rows_on(start.side), placement).map(|at| (start.side, at))
         });
-        let lines = match (&note.first, first, current_line) {
-            (Some(start), Some((Some(from), _)), Some(to)) => {
-                range_lines(diff, (start.side, from), (note.side, to))
-            }
+        let lines = match (first, current_line) {
+            (Some((side, at)), Some(to)) => range_lines(diff, (side, at.line), (note.side, to)),
             _ => Vec::new(),
         };
         Placed {
@@ -455,8 +447,8 @@ impl Site {
             current_text,
             current_path: Some(current_path),
             context,
-            first_line: first.and_then(|(line, _)| line),
-            first_changed: first.is_some_and(|(_, changed)| changed),
+            first_line: first.map(|(_, at)| at.line),
+            first_changed: first.is_some_and(|(_, at)| at.changed),
             lines,
         }
     }
@@ -551,16 +543,17 @@ fn range_lines(diff: &FileDiff, first: (Side, u32), last: (Side, u32)) -> Vec<St
             }
     };
     for hunk in &diff.hunks {
-        let positions: Vec<(u32, u32, &Line)> = hunk.positions().collect();
-        let start = positions.iter().position(|at| is(first, at));
-        let end = positions.iter().position(|at| is(last, at));
-        if let (Some(start), Some(end)) = (start, end)
-            && start <= end
-        {
-            return positions[start..=end]
-                .iter()
-                .map(|(_, _, line)| line.text.clone())
-                .collect();
+        let mut lines: Option<Vec<String>> = None;
+        for at in hunk.positions() {
+            if lines.is_none() && is(first, &at) {
+                lines = Some(Vec::new());
+            }
+            if let Some(lines) = lines.as_mut() {
+                lines.push(at.2.text.clone());
+                if is(last, &at) {
+                    return std::mem::take(lines);
+                }
+            }
         }
     }
     Vec::new()
@@ -593,13 +586,6 @@ impl Placed {
             first_line: None,
             first_changed: false,
             lines: Vec::new(),
-        }
-    }
-
-    fn gone(self) -> Self {
-        Self {
-            placement: Some(Placement::Gone),
-            ..self
         }
     }
 }

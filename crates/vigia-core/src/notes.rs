@@ -155,6 +155,18 @@ pub struct Note {
     pub written: SystemTime,
 }
 
+impl Note {
+    /// The stored numbers a label names, first and last, when both ends are on
+    /// one side; a range across sides has no span of numbers to name.
+    #[must_use]
+    pub fn span(&self) -> Option<(u32, u32)> {
+        self.first
+            .as_ref()
+            .filter(|first| first.side == self.side && first.line != self.line)
+            .map(|first| (first.line, self.line))
+    }
+}
+
 /// Where a note's line is among the rows in hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
@@ -193,10 +205,36 @@ pub fn resolve(note: &Note, rows: &[(u32, &str)]) -> Placement {
     resolve_line(note.line, &note.text, rows)
 }
 
-/// [`resolve`] for a range's first line, among `rows` on its own side.
+/// Where a range's first line stands now, beside its last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct First {
+    /// Its number on its own side now.
+    pub line: u32,
+    /// Whether its text moved under it, which draws the note changed.
+    pub changed: bool,
+}
+
+/// A range's first line among `rows` on its own side, given where its `last`
+/// line landed. `None` for a note on one line, and for a range whose last line
+/// is gone or whose first line is: a range follows its last line, and one whose
+/// first is gone shrinks to its last.
 #[must_use]
-pub fn resolve_first(first: &LineRef, rows: &[(u32, &str)]) -> Placement {
-    resolve_line(first.line, &first.text, rows)
+pub fn first_of(note: &Note, rows: &[(u32, &str)], last: Placement) -> Option<First> {
+    let first = note.first.as_ref()?;
+    if last == Placement::Gone {
+        return None;
+    }
+    match resolve_line(first.line, &first.text, rows) {
+        Placement::At(line) | Placement::Moved(line) => Some(First {
+            line,
+            changed: false,
+        }),
+        Placement::Changed => Some(First {
+            line: first.line,
+            changed: true,
+        }),
+        Placement::Gone => None,
+    }
 }
 
 fn resolve_line(line: u32, text: &str, rows: &[(u32, &str)]) -> Placement {
@@ -705,19 +743,11 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
             }
             "first-line" => {
                 twice(first_line.is_some())?;
-                first_line = Some(
-                    value
-                        .parse::<u32>()
-                        .map_err(|_| format!("first-line {value:?} is not a number"))?,
-                );
+                first_line = Some(number(name, value)?);
             }
             "line" => {
                 twice(line.is_some())?;
-                line = Some(
-                    value
-                        .parse::<u32>()
-                        .map_err(|_| format!("line {value:?} is not a number"))?,
-                );
+                line = Some(number(name, value)?);
             }
             "status" => {
                 twice(status.is_some())?;
@@ -775,6 +805,12 @@ fn decode(bytes: &[u8]) -> std::result::Result<Note, String> {
         reply,
         written: written.ok_or_else(|| missing("written"))?,
     })
+}
+
+fn number(name: &str, value: &str) -> std::result::Result<u32, String> {
+    value
+        .parse::<u32>()
+        .map_err(|_| format!("{name} {value:?} is not a number"))
 }
 
 fn side_of(value: &str) -> std::result::Result<Side, String> {
