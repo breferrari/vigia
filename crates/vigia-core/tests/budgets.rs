@@ -181,6 +181,12 @@ fn rename_tracking_costs_nothing_when_nothing_was_deleted() {
             .map(|c| c.expect("change"))
             .collect::<Vec<_>>()
     };
+    // A deletion that was restored no longer counts: the walk that saw it gone
+    // is the one that stops going straight to tracking.
+    scratch.remove("tracked.txt");
+    assert!(walk(true).iter().any(|c| c.kind == ChangeKind::Removed));
+    scratch.git(&["checkout", "--", "tracked.txt"]);
+
     let tracked = walk(true);
     assert_eq!(
         tracked.len(),
@@ -199,6 +205,52 @@ fn rename_tracking_costs_nothing_when_nothing_was_deleted() {
         on <= off * 3,
         "with nothing deleted, the walk took {on:?} tracking renames and {off:?} without, \
          so every untracked file is being weighed as a rename that cannot exist"
+    );
+}
+
+/// Tracked files in the deletion fixture: enough that comparing the index is
+/// most of a walk, so a walk taken twice shows.
+const TRACKED: usize = 3_000;
+
+#[test]
+fn a_lasting_deletion_costs_one_walk_a_tick_not_two() {
+    let scratch = Scratch::new("budget-renames-deleted");
+    for i in 0..TRACKED {
+        scratch.write(&format!("src/d{}/f{i}.txt", i % 30), "line\n");
+    }
+    scratch.commit_all("initial");
+    scratch.remove("src/d0/f0.txt");
+    let worktree = scratch.worktree();
+
+    let walk = |track_renames: bool| {
+        let options = ChangeOptions {
+            track_renames,
+            ..ChangeOptions::default()
+        };
+        worktree
+            .changes_with(options)
+            .expect("enumerate")
+            .map(|c| c.expect("change"))
+            .collect::<Vec<_>>()
+    };
+    let tracked = walk(true);
+    assert_eq!(
+        tracked.len(),
+        1,
+        "the fixture is not what this gate measures"
+    );
+    assert_eq!(tracked[0].kind, ChangeKind::Removed);
+
+    // Interleaved, so a machine that slows down slows both sides.
+    let (mut on, mut off) = (Duration::MAX, Duration::MAX);
+    for _ in 0..7 {
+        on = on.min(time(|| drop(walk(true))));
+        off = off.min(time(|| drop(walk(false))));
+    }
+    assert!(
+        on.as_secs_f64() <= off.as_secs_f64() * 1.5,
+        "with a deletion standing in the tree, a tick took {on:?} tracking renames and \
+         {off:?} without, so each tick is walking the tree twice"
     );
 }
 

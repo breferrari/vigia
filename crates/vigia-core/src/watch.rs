@@ -170,7 +170,7 @@ impl<'repo> Watcher<'repo> {
             .map_err(|e| Error::Watch(Box::new(e)))?;
 
         let roots = roots_of(workdir);
-        let index = IndexWatch::new(repo, &index);
+        let index = IndexWatch::new(repo);
 
         let (tx, rx) = mpsc::channel();
 
@@ -365,12 +365,15 @@ struct IndexPrint {
 }
 
 impl IndexWatch {
-    /// Seeded from the index the watcher already loaded, rather than read again.
-    fn new(repo: &gix::Repository, loaded: &gix::index::File) -> Self {
+    /// Starts with no print, so the first index event always walks. Seeding from
+    /// the index read here would hide a change written between the pane's first
+    /// walk and this watch arming: no event reports it, and every later refresh
+    /// would match the seed.
+    fn new(repo: &gix::Repository) -> Self {
         Self {
             path: repo.index_path(),
             hash: repo.object_hash(),
-            print: Some(IndexPrint::of(loaded)),
+            print: None,
         }
     }
 

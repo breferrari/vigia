@@ -343,6 +343,29 @@ fn marking_a_path_assume_unchanged_produces_a_tick() {
     an_index_flag_produces_a_tick("watch-index-assume", "--assume-unchanged");
 }
 
+/// Spend the first index event, which always walks, by rewriting the index
+/// byte for byte, and return how many events the OS has delivered so far.
+fn spend_the_first_index_event(scratch: &Scratch, watcher: &mut Watcher<'_>) -> u64 {
+    let index = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+    scratch.write(".git/index", &index);
+    assert!(
+        tick_within(watcher, SETTLE).is_some(),
+        "the first index event after arming produced no tick"
+    );
+    watcher.delivered()
+}
+
+#[test]
+fn the_first_index_write_after_arming_ticks_even_unchanged() {
+    // The pane walks before the watch arms, so a staged change written in
+    // between reaches no event. Only a walk on the first index event finds it,
+    // since every refresh after that matches the index it was written into.
+    let scratch = committed_scratch("watch-index-first");
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    spend_the_first_index_event(&scratch, &mut watcher);
+}
+
 #[test]
 fn rewriting_the_index_unchanged_produces_no_tick() {
     let scratch = committed_scratch("watch-index-touch");
@@ -350,6 +373,7 @@ fn rewriting_the_index_unchanged_produces_no_tick() {
 
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    let spent = spend_the_first_index_event(&scratch, &mut watcher);
 
     // What a `touch` does: the file is written and nothing in it moves.
     scratch.write(".git/index", &index);
@@ -359,7 +383,7 @@ fn rewriting_the_index_unchanged_produces_no_tick() {
         "an index rewritten byte for byte woke the monitor"
     );
     assert!(
-        watcher.delivered() > 0,
+        watcher.delivered() > spent,
         "this test proved nothing: the OS never reported the index write"
     );
 }
@@ -382,6 +406,7 @@ fn an_index_refresh_that_moves_only_stat_data_produces_no_tick() {
 
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    let spent = spend_the_first_index_event(&scratch, &mut watcher);
 
     // What an IDE, a git GUI or a prompt does on a timer.
     scratch.git_may_fail(&["update-index", "--refresh"]);
@@ -396,7 +421,7 @@ fn an_index_refresh_that_moves_only_stat_data_produces_no_tick() {
         "a refresh that changed no entry woke the monitor"
     );
     assert!(
-        watcher.delivered() > 0,
+        watcher.delivered() > spent,
         "this test proved nothing: the OS never reported the index write"
     );
 }

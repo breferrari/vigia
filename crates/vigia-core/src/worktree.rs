@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -44,6 +44,9 @@ pub struct Worktree {
     /// The clean filter: built on the first working-tree read after each
     /// [`Frame::advance`], and not before.
     filter: RefCell<Option<Filter>>,
+    /// Whether the last tracked walk found a deletion, which lasts until it is
+    /// committed or restored, so the next walk goes straight to tracking.
+    deleted: Cell<bool>,
 }
 
 impl Worktree {
@@ -60,6 +63,7 @@ impl Worktree {
             repo,
             workdir,
             filter: RefCell::new(None),
+            deleted: Cell::new(false),
         })
     }
 
@@ -121,12 +125,22 @@ impl Worktree {
         if !track_renames {
             return Ok(Inner::Streamed(self.walk(Walk::Streamed)?));
         }
-        if let Ok(plain) = Inner::Streamed(self.walk(Walk::Sorted)?).collect::<Result<Vec<_>>>()
+        if !self.deleted.get()
+            && let Ok(plain) = Inner::Streamed(self.walk(Walk::Sorted)?).collect::<Result<Vec<_>>>()
             && !plain.iter().any(|c| c.kind == ChangeKind::Removed)
         {
             return Ok(Inner::Collected(plain.into_iter()));
         }
-        Ok(Inner::Streamed(self.walk(Walk::Renames)?))
+        // Collected rather than streamed costs nothing: tracking buffers the walk.
+        let tracked: Vec<FileChange> =
+            Inner::Streamed(self.walk(Walk::Renames)?).collect::<Result<_>>()?;
+        // A rename's source is a deletion the plain walk would report as one.
+        self.deleted.set(
+            tracked
+                .iter()
+                .any(|c| matches!(c.kind, ChangeKind::Removed | ChangeKind::Renamed { .. })),
+        );
+        Ok(Inner::Collected(tracked.into_iter()))
     }
 
     fn walk(&self, walk: Walk) -> Result<gix::status::index_worktree::Iter> {
