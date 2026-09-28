@@ -10,8 +10,8 @@ use support::{
     holds_p99_rounds, materialise, settle, time, time_cpu,
 };
 use vigia_core::{
-    FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
-    Worktree,
+    ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
+    LineKind, RETAINED_HUNKS, Samples, Worktree,
 };
 
 /// I4: first paint on a 100k-line diff.
@@ -153,6 +153,104 @@ fn a_frame_recomputes_only_what_changed() {
         many_cost.evicted, 0,
         "editing a file evicted {} cached diffs",
         many_cost.evicted
+    );
+}
+
+/// Untracked files in the rename fixture: enough that weighing each one as a
+/// rename candidate would be most of a walk.
+const UNTRACKED: usize = 2_000;
+
+#[test]
+fn rename_tracking_costs_nothing_when_nothing_was_deleted() {
+    let scratch = Scratch::new("budget-renames-untracked");
+    scratch.write("tracked.txt", "a\n");
+    scratch.commit_all("initial");
+    for i in 0..UNTRACKED {
+        scratch.write(&format!("out/d{}/f{i}.txt", i % 20), "line\n");
+    }
+    let worktree = scratch.worktree();
+
+    let walk = |track_renames: bool| {
+        let options = ChangeOptions {
+            track_renames,
+            ..ChangeOptions::default()
+        };
+        worktree
+            .changes_with(options)
+            .expect("enumerate")
+            .map(|c| c.expect("change"))
+            .collect::<Vec<_>>()
+    };
+    // A deletion that was restored no longer counts: the walk that saw it gone
+    // is the one that stops going straight to tracking.
+    scratch.remove("tracked.txt");
+    assert!(walk(true).iter().any(|c| c.kind == ChangeKind::Removed));
+    scratch.git(&["checkout", "--", "tracked.txt"]);
+
+    let tracked = walk(true);
+    assert_eq!(
+        tracked.len(),
+        UNTRACKED,
+        "the fixture is not what this gate measures"
+    );
+    assert!(tracked.iter().all(|c| c.kind == ChangeKind::Added));
+
+    // Interleaved, so a machine that slows down slows both sides.
+    let (mut on, mut off) = (Duration::MAX, Duration::MAX);
+    for _ in 0..7 {
+        on = on.min(time(|| drop(walk(true))));
+        off = off.min(time(|| drop(walk(false))));
+    }
+    assert!(
+        on <= off * 3,
+        "with nothing deleted, the walk took {on:?} tracking renames and {off:?} without, \
+         so every untracked file is being weighed as a rename that cannot exist"
+    );
+}
+
+/// Tracked files in the deletion fixture: enough that comparing the index is
+/// most of a walk, so a walk taken twice shows.
+const TRACKED: usize = 3_000;
+
+#[test]
+fn a_lasting_deletion_costs_one_walk_a_tick_not_two() {
+    let scratch = Scratch::new("budget-renames-deleted");
+    for i in 0..TRACKED {
+        scratch.write(&format!("src/d{}/f{i}.txt", i % 30), "line\n");
+    }
+    scratch.commit_all("initial");
+    scratch.remove("src/d0/f0.txt");
+    let worktree = scratch.worktree();
+
+    let walk = |track_renames: bool| {
+        let options = ChangeOptions {
+            track_renames,
+            ..ChangeOptions::default()
+        };
+        worktree
+            .changes_with(options)
+            .expect("enumerate")
+            .map(|c| c.expect("change"))
+            .collect::<Vec<_>>()
+    };
+    let tracked = walk(true);
+    assert_eq!(
+        tracked.len(),
+        1,
+        "the fixture is not what this gate measures"
+    );
+    assert_eq!(tracked[0].kind, ChangeKind::Removed);
+
+    // Interleaved, so a machine that slows down slows both sides.
+    let (mut on, mut off) = (Duration::MAX, Duration::MAX);
+    for _ in 0..7 {
+        on = on.min(time(|| drop(walk(true))));
+        off = off.min(time(|| drop(walk(false))));
+    }
+    assert!(
+        on.as_secs_f64() <= off.as_secs_f64() * 1.5,
+        "with a deletion standing in the tree, a tick took {on:?} tracking renames and \
+         {off:?} without, so each tick is walking the tree twice"
     );
 }
 

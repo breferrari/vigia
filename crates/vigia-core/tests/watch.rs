@@ -3,7 +3,7 @@
 mod support;
 
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use support::{Scratch, budget};
 use vigia_core::{Tick, WatchOptions, Watcher};
@@ -302,6 +302,127 @@ fn staging_a_change_produces_a_tick() {
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "an index write produced no tick"
+    );
+}
+
+/// Run `git update-index <flag> a.txt` on a clean tree and require a tick. Each
+/// flag moves one field of an entry and nothing else, so each is the only
+/// thing that can tell the watch the index changed.
+fn an_index_flag_produces_a_tick(name: &str, flag: &str) {
+    let scratch = committed_scratch(name);
+    let before = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.git(&["update-index", flag, "a.txt"]);
+    let after = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+    assert_ne!(
+        before, after,
+        "this test proved nothing: `{flag}` did not rewrite the index"
+    );
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "`git update-index {flag}` changed an entry and produced no tick"
+    );
+}
+
+#[test]
+fn a_mode_change_in_the_index_produces_a_tick() {
+    an_index_flag_produces_a_tick("watch-index-mode", "--chmod=+x");
+}
+
+#[test]
+fn marking_a_path_skip_worktree_produces_a_tick() {
+    an_index_flag_produces_a_tick("watch-index-skip", "--skip-worktree");
+}
+
+#[test]
+fn marking_a_path_assume_unchanged_produces_a_tick() {
+    an_index_flag_produces_a_tick("watch-index-assume", "--assume-unchanged");
+}
+
+/// Spend the first index event, which always walks, by rewriting the index
+/// byte for byte, and return how many events the OS has delivered so far.
+fn spend_the_first_index_event(scratch: &Scratch, watcher: &mut Watcher<'_>) -> u64 {
+    let index = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+    scratch.write(".git/index", &index);
+    assert!(
+        tick_within(watcher, SETTLE).is_some(),
+        "the first index event after arming produced no tick"
+    );
+    watcher.delivered()
+}
+
+#[test]
+fn the_first_index_write_after_arming_ticks_even_unchanged() {
+    // The pane walks before the watch arms, so a staged change written in
+    // between reaches no event. Only a walk on the first index event finds it,
+    // since every refresh after that matches the index it was written into.
+    let scratch = committed_scratch("watch-index-first");
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    spend_the_first_index_event(&scratch, &mut watcher);
+}
+
+#[test]
+fn rewriting_the_index_unchanged_produces_no_tick() {
+    let scratch = committed_scratch("watch-index-touch");
+    let index = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    let spent = spend_the_first_index_event(&scratch, &mut watcher);
+
+    // What a `touch` does: the file is written and nothing in it moves.
+    scratch.write(".git/index", &index);
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "an index rewritten byte for byte woke the monitor"
+    );
+    assert!(
+        watcher.delivered() > spent,
+        "this test proved nothing: the OS never reported the index write"
+    );
+}
+
+#[test]
+fn an_index_refresh_that_moves_only_stat_data_produces_no_tick() {
+    let scratch = Scratch::new("watch-index-refresh");
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("initial");
+    // Same bytes, an hour older, so the index's stat data for `a.txt` is stale
+    // and the next refresh rewrites it. Moved explicitly rather than by a second
+    // write, which can land inside the commit's own timestamp.
+    std::fs::File::options()
+        .write(true)
+        .open(scratch.path_of("a.txt"))
+        .and_then(|file| file.set_modified(SystemTime::now() - Duration::from_secs(3600)))
+        .expect("age a.txt");
+    let scratch = scratch.settled();
+    let before = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    let spent = spend_the_first_index_event(&scratch, &mut watcher);
+
+    // What an IDE, a git GUI or a prompt does on a timer.
+    scratch.git_may_fail(&["update-index", "--refresh"]);
+    let after = std::fs::read(scratch.path_of(".git/index")).expect("read the index");
+    assert_ne!(
+        before, after,
+        "this test proved nothing: the refresh did not rewrite the index"
+    );
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a refresh that changed no entry woke the monitor"
+    );
+    assert!(
+        watcher.delivered() > spent,
+        "this test proved nothing: the OS never reported the index write"
     );
 }
 

@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -44,6 +44,9 @@ pub struct Worktree {
     /// The clean filter: built on the first working-tree read after each
     /// [`Frame::advance`], and not before.
     filter: RefCell<Option<Filter>>,
+    /// Whether the last tracked walk found a deletion, which lasts until it is
+    /// committed or restored, so the next walk goes straight to tracking.
+    deleted: Cell<bool>,
 }
 
 impl Worktree {
@@ -60,6 +63,7 @@ impl Worktree {
             repo,
             workdir,
             filter: RefCell::new(None),
+            deleted: Cell::new(false),
         })
     }
 
@@ -102,27 +106,58 @@ impl Worktree {
         origin: Origin,
         options: ChangeOptions<'h>,
     ) -> Result<Changes<'h>> {
-        match origin {
-            Origin::Unstaged => {
-                let iter = self
-                    .repo
-                    .status(gix::progress::Discard)
-                    .map_err(|e| Error::Status(Box::new(e)))?
-                    // Collapsed would report a changed directory as one entry. A
-                    // monitor has to name the file that changed.
-                    .untracked_files(gix::status::UntrackedFiles::Files)
-                    .index_worktree_rewrites(
-                        options.track_renames.then(gix::diff::Rewrites::default),
-                    )
-                    .into_index_worktree_iter(Vec::<BString>::new())
-                    .map_err(|e| Error::Status(Box::new(e)))?;
-                Ok(Changes::over(Inner::Streamed(iter), options.hide))
-            }
-            Origin::Staged => Ok(Changes::over(
-                Inner::Collected(self.staged(options)?.into_iter()),
-                options.hide,
-            )),
+        let inner = match origin {
+            Origin::Unstaged => self.unstaged(options.track_renames)?,
+            Origin::Staged => Inner::Collected(self.staged(options)?.into_iter()),
+        };
+        Ok(Changes::over(inner, options.hide))
+    }
+
+    /// The working tree against the index.
+    ///
+    /// A rename pairs a deletion with an addition, so a walk that finds no
+    /// deletion reads the same with tracking off. Tracking is what costs: `gix`
+    /// reads and hashes every untracked file as a candidate whether or not
+    /// anything was deleted, which is most of a walk over many. So the walk runs
+    /// without it first, sorted as the tracking walk sorts, and again with it only
+    /// when a deletion turned up.
+    fn unstaged(&self, track_renames: bool) -> Result<Inner> {
+        if !track_renames {
+            return Ok(Inner::Streamed(self.walk(Walk::Streamed)?));
         }
+        if !self.deleted.get()
+            && let Ok(plain) = Inner::Streamed(self.walk(Walk::Sorted)?).collect::<Result<Vec<_>>>()
+            && !plain.iter().any(|c| c.kind == ChangeKind::Removed)
+        {
+            return Ok(Inner::Collected(plain.into_iter()));
+        }
+        // Collected rather than streamed costs nothing: tracking buffers the walk.
+        let tracked: Vec<FileChange> =
+            Inner::Streamed(self.walk(Walk::Renames)?).collect::<Result<_>>()?;
+        // A rename's source is a deletion the plain walk would report as one.
+        self.deleted.set(
+            tracked
+                .iter()
+                .any(|c| matches!(c.kind, ChangeKind::Removed | ChangeKind::Renamed { .. })),
+        );
+        Ok(Inner::Collected(tracked.into_iter()))
+    }
+
+    fn walk(&self, walk: Walk) -> Result<gix::status::index_worktree::Iter> {
+        use gix::status::plumbing::index_as_worktree_with_renames::Sorting;
+        self.repo
+            .status(gix::progress::Discard)
+            .map_err(|e| Error::Status(Box::new(e)))?
+            // Collapsed would report a changed directory as one entry. A
+            // monitor has to name the file that changed.
+            .untracked_files(gix::status::UntrackedFiles::Files)
+            .index_worktree_options_mut(|options| {
+                options.sorting = (walk == Walk::Sorted).then_some(Sorting::ByPathCaseSensitive);
+            })
+            // Sorts too, which is what makes `Sorted` the same order.
+            .index_worktree_rewrites((walk == Walk::Renames).then(gix::diff::Rewrites::default))
+            .into_index_worktree_iter(Vec::<BString>::new())
+            .map_err(|e| Error::Status(Box::new(e)))
     }
 
     /// How many changes one comparison holds, without keeping any of them.
@@ -706,6 +741,17 @@ pub struct Changes<'h> {
     inner: Inner,
     hide: Option<&'h Hidden>,
     hidden: usize,
+}
+
+/// Which status walk to take over the working tree.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Walk {
+    /// As the threads finish, so the first change arrives first.
+    Streamed,
+    /// Buffered and in path order, without rename tracking.
+    Sorted,
+    /// With rename tracking, which sorts as well.
+    Renames,
 }
 
 /// Which comparison is being walked.
