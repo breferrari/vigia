@@ -7,7 +7,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     /// No git repository was found at or above the given path.
-    Discover(Box<gix::discover::Error>),
+    Discover(Box<gix::Error>),
     /// The repository has no working tree, so there is nothing to watch.
     Bare,
     /// Enumerating working-tree-vs-index changes failed.
@@ -205,8 +205,3 @@ impl std::error::Error for Error {
     }
 }
 
-impl From<gix::discover::Error> for Error {
-    fn from(e: gix::discover::Error) -> Self {
-        Error::Discover(Box::new(e))
-    }
-}

@@ -54,7 +54,7 @@ impl Worktree {
     /// `path` is not inside a git repository, or the repository it finds is bare and has no
     /// worktree to compare against.
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
-        let repo = gix::discover(path)?;
+        let repo = gix::discover(path).map_err(|e| Error::Discover(Box::new(e)))?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
         Ok(Self {
             repo,
@@ -182,26 +182,21 @@ impl Worktree {
             gix::status::tree_index::TrackRenames::Disabled
         };
 
+        // A sparse index yields no staged run rather than a dead pane. Asked before
+        // the walk, because the walk reports it only as a message.
+        if index.is_sparse() {
+            return Ok(Vec::new());
+        }
+
         let mut changes = Vec::new();
-        let walked = self
-            .repo
+        self.repo
             .tree_index_status(&tree, &index, None, renames, |change, _, _| {
                 if let Some(change) = staged_change(&change) {
                     changes.push(change);
                 }
-                Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
-            });
-
-        // A sparse index yields no staged run rather than a dead pane.
-        if let Err(e) = walked {
-            if matches!(
-                e,
-                gix::status::tree_index::Error::TreeIndexDiff(gix::diff::index::Error::IsSparse)
-            ) {
-                return Ok(Vec::new());
-            }
-            return Err(Error::Status(Box::new(e)));
-        }
+                Ok(gix::diff::index::Action::Continue(()))
+            })
+            .map_err(|e| Error::Status(Box::new(e)))?;
         Ok(changes)
     }
 
@@ -314,7 +309,7 @@ impl Worktree {
         let commit = info.object().map_err(|e| Error::History(Box::new(e)))?;
         let subject = commit
             .message()
-            .map_err(|e| Error::History(Box::new(e)))?
+            .map_err(|e| Error::History(e.into()))?
             .summary()
             .to_string();
         let when = commit

@@ -87,7 +87,7 @@ impl Filter {
                         .map(|_| ()))
                 },
             )
-            .map_err(|source| Error::filter(rela_path, source))?;
+            .map_err(|source| Error::filter(rela_path, source.into_error()))?;
 
         match outcome {
             // Nothing applied, so the bytes already read are the answer.
