@@ -205,6 +205,42 @@ fn the_client_version_is_echoed_when_the_server_speaks_it_and_the_latest_answers
 }
 
 #[test]
+fn handshake_names_worktree() {
+    // A client that sets no project variable starts the server wherever it
+    // was itself started, so the agent has to be able to see which store it
+    // reads before its first call.
+    let rig = Rig::new("mcp-names-worktree");
+    let mut server = rig.server();
+    let instructions = initialize(&mut server, "2025-06-18")["instructions"]
+        .as_str()
+        .expect("instructions")
+        .to_owned();
+    let served = document(&mut server, false)["worktree"]
+        .as_str()
+        .expect("the listing names its worktree")
+        .to_owned();
+    assert!(
+        instructions.contains(&served),
+        "{served} is not in the handshake: {instructions}"
+    );
+}
+
+#[test]
+fn handshake_carries_refusal() {
+    let root = TempDir::new("mcp-state");
+    let holder = TempDir::new("mcp-no-repo-handshake");
+    let mut server = Server::open(Some(holder.path()), env_at(root.path()));
+    let instructions = initialize(&mut server, "2025-06-18")["instructions"]
+        .as_str()
+        .expect("instructions")
+        .to_owned();
+    assert!(
+        instructions.contains("not inside a git worktree"),
+        "the refusal is not in the handshake: {instructions}"
+    );
+}
+
+#[test]
 fn server_discover_is_method_not_found_so_a_dual_era_client_falls_back() {
     let rig = Rig::new("mcp-discover");
     let mut server = rig.server();

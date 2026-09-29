@@ -112,6 +112,19 @@ impl Server {
         self.notice.as_deref()
     }
 
+    /// The handshake's instructions, naming the worktree served or why there
+    /// is none. A client that sets no project variable starts the server in
+    /// its own directory, which can be another repository's.
+    fn instructions(&self) -> String {
+        match &self.site {
+            Ok(site) => format!(
+                "{INSTRUCTIONS} Notes here are for the worktree at {}.",
+                site.worktree.workdir().display()
+            ),
+            Err(why) => format!("{INSTRUCTIONS} There are none to serve: {why}."),
+        }
+    }
+
     /// Whether the handshake has happened.
     #[must_use]
     pub fn initialised(&self) -> bool {
@@ -177,7 +190,7 @@ impl Server {
         match method {
             "initialize" => {
                 self.initialised = true;
-                Ok(initialize(params))
+                Ok(initialize(params, &self.instructions()))
             }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": tools() })),
@@ -569,7 +582,7 @@ impl Placed {
     }
 }
 
-fn initialize(params: &Value) -> Value {
+fn initialize(params: &Value, instructions: &str) -> Value {
     let asked = params.get("protocolVersion").and_then(Value::as_str);
     let version = asked
         .filter(|version| PROTOCOL_VERSIONS.contains(version))
@@ -578,7 +591,7 @@ fn initialize(params: &Value) -> Value {
         "protocolVersion": version,
         "capabilities": { "tools": {}, "resources": { "listChanged": true } },
         "serverInfo": { "name": "vigia", "version": VERSION },
-        "instructions": INSTRUCTIONS,
+        "instructions": instructions,
     })
 }
 
