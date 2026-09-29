@@ -1715,6 +1715,11 @@ fn the_bump_writes_the_changelog_it_publishes() {
          over the script proves nothing about the release: {step}"
     );
     assert!(
+        step.contains("grep '^Release-note:'") && step.contains("--format='%B'"),
+        "bump.yml's changelog step does not read Release-note lines from commit \
+         bodies, so a PR title always becomes the note: {step}"
+    );
+    assert!(
         step.contains("git describe --tags --abbrev=0"),
         "bump.yml's changelog step does not start the range at the previous \
          release: {step}"
@@ -1938,6 +1943,208 @@ fn the_changelog_entry_names_every_subject_it_drops() {
     );
 }
 
+/// A `Release-note:` line is written as it stands, in order, and `none` writes
+/// nothing.
+#[cfg(unix)]
+#[test]
+fn release_note_wins() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let lines = "Release-note: Remember toggles between runs\n\
+                 Release-note: Show the staged count on an empty pane (#9)\n\
+                 roadmap: a row moves\n\
+                 Release-note: none\n\
+                 The pane stops showing what is gone (#1)\n";
+    let (passed, left, said) = changelog_entry("notes", "0.2.0", lines, BEFORE);
+    assert!(
+        passed,
+        "the generator refused a section it can write:\n{left}"
+    );
+    let written: Vec<&str> = left
+        .lines()
+        .skip_while(|line| !line.starts_with("## [0.2.0]"))
+        .take_while(|line| !line.starts_with("## [0.1.0]"))
+        .filter(|line| line.starts_with("- "))
+        .collect();
+    assert_eq!(
+        written,
+        [
+            "- Remember toggles between runs",
+            "- Show the staged count on an empty pane",
+            "- The pane stops showing what is gone",
+        ],
+        "notes were not written as they stand, in order:\n{left}"
+    );
+    assert!(
+        !said.contains("filtered as internal: Release-note"),
+        "the log reports a note as a dropped subject:\n{said}"
+    );
+}
+
+/// A range of only prefixed internal work or `Release-note: none` is refused,
+/// so the bump stops before a version is cut.
+#[cfg(unix)]
+#[test]
+fn process_only_refused() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let lines = "docs: tidy the README\nchore: move a script\nRelease-note: none\n";
+    let (passed, left, said) = changelog_entry("process", "0.2.0", lines, BEFORE);
+    assert!(
+        !passed && left == BEFORE,
+        "a process-only range cut a version:\n{left}"
+    );
+    assert!(
+        said.contains("nothing user-facing"),
+        "the refusal says nothing:\n{said}"
+    );
+
+    // One plain subject is enough to release, trailer or not.
+    let lines = "docs: tidy the README\nThe pane draws a thing (#3)\n";
+    let (passed, left, _) = changelog_entry("one-visible", "0.2.0", lines, BEFORE);
+    assert!(passed, "a range with a visible change was refused:\n{left}");
+}
+
+/// A kept subject in contract phrasing is released with a warning, not refused.
+#[cfg(unix)]
+#[test]
+fn dialect_subject_warned() {
+    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+    let lines = "The third word is only, and it is the reading that goes inert (#528)\n";
+    let (passed, left, said) = changelog_entry("dialect", "0.2.0", lines, BEFORE);
+    assert!(passed, "a riddle subject blocked the release:\n{left}");
+    assert!(
+        said.contains("::warning::contract phrasing in the release notes: The third word"),
+        "the riddle subject was not named:\n{said}"
+    );
+}
+
+/// Runs `title-check.sh` in a scratch repository: one base commit, then
+/// `commits` as `(subject, body)`. Returns whether it passed and what it said.
+#[cfg(unix)]
+fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, String) {
+    let dir = std::env::temp_dir().join(format!("vigia-title-{}-{case}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&["tag", "base"]);
+    for (subject, body) in commits {
+        let mut args = vec!["commit", "-q", "--allow-empty", "-m", subject];
+        if !body.is_empty() {
+            args.extend(["-m", body]);
+        }
+        git(&args);
+    }
+    let out = Command::new("sh")
+        .arg(repo_root().join(".github/scripts/title-check.sh"))
+        .arg("base")
+        .env("TITLE", title)
+        .current_dir(&dir)
+        .output()
+        .expect("title-check.sh runs");
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+/// CI rejects contract phrasing in a title or subject unless a commit body
+/// carries `Release-note:`. The PR body does not count, since squash drops it.
+#[cfg(unix)]
+#[test]
+fn title_check_rejects() {
+    const RIDDLE: &str = "Nothing keeps a toggle, and remember is what does";
+
+    let (passed, said) = title_check("title", RIDDLE, &[("Remember toggles", "")]);
+    assert!(!passed, "a riddle title with no note passed:\n{said}");
+
+    let (passed, said) = title_check("subject", "Remember toggles", &[(RIDDLE, "")]);
+    assert!(
+        !passed,
+        "a riddle commit subject with no note passed:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "rescued",
+        RIDDLE,
+        &[(RIDDLE, "Release-note: Remember toggles between runs")],
+    );
+    assert!(
+        passed,
+        "a riddle title and subject with a note in the same commit failed:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "other-commit",
+        "Remember toggles",
+        &[
+            ("docs: plain", "Release-note: Remember toggles between runs"),
+            (RIDDLE, ""),
+        ],
+    );
+    assert!(
+        !passed,
+        "a trailer on one commit excused another commit's riddle subject:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "plain",
+        "Remember toggles between runs",
+        &[("Remember toggles", "")],
+    );
+    assert!(passed, "a plain title failed:\n{said}");
+
+    let (passed, said) = title_check("code", "Rename `is what does` helper", &[("Rename it", "")]);
+    assert!(passed, "a phrase inside backticks failed:\n{said}");
+}
+
+/// The lint job runs the title check on pull requests, with history to diff.
+#[test]
+fn ci_runs_title_check() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let lint = ci
+        .split_once("\n  lint:")
+        .and_then(|(_, rest)| rest.split_once("\n  test:"))
+        .map(|(lint, _)| lint)
+        .expect("ci.yml has a lint job before its test job");
+    assert!(
+        lint.contains("sh .github/scripts/title-check.sh"),
+        "the lint job does not run title-check.sh:\n{lint}"
+    );
+    assert!(
+        lint.contains("fetch-depth: 0"),
+        "the lint job checks out without history, so the PR's commits cannot be read"
+    );
+    assert!(
+        lint.contains("TITLE: ${{ github.event.pull_request.title }}")
+            && !lint.contains("title-check.sh \"${{"),
+        "the PR title must reach the script through env, never the command line"
+    );
+}
+
 /// Every config key reaches the filter that decides what a release says.
 ///
 /// That filter keeps a subject naming something a reader can press or set, and
@@ -2004,7 +2211,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
     ("SPEC.md", 413455),
     ("RULINGS.md", 103216),
-    ("CLAUDE.md", 17260),
+    ("CLAUDE.md", 17255),
     (".claude/skills/take-next/SKILL.md", 20983),
 ];
 

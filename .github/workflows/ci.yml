@@ -43,6 +43,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # A title becomes a release note unless a commit body carries
+      # `Release-note:`. The title arrives through env, never into the script.
+      - name: titles read as plain English
+        if: github.event_name == 'pull_request'
+        run: sh .github/scripts/title-check.sh "origin/${BASE}"
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.base_ref }}
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt

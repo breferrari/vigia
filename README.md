@@ -10,7 +10,7 @@
 
 **Your agent writes in one pane. `vigia` watches in the pane beside it, and carries your words back.**
 
-It is a live diff monitor, and that is the half you can see. The other half is a wire: point at a line, say one sentence, and it reaches the agent that wrote it.
+It shows the working-tree diff live, as the agent writes it. Click a line, type one sentence, and it goes to the agent that wrote that line.
 
 </div>
 
@@ -20,9 +20,9 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 
 ## 🔭 Why
 
-**This is not a diff viewer you open.** A diff viewer answers *what changed*, once, when you ask. Agentic engineering does not work like that: the agent edits **fast**, **wide**, and while you are reading something else, and the scrollback tells you what it *said* it did rather than what landed.
+**This is not a diff viewer you open.** A diff viewer shows *what changed* once, when you ask. A coding agent edits **fast**, across **many files**, often while you are reading something else. Its scrollback tells you what it *said* it did, not what actually changed on disk.
 
-`vigia` is the surface between the two of you. It watches what actually lands, continuously and without being touched, and it carries a sentence from you back to the agent, anchored to the line you were looking at. One pane writes. One pane watches, and answers.
+`vigia` shows what actually changed, continuously, without you touching it. It also sends a sentence from you back to the agent, tied to the line you were looking at. One pane writes. One pane watches, and answers.
 
 |  |  |
 |---|---|
@@ -34,7 +34,7 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 | ⌨️ **Nothing to learn first** | `?` draws every gesture, `m` every setting. `~/.config/vigia/config` decides what it opens as |
 
 > [!NOTE]
-> **A monitor, not a reviewer**, and not because it does less. It browses history and carries your notes to the agent. Because of what it *asks*: a reviewer is something you launch, work through and finish. `vigia` is already open, correct before you touch it, and still correct if you never do.
+> **A monitor, not a reviewer.** It can browse history and send your notes to the agent, but it asks nothing of you. A reviewer is something you launch, work through and finish. `vigia` is already open, correct before you touch it, and still correct if you never do.
 
 ---
 
@@ -43,11 +43,11 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 **1. Install it and point it at a repo.**
 
 ```sh
-cargo install vigia                          # or brew install breferrari/tap/vigia
+cargo install vigia
 vigia                                        # the tree you are in
 ```
 
-Leave it in the pane beside your agent. There is nothing to configure and nothing to press.
+No Rust toolchain? Use Homebrew or a prebuilt installer, under [Other installs](#other-installs) below. Leave it in the pane beside your agent. There is nothing to configure and nothing to press.
 
 **2. Let it follow.** As your agent writes, files appear in the pinned list at the top and the diff scrolls itself to whatever landed last. The sparkline says *when*, the heat strip says *where in the file*, the counters say *how much*. You are meant to glance, not to read.
 
@@ -64,10 +64,18 @@ The note goes to the agent anchored to that file and that line. Its answer arriv
 
 **5. Forget the rest.** Press `?` and every gesture is on screen. Press `m` and every setting is. Neither moves a row.
 
+<a id="other-installs"></a>
+
 <details>
-<summary><b>Other ways to install</b></summary>
+<summary><b>Other installs: Homebrew, prebuilt binaries, <code>--version</code></b></summary>
 
 <br>
+
+Homebrew, on macOS and Linux:
+
+```sh
+brew install breferrari/tap/vigia
+```
 
 A prebuilt binary, with no toolchain at all:
 
@@ -521,7 +529,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 | 🔨 | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
 
-There is no Phase 5 in that table: the shelf, where deferred work waits with the dated reason it was deferred for, was numbered as one until August and kept its milestone.
+There is no Phase 5. That number belonged to the list of deferred work, which is no longer a phase.
 
 Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked. [`CHANGELOG.md`](CHANGELOG.md) is every released version and what moved in it.
 
@@ -532,9 +540,7 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 **It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header with its position token, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, the note box open on a line, and the status bar.
 
-**The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. **One is left.** The header reads the worktree's name rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree.
-
-Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them. **One more came forward in August 2026**: the sparklines are drawn in the cyan the binary has used since the ramp landed rather than the green they were first mocked in, which is the ruling that green already means *added* two rows down. **Four more in September**: the header's position token and the `▾` that says a list lives behind it, both of which the picture predated; the run's total where the picture used to put the mode word, which was written down as a departure and is not one, since the word draws there only when there is nothing to count and this pane has three files; `m config` back on the status bar, which #80 had cut when there was no config menu for it to name; and the note box, which had never been drawn at all. A picture of a monitor that only ever watches describes half of what this is.
+**The picture is part of the specification.** Where it and the binary disagree, one of them has a bug, unless the difference is written down. One difference is written down: the header shows the worktree's name rather than `vigia`, because at 40 columns the name of the tree is the useful fact.
 
 </details>
 
@@ -556,6 +562,6 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code.
+Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging and committing, branch browsing, comment threads or a GUI. [`ROADMAP.md`](ROADMAP.md#non-goals-permanent) lists them.
 
 Five issues are labelled [`good first issue`](https://github.com/breferrari/vigia/labels/good%20first%20issue).

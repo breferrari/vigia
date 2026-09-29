@@ -7,8 +7,11 @@
 # and a filter nothing drives is a wish. The test feeds it fixed subjects and
 # reads back the section, so the rules below are checkable without a release.
 #
-# Subjects arrive on stdin, one per line, newest first, which is what
-# `git log --format=%s` gives and the order the section is written in.
+# Lines arrive on stdin, newest first. Each is a commit subject, or a
+# `Release-note: <text>` line the bump took from a commit body in its place.
+# A note is written as it stands and skips every filter below, and `Release-note:
+# none` writes nothing. A range where every commit is prefixed internal work or
+# `none` exits 1, so the bump stops before a version is cut.
 #
 # Usage: changelog-entry.sh <version> <date> [changelog]
 #   version   the version being released, three numeric components
@@ -103,6 +106,14 @@ visible_subject='([Tt]he pane|`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgD
 # cannot go back to stdin for it.
 subjects=$(cat)
 
+declared_none='^Release-note:[[:space:]]*[Nn][Oo][Nn][Ee][[:space:]]*$'
+if [ -n "$(printf '%s\n' "$subjects" | grep -v '^$' || true)" ] \
+    && [ -z "$(printf '%s\n' "$subjects" | grep -v '^$' | grep -Ev "$internal_prefix" | grep -Ev "$declared_none" || true)" ]; then
+    printf '%s\n' "$subjects" | grep -v '^$' | sed 's/^/::notice::process only: /'
+    echo "::error::nothing user-facing since the last release, so ${version} is not released"
+    exit 1
+fi
+
 # `|| true` on the grep, because it exits 1 when it filters everything out and
 # `set -e` would kill the script on the assignment rather than let the empty
 # case below be handled.
@@ -115,6 +126,11 @@ subjects=$(cat)
 # both patterns carry `\.`.
 kept=$(printf '%s\n' "$subjects" | grep -Ev "$internal_prefix" || true)
 kept=$(printf '%s\n' "$kept" | INTERNAL="$internal_subject" VISIBLE="$visible_subject" awk '
+    /^Release-note:/ {
+        sub(/^Release-note:[ \t]*/, "")
+        if ($0 != "" && tolower($0) !~ /^none[ \t]*$/) print
+        next
+    }
     $0 ~ ENVIRON["VISIBLE"] { print; next }
     tolower($0) ~ ENVIRON["INTERNAL"] { next }
     { print }
@@ -129,8 +145,17 @@ kept=$(printf '%s\n' "$kept" | INTERNAL="$internal_subject" VISIBLE="$visible_su
 # a subject about a key and `case` would read those as globs.
 printf '%s\n' "$subjects" | KEPT="$kept" awk '
     BEGIN { n = split(ENVIRON["KEPT"], k, "\n"); for (i = 1; i <= n; i++) keep[k[i]] = 1 }
-    NF && !($0 in keep) { print "::notice::filtered as internal: " $0 }
+    NF && !/^Release-note:/ && !($0 in keep) { print "::notice::filtered as internal: " $0 }
 '
+
+# A kept subject in contract phrasing reaches the notes as written. CI rejects
+# those on the pull request; this only names any that got through.
+printf '%s\n' "$subjects" | grep -v '^Release-note:' \
+    | sh "$(dirname "$0")/title-check.sh" --match \
+    | KEPT="$kept" awk '
+        BEGIN { n = split(ENVIRON["KEPT"], k, "\n"); for (i = 1; i <= n; i++) keep[k[i]] = 1 }
+        $0 in keep { print "::warning::contract phrasing in the release notes: " $0 }
+    '
 
 # Trailing `(#123)` references are the tracker's, not the reader's. The loop
 # peels them one at a time because a merge subject carries the issue's number
@@ -156,12 +181,12 @@ entries=$(printf '%s\n' "$kept" | strip_references | sed -E 's/^/- /')
 # key and a ruling in one breath. So the range is written out instead, and the
 # reader has the thing the filter could not see.
 if [ -z "$entries" ]; then
-    range=$(printf '%s\n' "$subjects" | strip_references | sed -E 's/^/  - /')
+    range=$(printf '%s\n' "$subjects" | grep -Ev "$declared_none" | strip_references | sed -E 's/^/  - /')
     if [ -z "$range" ]; then
         entries="- No commit sits between this release and the one before it."
     else
         entries=$(printf '%s\n%s\n' \
-            "- Nothing in this release's commits matched what a reader of the pane can see. That is as likely to be this filter dropping a change as a release with nothing in it, so every commit in the range is listed here unfiltered rather than summarised:" \
+            "- No commit in this release matched the filter for user-visible changes. The filter can drop a real change, so every commit in the range is listed here unfiltered:" \
             "$range")
     fi
 fi
