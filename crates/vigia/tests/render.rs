@@ -3202,7 +3202,7 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     let pulsing = row_text(&backend, 1);
     assert!(
         pulsing.contains('●'),
-        "the file named by the newest tick carries no pulse: {pulsing:?}"
+        "the file written last carries no pulse: {pulsing:?}"
     );
     for y in [2, 3] {
         let row = row_text(&backend, y);

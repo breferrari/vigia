@@ -78,7 +78,7 @@ palette! {
     path_cold,
     /// A listed path the pointer is resting on.
     path_hover,
-    /// The `●` marking a file that moved in the last tick.
+    /// The `●` marking the file written last.
     pulse,
     /// A churn sparkline's blocks, at the quietest of its three stops.
     spark,

@@ -57,7 +57,7 @@ The four state keys tell one note's state from another's at a glance, on the `�
 | `path_live` | a path that changed inside the glance window but not in the last tick |
 | `path_cold` | a path nothing has written since watching began |
 | `path_hover` | a listed path the pointer rests on: the pointer's own colour, underlined |
-| `pulse` | the `●` marking a file that moved in the last tick |
+| `pulse` | the `●` marking the file written last |
 | `note_mark` | the `✎` marking a file whose note the agent has not answered |
 | `note_mark_reply` | the `↳` marking one the agent has answered and nobody has resolved |
 | `note_mark_resolved` | the `✓` marking one just resolved, for as long as its departure draws |

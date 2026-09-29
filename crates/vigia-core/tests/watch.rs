@@ -172,6 +172,46 @@ fn a_tick_names_the_file_whose_write_landed_last() {
     }
 }
 
+/// A save inside a directory names the file, never the directory. Windows
+/// reports a modify on the parent after the file's own events.
+#[test]
+fn nested_write_is_newest() {
+    let scratch = Scratch::new("watch-nested");
+    scratch.write(
+        "src/a.rs", "x
+",
+    );
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let options = WatchOptions {
+        quiet: ORDERING_QUIET,
+        max_delay: Duration::from_secs(5),
+    };
+    let mut watcher = worktree.watch(options).expect("watch");
+
+    // Saved the way an editor saves: a temporary file renamed over the real one,
+    // which changes the directory as well as the file.
+    let temporary = scratch.path_of("src/a.rs.tmp");
+    std::fs::write(
+        &temporary, "y
+",
+    )
+    .expect("write the temporary file");
+    std::fs::rename(&temporary, scratch.path_of("src/a.rs")).expect("rename it over");
+    let tick = tick_within(&mut watcher, SETTLE).expect("a write must produce a tick");
+    assert_eq!(
+        tick.newest(),
+        Some("src/a.rs"),
+        "a nested write named {:?}, so follow finds no file to move to",
+        tick.paths
+    );
+    assert!(
+        !tick.paths.iter().any(|path| path == "src"),
+        "the tick lists the directory as a written file: {:?}",
+        tick.paths
+    );
+}
+
 /// The premise behind the ordering rule, checked against a real filesystem.
 #[test]
 fn a_rename_is_followed_to_where_the_file_now_is() {

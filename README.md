@@ -141,7 +141,7 @@ Every file gets the same row in both regions:
 | `▸` | **caret** | 📍 *where you are.* The diff below is inside this file |
 | `M` | **kind** | modified, added, deleted, renamed |
 | `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
-| `●` | **pulse** | ⚡ it changed on the newest tick |
+| `●` | **pulse** | ⚡ the file written last |
 | `✎` `↳` `✓` | **note mark** | 📝 your note is here, and where it stands |
 | green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
@@ -190,7 +190,7 @@ It is scaled **across every tracked file**, not against the row's own maximum, a
 
 <br>
 
-The dot marks the file named by the newest tick, and it lasts exactly one tick, so it **cuts rather than fades**. The path's own brightness is the same signal, slower: the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
+The dot marks the file written last, and it moves when another file is written, so it **cuts rather than fades**. The path's own brightness is the same signal, wider and slower: every file in the newest burst draws brightest, and the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
 
 The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered because you looked at it, no row becomes special by being pointed at, and the next key means exactly what it would have meant, unless you have a note box open, which is the one thing here you are inside until you leave it. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone. A line you left a note on stays marked, and that is not a selection either: you put it there, it outlives the pane, and it goes when the note does.
 
