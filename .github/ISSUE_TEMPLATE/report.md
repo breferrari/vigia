@@ -7,10 +7,10 @@ labels: ''
 
 **What you expected**
 
-**What happened**
+**What vigia drew**
 
 <!--
-Anything below is optional and helps, none of it is required.
+Everything below is optional. Each item helps.
 
 Terminal and version:
 OS:

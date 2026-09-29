@@ -22,13 +22,13 @@ Open an issue. What helps most:
 
 **`SPEC.md` is read before code, by everyone.** It is the contract: what must hold now, and why. Most of what looks like a free choice in this codebase already has a ruling, with the measurement that decided it recorded beside the rule.
 
-That is a real ask, and it is the honest one. The team sends back a change that contradicts a ruling, and the spec is the only place the rulings live. Start with:
+That is a real ask. A change that contradicts a ruling is sent back, and the spec is the only place the rulings live. Start with:
 
 - **§3 Invariants**: the eleven claims that everything else is built to keep
 - **§11.1**: what the shell does today, rule by rule
 - **§11.2**: questions that are open, and what was ruled on the ones that are not
 
-`ROADMAP.md` says what is next. `RULINGS.md` is the evidence trail behind the rulings. You do not need it to write code. You need it only to argue with a ruling.
+`ROADMAP.md` says what is next. `RULINGS.md` is the evidence behind the rulings. You do not need it to write code or to open your first PR. You need it only to argue with a ruling.
 
 ## House rules
 
@@ -39,9 +39,19 @@ A first PR is most likely to break these rules.
 - **An invariant without a failing test is a wish.** Nothing lands until a test fails when it is violated. If you cannot make it fail, say so in the PR and we will work out the gate together.
 - **Numbers or it did not happen.** A type signature is not evidence and a single green run is not evidence.
 - **Pure Rust.** Any dependency that pulls `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows, and CI fails the build if one appears.
-- **Do not hard-wrap prose.** Commit message bodies wrap at 72. Markdown and PR bodies do not wrap at all, because GitHub renders a single newline as a line break.
+- **Do not hard-wrap prose.** Markdown files, PR bodies and commit message bodies do not wrap at all: one paragraph is one line, because GitHub renders a single newline as a line break.
 - **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body.
-- **A pull request title becomes a release note.** The release writes its notes from the titles in it, so people who never open the diff read a title.
+- **A title can become a release note.** The release notes are written from the commits merged since the last release. To control the line, put `Release-note: <one sentence>` in a **commit message body** on your branch. It replaces the title in the notes. Pull requests are squash-merged with their commit messages, so a line that is only in the PR body is lost.
+- **A change the pane does not show gets no release note.** Title it `docs: ...` or `chore: ...`, or add `Release-note: none`. If every change since the last release is like that, no version is released.
+
+## Public files and contract files
+
+Two kinds of document live here, and they are written differently.
+
+- **Public files** are `README.md`, `CHANGELOG.md`, this file and the issue template. Release notes are copied from `CHANGELOG.md`. Write them in ordinary English: the fact first, short sentences, common words. Name what a user sees change, not the rule behind it.
+- **Contract files** are `SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md` and `CLAUDE.md`. They keep their own style: present tense, and each ruling names who made it and when.
+
+Phrases from the contract style are not allowed in public files. `.github/public-dialect.txt` lists them, and a test checks it. CI also checks your PR title and commit subjects against that list, and fails unless a commit body carries a `Release-note:` line. CI does not rerun when you only edit the PR title, so push a commit after renaming.
 
 ## Running things
 
