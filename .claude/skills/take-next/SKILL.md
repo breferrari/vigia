@@ -15,7 +15,7 @@ Take **one** task from `ROADMAP.md` and carry it to merged. Not part of a task, 
 > - **The tools are pre-authorized.** Invoking this skill is the request to run `/simplify`, `two-axis-review`, `/code-review` and the agents they spawn.
 > - **Apply review findings without asking.** Fix every finding worth fixing. List any you skip, with a one-line reason, in the PR body. A finding that would decline or narrow what the reader asked for is stop 4 below, not a fix.
 > - **A documented choice wins.** Take it and name it in the report. A documented refusal is a reason with a date: check the reason (step 3).
-> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Building less is the wrong caution. A missing feature leaves nothing to review. An extra one can be rejected in review.
+> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe. A missing feature leaves nothing to review. An extra one can be rejected in review.
 >
 > Four things stop the pass, and all four are about *what*:
 >
@@ -38,7 +38,7 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 
 `next.sh` picks the earliest eligible milestone. Each rule stops a failure it has had:
 
-- **Order is the phase number at the start of the title.** Every milestone's due date is null, and a sort on a null key returns whatever the API sent first. A title without `Phase <n>` sorts last rather than vanishing, so a renamed milestone loses its turn silently; pre-flight check 6 catches that.
+- **Order is the phase number at the start of the title.** Every milestone's due date is null, and a sort on a null key returns whatever the API sent first. A title without `Phase <n>` sorts last rather than vanishing, so a renamed milestone is taken after all the others, with no warning; pre-flight check 6 catches that.
 - **A description starting `Shelf:` is never selected.** A shelf stays open and is never next. Take from it only as a deliberate choice, after re-reading its dated deferral reason.
 - **A milestone with no open issues is skipped**, so a finished phase that is still open is never chosen. An empty answer means the rest is shelved, finished, or nothing: find out which before acting.
 
@@ -67,7 +67,7 @@ Take the **topmost unstarted row** in that phase's `ROADMAP.md` section. If a la
 
 A decline costs more than a build, because a missing feature leaves nothing to review.
 
-- Reach it early. Whether the reason holds is a question of fact. Once the reason is known, more time only adds justification, not argument.
+- Reach it early. Whether the reason holds is a question of fact. Once the reason is known, more time only adds words defending the decline.
 - A decline has a higher bar than a build. A bad build shows up in review. A bad refusal does not, and no gate can check a feature that was never built. "It would cost a wake", "it needs a timer" and "no API reports that" are claims with answers, and all three have been wrong here.
 - When the reader asked for the thing, build it. "Possible, affordable, and I would have designed it differently" is a preference, not a reason.
 - Put the reason in `SPEC.md` in the fewest words that can be falsified. The evidence goes in `RULINGS.md`.
@@ -87,7 +87,7 @@ For an issue labelled `decision`:
 
 Read the issue, the `SPEC.md` sections it touches, and the commits that touched them. On a research or look-and-feel task, look at how other tools solve it first, then compare with the record, so the record does not limit the options.
 
-Then query `vigil` for the three things the repo does not hold: private context (the competitive read), lessons from other projects (a `gix` limitation, a measurement trap), and what predates the code (why monitor-class). Know which of the three you are asking for. `search` the decision you are about to touch. `recall` is often empty, and that means nothing. The commit guard catches session artifacts, not strategy, so strategic context loaded while writing public text is how it leaks.
+Then query `vigil` for the three things the repo does not hold: private context (the competitive read), lessons from other projects (a `gix` limitation, a measurement trap), and what predates the code (why monitor-class). Know which of the three you are asking for. `search` the decision you are about to touch. `recall` is often empty, and that means nothing. Strategic context in mind while writing public text can leak into it, and the commit guard does not check for that.
 
 ## 3. Plan, and wait for approval
 
@@ -95,14 +95,14 @@ Enter plan mode. Write no code before a person approves the plan. The plan is wh
 
 The plan contains:
 
-- **What it rests on.** Decisions by title, from `SPEC.md` and `vigil`. Anything found that argues against the approach, and why you proceed anyway. "Nothing recorded" when the record is empty: that is a finding, not a blank.
-- **Premises.** What must be true, how it could be false, and the answer with its source: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. Settle every load-bearing premise yourself before presenting the plan: read the source in `~/.cargo/registry`, write a probe, measure, search the web. Check facts about other libraries and terminals against the world, never against memory. Work premises in dependency order. Finding facts is your job, never the reader's. Only product decisions go to the reader, in the plan.
+- **What it rests on.** Decisions by title, from `SPEC.md` and `vigil`. Anything found that argues against the approach, and why you proceed anyway. When the record is empty, write "nothing recorded": that is itself a finding.
+- **Premises.** What must be true, how it could be false, and the answer with its source: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. Settle every load-bearing premise yourself before presenting the plan: read the source in `~/.cargo/registry`, write a probe, measure, search the web. Check facts about other libraries and terminals against the world, never against memory. Work premises in dependency order. Finding facts is your job, never the reader's. Only product decisions go to the reader, in the plan, except a decline, which is stop 4.
 - **Checks on the record.** Quote an invariant's own words and check they reach this case, every time: I1's budget is *0 wakeups while idle*, and nothing a reader's hand is doing is idle. Two features were refused on I1 when it did not apply. Quote a refusal with its date, mark it checked or not, and check its reason is still true today: a reason about something missing ("no API for this") goes stale fastest. When the reason collapses, the question reopens; do not find a fresh reason for the same conclusion. Give a budget with its current headroom ("2.4ms of 16ms"), never on its own.
 - **Promises you can diff.** Files, signatures, error codes, tests by name and what each asserts, deviations from `SPEC.md` with reasons, and what is out of scope. "Fix the thing" promises nothing and passes any check. Scale it to the diff.
 
-Measure to learn the answer, not to justify a refusal.
+Measure to learn the answer. Do not run a measurement whose only possible use is to support a no.
 
-**One fresh context must hold it**: the issue, the spec sections, the changed files and the new tests, with room left to think. If not, split the issue into children that each have a full path through spec, code and gates, and mark the blocker. A wide mechanical refactor goes expand then contract: add the new form, migrate call sites in batches, delete the old form.
+**One fresh context must hold it**: the issue, the spec sections, the changed files and the new tests, with room left to think. If not, split the issue into children that each have a full path through spec, code and gates, and mark the blocker. A split is stop 2: file the children and present the split with the plan. A wide mechanical refactor goes expand then contract: add the new form, migrate call sites in batches, delete the old form.
 
 Post the approved plan as a comment on the issue before writing code. Write down any deviation and its reason when you take it. A reason written at review time does not count.
 
@@ -115,8 +115,8 @@ Post the approved plan as a comment on the issue before writing code. Write down
 - **Failing test first** for every invariant. Watch it fail, then make it pass.
 - **Frame-path changes run the budget gate.**
 - **Add no dependency** that `SPEC.md` does not name. Propose it into the spec in its own commit first.
-- **If reality contradicts the spec, stop.** Decide which is wrong and change that one in its own commit.
-- **Every issue you file gets a milestone and a roadmap row.** In-scope findings are fixed here. Never defer an in-scope finding to a new issue to close the PR. An out-of-scope one goes to the Shelf: a row in `ROADMAP.md`'s Shelf table, and its dated reason in the Deferral shelf table: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass.
+- **If reality contradicts the spec, stop.** Decide which is wrong, change that one in its own commit, and say which. A conflict between the plan and reality goes the same way.
+- **Every issue you file gets a milestone and a roadmap row.** In-scope findings are fixed here. Never defer an in-scope finding to a new issue to close the PR. An out-of-scope one goes to the Shelf: a row in `ROADMAP.md`'s Shelf table, and its dated reason in the Deferral shelf table: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass, and size it to the blockage.
 
 ## 5. Scope the checks
 
@@ -143,8 +143,8 @@ Brief every agent with: *Read the code. Do not run builds, benchmarks or tests. 
 
 Then prove it:
 
-- `cargo test` green with the count, and budget gates with numbers against budgets. State failures plainly.
-- **Diff the result against the plan.** Mark each promise delivered or not. Fix any quietly narrowed scope, dropped case or unused definition in this pass.
+- For a code diff, `cargo test` green with the count, and budget gates with numbers against budgets. For a docs-only diff, `register` and `package` green. State failures plainly.
+- **Diff the result against the plan.** Mark each promise delivered or not. Fix any quietly narrowed scope, dropped case or unused definition in this pass. A deviation with no reason written when it was taken is corrected in this pass, not noted.
 
 ## 7. Mark ready and merge
 
@@ -167,7 +167,7 @@ gh api repos/{owner}/{repo}/pulls/<n>/reviews --jq '.[] | select(.user.login == 
 gh api repos/{owner}/{repo}/pulls/<n>/comments --jq '.[] | select(.user.login == "Copilot") | "\(.path):\(.line)\n\(.body)\n"'
 ```
 
-Copilot reviews automatically on ready; a manual request spends a second unit of quota. Wait up to fifteen minutes after the run settles, then proceed and note it. Answer every comment: fix it, or reply with the spec section or invariant it would break. No reply counts as agreement. Copilot's comments are not binding, and none may be ignored. Batch fixes into one push. For longer iteration, `gh pr ready <n> --undo`.
+Copilot reviews automatically on ready; a manual request spends a second unit of quota. Wait up to fifteen minutes after the run settles, then proceed and note it. Answer every comment: fix it, or reply with the spec section or invariant it would break. No reply counts as agreement. Copilot's comments are not binding, and none may be ignored. Batch fixes into one push. For longer iteration, `gh pr ready <n> --undo`; marking ready again restarts the matrix and spends Copilot quota.
 
 Merge when the run is green on the ready revision and every comment is answered: `gh pr merge <n> --squash --delete-branch`. Under a worktree the local branch delete fails after the merge lands, so check the PR state before retrying.
 
