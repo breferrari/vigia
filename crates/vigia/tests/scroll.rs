@@ -1318,3 +1318,40 @@ fn tall_end_scrolls() {
         "a step down inside a last file taller than the pane held"
     );
 }
+
+/// Under wrap, a last file whose lines fit the pane but whose wrapped rows do
+/// not has not ended, so a step down still moves.
+#[test]
+fn wrapped_end_scrolls() {
+    let scratch = Scratch::new("shell-scroll-wrapped-end");
+    scratch.write("b.txt", "x\n");
+    scratch.commit_all("initial");
+    let long = "word ".repeat(40);
+    let lines: String = (0..body() / 2).map(|i| format!("{i} {long}\n")).collect();
+    scratch.write("b.txt", lines);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let wide = Body {
+        diff_width: 80,
+        ..split()
+    };
+    app.apply(Action::ToggleWrap, &mut frame, body())
+        .expect("wrap");
+
+    let mut step = |action| {
+        app.apply(action, &mut frame, body()).expect("apply");
+        app.view(&mut frame, &mut highlighter, &history, wide)
+            .expect("view")
+            .top
+    };
+    assert_eq!(step(Action::Bottom), Position { file: 0, row: 0 });
+    assert_eq!(
+        step(Action::Scroll(1)),
+        Position { file: 0, row: 1 },
+        "a step down held while wrapped rows were still below the pane"
+    );
+}
