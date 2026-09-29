@@ -272,7 +272,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | Build B9: `y` copies the caret file's path. **Revoked by [#386](https://github.com/breferrari/vigia/issues/386)** | [#372](https://github.com/breferrari/vigia/issues/372) |
 | ✅ | Bulk-rewrite settle guard fails on loaded musl runners | [#352](https://github.com/breferrari/vigia/issues/352) |
 | ✅ | The masthead graph draws a flat track and one spike, and the spike does not sit in the band | [#348](https://github.com/breferrari/vigia/issues/348) |
-| ⬜ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces | [#362](https://github.com/breferrari/vigia/issues/362) |
+| ✅ | decision: a bulk write marks every row with the pulse, so the mark says nothing on the shape an agent produces. **Ruled: one mark, the last write** | [#362](https://github.com/breferrari/vigia/issues/362) |
+| ⬜ | Build: one pulse mark per burst | [#556](https://github.com/breferrari/vigia/issues/556) |
 | ✅ | Turning wrap off measures a page step in the pane's height, so it walks over unseen lines. **Reported from use** | [#364](https://github.com/breferrari/vigia/issues/364) |
 | ✅ | a change arriving coalesces into place | [#365](https://github.com/breferrari/vigia/issues/365) |
 | ⬜ | watch.rs evicts an arbitrary path from a HashSet | [#368](https://github.com/breferrari/vigia/issues/368) |
