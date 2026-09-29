@@ -443,6 +443,8 @@ jobs:
           # checks never saw, so the release starts over.
           now=$(git ls-remote "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
             "refs/heads/${DEFAULT}" | cut -f1)
+          # The push landed and only its reply was lost.
+          [ "$now" = "$(git rev-parse HEAD)" ] && exit 0
           if [ -z "$now" ] || [ "$now" = "$(git rev-parse HEAD~1)" ]; then
             exit 1
           fi

@@ -1014,6 +1014,13 @@ fn a_bump_that_lost_a_race_is_dispatched_again() {
         moved < retry,
         "the release is dispatched again before checking the default branch moved"
     );
+    let landed = commit
+        .find(r#"[ "$now" = "$(git rev-parse HEAD)" ] && exit 0"#)
+        .expect("a push that landed but reported failure is taken for a lost race");
+    assert!(
+        landed < retry,
+        "a push that landed is dispatched again, stranding its version"
+    );
     assert!(
         commit[retry..].contains("exit 1"),
         "a retried run carries on, so the hand-off runs on a bump that never landed"
