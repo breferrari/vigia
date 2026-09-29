@@ -130,10 +130,8 @@ enum Wake {
     Posted(Posted),
 }
 
-/// The count of the run a pane is not drawing, taken only by a frame that draws it
-/// and only when a tick has passed since the last one. A frame that does not draw it
-/// owes the next one that does a count, whatever made the list empty in between:
-/// the staged toggle, `only`, a move of the standing or the last change going away.
+/// The staged count an empty pane shows. Counted again only after a tick, or after a
+/// frame that did not show it.
 fn elsewhere_of(
     kept: Counted,
     stale: &mut bool,
@@ -747,8 +745,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.written = true;
                     // The list's facts describe runs, so a write moves them too.
                     shell.places_stale = true;
-                    // And the count of the run it is not drawing, since a write to
-                    // the index is a tick too.
                     shell.elsewhere_stale = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time and only a wake the
@@ -1067,8 +1063,7 @@ struct Shell {
     /// Whether the list's facts are owed a walk: set when the tree moves, the list opens
     /// or the pane does, so the arrows re-measure nothing.
     places_stale: bool,
-    /// Whether `elsewhere` is owed a count. Building it reads every tree under
-    /// `HEAD`, and an empty pane repaints once a second while its history ages.
+    /// Whether `elsewhere` needs a new count. Counting reads every tree under `HEAD`.
     elsewhere_stale: bool,
     /// What the pane holds of the store between wakes: the notes as listed and
     /// the ones on their way off the screen.
@@ -2538,30 +2533,21 @@ mod tests {
             hidden: 0,
         };
         let mut stale = true;
-        let mut counts = 0;
-        let mut paint = |kept, stale: &mut bool, drawn, now| {
-            elsewhere_of(kept, stale, drawn, || {
-                counts += 1;
-                now
-            })
-        };
-        let kept = paint(Counted::default(), &mut stale, true, one);
-        // The once-a-second repaint of an ageing history, with nothing written.
-        let kept = paint(kept, &mut stale, true, two);
+        let kept = elsewhere_of(Counted::default(), &mut stale, true, || one);
+        assert_eq!(kept, one, "the first paint did not count");
+        // A repaint with no tick, as the history ages.
+        let kept = elsewhere_of(kept, &mut stale, true, || two);
         assert_eq!(kept, one, "a repaint with no tick counted again");
-        // A tick owes it.
         stale = true;
-        let kept = paint(kept, &mut stale, true, two);
-        assert_eq!(kept, two, "a tick's count was not taken");
-        // A frame that does not draw it clears it and owes the next one that does,
-        // which is how the staged toggle and a move of the standing are answered.
-        let kept = paint(kept, &mut stale, false, one);
+        let kept = elsewhere_of(kept, &mut stale, true, || two);
+        assert_eq!(kept, two, "a tick did not count again");
+        // A frame that hides it, then one that shows it again.
+        let kept = elsewhere_of(kept, &mut stale, false, || one);
         assert_eq!(kept, Counted::default());
-        let kept = paint(kept, &mut stale, true, one);
-        assert_eq!(kept, one, "a frame that emptied kept a count from before");
-        assert_eq!(counts, 3);
+        let kept = elsewhere_of(kept, &mut stale, true, || one);
+        assert_eq!(kept, one, "a frame that emptied kept an old count");
 
-        // And the pane is what calls it, with the tick owing it.
+        // The pane counts only through `elsewhere_of`, and the tick marks it stale.
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         assert_eq!(
@@ -2569,20 +2555,22 @@ mod tests {
                 .matches("count_of(vigia_core::Origin::Staged")
                 .count(),
             1,
-            "the staged count is reachable outside `elsewhere_of`, so an empty pane \
-             rebuilds an index from `HEAD` on every paint"
+            "the staged count is called outside `elsewhere_of`"
         );
-        for rule in [
-            "self.elsewhere = elsewhere_of(\n            self.elsewhere,\n            &mut self.elsewhere_stale,",
-            "shell.elsewhere_stale = true;",
-            "elsewhere_stale: true,",
-        ] {
-            assert!(
-                shipped.contains(rule),
-                "`{rule}` is gone, so the staged count is taken on every paint or \
-                 never again"
-            );
-        }
+        assert!(
+            shipped.contains("&mut self.elsewhere_stale,")
+                && shipped.contains("elsewhere_stale: true,"),
+            "`paint` no longer counts through the stale flag"
+        );
+        let tick = shipped
+            .split("Wake::Tick(paths) => {")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost").next())
+            .expect("the tick arm is gone");
+        assert!(
+            tick.contains("shell.elsewhere_stale = true;"),
+            "a tick no longer marks the staged count stale"
+        );
     }
 
     /// The footer says **sent** rather than copied, because OSC 52 has no reply. Both
