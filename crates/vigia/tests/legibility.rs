@@ -4770,3 +4770,37 @@ fn drawing_both_runs_costs_the_path_no_column_at_any_width() {
          was never actually grouped"
     );
 }
+
+/// A wider pane never shortens the body, but for one step: the width where the
+/// shortest hint first fits takes the footer's second line, and costs one row.
+/// Below that width a second line would hold nothing.
+#[test]
+fn wider_body_rows() {
+    // The shortest hint rung.
+    let first_hint = "f follow".len() as u16;
+    let chrome = chrome();
+    for files in [0usize, 1, 2, 40, 5000] {
+        for height in 1..=60u16 {
+            let mut steps = Vec::new();
+            let mut last: Option<usize> = None;
+            for width in 1..=200u16 {
+                let rows =
+                    body_layout(Rect::new(0, 0, width, height), &chrome, files, files).rows();
+                if let Some(before) = last
+                    && rows < before
+                {
+                    steps.push((width, before - rows));
+                }
+                last = Some(rows);
+            }
+            assert!(
+                steps.len() <= 1
+                    && steps
+                        .iter()
+                        .all(|&(width, lost)| lost == 1 && width >= first_hint),
+                "over {files} files at {height} rows, widening shortened the body at \
+                 (width, rows lost) {steps:?}"
+            );
+        }
+    }
+}
