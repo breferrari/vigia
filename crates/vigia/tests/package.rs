@@ -2002,7 +2002,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// It rose 1,184 bytes for a note over a range: the gutter drag, the anchor's two
 /// ends and what drift does to each, and the range the agent is sent.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 413455),
+    ("SPEC.md", 413313),
     ("RULINGS.md", 103216),
     ("CLAUDE.md", 17260),
     (".claude/skills/take-next/SKILL.md", 20983),

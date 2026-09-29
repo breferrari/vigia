@@ -1198,9 +1198,7 @@ fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
 /// Every downward step a reader can take from a short pane at the end.
 const DOWNWARD: [Action; 3] = [Action::Scroll(1), Action::Page(1), Action::HalfPage(1)];
 
-/// `G` rests on the last file's top and leaves the pane short. A step down
-/// from there has nowhere to go, so it holds rather than backing the pane up
-/// a screenful, which read as the content jumping the wrong way.
+/// A step down from the short pane `G` leaves holds.
 #[test]
 fn end_scroll_holds() {
     let scratch = fixture("shell-scroll-end-holds");
@@ -1233,7 +1231,7 @@ fn end_scroll_holds() {
             "{step:?} at the end of the diff moved the pane from {end:?} to {now:?}"
         );
     }
-    // And up still moves, and up: from a short pane it fills the screen from above.
+    // Up still moves, filling the short pane from above.
     let up = after(
         &mut app,
         &mut frame,
@@ -1247,8 +1245,7 @@ fn end_scroll_holds() {
     );
 }
 
-/// The same short pane, reached with no key at all: follow lands on the last
-/// file when it is the one written.
+/// The same, reached by follow rather than a key.
 #[test]
 fn follow_end_holds() {
     let scratch = fixture("shell-scroll-follow-end");
@@ -1285,8 +1282,7 @@ fn follow_end_holds() {
     );
 }
 
-/// A last file taller than the pane has not ended when `G` lands on its top, so a
-/// step down still moves through it.
+/// A last file taller than the pane has not ended.
 #[test]
 fn tall_end_scrolls() {
     let scratch = Scratch::large_diff("shell-scroll-tall-end", 2, body() * 3);
@@ -1319,8 +1315,7 @@ fn tall_end_scrolls() {
     );
 }
 
-/// Under wrap, a last file whose lines fit the pane but whose wrapped rows do
-/// not has not ended, so a step down still moves.
+/// Nor has one whose lines fit but whose wrapped rows do not.
 #[test]
 fn wrapped_end_scrolls() {
     let scratch = Scratch::new("shell-scroll-wrapped-end");
