@@ -297,6 +297,13 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
 | ✅ | The staged mark spends a gutter column on every row of both runs to mark the rows of one | [#316](https://github.com/breferrari/vigia/issues/316) |
 | ✅ | Side-by-side regions at real width: the list becomes a left rail | [#162](https://github.com/breferrari/vigia/issues/162) |
+| ✅ | The mcs tech pack declares keys mcs no longer reads | [#534](https://github.com/breferrari/vigia/issues/534) |
+| ✅ | Every tick re-walks every untracked file in the tree | [#536](https://github.com/breferrari/vigia/issues/536) |
+| ✅ | A write to `.git/index` that changes nothing still costs a full status walk | [#538](https://github.com/breferrari/vigia/issues/538) |
+| ✅ | Range notes from a gutter drag | [#540](https://github.com/breferrari/vigia/issues/540) |
+| ✅ | The config menu names its settings in prose | [#541](https://github.com/breferrari/vigia/issues/541) |
+| ✅ | Staged count rebuilt on every paint of an empty pane | [#545](https://github.com/breferrari/vigia/issues/545) |
+| ✅ | Index and HEAD writes unwatched when the git dir is outside the work tree | [#548](https://github.com/breferrari/vigia/issues/548) |
 
 **The phase's filter is its own instrument.** Rows arrive here from a reader watching the pane, not from a derivation, and the pattern held: five rows moved to the front on 2026-08-21 and three more on 2026-08-24, every one of them a gesture somebody reached for and did not find, or a hitch somebody felt. That is the only instrument that produces this filter, and [#72](https://github.com/breferrari/vigia/issues/72) is what widens it.
 
