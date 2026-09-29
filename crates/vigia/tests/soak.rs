@@ -1726,7 +1726,11 @@ fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
         no_bash("the plan job's platform list");
         return;
     };
-    assert!(scheduled.ok, "the scheduled plan failed:\n{}", scheduled.said);
+    assert!(
+        scheduled.ok,
+        "the scheduled plan failed:\n{}",
+        scheduled.said
+    );
     assert_eq!(
         platforms(&scheduled),
         "[\"ubuntu-latest\"]",
@@ -1736,7 +1740,11 @@ fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
     // A manual dispatch: all three tier-1 targets.
     let dispatched =
         run_plan_on(&script, "1800", "", "false").expect("bash was there a moment ago");
-    assert!(dispatched.ok, "the dispatched plan failed:\n{}", dispatched.said);
+    assert!(
+        dispatched.ok,
+        "the dispatched plan failed:\n{}",
+        dispatched.said
+    );
     for target in ["ubuntu-latest", "macos-latest", "windows-latest"] {
         assert!(
             platforms(&dispatched).contains(target),
