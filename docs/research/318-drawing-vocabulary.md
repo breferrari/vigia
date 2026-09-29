@@ -2,9 +2,9 @@
 
 Research dossier for [#318](https://github.com/breferrari/vigia/issues/318). This file is the "note down everything" artifact: every technique surveyed, every measurement taken, every source read, and the pricing that turns them into rulings. Claims carry their source (a URL, a file path, or the command that measured them). Screenshots live in `assets/`.
 
-The mandate, from the reader: lightweight and fast stays, but the ambition ceiling comes off. It is 2026 and this is a CLI; cutting-edge and cool is possible. Spec rulings are dated evidence with checkable reasons, not walls. Survey broadly and be thorough.
+The mandate, from the reader: lightweight and fast stays, but the ambition ceiling comes off. It is 2026 and this is a CLI, cutting-edge and cool is possible. Spec rulings are dated evidence with checkable reasons, not walls. Survey broadly and be thorough.
 
-Status: **complete, 2026-08-25.** Section 5 carries the rulings; SPEC.md §11.2 B18 is the authority. As the builds land, their captures join `assets/`: `321-washes.png` is #321's delta-formula diff, `322-gradients.png` is #322's Oklab-ramped sparklines and band over it, and `323-chrome.png` is #323's pills, spliced sheet and icons over both, all captured headless from a tmux pane.
+Status: **complete, 2026-08-25.** Section 5 carries the rulings. SPEC.md §11.2 B18 is the authority. As the builds land, their captures join `assets/`. `321-washes.png` is #321's delta-formula diff. `322-gradients.png` is #322's Oklab-ramped sparklines and band over it. `323-chrome.png` is #323's pills, spliced sheet and icons over both. All are captured headless from a tmux pane.
 
 ## 1. Survey of the world
 
@@ -14,41 +14,41 @@ What the best-looking terminal tools actually do, read from their sources and sc
 
 Surveyed 2026-08-25 from shallow clones of `anomalyco/opencode` (formerly `sst/opencode`, GitHub 301s to the new org) at `ac1c048e` and `sst/opentui`.
 
-**Stack.** OpenTUI + SolidJS on Bun with a native Zig rendering core (their in-house framework; Bubble Tea was abandoned in the 1.0 rewrite for performance). Flexbox layout, high-level renderables including a `Diff` widget, `Markdown`, `Code`, `ScrollBox`.
+**Stack.** OpenTUI + SolidJS on Bun with a native Zig rendering core (their in-house framework. They abandoned Bubble Tea in the 1.0 rewrite for performance). Flexbox layout, high-level renderables including a `Diff` widget, `Markdown`, `Code`, `ScrollBox`.
 
-**Gradients.** No declarative gradient prop; everything is per-cell RGB/alpha interpolation in app code:
+**Gradients.** There is no declarative gradient prop. Everything is per-cell RGB/alpha interpolation in app code:
 
-- The prompt's "Knight Rider" scanner: per-character colour per frame, gradient derived from **one** accent colour (head alpha 1.0, a 1.15x bloom step, then exponential alpha decay `0.65^i`); inactive cells same hue at alpha 0.2, so it is background-independent.
+- The prompt's "Knight Rider" scanner: per-character colour per frame, gradient derived from **one** accent colour (head alpha 1.0, a 1.15x bloom step, then exponential alpha decay `0.65^i`). Inactive cells use the same hue at alpha 0.2, so it is background-independent.
 - A pulsing radial gradient behind the logo: three expanding cosine rings lerping panel colour toward primary per cell, **pre-rendered into ~138 cached frames** blitted with `.set()`, clamped to 30fps while animating. Checks `capabilities.rgb` and swaps full-block/half-block rendering.
 - `tint(base, overlay, alpha)`: one linear per-channel lerp used for every soft colour in the UI, including diff backgrounds generated as `tint(bg, green, 0.22)` dark / `0.14` light.
 - Real per-cell alpha compositing in the Zig buffer: dialogs float on a translucent black scrim (alpha 150).
 
-**Theme system.** 52 tokens including **4 background layers** and **12 diff tokens** (per-side line bg, word-highlight, sign, line-number bg); 33 JSON themes; tokens can reference other tokens, take raw ANSI indices, or `{dark, light}` pairs. Mode comes from the terminal: OSC 11 luminance classification, DECRQM mode 2031 for live colour-scheme-change notifications, and a synthetic **"system" theme built from the terminal's own 16-colour palette + fg/bg** with a transparent true background. Everything RGBA end to end; capabilities probed (`rgb`, `sync`, `hyperlinks`, kitty keyboard, sixel...), not assumed.
+**Theme system.** 52 tokens including **4 background layers** and **12 diff tokens** (per-side line bg, word-highlight, sign, line-number bg). There are 33 JSON themes. Tokens can reference other tokens, take raw ANSI indices, or take `{dark, light}` pairs. Mode comes from the terminal. It uses OSC 11 luminance classification and DECRQM mode 2031 for live colour-scheme-change notifications. It also has a synthetic **"system" theme built from the terminal's own 16-colour palette + fg/bg** with a transparent true background. Everything is RGBA end to end. Capabilities are probed (`rgb`, `sync`, `hyperlinks`, kitty keyboard, sixel...), not assumed.
 
-**Visual signature.** Almost borderless: depth from the four stacked background layers; the accent is a single heavy left rule `┃` (an `EmptyBorder` with only the left edge), rounded borders only on errors; dialogs are borderless panels on the alpha scrim; toasts pin top-right with heavy rules in the variant colour. Spacing rhythm `padding 2/1`, `gap 1-2`. **Zero Nerd Font glyphs** (grep over the TUI source finds no PUA codepoints): iconography is plain Unicode (`✓ • ⋯`, braille spinner, half/full blocks). The logo is a half-block pixel font with a baked drop-shadow (`tint(background, fg, 0.25)` behind `▀`). Animations are gated by one toggle, fade-ins are 160ms smoothstep, and the flashy gradient runs inside one dialog, not ambiently.
+**Visual signature.** The look is almost borderless. Depth comes from the four stacked background layers. The accent is a single heavy left rule `┃` (an `EmptyBorder` with only the left edge). Rounded borders appear only on errors. Dialogs are borderless panels on the alpha scrim. Toasts pin top-right with heavy rules in the variant colour. Spacing rhythm is `padding 2/1`, `gap 1-2`. **Zero Nerd Font glyphs** (grep over the TUI source finds no PUA codepoints): iconography is plain Unicode (`✓ • ⋯`, braille spinner, half/full blocks). The logo is a half-block pixel font with a baked drop-shadow (`tint(background, fg, 0.25)` behind `▀`). Animations are gated by one toggle, fade-ins are 160ms smoothstep, and the flashy gradient runs inside one dialog, not ambiently.
 
 **Most vigia-relevant ideas.** (1) The terminal-derived system theme (palette + OSC 10/11, diff washes tinted from the terminal's own green/red, transparent background) makes a tool look native everywhere without shipping 33 themes. (2) Live dark/light re-resolution as a runtime event, which matters for a monitor that outlives a daytime theme flip. (3) Alpha/lerp-first colour math instead of hardcoded dims. (4) The 12-token diff vocabulary. (5) Animation with a budget conscience: frame caches, fps clamp, one global toggle, mode 2026 sync detection.
 
 ### 1.2 btop
 
-Source basis: shallow clone of `aristocratos/btop` at `76e323d` (2026-08-22, post v1.4.7); local install btop 1.4.7 with 41 stock themes at `/usr/share/btop/themes/`. Paths resolve on GitHub under `aristocratos/btop/blob/main/`.
+Source basis: shallow clone of `aristocratos/btop` at `76e323d` (2026-08-22, post v1.4.7). The local install is btop 1.4.7 with 41 stock themes at `/usr/share/btop/themes/`. Paths resolve on GitHub under `aristocratos/btop/blob/main/`.
 
-**Gradients.** `src/btop_theme.cpp`, `generateGradients()` (lines 306-363). 101 precomputed steps per gradient, one per integer percent, each stored as a fully rendered ANSI escape string so draw time is a lookup plus append, zero math. Interpolation is plain linear integer RGB per channel, no HSL, no gamma, no easing: good endpoints do the work. Gradients are 2-stop or 3-stop from theme keys `<name>_start/_mid/_end`; `_mid` splits the 101 steps at 50. Application differs by element:
+**Gradients.** `src/btop_theme.cpp`, `generateGradients()` (lines 306-363). Each gradient has 101 precomputed steps, one per integer percent. Each step is stored as a fully rendered ANSI escape string, so draw time is a lookup plus append, zero math. Interpolation is plain linear integer RGB per channel, no HSL, no gamma, no easing: good endpoints do the work. Gradients are 2-stop or 3-stop from theme keys `<name>_start/_mid/_end`. `_mid` splits the 101 steps at 50. Application differs by element:
 
 - Meters: per-cell, each cell coloured by its own position, so a full meter sweeps the gradient.
-- Multi-row graphs: **per-row**, one colour per text row mapped to the vertical axis (top = `_end`). One escape per row per frame; reads as "hotter at the top" while costing almost nothing.
+- Multi-row graphs: **per-row**, one colour per text row mapped to the vertical axis (top = `_end`). One escape per row per frame. It reads as "hotter at the top" while costing almost nothing.
 - One-row graphs: per-cell by value.
 - Process list: per-row by distance from the selection (a fade), plus per-value cells.
 
-At 256 colours the same 101 steps are quantised through the 6x6x6 cube (`round(c/51)`); banded but still ordered.
+At 256 colours the same 101 steps are quantised through the 6x6x6 cube (`round(c/51)`). The result is banded but still ordered.
 
-**Graphs.** Glyph tables in `Symbols::graph_symbols` (`src/btop_draw.cpp:84-134`), three sets: `braille` (a 5x5 lookup indexed `left_level * 5 + right_level`, each level 0-4 dots per braille column, so two samples per cell and 4 x height dots of vertical resolution), `block` (quadrant/half blocks, ~2 levels per half-cell), `tty` (` ░▒█`). Value mapping per row band with a +0.1 bias so tiny values still light a dot; `no_zero` keeps an idle baseline. Scrolling is O(1) per tick: two alternating string buffers, pop one UTF-8 cell at the front, append one at the end. The whole "smoothness" is 2x4 subpixels per cell plus 100-step vertical quantisation; no curve fitting.
+**Graphs.** Glyph tables are in `Symbols::graph_symbols` (`src/btop_draw.cpp:84-134`), in three sets: `braille` (a 5x5 lookup indexed `left_level * 5 + right_level`, each level 0-4 dots per braille column, so two samples per cell and 4 x height dots of vertical resolution), `block` (quadrant/half blocks, ~2 levels per half-cell), and `tty` (` ░▒█`). Value mapping is per row band with a +0.1 bias so tiny values still light a dot. `no_zero` keeps an idle baseline. Scrolling is O(1) per tick: two alternating string buffers, pop one UTF-8 cell at the front, append one at the end. The whole "smoothness" is 2x4 subpixels per cell plus 100-step vertical quantisation, with no curve fitting.
 
-**Themes.** Line-oriented `theme[key]="value"`, about 50 keys: chrome, per-box border colours, and the gradient triples. Empty `main_bg` means terminal-default background. Truecolour is a config flag, not detected; `--low-color` quantises to 256, and tty mode (auto-detected via `/dev/tty` on Linux) drops to 16 hardcoded SGR colours, shade-character graphs, square corners.
+**Themes.** Line-oriented `theme[key]="value"`, about 50 keys: chrome, per-box border colours, and the gradient triples. Empty `main_bg` means terminal-default background. Truecolour is a config flag and is not detected. `--low-color` quantises to 256. tty mode (auto-detected via `/dev/tty` on Linux) drops to 16 hardcoded SGR colours, shade-character graphs, square corners.
 
-**Chrome.** Rounded corners `╭╮╰╯` by default; titles spliced into the top border as `┐` + bold title + `┌` in a contrasting colour so the border visually opens around the text; superscript digits as hotkeys; per-box border hues; boxes drawn once and cached, content overprinted with cursor addressing.
+**Chrome.** Rounded corners `╭╮╰╯` are the default. Titles are spliced into the top border as `┐` + bold title + `┌` in a contrasting colour, so the border visually opens around the text. Superscript digits mark hotkeys. Each box has its own border hue. Boxes are drawn once and cached, and content is overprinted with cursor addressing.
 
-**Transferable mechanisms** (all replicable in ratatui): (1) precomputed 101-colour gradients; (2) the braille 5x5 two-samples-per-cell table with anti-vanishing bias; (3) per-row gradient colouring against the vertical axis, which looks expensive and costs one style per row; (4) border-spliced titles over tinted rounded borders; (5) a three-tier ladder truecolor/braille, 256-quantised, 16-colour + shades + square corners.
+**Transferable mechanisms** (all replicable in ratatui): (1) Precomputed 101-colour gradients. (2) The braille 5x5 two-samples-per-cell table with anti-vanishing bias. (3) Per-row gradient colouring against the vertical axis, which looks expensive and costs one style per row. (4) Border-spliced titles over tinted rounded borders. (5) A three-tier ladder: truecolor/braille, 256-quantised, 16-colour + shades + square corners.
 
 ### 1.3 The wider field
 
@@ -56,30 +56,30 @@ Surveyed 2026-08-25 against shallow clones (delta, crush, lazygit, gitui, helix,
 
 **Diff presentation, the section that matters most here.**
 
-- **delta** is the canonical beautiful diff, and its formula is exact: syntax-highlighted foreground over a **low-chroma full-width background wash**, with a hotter same-hue wash for word-level emphasis. The constants (`src/color.rs:156-186`): dark minus `#3f0001`, minus-emph `#901011`, plus `#002800`, plus-emph `#006000`; light minus `#ffe0e0`/`#ffc0c0`, plus `#d0ffd0`/`#a0efa0`; each with 256-colour fallbacks (52/124/22/28). Word-level emphasis tokenises with `\w+` and only pairs lines whose edit distance is under `--max-line-distance 0.6`, which is why highlights never smear across unrelated lines. File headers underlined, hunk headers boxed, `⋮` as the line-number gutter separator.
-- **crush** (Charm's AI TUI) modernises the same formula with a **two-tone gutter**: insert gutter bg `#293229`, code bg `#303a30` (dark), so the line-number column is a slightly darker shade of the same wash, structuring two columns with no border. Chroma syntax re-rendered over the wash, cached per (content + bg) hash.
-- **lazygit** outsources diff beauty to delta via the pager config; **gitui** is the plain-foreground baseline that looks dated beside them.
+- **delta** is the canonical beautiful diff, and its formula is exact: syntax-highlighted foreground over a **low-chroma full-width background wash**, with a hotter same-hue wash for word-level emphasis. The constants (`src/color.rs:156-186`): dark minus `#3f0001`, minus-emph `#901011`, plus `#002800`, plus-emph `#006000`. Light minus `#ffe0e0`/`#ffc0c0`, plus `#d0ffd0`/`#a0efa0`. Each has 256-colour fallbacks (52/124/22/28). Word-level emphasis tokenises with `\w+` and only pairs lines whose edit distance is under `--max-line-distance 0.6`, which is why highlights never smear across unrelated lines. File headers are underlined, hunk headers are boxed, and `⋮` is the line-number gutter separator.
+- **crush** (Charm's AI TUI) modernises the same formula with a **two-tone gutter**: insert gutter bg `#293229`, code bg `#303a30` (dark), so the line-number column is a slightly darker shade of the same wash. That structures two columns with no border. Chroma syntax is re-rendered over the wash, cached per (content + bg) hash.
+- **lazygit** outsources diff beauty to delta via the pager config. **gitui** is the plain-foreground baseline that looks dated beside them.
 - **helix** marks VCS changes with a one-column sub-cell ribbon: `▍` (U+258D) for add/modify, `▔` (U+2594) for deletions.
 
-**Gradients and colour.** lipgloss v2 has first-class `Blend1D/Blend2D` interpolating in **CIELAB** (via go-colorful), which is why Charm gradients do not go muddy in the middle; crush applies them per grapheme cluster (logo, `▶▶▶▶` queue pills, a `╱`-textured field behind the wordmark). starship fakes gradients by stepping Powerline segment backgrounds. yazi ships per-icon hex foregrounds and `reversed = true` for the hovered row.
+**Gradients and colour.** lipgloss v2 has first-class `Blend1D/Blend2D` interpolating in **CIELAB** (via go-colorful), which is why Charm gradients do not go muddy in the middle. crush applies them per grapheme cluster (logo, `▶▶▶▶` queue pills, a `╱`-textured field behind the wordmark). starship fakes gradients by stepping Powerline segment backgrounds. yazi ships per-icon hex foregrounds and `reversed = true` for the hovered row.
 
-**Adaptive theming is the defining 2025-2026 trend.** delta auto-detects light/dark via OSC 10/11 (`terminal-colorsaurus`). yazi queries OSC 11 **and** `CSI ? 996 n`, subscribes to change notifications with mode 2031, falls back to Rec.709 luma > 0.6. lipgloss v2 made background query explicit (`BackgroundColor(in,out)` + `LightDark`); bubbletea v2 delivers it as a message. Everyone ships paired dark/light styles.
+**Adaptive theming is the defining 2025-2026 trend.** delta auto-detects light/dark via OSC 10/11 (`terminal-colorsaurus`). yazi queries OSC 11 **and** `CSI ? 996 n`, subscribes to change notifications with mode 2031, falls back to Rec.709 luma > 0.6. lipgloss v2 made background query explicit (`BackgroundColor(in,out)` + `LightDark`). bubbletea v2 delivers it as a message. Everyone ships paired dark/light styles.
 
-**Nerd Font icons.** lazygit: opt-in (`nerdFontsVersion`), ~790 lines of per-extension icons with hex colours. yazi: on by default, theme-driven, vendored from nvim-web-devicons, with conditional rules. eza: `--icons=auto` only when stdout is a tty. superfile: one `nerdfont` bool swapping the whole table for ASCII. Field consensus: **icons are opt-in or theme-driven, never required, and every serious tool has a clean glyphless mode.**
+**Nerd Font icons.** lazygit: opt-in (`nerdFontsVersion`), ~790 lines of per-extension icons with hex colours. yazi: on by default, theme-driven, vendored from nvim-web-devicons, with conditional rules. eza: with `--icons=auto`, icons appear only when stdout is a tty. superfile: one `nerdfont` bool swapping the whole table for ASCII. Field consensus: **icons are opt-in or theme-driven, never required, and every serious tool has a clean glyphless mode.**
 
-**Chrome fashion.** Rounded corners are the 2025 default (lazygit default `rounded` with focus as border *colour*; television `Rounded` with `None` per panel; superfile `╭╮╰╯`; zellij themes carry `rounded_corners`). lipgloss adds half-block borders that read as a solid slab, plus a compositing Canvas/Layer system. The counter-current is borderless: yazi's single `│` separators, crush's padding-and-wash structure, posting's translucent Textual layers (`background: $surface 50%`). Powerline `` U+E0B0 is the status-bar separator everywhere.
+**Chrome fashion.** Rounded corners are the 2025 default (lazygit's default is `rounded` with focus as border *colour*, television uses `Rounded` with `None` per panel, superfile uses `╭╮╰╯`, and zellij themes carry `rounded_corners`). lipgloss adds half-block borders that read as a solid slab, plus a compositing Canvas/Layer system. The counter-current is borderless: yazi's single `│` separators, crush's padding-and-wash structure, posting's translucent Textual layers (`background: $surface 50%`). Powerline `` U+E0B0 is the status-bar separator everywhere.
 
-**Sub-cell graphics and new Unicode.** **ratatui now ships `Marker::Sextant` (2x3) and `Marker::Octant` (2x4, U+1CD00) in the canvas module** (PR ratatui#2235), joining braille and half blocks: octants are braille-resolution but densely packed, real area fills with no dot gaps. helix's eighth-block gutter above. chafa has drawn with wedges and sextants since 1.8.0 (what yazi uses for no-graphics preview). Real pixel graphics: yazi has seven adapter drivers (kitty old/new, iTerm2, sixel, ueberzug++, chafa) probed by behaviour (DA1 attr 4, kitty query id 31, XTVERSION); zellij re-renders sixel and kitty graphics inside panes.
+**Sub-cell graphics and new Unicode.** **ratatui now ships `Marker::Sextant` (2x3) and `Marker::Octant` (2x4, U+1CD00) in the canvas module** (PR ratatui#2235). They join braille and half blocks. Octants are braille-resolution but densely packed, with real area fills and no dot gaps. helix's eighth-block gutter above. chafa has drawn with wedges and sextants since 1.8.0 (what yazi uses for no-graphics preview). Real pixel graphics: yazi has seven adapter drivers (kitty old/new, iTerm2, sixel, ueberzug++, chafa) probed by behaviour (DA1 attr 4, kitty query id 31, XTVERSION). zellij re-renders sixel and kitty graphics inside panes.
 
-**OSC 8 hyperlinks.** delta `--hyperlinks` wraps commits, files and line numbers (templatable to `vscode://file/{path}:{line}`); eza `--hyperlink`. In ratatui this was long impossible because the buffer diff splits per cell; **ratatui 0.30.1 added `CellDiffOption::ForcedWidth`**, the hook `tui-link` and OpenAI's Codex CLI (itself ratatui+crossterm) use to emit OSC 8 with honest diff widths.
+**OSC 8 hyperlinks.** delta `--hyperlinks` wraps commits, files and line numbers (templatable to `vscode://file/{path}:{line}`). eza offers `--hyperlink`. In ratatui this was long impossible because the buffer diff splits per cell. **ratatui 0.30.1 added `CellDiffOption::ForcedWidth`**, the hook that `tui-link` and OpenAI's Codex CLI (itself ratatui+crossterm) use to emit OSC 8 with honest diff widths.
 
-**Motion.** crush runs a 20fps spinner with staggered character birth and prerendered static frames; Charm's `harmonica` is a spring-physics easing library; Textual animates via its CSS. Everyone gates animation behind a toggle.
+**Motion.** crush runs a 20fps spinner with staggered character birth and prerendered static frames. Charm's `harmonica` is a spring-physics easing library. Textual animates via its CSS. Everyone gates animation behind a toggle.
 
-**The one-paragraph synthesis.** The field's diff state of the art is delta's formula (syntax fg + low-chroma wash + hotter emph wash, light/dark by OSC query, not flag), modernised by crush's two-tone gutter. Chrome is rounded-or-borderless with focus as border colour; icons are theme-driven with a mandatory clean fallback; density comes from eighth-blocks and now octants, which ratatui already ships; OSC 8 on file names is the newest table-stakes nicety.
+**The one-paragraph synthesis.** The field's diff state of the art is delta's formula (syntax fg + low-chroma wash + hotter emph wash, light/dark by OSC query, not flag), modernised by crush's two-tone gutter. Chrome is rounded-or-borderless with focus as border colour. Icons are theme-driven with a mandatory clean fallback. Density comes from eighth-blocks and now octants, which ratatui already ships. OSC 8 on file names is the newest table-stakes nicety.
 
 ### 1.4 Terminal support matrix, 2025-2026
 
-Verified 2026-08-25 against official docs, changelogs and the terminals' own source at tagged versions; nothing from memory. Versions at time of check: ghostty 1.2/1.3, foot 1.20+, kitty 0.47, Alacritty 0.17.0, WezTerm 20240203 (+nightly), iTerm2 3.6.11, Windows Terminal 1.24, Konsole 26.08, VTE 0.82-0.84 / Ptyxis, tmux 3.7c.
+Verified 2026-08-25 against official docs, changelogs and the terminals' own source at tagged versions. Nothing comes from memory. Versions at time of check: ghostty 1.2/1.3, foot 1.20+, kitty 0.47, Alacritty 0.17.0, WezTerm 20240203 (+nightly), iTerm2 3.6.11, Windows Terminal 1.24, Konsole 26.08, VTE 0.82-0.84 / Ptyxis, tmux 3.7c.
 
 | Terminal | COLORTERM | 4:3/4:4/4:5 underline | CSI 58 colour | OSC 8 | mode 2026 | native sextants | native octants |
 |---|---|---|---|---|---|---|---|
@@ -97,21 +97,21 @@ Verified 2026-08-25 against official docs, changelogs and the terminals' own sou
 Deltas from common belief, the cells a year-old memory gets wrong:
 
 1. **VTE has no synchronized output** (0.82 recognises the mode, implements nothing), and VTE-based Ptyxis is now the Fedora/Ubuntu default terminal. Mode 2026 stays a progressive enhancement.
-2. Windows Terminal styled underlines arrived in 1.20 (not 1.18); mode 2026 reached stable in 1.23 (2026-01); **it still does not set COLORTERM**, making it the canonical false negative for env-sniffed truecolour.
+2. Windows Terminal styled underlines arrived in 1.20 (not 1.18). Mode 2026 reached stable in 1.23 (2026-01), and **it still does not set COLORTERM**. That makes it the canonical false negative for env-sniffed truecolour.
 3. tmux sets COLORTERM inward only since 3.6 (2025-11) and passes inner mode 2026 only since 3.7 (2026-06).
 4. **Octants are natively drawn by exactly four engines**: ghostty 1.2+, foot 1.20+, kitty 0.40+, VTE 0.78+. Alacritty, iTerm2, Windows Terminal and Konsole rely on the font, and Konsole does not even self-draw sextants.
 5. Konsole ships OSC 8 disabled by default. OSC 8 degrades silently everywhere (text renders, link inert), so emitting it always costs nothing.
 
-Prevalence: no public COLORTERM telemetry exists; synthesis of the 2025 surveys (jvns ~995 responses; Arch n=3,923; Homebrew casks) puts truecolour-capable terminals at the order of 90%+ of developer usage. The correct 2026 posture: **COLORTERM is a trustworthy positive signal whose absence proves nothing.** Practical floors for vigia: curly + underline-colour is safe everywhere modern (fallback from dotted/dashed to plain); emit 4:3/58:2 and OSC 8 unconditionally but depend on neither under tmux defaults; sextant/octant rungs come from a terminal table, not a font probe.
+Prevalence: no public COLORTERM telemetry exists. A synthesis of the 2025 surveys (jvns ~995 responses, Arch n=3,923, Homebrew casks) puts truecolour-capable terminals at the order of 90%+ of developer usage. The correct 2026 posture: **COLORTERM is a trustworthy positive signal whose absence proves nothing.** Practical floors for vigia: curly + underline-colour is safe everywhere modern (fallback from dotted/dashed to plain). Emit 4:3/58:2 and OSC 8 unconditionally, but depend on neither under tmux defaults. Sextant/octant rungs come from a terminal table, not a font probe.
 
 ## 1.9 Premises settled against the code
 
-- **Truecolour already reaches every terminal that advertises it.** `Depth::from_env` (`crates/vigia/src/colour.rs:137`) treats `COLORTERM=truecolor|24bit` as "the strongest positive signal", on top of a terminal table. The `Ansi16` default bites only where nothing says anything: ssh (forwards `TERM`, not `COLORTERM`) and multiplexers. So a truecolour-first look is not gated on a policy change; it is gated on nothing for most local terminals, and the ssh/tmux story is the part that needs a ladder, which exists.
-- **The glyph ladder's "detection never returns octants" is a statement about fonts, not about terminals.** foot and ghostty rasterise octants and sextants themselves (section 3.2), so a `Glyphs` detection table keyed on terminal, exactly like the one `Depth` already uses, can return them where the terminal self-renders. The mechanism the spec said was impossible for glyphs ("no terminal reports which glyphs its font carries") was never needed for these ranges, because the font is not consulted.
+- **Truecolour already reaches every terminal that advertises it.** `Depth::from_env` (`crates/vigia/src/colour.rs:137`) treats `COLORTERM=truecolor|24bit` as "the strongest positive signal", on top of a terminal table. The `Ansi16` default bites only where nothing says anything: ssh (forwards `TERM`, not `COLORTERM`) and multiplexers. So a truecolour-first look is not gated on a policy change. It is gated on nothing for most local terminals. The ssh/tmux story is the part that needs a ladder, and the ladder exists.
+- **The glyph ladder's "detection never returns octants" is a statement about fonts, not about terminals.** foot and ghostty rasterise octants and sextants themselves (section 3.2), so a `Glyphs` detection table keyed on terminal, exactly like the one `Depth` already uses, can return them where the terminal self-renders. The spec said a mechanism was impossible for glyphs ("no terminal reports which glyphs its font carries"). That mechanism was never needed for these ranges, because the font is not consulted.
 
 ## 2. Technique inventory
 
-Each technique: what it is, who uses it, terminal support, what it would buy vigia, what it costs, degradation story.
+Each technique: what it is, who uses it, terminal support, what it can buy vigia, what it costs, degradation story.
 
 (to fill: per-cell truecolour gradients, background washes, box drawing weight and rounding, half and quarter blocks, braille plotting, sextants and octants, Nerd Font icons, underline styles and colour, OSC 8 hyperlinks, synchronized output, motion while active, pixel graphics protocols)
 
@@ -121,7 +121,7 @@ Measurements from this machine: foot and ghostty, JetBrainsMono Nerd Font, Wayla
 
 ### 3.1 Font coverage
 
-Measured 2026-08-25 with `fc-list ':family=JetBrainsMono Nerd Font:charset=<hex>'` per codepoint (`assets/probe.py` is the companion visual probe; the sweep script iterates the range and counts hits).
+Measured 2026-08-25 with `fc-list ':family=JetBrainsMono Nerd Font:charset=<hex>'` per codepoint (`assets/probe.py` is the companion visual probe. The sweep script iterates the range and counts hits).
 
 | range | what | coverage |
 |---|---|---|
@@ -145,12 +145,12 @@ So the font itself already carries: complete box drawing, blocks, braille, the f
 
 ### 3.2 Fallback rendering probes
 
-`assets/probe.py` rendered in foot 1.x and ghostty (the two terminals installed here), screenshots `assets/probe-foot.png` and `assets/probe-ghostty.png`, taken 2026-08-25 on Hyprland with stock JetBrainsMono Nerd Font.
+`assets/probe.py` rendered in foot 1.x and ghostty (the two terminals installed here). The screenshots are `assets/probe-foot.png` and `assets/probe-ghostty.png`, taken 2026-08-25 on Hyprland with stock JetBrainsMono Nerd Font.
 
 **Both terminals render every section**, including everything the font has zero coverage of:
 
-1. **Sextants, smooth mosaics, and octants all draw correctly.** These terminals rasterise the Symbols for Legacy Computing and octant ranges themselves, font-independently, the way every terminal already rasterises box drawing. The spec's "no font measured carries U+1CD00, so detection never returns octants" is a fact about fonts being quoted as if it were a fact about rendering; on foot and ghostty the font never gets asked.
-2. **The combining overlay renders.** `M` + U+20D2, the exact composition #316 refused: both terminals draw the vertical stroke over the M, via font fallback (foot) or custom handling. `a` + U+20DD draws a clean enclosing circle in ghostty, a smaller but legible one in foot. `=` + U+0338 draws a correct not-equals. #316's premise, "a mark that needs a font we cannot see vanishes", is false on both terminals present; whether it holds anywhere that matters now depends on the wider matrix (survey pending), not on `fc-list`.
+1. **Sextants, smooth mosaics, and octants all draw correctly.** These terminals rasterise the Symbols for Legacy Computing and octant ranges themselves, font-independently, the way every terminal already rasterises box drawing. The spec's "no font measured carries U+1CD00, so detection never returns octants" is a fact about fonts being quoted as if it were a fact about rendering. On foot and ghostty the font never gets asked.
+2. **The combining overlay renders.** `M` + U+20D2 is the exact composition #316 refused. Both terminals draw the vertical stroke over the M, via font fallback (foot) or custom handling. `a` + U+20DD draws a clean enclosing circle in ghostty, a smaller but legible one in foot. `=` + U+0338 draws a correct not-equals. #316's premise, "a mark that needs a font we cannot see vanishes", is false on both terminals present. Whether it holds anywhere that matters now depends on the wider matrix (survey pending), not on `fc-list`.
 3. **All five underline styles are distinct** (plain, double, curly, dotted, dashed) and the separate underline colour works: `red-curly` draws a red undercurl under default-colour text in both.
 4. **Truecolour gradients are perfectly smooth** at 60 steps across, foreground on blocks and background wash alike. No banding.
 5. **Delta-style diff washes read exactly as intended**: whole-line dark green/red tint, brighter tint on the changed word, text legible throughout.
@@ -158,46 +158,46 @@ So the font itself already carries: complete box drawing, blocks, braille, the f
 
 ### 3.3 The tool as it draws today, across its modes
 
-Captured 2026-08-25 in foot on the chaotic synthetic repo (`assets/probe.py`'s sibling scripts; ~19 changed files: multi-hunk edits, block deletions, whole-file delete, renames with and without edits on top, staged+unstaged mixes, a binary, a 600-column line, untracked files, plus a burst driver writing at uneven cadence). Screenshots in `assets/`: `mode-default`, `mode-masthead`, `mode-rail`, `mode-staged`, `mode-sheet`, `mode-narrow60`, `mode-light`, `mode-ansi16`, `mode-nocolor`, `mode-braille`, and `btop-reference` from the same machine.
+Captured 2026-08-25 in foot on the chaotic synthetic repo (`assets/probe.py`'s sibling scripts, with ~19 changed files: multi-hunk edits, block deletions, whole-file delete, renames with and without edits on top, staged+unstaged mixes, a binary, a 600-column line, untracked files, plus a burst driver writing at uneven cadence). Screenshots in `assets/`: `mode-default`, `mode-masthead`, `mode-rail`, `mode-staged`, `mode-sheet`, `mode-narrow60`, `mode-light`, `mode-ansi16`, `mode-nocolor`, `mode-braille`, and `btop-reference` from the same machine.
 
 What the captures say about the current look, held beside the survey:
 
 - **The diff wash is the dated surface.** An added or removed block paints one flat tinted slab across the pane, at one intensity, with no word-level emphasis and no gutter separation. Beside delta's low-chroma wash + hotter same-hue word emphasis, or crush's two-tone gutter, it reads 2019. It is also the *dominant* surface: in a real burst the pane is mostly wash.
 - **The file list is already strong.** Heat strips with mixed bands, sparklines, right-anchored counters, kind sigils, the staged run with `new ← old` renames: the glance row is ahead of most of the field. What it lacks is entirely decorative: no gradient in the ramps (three flat stops), no icons, no hover affordances beyond the underline.
-- **Chrome is nearly absent by design** and mostly reads well: one rule under the header, a bottom status line. The gestures sheet is the one bordered element (plain single-line box, square corners). Nothing is rounded anywhere; the field's default is rounded or deliberately borderless.
-- **The ladders exist and work**: light, 256, 16-colour, `NO_COLOR`, and the glyph rungs all drew correctly in captures, which is a real asset most of the surveyed tools do not have in this form; degradation here is a mechanism, not a hope.
-- **Observation, filed not concluded**: under the chaotic driver the status bar's frame cell read `60-69ms` where the quiet lab read `12-17ms` and the spec's budget gate reads 2.4ms p50 at 80x24. Different pane (220x55), different workload, and the cell may measure the whole wake rather than the paint; noted for [#72](https://github.com/breferrari/vigia/issues/72)'s workload evidence rather than treated as a regression claim here.
+- **Chrome is nearly absent by design** and mostly reads well: one rule under the header, a bottom status line. The gestures sheet is the one bordered element (plain single-line box, square corners). Nothing is rounded anywhere. The field's default is rounded or deliberately borderless.
+- **The ladders exist and work**: light, 256, 16-colour, `NO_COLOR`, and the glyph rungs all drew correctly in captures. That is a real asset most of the surveyed tools do not have in this form. Degradation here is a mechanism, not a hope.
+- **Observation, filed not concluded**: under the chaotic driver the status bar's frame cell read `60-69ms` where the quiet lab read `12-17ms` and the spec's budget gate reads 2.4ms p50 at 80x24. Different pane (220x55), different workload, and possibly the cell measures the whole wake rather than the paint. It is noted for [#72](https://github.com/breferrari/vigia/issues/72)'s workload evidence rather than treated as a regression claim here.
 
 ## 4. Opportunity map
 
-Ranked draft, pending the terminal-support matrix (agent still out) and the checkpoint. Payoff is visual, judged against the captures; cost is engineering; every row keeps the ladder (what it becomes at 256, 16, `NO_COLOR`, ASCII is part of the row).
+Ranked draft, pending the terminal-support matrix (agent still out) and the checkpoint. Payoff is visual, judged against the captures. Cost is engineering. Every row keeps the ladder (what it becomes at 256, 16, `NO_COLOR`, ASCII is part of the row).
 
 | # | candidate | payoff | cost | spec rulings touched |
 |---|---|---|---|---|
-| 1 | **Delta-formula diff washes**: low-chroma line wash, hotter same-hue word-level emphasis, two-tone gutter (crush) | highest: it is the dominant surface | medium: word-pairing needs an edit-distance bound; theme keys exist | green/red roles kept (hue unchanged); picture redrawn |
-| 2 | **Terminal-adaptive theme**: OSC 10/11 query, system palette theme, live dark/light (mode 2031) | high: native look everywhere, no flag | medium: query plumbing | `VIGIA_THEME` stays as override; default changes |
-| 3 | **Truecolour gradients on glance elements** (btop mechanism: precomputed ramps; per-row for multi-row, per-value for one-row) | med-high | low: theme + paint only | 3-stop rulings dated by the 256 cube; top rung gains stops, lower rungs keep today's |
-| 4 | **Octant/sextant sparkline rungs by terminal table** (foot/ghostty/kitty self-render; ratatui `Marker::Octant` shipped) | medium | low: extend `Glyphs::detect`'s existing table | "detection never returns octants" corrected: it was a font fact, not a terminal fact |
-| 5 | **Chrome polish**: rounded corners + border-spliced title on the sheet; Powerline caps in header/status segments (font-guaranteed 16/16) | medium | low | none |
-| 6 | **OSC 8 hyperlinks on file paths** (ratatui 0.30.1 `CellDiffOption::ForcedWidth`) | medium: click a path, editor opens | medium | new capability; no ruling contradicts |
+| 1 | **Delta-formula diff washes**: low-chroma line wash, hotter same-hue word-level emphasis, two-tone gutter (crush) | highest: it is the dominant surface | medium: word-pairing needs an edit-distance bound, and theme keys exist | green/red roles kept (hue unchanged), picture redrawn |
+| 2 | **Terminal-adaptive theme**: OSC 10/11 query, system palette theme, live dark/light (mode 2031) | high: native look everywhere, no flag | medium: query plumbing | `VIGIA_THEME` stays as override, default changes |
+| 3 | **Truecolour gradients on glance elements** (btop mechanism: precomputed ramps, per-row for multi-row, per-value for one-row) | med-high | low: theme + paint only | 3-stop rulings dated by the 256 cube. Top rung gains stops, lower rungs keep today's |
+| 4 | **Octant/sextant sparkline rungs by terminal table** (foot/ghostty/kitty self-render, ratatui `Marker::Octant` shipped) | medium | low: extend `Glyphs::detect`'s existing table | "detection never returns octants" corrected: it was a font fact, not a terminal fact |
+| 5 | **Chrome polish**: rounded corners + border-spliced title on the sheet, Powerline caps in header/status segments (font-guaranteed 16/16) | medium | low | none |
+| 6 | **OSC 8 hyperlinks on file paths** (ratatui 0.30.1 `CellDiffOption::ForcedWidth`) | medium: click a path, editor opens | medium | new capability, no ruling contradicts |
 | 7 | **Nerd Font file icons in the list**, opt-in, theme-driven, ASCII fallback (lazygit/yazi shape) | medium | medium: icon table | I5 floor respected by opt-in + fallback |
-| 8 | **#316 premise correction**: combining overlays render via font fallback on both terminals here; the refusal's "vanishes with nothing to fall back to" was `fc-list` quoted as rendering truth | low direct (mark is solved with ink) | ruling-only | §11.2 correction; reopens the vocabulary, not the mark |
-| 9 | **Styled/coloured underlines** | unknown: no fact currently wants the channel | low | §5.3 reservation was written when plain was the only underline; a ruling should say whether the *style* axis is also reserved |
+| 8 | **#316 premise correction**: combining overlays render via font fallback on both terminals here, the refusal's "vanishes with nothing to fall back to" was `fc-list` quoted as rendering truth | low direct (mark is solved with ink) | ruling-only | §11.2 correction, reopens the vocabulary, not the mark |
+| 9 | **Styled/coloured underlines** | unknown: no fact currently wants the channel | low | §5.3 reservation was written when plain was the only underline. It is best if a ruling says whether the *style* axis is also reserved |
 | 10 | **Motion vocabulary** (OpenCode restraint: fps clamp, one toggle, active-only) | low-med | varies | I1 untouched while animation is change-driven |
 
 (to refine at the checkpoint)
 
 ## 4.1 Checkpoint
 
-Held 2026-08-25 with the reader, against the vision boards (`assets/board1.png`, `assets/board2.png`: honest ANSI mocks rendered in foot with the real font; `assets/vision.py` generates them).
+Held 2026-08-25 with the reader, against the vision boards (`assets/board1.png`, `assets/board2.png`: honest ANSI mocks rendered in foot with the real font. `assets/vision.py` generates them).
 
 **The ruling is: everything.** Delta-formula washes with word-level emphasis, gradient ramps and the band, the chrome bundle, octant/sextant rungs, the adaptive theme, and OSC 8 all get YES rulings and all get built. Three qualifiers the reader attached:
 
-1. **Customizable.** Every hue introduced is a theme key; nothing hardcodes a colour the theme cannot move.
+1. **Customizable.** Every hue introduced is a theme key. Nothing hardcodes a colour the theme cannot move.
 2. **A nice theme as the default.** The out-of-the-box look is the showcase, not a neutral base.
 3. **Documented.** Every new key and rung lands in the docs with the ruling that introduced it.
 
-Sequencing (the one part left to engineering judgement): the theme-system expansion is the foundation and lands first; the washes, gradients, chrome, rungs, adaptive theme and OSC 8 build on it as separate issues, one PR each, taken in order of visual payoff per cost.
+Sequencing (the one part left to engineering judgement): the theme-system expansion is the foundation and lands first. The washes, gradients, chrome, rungs, adaptive theme and OSC 8 build on it as separate issues, one PR each, taken in order of visual payoff per cost.
 
 ## 4. Opportunity map
 
@@ -209,11 +209,11 @@ Ranked candidates: visual payoff, cost, degradation, spec rulings touched with r
 
 All recorded 2026-08-25.
 
-- **SPEC §11.2 B18**: the vocabulary expands to the whole slate, ruled by the reader at the checkpoint with three qualifiers (every hue a theme key, the default theme is the showcase, everything documented). Re-checked and held on the way: the green/red role rule (sparkline gradient ships cyan), the no-column rule, `Ansi16` as default depth (strengthened: COLORTERM absence proves nothing), I1 (events, not polls; lookups, not per-frame math). Parked, not declined: styled underlines, until a fact wants the channel.
-- **SPEC §5.3 correction**: #316's coverage sentence measured one font and was quoted as rendering truth; font fallback is default-on across the 2026 matrix and both local terminals draw the overlay. The ink mark stays; the vocabulary reopens.
-- **SPEC §10 Windows-bullet amendment**: "detection never returns octants" was a font fact; the four self-rendering engines make it a table row, which #324 builds.
-- **SPEC §0** (process): how to read the document; rulings are reasons plus dates; research starts from the world. Paired with the take-next amendments (world-first on research rows; refusals cited quoted, dated, checked).
+- **SPEC §11.2 B18**: the vocabulary expands to the whole slate, ruled by the reader at the checkpoint with three qualifiers (every hue a theme key, the default theme is the showcase, everything documented). Re-checked and held on the way: the green/red role rule (sparkline gradient ships cyan), the no-column rule, `Ansi16` as default depth (strengthened: COLORTERM absence proves nothing), I1 (events, not polls, and lookups, not per-frame math). Parked, not declined: styled underlines, until a fact wants the channel.
+- **SPEC §5.3 correction**: #316's coverage sentence measured one font and was quoted as rendering truth. Font fallback is default-on across the 2026 matrix, and both local terminals draw the overlay. The ink mark stays. The vocabulary reopens.
+- **SPEC §10 Windows-bullet amendment**: "detection never returns octants" was a font fact. The four self-rendering engines make it a table row, which #324 builds.
+- **SPEC §0** (process): how to read the document. Rulings are reasons plus dates. Research starts from the world. It is paired with the take-next amendments (world-first on research rows, refusals cited quoted, dated, checked).
 - **Builds filed**: [#320](https://github.com/breferrari/vigia/issues/320) theme foundation, [#321](https://github.com/breferrari/vigia/issues/321) delta washes, [#322](https://github.com/breferrari/vigia/issues/322) gradients + band, [#323](https://github.com/breferrari/vigia/issues/323) chrome, [#324](https://github.com/breferrari/vigia/issues/324) glyph table rungs, [#325](https://github.com/breferrari/vigia/issues/325) adaptive theme, [#326](https://github.com/breferrari/vigia/issues/326) OSC 8. Sequence: #320 first, the rest in payoff order.
 - **Stale premises in the issue itself**, recorded so the next reader does not reprice them: "braille for sub-cell density against one glyph per sample" predated #159's braille rung, and "half and quarter blocks" are superseded by native octants.
 
-Status: **complete.** This file is the research record; the rulings live in SPEC.md and the work in the issues above.
+Status: **complete.** This file is the research record. The rulings live in SPEC.md and the work lives in the issues above.
