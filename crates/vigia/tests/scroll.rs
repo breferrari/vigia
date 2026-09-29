@@ -1194,3 +1194,127 @@ fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
         FILES / 2
     );
 }
+
+/// Every downward step a reader can take from a short pane at the end.
+const DOWNWARD: [Action; 3] = [Action::Scroll(1), Action::Page(1), Action::HalfPage(1)];
+
+/// `G` rests on the last file's top and leaves the pane short. A step down
+/// from there has nowhere to go, so it holds rather than backing the pane up
+/// a screenful, which read as the content jumping the wrong way.
+#[test]
+fn end_scroll_holds() {
+    let scratch = fixture("shell-scroll-end-holds");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let end = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Bottom,
+    );
+    assert_eq!(
+        end,
+        Position {
+            file: FILES - 1,
+            row: 0
+        },
+        "`G` moved"
+    );
+    for step in DOWNWARD {
+        let now = after(&mut app, &mut frame, &mut highlighter, &history, step);
+        assert_eq!(
+            now, end,
+            "{step:?} at the end of the diff moved the pane from {end:?} to {now:?}"
+        );
+    }
+    // And up still moves, and up: from a short pane it fills the screen from above.
+    let up = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(-1),
+    );
+    assert!(
+        (up.file, up.row) < (end.file, end.row),
+        "`k` at the end moved the pane down to {up:?}"
+    );
+}
+
+/// The same short pane, reached with no key at all: follow lands on the last
+/// file when it is the one written.
+#[test]
+fn follow_end_holds() {
+    let scratch = fixture("shell-scroll-follow-end");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let last = frame.files()[FILES - 1].path.clone();
+    assert!(app.follow(&last, &frame), "follow did not move to {last}");
+    let end = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view")
+        .top;
+    assert_eq!(
+        end,
+        Position {
+            file: FILES - 1,
+            row: 0
+        }
+    );
+    let now = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(1),
+    );
+    assert_eq!(
+        now, end,
+        "the first scroll after a follow jump moved the pane to {now:?}"
+    );
+}
+
+/// A last file taller than the pane has not ended when `G` lands on its top, so a
+/// step down still moves through it.
+#[test]
+fn tall_end_scrolls() {
+    let scratch = Scratch::large_diff("shell-scroll-tall-end", 2, body() * 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let end = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Bottom,
+    );
+    assert_eq!(end, Position { file: 1, row: 0 });
+    let now = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(1),
+    );
+    assert_eq!(
+        now,
+        Position { file: 1, row: 1 },
+        "a step down inside a last file taller than the pane held"
+    );
+}

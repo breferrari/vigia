@@ -1128,6 +1128,8 @@ pub struct View {
     pub top: Position,
     /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
     pub landed: bool,
+    /// Whether this frame drew the last row of the diff.
+    pub ended: bool,
     /// Files this viewport asked the frame for, drawn or merely crossed.
     pub read: usize,
     /// [`FileEntry`] values built for the record rather than for a row.
@@ -1496,6 +1498,7 @@ impl View {
                 row: position.row,
             },
             landed: false,
+            ended: false,
             read: 0,
             recorded: 0,
             scale: Scale(history.map_or_else(Default::default, History::scales)),
@@ -1769,6 +1772,10 @@ impl View {
                 && consumed
                 && (anchored || single || (view.top.row > 0 && !view.landed))
                 && view.top != floor);
+
+        view.ended = index >= stop
+            && consumed
+            && (at_bottom || view.display_rows(width, wrap, height, &walked, rows) <= height);
 
         let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked, rows);
 
