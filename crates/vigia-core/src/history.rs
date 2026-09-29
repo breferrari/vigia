@@ -238,7 +238,6 @@ struct Track {
     samples: [u32; HISTORY_SAMPLES],
     /// Ordinal of the last tick that named this path.
     tick: u64,
-    /// Ordinal of this path's last write, counted across every tick.
     write: u64,
     /// Bytes this path held when it was last weighed, if it ever has been.
     bytes: Option<u64>,
@@ -329,7 +328,7 @@ impl Track {
 /// history.record(["src/lib.rs", "Cargo.toml"], now);
 ///
 /// // Both were named by the newest tick, so both pulse. Follow mode moves to
-/// // one of them; the pulse is what says the other moved too.
+/// // the last one, and only it carries the `●`.
 /// assert_eq!(history.recency("src/lib.rs"), Recency::Pulse);
 /// assert_eq!(history.recency("Cargo.toml"), Recency::Pulse);
 /// assert_eq!(history.recency("README.md"), Recency::Cold);
@@ -442,8 +441,7 @@ impl History {
         self.tracks.get(path).map(Track::levelled)
     }
 
-    /// Whether this path is the newest burst's last write, which is what the
-    /// `●` marks. The rest of that burst share [`Recency::Pulse`] instead.
+    /// Whether this path is the newest burst's last write, which the `●` marks.
     pub fn newest(&self, path: &str) -> bool {
         // `self.write` is zero until something is recorded and no track can exist
         // before then, so this never reads a mark out of an empty store.

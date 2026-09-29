@@ -1075,7 +1075,7 @@ fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
     assert_eq!(history.recency("src/a.rs"), Recency::Live);
 }
 
-/// `SPEC.md` §11.1's `●`: the file the newest burst named, until another arrives.
+/// `SPEC.md` §11.1's `●`: the file written last, until another is written.
 #[test]
 fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
     let start = base();

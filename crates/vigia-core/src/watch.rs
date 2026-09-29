@@ -344,9 +344,9 @@ impl<'repo> Watcher<'repo> {
         Some(accepted)
     }
 
-    /// This event's path relative to the worktree, or `None` when nothing the
-    /// display depends on is behind it.
-    fn relative<'p>(&mut self, path: &'p Path) -> Option<&'p Path> {
+    /// This event's path relative to the worktree, and whether it is a
+    /// directory, or `None` when nothing the display depends on is behind it.
+    fn relative<'p>(&mut self, path: &'p Path) -> Option<(&'p Path, bool)> {
         // A git-dir event comes back as `.git`, which `followable` never follows.
         if let Some(inside) = within(&self.git_dir, path) {
             let watched = if inside == Path::new("index") {
@@ -354,12 +354,12 @@ impl<'repo> Watcher<'repo> {
             } else {
                 watched_in_git_dir(inside)
             };
-            return watched.then_some(Path::new(".git"));
+            return watched.then_some((Path::new(".git"), false));
         }
         if let Some(inside) = within(&self.common_dir, path) {
             // Only the refs: other worktrees' index and `HEAD` are here too.
             let refs = inside.starts_with("refs") || inside == Path::new("packed-refs");
-            return (refs && watched_in_git_dir(inside)).then_some(Path::new(".git"));
+            return (refs && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
         }
 
         // Outside the worktree entirely. Nothing we display depends on it.
@@ -379,7 +379,7 @@ impl<'repo> Watcher<'repo> {
             _ => gix::index::entry::Mode::FILE,
         };
 
-        (!self.is_ignored(rela, mode)).then_some(rela)
+        (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
     fn is_ignored(&mut self, rela: &Path, mode: gix::index::entry::Mode) -> bool {
@@ -517,14 +517,20 @@ pub(crate) fn roots_of(workdir: &Path) -> Vec<PathBuf> {
 /// Fold the paths one event named into what that event meant.
 fn accept_paths<'p>(
     paths: &'p [PathBuf],
-    mut resolve: impl FnMut(&'p Path) -> Option<&'p Path>,
+    mut resolve: impl FnMut(&'p Path) -> Option<(&'p Path, bool)>,
 ) -> Accepted {
     let mut accepted = Accepted::default();
     for path in paths.iter().rev() {
-        let Some(rela) = resolve(path) else {
+        let Some((rela, dir)) = resolve(path) else {
             continue;
         };
         accepted.relevant = true;
+        // Relevant, because a directory made after the watch was armed is seen
+        // only through its own event. Never the newest: Windows reports the
+        // parent after a save inside it, and no row is a directory.
+        if dir {
+            continue;
+        }
         accepted.newest = followable(rela);
         if accepted.newest.is_some() {
             break;
@@ -749,8 +755,8 @@ mod tests {
 
     /// Everything is inside the worktree and nothing is ignored, so the tests
     /// below are about the order rule and only the order rule.
-    fn take_all(path: &Path) -> Option<&Path> {
-        Some(path)
+    fn take_all(path: &Path) -> Option<(&Path, bool)> {
+        Some((path, false))
     }
 
     /// The one case where the order of an event's paths is observable, and the reason
@@ -782,6 +788,23 @@ mod tests {
 
         assert!(accepted.relevant);
         assert_eq!(accepted.newest.as_deref(), Some("src/a.rs"));
+    }
+
+    /// A directory event still wakes the pane, and names nothing to follow.
+    #[test]
+    fn directory_is_not_newest() {
+        let paths = [native(&["src", "a.rs"]), native(&["src"])];
+        let accepted = accept_paths(&paths, |path| Some((path, path == Path::new("src"))));
+
+        assert!(accepted.relevant);
+        assert_eq!(accepted.newest.as_deref(), Some("src/a.rs"));
+
+        let accepted = accept_paths(&paths[1..], |path| Some((path, true)));
+        assert!(
+            accepted.relevant,
+            "a new directory stopped producing a tick"
+        );
+        assert_eq!(accepted.newest, None);
     }
 
     /// Relevant and unfollowable are different answers and both have to
