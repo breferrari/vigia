@@ -989,6 +989,28 @@ fn the_purity_gate_derives_its_targets_from_the_release_config() {
     }
 }
 
+/// A bump whose push lost a race with a merge starts the release again, and any other
+/// rejected push fails.
+#[test]
+fn a_bump_that_lost_a_race_is_dispatched_again() {
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let commit = step_block(&bump, "commit the bump");
+    let moved = commit
+        .find(r#"[ "$now" = "$(git rev-parse HEAD~1)" ]"#)
+        .expect("the push step does not check whether the default branch moved");
+    let retry = commit
+        .find("gh workflow run bump.yml")
+        .expect("the push step does not dispatch the release again");
+    assert!(
+        moved < retry,
+        "the release is dispatched again before checking the default branch moved"
+    );
+    assert!(
+        commit[retry..].contains("exit 1"),
+        "a retried run carries on, so the hand-off runs on a bump that never landed"
+    );
+}
+
 /// The button that cuts a release reaches the workflow that performs one.
 #[test]
 fn the_release_button_reaches_the_release() {
@@ -1011,8 +1033,10 @@ fn the_release_button_reaches_the_release() {
     // workflow run` takes one and a typo there is a 404 at release time.
     let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
     let commands = run_commands(&bump);
-    let dispatch = commands
-        .iter()
+    // The hand-off's own dispatch: the push step dispatches bump.yml again when the
+    // default branch moved under it.
+    let dispatch = run_commands(step_block(&bump, "hand off to the release"))
+        .into_iter()
         .find(|command| command.contains("gh workflow run"))
         .expect("bump.yml dispatches the release");
 
@@ -1148,8 +1172,8 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
 
     // A rehearsal dispatches `dry-run` and a real release does not, and the polarity is
     // the assertion.
-    let dispatch = commands
-        .iter()
+    let dispatch = run_commands(step_block(&bump, "hand off to the release"))
+        .into_iter()
         .find(|command| command.contains("gh workflow run"))
         .expect("bump.yml dispatches the release");
     assert!(
