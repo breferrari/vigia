@@ -293,7 +293,6 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The chrome earns 2026: segmented bars, a spliced sheet title, opt-in icons | [#323](https://github.com/breferrari/vigia/issues/323) |
 | ✅ | The glyph ladder learns which terminals draw octants natively | [#324](https://github.com/breferrari/vigia/issues/324) |
 | ✅ | The pane takes its colours from the terminal, and follows a theme flip live | [#325](https://github.com/breferrari/vigia/issues/325) |
-| ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser | [#332](https://github.com/breferrari/vigia/issues/332) |
 | ✅ | A system palette built from the terminal's own colours | [#333](https://github.com/breferrari/vigia/issues/333) |
 | ✅ | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
 | ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
@@ -333,6 +332,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser | [#332](https://github.com/breferrari/vigia/issues/332) |
 | ✅ | Sentence test names. **Not planned** | [#553](https://github.com/breferrari/vigia/issues/553) |
 | ✅ | `cargo install` cannot replace the binary while a registered `vigia mcp` holds it open on Windows | [#458](https://github.com/breferrari/vigia/issues/458) |
 | ✅ | Every Windows upgrade leaves another copy of the binary behind | [#486](https://github.com/breferrari/vigia/issues/486) |
@@ -387,7 +387,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | `FrameStats::bytes` conflates bytes counted with bytes diffed | [#85](https://github.com/breferrari/vigia/issues/85) |
 | ⬜ | `Worktree::measure` has no test over a real repository | [#86](https://github.com/breferrari/vigia/issues/86) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
-| ⬜ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them | [#98](https://github.com/breferrari/vigia/issues/98) |
+| ✅ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them. **Already true by #214 and #322's values; gated here** | [#98](https://github.com/breferrari/vigia/issues/98) |
 | ⬜ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ✅ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
@@ -448,6 +448,7 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 
 | Item | Surfaced | Moved to | Why |
 |---|---|---|---|
+| A theme flip mid-session cannot reach the shell ([#332](https://github.com/breferrari/vigia/issues/332)) | Phase 8, 2026-09-30 | Shelf | Ruled 2026-09-30, reader: wait for upstream. crossterm 0.29.0 parses the mode 2031 reply as incomplete and never delivers it. The fix is crossterm-rs/crossterm#1106, open. Comes back when a crossterm release carries it. |
 | A visible change that names no key is filed as internal, and 0.48.0's notes lost one ([#523](https://github.com/breferrari/vigia/issues/523)) | 0.48.0, 2026-09-11 | Shelf, taken same day | Found by reading 0.48.0's published notes after the release ran green. `changelog-entry.sh` dropped `A list behind the token puts the pane at any commit` on the word `token`. The list carried that word for the release's own credentials, and the pane now draws it in its header. The allow pass that exists for this case asks for a backticked key, and the subject has none. The notes and the changelog are corrected by hand. This is the second occurrence of [#467](https://github.com/breferrari/vigia/issues/467)'s class with a different word. So the fix widens the allow pass rather than tuning the drop list again: `the pane` survives it. The measurement covered every first-parent subject to 0.48.0. It recovered two visible changes, and that entry let no internal subject through. |
 | A subject the notes filter drops is reported only as a workflow notice ([#524](https://github.com/breferrari/vigia/issues/524)) | #523, 2026-09-11 | Shelf | Split out of #523. It is the part that let the defect ship. The script already names every subject it drops, and its own comment says why: a drop is invisible everywhere else. A `::notice::` on a release run that went green is read by nobody, so the remedy does not reach. Shelved rather than taken there because any shape that reaches a person puts the drops in the release's published text. That is a ruling about what a reader sees. |
 | Nothing holds the written layer's two lists against the documents that exist ([#504](https://github.com/breferrari/vigia/issues/504)) | #374, 2026-09-10 | Shelf | Found by the altitude pass over #374. Closing it means classifying every tracked `.md` as prose, ledger or out of the rule's reach. That is a ruling about each of them, and it goes a long way past what #374 asked. `register.rs::markdown()` already finds the population. What is missing is the ruling on the third bucket. |

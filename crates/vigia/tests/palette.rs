@@ -908,22 +908,30 @@ fn the_three_note_marks_are_three_colours_at_every_depth_that_has_any() {
     }
 }
 
+/// No track draws in the pane's own colour at any depth, where it would be
+/// invisible.
 #[test]
-fn a_sparkline_track_is_never_the_colour_behind_it() {
-    // The failure a track has that a bucket does not: quantising into the background.
-    for (name, base, behind) in [
-        ("dark", Theme::dark(), Color::Black),
-        ("light", Theme::light(), Color::White),
+fn tracks_off_pane() {
+    for (name, base, behind, grey) in [
+        ("dark", Theme::dark(), Color::Black, Color::DarkGray),
+        ("light", Theme::light(), Color::White, Color::Gray),
     ] {
-        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
             let theme = base.resolve(depth);
-            assert_ne!(
-                theme.spark_track.fg,
-                Some(behind),
-                "{name} at {depth:?} draws the sparkline track in the colour of \
-                 the pane behind it, so a launched worktree draws a blank column \
-                 again"
-            );
+            for (track, style) in [
+                ("spark_track", theme.spark_track),
+                ("heat_track", theme.heat_track),
+                ("bar_track", theme.bar_track),
+            ] {
+                assert_ne!(
+                    style.fg,
+                    Some(behind),
+                    "{name} at {depth:?} draws {track} in the colour of the pane behind it"
+                );
+                if depth == Depth::Ansi16 {
+                    assert_eq!(style.fg, Some(grey), "{name}'s {track} at sixteen colours");
+                }
+            }
         }
     }
 }
