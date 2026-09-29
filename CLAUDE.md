@@ -2,7 +2,7 @@
 
 A live diff **monitor** for the terminal. Not a review tool.
 
-`vigia` is Portuguese: a watchman, and — nautically — a porthole. The window you look through. Also the verb: `vigia .` reads as "watch this."
+`vigia` is Portuguese: a watchman, and in nautical use a porthole. The window you look through. Also the verb: `vigia .` reads as "watch this."
 
 ## What this is, in one paragraph
 
@@ -10,25 +10,25 @@ You run an AI coding agent in one pane and `vigia` in the pane beside it. It sho
 
 ## The product class is the whole thesis
 
-`vigia` is **monitor-class**: already open, rarely touched, correct with zero input, cheap for days, glanceable. It is not a **reviewer** — something you launch per changeset to step through, annotate and decide on.
+`vigia` is **monitor-class**: already open, rarely touched, correct with zero input, cheap for days, glanceable. It is not a **reviewer**: something you launch per changeset to step through, annotate and decide on.
 
 That distinction is not stylistic. It generates every budget in `SPEC.md`, and those budgets are the product.
 
-**If a change would make `vigia` a better reviewer at the cost of an invariant, the change is wrong.** Reject it and say why.
+**If a change makes `vigia` a better reviewer at the cost of an invariant, the change is wrong.** Reject it and say why.
 
 ## Stack — settled, do not relitigate
 
 | Layer | Choice | Why |
 |---|---|---|
-| TUI | `ratatui` + `crossterm` | `bottom`, a btop-class system monitor, runs exactly this pair. `crossterm` is the only backend with Windows plus cross-platform mouse; `termion` is Unix-only |
+| TUI | `ratatui` + `crossterm` | `bottom`, a btop-class system monitor, runs exactly this pair. `crossterm` is the only backend with Windows plus cross-platform mouse. `termion` is Unix-only |
 | Git | `gix` | In-process diff. No `git diff` subprocess per tick |
 | Watch | `notify` | Native FS events per platform, which I1 requires instead of a timer. Pure Rust: no `cc` on any tier-1 target. Coalescing is ours, not its debouncer crate |
 | Highlighting | `syntect` | Pure Rust, so no C toolchain in CI. What `delta` and `bat` use |
 | Release | `cargo-dist` | Cross-platform binaries + Homebrew formula + GH workflow |
 
-Everything above is pure Rust on purpose: `--target x86_64-unknown-linux-musl` gives a static binary with no cross-toolchain, and macOS/Windows are tier-1. **Choosing tree-sitter over `syntect` reintroduces a C toolchain** — that is a spec change, not an implementation detail.
+Everything above is pure Rust on purpose: `--target x86_64-unknown-linux-musl` gives a static binary with no cross-toolchain, and macOS/Windows are tier-1. **Choosing tree-sitter over `syntect` reintroduces a C toolchain**: that is a spec change, not an implementation detail.
 
-**Reading a dependency's source: address it, never search for it.** `ratatui` 0.30 splits into `ratatui-core`, `ratatui-crossterm` and `ratatui-widgets`, so the types this project draws against most often (`Buffer`, `Cell`, the layout solver) live in a **transitive** crate that is not in this workspace. Its source sits in the Cargo registry cache behind a hash-suffixed index directory and a version-suffixed crate directory, which is not a path anyone can guess, which is exactly why a session starts searching for it instead. Both of these are instant:
+**Reading a dependency's source: address it, never search for it.** `ratatui` 0.30 splits into `ratatui-core`, `ratatui-crossterm` and `ratatui-widgets`, so the types this project draws against most often (`Buffer`, `Cell`, the layout solver) live in a **transitive** crate that is not in this workspace. Its source is in the Cargo registry cache, behind a hash-suffixed index directory and a version-suffixed crate directory. Nobody can guess that path, and that is exactly why a session starts searching for it instead. Both of these are instant:
 
 ```bash
 ls ~/.cargo/registry/src/*/ratatui-core-*/src/buffer/          # the sources, addressed directly
@@ -37,13 +37,13 @@ cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="ratatui-
 
 **Never run `find /` on Windows.** Under Git Bash `/` is the MSYS root, which mounts the Windows registry as directories under `/proc`, so the walk never terminates, and `~/.cargo` is not under it anyway. `.claude/scripts/scan-guard.mjs` refuses the call. Bound any exploratory scan with `timeout`, and prefer Glob or Grep pointed at an explicit path.
 
-`gix` was the least-precedented dependency here (`delta` uses `git2`/libgit2 instead, likely for age reasons), so Phase 1 proved it before anything was built on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and every Phase 1 budget holds with room. Evidence and the one constraint it came with are in `SPEC.md` §10.
+`gix` was the least-precedented dependency here (`delta` uses `git2`/libgit2 instead, probably for age reasons), so Phase 1 proved it before anything was built on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and every Phase 1 budget holds with room. Evidence and the one constraint it came with are in `SPEC.md` §10.
 
 ## Method: spec-driven, drift-enforced
 
 `SPEC.md` is the source of truth. Code is written against it.
 
-1. If the code and `SPEC.md` disagree, **stop.** One of them is wrong; decide which, change that one deliberately, in its own commit.
+1. If the code and `SPEC.md` disagree, **stop.** One of them is wrong. Decide which, and change that one deliberately, in its own commit.
 2. Every invariant in `SPEC.md` has a test that fails when it is violated. An invariant without a failing test is a wish.
 3. Performance budgets are tests, not aspirations. The thesis is a measurable claim, so a regression past budget **fails the build**.
 
@@ -60,7 +60,7 @@ Design rationale for this project is recorded outside this repo, reachable throu
 | **`search`** | The full written record: why the product class is what it is, why each dependency was chosen, which alternatives were rejected and on what evidence, what each budget was set against. **Start here.** |
 | **`expand`** | Once you have a specific note, see what it links to and what links back. Cheaper and more exact than searching again for the neighbourhood. |
 | **`recall`** | Short durable lessons scoped to this project. Pass `explain: true` when something you expected is missing: it distinguishes "scoped away" from "never existed". |
-| **`reason`** | A judgement that needs several notes weighed against each other, e.g. "is what I am about to do consistent with what was decided". It spawns a second session, so it is slower and costs more. Reach for it only when `search` returned the notes but not the answer. |
+| **`reason`** | A judgement that needs several notes weighed against each other, for example "is what I am about to do consistent with what was decided". It spawns a second session, so it is slower and costs more. Use it only when `search` returned the notes but not the answer. |
 | **`health`** | When something that should be there cannot be found. Every failure in this layer looks identical from the outside (no results), and this is what tells them apart. |
 | Resources | Notes are also exposed as `vault://note/<path>` and can be read directly when the title already answers the question. |
 
@@ -77,25 +77,25 @@ If that record and this repo disagree, the record holds the *why*. Reconcile bef
 
 ### Writing
 
-Two tools, and picking the wrong one is the common mistake. **The test is whether it would help someone working on a different project.**
+Two tools, and picking the wrong one is the common mistake. **The test is whether it helps someone working on a different project.**
 
-**`remember`** stores a durable **lesson**: a constraint you discovered, a gotcha that cost time, a rule that generalises. Not status, not a task summary, not anything you would resent being told again in six weeks.
+**`remember`** stores a durable **lesson**: a constraint you discovered, a gotcha that cost time, a rule that generalises. Not status, not a task summary, not anything you resent being told again in six weeks.
 
-- `confidence` is `verified` | `inferred` | `unverified`. Be honest, it is what a reader trusts. Supply `verification` whenever you claim `verified`: how you know, i.e. the test you ran or the source you read.
+- `confidence` is `verified` | `inferred` | `unverified`. Be honest: a reader trusts this field. Supply `verification` whenever you claim `verified`: how you know, that is, the test you ran or the source you read.
 - `scope` decides who ever sees the memory again, and it is the field most often got wrong from this repo. Three values, and the middle one is not decoration:
-  - **`project`** — true because of how *this* tool is built. `scope: "project"` with `projects: ["vigia"]`. The settle margin being two seconds is this.
-  - **`platform`** — true for anyone on the same technology, whoever they are. **This repo sits on two, and they are not the same one.** A `gix`, `syntect` or `ratatui` limitation is `platforms: ["rust"]`. A `TERM`, colour-depth, ANSI or terminfo fact is `platforms: ["terminal"]` — it reaches a Go or Python TUI identically, and reaches nothing that has no terminal. Name both when both are true.
-  - **`general`** — true with no platform at all: test shapes, review process, git and CI workflow, how an audit converges. It reaches **every** project the vault serves, so a fact about `TERM` filed here is served to a backend that has no terminal in it.
+  - **`project`**: true because of how *this* tool is built. `scope: "project"` with `projects: ["vigia"]`. The settle margin being two seconds is this.
+  - **`platform`**: true for anyone on the same technology, whoever they are. **This repo sits on two, and they are not the same one.** A `gix`, `syntect` or `ratatui` limitation is `platforms: ["rust"]`. A `TERM`, colour-depth, ANSI or terminfo fact is `platforms: ["terminal"]`. It reaches a Go or Python TUI identically, and reaches nothing that has no terminal. Name both when both are true.
+  - **`general`**: true with no platform at all: test shapes, review process, git and CI workflow, how an audit converges. It reaches **every** project the vault serves, so a fact about `TERM` filed here is served to a backend that has no terminal in it.
 
 `general` is the easy over-claim, because it is the only one that needs no vocabulary. **If the lesson names a specific library, runtime, or environment variable, it is almost certainly `platform`.**
-- `links` connects it to existing notes by title. `supersedes` corrects an earlier memory: the old one is kept and back-linked rather than deleted. **Correcting the scope of an earlier memory is a real use for it** — re-file with the right scope and supersede the original. The original keeps the reach it declared, but is served only where its correction is also served, so the narrowing actually takes effect instead of leaving the stale, wider copy reaching everybody alone.
+- `links` connects it to existing notes by title. `supersedes` corrects an earlier memory: the old one is kept and back-linked rather than deleted. **Correcting the scope of an earlier memory is a real use for it**: re-file with the right scope and supersede the original. The original keeps the reach it declared, but is served only where its correction is also served, so the narrowing takes effect and the stale, wider copy does not reach everybody on its own.
 - `dry_run: true` previews first.
 
-**`record_work`** files what happened **here** into the vault. Use it at the end of a real piece of work. Write it for a session that will not have your context and cannot re-read your diff, so fill every field you can: `summary`, `changes` (one line per file, what and why), `decisions` (especially where you rejected an alternative), `learned` (surprises and near-misses), `open` (unresolved threads nobody should assume are handled), `verification` (tests run and their result, failures stated honestly). `kind: "decision"` files it as a decision record; `informed_by` credits the notes you actually read.
+**`record_work`** files what happened **here** into the vault. Use it at the end of a real piece of work. Write it for a session that will not have your context and cannot re-read your diff, so fill every field you can: `summary`, `changes` (one line per file, what and why), `decisions` (especially where you rejected an alternative), `learned` (surprises and near-misses), `open` (unresolved threads that nobody is meant to assume are handled), `verification` (tests run and their result, failures stated honestly). `kind: "decision"` files it as a decision record. `informed_by` credits the notes you actually read.
 
 **If a write is refused for tool-call markup, retry once smaller in total size** (the required fields, prose trimmed), then file the note by hand under `projects/vigia/notes/` and comment on [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244). The same fold hits `remember`. Fields you drop survive as prose but stop being queryable.
 
-Rule of thumb: **a `gix` limitation that would bite any Rust project is a `remember`** — and note that it is `scope: "platform"` with `platforms: ["rust"]`, not `general`, which is exactly the call this section exists to get right. **"Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
+Rule of thumb: **a `gix` limitation that any Rust project can hit is a `remember`**. Note that it is `scope: "platform"` with `platforms: ["rust"]`, not `general`, which is exactly the call this section exists to get right. **"Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
 
 Before finishing work that changed or clarified a decision here, write it down. A finding that stays in this session is a finding the next session pays for again.
 
@@ -105,11 +105,11 @@ Before finishing work that changed or clarified a decision here, write it down. 
 
 Three rules that are this file's rather than the spec's:
 
-- **Measure the whole, not the part, and before the cost restricts anything.** Two fixtures, the same workload with and without the thing being priced, interleaved so a loaded machine moves both. A zero from a clock is a quantum until timed across enough repetitions to clear it: `GetThreadTimes` steps at 15.625ms on Windows and read a 2.60ms burst as nothing. A cap is a feature restriction and needs the same bar as a refusal; measured in situ, a sizing cap read 17.93ms against 18.43ms unsized and was deleted.
+- **Measure the whole, not the part, and before the cost restricts anything.** Two fixtures, the same workload with and without the thing being priced, interleaved so a loaded machine moves both. A zero from a clock is a quantum until timed across enough repetitions to clear it: `GetThreadTimes` steps at 15.625ms on Windows and read a 2.60ms burst as nothing. A cap is a feature restriction and needs the same bar as a refusal. Measured in situ, a sizing cap read 17.93ms against 18.43ms unsized and was deleted.
 - **What ships is what was asked for and nothing narrower.** A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here ([#272](https://github.com/breferrari/vigia/issues/272) imported `delta`'s wrap cap, and the reader had to say twice that he never asked for it). A limit nobody asked for is a refusal wearing a yes, and it is the harder kind to see.
-- **A session's own prior decision is a record of what was done, not permission withheld.** Name the reader's decisions; never cite a session's as a constraint on him.
+- **A session's own prior decision is a record of what was done, not permission withheld.** Name the reader's decisions. Never cite a session's as a constraint on him.
 
-Size the rigor to the surface: look and feel is `/simplify` plus a screenshot; the rest is take-next's step 6.
+Size the rigor to the surface: look and feel is `/simplify` plus a screenshot. The rest is take-next's step 6.
 
 ## Rulings say who made them
 
@@ -122,7 +122,7 @@ Ruled 2026-08-26, session.
 
 **Unattributed means a session inferred it, and an inferred ruling does not bind the reader.**
 
-Mark the origin of the **ruling**, not of the symptom. "Reported from the pane" describes where a complaint came from and says nothing about who chose the constraint attached to it. #272's cap was reader-reported and session-decided, and writing only the first is what let it be quoted back at him as his own.
+Mark the origin of the **ruling**, not of the symptom. "Reported from the pane" describes where a complaint came from and says nothing about who chose the constraint attached to it. #272's cap was reader-reported and session-decided, and writing only the first let it be quoted back at him as his own.
 
 ## Rulings can be revoked
 
@@ -146,17 +146,17 @@ gh workflow run "bump and release" -f bump=<patch|minor|major> -f rehearse=false
 
 It raises the version, commits it to `main`, builds the four target artifacts, creates the GitHub release, publishes the Homebrew formula, and runs `cargo publish --workspace`. Nothing else starts a release: `git tag && git push --tags` was removed as a trigger, and a tag pushed by a workflow cannot fire another one anyway.
 
-Pick the level from the diff. On `0.x` a new feature **and** a breaking public API change both go in the **minor**; `patch` is for fixes that change no signature. `rehearse=true` runs the whole path and publishes nothing, which is the way to check a change to the release machinery itself.
+Pick the level from the diff. On `0.x` a new feature **and** a breaking public API change both go in the **minor**. `patch` is for fixes that change no signature. `rehearse=true` runs the whole path and publishes nothing, and this is the way to check a change to the release machinery itself.
 
-**`RELEASE-SMOKE.md` is not this procedure and reading it as one wastes a session.** It is a human pre-flight against a built artifact: most of its boxes need a person at a terminal on three platforms, killing the process from another pane and looking at what the terminal does next. An agent cannot tick them. It is worth reading before a release that changes packaging, installation or the takeover; it is not a gate to clear before every dispatch, and it is not where the release is performed.
+**`RELEASE-SMOKE.md` is not this procedure and reading it as one wastes a session.** It is a human pre-flight against a built artifact: most of its boxes need a person at a terminal on three platforms. That person kills the process from another pane and looks at what the terminal does next. An agent cannot tick them. It is worth reading before a release that changes packaging, installation or the takeover. It is not a gate to clear before every dispatch, and it is not where the release is performed.
 
 ## House rules
 
-- **No agent-session artifacts in anything that lands in the repo.** No `claude.ai/code/session_*` URL, no `Claude-Session:` trailer, no local absolute path — not in commit messages, PR or issue bodies, or files. `Co-Authored-By:` is fine and wanted. `.claude/scripts/leak-guard.mjs` refuses a `gh` publish or a `git commit` carrying one, and `sh .claude/scripts/selftest.sh` exercises every guard offline.
+- **No agent-session artifacts in anything that lands in the repo.** No `claude.ai/code/session_*` URL, no `Claude-Session:` trailer, no local absolute path. Not in commit messages, PR or issue bodies, or files. `Co-Authored-By:` is fine and wanted. `.claude/scripts/leak-guard.mjs` refuses a `gh` publish or a `git commit` carrying one, and `sh .claude/scripts/selftest.sh` exercises every guard offline.
 - **No em-dashes** in anything published under Brenno's name: README prose, release notes, issue and PR bodies, commit messages. Use a period, a comma, a colon, or parentheses.
 - Probe capability by behaviour, never by asking. A single green run is not evidence when the defect is non-deterministic.
 - Verify the whole artifact, not just the property you were fixing.
 - **Write plainly.** Comments, commits, PR and issue bodies, and replies to the reader: short sentences, common words, the fact first. No metaphor, no aphorism, no rhetoric. If a line needs a second read, rewrite it. The register of this file is not a model to copy.
-- **A comment exists where the code cannot explain itself**: why the obvious approach is wrong, an invariant a caller must hold, a cost invisible at the call site. Not a restatement, an issue number, a ruling id or its own history. **A note, not an argument**: `// Unverified: a check would hash the whole file on every refresh.`, not `// Not verified: the checksum is compared rather than trusted, and verifying it would hash the whole file on every refresh.` Would it hold up in two years, without the session? A docblock longer than its item means one of the two is wrong.
+- **A comment exists where the code cannot explain itself**: why the obvious approach is wrong, an invariant a caller must hold, a cost invisible at the call site. Not a restatement, an issue number, a ruling id or its own history. **A note, not an argument**: `// Unverified: a check would hash the whole file on every refresh.`, not `// Not verified: the checksum is compared rather than trusted, and verifying it would hash the whole file on every refresh.` Will it hold up in two years, without the session? A docblock longer than its item means one of the two is wrong.
 - **A PR title or commit subject is an imperative. An issue title is a short label for the defect, not a sentence.** One clause, no *because*. PR: `Skip status work that cannot change the pane`, not `An idle pane stops walking on no-op index writes`. Issue: `Staged count rebuilt on every paint of an empty pane`, not `An empty pane rebuilds the staged count on every paint`.
-- **Nothing prose stops at a column. One paragraph is one line.** Markdown files, issue and PR bodies, commit message bodies: no hard wrapping anywhere. GitHub turns a single newline in a body into a real line break, so a paragraph wrapped at 80 arrives broken mid-sentence — 811 forced breaks across sixteen of this repository's PRs before anyone measured it. Gated by `register.rs::no_prose_paragraph_is_hard_wrapped` over every tracked `.md`. **Code comments are the exception**: nothing renders them. Check a body with `gh api repos/OWNER/REPO/pulls/N -H "Accept: application/vnd.github.html+json" --jq '.body_html' | grep -c '<br'`.
+- **Nothing prose stops at a column. One paragraph is one line.** Markdown files, issue and PR bodies, commit message bodies: no hard wrapping anywhere. GitHub turns a single newline in a body into a real line break, so a paragraph wrapped at 80 arrives broken mid-sentence. That gave 811 forced breaks across sixteen of this repository's PRs before anyone measured it. Gated by `register.rs::no_prose_paragraph_is_hard_wrapped` over every tracked `.md`. **Code comments are the exception**: nothing renders them. Check a body with `gh api repos/OWNER/REPO/pulls/N -H "Accept: application/vnd.github.html+json" --jq '.body_html' | grep -c '<br'`.
