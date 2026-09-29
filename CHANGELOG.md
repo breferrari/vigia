@@ -4,6 +4,11 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
 
+## [0.50.1] - 2026-09-29
+
+- Require plain writing and label-style issue titles
+- Count staged changes once per tick on an empty pane
+
 ## [0.50.0] - 2026-09-28
 
 - Note a range of lines by dragging from the gutter
