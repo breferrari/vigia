@@ -437,20 +437,17 @@ jobs:
           # rather than something demonstrated, and the paragraph above the
           # ruling says so. Actions masks a registered secret in log output, so a push
           # that fails prints the remote with `***` where the token is.
-          if git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
-            "HEAD:${DEFAULT}"; then
-            exit 0
-          fi
-          # A merge while this ran moves the default branch and rejects the push,
-          # before anything is published. Rebasing would ship code the version,
-          # changelog and checks never saw, so the whole release starts again.
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+            "HEAD:${DEFAULT}" && exit 0
+          # A merge during the run rejects the push. Rebasing would ship code the
+          # checks never saw, so the release starts over.
           now=$(git ls-remote "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
             "refs/heads/${DEFAULT}" | cut -f1)
           if [ -z "$now" ] || [ "$now" = "$(git rev-parse HEAD~1)" ]; then
             exit 1
           fi
           gh workflow run bump.yml --ref "${DEFAULT}" -f bump="${{ inputs.bump }}" -f rehearse=false
-          echo "::error::${DEFAULT} moved while this ran. Nothing was published. The release was dispatched again from the new ${DEFAULT}."
+          echo "::error::${DEFAULT} moved while this ran. Nothing was published; the release was dispatched again."
           exit 1
         env:
           # **One fine-grained token fills both roles, and the secret's name is

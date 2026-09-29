@@ -257,6 +257,15 @@ fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
     );
 }
 
+/// The hand-off's dispatch of the release. The push step dispatches bump.yml too,
+/// when the default branch moved under it, so the file's first dispatch is not this.
+fn hand_off_dispatch(bump: &str) -> String {
+    run_commands(step_block(bump, "hand off to the release"))
+        .into_iter()
+        .find(|command| command.contains("gh workflow run"))
+        .expect("bump.yml dispatches the release")
+}
+
 /// The step named `name`, from its `- name:` to the next step's.
 fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
     let header = format!("- name: {name}");
@@ -1033,12 +1042,7 @@ fn the_release_button_reaches_the_release() {
     // workflow run` takes one and a typo there is a 404 at release time.
     let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
     let commands = run_commands(&bump);
-    // The hand-off's own dispatch: the push step dispatches bump.yml again when the
-    // default branch moved under it.
-    let dispatch = run_commands(step_block(&bump, "hand off to the release"))
-        .into_iter()
-        .find(|command| command.contains("gh workflow run"))
-        .expect("bump.yml dispatches the release");
+    let dispatch = hand_off_dispatch(&bump);
 
     // The word immediately after `gh workflow run`, not a mention anywhere in
     // the step. A `run: |` body is one string here, and that body ends with an
@@ -1165,17 +1169,14 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     assert_precedes(
         &bump,
         "git commit",
-        "gh workflow run",
+        "gh workflow run release.yml",
         "bump.yml dispatches the release before it commits the version, so the \
          release would build whatever the default branch carried beforehand",
     );
 
     // A rehearsal dispatches `dry-run` and a real release does not, and the polarity is
     // the assertion.
-    let dispatch = run_commands(step_block(&bump, "hand off to the release"))
-        .into_iter()
-        .find(|command| command.contains("gh workflow run"))
-        .expect("bump.yml dispatches the release");
+    let dispatch = hand_off_dispatch(&bump);
     assert!(
         dispatch.contains(r#"= "true" ]; then tag=dry-run"#),
         "the rehearsal's tag no longer depends on `rehearse` being true in the \
