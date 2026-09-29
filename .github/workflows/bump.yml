@@ -380,9 +380,21 @@ jobs:
             echo "::error::no tag to write the notes from; a shallow checkout is the usual cause"
             exit 1
           fi
-          git log --first-parent --format='%s' "${previous}..HEAD" \
-            | sh .github/scripts/changelog-entry.sh \
+          # Per commit, its `Release-note:` lines or its subject, never both.
+          # The PR body is a best-effort fallback: squash merges keep commit
+          # messages, so it is usually not on main.
+          for sha in $(git log --first-parent --format='%H' "${previous}..HEAD"); do
+            notes=$(git log -1 --format='%B' "$sha" | tr -d '\r' | grep '^Release-note:' || true)
+            subject=$(git log -1 --format='%s' "$sha")
+            pr=$(printf '%s\n' "$subject" | sed -nE 's/.*\(#([0-9]+)\)[[:space:]]*$/\1/p')
+            if [ -z "$notes" ] && [ -n "$pr" ]; then
+              notes=$(gh pr view "$pr" --json body -q .body 2>/dev/null | tr -d '\r' | grep '^Release-note:' || true)
+            fi
+            if [ -n "$notes" ]; then printf '%s\n' "$notes"; else printf '%s\n' "$subject"; fi
+          done | sh .github/scripts/changelog-entry.sh \
                 '${{ steps.version.outputs.next }}' "$(date -u +%F)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The gate that makes the sed above safe, run before anything is pushed.
       # It compares the two strings the edit touched and fails if they disagree.

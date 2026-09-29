@@ -1,0 +1,14 @@
+# Phrases from the contract files' style that must not reach public files:
+# README.md, CHANGELOG.md, CONTRIBUTING.md, the issue template, release notes
+# and PR titles. One phrase per line, matched case-insensitively on word
+# boundaries, outside `code spans`. A trailing * matches any continuation.
+session inferred
+is what does
+wearing a yes
+the third word
+goes inert
+unattributed
+ruled 20*
+the reader flipped
+bind the reader
+the reader's own
