@@ -1970,7 +1970,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
     ("SPEC.md", 408221),
     ("RULINGS.md", 103037),
-    ("CLAUDE.md", 17304),
+    ("CLAUDE.md", 17094),
     (".claude/skills/take-next/SKILL.md", 25813),
 ];
 

@@ -120,7 +120,7 @@ Ruled 2026-08-26, reader.
 Ruled 2026-08-26, session.
 ```
 
-**Unattributed means a session inferred it, and an inferred ruling does not bind the reader.** Two words, and it turns *"why will you not do this"* from an argument into a lookup.
+**Unattributed means a session inferred it, and an inferred ruling does not bind the reader.**
 
 Mark the origin of the **ruling**, not of the symptom. "Reported from the pane" describes where a complaint came from and says nothing about who chose the constraint attached to it. #272's cap was reader-reported and session-decided, and writing only the first is what let it be quoted back at him as his own.
 
@@ -134,7 +134,7 @@ A rule that survives being overruled re-fires on the next session, and he argues
 
 `SPEC.md` says what holds now. When a ruling is replaced, the old text goes: git has it, and `RULINGS.md` takes the trail when the trail is still needed to apply the rule.
 
-**Annotating in place is not an option, and this is structural rather than a preference.** In any single case the argument for keeping the paragraph is the better one. Enough better arguments in a row is how a contract stops being readable, and how a commit that *removed* a feature still grew the file.
+**Annotating in place is not an option.** Kept paragraphs pile up until the contract is unreadable.
 
 ## Releasing
 
@@ -156,6 +156,7 @@ Pick the level from the diff. On `0.x` a new feature **and** a breaking public A
 - **No em-dashes** in anything published under Brenno's name: README prose, release notes, issue and PR bodies, commit messages. Use a period, a comma, a colon, or parentheses.
 - Probe capability by behaviour, never by asking. A single green run is not evidence when the defect is non-deterministic.
 - Verify the whole artifact, not just the property you were fixing.
+- **Write plainly.** Comments, commits, PR and issue bodies, and replies to the reader: short sentences, common words, the fact first. No metaphor, no aphorism, no rhetoric. If a line needs a second read, rewrite it. The register of this file is not a model to copy.
 - **A comment exists where the code cannot explain itself**: why the obvious approach is wrong, an invariant a caller must hold, a cost invisible at the call site. Not a restatement, an issue number, a ruling id or its own history. **A note, not an argument**: `// Unverified: a check would hash the whole file on every refresh.`, not `// Not verified: the checksum is compared rather than trusted, and verifying it would hash the whole file on every refresh.` Would it hold up in two years, without the session? A docblock longer than its item means one of the two is wrong.
-- **A PR title or commit subject is an imperative; an issue title says what is broken.** One clause, no *because*. `Skip status work that cannot change the pane`, not `An idle pane stops walking on no-op index writes`.
-- **Nothing prose stops at a column. One paragraph is one line.** Markdown files, issue and PR bodies, commit message bodies: no hard wrapping anywhere. GitHub turns a single newline in a body into a real line break, so a paragraph wrapped at 80 arrives broken mid-sentence — 811 forced breaks across sixteen of this repository's PRs before anyone measured it. Gated by `register.rs::no_prose_paragraph_is_hard_wrapped` over every tracked `.md`, because the rule was written down twice and lost twice: an instruction cannot beat a corpus, and these documents held 7,351 hard-wrapped lines that every session reads before it writes anything. **Code comments are the deliberate exception** — nothing renders them, so a break there corrupts nothing, and they sit beside code held near a hundred columns where one long line reads worse. Check a body with `gh api repos/OWNER/REPO/pulls/N -H "Accept: application/vnd.github.html+json" --jq '.body_html' | grep -c '<br'`.
+- **A PR title or commit subject is an imperative. An issue title is a short label for the defect, not a sentence.** One clause, no *because*. PR: `Skip status work that cannot change the pane`, not `An idle pane stops walking on no-op index writes`. Issue: `Staged count rebuilt on every paint of an empty pane`, not `An empty pane rebuilds the staged count on every paint`.
+- **Nothing prose stops at a column. One paragraph is one line.** Markdown files, issue and PR bodies, commit message bodies: no hard wrapping anywhere. GitHub turns a single newline in a body into a real line break, so a paragraph wrapped at 80 arrives broken mid-sentence — 811 forced breaks across sixteen of this repository's PRs before anyone measured it. Gated by `register.rs::no_prose_paragraph_is_hard_wrapped` over every tracked `.md`. **Code comments are the exception**: nothing renders them. Check a body with `gh api repos/OWNER/REPO/pulls/N -H "Accept: application/vnd.github.html+json" --jq '.body_html' | grep -c '<br'`.
