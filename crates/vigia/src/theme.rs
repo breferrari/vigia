@@ -8,6 +8,7 @@ use vigia_core::{Class, Recency};
 
 use crate::colour::Depth;
 use crate::render::{Band, Heat};
+use crate::terminal::{Background, Palette};
 use crate::view::NoteMark;
 
 /// The foreground a fade starts `from`, when it differs from the one it settles
@@ -246,12 +247,13 @@ impl Theme {
             "ansi" => Some(Self::ansi()),
             "dark" => Some(Self::dark()),
             "light" => Some(Self::light()),
+            "system" => Some(Self::system(None)),
             _ => None,
         }
     }
 
     /// Every built-in name, for an error message that can list them.
-    pub const NAMES: [&'static str; 3] = ["ansi", "dark", "light"];
+    pub const NAMES: [&'static str; 4] = ["ansi", "dark", "light", "system"];
 
     /// This palette, in colours `depth` can actually show.
     pub fn resolve(self, depth: Depth) -> Self {
@@ -349,12 +351,6 @@ impl Theme {
         let low = rgb(self.spark)?;
         let warm = rgb(self.spark_warm)?;
         let hot = rgb(self.spark_hot)?;
-        let lerp = |a: (u8, u8, u8), b: (u8, u8, u8), t: f32| {
-            let (la, aa, ba) = oklab_of(a);
-            let (lb, ab, bb) = oklab_of(b);
-            let mix = |x: f32, y: f32| x + (y - x) * t;
-            rgb_of(mix(la, lb), mix(aa, ab), mix(ba, bb))
-        };
         // Stops at 0, 4 and 7: the warm key sits where Band::of's middle third sits on
         // the eight-level height ramp.
         let colour = |(r, g, b)| Color::Rgb(r, g, b);
@@ -363,10 +359,10 @@ impl Theme {
         out[4] = colour(warm);
         out[7] = colour(hot);
         for at in [1, 2, 3] {
-            out[at] = lerp(low, warm, at as f32 / 4.0);
+            out[at] = oklab_mix(low, warm, at as f32 / 4.0);
         }
         for at in [5, 6] {
-            out[at] = lerp(warm, hot, (at - 4) as f32 / 3.0);
+            out[at] = oklab_mix(warm, hot, (at - 4) as f32 / 3.0);
         }
         Some(out)
     }
@@ -403,6 +399,36 @@ impl Theme {
         } else {
             (self.removed_row, self.removed_bar)
         }
+    }
+
+    /// `ansi`, plus the diff washes `ansi` cannot draw because it does not know
+    /// the background. The terminal said what its background is, so each wash
+    /// is mixed from it toward the terminal's own green or red. Without an
+    /// answer it is `ansi` exactly.
+    pub fn system(palette: Option<&Palette>) -> Self {
+        let mut theme = Self::ansi();
+        let Some(palette) = palette else {
+            return theme;
+        };
+        let pane = palette.background;
+        let gutter = if Background::of(pane) == Background::Light {
+            GUTTER_STEP_LIGHT
+        } else {
+            GUTTER_STEP_DARK
+        };
+        // Row, word and gutter, from one hue.
+        let washes = |hue| {
+            let t = row_mix(pane, hue);
+            let wash = |t| Style::new().bg(oklab_mix(pane, hue, t));
+            (wash(t), wash(t + WORD_STEP), wash(t + gutter))
+        };
+        if let Some(green) = palette.ansi[2] {
+            (theme.added_row, theme.added_word, theme.added_gutter) = washes(green);
+        }
+        if let Some(red) = palette.ansi[1] {
+            (theme.removed_row, theme.removed_word, theme.removed_gutter) = washes(red);
+        }
+        theme
     }
 
     /// The sixteen named colours, which is what shipped before there was a choice.
@@ -716,6 +742,63 @@ impl Theme {
     }
 }
 
+/// How far a `system` row wash starts from the background toward its hue, in
+/// Oklab, read off the showcase palettes.
+const ROW_MIX: f32 = 0.25;
+/// Where a row wash stops being pushed further to be seen.
+const ROW_MIX_MAX: f32 = 0.6;
+/// How far a row wash stands from its pane, at least. The showcases' quietest
+/// row wash measures 1.27:1; a fixed mix on pure black measured 1.04:1.
+const ROW_VISIBLE: f32 = 1.27;
+/// The word wash is this much hotter than the row it sits in.
+const WORD_STEP: f32 = 0.2;
+/// The gutter is a step darker than the row: less hue on a dark pane, more on
+/// a light one.
+const GUTTER_STEP_DARK: f32 = -0.08;
+const GUTTER_STEP_LIGHT: f32 = 0.06;
+
+/// How far from `pane` toward `hue` a row wash has to go to be seen.
+fn row_mix(pane: (u8, u8, u8), hue: (u8, u8, u8)) -> f32 {
+    let mut t = ROW_MIX;
+    while t < ROW_MIX_MAX && wcag_ratio(rgb_bytes(oklab_mix(pane, hue, t)), pane) < ROW_VISIBLE {
+        t += 0.01;
+    }
+    t
+}
+
+/// The bytes of a colour [`rgb_of`] made.
+fn rgb_bytes(colour: Color) -> (u8, u8, u8) {
+    match colour {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => unreachable!("rgb_of makes only Rgb"),
+    }
+}
+
+/// WCAG contrast ratio: 1 for one colour against itself, 21 for black on white.
+fn wcag_ratio(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {
+    let luminance = |(r, g, b): (u8, u8, u8)| {
+        let channel = |v: u8| {
+            let v = f32::from(v) / 255.0;
+            if v <= 0.039_28 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    };
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The colour `t` of the way from `a` to `b`, mixed in Oklab.
+fn oklab_mix(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> Color {
+    let (la, aa, ba) = oklab_of(a);
+    let (lb, ab, bb) = oklab_of(b);
+    let mix = |x: f32, y: f32| x + (y - x) * t;
+    rgb_of(mix(la, lb), mix(aa, ab), mix(ba, bb))
+}
+
 /// sRGB bytes to Oklab, through linear light.
 fn oklab_of((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
     let linear = |c: u8| {
@@ -857,7 +940,7 @@ impl fmt::Display for ThemeError {
             Self::UnknownBase { line, name } => write!(
                 f,
                 "line {line}: there is no built-in theme called {name:?}. There are \
-                 three: {}",
+                 four: {}",
                 Theme::NAMES.join(", ")
             ),
             Self::RepeatedBase { line } => write!(
@@ -887,7 +970,8 @@ impl std::error::Error for ThemeError {}
 pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
-    detected: Option<crate::terminal::Background>,
+    detected: Option<Background>,
+    palette: Option<&Palette>,
 ) -> Result<Theme, ThemeError> {
     // Chosen here, resolved once on the way out.
     let theme = if let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) {
@@ -896,6 +980,7 @@ pub fn from_env(
         // ordinary words and a file called `dark` in the working directory should
         // not silently take over what `VIGIA_THEME=dark` has always meant.
         match Theme::named(named) {
+            Some(_) if named == "system" => Theme::system(palette),
             Some(built_in) => built_in,
             None => load(Path::new(named))?,
         }
@@ -904,8 +989,8 @@ pub fn from_env(
         load(&path)?
     } else {
         match detected {
-            Some(crate::terminal::Background::Dark) => Theme::dark(),
-            Some(crate::terminal::Background::Light) => Theme::light(),
+            Some(Background::Dark) => Theme::dark(),
+            Some(Background::Light) => Theme::light(),
             None => Theme::default(),
         }
     };

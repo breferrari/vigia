@@ -1310,7 +1310,7 @@ fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
     ];
 
     for (why, pairs) in cases {
-        let theme = theme::from_env(Depth::Ansi16, env_of(pairs), None).expect("a theme");
+        let theme = theme::from_env(Depth::Ansi16, env_of(pairs), None, None).expect("a theme");
         assert!(
             !matches!(theme.added.fg, Some(Color::Rgb(..))),
             "{why}: reached the renderer unresolved"
@@ -1339,7 +1339,7 @@ fn a_theme_is_resolved_to_the_depth_it_will_be_drawn_at() {
     // palette already in colours this terminal can show, so the renderer never
     // converts anything.
     let env = |key: &str| (key == "VIGIA_THEME").then(|| "dark".to_owned());
-    let flat = theme::from_env(Depth::Ansi16, env, None).expect("a theme");
+    let flat = theme::from_env(Depth::Ansi16, env, None, None).expect("a theme");
     assert!(
         !matches!(flat.added.fg, Some(Color::Rgb(..))),
         "the palette reached the renderer unresolved"
@@ -1385,7 +1385,7 @@ added = #ff0000
     );
     let env = env_of(vec![("HOME".to_owned(), home.display().to_string())]);
 
-    let theme = theme::from_env(Depth::Truecolor, env, None).expect("a theme");
+    let theme = theme::from_env(Depth::Truecolor, env, None, None).expect("a theme");
     assert_eq!(theme.added.fg, Some(Color::Rgb(0xff, 0x00, 0x00)));
     assert_eq!(theme.keyword, Theme::dark().keyword, "the base was ignored");
 }
@@ -1407,7 +1407,7 @@ added = #ff0000
         ("VIGIA_THEME".to_owned(), "light".to_owned()),
     ]);
 
-    let theme = theme::from_env(Depth::Truecolor, env, None).expect("a theme");
+    let theme = theme::from_env(Depth::Truecolor, env, None, None).expect("a theme");
     assert_eq!(theme, Theme::light().resolve(Depth::Truecolor));
 }
 
@@ -1417,7 +1417,7 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
     let absent = home_with("absent", None);
     let env = env_of(vec![("HOME".to_owned(), absent.display().to_string())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
@@ -1429,7 +1429,7 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
         ),
     );
     let env = env_of(vec![("HOME".to_owned(), broken.display().to_string())]);
-    let err = theme::from_env(Depth::Truecolor, env, None).expect_err("refused");
+    let err = theme::from_env(Depth::Truecolor, env, None, None).expect_err("refused");
     assert!(err.to_string().contains("line 1"), "{err}");
 }
 
@@ -1447,14 +1447,14 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
     );
     let env = env_of(vec![("USERPROFILE".to_owned(), home.display().to_string())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor)
     );
 
     // And an empty one is no home at all, rather than a lookup rooted at `/`.
     let env = env_of(vec![("HOME".to_owned(), "  ".to_owned())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
@@ -1473,7 +1473,7 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
         ("USERPROFILE".to_owned(), home.display().to_string()),
     ]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "an empty HOME hid a good USERPROFILE"
     );
@@ -1797,25 +1797,25 @@ fn the_detected_background_picks_the_showcase_and_never_outranks_a_word() {
 
     // A terminal that answered picks the showcase for its side.
     assert_eq!(
-        theme::from_env(Depth::Truecolor, none, Some(Background::Dark)).expect("a theme"),
+        theme::from_env(Depth::Truecolor, none, Some(Background::Dark), None).expect("a theme"),
         Theme::dark().resolve(Depth::Truecolor),
         "a dark answer did not pick the dark showcase"
     );
     assert_eq!(
-        theme::from_env(Depth::Truecolor, none, Some(Background::Light)).expect("a theme"),
+        theme::from_env(Depth::Truecolor, none, Some(Background::Light), None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "a light answer did not pick the light showcase"
     );
     // No answer keeps the palette that assumes nothing.
     assert_eq!(
-        theme::from_env(Depth::Truecolor, none, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, none, None, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor),
         "silence did not keep the fallback"
     );
     // And a reader's own word still wins over any guess.
     let named = |key: &str| (key == "VIGIA_THEME").then(|| "light".to_owned());
     assert_eq!(
-        theme::from_env(Depth::Truecolor, named, Some(Background::Dark)).expect("a theme"),
+        theme::from_env(Depth::Truecolor, named, Some(Background::Dark), None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "detection outranked VIGIA_THEME"
     );
@@ -1921,4 +1921,173 @@ fn a_noted_line_stays_brighter_than_a_pointer_resting_on_it() {
              two are one thing where colour is gone"
         );
     }
+}
+
+/// Four terminals' own answers: a dark editor theme, a light one, xterm's pure
+/// black, and a warm dark one. Background, foreground, red, green.
+/// Background, foreground, red and green.
+type Answer = [(u8, u8, u8); 4];
+
+const TERMINALS: [(&str, Answer); 4] = [
+    (
+        "vscode-dark",
+        [
+            (0x1e, 0x1e, 0x1e),
+            (0xcc, 0xcc, 0xcc),
+            (0xcd, 0x31, 0x31),
+            (0x0d, 0xbc, 0x79),
+        ],
+    ),
+    (
+        "solarized-light",
+        [
+            (0xfd, 0xf6, 0xe3),
+            (0x65, 0x7b, 0x83),
+            (0xdc, 0x32, 0x2f),
+            (0x85, 0x99, 0x00),
+        ],
+    ),
+    (
+        "xterm",
+        [
+            (0x00, 0x00, 0x00),
+            (0xff, 0xff, 0xff),
+            (0xcd, 0x00, 0x00),
+            (0x00, 0xcd, 0x00),
+        ],
+    ),
+    (
+        "gruvbox",
+        [
+            (0x28, 0x28, 0x28),
+            (0xeb, 0xdb, 0xb2),
+            (0xcc, 0x24, 0x1d),
+            (0x98, 0x97, 0x1a),
+        ],
+    ),
+];
+
+fn answered([pane, ink, red, green]: Answer) -> vigia::Palette {
+    let mut ansi = [None; 16];
+    ansi[1] = Some(red);
+    ansi[2] = Some(green);
+    vigia::Palette {
+        background: pane,
+        foreground: Some(ink),
+        ansi,
+    }
+}
+
+/// What a wash costs the ink on it, as a share of the contrast the ink had on
+/// the bare pane: 1 costs nothing.
+fn cost(ink: (u8, u8, u8), wash: (u8, u8, u8), pane: (u8, u8, u8)) -> f64 {
+    contrast(ink, wash) / contrast(ink, pane)
+}
+
+/// `system` washes the diff from the terminal's own colours, as visibly as the
+/// quietest showcase wash and at no greater cost to the text on it than the
+/// costliest showcase wash.
+#[test]
+fn system_washes_diff() {
+    let (mut seen, mut row_cost, mut word_cost) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    for (_, theme, pane) in palettes() {
+        let ink = rgb_of(theme.context);
+        let bg = |style: Style| channels_of(style.bg.expect("a wash"), "showcase wash");
+        for (row, word) in [
+            (bg(theme.added_row), bg(theme.added_word)),
+            (bg(theme.removed_row), bg(theme.removed_word)),
+        ] {
+            seen = seen.min(contrast(row, pane));
+            row_cost = row_cost.min(cost(ink, row, pane));
+            word_cost = word_cost.min(cost(ink, word, pane));
+        }
+    }
+
+    for (name, colours) in TERMINALS {
+        let palette = answered(colours);
+        let [pane, ink, ..] = colours;
+        let theme = Theme::system(Some(&palette)).resolve(Depth::Truecolor);
+        let wash = |style: Style, which| channels_of(style.bg.expect("a system wash"), which);
+        let added = wash(theme.added_row, "added row");
+        let removed = wash(theme.removed_row, "removed row");
+        assert_ne!(
+            added, removed,
+            "{name}: an addition and a removal share a wash"
+        );
+
+        for (which, row, word) in [
+            ("added", added, wash(theme.added_word, "added word")),
+            ("removed", removed, wash(theme.removed_word, "removed word")),
+        ] {
+            let visible = contrast(row, pane);
+            assert!(
+                visible >= seen - 0.01,
+                "{name}'s {which} row stands {visible:.2}:1 from its pane, under the \
+                 quietest showcase wash at {seen:.2}:1"
+            );
+            let spent = cost(ink, row, pane);
+            assert!(
+                spent >= row_cost,
+                "{name}'s {which} row keeps {spent:.2} of the text's contrast, under \
+                 the showcases' {row_cost:.2}"
+            );
+            let spent = cost(ink, word, pane);
+            assert!(
+                spent >= word_cost,
+                "{name}'s {which} word wash keeps {spent:.2} of the text's contrast, \
+                 under the showcases' {word_cost:.2}"
+            );
+            assert!(
+                contrast(word, pane) > visible,
+                "{name}'s {which} word wash is no hotter than its row"
+            );
+        }
+    }
+}
+
+/// With no answer, or no green and red, `system` is `ansi`: nothing it
+/// cannot see is guessed.
+#[test]
+fn system_without_answers() {
+    assert_eq!(Theme::system(None), Theme::ansi());
+    let silent = vigia::Palette {
+        background: (0, 0, 0),
+        foreground: None,
+        ansi: [None; 16],
+    };
+    assert_eq!(
+        Theme::system(Some(&silent)),
+        Theme::ansi(),
+        "a background alone is not enough to wash a diff"
+    );
+    assert_eq!(Theme::named("system"), Some(Theme::ansi()));
+}
+
+/// `VIGIA_THEME=system` takes the terminal's answer; detection alone never does.
+#[test]
+fn system_is_chosen() {
+    let palette = answered(TERMINALS[0].1);
+    let named = |key: &str| (key == "VIGIA_THEME").then(|| "system".to_owned());
+    assert_eq!(
+        theme::from_env(
+            Depth::Truecolor,
+            named,
+            Some(vigia::Background::Dark),
+            Some(&palette)
+        )
+        .expect("a theme"),
+        Theme::system(Some(&palette)).resolve(Depth::Truecolor),
+    );
+    let none = |_: &str| None;
+    assert_eq!(
+        theme::from_env(
+            Depth::Truecolor,
+            none,
+            Some(vigia::Background::Dark),
+            Some(&palette)
+        )
+        .expect("a theme"),
+        Theme::dark().resolve(Depth::Truecolor),
+        "an answered palette displaced the showcase nobody asked to replace"
+    );
 }
