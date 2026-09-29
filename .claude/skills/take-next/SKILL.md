@@ -53,7 +53,7 @@ Run `sh .claude/skills/take-next/selftest.sh` after any edit to `next.sh`, `pref
 0. no soak test is running on this machine (advisory),
 1. every spec invariant is named by an issue title,
 2. no issue names an invariant the spec dropped,
-3. every roadmap row's mark matches its issue's state,
+3. every roadmap row's mark matches its issue's state, and every row's issue exists,
 4. every open issue has a milestone (without one, `next.sh` never sees it),
 5. the open `SPEC.md` §10 bullets, printed for you to read: one with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker: file it, then decide before planning whether it is in scope or taken first,
 6. `next.sh`'s answer matches the roadmap's section order, and every open milestone with work, except the Shelf, has a `## Phase <n>` section,
@@ -102,7 +102,7 @@ The plan contains:
 
 Measure to learn the answer. Do not run a measurement whose only possible use is to support a no.
 
-**One fresh context must hold it**: the issue, the spec sections, the changed files and the new tests, with room left to think. If not, split the issue into children that each have a full path through spec, code and gates, and mark the blocker. A split is stop 2: file the children and present the split with the plan. A wide mechanical refactor goes expand then contract: add the new form, migrate call sites in batches, delete the old form.
+**One fresh context must hold it**: the issue, the spec sections, the changed files and the new tests, with room left to think. If not, split the issue into children that each have a full path through spec, code and gates, and mark the blocker. A split is stop 2: present the split in the plan, and file the children after it is approved. A wide mechanical refactor goes expand then contract: add the new form, migrate call sites in batches, delete the old form.
 
 Post the approved plan as a comment on the issue before writing code. Write down any deviation and its reason when you take it. A reason written at review time does not count.
 
@@ -115,7 +115,7 @@ Post the approved plan as a comment on the issue before writing code. Write down
 - **Failing test first** for every invariant. Watch it fail, then make it pass.
 - **Frame-path changes run the budget gate.**
 - **Add no dependency** that `SPEC.md` does not name. Propose it into the spec in its own commit first.
-- **If reality contradicts the spec, stop.** Decide which is wrong, change that one in its own commit, and say which. A conflict between the plan and reality goes the same way.
+- **If reality contradicts the spec, stop (stop 1).** Say which one you think is wrong and wait. After the reader answers, change that one in its own commit. If reality contradicts the plan, write the deviation and its reason on the issue when you take it (step 3).
 - **Every issue you file gets a milestone and a roadmap row.** In-scope findings are fixed here. Never defer an in-scope finding to a new issue to close the PR. An out-of-scope one goes to the Shelf: a row in `ROADMAP.md`'s Shelf table, and its dated reason in the Deferral shelf table: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass, and size it to the blockage.
 
 ## 5. Scope the checks
@@ -137,7 +137,7 @@ The full sequence, in order, applying what each finds:
 3. `/code-review high`.
 4. **Mutation check.** For each gate added, remove its fix and confirm the gate fails. Mutate a copy of the file, never the worktree.
 
-Run each once. Docs-only diffs run `/simplify` and `two-axis-review`. A fresh review always finds something new, so rerunning until clean never ends. Run `/harden` only when the reader asks for it.
+Run each once. Docs-only diffs run `/simplify` and `two-axis-review`. A diff under ~200 lines across 3 files or fewer, away from the core areas above, runs `/simplify` and the mutation check. A fresh review always finds something new, so rerunning until clean never ends. Run `/harden` only when the reader asks for it.
 
 Brief every agent with: *Read the code. Do not run builds, benchmarks or tests. If you need a measurement, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run review agents on Sonnet.
 
@@ -173,12 +173,14 @@ Merge when the run is green on the ready revision and every comment is answered:
 
 ## 8. Close the loop
 
+Do items 2 and 3 on the branch before step 7, so they merge with the PR. Do items 1 and 4 after the merge.
+
 1. **Issue**: close it with the commit, test count and numbers.
 2. **`ROADMAP.md`**: flip the row's status, add a row for any issue this pass filed or closed, and add to the shelf or the pull-forward log if anything moved.
-3. **`SPEC.md`**: only if the contract changed, in its own commit.
+3. **`SPEC.md`**: only if the contract changed, in its own commit on the branch.
 4. **Vault**: `record_work` for what happened. `remember` for a lesson that helps another project.
 
-If `record_work` fails after one smaller retry, write the note by hand under `projects/vigia/notes/`, say so in the report, and comment on breferrari/obsidian-mind#244. Read every write back. A Stop hook blocks once if a merged pass has no note naming its issue.
+If `record_work` fails after one smaller retry, write the note by hand under `projects/vigia/notes/`, say so in the report, and comment the date and the dropped fields on breferrari/obsidian-mind#244. Read every write back. A Stop hook blocks once if a merged pass has no note naming its issue.
 
 ## 9. Report
 
