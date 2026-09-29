@@ -526,3 +526,150 @@ fn settling_waits_for_a_tree_that_is_still_being_written() {
         quiet.elapsed()
     );
 }
+
+/// A linked worktree of a repository with two commits, on branch `side`. Its index
+/// and `HEAD` live in the main repository's `.git/worktrees/`, outside its own tree.
+fn linked_scratch(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(
+        "a.txt", "x
+",
+    );
+    scratch.commit_all("first");
+    scratch.write(
+        "a.txt", "y
+",
+    );
+    scratch.commit_all("second");
+    scratch.git(&["worktree", "add", "-q", "-b", "side", "linked"]);
+    scratch.settled()
+}
+
+fn linked_watch(scratch: &Scratch) -> vigia_core::Worktree {
+    vigia_core::Worktree::discover(scratch.path_of("linked")).expect("discover")
+}
+
+#[test]
+fn staging_in_a_linked_worktree_produces_a_tick() {
+    let scratch = linked_scratch("watch-linked-index");
+    scratch.write(
+        "linked/a.txt",
+        "z
+",
+    );
+    let scratch = scratch.settled();
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.git(&["-C", "linked", "add", "a.txt"]);
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an index write in a linked worktree produced no tick"
+    );
+}
+
+#[test]
+fn moving_a_linked_worktrees_branch_produces_a_tick() {
+    let scratch = linked_scratch("watch-linked-ref");
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // Moves `refs/heads/side` in the common dir and nothing else.
+    scratch.git(&["-C", "linked", "reset", "-q", "--soft", "HEAD~1"]);
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "moving a linked worktree's branch produced no tick"
+    );
+}
+
+#[test]
+fn moving_a_linked_worktrees_head_produces_a_tick() {
+    let scratch = linked_scratch("watch-linked-head");
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // Writes the worktree's own `HEAD` and nothing else.
+    scratch.git(&["-C", "linked", "symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "moving a linked worktree's HEAD produced no tick"
+    );
+}
+
+#[test]
+fn the_main_worktrees_index_and_head_do_not_tick_a_linked_one() {
+    let scratch = linked_scratch("watch-linked-main");
+    scratch.write(
+        "a.txt", "w
+",
+    );
+    let scratch = scratch.settled();
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // The main worktree's index and `HEAD` sit in the common dir.
+    scratch.git(&["add", "a.txt"]);
+    scratch.git(&["symbolic-ref", "HEAD", "refs/heads/elsewhere"]);
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the main worktree's index or HEAD ticked a linked worktree"
+    );
+}
+
+#[test]
+fn a_linked_worktrees_index_does_not_tick_the_main_one() {
+    let scratch = linked_scratch("watch-main-linked");
+    scratch.write(
+        "linked/a.txt",
+        "z
+",
+    );
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // Writes `.git/worktrees/linked/index`, inside the main worktree's `.git`.
+    scratch.git(&["-C", "linked", "add", "a.txt"]);
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a linked worktree's index write ticked the main worktree"
+    );
+}
+
+#[test]
+fn a_separate_git_dir_ticks_on_its_index_and_its_refs() {
+    let store = support::TempDir::new("watch-separate-store");
+    let scratch = committed_scratch("watch-separate");
+    scratch.write(
+        "a.txt", "y
+",
+    );
+    scratch.commit_all("second");
+    // Moves the existing `.git` out and leaves a `.git` file pointing at it.
+    let separate = format!("--separate-git-dir={}", store.path().join("git").display());
+    scratch.git(&["init", "-q", &separate]);
+    scratch.write(
+        "a.txt", "z
+",
+    );
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.git(&["add", "a.txt"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an index write under a separate git dir produced no tick"
+    );
+
+    scratch.git(&["reset", "-q", "--soft", "HEAD~1"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "moving a branch under a separate git dir produced no tick"
+    );
+}

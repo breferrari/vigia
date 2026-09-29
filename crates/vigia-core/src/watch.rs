@@ -144,6 +144,12 @@ pub struct Watcher<'repo> {
     excludes: gix::AttributeStack<'repo>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
+    /// The git dir, in every spelling as for `roots`. A linked worktree, a submodule
+    /// or a separate `GIT_DIR` keeps it outside the worktree.
+    git_dir: Vec<PathBuf>,
+    /// The common dir, when it is not the git dir. Empty otherwise. It holds the
+    /// branch refs, and also other worktrees' `HEAD` and index.
+    common_dir: Vec<PathBuf>,
     index: IndexWatch,
     options: WatchOptions,
     stats: WatchStats,
@@ -170,6 +176,20 @@ impl<'repo> Watcher<'repo> {
             .map_err(|e| Error::Watch(Box::new(e)))?;
 
         let roots = roots_of(workdir);
+        // A linked worktree's common dir comes back as `<git dir>/../..`, which would
+        // match as a path under the git dir.
+        let tidy = |dir: &Path| {
+            let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+            gix::path::normalize(dir.as_path().into(), &dir)
+                .map_or_else(|| dir.clone(), std::borrow::Cow::into_owned)
+        };
+        let (git, common) = (tidy(repo.git_dir()), tidy(repo.common_dir()));
+        let git_dir = spellings_of(&git, &roots);
+        let common_dir = if common == git {
+            Vec::new()
+        } else {
+            spellings_of(&common, &roots)
+        };
         let index = IndexWatch::new(repo);
 
         let (tx, rx) = mpsc::channel();
@@ -191,6 +211,23 @@ impl<'repo> Watcher<'repo> {
         backend
             .watch(workdir, RecursiveMode::Recursive)
             .map_err(|e| Error::Watch(Box::new(e)))?;
+        // Not recursive: `objects/` churns on every write.
+        let inside = |dir: &Path| roots.iter().any(|root| dir.starts_with(root));
+        for dir in [git_dir.first(), common_dir.first()].into_iter().flatten() {
+            if inside(dir) {
+                continue;
+            }
+            backend
+                .watch(dir, RecursiveMode::NonRecursive)
+                .map_err(|e| Error::Watch(Box::new(e)))?;
+            // A linked worktree's git dir has no refs of its own.
+            let heads = dir.join("refs").join("heads");
+            if heads.is_dir() {
+                backend
+                    .watch(&heads, RecursiveMode::Recursive)
+                    .map_err(|e| Error::Watch(Box::new(e)))?;
+            }
+        }
 
         Ok(Self {
             rx,
@@ -198,6 +235,8 @@ impl<'repo> Watcher<'repo> {
             _backend: backend,
             excludes,
             roots,
+            git_dir,
+            common_dir,
             index,
             options,
             stats: WatchStats::default(),
@@ -308,17 +347,26 @@ impl<'repo> Watcher<'repo> {
     /// This event's path relative to the worktree, or `None` when nothing the
     /// display depends on is behind it.
     fn relative<'p>(&mut self, path: &'p Path) -> Option<&'p Path> {
-        let rela = self
-            .roots
-            .iter()
-            // Outside the worktree entirely. Nothing we display depends on it.
-            .find_map(|root| path.strip_prefix(root).ok())?;
+        // A git-dir event comes back as `.git`, which `followable` never follows.
+        if let Some(inside) = within(&self.git_dir, path) {
+            let watched = if inside == Path::new("index") {
+                self.index.moved()
+            } else {
+                watched_in_git_dir(inside)
+            };
+            return watched.then_some(Path::new(".git"));
+        }
+        if let Some(inside) = within(&self.common_dir, path) {
+            // Only the refs: other worktrees' index and `HEAD` are here too.
+            let refs = inside.starts_with("refs") || inside == Path::new("packed-refs");
+            return (refs && watched_in_git_dir(inside)).then_some(Path::new(".git"));
+        }
 
-        if rela.components().next().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
-            if rela == Path::new(".git").join("index") {
-                return self.index.moved().then_some(rela);
-            }
-            return watched_in_git_dir(rela).then_some(rela);
+        // Outside the worktree entirely. Nothing we display depends on it.
+        let rela = within(&self.roots, path)?;
+        // A linked worktree's `.git` file, or a `.git` that is not this repository's.
+        if rela.starts_with(".git") {
+            return None;
         }
 
         // The mode is not cosmetic. A rule like `target/` matches directories only, and
@@ -433,6 +481,25 @@ impl IndexPrint {
     }
 }
 
+/// `path` relative to the first of `roots` it is under.
+fn within<'p>(roots: &[PathBuf], path: &'p Path) -> Option<&'p Path> {
+    roots.iter().find_map(|root| path.strip_prefix(root).ok())
+}
+
+/// Every spelling of `dir`, with each worktree root's spelling when it is under one.
+fn spellings_of(dir: &Path, roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = roots_of(dir);
+    if let Some(rela) = within(roots, dir) {
+        for root in roots {
+            let spelling = root.join(rela);
+            if !all.contains(&spelling) {
+                all.push(spelling);
+            }
+        }
+    }
+    all
+}
+
 /// Every spelling of a watched root that an event path might carry.
 pub(crate) fn roots_of(workdir: &Path) -> Vec<PathBuf> {
     let mut roots = vec![workdir.to_path_buf()];
@@ -466,25 +533,20 @@ fn accept_paths<'p>(
     accepted
 }
 
-/// Where the view should move for a worktree-relative path an event named, or
-/// `None` when there is nowhere to move.
-fn watched_in_git_dir(rela: &Path) -> bool {
-    if rela.file_name() == Some(OsStr::new("index")) {
-        return true;
-    }
-
-    // Everything below is judged on the path *within* `.git`, so strip it once.
-    let mut inside = rela.components();
-    inside.next();
-    let mut inside = inside.peekable();
+/// Whether a write at `inside`, a path within the git dir, can change the pane.
+fn watched_in_git_dir(inside: &Path) -> bool {
+    let mut inside = inside.components().peekable();
     let Some(first) = inside.next() else {
         return false;
     };
     let first = first.as_os_str();
 
-    if first == OsStr::new("HEAD") || first == OsStr::new("packed-refs") {
-        // Only when it *is* that file: a directory called `HEAD` somewhere below
-        // is not one, and `refs/heads/HEAD` reaches the arm underneath.
+    // Only when it *is* that file: an `index`, `HEAD` or directory by that name
+    // somewhere below belongs to another worktree or a submodule.
+    if first == OsStr::new("index")
+        || first == OsStr::new("HEAD")
+        || first == OsStr::new("packed-refs")
+    {
         return inside.peek().is_none();
     }
 
@@ -601,7 +663,9 @@ mod tests {
     /// A branch tip moving is a change the monitor must see, and until it did not.
     #[test]
     fn a_branch_tip_moving_is_a_change_the_monitor_must_see() {
-        let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
+        let watched = |parts: &[&str]| {
+            watched_in_git_dir(native(parts).strip_prefix(".git").expect("under .git"))
+        };
 
         assert!(watched(&[".git", "index"]), "staging, as it always was");
         assert!(watched(&[".git", "HEAD"]), "a checkout, or detaching");
@@ -623,7 +687,9 @@ mod tests {
     /// what was already on screen.
     #[test]
     fn the_rest_of_the_git_directory_still_wakes_nothing() {
-        let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
+        let watched = |parts: &[&str]| {
+            watched_in_git_dir(native(parts).strip_prefix(".git").expect("under .git"))
+        };
 
         assert!(!watched(&[".git", "refs", "remotes", "origin", "main"]));
         assert!(!watched(&[".git", "refs", "tags", "v1.0.0"]));
@@ -645,6 +711,8 @@ mod tests {
             !watched(&[".git", "worktrees", "other", "HEAD"]),
             "another worktree's HEAD is another worktree's business"
         );
+        assert!(!watched(&[".git", "worktrees", "other", "index"]));
+        assert!(!watched(&[".git", "modules", "sub", "index"]));
     }
 
     /// Neither of the refs the staged run watches is somewhere to scroll to.
