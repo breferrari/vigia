@@ -130,6 +130,26 @@ enum Wake {
     Posted(Posted),
 }
 
+/// The count of the run a pane is not drawing, taken only by a frame that draws it
+/// and only when a tick has passed since the last one. A frame that does not draw it
+/// owes the next one that does a count, whatever made the list empty in between:
+/// the staged toggle, `only`, a move of the standing or the last change going away.
+fn elsewhere_of(
+    kept: Counted,
+    stale: &mut bool,
+    drawn: bool,
+    count: impl FnOnce() -> Counted,
+) -> Counted {
+    if !drawn {
+        *stale = true;
+        Counted::default()
+    } else if std::mem::take(stale) {
+        count()
+    } else {
+        kept
+    }
+}
+
 /// Whether a demand is worth handing to a warmer, given what the last one was
 /// handed and whether the tree has changed since.
 pub fn worth_warming(wanted: &[String], served: &[String], written: bool) -> bool {
@@ -393,6 +413,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         store_watch: None,
         notes_stale: false,
         places_stale: false,
+        elsewhere_stale: true,
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
         box_effect: None,
@@ -726,6 +747,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.written = true;
                     // The list's facts describe runs, so a write moves them too.
                     shell.places_stale = true;
+                    // And the count of the run it is not drawing, since a write to
+                    // the index is a tick too.
+                    shell.elsewhere_stale = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time and only a wake the
                     // loop was having moves it. Parked too, so the sparkline is whole
@@ -1043,6 +1067,9 @@ struct Shell {
     /// Whether the list's facts are owed a walk: set when the tree moves, the list opens
     /// or the pane does, so the arrows re-measure nothing.
     places_stale: bool,
+    /// Whether `elsewhere` is owed a count. Building it reads every tree under
+    /// `HEAD`, and an empty pane repaints once a second while its history ages.
+    elsewhere_stale: bool,
     /// What the pane holds of the store between wakes: the notes as listed and
     /// the ones on their way off the screen.
     ledger: Ledger,
@@ -2009,13 +2036,16 @@ impl Shell {
 
         // On a frame with nothing to draw, where the work went, which for a commit
         // that changed nothing is not whatever happens to be staged now.
-        self.elsewhere = if self.screen.files == 0 && !self.app.staged() && frame.is_live() {
-            worktree
-                .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
-                .unwrap_or_default()
-        } else {
-            Counted::default()
-        };
+        self.elsewhere = elsewhere_of(
+            self.elsewhere,
+            &mut self.elsewhere_stale,
+            self.screen.files == 0 && !self.app.staged() && frame.is_live(),
+            || {
+                worktree
+                    .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
+                    .unwrap_or_default()
+            },
+        );
 
         // Rebuilt so a notice raised by the collect above, and the notes it
         // counted, reach this frame rather than the next one. Safe to differ from
@@ -2495,6 +2525,64 @@ mod tests {
             "`Shell::apply` names the gesture that moves the pane, which is the \
              list `Shell::stand` answers from state to avoid"
         );
+    }
+
+    #[test]
+    fn the_run_the_pane_is_not_drawing_is_counted_once_per_tick() {
+        let one = Counted {
+            shown: 1,
+            hidden: 0,
+        };
+        let two = Counted {
+            shown: 2,
+            hidden: 0,
+        };
+        let mut stale = true;
+        let mut counts = 0;
+        let mut paint = |kept, stale: &mut bool, drawn, now| {
+            elsewhere_of(kept, stale, drawn, || {
+                counts += 1;
+                now
+            })
+        };
+        let kept = paint(Counted::default(), &mut stale, true, one);
+        // The once-a-second repaint of an ageing history, with nothing written.
+        let kept = paint(kept, &mut stale, true, two);
+        assert_eq!(kept, one, "a repaint with no tick counted again");
+        // A tick owes it.
+        stale = true;
+        let kept = paint(kept, &mut stale, true, two);
+        assert_eq!(kept, two, "a tick's count was not taken");
+        // A frame that does not draw it clears it and owes the next one that does,
+        // which is how the staged toggle and a move of the standing are answered.
+        let kept = paint(kept, &mut stale, false, one);
+        assert_eq!(kept, Counted::default());
+        let kept = paint(kept, &mut stale, true, one);
+        assert_eq!(kept, one, "a frame that emptied kept a count from before");
+        assert_eq!(counts, 3);
+
+        // And the pane is what calls it, with the tick owing it.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        assert_eq!(
+            shipped
+                .matches("count_of(vigia_core::Origin::Staged")
+                .count(),
+            1,
+            "the staged count is reachable outside `elsewhere_of`, so an empty pane \
+             rebuilds an index from `HEAD` on every paint"
+        );
+        for rule in [
+            "self.elsewhere = elsewhere_of(\n            self.elsewhere,\n            &mut self.elsewhere_stale,",
+            "shell.elsewhere_stale = true;",
+            "elsewhere_stale: true,",
+        ] {
+            assert!(
+                shipped.contains(rule),
+                "`{rule}` is gone, so the staged count is taken on every paint or \
+                 never again"
+            );
+        }
     }
 
     /// The footer says **sent** rather than copied, because OSC 52 has no reply. Both
