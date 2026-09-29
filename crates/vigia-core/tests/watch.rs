@@ -731,7 +731,8 @@ fn hidden_write_sleeps() {
     watcher.hide(Some(vigia_core::Hidden::new("^gen/").expect("a pattern")));
 
     scratch.write("gen/out.txt", "y\n");
-    std::thread::sleep(ORDERING_QUIET * 2);
+    let woke = tick_within(&mut watcher, ORDERING_QUIET * 3);
+    assert!(woke.is_none(), "a hidden write woke the watch: {woke:?}");
     scratch.write("src/a.rs", "y\n");
 
     let tick = tick_within(&mut watcher, SETTLE).expect("the visible write must tick");
@@ -778,7 +779,8 @@ fn hidden_dir_sleeps() {
     watcher.hide(Some(vigia_core::Hidden::new("^gen/").expect("a pattern")));
 
     scratch.write("gen/out.txt", "y\n");
-    std::thread::sleep(ORDERING_QUIET * 2);
+    let woke = tick_within(&mut watcher, ORDERING_QUIET * 3);
+    assert!(woke.is_none(), "a hidden write woke the watch: {woke:?}");
     scratch.write("src/a.rs", "y\n");
 
     let tick = tick_within(&mut watcher, SETTLE).expect("the visible write must tick");
