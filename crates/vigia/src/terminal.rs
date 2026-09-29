@@ -273,7 +273,7 @@ pub fn background_of(reply: &[u8]) -> Option<Background> {
     Some(Background::of(rgb_after(text, "]11;")?))
 }
 
-/// Every colour a reply to [`ask`] carries, or `None` without a background.
+/// Every colour a terminal's reply carries, or `None` without a background.
 pub fn colours_of(reply: &[u8]) -> Option<Colours> {
     let text = std::str::from_utf8(reply).ok()?;
     let mut ansi = [None; 16];
