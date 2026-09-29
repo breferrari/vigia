@@ -141,7 +141,7 @@ Every file gets the same row in both regions:
 | `▸` | **caret** | 📍 *where you are.* The diff below is inside this file |
 | `M` | **kind** | modified, added, deleted, renamed |
 | `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
-| `●` | **pulse** | ⚡ it changed on the newest tick |
+| `●` | **pulse** | ⚡ the file written last |
 | `✎` `↳` `✓` | **note mark** | 📝 your note is here, and where it stands |
 | green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |

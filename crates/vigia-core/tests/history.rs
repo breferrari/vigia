@@ -1127,23 +1127,44 @@ fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
     );
 }
 
-/// Every file one burst names carries the mark, which is what *newest* means.
+/// One burst marks the one file it wrote last, and the rest keep the top rung.
 #[test]
-fn every_file_a_burst_names_carries_the_newest_mark() {
+fn burst_marks_last_write() {
     let start = base();
     let mut history = History::starting_at(start);
     let wrote = start + Duration::from_millis(1);
     history.record(["src/a.rs", "src/b.rs", "src/c.rs"], wrote);
 
-    for path in ["src/a.rs", "src/b.rs", "src/c.rs"] {
+    assert!(
+        history.newest("src/c.rs"),
+        "the burst's last write carries no mark"
+    );
+    for path in ["src/a.rs", "src/b.rs"] {
         assert!(
-            history.newest(path),
-            "{path} was in the burst and carries no mark"
+            !history.newest(path),
+            "{path} was written before the end of the burst and carries the mark, \
+             so a bulk write marks every row"
+        );
+        assert_eq!(
+            history.recency(path),
+            Recency::Pulse,
+            "{path} was in the newest burst and lost the top rung"
         );
     }
     assert!(
         !history.newest("src/never.rs"),
         "a path nothing is tracked for carries the mark"
+    );
+
+    // A later burst that rewrites an earlier file moves the mark to it.
+    history.record(["src/c.rs", "src/a.rs"], wrote + Duration::from_millis(1));
+    assert!(
+        history.newest("src/a.rs"),
+        "the later last write has no mark"
+    );
+    assert!(
+        !history.newest("src/c.rs"),
+        "the earlier last write kept it"
     );
 }
 
