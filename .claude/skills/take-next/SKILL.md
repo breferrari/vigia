@@ -5,7 +5,7 @@ description: Take the next task from ROADMAP.md and ship it end to end. Use when
 
 # take-next
 
-Take **one** issue from the tracker and carry it to merged. This file lives in the repo so it is versioned.
+Take **one** task from `ROADMAP.md` and carry it to merged. This file lives in the repo so it is versioned.
 
 ## Running unattended
 
@@ -41,7 +41,7 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 
 Run `sh .claude/skills/take-next/selftest.sh` after any edit to `next.sh`, `preflight.sh` or these rules. Close a milestone when you finish its last issue.
 
-The issues are the truth and `ROADMAP.md` follows them. When they disagree, fix the roadmap in the same pass.
+`ROADMAP.md` declares the next task and links every issue, open or closed. The tracker holds each issue's state. When the two disagree, fix the roadmap in the same pass.
 
 ### Pre-flight
 
@@ -54,11 +54,11 @@ The issues are the truth and `ROADMAP.md` follows them. When they disagree, fix 
 4. every open issue has a milestone (without one, `next.sh` never sees it),
 5. the open `SPEC.md` §10 bullets, printed for you to read: one with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker to file first,
 6. `next.sh`'s answer matches the roadmap's section order, and every open milestone with work has a `## Phase <n>` section,
-7. every open issue has a roadmap row.
+7. every issue, open or closed, has a roadmap row.
 
 A false positive means the check is wrong: fix the check. A command in this file that no longer works is fixed in the pass that finds it.
 
-Take the **topmost unstarted task** in the chosen phase. If a later task blocks it, say so and take the blocker. If a task is `🔨 in progress`, check `git status` and open PRs first: another session may own it.
+Take the **topmost unstarted row** in that phase's `ROADMAP.md` section. If a later task blocks it, say so and take the blocker. If a task is `🔨 in progress`, check `git status` and open PRs first: another session may own it.
 
 ### Declines
 
@@ -112,7 +112,7 @@ Post the approved plan as a comment on the issue before writing code. Write down
 - **Frame-path changes run the budget gate.**
 - **Add no dependency** that `SPEC.md` does not name. Propose it into the spec in its own commit first.
 - **If reality contradicts the spec, stop.** Decide which is wrong and change that one in its own commit.
-- **In-scope findings are fixed here.** An out-of-scope one gets an issue with a milestone and a roadmap row: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass.
+- **Every issue you file gets a milestone and a roadmap row.** In-scope findings are fixed here. An out-of-scope one goes to the Shelf: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass.
 
 ## 5. Scope the checks
 
@@ -167,7 +167,7 @@ Merge when the run is green on the ready revision and every comment is answered:
 ## 8. Close the loop
 
 1. **Issue**: close it with the commit, test count and numbers.
-2. **`ROADMAP.md`**: flip the row's status.
+2. **`ROADMAP.md`**: flip the row's status, and add a row for any issue this pass filed or closed.
 3. **`SPEC.md`**: only if the contract changed, in its own commit.
 4. **Vault**: `record_work` for what happened. `remember` for a lesson that helps another project.
 

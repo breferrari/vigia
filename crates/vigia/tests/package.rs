@@ -2003,7 +2003,7 @@ const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
     ("SPEC.md", 408221),
     ("RULINGS.md", 103037),
     ("CLAUDE.md", 17080),
-    (".claude/skills/take-next/SKILL.md", 13085),
+    (".claude/skills/take-next/SKILL.md", 13254),
 ];
 
 /// The documents that record events rather than argue positions.
