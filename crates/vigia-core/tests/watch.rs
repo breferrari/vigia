@@ -526,3 +526,109 @@ fn settling_waits_for_a_tree_that_is_still_being_written() {
         quiet.elapsed()
     );
 }
+
+/// A linked worktree of a repository with two commits, on branch `side`. Its index
+/// and `HEAD` live in the main repository's `.git/worktrees/`, outside its own tree.
+fn linked_scratch(name: &str) -> (Scratch, std::path::PathBuf) {
+    let scratch = Scratch::new(name);
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("first");
+    scratch.write("a.txt", "y\n");
+    scratch.commit_all("second");
+    scratch.git(&["worktree", "add", "-q", "-b", "side", "linked"]);
+    let linked = scratch.path_of("linked");
+    (scratch.settled(), linked)
+}
+
+fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("run git");
+    assert!(out.status.success(), "git {args:?} failed");
+}
+
+#[test]
+fn staging_in_a_linked_worktree_produces_a_tick() {
+    let (scratch, linked) = linked_scratch("watch-linked-index");
+    std::fs::write(linked.join("a.txt"), "z\n").expect("write");
+    let scratch = scratch.settled();
+    let worktree = vigia_core::Worktree::discover(&linked).expect("discover");
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    git_in(&linked, &["add", "a.txt"]);
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an index write in a linked worktree produced no tick"
+    );
+    drop(scratch);
+}
+
+#[test]
+fn moving_a_linked_worktrees_branch_produces_a_tick() {
+    let (scratch, linked) = linked_scratch("watch-linked-ref");
+    let worktree = vigia_core::Worktree::discover(&linked).expect("discover");
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // Moves `refs/heads/side` in the common dir and nothing else.
+    git_in(&linked, &["reset", "-q", "--soft", "HEAD~1"]);
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "moving a linked worktree's branch produced no tick"
+    );
+    drop(scratch);
+}
+
+#[test]
+fn the_main_worktrees_index_does_not_tick_a_linked_one() {
+    let (scratch, linked) = linked_scratch("watch-linked-main");
+    scratch.write("a.txt", "w\n");
+    let scratch = scratch.settled();
+    let worktree = vigia_core::Worktree::discover(&linked).expect("discover");
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // The main worktree's index and `HEAD` sit in the common dir too.
+    scratch.git(&["add", "a.txt"]);
+
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the main worktree's index write ticked a linked worktree"
+    );
+}
+
+#[test]
+fn moving_a_branch_under_a_separate_git_dir_produces_a_tick() {
+    let scratch = Scratch::new("watch-separate");
+    let tree = scratch.path_of("tree");
+    let store = scratch.path_of("store");
+    std::fs::create_dir(&tree).expect("mkdir");
+    let separate = format!("--separate-git-dir={}", store.display());
+    git_in(&tree, &["init", "-q", "-b", "main", &separate]);
+    for args in [
+        &["config", "user.email", "test@example.invalid"][..],
+        &["config", "user.name", "vigia tests"],
+        &["config", "core.autocrlf", "false"],
+        &["config", "commit.gpgsign", "false"],
+    ] {
+        git_in(&tree, args);
+    }
+    for text in ["x\n", "y\n"] {
+        std::fs::write(tree.join("a.txt"), text).expect("write");
+        git_in(&tree, &["add", "a.txt"]);
+        git_in(&tree, &["commit", "-q", "-m", "c"]);
+    }
+    let scratch = scratch.settled();
+    let worktree = vigia_core::Worktree::discover(&tree).expect("discover");
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    git_in(&tree, &["reset", "-q", "--soft", "HEAD~1"]);
+
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "moving a branch under a separate git dir produced no tick"
+    );
+    drop(scratch);
+}

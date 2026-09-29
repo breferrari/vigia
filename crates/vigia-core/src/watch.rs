@@ -144,6 +144,12 @@ pub struct Watcher<'repo> {
     excludes: gix::AttributeStack<'repo>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
+    /// The git dir, when it is outside the worktree: a linked worktree, a submodule
+    /// or a separate `GIT_DIR`. Every spelling, as for `roots`.
+    git_dir: Vec<PathBuf>,
+    /// The common dir, when it is outside the worktree and is not the git dir. It
+    /// holds the branch refs, and also other worktrees' `HEAD` and index.
+    common_dir: Vec<PathBuf>,
     index: IndexWatch,
     options: WatchOptions,
     stats: WatchStats,
@@ -170,6 +176,26 @@ impl<'repo> Watcher<'repo> {
             .map_err(|e| Error::Watch(Box::new(e)))?;
 
         let roots = roots_of(workdir);
+        let outside = |dir: &Path| {
+            let spellings = roots_of(dir);
+            let inside = spellings
+                .iter()
+                .any(|dir| roots.iter().any(|root| dir.starts_with(root)));
+            if inside { Vec::new() } else { spellings }
+        };
+        // A linked worktree's common dir comes back as `<git dir>/../..`, which would
+        // match as a path under the git dir.
+        let tidy = |dir: &Path| {
+            gix::path::normalize(dir.into(), workdir)
+                .map_or_else(|| dir.to_path_buf(), std::borrow::Cow::into_owned)
+        };
+        let (git, common) = (tidy(repo.git_dir()), tidy(repo.common_dir()));
+        let git_dir = outside(&git);
+        let common_dir = if common == git {
+            Vec::new()
+        } else {
+            outside(&common)
+        };
         let index = IndexWatch::new(repo);
 
         let (tx, rx) = mpsc::channel();
@@ -191,6 +217,19 @@ impl<'repo> Watcher<'repo> {
         backend
             .watch(workdir, RecursiveMode::Recursive)
             .map_err(|e| Error::Watch(Box::new(e)))?;
+        // Not recursive: `objects/` churns on every write. A watch that fails here
+        // leaves the pane as it was before, blind to index and ref writes only.
+        let mut arm = |dir: &Path, mode| {
+            let _ = backend.watch(dir, mode);
+        };
+        if let Some(dir) = git_dir.first() {
+            arm(dir, RecursiveMode::NonRecursive);
+            arm(&dir.join("refs").join("heads"), RecursiveMode::Recursive);
+        }
+        if let Some(dir) = common_dir.first() {
+            arm(dir, RecursiveMode::NonRecursive);
+            arm(&dir.join("refs").join("heads"), RecursiveMode::Recursive);
+        }
 
         Ok(Self {
             rx,
@@ -198,6 +237,8 @@ impl<'repo> Watcher<'repo> {
             _backend: backend,
             excludes,
             roots,
+            git_dir,
+            common_dir,
             index,
             options,
             stats: WatchStats::default(),
@@ -308,11 +349,26 @@ impl<'repo> Watcher<'repo> {
     /// This event's path relative to the worktree, or `None` when nothing the
     /// display depends on is behind it.
     fn relative<'p>(&mut self, path: &'p Path) -> Option<&'p Path> {
-        let rela = self
-            .roots
-            .iter()
-            // Outside the worktree entirely. Nothing we display depends on it.
-            .find_map(|root| path.strip_prefix(root).ok())?;
+        let outside = if let Some(inside) = within(&self.git_dir, path) {
+            Some(if inside == Path::new("index") {
+                self.index.moved()
+            } else {
+                watched_in_git_dir(&Path::new(".git").join(inside))
+            })
+        } else {
+            // Only the refs: the common dir also holds other worktrees' index and `HEAD`.
+            within(&self.common_dir, path).map(|inside| {
+                (inside.starts_with("refs") || inside == Path::new("packed-refs"))
+                    && watched_in_git_dir(&Path::new(".git").join(inside))
+            })
+        };
+        if let Some(watched) = outside {
+            // Named `.git`, so nothing follows it.
+            return watched.then_some(Path::new(".git"));
+        }
+
+        // Outside the worktree entirely. Nothing we display depends on it.
+        let rela = within(&self.roots, path)?;
 
         if rela.components().next().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
             if rela == Path::new(".git").join("index") {
@@ -431,6 +487,11 @@ impl IndexPrint {
             digest: digest.finish(),
         }
     }
+}
+
+/// `path` relative to the first of `roots` it is under.
+fn within<'p>(roots: &[PathBuf], path: &'p Path) -> Option<&'p Path> {
+    roots.iter().find_map(|root| path.strip_prefix(root).ok())
 }
 
 /// Every spelling of a watched root that an event path might carry.
