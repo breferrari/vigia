@@ -101,7 +101,7 @@ The middle column **is** the floor. One real sibling pays the compile in full, a
 
 **And which half of I1 refuses that is worth getting right, because the obvious citation is the wrong one.** The first draft of this entry said the clock is "what I1 exists to refuse", and I1's *budget* does not refuse it at all: **0 wakeups while idle**, measured over a sixty-second idle window. A timer that runs only while a button is held is not idle, and nobody holds a mouse button through a sixty-second window, so the gate, whatever the timer does, stays green. That is the same structural blindness the entry above records for pointer motion, where the measure is *"silent here by construction"*. If a refusal rests on it, that refusal is checkable and wrong, which is worse than no citation. What actually reaches a held-button clock is **I1's first sentence**, which is a claim about mechanism rather than about idleness: *"Redraw is event-driven, never a fixed timer."* A repeat clock is a fixed timer that produces redraws, whoever holds what, and no measure needs to catch it for the sentence to hold.
 
-**This is not a correction to the phrase everywhere else it appears.** *"The timer I1 forbids"* is this repo's own shorthand and is correct in every other place it occurs: the pulse decay, the header's idle word, the memory readout, the poll loop `lib.rs` rejects and §10's highlight tail are all clocks that, if allowed, would run **while nothing is happening**, which is precisely the state the budget measures and precisely where it bites. A held-button repeat is the one instance where the clock is bounded by an active gesture, so it slips under the measure while still failing the sentence. This is worth writing down because the shorthand is otherwise reliable, and a reader who has seen it used well five times will not stop to check the sixth.
+**This is not a correction to the phrase everywhere else it appears.** *"The timer I1 forbids"* is this repo's own shorthand and is correct in every other place it occurs: the pulse decay, the header's idle word, the memory readout, the poll loop `lib.rs` rejects and §10's highlight tail are all clocks that, if allowed, would run **while nothing is happening**, which is precisely the state the budget measures and precisely where it bites. A held-button repeat is the one instance where the clock is bounded by an active gesture, so it slips under the measure while still failing the sentence.
 
 §5.3 refused the same thing for animation (*"snap, never ease"*), and that was **reversed 2026-08-27 by the reader** on this entry's own ground: a clock that cannot start on its own never touches I1's idle measure.
 
@@ -291,7 +291,7 @@ Same pass. `codegen-units = 1` had been in `[profile.release]` since the budgets
 
 **On Windows it was making `fancy-regex` compilation roughly 6x slower**, and because `syntect` compiles patterns lazily on first use, that landed on frames a reader was waiting for: a 24-line `sh` fenced block cost 286.91ms of parse at 1 and 22.39ms at 2. It is a cliff at 1, not a gradient, and `lto` is irrelevant either way.
 
-**On Linux it does nothing at all**, which is the part worth recording. Re-measured 2026-08-22 interleaved over three rounds against three separately built binaries, `codegen-units` 1, 2 and 16 sit within 3% on every fixture. The cold parse (which is where a compile would show) is 11.999ms at 1 against 12.113ms at 2, within 1%. The toggle was applying: the binary went 3,493,720 to 3,604,896 to 4,077,632 bytes. macOS has never been measured by anyone.
+**On Linux it does nothing at all**. Re-measured 2026-08-22 interleaved over three rounds against three separately built binaries, `codegen-units` 1, 2 and 16 sit within 3% on every fixture. The cold parse (which is where a compile would show) is 11.999ms at 1 against 12.113ms at 2, within 1%. The toggle was applying: the binary went 3,493,720 to 3,604,896 to 4,077,632 bytes. macOS has never been measured by anyone.
 
 Two lessons, and the second is the general one:
 
@@ -330,7 +330,7 @@ Both defects are B13's own, both were introduced by the change that made the she
 
 **The close control advanced.** A click on `✕` returned `Action::ToggleSheet`, which is the action `?` sends, and once `?` meant *advance* the control did too. On a six-page pane a reader needed six clicks to leave, and the pointer has no `?` to fall back on. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both stated the opposite while it did this, which makes it the fourth false claim in this element's documentation inside one pass.
 
-The gate that was meant to catch it is worth recording precisely, because it looks adequate. `the_close_control_dismisses_and_the_sheet_swallows_the_rest` asserts that `action_for` on the control's cell returns the dismissing action, on an eighty by twenty-four pane. Two things make that unable to fail here. The pane is **one page**, so there is nothing to advance to and the two actions are indistinguishable on it. And the test asserts the action's **identity** and never applies it, so what the action does to the state is not in the assertion at all. An identity is not an outcome.
+The gate that was meant to catch it looks adequate. `the_close_control_dismisses_and_the_sheet_swallows_the_rest` asserts that `action_for` on the control's cell returns the dismissing action, on an eighty by twenty-four pane. Two things make that unable to fail here. The pane is **one page**, so there is nothing to advance to and the two actions are indistinguishable on it. And the test asserts the action's **identity** and never applies it, so what the action does to the state is not in the assertion at all. An identity is not an outcome.
 
 **The last page's box moved.** `paged_fit` sized the frame from `take`, which is a remainder on the last page, and `sheet_plan` centres the box on its height. So the final page shrank by the remainder and slid down half of it. The close control went with it, and the row it vacated fell through to a scrollbar that was not visible to the reader. The box is `capacity + SHEET_FRAME` on every page now, with the tail blank inside the frame.
 
@@ -350,7 +350,7 @@ The ruling is `SPEC.md` §11.2 B14 and what the shell does is §11.1. This is th
 
 **And the picture stopped being an exception.** `assets/preview.svg` is a 109-column render. So §5.1 was only able to say the picture and the code "describe the same pane" by noting that the picture sits below the arrival width. With the rail asked for, they describe the same pane at every width.
 
-**What it cost, which is the sheet and not the pane.** A key is a row. So the gestures table went from eleven keyboard rows to twelve, and every row count in §11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x 15` and `71 x 15`, the roomy rung to `68 x 30`. (**Those numbers are B14's own and are not current**: B15 and then B16 moved them again. The current ones are in §11.1.) **No width moved**, and that is what kept this one issue rather than two. The cells of `r` are `r` and `show or hide the left rail` (25 columns) or `the left rail` (13). They are inside the existing maxima of 22 and 28 wide, 13 and 18 tight. Every prediction in the plan held. This is worth recording because the plan made them before the run rather than after.
+**What it cost, which is the sheet and not the pane.** A key is a row. So the gestures table went from eleven keyboard rows to twelve, and every row count in §11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x 15` and `71 x 15`, the roomy rung to `68 x 30`. (**Those numbers are B14's own**: §11.1 has the current ones.) **No width moved**, and that is what kept this one issue rather than two. The cells of `r` are `r` and `show or hide the left rail` (25 columns) or `the left rail` (13). They are inside the existing maxima of 22 and 28 wide, 13 and 18 tight. Every prediction in the plan held. This is worth recording because the plan made them before the run rather than after.
 
 **The keep-set did not move, and the reason first written for that was false.** `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`. `SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at rank eight of `DROP_ORDER`, two before `f`, with `s` between them since B16.
 
@@ -496,6 +496,10 @@ The objection that ends it is that the dependency is **circular**. `render::gutt
 ## 11.1 — the two widths of a diff row
 
 Measured 2026-09-09, [#474](https://github.com/breferrari/vigia/issues/474): the two agree wherever a bar is drawn and part by 2 below forty-four and 1 to seventy-nine wherever none is. The alternatives, and the 2026-08-10 deferral they answer, are on the issue.
+
+## 11.1 — one pulse mark
+
+Ruled 2026-09-29, session ([#362](https://github.com/breferrari/vigia/issues/362)). Rejected: every path of the burst, since a 31-file write marked every row. Rejected: a cap, since it needs an *n* nobody chose.
 
 ## 11.1 — the list-alone state took a key of its own rather than a third state of `s`
 
