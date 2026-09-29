@@ -48,7 +48,7 @@ After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/
 
 ### Pre-flight
 
-`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit. Fix each hit in this pass. The script takes about twenty seconds.
+`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4, 6 and 7. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say. The script takes about twenty seconds.
 
 First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1. It also causes checks 2, 4 and 7 to miss real drift. Then it runs these checks:
 
@@ -82,12 +82,12 @@ For an issue with the `decision` label:
 
 - Put the ruling in the `SPEC.md` section that the issue names, with its `Ruled <date>, reader|session` line. Close its §10 bullet. A ruling that is only in the issue is not filed.
 - Put the rejected option in `RULINGS.md`.
-- A *yes* is half the pass. File the build as its own issue. Take it next, in its own PR. This is not stop 2, because the build is a separate issue, not a split. Size is the only reason to stop after the ruling. If the build is too big for this pass, start the report with "nothing visible changed yet. The build is #N".
+- A *yes* is half the pass. File the build as its own issue. Take it next, in its own PR. This is not stop 2, because the build is a separate issue, not a split. Size is the only reason to stop after the ruling. If the build is too big for this pass, start the report with "nothing yet" and the build issue (step 9).
 - If you cannot make a ruling, write what can settle it. Leave the issue open.
 
 ## 2. Load the context
 
-Read the issue, the `SPEC.md` sections that it touches, and the commits that changed those sections. For a research or look-and-feel task, do these reads last. First, find how other tools solve the problem. This order keeps the record from limiting the options.
+Read the issue first. For a research or look-and-feel task, next find how other tools solve the problem. Then read the `SPEC.md` sections that the issue touches and the commits that changed those sections. This order keeps the record from limiting the options.
 
 Then query `vigil` for the three things that the repo does not hold:
 
@@ -138,6 +138,8 @@ If the output is empty, the diff is docs-only. Then skip `cargo test`, the bench
 
 **The kind of change decides the review.** A human eye judges feel. Thus look-and-feel work (layout, colour, keys, chrome) runs `/simplify` and puts a screenshot in the PR. All other work runs the full sequence below. Docs-only diffs and small code diffs are the exceptions, at the end of this step. The rule goes one way only. The core areas are the frame path, the watch engine, the diff oracle, the budget gates and the invariants. If look-and-feel work touches a core area, that part runs the full sequence. Do not use the lighter review on a core area.
 
+**Before the review, diff the result against the plan.** Mark each promise delivered or not delivered. In this pass, fix each quietly narrowed scope, each dropped case and each unused definition. If a deviation has no reason written when you took it, remove the deviation in this pass: make the code match the plan. A reason that you write now does not count.
+
 The full sequence, in order. Apply what each step finds:
 
 1. `/simplify`.
@@ -147,12 +149,11 @@ The full sequence, in order. Apply what each step finds:
 
 Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise.
 
-Give each agent this brief: *Read the code. Do not run builds, benchmarks or tests. This brief has every measurement you need. If one is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run the review agents on Sonnet.
+Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run the review agents on Sonnet.
 
 Then prove the result:
 
 - For a code diff, report `cargo test` green with the count. Report the budget gates with numbers against the budgets. For a docs-only diff, report `register` and `package` green. State each failure plainly.
-- **Diff the result against the plan.** Mark each promise delivered or not delivered. In this pass, fix each quietly narrowed scope, each dropped case and each unused definition. If a deviation has no reason written when you took it, remove the deviation in this pass: make the code match the plan. A reason that you write now does not count.
 
 ## 7. Mark ready and merge
 
