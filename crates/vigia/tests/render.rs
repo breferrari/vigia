@@ -7394,3 +7394,32 @@ fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
         "with both runs on and everything hidden the body reads {body:?}"
     );
 }
+
+/// A theme sets what the caret's row adds to its path, layered on the row's own
+/// ink: a modifier adds to the bold, and a colour recolours the path.
+#[test]
+fn caret_weight_themed() {
+    let (width, height) = (80u16, 24u16);
+    let view = a_stepped_screen();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+
+    let theme = vigia::theme::parse("path_current = italic").expect("a theme");
+    let backend = themed_screen(width, height, &view, &chrome(), &theme);
+    let plain = weight(theme.recency(Recency::Cold));
+    let marked = (plain.0, plain.1 | Modifier::BOLD | Modifier::ITALIC);
+    assert!(
+        path_weights(&backend, laid.list.top, "src/f0.rs")
+            .iter()
+            .all(|w| *w == marked),
+        "the caret's row did not take the theme's modifier on its own ink"
+    );
+
+    let theme = vigia::theme::parse("path_current = cyan").expect("a theme");
+    let backend = themed_screen(width, height, &view, &chrome(), &theme);
+    assert!(
+        path_weights(&backend, laid.list.top, "src/f0.rs")
+            .iter()
+            .all(|w| w.0 == Some(Color::Cyan)),
+        "the caret's row did not take the theme's colour"
+    );
+}

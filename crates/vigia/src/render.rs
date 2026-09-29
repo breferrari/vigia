@@ -216,9 +216,6 @@ const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
 /// What marks the row for the file the diff is currently inside.
 const CARET: &str = "▸";
 
-/// The weight that row's path takes on top of whatever recency gave it.
-const CURRENT_WEIGHT: Modifier = Modifier::BOLD;
-
 /// How many slices the heat strip may show, widest rung first.
 const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
 
@@ -5168,7 +5165,7 @@ impl Painter<'_> {
             self.theme.recency(heading.recency)
         };
         let ink = if current {
-            ink.add_modifier(CURRENT_WEIGHT)
+            ink.patch(self.theme.path_current)
         } else {
             ink
         };

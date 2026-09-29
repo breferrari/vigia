@@ -59,6 +59,7 @@ The four state keys tell one note's state from another's at a glance, on the `�
 | `path_live` | a path that changed inside the glance window but not in the last tick |
 | `path_cold` | a path nothing has written since watching began |
 | `path_hover` | a listed path the pointer rests on: the pointer's own colour, underlined |
+| `path_current` | what the listed row the caret marks adds to its path, patched onto the style the row already took: `bold` by default, so `path_current = italic` makes it bold and italic, and a colour recolours it |
 | `pulse` | the `●` marking the file written last |
 | `note_mark` | the `✎` marking a file whose note the agent has not answered |
 | `note_mark_reply` | the `↳` marking one the agent has answered and nobody has resolved |

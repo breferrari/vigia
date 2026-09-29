@@ -79,6 +79,9 @@ palette! {
     path_cold,
     /// A listed path the pointer is resting on.
     path_hover,
+    /// What the caret's row adds to its path, patched onto whichever style the
+    /// row already took, so a modifier alone keeps the row's colour.
+    path_current,
     /// The `●` marking the file written last.
     pulse,
     /// A churn sparkline's blocks, at the quietest of its three stops.
@@ -447,6 +450,7 @@ impl Theme {
             // to separate a hovered button from `bar_track` on a palette with
             // nothing between them, and a path has the underline instead.
             path_hover: fg(Color::Gray).add_modifier(Modifier::UNDERLINED),
+            path_current: Style::new().add_modifier(Modifier::BOLD),
             // Cyan rather than a diff colour. The pulse says *when*, and green or
             // red beside a path would read as *what*, which the sigil column
             // already means two rows below.
@@ -562,6 +566,7 @@ impl Theme {
             // `bar_hover`'s `#a8b1bb`, which is 8.71:1 on this pane: quieter
             // than `path_live`'s `#e6edf3` and a long way clear of unreadable.
             path_hover: rgb(0xa8, 0xb1, 0xbb).add_modifier(Modifier::UNDERLINED),
+            path_current: Style::new().add_modifier(Modifier::BOLD),
             pulse: rgb(0x39, 0xc5, 0xcf),
             // Cyan, where the picture's sparkline is green. What decides the hue is
             // that green already means addition two rows down, and a churn sparkline is
@@ -661,6 +666,7 @@ impl Theme {
             path_live: rgb(0x1f, 0x23, 0x28),
             path_cold: rgb(0x81, 0x8b, 0x98),
             path_hover: rgb(0x3d, 0x46, 0x50).add_modifier(Modifier::UNDERLINED),
+            path_current: Style::new().add_modifier(Modifier::BOLD),
             pulse: rgb(0x0a, 0x62, 0x6b),
             // Darker as it climbs, which is the same rule as `dark`'s and
             // not a second one: both move towards the foreground, and on a light
