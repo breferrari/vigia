@@ -3,8 +3,10 @@
 #[path = "support/mod.rs"]
 mod screen;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 /// The two shapes a test uses to read outside this package.
 const PATH_ATTRIBUTE: &str = concat!("#[path = \"..", "/../");
@@ -2000,7 +2002,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// It rose 1,184 bytes for a note over a range: the gutter drag, the anchor's two
 /// ends and what drift does to each, and the range the agent is sent.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 413572),
+    ("SPEC.md", 413505),
     ("RULINGS.md", 103265),
     ("CLAUDE.md", 17260),
     (".claude/skills/take-next/SKILL.md", 20983),
@@ -2485,5 +2487,129 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
         missing.is_empty(),
         "the sheet opens on {missing:?} and SPEC.md quotes neither, so the \
          document describes a surface the binary no longer has"
+    );
+}
+
+/// Direct dependencies that `README.md`'s `Built with` table leaves out on purpose.
+const NOT_IN_README: [&str; 7] = [
+    "libc",
+    "rustix",
+    "rustls-graviola",
+    "serde_json",
+    "signal-hook",
+    "ureq",
+    "windows-sys",
+];
+
+/// Every direct dependency of every workspace member, as (name, dev), sorted
+/// and unique. Members depending on each other are left out.
+fn direct_dependencies() -> &'static [(String, bool)] {
+    static FOUND: OnceLock<Vec<(String, bool)>> = OnceLock::new();
+    FOUND.get_or_init(|| {
+        let output = Command::new(env!("CARGO"))
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--no-deps",
+                "--offline",
+            ])
+            .current_dir(repo_root())
+            .output()
+            .expect("cargo runs");
+        assert!(
+            output.status.success(),
+            "`cargo metadata` failed:
+{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
+
+        let found: BTreeSet<(String, bool)> = metadata["packages"]
+            .as_array()
+            .expect("metadata lists packages")
+            .iter()
+            .flat_map(|package| package["dependencies"].as_array().expect("a list"))
+            .filter(|dependency| dependency["path"].is_null())
+            .map(|dependency| {
+                let name = dependency["name"].as_str().expect("a name").to_owned();
+                (name, dependency["kind"] == "dev")
+            })
+            .collect();
+        assert!(
+            found.len() >= 15,
+            "found only {} dependencies, so the scan is broken and every assertion              built on it is vacuous",
+            found.len()
+        );
+        found.into_iter().collect()
+    })
+}
+
+/// The text of one `## ` section of a document, heading included.
+fn section<'a>(document: &'a str, heading: &str) -> &'a str {
+    let start = document
+        .find(heading)
+        .unwrap_or_else(|| panic!("no section headed {heading:?}"));
+    let rest = &document[start + heading.len()..];
+    let end = rest
+        .find("\n## ")
+        .map_or(document.len(), |i| start + heading.len() + i);
+    &document[start..end]
+}
+
+/// `SPEC.md` §6 names every direct dependency, dev and build ones included.
+#[test]
+fn dependencies_in_spec() {
+    let spec = repo_file("SPEC.md");
+    let architecture = section(&spec, "\n## 6. ");
+    let missing: BTreeSet<&str> = direct_dependencies()
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .filter(|name| !architecture.contains(&format!("`{name}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the manifests declare {missing:?} and SPEC.md §6 never names them. §6 \
+         names every direct dependency with what it buys and what it adds to the graph"
+    );
+}
+
+/// Every dependency but a dev one is in the README's `Built with` table or on
+/// [`NOT_IN_README`], and that list holds only dependencies absent from the table.
+#[test]
+fn dependencies_in_readme() {
+    let readme = repo_file("README.md");
+    let table = section(&readme, "\n## 🧱 Built with");
+    let in_table = |name: &str| {
+        let link = format!("[{name}](");
+        table
+            .lines()
+            .any(|line| line.starts_with('|') && line.contains(&link))
+    };
+    let shipped: Vec<&str> = direct_dependencies()
+        .iter()
+        .filter(|(_, dev)| !dev)
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    let unplaced: Vec<&str> = shipped
+        .iter()
+        .copied()
+        .filter(|name| !in_table(name) && !NOT_IN_README.contains(name))
+        .collect();
+    assert!(
+        unplaced.is_empty(),
+        "{unplaced:?} is a direct dependency and README.md's `Built with` table \
+         neither names it nor is it on NOT_IN_README. Add a row, or add it to the list"
+    );
+
+    let stale: Vec<&str> = NOT_IN_README
+        .into_iter()
+        .filter(|name| in_table(name) || !shipped.contains(name))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "NOT_IN_README lists {stale:?}, which the table names or no manifest declares"
     );
 }
