@@ -908,15 +908,15 @@ fn the_three_note_marks_are_three_colours_at_every_depth_that_has_any() {
     }
 }
 
-/// No track quantises into the pane it is drawn on, at any depth: a track in
-/// the pane's own colour is the nothing §5.1 ruled out.
+/// No track draws in the pane's own colour at any depth, where it would be
+/// invisible.
 #[test]
 fn tracks_off_pane() {
-    for (name, base, behind) in [
-        ("dark", Theme::dark(), Color::Black),
-        ("light", Theme::light(), Color::White),
+    for (name, base, behind, grey) in [
+        ("dark", Theme::dark(), Color::Black, Color::DarkGray),
+        ("light", Theme::light(), Color::White, Color::Gray),
     ] {
-        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
             let theme = base.resolve(depth);
             for (track, style) in [
                 ("spark_track", theme.spark_track),
@@ -928,6 +928,9 @@ fn tracks_off_pane() {
                     Some(behind),
                     "{name} at {depth:?} draws {track} in the colour of the pane behind it"
                 );
+                if depth == Depth::Ansi16 {
+                    assert_eq!(style.fg, Some(grey), "{name}'s {track} at sixteen colours");
+                }
             }
         }
     }
