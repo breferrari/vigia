@@ -1157,7 +1157,7 @@ A question lands here with a recommendation marked **(proposed)**. It is not set
 **B5 — Not a git repository, and submodules.** The halves are separated because only one is decided.
 
 
-**Not a repository: ruled 2026-07-31, session, and it had already shipped. See §11.1.** What is worth recording is that `run` has ordered `Worktree::discover` ahead of `Session::enter` from the day the shell was built, so this sat marked `(proposed)` for two phases while the code did it. Found by [#40](https://github.com/breferrari/vigia/issues/40) while ruling B3. This is the drift §11's warning box describes, and `take-next`'s pre-flight cannot see it, since it compares invariant tokens rather than behaviour.
+**Not a repository: ruled 2026-07-31, session, and it had already shipped. See §11.1.** Found by [#40](https://github.com/breferrari/vigia/issues/40) while ruling B3. This is the drift §11's warning box describes, and `take-next`'s pre-flight cannot see it, since it compares invariant tokens rather than behaviour.
 
 
 **Submodules: still open.** *(proposed)* Out of v1, shown as an opaque directory and said so, because recursing into them costs the incremental guarantees in I2a.
@@ -1420,7 +1420,7 @@ Every page of a pane is one box, with the tail blank inside the frame, which is 
 **Follow still moves between files.** `f` and an automatic follow are explicit requests to be moved, where the pin is about what a reader's own scrolling reaches, so pinning is not a manual scroll and does not disengage follow. The pairing is the gesture's best case rather than an edge of it.
 
 
-**The heading of the pinned file draws, as the block's first row.** It carries the pulse, the heat strip, the sparkline and the counts, so a pane that dropped it as redundant would lose the glance elements on exactly the screen built to watch one file. **The branch not taken is a sticky heading**, refused rather than declined. It costs the diff a permanent row. It is a second answer to a question the caret and the bold path already answer. It is a larger claim than a gesture that only narrows what the walk reaches.
+**The heading of the pinned file draws, as the block's first row.** It carries the pulse, the heat strip, the sparkline and the counts, so a pane that dropped it as redundant would lose the glance elements on exactly the screen built to watch one file. **The branch not taken is a sticky heading**, refused rather than declined. It costs the diff a permanent row. It is a second answer to a question the caret and the bold path already answer. It is a larger claim than a gesture that only narrows what the walk reaches. If it turns out that a reader misses the heading when it scrolls away, the question reopens as its own ruling rather than as an amendment to this one.
 
 
 **The scrollbar measures this file, and so does a drag on it.** Both read the pinned file's span and neither counts the changed set. A bar drawn from one total and dragged against another agrees at both ends of the track and nowhere in between, so in that case a gate that asserts the ends passes against it. That is a recorded lesson from the row-exact bar, and the gate walks the middle.
