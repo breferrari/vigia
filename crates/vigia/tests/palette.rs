@@ -1924,7 +1924,7 @@ fn a_noted_line_stays_brighter_than_a_pointer_resting_on_it() {
 }
 
 /// Four terminals' own answers: a dark editor theme, a light one, xterm's pure
-/// black, and a warm dark one. Background, foreground, red, green.
+/// black, and a warm dark one.
 /// Background, foreground, red and green.
 type Answer = [(u8, u8, u8); 4];
 
@@ -1967,11 +1967,11 @@ const TERMINALS: [(&str, Answer); 4] = [
     ),
 ];
 
-fn answered([pane, ink, red, green]: Answer) -> vigia::Palette {
+fn answer_of([pane, ink, red, green]: Answer) -> vigia::Colours {
     let mut ansi = [None; 16];
     ansi[1] = Some(red);
     ansi[2] = Some(green);
-    vigia::Palette {
+    vigia::Colours {
         background: pane,
         foreground: Some(ink),
         ansi,
@@ -2004,7 +2004,7 @@ fn system_washes_diff() {
     }
 
     for (name, colours) in TERMINALS {
-        let palette = answered(colours);
+        let palette = answer_of(colours);
         let [pane, ink, ..] = colours;
         let theme = Theme::system(Some(&palette)).resolve(Depth::Truecolor);
         let wash = |style: Style, which| channels_of(style.bg.expect("a system wash"), which);
@@ -2050,7 +2050,7 @@ fn system_washes_diff() {
 #[test]
 fn system_without_answers() {
     assert_eq!(Theme::system(None), Theme::ansi());
-    let silent = vigia::Palette {
+    let silent = vigia::Colours {
         background: (0, 0, 0),
         foreground: None,
         ansi: [None; 16],
@@ -2066,7 +2066,7 @@ fn system_without_answers() {
 /// `VIGIA_THEME=system` takes the terminal's answer; detection alone never does.
 #[test]
 fn system_is_chosen() {
-    let palette = answered(TERMINALS[0].1);
+    let palette = answer_of(TERMINALS[0].1);
     let named = |key: &str| (key == "VIGIA_THEME").then(|| "system".to_owned());
     assert_eq!(
         theme::from_env(

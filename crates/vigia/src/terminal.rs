@@ -239,7 +239,7 @@ impl Background {
 /// The colours a terminal reported for itself: its background, its default
 /// foreground, and the sixteen entries of its palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Palette {
+pub struct Colours {
     /// OSC 11.
     pub background: (u8, u8, u8),
     /// OSC 10, when the terminal answered it.
@@ -274,13 +274,13 @@ pub fn background_of(reply: &[u8]) -> Option<Background> {
 }
 
 /// Every colour a reply to [`ask`] carries, or `None` without a background.
-pub fn palette_of(reply: &[u8]) -> Option<Palette> {
+pub fn colours_of(reply: &[u8]) -> Option<Colours> {
     let text = std::str::from_utf8(reply).ok()?;
     let mut ansi = [None; 16];
     for (index, entry) in ansi.iter_mut().enumerate() {
         *entry = rgb_after(text, &format!("]4;{index};"));
     }
-    Some(Palette {
+    Some(Colours {
         background: rgb_after(text, "]11;")?,
         foreground: rgb_after(text, "]10;"),
         ansi,
@@ -323,8 +323,21 @@ fn answered(reply: &[u8], palette: bool) -> bool {
     }
 }
 
+/// How long a terminal that has begun answering the palette is given to finish.
+#[cfg(any(unix, test))]
+const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long [`ask`] waits in all. A terminal that has begun answering the
+/// palette is waited on to the end: an answer left unread reaches the event
+/// reader as keystrokes.
+#[cfg(any(unix, test))]
+fn wait_limit(palette: bool, begun: bool, timeout: std::time::Duration) -> std::time::Duration {
+    if palette && begun { ANSWERING } else { timeout }
+}
+
 /// Ask the terminal its background colour, and with `palette` its foreground
-/// and sixteen entries too, waiting at most `timeout`. The raw reply.
+/// and sixteen entries too, waiting at most `timeout` for a first answer. The
+/// raw reply.
 #[cfg(unix)]
 pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
     use std::io::{Read, Write};
@@ -345,8 +358,9 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
     let _ = (|| {
         tty.write_all(&query(palette)).ok()?;
         tty.flush().ok()?;
-        let deadline = std::time::Instant::now() + timeout;
+        let start = std::time::Instant::now();
         loop {
+            let deadline = start + wait_limit(palette, !reply.is_empty(), timeout);
             let now = std::time::Instant::now();
             if now >= deadline {
                 return Some(());
@@ -359,7 +373,7 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             let waited =
                 rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
             if waited == 0 {
-                return Some(());
+                continue;
             }
             let mut buffer = [0u8; 256];
             let read = tty.read(&mut buffer).ok()?;
@@ -386,7 +400,7 @@ pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
 
 #[cfg(test)]
 mod background_tests {
-    use super::{Background, answered, background_of, palette_of, query};
+    use super::{ANSWERING, Background, answered, background_of, colours_of, query, wait_limit};
 
     #[test]
     fn every_reply_shape_the_matrix_saw_classifies() {
@@ -445,7 +459,7 @@ mod background_tests {
         let mut reply = b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\\x1b]10;rgb:cccc/cccc/cccc\x07".to_vec();
         reply.extend_from_slice(b"\x1b]4;1;rgb:cd/31/31\x07\x1b]4;2;rgb:0d0d/bcbc/7979\x1b\\");
         reply.extend_from_slice(b"\x1b]4;12;rgb:3b/8e/ea\x07\x1b[?62;22c");
-        let palette = palette_of(&reply).expect("a background answered");
+        let palette = colours_of(&reply).expect("a background answered");
 
         assert_eq!(palette.background, (0x1e, 0x1e, 0x1e));
         assert_eq!(palette.foreground, Some((0xcc, 0xcc, 0xcc)));
@@ -468,8 +482,8 @@ mod background_tests {
 
     #[test]
     fn palette_needs_background() {
-        assert_eq!(palette_of(b"\x1b]10;rgb:cc/cc/cc\x07\x1b[?1;2c"), None);
-        assert_eq!(palette_of(b""), None);
+        assert_eq!(colours_of(b"\x1b]10;rgb:cc/cc/cc\x07\x1b[?1;2c"), None);
+        assert_eq!(colours_of(b""), None);
     }
 
     #[test]
@@ -490,6 +504,26 @@ mod background_tests {
         // The colour replies alone do not end a palette wait: more are coming.
         assert!(!answered(b"\x1b]11;rgb:00/00/00\x07", true));
         assert!(answered(b"\x1b]11;rgb:00/00/00\x07", false));
+    }
+
+    #[test]
+    fn answering_is_waited() {
+        let timeout = std::time::Duration::from_millis(150);
+        assert_eq!(
+            wait_limit(true, true, timeout),
+            ANSWERING,
+            "a half-read palette was cut off"
+        );
+        assert_eq!(
+            wait_limit(true, false, timeout),
+            timeout,
+            "a silent terminal was waited on"
+        );
+        assert_eq!(
+            wait_limit(false, true, timeout),
+            timeout,
+            "the default query grew a wait"
+        );
     }
 }
 

@@ -482,7 +482,7 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 A palette, a colour depth, which drawing glyphs your font carries, what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
 
 ```sh
-VIGIA_THEME=dark vigia          # a built-in palette, or a path to your own
+VIGIA_THEME=dark vigia          # ansi, dark, light or system, or a path to your own
 NO_COLOR=1 vigia                # every ladder collapses to something readable
 ```
 

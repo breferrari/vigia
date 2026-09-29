@@ -8,7 +8,7 @@ use vigia_core::{Class, Recency};
 
 use crate::colour::Depth;
 use crate::render::{Band, Heat};
-use crate::terminal::{Background, Palette};
+use crate::terminal::{Background, Colours};
 use crate::view::NoteMark;
 
 /// The foreground a fade starts `from`, when it differs from the one it settles
@@ -247,7 +247,7 @@ impl Theme {
             "ansi" => Some(Self::ansi()),
             "dark" => Some(Self::dark()),
             "light" => Some(Self::light()),
-            "system" => Some(Self::system(None)),
+            SYSTEM => Some(Self::system(None)),
             _ => None,
         }
     }
@@ -405,12 +405,12 @@ impl Theme {
     /// the background. The terminal said what its background is, so each wash
     /// is mixed from it toward the terminal's own green or red. Without an
     /// answer it is `ansi` exactly.
-    pub fn system(palette: Option<&Palette>) -> Self {
+    pub fn system(colours: Option<&Colours>) -> Self {
         let mut theme = Self::ansi();
-        let Some(palette) = palette else {
+        let Some(colours) = colours else {
             return theme;
         };
-        let pane = palette.background;
+        let pane = colours.background;
         let gutter = if Background::of(pane) == Background::Light {
             GUTTER_STEP_LIGHT
         } else {
@@ -422,10 +422,10 @@ impl Theme {
             let wash = |t| Style::new().bg(oklab_mix(pane, hue, t));
             (wash(t), wash(t + WORD_STEP), wash(t + gutter))
         };
-        if let Some(green) = palette.ansi[2] {
+        if let Some(green) = colours.ansi[2] {
             (theme.added_row, theme.added_word, theme.added_gutter) = washes(green);
         }
-        if let Some(red) = palette.ansi[1] {
+        if let Some(red) = colours.ansi[1] {
             (theme.removed_row, theme.removed_word, theme.removed_gutter) = washes(red);
         }
         theme
@@ -760,18 +760,10 @@ const GUTTER_STEP_LIGHT: f32 = 0.06;
 /// How far from `pane` toward `hue` a row wash has to go to be seen.
 fn row_mix(pane: (u8, u8, u8), hue: (u8, u8, u8)) -> f32 {
     let mut t = ROW_MIX;
-    while t < ROW_MIX_MAX && wcag_ratio(rgb_bytes(oklab_mix(pane, hue, t)), pane) < ROW_VISIBLE {
+    while t < ROW_MIX_MAX && wcag_ratio(oklab_bytes(pane, hue, t), pane) < ROW_VISIBLE {
         t += 0.01;
     }
     t
-}
-
-/// The bytes of a colour [`rgb_of`] made.
-fn rgb_bytes(colour: Color) -> (u8, u8, u8) {
-    match colour {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => unreachable!("rgb_of makes only Rgb"),
-    }
 }
 
 /// WCAG contrast ratio: 1 for one colour against itself, 21 for black on white.
@@ -793,6 +785,12 @@ fn wcag_ratio(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {
 
 /// The colour `t` of the way from `a` to `b`, mixed in Oklab.
 fn oklab_mix(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> Color {
+    let (r, g, b) = oklab_bytes(a, b, t);
+    Color::Rgb(r, g, b)
+}
+
+/// [`oklab_mix`], as bytes.
+fn oklab_bytes(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
     let (la, aa, ba) = oklab_of(a);
     let (lb, ab, bb) = oklab_of(b);
     let mix = |x: f32, y: f32| x + (y - x) * t;
@@ -821,7 +819,7 @@ fn oklab_of((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
 }
 
 /// Oklab back to sRGB bytes, clamped into gamut.
-fn rgb_of(l: f32, a: f32, b: f32) -> Color {
+fn rgb_of(l: f32, a: f32, b: f32) -> (u8, u8, u8) {
     let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
     let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
     let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
@@ -838,7 +836,7 @@ fn rgb_of(l: f32, a: f32, b: f32) -> Color {
         };
         (c * 255.0).round() as u8
     };
-    Color::Rgb(byte(r), byte(g), byte(b))
+    (byte(r), byte(g), byte(b))
 }
 
 impl Default for Theme {
@@ -962,6 +960,14 @@ impl fmt::Display for ThemeError {
 
 impl std::error::Error for ThemeError {}
 
+/// The built-in that asks the terminal for its colours.
+const SYSTEM: &str = "system";
+
+/// Whether the palette named in the environment needs the terminal's colours.
+pub fn wants_colours(lookup: impl Fn(&str) -> Option<String>) -> bool {
+    lookup(THEME_VAR).is_some_and(|name| name.trim() == SYSTEM)
+}
+
 /// The palette this process should draw with.
 ///
 /// # Errors
@@ -971,7 +977,7 @@ pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
     detected: Option<Background>,
-    palette: Option<&Palette>,
+    colours: Option<&Colours>,
 ) -> Result<Theme, ThemeError> {
     // Chosen here, resolved once on the way out.
     let theme = if let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) {
@@ -980,7 +986,7 @@ pub fn from_env(
         // ordinary words and a file called `dark` in the working directory should
         // not silently take over what `VIGIA_THEME=dark` has always meant.
         match Theme::named(named) {
-            Some(_) if named == "system" => Theme::system(palette),
+            Some(_) if named == SYSTEM => Theme::system(colours),
             Some(built_in) => built_in,
             None => load(Path::new(named))?,
         }
