@@ -438,7 +438,19 @@ jobs:
           # ruling says so. Actions masks a registered secret in log output, so a push
           # that fails prints the remote with `***` where the token is.
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
-            "HEAD:${DEFAULT}"
+            "HEAD:${DEFAULT}" && exit 0
+          # A merge during the run rejects the push. Rebasing would ship code the
+          # checks never saw, so the release starts over.
+          now=$(git ls-remote "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+            "refs/heads/${DEFAULT}" | cut -f1)
+          # The push landed and only its reply was lost.
+          [ "$now" = "$(git rev-parse HEAD)" ] && exit 0
+          if [ -z "$now" ] || [ "$now" = "$(git rev-parse HEAD~1)" ]; then
+            exit 1
+          fi
+          gh workflow run bump.yml --ref "${DEFAULT}" -f bump="${{ inputs.bump }}" -f rehearse=false
+          echo "::error::${DEFAULT} moved while this ran. Nothing was published; the release was dispatched again."
+          exit 1
         env:
           # **One fine-grained token fills both roles, and the secret's name is
           # older than the second one.** `HOMEBREW_TAP_TOKEN` carries Contents
@@ -450,6 +462,7 @@ jobs:
           # access list can drop either repository independently.
           RELEASE_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           DEFAULT: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # `dry-run` is `release.yml`'s own word for build-everything-publish-
       # nothing, so a rehearsal exercises the whole release path and stops short
