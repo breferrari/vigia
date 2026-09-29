@@ -294,7 +294,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The glyph ladder learns which terminals draw octants natively | [#324](https://github.com/breferrari/vigia/issues/324) |
 | ✅ | The pane takes its colours from the terminal, and follows a theme flip live | [#325](https://github.com/breferrari/vigia/issues/325) |
 | ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser | [#332](https://github.com/breferrari/vigia/issues/332) |
-| ⬜ | A system palette built from the terminal's own colours | [#333](https://github.com/breferrari/vigia/issues/333) |
+| ✅ | A system palette built from the terminal's own colours | [#333](https://github.com/breferrari/vigia/issues/333) |
 | ✅ | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
 | ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
 | ✅ | The staged mark spends a gutter column on every row of both runs to mark the rows of one | [#316](https://github.com/breferrari/vigia/issues/316) |

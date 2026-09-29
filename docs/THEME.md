@@ -4,9 +4,11 @@ Every colour the pane draws is a theme key. This file is the reference. It cover
 
 ## Choosing a palette
 
-`VIGIA_THEME` names a built-in (`ansi`, `dark`, `light`) or points at a theme file by path. A built-in name wins over a file of the same name in the working directory. When the variable is unset, `~/.config/vigia/theme` is read if it exists (resolved from `HOME`, then `USERPROFILE`). Otherwise the default palette is `ansi`.
+`VIGIA_THEME` names a built-in (`ansi`, `dark`, `light`, `system`) or points at a theme file by path. A built-in name wins over a file of the same name in the working directory. When the variable is unset, `~/.config/vigia/theme` is read if it exists (resolved from `HOME`, then `USERPROFILE`). Otherwise the terminal is asked for its background: a dark answer picks `dark` and a light one `light`. With no answer the palette is `ansi`.
 
-`ansi` is the default because it is the only palette that is correct on a terminal whose background nothing detected. Its sixteen names resolve to the reader's own scheme, so the pane matches the terminal beside it instead of fighting it. The cost is that `ansi` never draws row washes, at any depth, because a wash has to assume a background, and the contract of that palette is that it assumes none. A reader who knows their background gets the full picture by naming `dark` or `light`. ([#325](https://github.com/breferrari/vigia/issues/325) is the build that will detect the background and pick for you. Until it lands, the showcase is one variable away.)
+`ansi` is the fallback because it is the only palette that is correct on a terminal whose background nothing detected. Its sixteen names resolve to the reader's own scheme, so the pane matches the terminal beside it instead of fighting it. The cost is that `ansi` never draws row washes, at any depth, because a wash has to assume a background, and the contract of that palette is that it assumes none.
+
+`system` is `ansi` with the washes back. At startup it asks the terminal for its background, its foreground and its sixteen palette entries, and it mixes each diff wash from the background toward the terminal's own green or red, far enough to be seen. The pane then matches the terminal beside it and still washes changed rows. A terminal that does not answer gets `ansi`, and so does Windows, where nothing is asked. `base = system` in a theme file starts from `ansi` too, because a file is read without the answer.
 
 `VIGIA_COLOR` overrides the detected colour depth (`truecolor`, `256`, `ansi`, `none`), and `NO_COLOR` turns colour off entirely. Depth and palette are separate axes: the palette decides what can be drawn, and the depth decides how finely it can be expressed.
 

@@ -78,7 +78,7 @@ pub use render::{
     diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
-pub use terminal::{Background, Screen, Session, background_of};
+pub use terminal::{Background, Colours, Screen, Session, background_of, colours_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
@@ -325,8 +325,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     // Same rule one input over: an error painted inside a TUI that then hands
     // the terminal back is an error nobody sees. `SPEC.md` §11.1.
-    let detected = terminal::background(std::time::Duration::from_millis(150));
-    let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok(), detected)?;
+    // The palette is asked for only when it will be used, so the default costs
+    // one query and not eighteen.
+    let wanted = theme::wants_colours(|key| std::env::var(key).ok());
+    let reply = terminal::ask(std::time::Duration::from_millis(150), wanted);
+    let colours = terminal::colours_of(&reply);
+    let theme = theme::from_env(
+        Depth::detect()?,
+        |key| std::env::var(key).ok(),
+        terminal::background_of(&reply),
+        colours.as_ref(),
+    )?;
 
     // Resolved once before the screen is taken, so the frame path never asks the
     // environment anything. An unrecognised value is refused, not defaulted.
