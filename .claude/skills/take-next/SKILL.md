@@ -22,7 +22,7 @@ Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of 
 > 1. A finding contradicts `SPEC.md` (step 4).
 > 2. The task is two tasks (step 3).
 > 3. An action is destructive outside this branch.
-> 4. You decide that something the reader asked for must be declined or narrowed. Plan approval does not cover this. A decline inside a long plan is easy to miss. Approval of the plan is not approval of the decline. Ask the question in its own message, and wait.
+> 4. You conclude that something the reader asked for must be declined or narrowed. Plan approval does not cover this. A decline inside a long plan is easy to miss. Approval of the plan is not approval of the decline. Ask the question in its own message, and wait.
 >
 > **An unattended session may add. It may not subtract.**
 >
@@ -69,10 +69,10 @@ Take the **topmost unstarted row** in the `ROADMAP.md` section of that phase. If
 
 A decline costs more than a build, because a missing feature gives the reader nothing to review.
 
-- Reach a decline early. The reason is a question of fact. After you know the reason, more time only adds words that defend the decline.
-- A decline needs more evidence than a build. A bad build is visible in review. A bad refusal is not visible, and no gate can find a feature that nobody built. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers. All three were wrong in this repo before.
+- Reach a decline early. Whether the reason holds is a question of fact. After you know the reason, more time only adds words that defend the decline.
+- A decline has a higher bar than a build: its reason must survive a check. A bad build is visible in review. A bad refusal is not visible, and no gate can find a feature that nobody built. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers. All three were wrong in this repo before.
 - If the reader asked for the thing, build it. "Possible, affordable, but I prefer another design" is a preference, not a reason.
-- Put the reason in `SPEC.md` in the fewest words that a test can prove false. Put the evidence in `RULINGS.md`.
+- Put the reason in `SPEC.md` in the fewest words that evidence can prove false. Put the evidence in `RULINGS.md`.
 
 ### A `decision` issue is ruled first and built second
 
@@ -83,11 +83,11 @@ For an issue with the `decision` label:
 - Put the ruling in the `SPEC.md` section that the issue names, with its `Ruled <date>, reader|session` line. Close its §10 bullet. A ruling that is only in the issue is not filed.
 - Put the rejected option in `RULINGS.md`.
 - A *yes* is half the pass. File the build as its own issue. Take it next, in its own PR. This is not stop 2, because the build is a separate issue, not a split. Size is the only reason to stop after the ruling. If the build is too big for this pass, start the report with "nothing visible changed yet. The build is #N".
-- If you cannot make a ruling, write what evidence can settle it. Leave the issue open.
+- If you cannot make a ruling, write what can settle it. Leave the issue open.
 
 ## 2. Load the context
 
-Read the issue, the `SPEC.md` sections that it touches, and the commits that changed those sections. For a research or look-and-feel task, first find how other tools solve the problem. Then compare with the record. This order keeps the record from limiting the options.
+Read the issue, the `SPEC.md` sections that it touches, and the commits that changed those sections. For a research or look-and-feel task, do these reads last. First, find how other tools solve the problem. This order keeps the record from limiting the options.
 
 Then query `vigil` for the three things that the repo does not hold:
 
@@ -106,7 +106,7 @@ The plan contains these parts:
 - **What it rests on.** List the decisions by title, from `SPEC.md` and `vigil`. List each fact that argues against the approach, and why you continue. If the record is empty, write "nothing recorded". That empty result is a finding.
 - **Premises.** For each premise, write what must be true, how it can be false, and the answer with its source. The source is one of: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. A premise that the plan depends on must not stay *assumed*. Settle it before you present the plan. Read the source in `~/.cargo/registry`, write a probe, measure, or search the web. For facts about other libraries and terminals, use the world as the source, not memory. Settle premises in dependency order. Finding facts is your job, not the reader's job. Only product decisions go to the reader, in the plan. A decline is the exception, because it is stop 4.
 - **Checks on the record.** Quote the words of each invariant that you cite. Make sure that they apply to this case. For example, I1's budget is *0 wakeups while idle*, and a reader who uses the pane is not idle. Two features were refused on I1, and I1 did not apply to either. Quote each refusal that you cite, with its date, and mark it checked or not checked. Make sure that its reason is still true. A reason about something missing ("no API for this") becomes false fastest. If the reason is false, the question is open again. Do not find a new reason for the same conclusion. Give each budget with its current headroom ("2.4ms of 16ms"), not alone.
-- **Promises you can diff.** List the files, signatures and error codes. List the tests by name, with what each test asserts. List each deviation from `SPEC.md` with its reason, and list what is out of scope. "Fix the thing" promises nothing and passes every check. Make the list as large as the diff.
+- **Promises you can diff.** List the files, signatures and error codes. List the tests by name, with what each test asserts. List each deviation from `SPEC.md` with its reason, and list what is out of scope. "Fix the thing" promises nothing and passes every check. Size the list to the diff.
 
 Measure to learn the answer. Do not run a measurement that can only support a no.
 
@@ -152,7 +152,7 @@ Give each agent this brief: *Read the code. Do not run builds, benchmarks or tes
 Then prove the result:
 
 - For a code diff, report `cargo test` green with the count. Report the budget gates with numbers against the budgets. For a docs-only diff, report `register` and `package` green. State each failure plainly.
-- **Diff the result against the plan.** Mark each promise delivered or not delivered. In this pass, fix each quietly narrowed scope, each dropped case and each unused definition. If a deviation has no reason from the time you took it, correct the deviation in this pass. Do not only note it.
+- **Diff the result against the plan.** Mark each promise delivered or not delivered. In this pass, fix each quietly narrowed scope, each dropped case and each unused definition. If a deviation has no reason written when you took it, remove the deviation in this pass: make the code match the plan. A reason that you write now does not count.
 
 ## 7. Mark ready and merge
 
@@ -175,7 +175,7 @@ gh api repos/{owner}/{repo}/pulls/<n>/reviews --jq '.[] | select(.user.login == 
 gh api repos/{owner}/{repo}/pulls/<n>/comments --jq '.[] | select(.user.login == "Copilot") | "\(.path):\(.line)\n\(.body)\n"'
 ```
 
-When the PR becomes ready, Copilot reviews it automatically. A manual request spends a second unit of quota. After the run ends, wait up to fifteen minutes. If no review arrives, continue and write that in the report. Reply to every comment. Fix it, or reply with the spec section or invariant that the fix breaks. A comment without a reply reads as agreement. Copilot comments do not bind you, and you must not ignore any of them. Put all fixes in one push. For longer work, run `gh pr ready <n> --undo`. The next ready call starts the matrix again and spends Copilot quota again.
+When the PR becomes ready, Copilot reviews it automatically. A manual request spends a second unit of quota. After the first ready run ends, wait up to fifteen minutes for the Copilot review. If no review arrives, continue and write that in the report. Reply to every comment. Fix it, or reply with the spec section or invariant that the fix breaks. A comment without a reply reads as agreement. Copilot comments do not bind you, and you must not ignore any of them. Put all fixes in one push. If you must do more than fix review comments, run `gh pr ready <n> --undo` first. The next ready call starts the matrix again and spends Copilot quota again.
 
 When the latest run is green on the PR head and every comment has a reply, merge with `gh pr merge <n> --squash --delete-branch`. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 
@@ -184,7 +184,7 @@ When the latest run is green on the PR head and every comment has a reply, merge
 Do items 2 and 3 on the branch before step 7, so that they merge with the PR. Do items 1 and 4 after the merge.
 
 1. **Issue.** Close it with the commit, the test count and the numbers.
-2. **`ROADMAP.md`.** Change the status of the row. Add a row for each issue that this pass filed or closed. If an item moved, add it to the shelf or to the pull-forward log.
+2. **`ROADMAP.md`.** Change the status of the row. Add a row for each issue that this pass filed or closed. If this pass moved an issue to the Shelf, add its rows to the Shelf and Deferral shelf tables. If it took an issue from the Shelf, add a line to the Pull-forward log.
 3. **`SPEC.md`.** If the contract changed, change it in its own commit on the branch.
 4. **Vault.** Use `record_work` for what happened. Use `remember` for a lesson that helps another project.
 
