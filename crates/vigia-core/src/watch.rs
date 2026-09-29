@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher as _};
 
+use crate::Hidden;
 use crate::error::{Error, Result};
 use crate::history::HISTORY_PATHS;
 
@@ -154,6 +155,8 @@ pub struct Watcher<'repo> {
     options: WatchOptions,
     stats: WatchStats,
     delivered: Arc<AtomicU64>,
+    /// The reader's `hide` pattern, which keeps a path from waking the watch.
+    hidden: Option<Hidden>,
 }
 
 impl<'repo> Watcher<'repo> {
@@ -241,7 +244,13 @@ impl<'repo> Watcher<'repo> {
             options,
             stats: WatchStats::default(),
             delivered,
+            hidden: None,
         })
+    }
+
+    /// Keep every path `hide` covers from waking the watch.
+    pub fn hide(&mut self, hide: Option<Hidden>) {
+        self.hidden = hide;
     }
 
     /// A handle that can wake this watcher from another thread.
@@ -366,6 +375,13 @@ impl<'repo> Watcher<'repo> {
         let rela = within(&self.roots, path)?;
         // A linked worktree's `.git` file, or a `.git` that is not this repository's.
         if rela.starts_with(".git") {
+            return None;
+        }
+        // Before the syscall below, so a hidden path costs one match. A directory
+        // whose own path is hidden is taken to hold nothing visible.
+        if let (Some(hidden), Some(spelled)) = (&self.hidden, followable(rela))
+            && (hidden.is_hidden(&spelled) || hidden.is_hidden(&format!("{spelled}/")))
+        {
             return None;
         }
 

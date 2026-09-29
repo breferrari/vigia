@@ -713,3 +713,31 @@ fn a_separate_git_dir_ticks_on_its_index_and_its_refs() {
         "moving a branch under a separate git dir produced no tick"
     );
 }
+
+/// A write the `hide` pattern covers never wakes the watch. The visible write
+/// after it is the first tick, and it names nothing hidden.
+#[test]
+fn hidden_write_sleeps() {
+    let scratch = Scratch::new("watch-hidden");
+    scratch.write("gen/out.txt", "x\n");
+    scratch.write("src/a.rs", "x\n");
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let options = WatchOptions {
+        quiet: ORDERING_QUIET,
+        max_delay: Duration::from_secs(5),
+    };
+    let mut watcher = worktree.watch(options).expect("watch");
+    watcher.hide(Some(vigia_core::Hidden::new("^gen/").expect("a pattern")));
+
+    scratch.write("gen/out.txt", "y\n");
+    std::thread::sleep(ORDERING_QUIET * 2);
+    scratch.write("src/a.rs", "y\n");
+
+    let tick = tick_within(&mut watcher, SETTLE).expect("the visible write must tick");
+    assert_eq!(
+        tick.paths,
+        vec!["src/a.rs".to_owned()],
+        "the first tick was not the visible write alone, so the hidden one woke the watch"
+    );
+}

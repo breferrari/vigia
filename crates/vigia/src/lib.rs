@@ -465,7 +465,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
 
     // Armed only now.
-    spawn_watch(path.to_path_buf(), tx.clone());
+    spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
 
     // And the store's own, an event source beside the tree's: what the agent
     // writes there is a wake, never a poll.
@@ -2134,7 +2134,7 @@ impl Shell {
 }
 
 /// Forward coalesced working-tree changes onto the shell's channel.
-fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
+fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>) {
     std::thread::spawn(move || {
         let worktree = match Worktree::discover(&path) {
             Ok(worktree) => worktree,
@@ -2150,6 +2150,7 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
                 return;
             }
         };
+        watcher.hide(hide);
 
         // The tick says only that something changed, which is all the shell needs:
         // every tick triggers one status walk, and a walk finds whatever the events
