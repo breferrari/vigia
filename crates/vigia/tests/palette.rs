@@ -2093,3 +2093,41 @@ fn system_is_chosen() {
         "an answered palette displaced the showcase nobody asked to replace"
     );
 }
+
+/// A wide glyph keeps the wash under both of its columns, at every width, as a
+/// terminal draws it. A backend never receives a wide glyph's second cell, and a
+/// terminal paints the glyph's own background across both, so that cell counts
+/// as the glyph's.
+#[test]
+fn wide_glyph_washed() {
+    let dark = Theme::dark().resolve(Depth::Truecolor);
+    let wash = wash_of(dark, true);
+    // The line numbers take the gutter's tone rather than the row's.
+    let tone = dark.added_gutter.bg.expect("a gutter tone");
+    let mut view = three_kinds();
+    view.rows[ADDED as usize - 1] = line(LineKind::Added, 2, "日本語のテキストです");
+
+    let mut failing = Vec::new();
+    for width in 10..=120u16 {
+        let backend = draw(width, 8, &view, dark);
+        let buffer = backend.buffer();
+        let shown = |x: u16| {
+            let cell = &buffer[(x, ADDED)];
+            if cell.bg == wash || cell.bg == tone {
+                return true;
+            }
+            let before = &buffer[(x - 1, ADDED)];
+            ratatui::text::Span::raw(before.symbol()).width() == 2 && before.bg == wash
+        };
+        let holes: Vec<u16> = (1..width).filter(|&x| !shown(x)).collect();
+        if !holes.is_empty() {
+            failing.push((width, holes));
+        }
+    }
+    assert!(
+        failing.is_empty(),
+        "the wash is missing at {} widths, first {:?}",
+        failing.len(),
+        failing.first()
+    );
+}
