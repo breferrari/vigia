@@ -12,7 +12,7 @@ Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of 
 >
 > The reader often starts the skill and leaves it alone overnight. If a step waits for an answer, the pass stalls until the reader replies. The reply often comes hours later, with the work done and nothing merged. So split **what** from **how**. Step 3 settles what gets built, and a question costs nothing there. Everything after step 3 is execution, and this file answers execution questions:
 >
-> - **The tools are pre-authorized.** The request to run this skill is also the request to run `/simplify`, `two-axis-review`, `/code-review` and the agents that they start.
+> - **The tools are pre-authorized.** The request to run this skill is also the request to run `/simplify`, `/two-axis-review`, `/code-review` and the agents that they start.
 > - **Apply review findings without asking.** Fix each finding that is worth a fix. In the PR body, list each finding that you skip, with a one-line reason. In a core area (step 6), if you cannot name why a finding is wrong, fix it. A finding that declines or narrows what the reader asked for is stop 4 below. Do not apply it as a fix.
 > - **A documented choice wins.** Take it and name it in the report. A documented refusal is a reason with a date. Make sure that the reason is still true (step 3).
 > - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe. A missing feature gives the reader nothing to review. The reader can reject an extra feature in review.
@@ -143,11 +143,11 @@ If the output is empty, the diff is docs-only. Then skip `cargo test`, the bench
 The full sequence, in order. Apply what each step finds:
 
 1. `/simplify`.
-2. `two-axis-review` against `origin/main`. The Spec axis compares the diff with the issue and the plan comment. The Standards axis mostly repeats `/simplify`. Act only on what `/simplify` did not find.
+2. `/two-axis-review` against `origin/main`. The Spec axis compares the diff with the issue and the plan comment. The Standards axis mostly repeats `/simplify`. Act only on what `/simplify` did not find.
 3. `/code-review high`.
 4. **Mutation check.** For each new gate, remove its fix and make sure that the gate fails. Change a copy of the file, not the worktree.
 
-Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise.
+Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise.
 
 Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run the review agents on Sonnet.
 
