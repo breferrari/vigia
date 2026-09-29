@@ -741,3 +741,50 @@ fn hidden_write_sleeps() {
         "the first tick was not the visible write alone, so the hidden one woke the watch"
     );
 }
+
+/// A file named like a hidden directory is not hidden: `^build/` covers what is
+/// in `build/`, and a file called `build` is shown, so its writes wake.
+#[test]
+fn slash_file_wakes() {
+    let scratch = Scratch::new("watch-slash-file");
+    scratch.write("build", "x\n");
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let options = WatchOptions {
+        quiet: ORDERING_QUIET,
+        max_delay: Duration::from_secs(5),
+    };
+    let mut watcher = worktree.watch(options).expect("watch");
+    watcher.hide(Some(vigia_core::Hidden::new("^build/").expect("a pattern")));
+
+    scratch.write("build", "y\n");
+    let tick = tick_within(&mut watcher, SETTLE).expect("a shown file must tick");
+    assert_eq!(tick.paths, vec!["build".to_owned()]);
+}
+
+/// A hidden directory made after the watch is armed, and written into, never
+/// wakes it either.
+#[test]
+fn hidden_dir_sleeps() {
+    let scratch = Scratch::new("watch-hidden-dir");
+    scratch.write("src/a.rs", "x\n");
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let options = WatchOptions {
+        quiet: ORDERING_QUIET,
+        max_delay: Duration::from_secs(5),
+    };
+    let mut watcher = worktree.watch(options).expect("watch");
+    watcher.hide(Some(vigia_core::Hidden::new("^gen/").expect("a pattern")));
+
+    scratch.write("gen/out.txt", "y\n");
+    std::thread::sleep(ORDERING_QUIET * 2);
+    scratch.write("src/a.rs", "y\n");
+
+    let tick = tick_within(&mut watcher, SETTLE).expect("the visible write must tick");
+    assert_eq!(
+        tick.paths,
+        vec!["src/a.rs".to_owned()],
+        "a hidden directory made after arming woke the watch"
+    );
+}

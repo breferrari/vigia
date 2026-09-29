@@ -377,10 +377,10 @@ impl<'repo> Watcher<'repo> {
         if rela.starts_with(".git") {
             return None;
         }
-        // Before the syscall below, so a hidden path costs one match. A directory
-        // whose own path is hidden is taken to hold nothing visible.
-        if let (Some(hidden), Some(spelled)) = (&self.hidden, followable(rela))
-            && (hidden.is_hidden(&spelled) || hidden.is_hidden(&format!("{spelled}/")))
+        // Before the syscall below, so a hidden file costs one match.
+        let spelled = self.hidden.as_ref().and(followable(rela));
+        if let (Some(hidden), Some(spelled)) = (&self.hidden, &spelled)
+            && hidden.is_hidden(spelled)
         {
             return None;
         }
@@ -394,6 +394,14 @@ impl<'repo> Watcher<'repo> {
             // directory could hide a deleted file behind a rule like `build/`.
             _ => gix::index::entry::Mode::FILE,
         };
+        // A directory's own event, hidden by the spelling its contents start with.
+        // Only an existing one: a deleted file named like it must still wake.
+        if mode == gix::index::entry::Mode::DIR
+            && let (Some(hidden), Some(spelled)) = (&self.hidden, &spelled)
+            && hidden.is_hidden(&format!("{spelled}/"))
+        {
+            return None;
+        }
 
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }

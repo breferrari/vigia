@@ -299,8 +299,8 @@ pub fn epoch_now() -> i64 {
 ///
 /// The history store is fed from the burst and never from the walk, so the walk's
 /// own filter cannot reach it: a hidden path left in here spends one of I10's 256
-/// tracked slots and holds a sparkline for a row nothing draws. It suppresses the
-/// sample and not the wake, which still arrives and is still walked.
+/// tracked slots and holds a sparkline for a row nothing draws. The watcher
+/// already drops what the pattern covers, so this is a second guard on one rule.
 #[doc(hidden)]
 #[must_use]
 pub fn shown(mut paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<String> {
