@@ -61,8 +61,8 @@ pub fn permit() -> Option<Permit> {
 /// What Enter's post came to, and the only thing the footer is told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Posted {
-    /// No session has registered against this worktree, which is every reader
-    /// who has not installed the hook. Nothing was opened.
+    /// No session has registered against this worktree: the hook is not
+    /// installed, or the agent is not Claude Code. Nothing was opened.
     Unregistered,
     /// At least one registered session took the line.
     Sent,
@@ -72,15 +72,12 @@ pub enum Posted {
     Failed,
 }
 
-/// What the footer says, or `None` for the silence a reader with no hook gets:
-/// telling them *noted* on every Enter would be a word about a rung they never
-/// asked for.
+/// What the footer says. *noted* means nothing live took the line.
 #[must_use]
-pub fn word(posted: Posted) -> Option<&'static str> {
+pub fn word(posted: Posted) -> &'static str {
     match posted {
-        Posted::Unregistered => None,
-        Posted::Sent => Some("sent"),
-        Posted::Failed => Some("noted"),
+        Posted::Sent => "sent",
+        Posted::Unregistered | Posted::Failed => "noted",
     }
 }
 

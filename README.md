@@ -379,7 +379,7 @@ The resource is `vigia://notes`, and the server announces every change to the st
 }
 ```
 
-`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
+`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line and **noted** when nothing live did, so the note is waiting in the store. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
 
 `vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
 
@@ -434,6 +434,14 @@ A user-scoped server is started from your own config directory rather than from 
 `vigia` is not the session's child and nothing comes back down the socket, so whether the session acted on your note, held it behind a permission prompt or dropped it is not something the pane can tell you. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
 
 </details>
+
+### Other agents
+
+The server and `pending` work with any agent. The live push does not.
+
+- **The server is plain MCP over stdio**, so any client can run it. For Codex: `codex mcp add vigia -- vigia mcp`. Claude Code tells the server which project it is in. Other clients do not, so the server serves the worktree it was started in. If your agent starts somewhere else, set the client's `cwd` for the server to the worktree. The server names the worktree in its handshake, so the agent can see which one it has.
+- **`vigia mcp pending` reads nothing from its hook**, so any prompt hook that passes a command's output to the model can run it. Codex's `UserPromptSubmit` hook is one.
+- **`vigia mcp register` is Claude Code's alone.** It records a socket that only Claude Code opens. Under any other agent a note waits in the store until the agent next calls `notes`, and the footer says **noted**.
 
 ---
 

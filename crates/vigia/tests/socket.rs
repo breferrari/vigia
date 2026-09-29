@@ -196,15 +196,14 @@ fn the_content_of_a_note_with_no_context_is_still_whole() {
 
 #[test]
 fn no_registration_attempts_no_connection() {
-    // The common case: a reader who never installed the hook. Nothing is
-    // opened, and the footer is told to say nothing at all.
+    // The common case: no hook installed, or an agent with none.
     let (_scratch, _root, registry) = registry("socket-none", &[]);
     let wire = Wire::default();
 
     let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Unregistered);
     assert!(wire.sessions().is_empty(), "something was opened");
-    assert_eq!(word(Posted::Unregistered), None);
+    assert_eq!(word(Posted::Unregistered), "noted");
 }
 
 #[test]
@@ -273,12 +272,12 @@ fn one_session_taking_it_is_sent_even_when_another_refuses() {
 }
 
 #[test]
-fn the_footer_says_sent_when_one_took_it_and_noted_when_none_did() {
+fn footer_words() {
     // `sent` cannot mean delivered: the channel writes nothing back, so the
     // strongest true claim is that the line left this process.
-    assert_eq!(word(Posted::Sent), Some("sent"));
-    assert_eq!(word(Posted::Failed), Some("noted"));
-    assert_eq!(word(Posted::Unregistered), None);
+    assert_eq!(word(Posted::Sent), "sent");
+    assert_eq!(word(Posted::Failed), "noted");
+    assert_eq!(word(Posted::Unregistered), "noted");
 }
 
 #[test]
@@ -395,7 +394,7 @@ fn a_registry_that_cannot_be_read_is_noted_rather_than_silent() {
     let wire = Wire::default();
     let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Failed);
-    assert_eq!(word(posted), Some("noted"));
+    assert_eq!(word(posted), "noted");
     assert!(wire.sessions().is_empty(), "something was opened");
 }
 
