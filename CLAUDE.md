@@ -28,7 +28,7 @@ That distinction is not stylistic. It generates every budget in `SPEC.md`, and t
 
 Everything above is pure Rust on purpose: `--target x86_64-unknown-linux-musl` gives a static binary with no cross-toolchain, and macOS/Windows are tier-1. **Choosing tree-sitter over `syntect` reintroduces a C toolchain**: that is a spec change, not an implementation detail.
 
-**Reading a dependency's source: address it, never search for it.** `ratatui` 0.30 splits into `ratatui-core`, `ratatui-crossterm` and `ratatui-widgets`, so the types this project draws against most often (`Buffer`, `Cell`, the layout solver) live in a **transitive** crate that is not in this workspace. Its source is in the Cargo registry cache, behind a hash-suffixed index directory and a version-suffixed crate directory. Nobody can guess that path, and that is exactly why a session starts searching for it instead. Both of these are instant:
+**Reading a dependency's source: address it, never search for it.** `ratatui` 0.30 splits into `ratatui-core`, `ratatui-crossterm` and `ratatui-widgets`, so the types this project draws against most often (`Buffer`, `Cell`, the layout solver) live in a **transitive** crate that is not in this workspace. Its source is in the Cargo registry cache, behind a hash-suffixed index directory and a version-suffixed crate directory. Both of these are instant:
 
 ```bash
 ls ~/.cargo/registry/src/*/ratatui-core-*/src/buffer/          # the sources, addressed directly
@@ -37,7 +37,7 @@ cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="ratatui-
 
 **Never run `find /` on Windows.** Under Git Bash `/` is the MSYS root, which mounts the Windows registry as directories under `/proc`, so the walk never terminates, and `~/.cargo` is not under it anyway. `.claude/scripts/scan-guard.mjs` refuses the call. Bound any exploratory scan with `timeout`, and prefer Glob or Grep pointed at an explicit path.
 
-`gix` was the least-precedented dependency here (`delta` uses `git2`/libgit2 instead, probably for age reasons), so Phase 1 proved it before anything was built on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and every Phase 1 budget holds with room. Evidence and the one constraint it came with are in `SPEC.md` §10.
+`gix` was the least-precedented dependency here, so Phase 1 proved it before anything was built on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and every Phase 1 budget holds with room. Evidence and the one constraint it came with are in `SPEC.md` §10.
 
 ## Method: spec-driven, drift-enforced
 
@@ -97,16 +97,16 @@ Two tools, and picking the wrong one is the common mistake. **The test is whethe
 
 Rule of thumb: **a `gix` limitation that any Rust project can hit is a `remember`**. Note that it is `scope: "platform"` with `platforms: ["rust"]`, not `general`, which is exactly the call this section exists to get right. **"Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
 
-Before finishing work that changed or clarified a decision here, write it down. A finding that stays in this session is a finding the next session pays for again.
+Before finishing work that changed or clarified a decision here, write it down.
 
 ## Bias to building
 
-**The default is build, and a refusal needs a reason that survives being checked.** `SPEC.md` §0 carries the rules for citing the record, and every reader passes it: a ruling is its reason plus a date, a reason naming an absence expires fastest, an invariant's own words have to reach the case, a budget arrives with its current headroom, and a reason that collapses reopens the question. Four rows of Phase 8 spent a session each on a decline, and one was reopened because both of its reasons were false. The frame path runs at **2.4ms p50** against a 16ms budget, so a cost cited without that headroom is a mood, not a measurement.
+**The default is build, and a refusal needs a reason that survives being checked.** `SPEC.md` §0 carries the rules for citing the record, and every reader passes it: a ruling is its reason plus a date, a reason naming an absence expires fastest, an invariant's own words have to reach the case, a budget arrives with its current headroom, and a reason that collapses reopens the question. The frame path runs at **2.4ms p50** against a 16ms budget. A cost cited without that headroom is not a measurement.
 
 Three rules that are this file's rather than the spec's:
 
 - **Measure the whole, not the part, and before the cost restricts anything.** Two fixtures, the same workload with and without the thing being priced, interleaved so a loaded machine moves both. A zero from a clock is a quantum until timed across enough repetitions to clear it: `GetThreadTimes` steps at 15.625ms on Windows and read a 2.60ms burst as nothing. A cap is a feature restriction and needs the same bar as a refusal. Measured in situ, a sizing cap read 17.93ms against 18.43ms unsized and was deleted.
-- **What ships is what was asked for and nothing narrower.** A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here ([#272](https://github.com/breferrari/vigia/issues/272) imported `delta`'s wrap cap, and the reader had to say twice that he never asked for it). A limit nobody asked for is a refusal wearing a yes, and it is the harder kind to see.
+- **What ships is what was asked for and nothing narrower.** A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here ([#272](https://github.com/breferrari/vigia/issues/272) imported `delta`'s wrap cap, which he never asked for).
 - **A session's own prior decision is a record of what was done, not permission withheld.** Name the reader's decisions. Never cite a session's as a constraint on him.
 
 Size the rigor to the surface: look and feel is `/simplify` plus a screenshot. The rest is take-next's step 6.
@@ -122,6 +122,8 @@ Ruled 2026-08-26, session.
 
 **Unattributed means a session inferred it, and an inferred ruling does not bind the reader.**
 
+A new ruling also carries `User-facing: <one sentence>` or `User-facing: none`. A `none` ruling never appears in the README, the CHANGELOG or a PR title.
+
 Mark the origin of the **ruling**, not of the symptom. "Reported from the pane" describes where a complaint came from and says nothing about who chose the constraint attached to it. #272's cap was reader-reported and session-decided, and writing only the first let it be quoted back at him as his own.
 
 ## Rulings can be revoked
@@ -136,6 +138,12 @@ A rule that survives being overruled re-fires on the next session, and he argues
 
 **Annotating in place is not an option.** Kept paragraphs pile up until the contract is unreadable.
 
+## Public language
+
+Contract files (`SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md`, this file, `.claude/`) keep the house style. Public files (README, CHANGELOG, CONTRIBUTING, the issue template, release notes, PR titles) use ordinary English and name what the user sees. `.github/public-dialect.txt` lists the banned phrases; `register.rs` and CI enforce it.
+
+When a subject would be a poor release note, put `Release-note: <one sentence>` in the commit body; squash drops the PR body. `docs:`, `chore:` or `Release-note: none` marks work the pane does not show.
+
 ## Releasing
 
 **Dispatch the `bump and release` workflow.** That is the whole procedure:
@@ -144,11 +152,13 @@ A rule that survives being overruled re-fires on the next session, and he argues
 gh workflow run "bump and release" -f bump=<patch|minor|major> -f rehearse=false
 ```
 
-It raises the version, commits it to `main`, builds the four target artifacts, creates the GitHub release, publishes the Homebrew formula, and runs `cargo publish --workspace`. Nothing else starts a release: `git tag && git push --tags` was removed as a trigger, and a tag pushed by a workflow cannot fire another one anyway.
+It raises the version, commits it to `main`, builds the four target artifacts, creates the GitHub release, publishes the Homebrew formula, and runs `cargo publish --workspace`. Nothing else starts a release; a tag push is not a trigger.
 
 Pick the level from the diff. On `0.x` a new feature **and** a breaking public API change both go in the **minor**. `patch` is for fixes that change no signature. `rehearse=true` runs the whole path and publishes nothing, and this is the way to check a change to the release machinery itself.
 
-**`RELEASE-SMOKE.md` is not this procedure and reading it as one wastes a session.** It is a human pre-flight against a built artifact: most of its boxes need a person at a terminal on three platforms. That person kills the process from another pane and looks at what the terminal does next. An agent cannot tick them. It is worth reading before a release that changes packaging, installation or the takeover. It is not a gate to clear before every dispatch, and it is not where the release is performed.
+Do not dispatch when every commit since the last tag is process-only (`docs:`, `chore:`, `Release-note: none`): the bump refuses it.
+
+**`RELEASE-SMOKE.md` is not this procedure.** It is a human pre-flight on three platforms that an agent cannot tick. Read it before a release that changes packaging, installation or the takeover.
 
 ## House rules
 
@@ -156,7 +166,7 @@ Pick the level from the diff. On `0.x` a new feature **and** a breaking public A
 - **No em-dashes** in anything published under Brenno's name: README prose, release notes, issue and PR bodies, commit messages. Use a period, a comma, a colon, or parentheses.
 - Probe capability by behaviour, never by asking. A single green run is not evidence when the defect is non-deterministic.
 - Verify the whole artifact, not just the property you were fixing.
-- **Write plainly.** Comments, commits, PR and issue bodies, and replies to the reader: short sentences, common words, the fact first. No metaphor, no aphorism, no rhetoric. If a line needs a second read, rewrite it. The register of this file is not a model to copy.
+- **Write plainly.** Comments, commits, PR and issue bodies, and replies to the reader: short sentences, common words, the fact first. No metaphor, no aphorism, no rhetoric. If a line needs a second read, rewrite it. The register of this file is not a model to copy; see Public language.
 - **A comment exists where the code cannot explain itself**: why the obvious approach is wrong, an invariant a caller must hold, a cost invisible at the call site. Not a restatement, an issue number, a ruling id or its own history. **A note, not an argument**: `// Unverified: a check would hash the whole file on every refresh.`, not `// Not verified: the checksum is compared rather than trusted, and verifying it would hash the whole file on every refresh.` Will it hold up in two years, without the session? A docblock longer than its item means one of the two is wrong.
 - **A name is a label, not a sentence.** Every name: functions, types, constants, tests, branches, issue titles, headings, roadmap rows. Two to four words, the thing itself, no *because*, no *when*. Test: `footer_words`, not `the_footer_says_sent_when_one_took_it_and_noted_when_none_did`; the sentence goes in the assert message. Issue: `Staged count rebuilt on every paint`, not `An empty pane rebuilds the staged count on every paint`. A PR title or commit subject is the one exception: a short imperative, `Skip no-op status walks`. **Most of this repository's existing names are sentences. Do not copy them.**
 - **Nothing prose stops at a column. One paragraph is one line.** Markdown files, issue and PR bodies, commit message bodies: no hard wrapping anywhere. GitHub turns a single newline in a body into a real line break, so a paragraph wrapped at 80 arrives broken mid-sentence. That gave 811 forced breaks across sixteen of this repository's PRs before anyone measured it. Gated by `register.rs::no_prose_paragraph_is_hard_wrapped` over every tracked `.md`. **Code comments are the exception**: nothing renders them. Check a body with `gh api repos/OWNER/REPO/pulls/N -H "Accept: application/vnd.github.html+json" --jq '.body_html' | grep -c '<br'`.
