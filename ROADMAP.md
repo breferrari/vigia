@@ -204,7 +204,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The note box arrives in a diff row's time, so a considered effect reads as a pop. **Reported from use** | [#460](https://github.com/breferrari/vigia/issues/460) |
 | ✅ | A note with no reply still draws the answer's stem. **Reported from use** | [#459](https://github.com/breferrari/vigia/issues/459) |
 | ✅ | Remove the masthead, and revoke the ruling that kept it. **Reported from use** | [#457](https://github.com/breferrari/vigia/issues/457) |
-| ⬜ | vigia mcp finds its worktree by an agent's own variable | [#450](https://github.com/breferrari/vigia/issues/450) |
+| ✅ | vigia mcp finds its worktree by an agent's own variable | [#450](https://github.com/breferrari/vigia/issues/450) |
 | ✅ | The footer's transition is too quick to see, and unreadable while it runs. **Reported from use** | [#410](https://github.com/breferrari/vigia/issues/410) |
 | ✅ | The footer's motions are on the channel that degrades, and too short to see. **Reported from use** | [#408](https://github.com/breferrari/vigia/issues/408) |
 | ✅ | The footer says everything in one red, and no notice arrives. **Reported from use** | [#405](https://github.com/breferrari/vigia/issues/405) |
@@ -331,6 +331,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 
 | | Task | Issue |
 |---|---|---|
+| ✅ | Sentence test names. **Not planned** | [#553](https://github.com/breferrari/vigia/issues/553) |
 | ✅ | `cargo install` cannot replace the binary while a registered `vigia mcp` holds it open on Windows | [#458](https://github.com/breferrari/vigia/issues/458) |
 | ✅ | Every Windows upgrade leaves another copy of the binary behind | [#486](https://github.com/breferrari/vigia/issues/486) |
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
