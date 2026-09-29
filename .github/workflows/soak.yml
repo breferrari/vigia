@@ -6,10 +6,9 @@ name: soak
 # `cargo test --workspace` in ci.yml and needs nothing here.
 on:
   schedule:
-    # Linux daily, all three tier-1 targets weekly. A leak is usually not
-    # platform-specific, and four hours on three hosted runners every day is
-    # not a proportionate way to find out.
-    - cron: "41 3 * * *"
+    # Weekly, Linux alone, 30 minutes over 20 x 200. That fixture settles in
+    # about thirty seconds, so the window measures the plateau. 100 x 500 takes
+    # about eight hours to settle, and a four-hour run over it measured the climb.
     - cron: "41 4 * * 0"
   workflow_dispatch:
     inputs:
@@ -21,7 +20,7 @@ on:
           and VIGIA_SOAK_LINES=500, then `cargo test --release --test soak --
           --nocapture`. The reference machine these numbers come from is Windows,
           so that is three environment variables however your shell sets them.
-        default: "14400"
+        default: "1800"
       runner:
         description: >-
           One runner label to soak on, replacing the platform matrix. Empty
@@ -31,7 +30,10 @@ on:
         default: ""
       files:
         description: "Fixture files."
-        default: "100"
+        default: "20"
+      lines:
+        description: "Lines per fixture file."
+        default: "200"
 
 env:
   CARGO_TERM_COLOR: always
@@ -56,7 +58,7 @@ jobs:
   # itself, and **the expression language cannot**:
   # `${{ fromJSON(inputs.seconds) / 60 + 90 }}` is rejected at parse time with
   # `Unexpected symbol: '/'`, which fails the *whole file* rather than the one
-  # field, so the daily soak would have stopped running altogether. Arithmetic
+  # field, so the scheduled soak would have stopped running altogether. Arithmetic
   # is absent from the documented operator list and from the implementation
   # too, and that was established by dispatching it rather than by reading.
   #
@@ -88,11 +90,11 @@ jobs:
       - id: window
         shell: bash
         env:
-          SOAK_SECONDS: ${{ inputs.seconds || '14400' }}
+          SOAK_SECONDS: ${{ inputs.seconds || '1800' }}
           SOAK_RUNNER: ${{ inputs.runner }}
-          # The daily cron takes Linux alone; every other trigger takes all
-          # three. Resolved here because a job-level `if` cannot see `matrix`.
-          SOAK_DAILY: ${{ github.event.schedule == '41 3 * * *' }}
+          # The weekly cron takes Linux alone; a dispatch takes all three.
+          # Resolved here because a job-level `if` cannot see `matrix`.
+          SOAK_SCHEDULED: ${{ github.event_name == 'schedule' }}
         run: |
           set -euo pipefail
           case "$SOAK_SECONDS" in
@@ -116,7 +118,7 @@ jobs:
           [ "$seconds" -ge 1 ] || { echo "::error::seconds must be at least 1, got '$SOAK_SECONDS'"; exit 1; }
 
           # Ninety minutes over the window for checkout, build and fixture,
-          # which is the headroom the pinned 330 gave the four-hour default and
+          # which is the headroom the pinned 330 gave the old four-hour default and
           # is preserved rather than picked fresh.
           timeout=$(( seconds / 60 + 90 ))
 
@@ -139,7 +141,7 @@ jobs:
                 ;;
             esac
             os="[\"$SOAK_RUNNER\"]"
-          elif [ "$SOAK_DAILY" = true ]; then
+          elif [ "$SOAK_SCHEDULED" = true ]; then
             os='["ubuntu-latest"]'
           else
             os='["ubuntu-latest", "macos-latest", "windows-latest"]'
@@ -182,5 +184,5 @@ jobs:
         run: cargo test --release --test soak -- --nocapture
         env:
           VIGIA_SOAK_SECS: ${{ needs.plan.outputs.seconds }}
-          VIGIA_SOAK_FILES: ${{ inputs.files || '100' }}
-          VIGIA_SOAK_LINES: "500"
+          VIGIA_SOAK_FILES: ${{ inputs.files || '20' }}
+          VIGIA_SOAK_LINES: ${{ inputs.lines || '200' }}

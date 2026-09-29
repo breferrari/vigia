@@ -71,8 +71,7 @@ A regression past any budget **fails the build.**
 > re-highlighting (`syntect`, Phase 2) have different dependencies and phases; the 18.58ms-vs-3.27ms measurement that forced the split is there.
 > - **I8** stopped saying `SIGINT` because raw mode makes Ctrl-C a key event,
 > never a signal, and the externally delivered signal it was narrowed to exclude is **covered since 2026-08-08** ([#24](https://github.com/breferrari/vigia/issues/24)). The ruling worth keeping is the one about *shape*: it was taken symmetrically, on both tier-1 platforms in one issue, because the single-task version was Unix-only and [#16](https://github.com/breferrari/vigia/issues/16) had already rejected a guarantee that means different things on different targets. What made that affordable was measurement rather than principle — neither half adds a crate to any graph — and the row's exclusions are now the same sentence on both platforms rather than two different promises.
-> - **I3**'s scheduled window is shorter than 24h because a GitHub-hosted job is
-> terminated at six hours; the full window runs by `workflow_dispatch` or locally, the sample count is fixed so the statistic is computed identically, and a window short enough to be all warmup measures only warmup — §7 carries that as a rule.
+> - **I3**'s scheduled soak is 30 minutes a week on Linux over the 20 x 200 fixture, which settles in about thirty seconds, so the window measures the plateau. *Ruled 2026-09-29, reader.* The full 24h runs by `workflow_dispatch` or locally. The sample count is fixed, so the statistic is computed the same way at any window.
 
 ## 4. Scope
 

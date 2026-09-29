@@ -208,9 +208,9 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 >
 > The budget is a claim about a day and it stays one. What changed is the proof column, because the number in it was unrunnable: a **GitHub-hosted job is terminated at six hours** of execution time, where a self-hosted one gets five days. Verified against GitHub's published limits, 2026-07-31.
 >
-> So the scheduled run takes the longest window that fits under the cap, and the full 24h is reached by `workflow_dispatch`, which carries the duration and the runner label, on a machine with no cap. The shape of the measurement does not change with the window: the sample **count** is fixed, so the cadence is exactly the five minutes above at 24h and proportionally tighter below it, and the statistic is computed identically either way.
+> So the scheduled run is 30 minutes a week on Linux over the 20 x 200 fixture, which settles in about thirty seconds. *Ruled 2026-09-29, reader.* The four-hour daily run before it used 100 x 500, which settles in about eight hours, so 27 of 39 Linux runs failed on the climb, with no leak traced. The full 24h is reached by `workflow_dispatch` on a runner with no cap. The sample **count** is fixed, so the statistic is computed identically at any window.
 >
-> What does not scale down is the warmup. Every process climbs to an allocator plateau before it is flat, so a window short enough to be all warmup can only measure warmup, and the gate refuses to assert there rather than reporting a number it cannot stand behind. §7 carries that as a rule.
+> What does not scale down is the warmup. Every process climbs to an allocator plateau before it is flat, so a window that is all warmup can only measure warmup, and the gate refuses to assert there. §7 carries that as a rule.
 
 ---
 

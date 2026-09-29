@@ -1572,8 +1572,8 @@ fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
     run_plan_on(script, seconds, runner, "false")
 }
 
-/// The same, with the daily cron's flag under the caller's control.
-fn run_plan_on(script: &str, seconds: &str, runner: &str, daily: &str) -> Option<Planned> {
+/// The same, with the scheduled-trigger flag under the caller's control.
+fn run_plan_on(script: &str, seconds: &str, runner: &str, scheduled: &str) -> Option<Planned> {
     // A counter rather than anything derived from the inputs: two labels of the
     // same length would otherwise share a directory, and two of the hostile
     // ones below are both thirteen characters.
@@ -1592,7 +1592,7 @@ fn run_plan_on(script: &str, seconds: &str, runner: &str, daily: &str) -> Option
         .arg(script)
         .env("SOAK_SECONDS", seconds)
         .env("SOAK_RUNNER", runner)
-        .env("SOAK_DAILY", daily)
+        .env("SOAK_SCHEDULED", scheduled)
         .env("GITHUB_OUTPUT", &out);
 
     // Probe before building anything for it to write into, and probe for a
@@ -1705,44 +1705,43 @@ fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
             .to_owned()
     };
 
-    // The flag has to name a cron this workflow actually runs on.
-    let daily_cron = workflow_settings(&source, "SOAK_DAILY:")
+    // The flag has to be true for the schedule, and a schedule has to exist.
+    let scheduled_flag = workflow_settings(&source, "SOAK_SCHEDULED:")
         .into_iter()
         .next()
-        .expect("the plan job sets SOAK_DAILY");
-    let schedules = workflow_settings(&source, "- cron:");
+        .expect("the plan job sets SOAK_SCHEDULED");
     assert!(
-        schedules
-            .iter()
-            .any(|cron| daily_cron.contains(cron.trim_matches('"'))),
-        "`SOAK_DAILY` is {daily_cron:?}, which compares against no cron this \
-         workflow is scheduled on ({schedules:?}), so the branch below fires \
-         for no trigger or for every one"
+        scheduled_flag.contains("github.event_name == 'schedule'"),
+        "`SOAK_SCHEDULED` is {scheduled_flag:?}, which is not true for the \
+         scheduled trigger, so the branch below fires for no trigger or for \
+         every one"
+    );
+    assert!(
+        !workflow_settings(&source, "- cron:").is_empty(),
+        "the soak workflow has no schedule"
     );
 
-    // The daily cron: Linux alone, because three hosted runners every day is
-    // not a proportionate way to find a leak that is rarely platform-specific.
-    let Some(daily) = run_plan_on(&script, "14400", "", "true") else {
+    // The schedule: Linux alone. A leak is rarely platform-specific.
+    let Some(scheduled) = run_plan_on(&script, "1800", "", "true") else {
         no_bash("the plan job's platform list");
         return;
     };
-    assert!(daily.ok, "the daily plan failed:\n{}", daily.said);
+    assert!(scheduled.ok, "the scheduled plan failed:\n{}", scheduled.said);
     assert_eq!(
-        platforms(&daily),
+        platforms(&scheduled),
         "[\"ubuntu-latest\"]",
-        "the daily cron no longer soaks Linux alone"
+        "the scheduled run no longer soaks Linux alone"
     );
 
-    // Everything else, which is the weekly cron and every manual dispatch: all
-    // three tier-1 targets.
-    let weekly = run_plan_on(&script, "14400", "", "false").expect("bash was there a moment ago");
-    assert!(weekly.ok, "the weekly plan failed:\n{}", weekly.said);
+    // A manual dispatch: all three tier-1 targets.
+    let dispatched =
+        run_plan_on(&script, "1800", "", "false").expect("bash was there a moment ago");
+    assert!(dispatched.ok, "the dispatched plan failed:\n{}", dispatched.said);
     for target in ["ubuntu-latest", "macos-latest", "windows-latest"] {
         assert!(
-            platforms(&weekly).contains(target),
-            "the weekly run no longer soaks {target}, and it is a tier-1 \
-             target: {}",
-            platforms(&weekly)
+            platforms(&dispatched).contains(target),
+            "a dispatch no longer soaks {target}, and it is a tier-1 target: {}",
+            platforms(&dispatched)
         );
     }
 
