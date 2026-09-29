@@ -116,7 +116,7 @@ Post the approved plan as a comment on the issue before writing code. Write down
 - **Frame-path changes run the budget gate.**
 - **Add no dependency** that `SPEC.md` does not name. Propose it into the spec in its own commit first.
 - **If reality contradicts the spec, stop.** Decide which is wrong and change that one in its own commit.
-- **Every issue you file gets a milestone and a roadmap row.** In-scope findings are fixed here. Never defer an in-scope finding to a new issue to close the PR. An out-of-scope one goes to the Shelf with its dated reason in the body and a row in `ROADMAP.md`'s Deferral shelf: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass.
+- **Every issue you file gets a milestone and a roadmap row.** In-scope findings are fixed here. Never defer an in-scope finding to a new issue to close the PR. An out-of-scope one goes to the Shelf: a row in `ROADMAP.md`'s Shelf table, and its dated reason in the Deferral shelf table: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, check, skill or workflow goes to the Shelf. Take that kind of work only when it blocks a product pass.
 
 ## 5. Scope the checks
 
@@ -180,10 +180,6 @@ Merge when the run is green on the ready revision and every comment is answered:
 
 If `record_work` fails after one smaller retry, write the note by hand under `projects/vigia/notes/`, say so in the report, and comment on breferrari/obsidian-mind#244. Read every write back. A Stop hook blocks once if a merged pass has no note naming its issue.
 
-## Writing
-
-The PR body, the issue comments, commits and the report follow `CLAUDE.md`'s house rules: plain words, the fact first, one paragraph per line. Write the PR body with `/pr`. It says what is now true and links the plan comment. It does not replay the review: one line per tool, then one line per skipped finding with its reason.
-
 ## 9. Report
 
 1. **First line:** what the reader can now do that they could not before, or "nothing yet" and the issue that will change it.
@@ -196,3 +192,7 @@ Then, briefly: the issue taken, what shipped with numbers, the next task (named,
 - **What the record gave:** the recorded decisions the work stood on, or none.
 - **Decisions taken without asking:** one line each, the branch taken and the one not taken.
 - **Pane:** what `vigia` showed that read wrong, `none`, or `not open`.
+
+## Writing
+
+The PR body, the issue comments, commits and the report follow `CLAUDE.md`'s house rules: plain words, the fact first, one paragraph per line. Write the PR body with `/pr`. It says what is now true and links the plan comment. It does not replay the review: one line per tool, then one line per skipped finding with its reason.
