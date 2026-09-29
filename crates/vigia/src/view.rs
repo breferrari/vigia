@@ -1128,6 +1128,8 @@ pub struct View {
     pub top: Position,
     /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
     pub landed: bool,
+    /// Whether this frame drew the last row of the diff.
+    pub ended: bool,
     /// Files this viewport asked the frame for, drawn or merely crossed.
     pub read: usize,
     /// [`FileEntry`] values built for the record rather than for a row.
@@ -1496,6 +1498,7 @@ impl View {
                 row: position.row,
             },
             landed: false,
+            ended: false,
             read: 0,
             recorded: 0,
             scale: Scale(history.map_or_else(Default::default, History::scales)),
@@ -1771,6 +1774,7 @@ impl View {
                 && view.top != floor);
 
         let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked, rows);
+        view.ended &= index >= stop && consumed;
 
         // After the walk, because only the walk knows where the diff landed.
         view.take_list(
@@ -2090,6 +2094,7 @@ impl View {
         // Nothing on this screen wraps and nothing sits under a row, so the rows
         // are the display rows and every index already names one.
         if total == breaks.len() {
+            self.ended = total <= height;
             self.notes.marked = pins
                 .iter()
                 .filter(|pin| pin.marks)
@@ -2135,6 +2140,9 @@ impl View {
                 .max(ends.saturating_sub(height))
                 .clamp(floor, ceiling);
         }
+        // Whether the last collected row is on screen, which `collect` narrows to
+        // the diff's last row.
+        self.ended = total.saturating_sub(dropped) <= height;
         let mut from = 0usize;
         let mut above = dropped;
         while from < breaks.len() && above >= cost(from) {

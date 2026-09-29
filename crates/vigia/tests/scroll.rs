@@ -1194,3 +1194,159 @@ fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
         FILES / 2
     );
 }
+
+/// Every downward step a reader can take from a short pane at the end.
+const DOWNWARD: [Action; 3] = [Action::Scroll(1), Action::Page(1), Action::HalfPage(1)];
+
+/// A step down from the short pane `G` leaves holds.
+#[test]
+fn end_scroll_holds() {
+    let scratch = fixture("shell-scroll-end-holds");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let end = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Bottom,
+    );
+    assert_eq!(
+        end,
+        Position {
+            file: FILES - 1,
+            row: 0
+        },
+        "`G` moved"
+    );
+    for step in DOWNWARD {
+        let now = after(&mut app, &mut frame, &mut highlighter, &history, step);
+        assert_eq!(
+            now, end,
+            "{step:?} at the end of the diff moved the pane from {end:?} to {now:?}"
+        );
+    }
+    // Up still moves, filling the short pane from above.
+    let up = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(-1),
+    );
+    assert!(
+        (up.file, up.row) < (end.file, end.row),
+        "`k` at the end moved the pane down to {up:?}"
+    );
+}
+
+/// The same, reached by follow rather than a key.
+#[test]
+fn follow_end_holds() {
+    let scratch = fixture("shell-scroll-follow-end");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let last = frame.files()[FILES - 1].path.clone();
+    assert!(app.follow(&last, &frame), "follow did not move to {last}");
+    let end = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view")
+        .top;
+    assert_eq!(
+        end,
+        Position {
+            file: FILES - 1,
+            row: 0
+        }
+    );
+    let now = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(1),
+    );
+    assert_eq!(
+        now, end,
+        "the first scroll after a follow jump moved the pane to {now:?}"
+    );
+}
+
+/// A last file taller than the pane has not ended.
+#[test]
+fn tall_end_scrolls() {
+    let scratch = Scratch::large_diff("shell-scroll-tall-end", 2, body() * 3);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let end = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Bottom,
+    );
+    assert_eq!(end, Position { file: 1, row: 0 });
+    let now = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(1),
+    );
+    assert_eq!(
+        now,
+        Position { file: 1, row: 1 },
+        "a step down inside a last file taller than the pane held"
+    );
+}
+
+/// Nor has one whose lines fit but whose wrapped rows do not.
+#[test]
+fn wrapped_end_scrolls() {
+    let scratch = Scratch::new("shell-scroll-wrapped-end");
+    scratch.write("b.txt", "x\n");
+    scratch.commit_all("initial");
+    let long = "word ".repeat(40);
+    let lines: String = (0..body() / 2).map(|i| format!("{i} {long}\n")).collect();
+    scratch.write("b.txt", lines);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let wide = Body {
+        diff_width: 80,
+        ..split()
+    };
+    app.apply(Action::ToggleWrap, &mut frame, body())
+        .expect("wrap");
+
+    let mut step = |action| {
+        app.apply(action, &mut frame, body()).expect("apply");
+        app.view(&mut frame, &mut highlighter, &history, wide)
+            .expect("view")
+            .top
+    };
+    assert_eq!(step(Action::Bottom), Position { file: 0, row: 0 });
+    assert_eq!(
+        step(Action::Scroll(1)),
+        Position { file: 0, row: 1 },
+        "a step down held while wrapped rows were still below the pane"
+    );
+}

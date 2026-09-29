@@ -169,6 +169,8 @@ pub struct App {
     note_box: Option<NoteBox>,
     /// The notes as the footer counts them, from the last collect.
     note_count: NoteCount,
+    /// Where the last frame stood when it drew the diff's last row.
+    end: Option<Position>,
     /// Logical rows the last frame drew, which a page step is measured in.
     /// Stepping by the display height instead walks over unwrapped content.
     shown: usize,
@@ -254,6 +256,7 @@ impl Default for App {
             notes_shown: true,
             note_box: None,
             note_count: NoteCount::default(),
+            end: None,
             shown: 0,
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
@@ -1195,6 +1198,11 @@ impl App {
     /// The two directions are deliberately not symmetrical, and the signatures
     /// say so rather than hiding it.
     fn scroll(&mut self, rows: isize, frame: &mut Frame) -> Result<()> {
+        // At the end a step down has nowhere to go, and taking it backs a short
+        // pane up a screenful.
+        if rows > 0 && self.end == Some(self.position) {
+            return Ok(());
+        }
         self.anchored = true;
         match rows.cmp(&0) {
             std::cmp::Ordering::Equal => Ok(()),
@@ -1359,6 +1367,7 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
+        self.end = view.ended.then_some(view.top);
         // A span the walk had no rows for is not a selection, whatever the pointer did.
         self.resolved = self.selecting.is_some_and(|span| view.resolves(span));
         // Cleared only once it was served. A pane with no diff region
