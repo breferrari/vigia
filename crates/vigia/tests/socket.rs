@@ -196,9 +196,7 @@ fn the_content_of_a_note_with_no_context_is_still_whole() {
 
 #[test]
 fn no_registration_attempts_no_connection() {
-    // The common case: a reader who never installed the hook, or whose agent
-    // has none. Nothing is opened, and the footer says the note is only in
-    // the store.
+    // The common case: no hook installed, or an agent with none.
     let (_scratch, _root, registry) = registry("socket-none", &[]);
     let wire = Wire::default();
 

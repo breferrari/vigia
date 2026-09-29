@@ -800,7 +800,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // is one listing.
                 Wake::Notes => shell.notes_stale = true,
                 Wake::Posted(posted) => {
-                    shell.say(post::word(posted).to_owned(), Voice::Said, began);
+                    shell.say(post::word(posted).to_owned(), Voice::Said, began)
                 }
             }
         }

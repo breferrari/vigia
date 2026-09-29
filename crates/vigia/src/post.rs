@@ -72,9 +72,7 @@ pub enum Posted {
     Failed,
 }
 
-/// What the footer says. *noted* covers every case where nothing live took the
-/// line, so the reader can tell it from *sent* whatever agent is in the other
-/// pane.
+/// What the footer says. *noted* means nothing live took the line.
 #[must_use]
 pub fn word(posted: Posted) -> &'static str {
     match posted {
