@@ -189,15 +189,17 @@ else
   say "  (skipped under test seams — needs the live tracker)"
 fi
 
-say "7. missing row — issues the roadmap never mentions (the direction the 2026-08-03 sweep found four gaps in):"
+say "7. missing row — open issues the roadmap never mentions:"
+# Open issues only. A closed issue with no row is history the tracker already
+# holds, and demanding a row after the fact is bookkeeping with no queue in it.
 found=0
-cut -f1 "$tmp/issues.tsv" > "$tmp/nums.txt"
+awk -F'	' '$2 == "OPEN" { print $1 }' "$tmp/issues.tsv" > "$tmp/nums.txt"
 while IFS= read -r n; do
   if ! grep -qE "${B}#${n}${A}" "$tmp/roadmap.md"; then
-    title=$(awk -F'\t' -v n="$n" '$1 == n { print $4 }' "$tmp/issues.tsv")
+    title=$(awk -F'	' -v n="$n" '$1 == n { print $4 }' "$tmp/issues.tsv")
     hit "#$n has no roadmap mention: $title"; found=1
   fi
 done < "$tmp/nums.txt"
-[ "$found" -eq 0 ] && ok "every issue has a roadmap mention"
+[ "$found" -eq 0 ] && ok "every open issue has a roadmap mention"
 
 if [ "$findings" -eq 0 ]; then say "pre-flight clean"; else say "$findings finding(s) — fix in this pass, not a note"; exit 1; fi

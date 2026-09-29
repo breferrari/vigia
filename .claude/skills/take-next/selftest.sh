@@ -234,6 +234,15 @@ case "$line" in
   *)  no "a row is checked against the issue in its own cell" "no drift" "$line" ;;
 esac
 
+# Comparison 7 asks only open issues for a row: #1 is closed and #2 is open,
+# and neither is on this roadmap.
+printf '## Phase 8 - look\n' > "$FIX/roadmap.md"
+line=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md"   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md"   PREFLIGHT_ISSUES_FILE="$FIX/issues.json"   PREFLIGHT_ISSUE_LIMIT=10     sh "$PRE" 2>&1 | awk '/has no roadmap mention/ { $1 = $1; print }')
+case "$line" in
+  "DRIFT #2 has no roadmap mention: issue 2") ok "only an open issue owes the roadmap a row" ;;
+  *) no "only an open issue owes the roadmap a row" "DRIFT #2 has no roadmap mention: issue 2" "$line" ;;
+esac
+
 echo "drift:"
 
 present() { # needle, file, name

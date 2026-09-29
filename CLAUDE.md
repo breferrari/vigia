@@ -109,7 +109,7 @@ Three rules that are this file's rather than the spec's:
 - **What ships is what was asked for and nothing narrower.** A bound taken from a neighbouring tool's default is that tool's decision, not a ruling here ([#272](https://github.com/breferrari/vigia/issues/272) imported `delta`'s wrap cap, and the reader had to say twice that he never asked for it). A limit nobody asked for is a refusal wearing a yes, and it is the harder kind to see.
 - **A session's own prior decision is a record of what was done, not permission withheld.** Name the reader's decisions; never cite a session's as a constraint on him.
 
-Size the rigor to the surface: look and feel is `/simplify` plus a screenshot, and the audit loop is for the frame path and the invariants.
+Size the rigor to the surface: look and feel is `/simplify` plus a screenshot, and the rest runs take-next's review sequence.
 
 ## Rulings say who made them
 
