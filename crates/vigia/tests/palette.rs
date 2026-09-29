@@ -2111,15 +2111,19 @@ fn wide_glyph_washed() {
     for width in 10..=120u16 {
         let backend = draw(width, 8, &view, dark);
         let buffer = backend.buffer();
-        let shown = |x: u16| {
+        // The gutter, which takes the tone, is everything left of the sigil.
+        let sigil = (0..width)
+            .find(|&x| buffer[(x, ADDED)].symbol() == "+")
+            .expect("the added row draws its sigil");
+        let washed = |x: u16| {
             let cell = &buffer[(x, ADDED)];
-            if cell.bg == wash || cell.bg == tone {
+            if cell.bg == wash || (x < sigil && cell.bg == tone) {
                 return true;
             }
             let before = &buffer[(x - 1, ADDED)];
             ratatui::text::Span::raw(before.symbol()).width() == 2 && before.bg == wash
         };
-        let holes: Vec<u16> = (1..width).filter(|&x| !shown(x)).collect();
+        let holes: Vec<u16> = (1..width).filter(|&x| !washed(x)).collect();
         if !holes.is_empty() {
             failing.push((width, holes));
         }
