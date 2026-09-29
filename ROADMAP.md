@@ -300,8 +300,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The mcs tech pack declares keys mcs no longer reads | [#534](https://github.com/breferrari/vigia/issues/534) |
 | ✅ | Every tick re-walks every untracked file in the tree | [#536](https://github.com/breferrari/vigia/issues/536) |
 | ✅ | A write to `.git/index` that changes nothing still costs a full status walk | [#538](https://github.com/breferrari/vigia/issues/538) |
+| ✅ | Range notes from a gutter drag | [#540](https://github.com/breferrari/vigia/issues/540) |
 | ✅ | The config menu names its settings in prose | [#541](https://github.com/breferrari/vigia/issues/541) |
-| ✅ | A note can span a range of lines, made by dragging from the gutter | [#540](https://github.com/breferrari/vigia/issues/540) |
 | ✅ | Staged count rebuilt on every paint of an empty pane | [#545](https://github.com/breferrari/vigia/issues/545) |
 | ✅ | Index and HEAD writes unwatched when the git dir is outside the work tree | [#548](https://github.com/breferrari/vigia/issues/548) |
 
