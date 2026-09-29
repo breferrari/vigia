@@ -2094,7 +2094,20 @@ fn title_check_rejects() {
     );
     assert!(
         passed,
-        "a riddle title with a note in a commit body failed:\n{said}"
+        "a riddle title and subject with a note in the same commit failed:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "other-commit",
+        "Remember toggles",
+        &[
+            ("docs: plain", "Release-note: Remember toggles between runs"),
+            (RIDDLE, ""),
+        ],
+    );
+    assert!(
+        !passed,
+        "a trailer on one commit excused another commit's riddle subject:\n{said}"
     );
 
     let (passed, said) = title_check(

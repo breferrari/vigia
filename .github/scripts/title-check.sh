@@ -3,8 +3,8 @@
 #
 # Usage: title-check.sh <base>   fails when $TITLE or a commit subject in
 #                                <base>..HEAD uses a phrase from
-#                                .github/public-dialect.txt and no commit body
-#                                in that range carries a `Release-note:` line
+#                                .github/public-dialect.txt without a
+#                                `Release-note:` line (see below)
 #        title-check.sh --match  prints each stdin line that uses a phrase
 #
 # Only commit bodies count. Pull requests are squash-merged with their commit
@@ -41,15 +41,31 @@ fi
 [ "$#" -eq 1 ] || { echo "::error::usage: title-check.sh <base> | --match"; exit 1; }
 base="$1"
 
-hits=$({ printf '%s\n' "${TITLE:-}"; git log --no-merges --format=%s "${base}..HEAD"; } | matches)
-[ -z "$hits" ] && exit 0
+# Each commit stands alone: a trailer on one commit never excuses another's
+# subject. The PR title is the note only when no commit carries a trailer.
+failed=0
+noted=0
+for sha in $(git log --no-merges --format=%H "${base}..HEAD"); do
+    if git log -1 --format=%b "$sha" | grep -q '^Release-note:'; then
+        noted=1
+        continue
+    fi
+    hit=$(git log -1 --format=%s "$sha" | matches)
+    if [ -n "$hit" ]; then
+        echo "::error::commit ${sha} uses contract phrasing and carries no Release-note: ${hit}"
+        failed=1
+    fi
+done
 
-if git log --no-merges --format=%b "${base}..HEAD" | grep -q '^Release-note:'; then
-    echo "::notice::a commit body carries Release-note:, so these titles do not reach the release notes:"
-    printf '%s\n' "$hits" | sed 's/^/::notice::  /'
-    exit 0
+if [ "$noted" -eq 0 ]; then
+    hit=$(printf '%s\n' "${TITLE:-}" | matches)
+    if [ -n "$hit" ]; then
+        echo "::error::the PR title uses contract phrasing and no commit carries a Release-note: ${hit}"
+        failed=1
+    fi
 fi
 
-printf '%s\n' "$hits" | sed 's/^/::error::uses contract phrasing: /'
-echo "::error::Reword it, or add 'Release-note: <one plain sentence>' to a commit message body and push. The PR body does not count: it is lost on squash."
-exit 1
+if [ "$failed" -ne 0 ]; then
+    echo "::error::Reword it, or add 'Release-note: <one plain sentence>' to that commit's message body and push. The PR body does not count: it is lost on squash."
+    exit 1
+fi
