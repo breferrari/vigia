@@ -497,7 +497,7 @@ The objection that ends it is that the dependency is **circular**. `render::gutt
 
 Measured 2026-09-09, [#474](https://github.com/breferrari/vigia/issues/474): the two agree wherever a bar is drawn and part by 2 below forty-four and 1 to seventy-nine wherever none is. The alternatives, and the 2026-08-10 deferral they answer, are on the issue.
 
-## 11.1 — the pulse mark names one file per burst
+## 11.1 — one pulse mark
 
 Ruled 2026-09-29, session ([#362](https://github.com/breferrari/vigia/issues/362)). Rejected: every path of the burst, since a 31-file write marked every row. Rejected: a cap, since it needs an *n* nobody chose.
 
