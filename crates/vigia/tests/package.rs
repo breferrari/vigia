@@ -2210,7 +2210,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// ends and what drift does to each, and the range the agent is sent.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
     ("SPEC.md", 405061),
-    ("RULINGS.md", 103216),
+    ("RULINGS.md", 97464),
     ("CLAUDE.md", 17255),
     (".claude/skills/take-next/SKILL.md", 20983),
 ];
