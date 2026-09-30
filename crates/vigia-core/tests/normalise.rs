@@ -673,3 +673,41 @@ fn status_follows_config() {
         "the running frame listed files under the config it was opened with"
     );
 }
+
+/// A reload that fails keeps the old config, and the caches built under it go
+/// when a later reload succeeds, though the config file itself did not move.
+#[test]
+fn failed_reload_retried() {
+    let scratch = one_line_changed("normalise-failed-reload");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let read = |frame: &mut Frame| {
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        let (_, diff) = frame.diff(at).expect("diff");
+        (diff.added, diff.removed)
+    };
+    let stale = read(&mut frame);
+
+    // An include git reads with the config, and nothing fingerprints.
+    std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
+    scratch.git(&["config", "core.autocrlf", "false"]);
+    scratch.git(&["config", "include.path", "extra"]);
+    assert_eq!(read(&mut frame), stale, "the reload was expected to fail");
+
+    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
+    let truth = read(&mut scratch.worktree().frame());
+    assert_ne!(
+        truth, stale,
+        "the control is wrong: the change has to move the diff"
+    );
+    assert_eq!(
+        read(&mut frame),
+        truth,
+        "a reload that succeeded on unchanged config prints kept the old diffs"
+    );
+}

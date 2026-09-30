@@ -358,7 +358,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
-            filter_sources: worktree.opened_prints(),
+            filter_sources: worktree.loaded_prints(),
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -387,8 +387,7 @@ impl<'w> Frame<'w> {
         // Before the walks, which read the config too. No settle check here: a new
         // repository's config is young for seconds. Missed: a same-length rewrite
         // inside one mtime granule.
-        let sources = self.worktree.filter_prints();
-        self.worktree.follow_config(sources);
+        self.worktree.follow_config(self.worktree.filter_prints());
 
         let options = ChangeOptions {
             hide: self.hide.as_ref(),
@@ -440,6 +439,9 @@ impl<'w> Frame<'w> {
             .copied()
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
+        // What the repository loaded, not what the files read: a reload that failed
+        // on a torn write has to evict when it succeeds, under the same prints.
+        let sources = self.worktree.loaded_prints();
         let sources_moved = sources != self.filter_sources;
         self.filter_sources = sources;
         if !provable || attributes != self.attributes || sources_moved {

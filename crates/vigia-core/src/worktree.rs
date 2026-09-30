@@ -42,9 +42,8 @@ pub struct Worktree {
     /// The repository as opened. Only the watcher reads it, because it borrows the
     /// repository for its whole life and a reload cannot swap it under that.
     opened: gix::Repository,
-    /// The repository under its current configuration, which every other reader
-    /// uses. A borrow of it must end before the method that took it returns, so
-    /// [`Self::follow_config`] never finds one held.
+    /// The repository under its current configuration, for every other reader.
+    /// A borrow must end inside the method that took it, or a reload panics.
     live: RefCell<gix::Repository>,
     workdir: PathBuf,
     /// The clean filter: built on the first working-tree read after each
@@ -53,9 +52,9 @@ pub struct Worktree {
     /// The files under the git dir that shape the clean filter: the
     /// configuration and `info/attributes`.
     filter_sources: [PathBuf; 2],
-    /// What [`Self::filter_sources`] looked like when the filter's repository
-    /// was last opened, so a frame built later can tell it is stale.
-    opened_prints: Cell<[Option<Fingerprint>; 2]>,
+    /// What [`Self::filter_sources`] looked like when `live` last loaded them, so
+    /// a frame can tell its caches are stale.
+    loaded_prints: Cell<[Option<Fingerprint>; 2]>,
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -82,10 +81,10 @@ impl Worktree {
             workdir,
             filter: RefCell::new(None),
             filter_sources,
-            opened_prints: Cell::new([None, None]),
+            loaded_prints: Cell::new([None, None]),
             deleted: Cell::new(false),
         };
-        worktree.opened_prints.set(worktree.filter_prints());
+        worktree.loaded_prints.set(worktree.filter_prints());
         Ok(worktree)
     }
 
@@ -217,10 +216,11 @@ impl Worktree {
 
     /// The index against `HEAD^{tree}`, collected.
     fn staged(&self, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
-        let tree = match self.repo().head_tree_id() {
+        let repo = self.repo();
+        let tree = match repo.head_tree_id() {
             Ok(id) => id.detach(),
             // Unborn, detached at nothing, or an unreadable `HEAD`.
-            Err(_) => self.repo().empty_tree().id().detach(),
+            Err(_) => repo.empty_tree().id().detach(),
         };
         self.against_index(tree, options)
     }
@@ -706,19 +706,19 @@ impl Worktree {
     /// loaded under. A config that does not parse, as one mid-write does, keeps
     /// the previous one and is tried again on the next tick.
     pub(crate) fn follow_config(&self, now: [Option<Fingerprint>; 2]) {
-        if now == self.opened_prints.get() {
+        if now == self.loaded_prints.get() {
             return;
         }
         let mut repo = self.repo().clone();
         if repo.reload().is_ok() {
             *self.live.borrow_mut() = repo;
-            self.opened_prints.set(now);
+            self.loaded_prints.set(now);
         }
     }
 
-    /// What the files that shape the filter looked like when it was last opened.
-    pub(crate) fn opened_prints(&self) -> [Option<Fingerprint>; 2] {
-        self.opened_prints.get()
+    /// What the files that shape the filter looked like when last loaded.
+    pub(crate) fn loaded_prints(&self) -> [Option<Fingerprint>; 2] {
+        self.loaded_prints.get()
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
