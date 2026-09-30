@@ -1300,8 +1300,8 @@ fn dump_base_version_current() {
     if !in_repository() {
         return;
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let lock = std::fs::read_to_string(root.join("Cargo.lock")).expect("read Cargo.lock");
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let lock = std::fs::read_to_string(manifest.join("../../Cargo.lock")).expect("read Cargo.lock");
     let locked = lock
         .split("[[package]]")
         .find(|entry| entry.contains("name = \"two-face\""))
@@ -1312,10 +1312,8 @@ fn dump_base_version_current() {
         })
         .map(|version| version.trim_matches('"').to_owned())
         .expect("two-face is in the lock file");
-    let notice = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/NOTICE.md"),
-    )
-    .expect("read NOTICE.md");
+    let notice =
+        std::fs::read_to_string(manifest.join("assets/NOTICE.md")).expect("read NOTICE.md");
     let recorded = notice
         .lines()
         .find_map(|line| line.strip_prefix("The base set is two-face `"))
