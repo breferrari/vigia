@@ -426,7 +426,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | A commit can describe a gate it deleted, and the suite stays green because a missing gate is what no gate can see | [#289](https://github.com/breferrari/vigia/issues/289) |
 | ✅ | `take-next` step 8 names a recurrence and prescribes a workaround, with no point at which the recurrence becomes a bug | [#290](https://github.com/breferrari/vigia/issues/290) |
 | ⬜ | The mutation harness is re-improvised every pass, and the same footgun has fired in four of them | [#299](https://github.com/breferrari/vigia/issues/299) |
-| ⬜ | A PR reached ready, mergeable and never checked, because the push and the ready raced | [#301](https://github.com/breferrari/vigia/issues/301) |
+| ✅ | A PR reached ready, mergeable and never checked, because the push and the ready raced | [#301](https://github.com/breferrari/vigia/issues/301) |
 | ✅ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
 | ✅ | The pre-flight read a truncated board and called it drift | [#369](https://github.com/breferrari/vigia/issues/369) |
 | ⬜ | The pre-flight's cheapest loop is its slowest | [#371](https://github.com/breferrari/vigia/issues/371) |
