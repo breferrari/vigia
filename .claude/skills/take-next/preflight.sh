@@ -125,30 +125,21 @@ done < "$tmp/issue-invariants.txt"
 [ "$found" -eq 0 ] && ok "no issue names a retired invariant"
 
 say "3. state — roadmap marks vs issue state:"
-found=0
-grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]' "$tmp/roadmap.md" | while IFS= read -r row; do
-  # The row's own issue is the one in its last cell, not the first link in it.
-  # Six rows cite a second issue in their task prose (`Revoked by`, `Closed by`,
-  # `Deferred by`), and reading the first link checked those rows against the
-  # wrong issue. Five of the six agreed by luck, both being closed; the sixth is
-  # a shelf row whose deferral cites a closed issue while its own is open, and
-  # that one reported drift on a roadmap that was correct.
-  n=$(printf '%s' "$row" | grep -oE '\[#[0-9]+\]' | tail -1 | tr -dc '0-9')
-  state=$(awk -F'\t' -v n="$n" '$1 == n { print $2 }' "$tmp/issues.tsv")
-  # A row citing an issue the board does not have used to `continue`, which is the
-  # same silence #369 was about and not the same cause: truncation is one way to
-  # get here, and a deleted issue, a transferred one and a mistyped `#N` are three
-  # more that no fetch size would fix. The board guard above cannot see any of
-  # them, because it counts what arrived rather than what was asked for.
-  if [ -z "$state" ]; then
-    printf '  DRIFT row cites #%s, which the tracker does not have\n' "$n"
-    continue
-  fi
-  case "$row" in
-    "| ✅"*) [ "$state" = "OPEN" ] && printf '  DRIFT row marked done, issue #%s is open\n' "$n" ;;
-    *)      [ "$state" = "CLOSED" ] && printf '  DRIFT row not marked done, issue #%s is closed\n' "$n" ;;
-  esac
-done > "$tmp/state.out"
+# One awk for every row, since a process per row is most of the run.
+grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]' "$tmp/roadmap.md" |
+awk -F'\t' '
+  FILENAME == ARGV[1] { state[$1] = $2; next }
+  {
+    # A row names its issue in its last cell. Six rows cite a second issue in
+    # their task prose (`Revoked by`, `Closed by`), so the first link is wrong.
+    match($0, /\[#[0-9]+\]$/)
+    n = substr($0, RSTART + 2, RLENGTH - 3)
+    # A deleted issue, a transferred one and a mistyped `#N` all land here, and
+    # the board guard above cannot see them: it counts what arrived.
+    if (!(n in state)) { printf "  DRIFT row cites #%s, which the tracker does not have\n", n; next }
+    if (index($0, "| ✅") == 1) { if (state[n] == "OPEN") printf "  DRIFT row marked done, issue #%s is open\n", n }
+    else if (state[n] == "CLOSED") printf "  DRIFT row not marked done, issue #%s is closed\n", n
+  }' "$tmp/issues.tsv" - > "$tmp/state.out"
 if [ -s "$tmp/state.out" ]; then cat "$tmp/state.out"; findings=$((findings + $(wc -l < "$tmp/state.out"))); else ok "every roadmap mark agrees with its issue"; fi
 
 say "4. unfiled — open issues with no milestone (invisible to step 1 forever):"
@@ -190,14 +181,20 @@ else
 fi
 
 say "7. missing row — issues the roadmap never mentions (the direction the 2026-08-03 sweep found four gaps in):"
-found=0
-cut -f1 "$tmp/issues.tsv" > "$tmp/nums.txt"
-while IFS= read -r n; do
-  if ! grep -qE "${B}#${n}${A}" "$tmp/roadmap.md"; then
-    title=$(awk -F'\t' -v n="$n" '$1 == n { print $4 }' "$tmp/issues.tsv")
-    hit "#$n has no roadmap mention: $title"; found=1
-  fi
-done < "$tmp/nums.txt"
-[ "$found" -eq 0 ] && ok "every issue has a roadmap mention"
+# Every `#N` the roadmap mentions, collected in one pass. A mention has no
+# letter or digit on either side. `grep -o` with boundary groups would consume
+# the separator and lose the second of `#1,#2`.
+awk -F'\t' '
+  FILENAME == ARGV[1] {
+    off = 0
+    while (match(substr($0, off + 1), /#[0-9]+/)) {
+      s = off + RSTART; e = s + RLENGTH
+      if (substr($0, s - 1, 1) !~ /[A-Za-z0-9]/ && substr($0, e, 1) !~ /[A-Za-z0-9]/) seen[substr($0, s + 1, RLENGTH - 1)] = 1
+      off = e - 1
+    }
+    next
+  }
+  !($1 in seen) { printf "  DRIFT #%s has no roadmap mention: %s\n", $1, $4 }' "$tmp/roadmap.md" "$tmp/issues.tsv" > "$tmp/missing.out"
+if [ -s "$tmp/missing.out" ]; then cat "$tmp/missing.out"; findings=$((findings + $(wc -l < "$tmp/missing.out"))); else ok "every issue has a roadmap mention"; fi
 
 if [ "$findings" -eq 0 ]; then say "pre-flight clean"; else say "$findings finding(s) — fix in this pass, not a note"; exit 1; fi
