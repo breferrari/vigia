@@ -2336,6 +2336,9 @@ pub fn note_cells(laid: &Regions, view: &View) -> Vec<NoteCells> {
 }
 
 /// Draw a whole screen: one header line, the body, and one or two footer lines.
+///
+/// Lays out for the part of `area` inside `buf`. [`regions`] takes no buffer,
+/// so a caller hit-testing this frame gives it that same rect.
 pub fn render(
     buf: &mut Buffer,
     area: Rect,
