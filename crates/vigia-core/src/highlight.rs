@@ -116,7 +116,7 @@ pub struct HighlightStats {
     pub bytes: u64,
     /// Hunks dropped because they left the viewport.
     pub evicted: u64,
-    /// Blocks quoted in a note's answer that were parsed. One per block per
+    /// Blocks quoted in a note's answer whose parse began. One per block per
     /// write, since the parse outlives every frame that draws the same text.
     pub quoted: u64,
     /// Lines of those blocks run through the parser, a subset of `lines`: a
@@ -293,13 +293,9 @@ pub struct Uncompiled {
     pub lines: Vec<String>,
 }
 
-/// One block quoted in a note's answer, parsed whole and kept between frames.
-///
-/// A hunk is parsed forward only and rewound, because it can be a thousand lines
-/// and one of them changes before every frame. A quote is neither: the agent
-/// writes an answer once and rewrites it whole, so the checkpoints and the
-/// rewind buy nothing and the block is parsed in one go the frame its content
-/// first appears.
+/// One block quoted in a note's answer, kept between frames and filled forward
+/// to the last line a frame draws, never rewound: the agent writes an answer
+/// once and rewrites it whole, so a hunk's checkpoints would buy nothing here.
 struct Quote {
     /// The note this block belongs to.
     id: String,
@@ -1143,10 +1139,8 @@ impl Pass<'_> {
         self.highlighter.quoted(id, ordinal, token, path, lines)
     }
 
-    /// [`Self::quoted`] as far as line `upto`: the block is parsed forward to
-    /// there and no further, so a frame drawing the top of a long answer parses
-    /// the lines it draws. What comes back covers the lines parsed so far, which
-    /// is at least `upto` of them.
+    /// [`Self::quoted`] as far as line `upto` and no further, so a frame parses
+    /// the lines it draws. What comes back covers at least those.
     pub fn quoted_to(
         &mut self,
         id: &str,

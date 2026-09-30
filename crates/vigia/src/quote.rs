@@ -226,31 +226,40 @@ pub fn code_row_count(lines: &[String], room: usize) -> usize {
     lines.iter().map(|line| 1 + cuts_of(line, room).len()).sum()
 }
 
-/// A quoted block's lines as rows of at most `room` columns, with `spans` from
-/// the grammar covering each line: the rows from the `skip`th, at most `take`
-/// of them, built from the first line that reaches the window and no earlier
-/// one. A line's spans are plain where `spans` stops short of it.
+/// One row of a quoted block before its runs are known: the line it is a piece
+/// of, the piece, and the columns a continuation stands in by.
+struct Piece {
+    line: usize,
+    range: Range<usize>,
+    indent: usize,
+}
+
+/// The rows a window of a quoted block draws, before their runs are known.
+pub struct Window {
+    pieces: Vec<Piece>,
+    /// Rows the walk passed, which is the block's whole count where the window
+    /// did not fill.
+    pub walked: usize,
+    /// Lines the window reaches, which is how far the grammar has to be asked.
+    pub end: usize,
+}
+
+/// The rows of a quoted block from the `skip`th, at most `take` of them, walked
+/// from the first line that reaches the window and no earlier one.
 #[must_use]
-pub fn code_rows_in(
-    lines: &[String],
-    spans: &[Vec<Span>],
-    room: usize,
-    skip: usize,
-    take: usize,
-) -> Vec<CodeRow> {
-    let mut out = Vec::new();
+pub fn code_window(lines: &[String], room: usize, skip: usize, take: usize) -> Window {
+    let mut pieces = Vec::new();
     let mut passed = 0usize;
     for (at, line) in lines.iter().enumerate() {
-        if out.len() >= take {
+        if pieces.len() >= take {
             break;
         }
         let cuts = cuts_of(line, room);
-        // Passed over whole, so its runs are never built.
+        // Passed over whole, so its indent is never measured.
         if passed + cuts.len() < skip {
             passed += cuts.len() + 1;
             continue;
         }
-        let runs = runs_of(spans.get(at).map_or(&[][..], Vec::as_slice), line.len());
         let indent = crate::render::indent_of(line, room);
         let mut start = 0usize;
         for cut in cuts.iter().copied().chain(std::iter::once(line.len())) {
@@ -259,47 +268,48 @@ pub fn code_rows_in(
                 start = cut;
                 continue;
             }
-            if out.len() >= take {
+            if pieces.len() >= take {
                 break;
             }
-            out.push(CodeRow {
-                text: line[start..cut].to_owned(),
-                runs: merged(rebase(&runs, &(start..cut))),
+            pieces.push(Piece {
+                line: at,
+                range: start..cut,
                 // Every row but the one the line starts on, which is what
                 // `start` already says.
                 indent: if start > 0 { indent } else { 0 },
             });
+            passed += 1;
             start = cut;
         }
     }
-    out
+    let end = pieces.last().map_or(0, |piece| piece.line + 1);
+    Window {
+        pieces,
+        walked: passed,
+        end,
+    }
 }
 
-/// The lines whose rows a window of [`code_rows_in`] draws, as `first..last`,
-/// or `None` where the window falls past the block.
+/// [`code_window`]'s rows with their runs from `spans`, plain where `spans`
+/// stops short of a line.
 #[must_use]
-pub fn code_lines_in(
-    lines: &[String],
-    room: usize,
-    skip: usize,
-    take: usize,
-) -> Option<Range<usize>> {
-    if take == 0 {
-        return None;
-    }
-    let mut passed = 0usize;
-    let mut first = None;
-    for (at, line) in lines.iter().enumerate() {
-        let rows = 1 + cuts_of(line, room).len();
-        if passed + rows > skip {
-            first.get_or_insert(at);
-        }
-        passed += rows;
-        if passed >= skip + take {
-            return first.map(|first| first..at + 1);
-        }
-    }
-    first.map(|first| first..lines.len())
+pub fn code_rows_of(lines: &[String], spans: &[Vec<Span>], window: Window) -> Vec<CodeRow> {
+    window
+        .pieces
+        .into_iter()
+        .map(|piece| {
+            let line = &lines[piece.line];
+            let runs = runs_of(
+                spans.get(piece.line).map_or(&[][..], Vec::as_slice),
+                line.len(),
+            );
+            CodeRow {
+                text: line[piece.range.clone()].to_owned(),
+                runs: merged(rebase(&runs, &piece.range)),
+                indent: piece.indent,
+            }
+        })
+        .collect()
 }
 
 /// One run per span, and the whole line plain where the highlighter gave none.

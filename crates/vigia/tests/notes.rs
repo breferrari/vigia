@@ -7383,22 +7383,6 @@ fn an_answer_with_carriage_returns_draws_no_stray_mark() {
     );
 }
 
-/// A note under the fixture's edited line, answered with `reply`.
-fn long_answered(reply: &str) -> vigia_core::Note {
-    vigia_core::Note {
-        id: "answered".to_owned(),
-        path: PATH.to_owned(),
-        side: Side::New,
-        line: 5,
-        text: EDITED.to_owned(),
-        first: None,
-        body: BODY.to_owned(),
-        status: Status::Seen,
-        reply: Some(reply.to_owned()),
-        written: std::time::SystemTime::now(),
-    }
-}
-
 /// The ordinary pane's body for one file.
 fn one_file_screen(app: &App) -> vigia::Body {
     body_layout(
@@ -7432,7 +7416,12 @@ fn an_answer_parses_what_it_draws() {
     let rows = screen.diff as u64;
 
     let block = support::generated(2_000, "quoted");
-    app.set_notes(vec![long_answered(&format!("```rust\n{block}```"))]);
+    app.set_notes(vec![left_as(
+        "answered",
+        BODY,
+        Status::Seen,
+        Some(&format!("```rust\n{block}```")),
+    )]);
 
     let before = highlighter.stats().quoted_lines;
     let view = app
@@ -7490,7 +7479,12 @@ fn note_rows_follow_the_window() {
     let screen = one_file_screen(&app);
     let height = screen.diff;
 
-    app.set_notes(vec![long_answered(&support::generated(10_000, "prose"))]);
+    app.set_notes(vec![left_as(
+        "answered",
+        BODY,
+        Status::Seen,
+        Some(&support::generated(10_000, "prose")),
+    )]);
     let view = app
         .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");

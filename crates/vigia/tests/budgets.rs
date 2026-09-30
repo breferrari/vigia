@@ -101,6 +101,22 @@ fn body(app: &App, files: usize) -> usize {
     layout(app, files).diff
 }
 
+/// Note rows on the screen carrying a class the grammar gave them. A run the
+/// grammar never coloured is still a run, so this asks for a class it had to
+/// produce: a pane of blocks drawn plain would satisfy a gate named for what
+/// quoting costs.
+fn coloured_note_rows(view: &View) -> usize {
+    view.rows
+        .iter()
+        .filter(|row| {
+            matches!(row, Row::Note { runs, .. }
+                if runs
+                    .iter()
+                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
+        })
+        .count()
+}
+
 /// One frame of the shell, timed whole: diff, collect, paint.
 fn shell_frame(
     frame: &mut Frame,
@@ -3046,16 +3062,7 @@ fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
     // A run the grammar never coloured is still a run, so this asks for a class
     // the grammar had to produce: a pane of blocks drawn plain would satisfy a
     // gate named for what quoting costs.
-    let coloured = view
-        .rows
-        .iter()
-        .filter(|row| {
-            matches!(row, Row::Note { runs, .. }
-                if runs
-                    .iter()
-                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
-        })
-        .count();
+    let coloured = coloured_note_rows(&view);
     assert!(
         coloured >= 20,
         "{coloured} rows on the timed screen carry a class the grammar gave \
@@ -3095,8 +3102,8 @@ const ARRIVING_LINES: usize = 2_000;
 /// so every sample is an arrival, each answer differing from the last in a line
 /// the window never reaches.
 struct Arrival {
-    fenced: Samples,
-    prose: Samples,
+    /// The fenced and the prose arm, where the pane was timed.
+    timed: Option<(Samples, Samples)>,
     /// Lines of the block one screen parsed, against the rows it has.
     parsed: u64,
     rows: usize,
@@ -3104,7 +3111,7 @@ struct Arrival {
     coloured: usize,
 }
 
-fn arrival_on(name: &str, pane: Rect) -> Arrival {
+fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
     let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -3171,37 +3178,40 @@ fn arrival_on(name: &str, pane: Rect) -> Arrival {
         })
     };
 
-    for _ in 0..WARMUP_FRAMES {
-        for fenced in [true, false] {
-            next_frame(
-                &mut frame,
-                &mut app,
-                &mut highlighter,
-                &mut warm,
-                &mut history,
-                fenced,
-            );
-        }
-    }
-    let (mut fenced_frames, mut prose_frames) =
-        (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
-    for _ in 0..SAMPLED_FRAMES {
-        for fenced in [true, false] {
-            let (wall, _) = next_frame(
-                &mut frame,
-                &mut app,
-                &mut highlighter,
-                &mut warm,
-                &mut history,
-                fenced,
-            );
-            if fenced {
-                fenced_frames.push(wall);
-            } else {
-                prose_frames.push(wall);
+    let samples = timed.then(|| {
+        for _ in 0..WARMUP_FRAMES {
+            for fenced in [true, false] {
+                next_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &mut warm,
+                    &mut history,
+                    fenced,
+                );
             }
         }
-    }
+        let (mut fenced_frames, mut prose_frames) =
+            (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
+        for _ in 0..SAMPLED_FRAMES {
+            for fenced in [true, false] {
+                let (wall, _) = next_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &mut warm,
+                    &mut history,
+                    fenced,
+                );
+                if fenced {
+                    fenced_frames.push(wall);
+                } else {
+                    prose_frames.push(wall);
+                }
+            }
+        }
+        (fenced_frames, prose_frames)
+    });
 
     // One more arrival, read rather than timed: what it parsed and what it drew.
     let before = warm.stats().quoted_lines;
@@ -3210,19 +3220,9 @@ fn arrival_on(name: &str, pane: Rect) -> Arrival {
         .view(&mut frame, &mut warm, &history, screen)
         .expect("view");
     let parsed = warm.stats().quoted_lines - before;
-    let coloured = view
-        .rows
-        .iter()
-        .filter(|row| {
-            matches!(row, Row::Note { runs, .. }
-                if runs
-                    .iter()
-                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
-        })
-        .count();
+    let coloured = coloured_note_rows(&view);
     Arrival {
-        fenced: fenced_frames,
-        prose: prose_frames,
+        timed: samples,
         parsed,
         rows: screen.diff,
         coloured,
@@ -3232,8 +3232,8 @@ fn arrival_on(name: &str, pane: Rect) -> Arrival {
 /// I9 on the frame a long fenced answer arrives, timed on the ordinary pane and
 /// read on the tall one: on either, the block is parsed no further than the
 /// rows drawn. The tall pane's window is a hundred-odd lines of grammar on top
-/// of its frame, which is the first-touch cost §7 leaves outside I9, so it is
-/// recorded rather than budgeted.
+/// of its frame, a first touch the spec leaves outside the steady budget, so it
+/// is recorded rather than budgeted.
 #[test]
 fn an_arriving_answer_holds_the_frame_budget() {
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
@@ -3241,27 +3241,31 @@ fn an_arriving_answer_holds_the_frame_budget() {
     }
     let _timed = exclusively_timed();
 
-    let ordinary = arrival_on("notes-arriving", area());
-    let tall = arrival_on("notes-arriving-tall", NOTED_PANE);
+    let ordinary = arrival_on("notes-arriving", area(), true);
+    let tall = arrival_on("notes-arriving-tall", NOTED_PANE, false);
+    let (fenced, prose) = ordinary
+        .timed
+        .as_ref()
+        .expect("the ordinary pane was timed");
+    let prose_p50 = prose.percentile(0.5).expect("a sampled frame");
+    println!(
+        "arriving on the ordinary {}x{} pane: frame p50 {:?} with a {ARRIVING_LINES}-line \
+         answer fenced, {prose_p50:?} with the same bytes as prose",
+        area().width,
+        area().height,
+        fenced.percentile(0.5).expect("a sampled frame"),
+    );
 
-    for (name, pane, arrival) in [("ordinary", area(), &ordinary), ("tall", NOTED_PANE, &tall)] {
+    for (name, arrival) in [("ordinary", &ordinary), ("tall", &tall)] {
         println!(
-            "arriving on the {name} {}x{} pane: frame p50 {:?} with a {ARRIVING_LINES}-line \
-             answer fenced, {:?} with the same bytes as prose; the screen parsed {} lines \
-             for {} rows",
-            pane.width,
-            pane.height,
-            arrival.fenced.percentile(0.5).expect("a sampled frame"),
-            arrival.prose.percentile(0.5).expect("a sampled frame"),
-            arrival.parsed,
-            arrival.rows
+            "the {name} pane parsed {} lines of the block for {} rows",
+            arrival.parsed, arrival.rows
         );
-        // Non-vacuity: the screen drew the block, in colour. Every line of the
-        // block is a `fn`, so every parsed line drew a class.
+        // Every line of the block is a `fn`, so every parsed line drew a class.
         assert!(
             arrival.coloured as u64 >= arrival.parsed,
             "{} rows on the {name} pane carry a class the grammar gave them for {} \
-             lines parsed, so this gate timed a screen whose answer was not highlighted",
+             lines parsed, so this gate read a screen whose answer was not highlighted",
             arrival.coloured,
             arrival.parsed
         );
@@ -3278,13 +3282,17 @@ fn an_arriving_answer_holds_the_frame_budget() {
         );
     }
 
-    let prose_p50 = ordinary.prose.percentile(0.5).expect("a sampled frame");
     holds_p99_rounds(
         "I9: the frame a long fenced answer arrives on",
         budget(I9_FRAME),
-        &ordinary.fenced,
+        fenced,
         || format!("(prose p50 {prose_p50:?})"),
         // A second round is a second rig, built whole.
-        || (arrival_on("notes-arriving-again", area()).fenced, None),
+        || {
+            let (fenced, _) = arrival_on("notes-arriving-again", area(), true)
+                .timed
+                .expect("the pane was timed");
+            (fenced, None)
+        },
     );
 }
