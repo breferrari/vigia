@@ -46,11 +46,8 @@ const test = () => spawnSync(command.join(" "), { shell, encoding: "utf8", maxBu
 // command that never ran is one of those.
 const baseline = test();
 if (baseline.status !== 0) {
-	const said = `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`.trim().split("
-").slice(-20).join("
-");
-	abort(`the test command is red on the unmutated tree:
-${said}`);
+	const said = `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`.trim().split("\n").slice(-20).join("\n");
+	abort(`the test command is red on the unmutated tree:\n${said}`);
 }
 
 let restore = null;
