@@ -404,7 +404,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | The workflow gates read text, and text has more spellings than the mechanism | [#145](https://github.com/breferrari/vigia/issues/145) |
 | ✅ | decision: a bonus hint rung is never worth a row, and nobody ruled whether it is worth a readout | [#147](https://github.com/breferrari/vigia/issues/147) |
 | ✅ | Pointer motion draws a full frame, and I1's letter says it should not | [#154](https://github.com/breferrari/vigia/issues/154) |
-| ⬜ | §5.1 says the deliberate departures are two, and enumerates four | [#156](https://github.com/breferrari/vigia/issues/156) |
+| ✅ | §5.1 says the deliberate departures are two, and enumerates four | [#156](https://github.com/breferrari/vigia/issues/156) |
 | ✅ | The absolute frame budgets flake on shared runners, and the failure reads as a regression | [#178](https://github.com/breferrari/vigia/issues/178) |
 | ⬜ | Under a default tmux, a non-active pane may get no mouse events at all | [#188](https://github.com/breferrari/vigia/issues/188) |
 | ✅ | `App::chrome` takes four pointer marks positionally, and every new mark churns thirty call sites | [#191](https://github.com/breferrari/vigia/issues/191) |
@@ -518,7 +518,6 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | An agent's write is how the grammar compile arrives ([#129](https://github.com/breferrari/vigia/issues/129)) | #72, 2026-08-07 | Phase 8 | This repository's first finding from a *worktree* rather than from a fixture. It is a shape `SPEC.md` §10 already knew about, arriving by a route nobody wrote down. §10 lists the ways a reader meets a cold grammar parse and every one is a key they pressed: `G`, a follow jump, scrolling up. |
 | No seam between this crate and `gix` ([#74](https://github.com/breferrari/vigia/issues/74)) | Craft review, 2026-07-31 | Phase 5 | The status walk, rename tracking, the attributes stack and the filter machinery are consumed directly and widely. So §3's budgets are a **transitive** property of a pre-1.0 dependency's implementation. |
 | Pointer motion draws a full frame ([#154](https://github.com/breferrari/vigia/issues/154)) | I1, 2026-08-15 | Phase 8 | Found while ruling [#123](https://github.com/breferrari/vigia/issues/123), which changes no source: this has been true since the mouse landed in Phase 2. |
-| §5.1's departure count contradicts itself ([#156](https://github.com/breferrari/vigia/issues/156)) | §5.1, 2026-08-15 | Phase 8 | Found while ruling [#124](https://github.com/breferrari/vigia/issues/124), which had to say whether a speaking rule, if added, is a *fifth* departure and was unable to say. §5.1 numbers a first, a second, a third and a fourth. Two other sentences still say the total is **two**: the header row's "first of two deliberate departures" and §11.1's "the deliberate departures stay at two". |
 
 ### A deferral reason is a dated claim like any other
 
@@ -548,6 +547,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | The bump cannot move a protected `main` ([#143](https://github.com/breferrari/vigia/issues/143)) | Out of the Shelf, 2026-08-11 | Release infrastructure, so the Shelf is where it belongs by the rule that instrument findings wait for a product pass to be blocked by one. This is that rule applying, not an exception to it: the release button's first real run was unable to move `main` at all, so nothing shippable was able to ship until it was fixed. Taken mid-pass, ahead of Phase 8's [#121](https://github.com/breferrari/vigia/issues/121), which is untouched and still next |
 | A release that removes a key can be filed as internal ([#467](https://github.com/breferrari/vigia/issues/467)) | Out of the Shelf, 2026-09-09 | Shelved the day it was found, as instrument work with no product pass blocked by it. Taken because the deferral's own reason was measured and did not survive it: the word that emptied 0.42.0 emptied three release ranges in fifty-five, two of the three wrongly, and a fourth release lost a key's line out of a section that was never empty. A filter nobody can see failing does not wait for a pass to be blocked by it. |
 | `G` leaves the pane short, and the first scroll yanks it back ([#62](https://github.com/breferrari/vigia/issues/62)) | Off the Shelf, 2026-09-29 | Phase 8 had nothing left to take: #332 is blocked on crossterm. The reason it was shelved (a `G` rework that reverses §11.1) did not apply, because holding a step down at the end fixes the jolt with `G` unchanged |
+| §5.1's departure count contradicts itself ([#156](https://github.com/breferrari/vigia/issues/156)) | Off the Shelf, 2026-09-30 | Shelf triage: the ledger names one open departure, and three sentences elsewhere still counted two or three. |
 
 ---
 
