@@ -6,8 +6,8 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    Scratch, absolute_gates_apply, budget, delta, highlight_delta, highlight_window, holds_p99,
-    holds_p99_rounds, materialise, settle, time, time_cpu,
+    CLOCK_TICK, Scratch, absolute_gates_apply, budget, delta, highlight_delta, highlight_window,
+    holds_p99, holds_p99_rounds, materialise, settle, time, time_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -986,7 +986,7 @@ fn the_cpu_clock_tells_waiting_from_working() {
     // since load can only push CPU time down and its bound is an upper one.
     // `GetThreadTimes` counts in scheduler ticks, the coarsest thread clock
     // here. Eight of them keep one lost tick to an eighth of the window.
-    let quantum = Duration::from_micros(15_625);
+    let quantum = CLOCK_TICK;
     let busy = quantum * 8;
     let mut best = Duration::ZERO;
     let mut wall = Duration::ZERO;
@@ -1107,64 +1107,63 @@ fn the_excess_a_round_spends_over_budget_counts_only_the_samples_that_exceeded_i
     );
 }
 
-/// `fast` samples at 5ms wall and 4.9ms CPU, then `slow` of pure work at `ms`.
-fn tail_of_work(fast: usize, slow: usize, ms: u64) -> (Samples, Option<Samples>) {
-    let (mut wall, mut cpu) = (Samples::new(fast + slow), Samples::new(fast + slow));
-    for _ in 0..fast {
-        wall.push(Duration::from_millis(5));
-        cpu.push(Duration::from_micros(4_900));
-    }
-    for _ in 0..slow {
-        wall.push(Duration::from_millis(ms));
-        cpu.push(Duration::from_millis(ms));
+/// A round of `fast` then `slow` samples, each `(count, wall, cpu)` in
+/// microseconds.
+fn round_of(fast: (usize, u64, u64), slow: (usize, u64, u64)) -> (Samples, Option<Samples>) {
+    let n = fast.0 + slow.0;
+    let (mut wall, mut cpu) = (Samples::new(n), Samples::new(n));
+    for (count, w, c) in [fast, slow] {
+        for _ in 0..count {
+            wall.push(Duration::from_micros(w));
+            cpu.push(Duration::from_micros(c));
+        }
     }
     (wall, Some(cpu))
 }
 
-#[test]
-#[should_panic(expected = "cannot attribute")]
-fn short_tail_after_fast_frames_fails() {
-    // 247 fast frames bank 24.7ms of off-CPU noise, which would pay for the 24ms
-    // three frames of work spend over budget.
-    let (first, _) = tail_of_work(247, 3, 18);
+/// [`holds_p99_rounds`] over the same round twice.
+fn attributes(budget_ms: u64, fast: (usize, u64, u64), slow: (usize, u64, u64)) {
+    let (first, _) = round_of(fast, slow);
     holds_p99_rounds(
-        "three frames of work after fast ones",
-        Duration::from_millis(10),
+        "a fixture round",
+        Duration::from_millis(budget_ms),
         &first,
         String::new,
-        || tail_of_work(247, 3, 18),
+        || round_of(fast, slow),
     );
 }
 
 #[test]
 #[should_panic(expected = "cannot attribute")]
-fn short_tail_under_quantum_fails() {
-    // Three 20ms frames of work, each read as one 15.625ms tick: 13.1ms of
-    // deficit against 12ms over, so the clock's rounding would acquit the work.
-    let round = || {
-        let (mut wall, mut cpu) = (Samples::new(100), Samples::new(100));
-        for _ in 0..97 {
-            wall.push(Duration::from_millis(15));
-            cpu.push(Duration::from_millis(15));
-        }
-        for _ in 0..3 {
-            wall.push(Duration::from_millis(20));
-            cpu.push(Duration::from_micros(15_625));
-        }
-        (wall, Some(cpu))
-    };
-    let (first, _) = round();
-    holds_p99_rounds(
-        "three frames of work under a coarse clock",
-        Duration::from_millis(16),
-        &first,
-        String::new,
-        round,
+fn short_tail_fails() {
+    // 247 fast frames bank 24.7ms of off-CPU noise, which would pay for the
+    // 24ms three frames of work spend over budget.
+    attributes(10, (247, 5_000, 4_900), (3, 18_000, 18_000));
+}
+
+#[test]
+#[should_panic(expected = "cannot attribute")]
+fn coarse_clock_fails() {
+    // Three 20ms frames of work, each read as one tick: 13.1ms of deficit
+    // against 12ms over, so the clock's rounding would acquit the work.
+    let tick = CLOCK_TICK.as_micros() as u64;
+    attributes(16, (97, 15_000, 15_000), (3, 20_000, tick));
+}
+
+#[test]
+fn floor_edge() {
+    // At the floor the clock decides, and a round spent off-CPU is acquitted.
+    let floor = (CLOCK_TICK * 20).as_micros() as u64;
+    attributes(10, (0, 0, 0), (1, floor, 1_000));
+    let under = std::panic::catch_unwind(|| attributes(10, (0, 0, 0), (1, floor - 1, 1_000)));
+    assert!(
+        under.is_err(),
+        "a breach one microsecond under the floor was attributed"
     );
 }
 
 #[test]
-fn wall_over_sums_breaching_samples() {
+fn wall_over_sums() {
     let budget = Duration::from_millis(10);
     assert_eq!(
         flat(100, 10).wall_over(budget),

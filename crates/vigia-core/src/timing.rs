@@ -111,6 +111,6 @@ impl Samples {
         self.values[..self.len()]
             .iter()
             .filter(|each| **each > budget)
-            .fold(Duration::ZERO, |sum, each| sum.saturating_add(*each))
+            .sum()
     }
 }

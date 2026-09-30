@@ -144,10 +144,11 @@ pub fn holds_p99(
 
 /// The coarsest thread clock a tier has: `GetThreadTimes` counts in scheduler
 /// ticks.
-const CLOCK_TICK: Duration = Duration::from_micros(15_625);
+pub const CLOCK_TICK: Duration = Duration::from_micros(15_625);
 
 /// Breaching wall time below which a CPU clock cannot tell the host from the
-/// work: twenty ticks keep one tick's rounding to a twentieth.
+/// work. The coarsest tick on every platform, because below it the fast frames'
+/// off-CPU noise can pay for a short tail of work on any clock.
 const ATTRIBUTION_FLOOR: Duration = CLOCK_TICK.saturating_mul(20);
 
 /// [`holds_p99`] where a round is produced whole rather than a sample at a time.
@@ -180,8 +181,7 @@ pub fn holds_p99_rounds(
     // *consistent with* a stall and does not establish one; thread CPU time
     // establishes it, because no amount of host contention inflates work done.
     if let Some(cpu) = cpu.as_ref() {
-        // A breach too short for the clock to resolve cannot be the host's, for
-        // the reason a missing clock cannot: failing closed is the safe direction.
+        // Fails closed: under the floor, rounding or noise can pay for real work.
         let breaching = again.wall_over(budget);
         if breaching < ATTRIBUTION_FLOOR {
             panic!(
