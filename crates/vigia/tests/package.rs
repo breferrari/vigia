@@ -273,7 +273,7 @@ fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
     let header = format!("- name: {name}");
     let at = bump
         .find(&header)
-        .unwrap_or_else(|| panic!("bump.yml has no step named `{name}`"));
+        .unwrap_or_else(|| panic!("the workflow has no step named `{name}`"));
     let rest = &bump[at + header.len()..];
     rest.find("\n      - ").map_or(rest, |end| &rest[..end])
 }
@@ -1789,12 +1789,20 @@ fn changelog_entry(
         .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
-    child
+    // A script that exits before reading everything closes the pipe first; its
+    // exit status and output are what the cases judge.
+    if let Err(e) = child
         .stdin
         .take()
         .expect("the child's stdin is a pipe")
         .write_all(subjects.as_bytes())
-        .expect("the subjects reach the script");
+    {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "the subjects reach the script: {e}"
+        );
+    }
     let out = child.wait_with_output().expect("the script exits");
 
     let left = read(&path);
@@ -2979,5 +2987,18 @@ fn ci_runs_cited_gates() {
         lint.contains("sh .github/scripts/cited-gates.sh")
             && lint.contains("github.event.pull_request.body"),
         "the lint job does not run cited-gates.sh with the PR body:\n{lint}"
+    );
+}
+
+/// The lint job's one network download retries, so a release CDN that answers
+/// 500 once does not turn `main` red.
+#[test]
+fn dist_install_retries() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = step_block(&ci, "the generated release workflow is current");
+    assert!(
+        step.contains("for attempt in") && step.contains("break") && step.contains("|| exit 1"),
+        "the cargo-dist install does not retry and then fail, so one bad download \
+         either fails the build or is swallowed:\n{step}"
     );
 }

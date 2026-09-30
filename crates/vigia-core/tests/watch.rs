@@ -114,6 +114,7 @@ fn a_burst_of_writes_becomes_one_tick() {
     // The burst directory has to exist, and be watched, before the burst lands in it.
     scratch.write("burst/.keep", "\n");
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     // A wide quiet window so the whole burst lands inside it even on a loaded
     // machine. The coalescing mechanism is under test, not the default timing.
@@ -146,6 +147,7 @@ fn a_tick_names_the_file_whose_write_landed_last() {
     scratch.write("a.txt", "x\n");
     scratch.write("b.txt", "x\n");
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     // Both files sit at the worktree root, which exists when the watch is
     // armed. `a_burst_of_writes_becomes_one_tick` explains why that matters:
@@ -183,6 +185,7 @@ fn nested_write_is_newest() {
 ",
     );
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     let options = WatchOptions {
         quiet: ORDERING_QUIET,
@@ -219,6 +222,7 @@ fn a_rename_is_followed_to_where_the_file_now_is() {
     let scratch = Scratch::new("watch-rename");
     scratch.write("before.txt", "x\n");
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     let options = WatchOptions {
         quiet: ORDERING_QUIET,
@@ -722,8 +726,8 @@ fn hidden_write_sleeps() {
     scratch.write("gen/out.txt", "x\n");
     scratch.write("src/a.rs", "x\n");
     scratch.commit_all("initial");
-    // The setup's own `.git` writes must land before the watch arms, or a late
-    // one reads here as a hidden write waking it.
+    // Late setup writes under `.git` would read here as a hidden write waking
+    // the watch. Settling narrows that race; it cannot see the event queue.
     let scratch = scratch.settled();
     let worktree = scratch.worktree();
     let options = WatchOptions {
@@ -753,6 +757,7 @@ fn slash_file_wakes() {
     let scratch = Scratch::new("watch-slash-file");
     scratch.write("build", "x\n");
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     let options = WatchOptions {
         quiet: ORDERING_QUIET,
