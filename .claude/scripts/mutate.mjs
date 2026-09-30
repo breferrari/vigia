@@ -76,7 +76,8 @@ for (const m of battery) {
 		restore = null;
 	}
 	if (hash(readFileSync(m.file)) !== before) abort(`${m.name}: ${m.file} did not come back byte for byte`);
-	if (dirty()) abort(`${m.name}: the tree is not clean after the restore:\n${dirty()}`);
+	const left = dirty();
+	if (left) abort(`${m.name}: the tree is not clean after the restore:\n${left}`);
 
 	const output = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
 	const failed = [...output.matchAll(/^test (\S+) \.\.\. FAILED/gm)].map((hit) => hit[1]);
