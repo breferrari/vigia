@@ -550,7 +550,13 @@ impl Worktree {
     ///
     /// The filesystem watcher cannot be armed on this worktree.
     pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
-        Watcher::new(&self.repo(), &self.workdir, options)
+        Watcher::new(
+            &self.repo(),
+            &self.filter_sources[0],
+            self.loaded_config.get(),
+            &self.workdir,
+            options,
+        )
     }
 
     /// Start a frame over this working tree.

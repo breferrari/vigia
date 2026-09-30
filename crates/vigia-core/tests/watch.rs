@@ -902,9 +902,14 @@ fn excludes_before_watch() {
         tick_within(&mut watcher, IDLE).is_none(),
         "a config written before the watch armed was never loaded"
     );
+    scratch.write("a.txt", "changed\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the watch was not live, so the quiet above proves nothing"
+    );
 }
 
-/// A config that fails to load is tried again on the next path judged, without
+/// A config that fails to load is tried again on the next tick, without
 /// another config write.
 #[test]
 fn failed_excludes_retried() {
@@ -933,6 +938,29 @@ fn failed_excludes_retried() {
     scratch.write("vigia-excluded/b.o", "x\n");
     assert!(
         tick_within(&mut watcher, IDLE).is_none(),
-        "a failed reload was not tried again on the next path"
+        "a failed reload was not tried again on the next tick"
+    );
+    scratch.write("a.txt", "changed\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the watch was not live, so the quiet above proves nothing"
+    );
+}
+
+/// A linked worktree's `info/attributes` lives in the common dir, outside its
+/// tree, and a write to it still wakes the pane.
+#[test]
+fn linked_info_attributes_ticks() {
+    let scratch = linked_scratch("watch-linked-info");
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    let scratch = scratch.settled();
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
+        .expect("write attributes");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an info/attributes write in the common dir produced no tick"
     );
 }

@@ -154,6 +154,9 @@ pub struct Watcher<'repo> {
     /// Set by a config event, and at start so a write before the watch armed is
     /// not missed. The next path judged reloads.
     reload_due: bool,
+    /// Whether this tick has tried, so a config that keeps failing costs one
+    /// reload a tick rather than one a path.
+    reload_tried: bool,
     /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
@@ -173,8 +176,12 @@ pub struct Watcher<'repo> {
 }
 
 impl<'repo> Watcher<'repo> {
+    /// `loaded_config` is the config's fingerprint when `repo` loaded it, or
+    /// `None` when unknown, which reloads on the first path judged.
     pub(crate) fn new(
         repo: &gix::Repository,
+        config: &Path,
+        loaded_config: Option<Fingerprint>,
         workdir: &Path,
         options: WatchOptions,
     ) -> Result<Self> {
@@ -234,6 +241,13 @@ impl<'repo> Watcher<'repo> {
                     .watch(&heads, RecursiveMode::Recursive)
                     .map_err(|e| Error::Watch(Box::new(e)))?;
             }
+            // For `info/attributes`, which a non-recursive watch above cannot see.
+            let info = dir.join("info");
+            if info.is_dir() {
+                backend
+                    .watch(&info, RecursiveMode::NonRecursive)
+                    .map_err(|e| Error::Watch(Box::new(e)))?;
+            }
         }
 
         Ok(Self {
@@ -242,9 +256,10 @@ impl<'repo> Watcher<'repo> {
             _backend: backend,
             repo: repo.clone(),
             excludes,
-            config: repo.common_dir().join("config"),
-            loaded_config: None,
+            config: config.to_path_buf(),
+            loaded_config,
             reload_due: true,
+            reload_tried: false,
             _worktree: PhantomData,
             roots,
             git_dir,
@@ -282,6 +297,7 @@ impl<'repo> Watcher<'repo> {
 
     /// Block until the working tree changes, then return one coalesced tick.
     pub fn next_tick(&mut self) -> Option<Tick> {
+        self.reload_tried = false;
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
@@ -376,8 +392,8 @@ impl<'repo> Watcher<'repo> {
             return watched.then_some((Path::new(".git"), false));
         }
         if let Some(inside) = within(&self.common_dir, path) {
-            // The refs and the files that shape the filter: other worktrees' index
-            // and `HEAD` are here too.
+            // Other worktrees' index and `HEAD` live here too, so only the refs and
+            // the files that shape the filter are taken.
             let shared = inside.starts_with("refs")
                 || inside.starts_with("info")
                 || inside == Path::new("packed-refs")
@@ -426,8 +442,12 @@ impl<'repo> Watcher<'repo> {
 
     /// Reload the config and the rules it names, such as `core.excludesFile`, as
     /// [`Worktree`](crate::Worktree) reloads its own. One that does not load keeps
-    /// the rules from before it, and the next path judged tries again.
+    /// the rules from before it, and the next tick tries again.
     fn reload_excludes(&mut self) {
+        if self.reload_tried {
+            return;
+        }
+        self.reload_tried = true;
         let now = fingerprint(&self.config);
         if now == self.loaded_config {
             self.reload_due = false;
