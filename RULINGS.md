@@ -185,6 +185,18 @@ The middle column **is** the floor. One real sibling pays the compile in full. T
 >
 > **Fixed 2026-09-04 ([#412](https://github.com/breferrari/vigia/issues/412)), which makes the line above false.** Every fresh diff now puts its height beside it, and the walk asks only the span, with one stat. A print that moved inside the settle margin keeps its height until the file settles, and the walk reads it once then. Re-reading inside the margin was #84's 20.71ms breach of I9. So the in-margin re-measure above became a deferral: one stat per file per tick, and one read when the file settles. That frame is asserted against I9.
 
+## I4 — a note's rows and a quoted block's parse follow the window, 2026-09-30
+
+Before [#530](https://github.com/breferrari/vigia/issues/530), `Pin::rows` built every row of every note twice a frame, once for the clamp's count and once to emit, and `answer_of` parsed every line of a fenced block on the frame the answer arrived. Measured in release on the note rig on 2026-09-12: a 2,000-line fenced answer cost 160.5ms on its arrival frame against 13.2ms as prose, and 10,000 lines cost 757.2ms. The steady frame held (12.557ms fenced against 12.483ms prose for twenty four-line answers), which is why the row sat on the Shelf as "paid once".
+
+The mechanism: a note is one list of sections (`Pin::sections`) that the count sums and the build walks, so the clamp's exact count and the emitted rows cannot differ, and a unit test (`view::tests::count_matches_build`) holds every shape, width and window to that. The window functions report the rows they walked, so a part is not counted before it is built. A quoted block keeps its parser position (`Quote::parse`) and `Pass::quoted_to` fills it forward to the last line the window reaches; `HighlightStats::quoted_lines` counts the lines parsed. `View::built` counts the note rows a screen built.
+
+Measured on the branch, release, with `arrival_holds_the_budget`: the 80x160 pane's fenced arrival went from **119.98ms p50 on `main` to 18.69ms**, against 13.14ms for the same bytes as prose, and it parsed 110 lines for 115 rows; the 80x24 pane reads **7.90ms fenced against 7.55ms prose**, 8 lines parsed for 13 rows. The tall pane's remainder is its window, a hundred-odd lines of grammar on top of a 13ms frame, so the gate times the ordinary pane and reads the tall one. The steady quoted gate moved from 12.557ms to 12.52ms fenced.
+
+Three alternatives were rejected. A lazy clamp that never needs an exact count: the bottom clamp computes `dropped = total - height` and a box pulls the window by row sums, so the count must be exact, and only the build can be windowed. Parsing at placement with a line bound from the layout: placement runs before the clamp decides the window, so the bound would be circular; the rows the clamp keeps are the only position that knows it. Sharing the hunk's `Entry::fill_to`: a hunk has checkpoints, a rewind and three parse states because a line of it changes before every frame; a quote has one `Side` and is replaced whole on rewrite, so the ten-line fill loop is the only shape shared and a shared type would carry the hunk's machinery for nothing.
+
+Left as it is: the bottom clamp on an answer taller than the pane parses to the last drawn row, which is the whole block, once, the same first touch the #51 bullet records for `G` into a hunk. The count walk is a width scan of the whole answer per frame, twice at most; `prose_pieces` rescans a paragraph's remainder per piece, which a 100 KB single line would feel, and which predates this change.
+
 ## I2 — why it is two numbers
 
 > [!NOTE]
