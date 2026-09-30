@@ -117,8 +117,8 @@ pub struct HighlightStats {
     /// Hunks dropped because they left the viewport.
     pub evicted: u64,
     /// Blocks quoted in a note's answer whose parse began. One per block per
-    /// write while the note's file is drawn, since the parse outlives every
-    /// frame that asks for it.
+    /// write while the note's line is on the pane, since the parse outlives
+    /// every frame that asks for it.
     pub quoted: u64,
     /// Lines of those blocks run through the parser, a subset of `lines`: a
     /// block is parsed as far as the last line a frame draws.
@@ -946,6 +946,39 @@ impl Highlighter {
         self.quoted_to(id, ordinal, token, path, lines, lines.len())
     }
 
+    /// Keeps a block's parse without asking for a line: its entry is marked live
+    /// where one exists, its demand renewed where its grammar is still
+    /// uncompiled, and an entry started where there is none. No digest, so a
+    /// block behind the window costs the frame a lookup.
+    fn hold(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+    ) {
+        let Some(at) = self
+            .quotes
+            .iter()
+            .position(|quote| quote.ordinal == ordinal && quote.id == id)
+        else {
+            self.quoted_to(id, ordinal, token, path, lines, 0);
+            return;
+        };
+        if let Some(scope) = self.quotes[at].deferred
+            && !lines.is_empty()
+            && self.demanded.insert(scope)
+        {
+            self.uncompiled.push(Uncompiled {
+                token: token.map(str::to_owned),
+                path: path.to_owned(),
+                lines: lines.to_vec(),
+            });
+        }
+        self.quotes[at].live = true;
+    }
+
     fn quoted_to(
         &mut self,
         id: &str,
@@ -1137,6 +1170,20 @@ impl Pass<'_> {
         lines: &[String],
     ) -> &[Vec<Span>] {
         self.highlighter.quoted(id, ordinal, token, path, lines)
+    }
+
+    /// Keeps a block's parse between frames without asking for a line, and
+    /// keeps the demand for its grammar standing where nothing has compiled
+    /// one yet.
+    pub fn hold(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+    ) {
+        self.highlighter.hold(id, ordinal, token, path, lines);
     }
 
     /// [`Self::quoted`] as far as line `upto` and no further, so a frame parses

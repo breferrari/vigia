@@ -7527,9 +7527,106 @@ fn return_costs_a_screenful() {
     // return parses the rows it draws and no more.
     let again = highlighter.stats().quoted_lines - before;
     assert!(
+        again >= 1,
+        "coming back parsed nothing, so the block was never swept and this reads nothing"
+    );
+    assert!(
         again <= screen.diff as u64,
-        "coming back to a swept block parsed {again} lines for a {}-row body, so the          return costs the block rather than the window",
+        "coming back to a swept block parsed {again} lines for a {}-row body, so the \
+         return costs the block rather than the window",
         screen.diff
+    );
+}
+
+#[test]
+fn kept_while_pinned() {
+    // A diff tall enough to scroll, with the note deep inside its first hunk
+    // and a second hunk below, so the pane can hold the note's line as its
+    // last row with the whole answer behind the window.
+    let scratch = Scratch::new("notes-parse-held");
+    scratch.write(PATH, numbered_lines(200));
+    scratch.commit_all("baseline");
+    for line in 4..60 {
+        scratch.edit_line(PATH, line, "    changed above the note");
+    }
+    scratch.edit_line(PATH, 49, EDITED);
+    for line in 150..190 {
+        scratch.edit_line(PATH, line, "    changed below the note");
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+
+    let reply = format!("```rust\n{}```", support::generated(50, "quoted"));
+    let mut pinned = note("answered", 50, EDITED, BODY);
+    pinned.reply = Some(reply);
+    app.set_notes(vec![pinned]);
+
+    // Scroll until the note's line is the last row drawn, which puts every row
+    // of the answer behind the window while the note stays pinned.
+    let mut landed = false;
+    for _ in 0..200 {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        if matches!(view.rows.last(), Some(Row::Line { text, .. }) if text == EDITED) {
+            landed = true;
+            break;
+        }
+        app.apply(Action::Scroll(1), &mut frame, screen.diff)
+            .expect("scroll");
+    }
+    assert!(
+        landed,
+        "no scroll put the note's line on the pane's last row"
+    );
+
+    // Down, so the block's first rows are drawn and parsed once.
+    app.apply(Action::Scroll(10), &mut frame, screen.diff)
+        .expect("scroll on");
+    let before = highlighter.stats().quoted_lines;
+    app.view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        highlighter.stats().quoted_lines > before,
+        "the block's rows were drawn and nothing was parsed, so this reads nothing"
+    );
+
+    // Back up, so the line is the last row again and every row of the answer
+    // is behind the window, for two frames, which is the sweep's grace.
+    app.apply(Action::Scroll(-10), &mut frame, screen.diff)
+        .expect("scroll back");
+    for _ in 0..2 {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        assert!(
+            !view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+            "a note row is drawn, so the answer is not behind the window"
+        );
+    }
+
+    // And on again: the same rows, from the parse the pin kept.
+    app.apply(Action::Scroll(10), &mut frame, screen.diff)
+        .expect("scroll on");
+    let before = highlighter.stats().quoted_lines;
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(|row| {
+            matches!(row, Row::Note { runs, .. } if runs.iter().any(|run| run.class.is_some()))
+        }),
+        "no code row is drawn after scrolling on, so this reads nothing"
+    );
+    assert_eq!(
+        highlighter.stats().quoted_lines - before,
+        0,
+        "a pinned note's block was parsed again after two frames behind the window"
     );
 }
 

@@ -579,9 +579,8 @@ impl Answer {
             .sum()
     }
 
-    /// Asks the highlighter for every block and parses nothing, so a block whose
-    /// rows are off the window this frame keeps its parse, and a grammar it
-    /// waits for is still demanded.
+    /// Keeps every block's parse, so a block whose rows are off the window this
+    /// frame is not swept, and a grammar it waits for is still demanded.
     fn keep(&self, pass: &mut Pass<'_>, id: &str, path: &str) {
         for part in &self.parts {
             if let Part::Code {
@@ -590,7 +589,7 @@ impl Answer {
                 lines,
             } = part
             {
-                pass.quoted_to(id, *ordinal, token.as_deref(), path, lines, 0);
+                pass.hold(id, *ordinal, token.as_deref(), path, lines);
             }
         }
     }
@@ -2370,9 +2369,10 @@ impl View {
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at];
         let total: usize = (0..breaks.len()).map(cost).sum();
-        // Every pinned answer, drawn or not: the pass sweeps what it is not asked for.
-        if let Some(pass) = pass.as_deref_mut() {
-            for pin in pins.iter().filter(|_| drawn) {
+        // Every pinned answer's blocks, whether the window reaches them or not:
+        // the pass sweeps what nothing asks for.
+        if drawn && let Some(pass) = pass.as_deref_mut() {
+            for pin in pins {
                 if let Some(reply) = &pin.reply {
                     reply.keep(pass, &pin.id, &pin.path);
                 }
