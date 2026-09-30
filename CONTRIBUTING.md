@@ -70,7 +70,8 @@ Phrases from the contract style are not allowed in public files. `.github/public
 ## Running things
 
 ```sh
-cargo test --workspace          # everything, including the budget gates
+cargo nextest run --workspace   # the suite; cargo install cargo-nextest --locked
+cargo test --workspace --doc    # the doctests, which nextest does not run
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```

@@ -133,10 +133,10 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 ## 5. Scope the checks
 
 ```sh
-git diff --name-only <base>..HEAD | grep -vE '\.md$|^\.github/ISSUE|^LICENSE'
+git diff --name-only <base>..HEAD | sh .github/scripts/change-class.sh | tail -1
 ```
 
-If the output is empty, the diff is docs-only. Then skip `cargo test`, the benches and the budget gates, and run `cargo test --test register --test package`. `Cargo.toml`, `Cargo.lock`, `.github/workflows`, `.github/scripts` and `.claude/scripts` are always code. In the PR body, write which scope you chose.
+`docs` means the diff is docs-only. Then skip the suite, the benches and the budget gates, and run the suites that CI's documents job runs: `cargo nextest run -p vigia --test package --test register --test sheet --test theme_docs` and `cargo nextest run -p vigia-core --test coverage`. `full` is code. In the PR body, write which scope you chose.
 
 ## 6. Review and prove
 
@@ -157,7 +157,7 @@ Give each agent a brief. Add every measurement that the reviewer needs to the br
 
 Then prove the result:
 
-- For a code diff, report `cargo test` green with the count. Report the budget gates with numbers against the budgets. For a docs-only diff, report `register` and `package` green. State each failure plainly.
+- For a code diff, report `cargo nextest run --workspace` and `cargo test --workspace --doc` green with the counts. Report the budget gates with numbers against the budgets. For a docs-only diff, report `register` and `package` green. State each failure plainly.
 
 ## 7. Mark ready and merge
 
