@@ -70,11 +70,15 @@ Phrases from the contract style are not allowed in public files. `.github/public
 ## Running things
 
 ```sh
-cargo nextest run --workspace   # the suite; cargo install cargo-nextest --locked
-cargo test --workspace --doc    # the doctests, which nextest does not run
+cargo nextest run --workspace --profile ci    # the suite; cargo install cargo-nextest --locked
+cargo nextest run -p vigia --test notes heat  # one suite, then a substring of the test names
+cargo test --workspace --doc                  # the doctests, which nextest does not run
+cargo test --release --test budgets           # a release gate; first_paint is the other, run as its own step like CI does
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
+
+The suites run under nextest with its `ci` profile, which runs every test and reports every failure in one pass; `cargo test`, and nextest without that profile, stop at the first failure. The release gates run under `cargo test`, as CI runs them. CI sets `VIGIA_BUDGET_SLACK=3` on every step, because its shared runners are slow.
 
 CI runs on Linux, macOS and Windows, with a musl leg for the artifact that Linux actually ships. The budget gates run in debug on every commit. The absolute wall-clock tier runs in release only. A pull request that changes only documents, skills, templates or images runs the suites that read documents on Linux and skips the rest, so it finishes in a couple of minutes. The `full-ci` label forces the whole run on any pull request.
 
