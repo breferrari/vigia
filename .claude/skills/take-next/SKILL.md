@@ -120,7 +120,7 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 
 ## 4. Build
 
-- **Runners, as `ci.yml` has them**: debug suites `cargo nextest run`, a release gate `cargo test --release --test <gate>`, doctests `cargo test --workspace --doc`. CONTRIBUTING.md, Running things, has the install line.
+- **Runners, as `ci.yml`**: suites `cargo nextest run`, a release gate `cargo test --release --test <gate>`, doctests `cargo test --workspace --doc`.
 - **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First, find a free `../vigia.*` worktree, because its `target/` is warm. Make sure that no other session uses it. Then run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
 - **If the reader is present,** run `vigia` in a side pane on the worktree. A reader who looked at the pane found defects that eleven green gates missed.
 - **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
@@ -164,7 +164,7 @@ Then prove the result:
 
 Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR with `gh pr edit <n> --add-label <label>`. The label follows the changed paths, not what a user can see. Any path under `crates/*/src/` or `crates/*/assets/`, a dependency the binary builds with in `Cargo.toml` or `Cargo.lock`, or install (the `dist` metadata in `Cargo.toml`, `release.yml`) makes the PR `release`, a comment or a refactor included, because the binary changed. Everything else, which is process, CI, skills, `SPEC.md`, `ROADMAP.md`, tests and gates, is `internal`. Ruled 2026-09-30, reader. User-facing: none. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. Start a `release` title with `fix:` for a defect or `feat:` for a new feature.
 
-Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix on three platforms and the Copilot review. Copilot has a quota. Mark the PR ready once, after the local suite is green and the plan diff is clean.
+Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix on three platforms and the Copilot review. Copilot has a quota, so mark the PR ready once, after the local suite is green and the plan diff is clean.
 
 ```sh
 t=$(date -u +%Y-%m-%dT%H:%M:%SZ)
