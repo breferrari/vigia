@@ -71,6 +71,7 @@ Phrases from the contract style are not allowed in public files. `.github/public
 
 ```sh
 cargo test --workspace          # everything, including the budget gates
+cargo nextest run --workspace   # the same suite, the way CI runs it, if you have nextest
 cargo clippy --workspace --all-targets
 cargo fmt --all
 ```
