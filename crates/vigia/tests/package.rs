@@ -2913,3 +2913,40 @@ fn ready_run_survives() {
          ready event cancel each other and the survivor can be the skipped run: {group}"
     );
 }
+
+/// The names of the steps in `ci` that run `cargo test` without
+/// `VIGIA_BUDGET_SLACK`, which `support::budget` reads.
+fn unslacked_steps(ci: &str) -> Vec<String> {
+    without_comments(ci)
+        .split("- name:")
+        .skip(1)
+        .filter(|step| step.contains("cargo test") && !step.contains("VIGIA_BUDGET_SLACK:"))
+        .map(|step| step.lines().next().unwrap_or_default().trim().to_owned())
+        .collect()
+}
+
+/// A wall-clock gate asks for slack through `budget`, and without the variable
+/// the step holds it to the raw bound. `watch.rs` ran that way unnoticed.
+#[test]
+fn ci_tests_get_slack() {
+    let fixture = "      - name: test\n        run: cargo test --workspace\n      \
+                   - name: budgets\n        run: cargo test --test budgets\n        \
+                   env:\n          VIGIA_BUDGET_SLACK: \"3\"\n";
+    assert_eq!(
+        unslacked_steps(fixture),
+        ["test"],
+        "the scan missed a test step with no slack"
+    );
+
+    let ci = repo_file(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("cargo test"),
+        "ci.yml runs no `cargo test`, so this gate reads nothing"
+    );
+    let bare = unslacked_steps(&ci);
+    assert!(
+        bare.is_empty(),
+        "ci.yml runs `cargo test` without VIGIA_BUDGET_SLACK in {bare:?}, so every \
+         `budget()` bound those steps reach runs unloosened on a shared runner"
+    );
+}
