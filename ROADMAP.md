@@ -413,8 +413,6 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
 | ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ✅ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
-| ⬜ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
-| ⬜ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
 | ✅ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
 | ⬜ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
 | ✅ | The churn band measures how many files were written, not how much changed. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#232](https://github.com/breferrari/vigia/issues/232) |
