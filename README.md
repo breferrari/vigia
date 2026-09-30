@@ -527,7 +527,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **4. The artifacts tell the truth** | README, mockup, spec and tracker agree with each other |
 | ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them |
 | ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
-| 🔨 | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
+| ✅ | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
 
 There is no Phase 5. That number belonged to the list of deferred work, which is no longer a phase.
 

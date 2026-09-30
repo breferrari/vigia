@@ -5672,13 +5672,19 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
 
 #[test]
 fn render_clips_to_the_buffer_rather_than_the_area() {
-    // `render`'s own contract is that any area is legal, and most writers here reach
-    // the cells through `Buffer::set_stringn` or `set_style`, which clip.
+    // `render`'s contract is that any area is legal: it draws what the part of
+    // the area inside the buffer would draw on its own.
     let theme = Theme::default();
     for (buffer, area) in [
-        ((40u16, 10u16), (60u16, 10u16)),
-        ((40, 10), (200, 10)),
-        ((10, 6), (80, 6)),
+        ((40u16, 10u16), Rect::new(0, 0, 60, 10)),
+        ((40, 10), Rect::new(0, 0, 200, 10)),
+        ((10, 6), Rect::new(0, 0, 80, 6)),
+        ((40, 10), Rect::new(0, 0, 40, 20)),
+        ((40, 10), Rect::new(0, 0, 40, 40)),
+        ((80, 24), Rect::new(0, 0, 80, 40)),
+        ((40, 10), Rect::new(0, 0, 60, 20)),
+        ((10, 6), Rect::new(20, 20, 10, 10)),
+        ((40, 10), Rect::new(10, 5, 60, 20)),
     ] {
         for view in [
             one_file(),
@@ -5705,14 +5711,16 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                 ..ragged_counts()
             },
         ] {
-            let mut buf = Buffer::empty(Rect::new(0, 0, buffer.0, buffer.1));
-            render(
-                &mut buf,
-                Rect::new(0, 0, area.0, area.1),
-                &view,
-                &theme,
-                Glyphs::default(),
-                &chrome(),
+            let own = Rect::new(0, 0, buffer.0, buffer.1);
+            let draw = |at: Rect| {
+                let mut buf = Buffer::empty(own);
+                render(&mut buf, at, &view, &theme, Glyphs::default(), &chrome());
+                buf
+            };
+            assert_eq!(
+                draw(area),
+                draw(own.intersection(area)),
+                "{area:?} into {buffer:?}"
             );
         }
     }
