@@ -368,7 +368,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
 | ✅ | `G` leaves the pane short, and the first scroll yanks it back a screenful | [#62](https://github.com/breferrari/vigia/issues/62) |
 | ✅ | The row wash drops a column under every wide glyph. **Not on screen: the backend never receives a wide glyph's second cell; the gate now reads what a terminal draws** | [#63](https://github.com/breferrari/vigia/issues/63) |
-| ⬜ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
+| ✅ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
 | ⬜ | An LFS-tracked text file diffs its pointer against its content | [#69](https://github.com/breferrari/vigia/issues/69) |
 | ⬜ | The settle margin's cost is bounded structurally and unbounded temporally | [#73](https://github.com/breferrari/vigia/issues/73) |
 | ⬜ | The `gix` status surface is load-bearing on every budget with no seam | [#74](https://github.com/breferrari/vigia/issues/74) |
@@ -392,13 +392,13 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ✅ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
-| ⬜ | The clipboard write's failure branch is unreachable by any test | [#392](https://github.com/breferrari/vigia/issues/392) |
+| ✅ | The clipboard write's failure branch is unreachable by any test | [#392](https://github.com/breferrari/vigia/issues/392) |
 | ⬜ | `sheet.rs` restates two dozen constants the table's own length implies | [#393](https://github.com/breferrari/vigia/issues/393) |
 | ⬜ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
 | ✅ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
 | ✅ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
 | ⬜ | `MIN_TICKS` restates `MIN_FRAMES`, and the queue it looks like it guards is unbounded | [#114](https://github.com/breferrari/vigia/issues/114) |
-| ⬜ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
+| ✅ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
 | ⬜ | 0.1.1: trusted publishing, so the crates.io token stops existing | [#141](https://github.com/breferrari/vigia/issues/141) |
 | ✅ | The bump cannot move a protected main, because the checks it needs can never arrive | [#143](https://github.com/breferrari/vigia/issues/143) |
 | ⬜ | The workflow gates read text, and text has more spellings than the mechanism | [#145](https://github.com/breferrari/vigia/issues/145) |
@@ -506,7 +506,6 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | The bulk-rewrite I9 gate is flaky on macOS hosted runners ([#36](https://github.com/breferrari/vigia/issues/36)) | I3, 2026-07-31 | Phase 5 | Failed once at 79.22ms p99 against a 48ms budget. It passed on a re-run of the same commit, in a PR that changes no file under `crates/*/src`. |
 | `take-next`'s pre-flight cannot see an untracked spec prerequisite ([#34](https://github.com/breferrari/vigia/issues/34)) | #32, 2026-07-31 | Phase 5 | The pre-flight's four comparisons are all keyed on `I<n>` tokens and issue metadata. So a prerequisite stated in `SPEC.md` prose with no issue behind it is invisible to every one of them. |
 | The heat projection's cost follows the file ([#55](https://github.com/breferrari/vigia/issues/55)) | #41's pre-flight, 2026-07-31 | Phase 5 | Not deferred by a session that wanted to avoid it: **nothing had ever taken it**, because it is an open `SPEC.md` §10 bullet that no issue named, which is the exact hole that [#34](https://github.com/breferrari/vigia/issues/34) added the fifth comparison for. |
-| A file the attributes declare binary is diffed as text ([#68](https://github.com/breferrari/vigia/issues/68)) | #65, 2026-08-01 | Phase 5 | Out of scope for #65 because it is a **different attribute doing a different thing**: that issue normalises bytes, this one suppresses a diff. |
 | An LFS-tracked text file diffs its pointer against its content ([#69](https://github.com/breferrari/vigia/issues/69)) | #65, 2026-08-01 | Phase 5 | **Not a defect discovered but a consequence recorded**, and not a regression: it is what happened before any filter ran. |
 | I7 is measured without the highlighter ([#51](https://github.com/breferrari/vigia/issues/51)) | #45, 2026-07-31 | Phase 5 | The same blind spot as #45's, one invariant over: I7's 20.37ms comes from `crates/vigia-core/examples/timings.rs`, which is core-only and builds no `Highlighter`, while the shipped first paint parses whatever the first screenful shows. |
 | The settle margin's cost is unbudgeted ([#73](https://github.com/breferrari/vigia/issues/73)) | Craft review, 2026-07-31 | Phase 5 | Not a rediscovery of [#32](https://github.com/breferrari/vigia/issues/32), which settled the margin's **soundness** and added the gate that drives frames without ever letting the fixture settle. |
