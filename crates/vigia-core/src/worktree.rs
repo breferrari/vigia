@@ -39,10 +39,7 @@ impl Default for ChangeOptions<'_> {
 
 /// A working tree under observation.
 pub struct Worktree {
-    /// The repository as opened. Only the watcher reads it, because it borrows the
-    /// repository for its whole life and a reload cannot swap it under that.
-    opened: gix::Repository,
-    /// The repository under its current configuration, for every other reader.
+    /// The repository under its current configuration. The watcher takes a clone.
     /// A borrow must end inside the method that took it, or a reload waits a tick.
     live: RefCell<gix::Repository>,
     workdir: PathBuf,
@@ -78,8 +75,7 @@ impl Worktree {
             common.join("info").join("attributes"),
         ];
         Ok(Self {
-            live: RefCell::new(repo.clone()),
-            opened: repo,
+            live: RefCell::new(repo),
             workdir,
             filter: RefCell::new(None),
             filter_sources,
@@ -554,7 +550,7 @@ impl Worktree {
     ///
     /// The filesystem watcher cannot be armed on this worktree.
     pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
-        Watcher::new(&self.opened, &self.workdir, options)
+        Watcher::new(&self.repo(), &self.workdir, options)
     }
 
     /// Start a frame over this working tree.

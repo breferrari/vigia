@@ -813,3 +813,39 @@ fn config_write_ticks() {
         "a config write produced no tick, so the pane never re-reads the filter"
     );
 }
+
+/// A path ignored through `core.excludesFile` wakes the watch once the config
+/// stops naming that file, without a restart.
+#[test]
+fn excludes_file_followed() {
+    let scratch = Scratch::new("watch-excludes-file");
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("initial");
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "build/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.write("build/keep", "x\n");
+    let scratch = scratch.settled();
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.write("build/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: core.excludesFile did not ignore build/"
+    );
+
+    scratch.git(&["config", "--unset", "core.excludesFile"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the config write produced no tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    scratch.write("build/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path the config stopped ignoring never woke the watch"
+    );
+}

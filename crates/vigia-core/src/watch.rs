@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -142,7 +143,10 @@ pub struct Watcher<'repo> {
     tx: Sender<Message>,
     /// Dropping this stops the OS watch, so it must outlive the receiver.
     _backend: notify::RecommendedWatcher,
-    excludes: gix::AttributeStack<'repo>,
+    /// Owned rather than borrowed, so a config write can reload it.
+    repo: gix::Repository,
+    excludes: gix::worktree::Stack,
+    _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
     /// The git dir, in every spelling as for `roots`. A linked worktree, a submodule
@@ -161,22 +165,13 @@ pub struct Watcher<'repo> {
 
 impl<'repo> Watcher<'repo> {
     pub(crate) fn new(
-        repo: &'repo gix::Repository,
+        repo: &gix::Repository,
         workdir: &Path,
         options: WatchOptions,
     ) -> Result<Self> {
         // Everything that reads the repository happens before the watch is armed, so
         // the watcher never observes its own construction.
-        let index = repo
-            .index_or_empty()
-            .map_err(|e| Error::Watch(Box::new(e)))?;
-        let excludes = repo
-            .excludes(
-                &index,
-                None,
-                gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
-            )
-            .map_err(|e| Error::Watch(Box::new(e)))?;
+        let excludes = excludes_of(repo)?;
 
         let roots = roots_of(workdir);
         // A linked worktree's common dir comes back as `<git dir>/../..`, which would
@@ -236,7 +231,9 @@ impl<'repo> Watcher<'repo> {
             rx,
             tx,
             _backend: backend,
+            repo: repo.clone(),
             excludes,
+            _worktree: PhantomData,
             roots,
             git_dir,
             common_dir,
@@ -360,6 +357,9 @@ impl<'repo> Watcher<'repo> {
         if let Some(inside) = within(&self.git_dir, path) {
             let watched = if inside == Path::new("index") {
                 self.index.moved()
+            } else if inside == Path::new("config") {
+                self.follow_config();
+                true
             } else {
                 watched_in_git_dir(inside)
             };
@@ -406,14 +406,39 @@ impl<'repo> Watcher<'repo> {
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
+    /// Reload the config and the rules it names, such as `core.excludesFile`. A
+    /// config that does not load keeps the rules from before it.
+    fn follow_config(&mut self) {
+        if self.repo.reload().is_ok()
+            && let Ok(excludes) = excludes_of(&self.repo)
+        {
+            self.excludes = excludes;
+        }
+    }
+
     fn is_ignored(&mut self, rela: &Path, mode: gix::index::entry::Mode) -> bool {
-        match self.excludes.at_path(rela, Some(mode)) {
+        match self.excludes.at_path(rela, Some(mode), &self.repo.objects) {
             Ok(platform) => platform.is_excluded(),
             // If the rules cannot be consulted, do not filter. A wasted sweep
             // is cheaper than a change the monitor never showed.
             Err(_) => false,
         }
     }
+}
+
+/// The ignore rules the repository's config and index name, detached from it.
+fn excludes_of(repo: &gix::Repository) -> Result<gix::worktree::Stack> {
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| Error::Watch(Box::new(e)))?;
+    Ok(repo
+        .excludes(
+            &index,
+            None,
+            gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
+        )
+        .map_err(|e| Error::Watch(Box::new(e)))?
+        .detach())
 }
 
 /// The worktree's own index, and what it held when an event was last judged.
