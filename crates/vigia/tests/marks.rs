@@ -322,7 +322,8 @@ fn the_mark_arrives_before_the_pulse_and_outlives_it() {
 fn a_slice_holding_a_note_takes_the_notes_ink_and_keeps_its_glyph() {
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[5] = true;
+    // Two source buckets to a slice at this width.
+    notes.at[10] = true;
     let backend = drawn(WIDE, &one_file(notes, false), &theme);
     let inks = strip(&backend, FIRST);
 
@@ -330,7 +331,7 @@ fn a_slice_holding_a_note_takes_the_notes_ink_and_keeps_its_glyph() {
     // would read as a narrower rung, and the ladder gate cannot see that.
     assert_eq!(
         inks.len(),
-        HEAT_BUCKETS,
+        HEAT_BUCKETS / 2,
         "the strip drew {} slices with a note in it",
         inks.len()
     );
@@ -354,8 +355,8 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
     // the two rules draw the same row.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[1] = true;
-    notes.at[11] = true;
+    notes.at[2] = true;
+    notes.at[22] = true;
     let inks = strip(&drawn(WIDE, &one_file(notes, false), &theme), FIRST);
     let noted = noted_slices(&inks, &theme);
     assert_eq!(noted, vec![1, 11]);
@@ -363,15 +364,15 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
 
 #[test]
 fn a_notes_slice_folds_into_the_rung_the_strip_degrades_to() {
-    // Twenty-four source buckets projected onto twelve: a note in bucket 3 is in
+    // Forty-eight source buckets projected onto twelve: a note in bucket 6 is in
     // slice 1, and the fold is `any` rather than the counts' `sum`.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[3] = true;
+    notes.at[6] = true;
     let inks = strip(&drawn(109, &one_file(notes, false), &theme), FIRST);
     assert_eq!(
         inks.len(),
-        HEAT_BUCKETS / 2,
+        HEAT_BUCKETS / 4,
         "109 columns is meant to be the twelve-slice rung"
     );
     let noted = noted_slices(&inks, &theme);

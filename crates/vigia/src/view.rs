@@ -813,7 +813,7 @@ impl Pin {
 }
 
 /// Slices a file's length is divided into for the heat strip.
-pub const HEAT_BUCKETS: usize = 24;
+pub const HEAT_BUCKETS: usize = 48;
 
 /// What a drawn sparkline bucket's height is divided by, one figure per rung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -951,12 +951,22 @@ impl NoteMark {
 }
 
 /// What the reader's notes on one file put on its row and on its heat strip.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileNotes {
     /// `None` where the file holds no note at all.
     pub mark: Option<NoteMark>,
     /// Which slices hold an unresolved one; presence and not state, per §11.1.
     pub at: [bool; HEAT_BUCKETS],
+}
+
+// By hand, since `Default` stops at arrays of 32.
+impl Default for FileNotes {
+    fn default() -> Self {
+        Self {
+            mark: None,
+            at: [false; HEAT_BUCKETS],
+        }
+    }
 }
 
 /// What `notes` put on `diff`'s file. The **stored** line is used and not the pane's

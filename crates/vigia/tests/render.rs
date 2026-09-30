@@ -3291,7 +3291,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
 }
 
 /// A pane wide enough for the heat strip's widest rung.
-const WHOLE_STRIP_PANE: u16 = 140;
+const WHOLE_STRIP_PANE: u16 = 240;
 
 /// A heat map from `(slice, added, removed)` triples, everything else track.
 fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {

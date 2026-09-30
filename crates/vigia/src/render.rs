@@ -218,7 +218,13 @@ const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
 const CARET: &str = "▸";
 
 /// How many slices the heat strip may show, widest rung first.
-const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+const HEAT_RUNGS: [usize; 5] = [
+    HEAT_BUCKETS,
+    HEAT_BUCKETS / 2,
+    HEAT_BUCKETS / 4,
+    HEAT_BUCKETS / 8,
+    0,
+];
 
 // Asserted rather than documented, because a rung that does not divide the source is
 // silent.
@@ -1153,7 +1159,7 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
 pub const COUNT_CELL: usize = 5;
 
 /// Every shape a file row's right-hand side may take, widest first.
-const ROW_LAYOUTS: [Columns; 10] = [
+const ROW_LAYOUTS: [Columns; 11] = [
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[0],
@@ -1165,7 +1171,14 @@ const ROW_LAYOUTS: [Columns; 10] = [
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[0],
-        HEAT_RUNGS[0],
+        HEAT_RUNGS[1],
+        SPARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        MARK_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[1],
         SPARK_RUNGS[1],
     ),
     SETTLED,
@@ -1173,42 +1186,42 @@ const ROW_LAYOUTS: [Columns; 10] = [
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[0],
-        HEAT_RUNGS[1],
-        SPARK_RUNGS[2],
-    ),
-    Columns::new(
-        COUNT_CELL,
-        MARK_RUNGS[0],
-        PULSE_RUNGS[0],
         HEAT_RUNGS[2],
         SPARK_RUNGS[2],
-    ),
-    Columns::new(
-        COUNT_CELL,
-        MARK_RUNGS[0],
-        PULSE_RUNGS[0],
-        HEAT_RUNGS[2],
-        SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[3],
+        SPARK_RUNGS[2],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        MARK_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[3],
+        SPARK_NO,
+    ),
+    Columns::new(
+        COUNT_CELL,
+        MARK_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[4],
         SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[1],
-        HEAT_RUNGS[3],
+        HEAT_RUNGS[4],
         SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[1],
         PULSE_RUNGS[1],
-        HEAT_RUNGS[3],
+        HEAT_RUNGS[4],
         SPARK_NO,
     ),
     Columns::NOTHING,
@@ -1222,7 +1235,7 @@ const SETTLED: Columns = Columns::new(
     COUNT_CELL,
     MARK_RUNGS[0],
     PULSE_RUNGS[0],
-    HEAT_RUNGS[1],
+    HEAT_RUNGS[2],
     SPARK_RUNGS[1],
 );
 
@@ -1230,7 +1243,7 @@ const SETTLED: Columns = Columns::new(
 const SETTLED_CELLS: usize = reserved(counts_width(COUNT_CELL))
     + reserved(MARK_RUNGS[0])
     + reserved(1)
-    + reserved(HEAT_RUNGS[1])
+    + reserved(HEAT_RUNGS[2])
     + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block));
 
 /// The share of a row the glance elements may take, above the settled ladder.

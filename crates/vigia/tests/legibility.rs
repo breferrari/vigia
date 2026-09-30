@@ -52,7 +52,7 @@ const WIDE_GLYPH_ROWS: u16 = 8;
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
 /// Panes wide enough to reach every rung of the glance ladder.
-const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=200;
+const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=240;
 
 /// The width `assets/preview.svg` is measured from, stated in its own comment.
 const PICTURED_PANE: u16 = 109;
@@ -61,7 +61,13 @@ const PICTURED_PANE: u16 = 109;
 const PICTURED_SLICES: usize = 12;
 
 /// How many slices the heat strip may show, widest rung first.
-const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+const HEAT_RUNGS: [usize; 5] = [
+    HEAT_BUCKETS,
+    HEAT_BUCKETS / 2,
+    HEAT_BUCKETS / 4,
+    HEAT_BUCKETS / 8,
+    0,
+];
 
 /// How many buckets a sparkline may show, widest rung first.
 const SPARK_RUNGS: [usize; 4] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, HISTORY_BUCKETS / 4, 0];
@@ -1626,6 +1632,7 @@ fn the_glance_columns_collapse_in_one_order() {
         (59, (true, 12, 12)),
         (139, (true, 24, 12)),
         (169, (true, 24, 24)),
+        (229, (true, 48, 24)),
     ];
     let theme = theme();
     let heats = support::heat_colours(&theme);
@@ -2969,7 +2976,7 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
     let widest = reserved(COUNT_HALF * 2 + 1)
         + reserved(PULSE_CELLS)
         + reserved(HEAT_RUNGS[0])
-        + reserved(SPARK_RUNGS[1])
+        + reserved(SPARK_RUNGS[0])
         + reserved(MARK_CELLS);
     let boundary = GENEROUS_WIDTHS
         .clone()
