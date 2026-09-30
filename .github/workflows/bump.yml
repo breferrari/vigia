@@ -405,8 +405,9 @@ jobs:
             else
               who=$(git rev-parse --short "$sha")
             fi
-            # The PR body is a fallback only: squash merges keep commit
-            # messages, so a trailer written there is usually not on main.
+            # The commit message wins. The PR description's release note
+            # section is the second source, for a contributor who wrote it
+            # there.
             notes=$(git log -1 --format='%B' "$sha" | tr -d '\r' | grep '^Release-note:' || true)
             if [ -z "$notes" ]; then
               notes=$(printf '%s\n' "$body" | tr -d '\r' | grep '^Release-note:' || true)

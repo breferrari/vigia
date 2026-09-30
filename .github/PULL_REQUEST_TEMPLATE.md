@@ -1,18 +1,21 @@
-<!-- Title: a short imperative, one clause. An internal PR starts with its kind: ci:, docs:, spec:, roadmap:, skill:, test: or chore:. A release PR has no prefix, because its title can become the changelog line. -->
+<!--
+Thanks for the pull request. CONTRIBUTING.md has the house rules. The short version:
 
-## What is true now
+Title: one clause, imperative. Internal work starts with its kind: ci:, docs:, spec:, roadmap:, skill:, test: or chore:. A change a user can see has no prefix, because its title can become the changelog line.
+-->
 
-One paragraph. What a user or a maintainer can do or see now that they could not before. Link the issue.
+## Summary
 
-## Why
+<!-- What this changes and why. Link the issue: closes #123. -->
 
-The problem this solves, and the alternative you did not take, if there was one.
+## Test plan
 
-## Release
+<!-- How you verified it: the tests you ran and their result, with numbers. A budget gate reports its number against the budget. State failures plainly. -->
 
-- [ ] Label: `release` when a user of the pane can see the change, `internal` for everything else. A maintainer applies it if you cannot.
-- [ ] A commit body carries `Release-note: <one sentence a user can read>`, or `Release-note: none` for internal work. The PR description does not count: it is lost on squash.
+## Release note
 
-## Verification
+<!--
+One line a user of vigia can read, describing what they see change, written as `Release-note: <sentence>`. Write `Release-note: none` for internal work such as CI, tests, docs or refactors. The line is read from a commit message body first, then from here.
 
-The tests you ran and their result, with numbers. A budget gate reports its number against the budget. State failures plainly.
+The label is a maintainer's job if you cannot set it: `release` when a user can see the change, `internal` otherwise.
+-->

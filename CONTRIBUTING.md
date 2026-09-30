@@ -40,7 +40,7 @@ A first PR is most likely to break these rules.
 - **Numbers or it did not happen.** A type signature is not evidence and a single green run is not evidence.
 - **Pure Rust.** Any dependency that pulls `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows, and CI fails the build if one appears.
 - **Do not hard-wrap prose.** Markdown files, PR bodies and commit message bodies do not wrap at all: one paragraph is one line, because GitHub renders a single newline as a line break.
-- **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body. A pull request follows `.github/PULL_REQUEST_TEMPLATE.md`, and GitHub fills it in for you.
+- **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body. A pull request has three sections, summary, test plan and release note, and GitHub fills the template in for you.
 - **A title can become a release note.** See the next section for how the release notes are built and what you control.
 
 ## Release notes
@@ -50,9 +50,9 @@ Every pull request carries one of two labels before it merges: `release` or `int
 - **`release`** means a user of `vigia` can see the change: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. The pull request is listed in `CHANGELOG.md` and in the GitHub Release.
 - **`internal`** means everything else: CI, tests, documentation, the roadmap, the spec, scripts. The pull request is not listed anywhere.
 
-What you control is the line a user reads. Put `Release-note: <one sentence>` in a commit message body on your branch, and that sentence becomes the changelog line instead of your title. Put `Release-note: none` when the change is internal. Write the sentence for someone who has never opened this repository: name what changed in the pane, not the rule behind it. If you write nothing, the title of a `release` pull request becomes the line, so make the title readable on its own.
+What you control is the line a user reads. Put `Release-note: <one sentence>` in the Release note section of the pull request description, or in a commit message body on your branch, and that sentence becomes the changelog line instead of your title. Put `Release-note: none` when the change is internal. Write the sentence for someone who has never opened this repository: name what changed in the pane, not the rule behind it. If you write nothing, the title of a `release` pull request becomes the line, so make the title readable on its own.
 
-Pull requests are squash-merged with their commit messages, so a `Release-note:` line that is only in the pull request description is lost. Put it in a commit.
+The release reads the commit message first and the pull request description second, so a line in a commit wins. The CI check on wording, described below, reads commits only.
 
 Start the title of an `internal` pull request with a prefix that says what kind of work it is: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, or `chore:` for anything else. A `release` pull request has no prefix, because its title can become the changelog line. The prefix is for people reading the log. The label is what the release reads.
 
