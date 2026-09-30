@@ -1069,7 +1069,7 @@ mod tests {
             assert_eq!(dropped, 1);
             assert_eq!(
                 paths, expected,
-                "a repeat moved f0 back, so f1 was dropped in its place"
+                "the repeat moved f0 to the back, so f1 was evicted instead"
             );
         }
     }
