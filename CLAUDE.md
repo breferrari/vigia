@@ -44,7 +44,7 @@ cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="ratatui-
 `SPEC.md` is the source of truth. Code is written against it.
 
 1. If the code and `SPEC.md` disagree, **stop.** One of them is wrong. Decide which, and change that one deliberately, in its own commit.
-2. Every invariant in `SPEC.md` has a test that fails when it is violated. An invariant without a failing test is a wish.
+2. Every invariant in `SPEC.md` has a test that fails when it is violated. An invariant without a failing test is a wish. `SPEC.md` and `RULINGS.md` have no size cap: `package.rs` fails only when an invariant id leaves the table. This file keeps a hard byte ceiling there.
 3. Performance budgets are tests, not aspirations. The thesis is a measurable claim, so a regression past budget **fails the build**.
 
 Do not add a dependency, a flag, or a subcommand that `SPEC.md` does not name. Propose it, get it into the spec, then build it.

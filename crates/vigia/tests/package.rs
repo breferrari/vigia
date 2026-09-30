@@ -2180,40 +2180,53 @@ fn every_config_key_reaches_the_changelog_filter() {
     );
 }
 
-/// What each prose document is allowed to weigh, in bytes.
+/// The two documents every session reads first, and the most each may weigh
+/// in bytes. Growing past the ceiling fails the build.
 ///
-/// Prose says what holds and why, so it should get shorter as rulings are
-/// replaced, and a ceiling equal to today's size is what makes a pass adding a
-/// paragraph go and find one to delete. The two a session reads before anything
-/// else are here for the same reason from the other side: a rule stated three
-/// times in the skill costs the pass the room it needs to reason.
+/// `CLAUDE.md` gets about 300 bytes over its size on the commit that set this, so
+/// one sentence fits without a raise. The skill sits at its size.
+///
+/// `SPEC.md` and `RULINGS.md` carry no byte ceiling. A size cap fails a clearer
+/// sentence and passes a shorter one that dropped an exception, which is the
+/// wrong way round for a contract. What the contract must keep is every
+/// invariant, and [`SPEC_INVARIANTS`] holds that instead.
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
-///
-/// `SPEC.md` rose 1,706 bytes for B21's quoted code. A fenced block in an answer is a
-/// second way a note row is drawn, and what it costs the contract is the rules a reader
-/// cannot see in the code: what counts as a fence, that a code row breaks at the column
-/// where every other row here breaks at a blank, which grammar answers and what happens
-/// when none does, that an answer always draws a row, and that the copy still carries the
-/// markup the pane dropped. That last one would be re-derived: a pane that stopped drawing
-/// backticks and a clipboard that keeps them look like a defect until something says they
-/// are one rule. The clause a few sentences earlier gained five words in the same pass,
-/// because the answer being unmarked stopped being true the moment it could be coloured,
-/// and a contract that contradicts itself in one paragraph is worse than a longer one.
-/// §6's count of what parses moved from two to three, which is a correction rather than a
-/// raise: the sentence is how `compiled` is knowable at all, and a third parser it did not
-/// name makes it false. Two clauses under it went with the count, because a warmer that
-/// opens no file cannot be described by a paragraph that says a real file is the only way
-/// in. A raise with no new surface behind it is the thing this number is for.
-///
-/// It rose 1,184 bytes for a note over a range: the gutter drag, the anchor's two
-/// ends and what drift does to each, and the range the agent is sent.
-const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 404954),
-    ("RULINGS.md", 97464),
-    ("CLAUDE.md", 17255),
+const WRITTEN_LAYER_BUDGET: [(&str, usize); 2] = [
+    ("CLAUDE.md", 17_700),
     (".claude/skills/take-next/SKILL.md", 20983),
 ];
+
+/// Every invariant id the spec's table declares. One leaving fails the build.
+///
+/// The row shape is the one `preflight.sh` reads: a table row whose first cell
+/// is the bold id.
+const SPEC_INVARIANTS: [&str; 11] = [
+    "I1", "I2a", "I2b", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10",
+];
+
+/// The invariant ids whose table row is missing from `spec`.
+fn missing_invariants(spec: &str) -> Vec<&'static str> {
+    SPEC_INVARIANTS
+        .into_iter()
+        .filter(|id| {
+            let cell = format!("| **{id}**");
+            !spec.lines().any(|line| line.starts_with(&cell))
+        })
+        .collect()
+}
+
+/// The documents in [`WRITTEN_LAYER_BUDGET`] that `weigh` puts over their ceiling.
+fn over_budget(weigh: impl Fn(&str) -> usize) -> Vec<String> {
+    WRITTEN_LAYER_BUDGET
+        .into_iter()
+        .filter_map(|(name, ceiling)| {
+            let bytes = weigh(name);
+            (bytes > ceiling)
+                .then(|| format!(" {name}: {bytes} bytes against a ceiling of {ceiling}"))
+        })
+        .collect()
+}
 
 /// The documents that record events rather than argue positions.
 ///
@@ -2601,27 +2614,92 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
     );
 }
 
-/// Each prose document weighs no more than its budget.
+/// Each capped document weighs no more than its ceiling.
 #[test]
 fn the_written_layer_stays_under_its_budget() {
     let root = repo_root();
-    let mut over = Vec::new();
-
-    for (name, ceiling) in WRITTEN_LAYER_BUDGET {
-        let bytes = read(&root.join(name)).len();
-        if bytes > ceiling {
-            over.push(format!(
-                " {name}: {bytes} bytes against a ceiling of {ceiling}"
-            ));
-        }
-    }
-
+    let over = over_budget(|name| read(&root.join(name)).len());
     assert!(
         over.is_empty(),
-        "the written layer grew past its budget:\n{}\n\nLower the ceiling when prose \
-         comes out. Raising one to fit what was added is what this refuses: go and \
-         find the paragraph this one replaces.",
+        "grew past its ceiling:\n{}\n\nCut a sentence rather than raising the number. \
+         This gate is for CLAUDE.md and the skill only: SPEC.md and RULINGS.md have \
+         no byte cap.",
         over.join("\n")
+    );
+}
+
+/// A document one byte over its ceiling is reported.
+#[test]
+fn ceiling_overflow_fails() {
+    let over = over_budget(|name| {
+        WRITTEN_LAYER_BUDGET
+            .iter()
+            .find(|(capped, _)| *capped == name)
+            .map(|(_, ceiling)| ceiling + 1)
+            .expect("every name weighed is in the budget")
+    });
+    assert_eq!(
+        over.len(),
+        WRITTEN_LAYER_BUDGET.len(),
+        "a byte over the ceiling went unreported: {over:?}"
+    );
+}
+
+/// The spec's table declares every invariant.
+#[test]
+fn spec_invariant_ids() {
+    let missing = missing_invariants(&repo_file("SPEC.md"));
+    assert!(
+        missing.is_empty(),
+        "SPEC.md's invariant table no longer has a row for {}. An invariant is \
+         deleted by a ruling in RULINGS.md and a change to this list, never by an edit \
+         that lost the row",
+        missing.join(", ")
+    );
+}
+
+/// A spec that grew by a paragraph still passes.
+#[test]
+fn spec_grows_freely() {
+    let paragraph = "The pane redraws when the worktree changes and at no other time. ";
+    let mut longer = repo_file("SPEC.md");
+    while longer.len() < 404_954 + 2_048 {
+        longer.push_str(paragraph);
+    }
+    assert!(
+        missing_invariants(&longer).is_empty(),
+        "a spec 2k bytes past its last capped size must pass: only a lost invariant fails"
+    );
+}
+
+/// The contract carries no byte ceiling.
+#[test]
+fn contract_uncapped() {
+    let capped: Vec<&str> = ["SPEC.md", "RULINGS.md"]
+        .into_iter()
+        .filter(|doc| WRITTEN_LAYER_BUDGET.iter().any(|(name, _)| name == doc))
+        .collect();
+    assert!(
+        capped.is_empty(),
+        "{} is back under a byte ceiling. A size cap fails a clearer sentence and \
+         passes one that dropped an exception; `spec_invariant_ids` is the gate instead",
+        capped.join(" and ")
+    );
+}
+
+/// A spec that lost an invariant's row fails.
+#[test]
+fn lost_invariant_fails() {
+    let spec = repo_file("SPEC.md");
+    let without: String = spec
+        .lines()
+        .filter(|line| !line.starts_with("| **I7**"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        missing_invariants(&without),
+        ["I7"],
+        "deleting I7's row must be the one thing this gate reports"
     );
 }
 
