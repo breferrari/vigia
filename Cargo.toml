@@ -217,6 +217,15 @@ signal-hook = { version = "0.4", default-features = false, features = [
     "iterator",
 ] }
 
+# Dependencies are optimised in the dev profile; the workspace crates are not.
+# The debug suite spends most of its time inside syntect and its regex engine,
+# which are an order of magnitude slower unoptimised, and nothing a test asserts
+# depends on a dependency being compiled for debugging. The workspace crates
+# keep debug assertions and fast incremental builds. Every absolute budget is
+# still measured against `release`.
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.
 lto = "thin"
