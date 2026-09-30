@@ -70,14 +70,13 @@ struct Burst {
 impl Burst {
     /// Record a followable path, which by construction is the newest so far.
     fn push(&mut self, path: String) {
-        if self.order.iter().any(|seen| seen == &path) {
+        if self.order.contains(&path) {
             self.newest = Some(path);
             return;
         }
         if self.order.len() >= HISTORY_PATHS {
             // Lose the oldest. Refusing the arrival would eventually refuse the
-            // newest, which is follow mode's answer, and taking whichever path a
-            // set yields first made that victim a different one each run.
+            // newest, which is follow mode's answer.
             self.order.pop_front();
             self.dropped += 1;
         }
@@ -1040,8 +1039,10 @@ mod tests {
             assert_eq!(paths.len(), HISTORY_PATHS, "and it did not exceed the cap");
         }
 
+        /// The victim is fixed by arrival order, so the same burst drops the same
+        /// path on every run.
         #[test]
-        fn the_oldest_path_is_the_one_evicted_when_the_cap_is_exceeded() {
+        fn oldest_evicted_first() {
             let mut burst = Burst::default();
             for n in 0..HISTORY_PATHS + 1 {
                 burst.push(format!("f{n}"));
@@ -1050,6 +1051,26 @@ mod tests {
             let expected: Vec<String> = (1..=HISTORY_PATHS).map(|n| format!("f{n}")).collect();
             assert_eq!(dropped, 1);
             assert_eq!(paths, expected);
+        }
+
+        /// Oldest by arrival, not least recently touched. The history store
+        /// already orders by recency, and a burst lives for one burst only.
+        #[test]
+        fn repeat_keeps_its_place() {
+            let mut burst = Burst::default();
+            for n in 0..HISTORY_PATHS {
+                burst.push(format!("f{n}"));
+            }
+            burst.push("f0".to_owned());
+            burst.push(format!("f{HISTORY_PATHS}"));
+            let (paths, dropped) = burst.finish();
+
+            let expected: Vec<String> = (1..=HISTORY_PATHS).map(|n| format!("f{n}")).collect();
+            assert_eq!(dropped, 1);
+            assert_eq!(
+                paths, expected,
+                "a repeat moved f0 back, so f1 was dropped in its place"
+            );
         }
     }
 }

@@ -572,6 +572,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | Off the Shelf, 2026-09-30 | Shelf triage: still real. The dated-claim preamble already existed, and no check read the reasons. Pre-flight check 9 now lists the open rows whose reason cites something that changed. |
 | Status walk config stale ([#606](https://github.com/breferrari/vigia/issues/606)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, and the shelf reason was a cost, not a ruling. One repository reloaded in place before the walk; only the watcher keeps the one it opened. |
 | Watcher excludes keep opened config ([#619](https://github.com/breferrari/vigia/issues/619)) | Off the Shelf, 2026-09-30 | Filed by #617 and still real. `gix` lets the watcher own its exclude stack, so the fix stays inside `watch.rs`. |
+| Burst cap evicts the oldest path ([#368](https://github.com/breferrari/vigia/issues/368)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. |
 
 ---
 
