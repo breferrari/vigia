@@ -142,6 +142,21 @@ pub fn holds_p99(
     });
 }
 
+/// `GetThreadTimes`' step: Windows counts thread time in scheduler ticks.
+pub const COARSE_TICK: Duration = Duration::from_micros(15_625);
+
+/// This platform's thread clock step. Linux and macOS count in nanoseconds and
+/// microseconds.
+pub const CLOCK_TICK: Duration = if cfg!(windows) {
+    COARSE_TICK
+} else {
+    Duration::from_micros(1)
+};
+
+/// Breaching wall time a coarse clock needs before it can tell the host from
+/// the work, in its own ticks.
+pub const FLOOR_TICKS: u32 = 20;
+
 /// [`holds_p99`] where a round is produced whole rather than a sample at a time.
 pub fn holds_p99_rounds(
     claim: &str,
@@ -149,6 +164,18 @@ pub fn holds_p99_rounds(
     first: &Samples,
     detail: impl Fn() -> String,
     round: impl FnOnce() -> (Samples, Option<Samples>),
+) {
+    holds_p99_ticked(claim, budget, first, detail, round, CLOCK_TICK);
+}
+
+/// [`holds_p99_rounds`] against a thread clock that steps by `tick`.
+pub fn holds_p99_ticked(
+    claim: &str,
+    budget: Duration,
+    first: &Samples,
+    detail: impl Fn() -> String,
+    round: impl FnOnce() -> (Samples, Option<Samples>),
+    tick: Duration,
 ) {
     let one = Shape::of(first);
     if one.p99 <= budget {
@@ -172,18 +199,32 @@ pub fn holds_p99_rounds(
     // *consistent with* a stall and does not establish one; thread CPU time
     // establishes it, because no amount of host contention inflates work done.
     if let Some(cpu) = cpu.as_ref() {
-        let deficit = again.total().saturating_sub(cpu.total());
-        // What the deficit has to explain: the round's own excess, in the same units as
-        // the deficit.
+        let (breaching, off_cpu) = again.breach_over(cpu, budget);
+        // A fine clock reads each frame exactly, so only the breaching frames'
+        // own off-CPU time may pay for them. A coarse one rounds each frame by up
+        // to a tick, which only a whole round of consecutive frames cancels.
+        let (deficit, counted) = if tick < Duration::from_millis(1) {
+            (off_cpu, "its breaching frames")
+        } else {
+            let floor = tick * FLOOR_TICKS;
+            if breaching < floor {
+                panic!(
+                    "{claim} was over the {budget:?} budget twice ({one} then {two}). \
+                     Its breaching frames took {breaching:?}, under the {floor:?} a \
+                     {tick:?} clock needs, so it cannot attribute them, and they are \
+                     ours. {}",
+                    detail()
+                );
+            }
+            (again.total().saturating_sub(cpu.total()), "the round")
+        };
+        // What the deficit has to explain: the round's excess over budget, summed.
         let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
-        // Both sides are sums over the round, and that is the whole correction, in two
-        // parts. This compared `deficit`, a whole round's off-CPU time, against a
-        // single frame's excess over budget.
         if deficit >= excess {
             eprintln!(
                 "note: {claim} was over the {budget:?} budget on wall clock twice \
-                 ({one} then {two}) and the round spent {deficit:?} **off-CPU**, \
+                 ({one} then {two}) and {counted} spent {deficit:?} **off-CPU**, \
                  which covers the {excess:?} the round spent over budget in total \
                  (p99 alone was {overshoot:?} over), so the overshoot is \
                  time this process was not running rather than work it did. Reported \
@@ -194,7 +235,7 @@ pub fn holds_p99_rounds(
         }
         panic!(
             "{claim} was over the {budget:?} budget twice on wall clock ({one} then \
-             {two}) and the round spent only {deficit:?} off-CPU against {excess:?} \
+             {two}) and {counted} spent only {deficit:?} off-CPU against {excess:?} \
              spent over budget across the round (p99 alone was {overshoot:?} over), \
              so the time went into **work done** and this is \
              the frame path rather than the host: contention cannot inflate a CPU \

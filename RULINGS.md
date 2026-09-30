@@ -521,3 +521,15 @@ Ruled 2026-09-04, reader ([#374](https://github.com/breferrari/vigia/issues/374)
 **Stat both files every tick, rather than the two other options #111 named.** Asking `gix` whether the attribute state it rebuilt differs from the last one is the correct question, but `gix` exposes no cheap identity for "the attribute state", and building one means hashing the resolved stack on every tick. Accepting the limit and documenting it was what shipped before, and it left a stale diff on screen until the file was touched again. Two stats a tick measured as noise (3.43ms against 3.46ms p50 over this repository, three interleaved runs each), so the cheapest option that works was taken.
 
 **No settle check on the two files, unlike the attributes files in the changed set.** A new repository's config is young for its first seconds, so requiring a settled modification time dropped the caches on every tick, and two reuse gates in `tests/frame.rs` failed. The cost is the one change it misses: a rewrite of the same length inside one modification-time granule.
+
+## §7 — how off-CPU time is counted
+
+**Per breaching frame on a fine clock, per round with a floor on a coarse one.** Ruled 2026-09-30, reader ([#270](https://github.com/breferrari/vigia/issues/270)). User-facing: none
+
+Two failures acquitted a short tail of real work. Credit transfer let the off-CPU noise of many fast frames pay for a few slow ones. Quantisation read 20ms of work as one 15.625ms tick on Windows.
+
+**Rejected: one floor of twenty Windows ticks on every platform.** It was the first version of this pass. It failed closed on any breach under 312.5ms of breaching wall time, so a real 3-frame host stall on Linux, which the nanosecond clock resolves, failed CI where it had been acquitted. It also missed the issue's criterion that the floor mean the same on a finer clock.
+
+**Rejected: per-sample deficit everywhere, with a one-tick allowance per frame.** On Windows the tick is about the 16ms budget, so a genuine stall frame with a few milliseconds of work sits within one tick of its excess, and nearly every real stall would fail. The whole-round sum is what cancels the rounding there, because consecutive readings telescope and the error totals about two ticks, not one per frame.
+
+**What remains.** On Windows a short real stall, under twenty ticks of breaching wall time, still fails closed. That is the one case the coarse clock cannot resolve.
