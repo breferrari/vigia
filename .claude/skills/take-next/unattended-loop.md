@@ -6,7 +6,7 @@ The reader invoked `/take-next unattended-loop`. That invocation is plan approva
 
 - **Step 3 does not wait, and skips plan mode.** Write the plan as usual and post it on the issue, headed "Plan (pre-approved by the reader for this run)". Then build. This replaces "Step 3 is a real stop".
 - **The four stops stop the item, not the loop.** A contradiction with `SPEC.md`, a task that is two tasks, a destructive action outside the branch, or a decline or narrowing of what the reader asked for: do not build past it. If a draft PR is open, leave it open with the question at the top of its body. Record the question for the final report and take the next item. A `SPEC.md` §6 dependency or stack change is the reader's, and goes to the report the same way. This replaces "ask the question in its own message, and wait".
-- **Step 7 does not block.** After `gh pr ready`, start the next pass in a new worktree while CI runs.
+- **No step blocks.** After `gh pr ready`, start the next pass in a new worktree while CI runs. While a review agent or CI runs, work: apply findings already in, build the next item, or read the queue again.
 
 ## Merging
 
@@ -17,8 +17,11 @@ The reader invoked `/take-next unattended-loop`. That invocation is plan approva
 ## The queue
 
 1. `next.sh`, in its own order.
-2. When it is dry, the Shelf, product items only: work that changes what the pane does or costs. Skip items labelled `decision`, items labelled `good first issue`, items with an open PR by someone else, and gate, CI, skill and workflow work. The reader chose this scope on 2026-09-30. Each pull gets a line in the Pull-forward log.
+2. When it is dry, the Shelf, product items only: work that changes what the pane does or costs. Skip items labelled `decision`, items labelled `good first issue`, items with an open PR by someone else, and gate, CI, skill and workflow work. The reader chose this scope on 2026-09-30. One exception: an item that blocks releasing work this loop merged is taken whatever its kind. Each pull gets a line in the Pull-forward log.
 3. Re-read an item's dated deferral reason before taking it. A reason that still holds, or an item that needs a refactor across many call sites, goes to the report with one line, and the loop moves on.
+
+
+Read the queue again before each wait and before calling it dry: issues are filed while the loop runs. When nothing is eligible, say so in one line with the reason per item, then go on with the PRs still open.
 
 ## Done when
 
