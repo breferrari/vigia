@@ -7382,3 +7382,289 @@ fn an_answer_with_carriage_returns_draws_no_stray_mark() {
         "the unprintable mark reached the pane: {under:?}"
     );
 }
+
+/// The ordinary pane's body for one file.
+fn one_file_screen(app: &App) -> vigia::Body {
+    body_layout(
+        PANE,
+        &app.chrome(
+            "fixture",
+            None,
+            vigia::Stood {
+                standing: &Standing::Current,
+                now: 0,
+            },
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
+        1,
+        1,
+    )
+}
+
+#[test]
+fn parse_follows_the_window() {
+    let scratch = fixture("notes-parse-window");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+    let rows = screen.diff as u64;
+
+    let block = support::generated(2_000, "quoted");
+    app.set_notes(vec![left_as(
+        "answered",
+        BODY,
+        Status::Seen,
+        Some(&format!("```rust\n{block}```")),
+    )]);
+
+    let before = highlighter.stats().quoted_lines;
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let arrival = highlighter.stats().quoted_lines - before;
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the screen drew no note row, so nothing here was parsed for a reason"
+    );
+    assert!(
+        arrival >= 1,
+        "the arrival parsed nothing, so the block drew plain and this gate reads nothing"
+    );
+    assert!(
+        arrival <= rows,
+        "the arrival parsed {arrival} lines of a 2,000-line block for a {rows}-row body, \
+         so the parse follows the block rather than the window"
+    );
+
+    let before = highlighter.stats().quoted_lines;
+    app.view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert_eq!(
+        highlighter.stats().quoted_lines - before,
+        0,
+        "a second screen over the same answer parsed again"
+    );
+
+    app.apply(
+        Action::Scroll(isize::try_from(screen.diff).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll");
+    let before = highlighter.stats().quoted_lines;
+    app.view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let further = highlighter.stats().quoted_lines - before;
+    assert!(
+        further <= rows,
+        "a screenful down parsed {further} more lines for a {rows}-row body"
+    );
+}
+
+#[test]
+fn return_costs_a_screenful() {
+    // A second hunk below the note, taller than the pane, so the pane can sit
+    // past the note's rows.
+    let scratch = Scratch::new("notes-parse-kept");
+    scratch.write(PATH, numbered_lines(200));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    for line in 150..190 {
+        scratch.edit_line(PATH, line, "    changed below the note");
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+
+    let block = support::generated(300, "quoted");
+    app.set_notes(vec![left_as(
+        "answered",
+        BODY,
+        Status::Seen,
+        Some(&format!("```rust\n{block}```")),
+    )]);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the screen drew no note row"
+    );
+
+    // Past the block's rows, twice, which is the sweep's grace, then back.
+    app.apply(Action::Scroll(400), &mut frame, screen.diff)
+        .expect("scroll");
+    for _ in 0..2 {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        assert!(
+            !view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+            "the screen still shows the note, so this scrolled nowhere"
+        );
+    }
+    app.apply(Action::Scroll(-400), &mut frame, screen.diff)
+        .expect("scroll back");
+    let before = highlighter.stats().quoted_lines;
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the screen drew no note row on the way back"
+    );
+    // The note left the pane with its line, so the pass swept its block; the
+    // return parses the rows it draws and no more.
+    let again = highlighter.stats().quoted_lines - before;
+    assert!(
+        again >= 1,
+        "coming back parsed nothing, so the block was never swept and this reads nothing"
+    );
+    assert!(
+        again <= screen.diff as u64,
+        "coming back to a swept block parsed {again} lines for a {}-row body, so the \
+         return costs the block rather than the window",
+        screen.diff
+    );
+}
+
+#[test]
+fn kept_while_pinned() {
+    // A diff tall enough to scroll, with the note deep inside its first hunk
+    // and a second hunk below, so the pane can hold the note's line as its
+    // last row with the whole answer behind the window.
+    let scratch = Scratch::new("notes-parse-held");
+    scratch.write(PATH, numbered_lines(200));
+    scratch.commit_all("baseline");
+    for line in 4..60 {
+        scratch.edit_line(PATH, line, "    changed above the note");
+    }
+    scratch.edit_line(PATH, 49, EDITED);
+    for line in 150..190 {
+        scratch.edit_line(PATH, line, "    changed below the note");
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+
+    let reply = format!("```rust\n{}```", support::generated(50, "quoted"));
+    let mut pinned = note("answered", 50, EDITED, BODY);
+    pinned.reply = Some(reply);
+    app.set_notes(vec![pinned]);
+
+    // Scroll until the note's line is the last row drawn, which puts every row
+    // of the answer behind the window while the note stays pinned.
+    let mut landed = false;
+    for _ in 0..200 {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        if matches!(view.rows.last(), Some(Row::Line { text, .. }) if text == EDITED) {
+            landed = true;
+            break;
+        }
+        app.apply(Action::Scroll(1), &mut frame, screen.diff)
+            .expect("scroll");
+    }
+    assert!(
+        landed,
+        "no scroll put the note's line on the pane's last row"
+    );
+
+    // Down, so the block's first rows are drawn and parsed once.
+    app.apply(Action::Scroll(10), &mut frame, screen.diff)
+        .expect("scroll on");
+    let before = highlighter.stats().quoted_lines;
+    app.view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        highlighter.stats().quoted_lines > before,
+        "the block's rows were drawn and nothing was parsed, so this reads nothing"
+    );
+
+    // Back up, so the line is the last row again and every row of the answer
+    // is behind the window, for two frames, which is the sweep's grace.
+    app.apply(Action::Scroll(-10), &mut frame, screen.diff)
+        .expect("scroll back");
+    for _ in 0..2 {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        assert!(
+            !view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+            "a note row is drawn, so the answer is not behind the window"
+        );
+    }
+
+    // And on again: the same rows, from the parse the pin kept.
+    app.apply(Action::Scroll(10), &mut frame, screen.diff)
+        .expect("scroll on");
+    let before = highlighter.stats().quoted_lines;
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(|row| {
+            matches!(row, Row::Note { runs, .. } if runs.iter().any(|run| run.class.is_some()))
+        }),
+        "no code row is drawn after scrolling on, so this reads nothing"
+    );
+    assert_eq!(
+        highlighter.stats().quoted_lines - before,
+        0,
+        "a pinned note's block was parsed again after two frames behind the window"
+    );
+}
+
+#[test]
+fn rows_follow_the_window() {
+    let scratch = fixture("notes-rows-window");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+    let height = screen.diff;
+
+    app.set_notes(vec![left_as(
+        "answered",
+        BODY,
+        Status::Seen,
+        Some(&support::generated(10_000, "prose")),
+    )]);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert_eq!(view.rows.len(), height, "the screen did not fill");
+    assert!(
+        matches!(view.rows.last(), Some(Row::Note { .. })),
+        "the screen's last row is not the answer's, so the answer is not what fills it"
+    );
+    let drawn = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Note { .. }))
+        .count();
+    assert_eq!(
+        view.built, drawn,
+        "{} note rows were built and {drawn} drawn for a {height}-row body over a \
+         10,000-line answer, so the rows follow the answer rather than the window",
+        view.built
+    );
+}

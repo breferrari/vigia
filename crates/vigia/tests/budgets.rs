@@ -101,6 +101,22 @@ fn body(app: &App, files: usize) -> usize {
     layout(app, files).diff
 }
 
+/// Note rows on the screen carrying a class the grammar gave them. A run the
+/// grammar never coloured is still a run, so this asks for a class it had to
+/// produce: a pane of blocks drawn plain would satisfy a gate named for what
+/// quoting costs.
+fn coloured_note_rows(view: &View) -> usize {
+    view.rows
+        .iter()
+        .filter(|row| {
+            matches!(row, Row::Note { runs, .. }
+                if runs
+                    .iter()
+                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
+        })
+        .count()
+}
+
 /// One frame of the shell, timed whole: diff, collect, paint.
 fn shell_frame(
     frame: &mut Frame,
@@ -3046,16 +3062,7 @@ fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
     // A run the grammar never coloured is still a run, so this asks for a class
     // the grammar had to produce: a pane of blocks drawn plain would satisfy a
     // gate named for what quoting costs.
-    let coloured = view
-        .rows
-        .iter()
-        .filter(|row| {
-            matches!(row, Row::Note { runs, .. }
-                if runs
-                    .iter()
-                    .any(|run| !matches!(run.class, None | Some(Class::Plain))))
-        })
-        .count();
+    let coloured = coloured_note_rows(&view);
     assert!(
         coloured >= 20,
         "{coloured} rows on the timed screen carry a class the grammar gave \
@@ -3083,6 +3090,196 @@ fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
                 &mut history,
                 true,
             )
+        },
+    );
+}
+
+/// Lines a long answer quotes, so its arrival is a parse the window bounds.
+const ARRIVING_LINES: usize = 2_000;
+
+/// What one pane pays on the frame a long fenced answer arrives, against the
+/// same bytes as prose: the block is parsed as far as the rows the pane draws,
+/// so every sample is an arrival, each answer differing from the last in a line
+/// the window never reaches.
+struct Arrival {
+    /// The fenced and the prose arm, where the pane was timed.
+    timed: Option<(Samples, Samples)>,
+    /// Lines of the block one screen parsed, against the rows it has.
+    parsed: u64,
+    rows: usize,
+    /// Rows of the timed screen carrying a class the grammar gave them.
+    coloured: usize,
+}
+
+fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
+    let scratch = Scratch::large_diff(name, FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    // Past the plain first frame, so a read with no warmup still parses.
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+    let screen = layout_of(&app, pane, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(pane);
+
+    app.apply(
+        Action::Scroll(isize::try_from(LINES + 2).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll to the working-tree side");
+
+    let block = generated(ARRIVING_LINES, "quoted");
+    let answer = |fenced: bool, sample: usize| {
+        if fenced {
+            format!("swapped it for this:\n```rust\n{block}// sample {sample}\n```")
+        } else {
+            format!("swapped it for this:\n{block}sample {sample}")
+        }
+    };
+    let (_, diff) = frame.diff(0).expect("diff");
+    let (line, text) = diff.rows_on(Side::New)[0];
+    let (path, text) = (diff.path.clone(), text.to_owned());
+    let note = |fenced: bool, sample: usize| {
+        vec![Note {
+            id: "arriving".to_owned(),
+            path: path.clone(),
+            side: Side::New,
+            line,
+            text: text.clone(),
+            first: None,
+            body: "the reader's words".to_owned(),
+            status: Status::Seen,
+            reply: Some(answer(fenced, sample)),
+            written: std::time::SystemTime::now(),
+        }]
+    };
+
+    let mut edits = 0usize;
+    // One highlighter for both arms: every sample is a fresh digest, so nothing
+    // an arm keeps could serve the other.
+    let mut next_frame = |frame: &mut Frame,
+                          app: &mut App,
+                          highlighter: &mut Highlighter,
+                          history: &mut History,
+                          fenced: bool| {
+        scratch.edit_line(
+            EDITED_PATH,
+            0,
+            &format!("fn edited_{edits}() {{ let value = {edits}; }}"),
+        );
+        edits += 1;
+        app.set_notes(note(fenced, edits));
+        time_cpu(|| {
+            sample(history, scratch.root(), EDITED_PATH);
+            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
+        })
+    };
+
+    let samples = timed.then(|| {
+        for _ in 0..WARMUP_FRAMES {
+            for fenced in [true, false] {
+                next_frame(&mut frame, &mut app, &mut highlighter, &mut history, fenced);
+            }
+        }
+        let (mut fenced_frames, mut prose_frames) =
+            (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
+        for _ in 0..SAMPLED_FRAMES {
+            for fenced in [true, false] {
+                let (wall, _) =
+                    next_frame(&mut frame, &mut app, &mut highlighter, &mut history, fenced);
+                if fenced {
+                    fenced_frames.push(wall);
+                } else {
+                    prose_frames.push(wall);
+                }
+            }
+        }
+        (fenced_frames, prose_frames)
+    });
+
+    // One more arrival, read rather than timed: what it parsed and what it drew.
+    let before = highlighter.stats().quoted_lines;
+    app.set_notes(note(true, usize::MAX));
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let parsed = highlighter.stats().quoted_lines - before;
+    let coloured = coloured_note_rows(&view);
+    Arrival {
+        timed: samples,
+        parsed,
+        rows: screen.diff,
+        coloured,
+    }
+}
+
+/// I9 on the frame a long fenced answer arrives, timed on the ordinary pane and
+/// read on the tall one: on either, the block is parsed no further than the
+/// rows drawn. The tall pane's window is a hundred-odd lines of grammar on top
+/// of its frame, a first touch the spec leaves outside the steady budget, so it
+/// is recorded rather than budgeted.
+#[test]
+fn arrival_holds_the_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let ordinary = arrival_on("notes-arriving", area(), true);
+    let tall = arrival_on("notes-arriving-tall", NOTED_PANE, false);
+    let (fenced, prose) = ordinary
+        .timed
+        .as_ref()
+        .expect("the ordinary pane was timed");
+    let prose_p50 = prose.percentile(0.5).expect("a sampled frame");
+    println!(
+        "arriving on the ordinary {}x{} pane: frame p50 {:?} with a {ARRIVING_LINES}-line \
+         answer fenced, {prose_p50:?} with the same bytes as prose",
+        area().width,
+        area().height,
+        fenced.percentile(0.5).expect("a sampled frame"),
+    );
+
+    for (name, arrival) in [("ordinary", &ordinary), ("tall", &tall)] {
+        println!(
+            "the {name} pane parsed {} lines of the block for {} rows",
+            arrival.parsed, arrival.rows
+        );
+        // Every line of the block is a `fn`, so every parsed line drew a class.
+        assert!(
+            arrival.coloured as u64 >= arrival.parsed,
+            "{} rows on the {name} pane carry a class the grammar gave them for {} \
+             lines parsed, so this gate read a screen whose answer was not highlighted",
+            arrival.coloured,
+            arrival.parsed
+        );
+        assert!(
+            arrival.parsed >= 1,
+            "the arrival on the {name} pane parsed nothing, so the block drew plain"
+        );
+        assert!(
+            arrival.parsed <= arrival.rows as u64,
+            "the arrival on the {name} pane parsed {} lines of a {ARRIVING_LINES}-line \
+             block for a {}-row body, so the parse follows the block rather than the window",
+            arrival.parsed,
+            arrival.rows
+        );
+    }
+
+    holds_p99_rounds(
+        "I9: the frame a long fenced answer arrives on",
+        budget(I9_FRAME),
+        fenced,
+        || format!("(prose p50 {prose_p50:?})"),
+        // A second round is a second rig, built whole.
+        || {
+            let (fenced, _) = arrival_on("notes-arriving-again", area(), true)
+                .timed
+                .expect("the pane was timed");
+            (fenced, None)
         },
     );
 }
