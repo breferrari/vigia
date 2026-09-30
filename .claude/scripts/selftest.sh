@@ -136,10 +136,14 @@ battery '[{"name":"twice","file":"a.txt","old":"a","new":"x"}]'
 out=$(mutate); got=$?
 [ "$got" -eq 2 ] && unchanged && ok "an anchor matching twice aborts" || no "an anchor matching twice aborts (said: $out)" 2 "$got"
 
+battery '[{"name":"same","file":"a.txt","old":"beta","new":"beta"}]'
+out=$(mutate); got=$?
+[ "$got" -eq 2 ] && unchanged && ok "a mutation that changes nothing aborts" || no "a mutation that changes nothing aborts (said: $out)" 2 "$got"
+
 printf 'work\n' > "$MUT/b.txt"
 battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"}]'
 out=$(mutate); got=$?
-if [ "$got" -eq 2 ] && printf '%s' "$out" | grep -q "not clean" && git -C "$MUT" diff --quiet; then ok "a dirty tree is refused before anything applies"
+if [ "$got" -eq 2 ] && printf '%s' "$out" | grep -q "commit first" && git -C "$MUT" diff --quiet; then ok "a dirty tree is refused before anything applies"
 else no "a dirty tree is refused before anything applies (said: $out)" 2 "$got"; fi
 rm -f "$MUT/b.txt"
 
