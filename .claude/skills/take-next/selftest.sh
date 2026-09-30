@@ -228,7 +228,12 @@ cat > "$FIX/roadmap.md" <<'ROW'
 ROW
 jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "I1: the first"},
         {number: 2, state: "OPEN", milestone: {title: "Phase 8 - look"}, title: "issue 2"}]'   > "$FIX/issues.json"
-line=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md"   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md"   PREFLIGHT_ISSUES_FILE="$FIX/issues.json"   PREFLIGHT_ISSUE_LIMIT=10     sh "$PRE" 2>&1 | awk '/row (not marked done|marked done|cites)/ { $1 = $1; print }')
+# One pre-flight run over the fixture files, at a limit the fixtures stay under.
+pre() {
+  PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" \
+  PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" "$@"
+}
+line=$(pre 2>&1 | awk '/row (not marked done|marked done|cites)/ { $1 = $1; print }')
 case "$line" in
   "") ok "a row is checked against the issue in its own cell" ;;
   *)  no "a row is checked against the issue in its own cell" "no drift" "$line" ;;
@@ -247,7 +252,7 @@ ROW
 jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "I1: the first"},
         {number: 2, state: "OPEN", milestone: {title: "Phase 8 - look"}, title: "issue 2"},
         {number: 3, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "issue 3"}]' > "$FIX/issues.json"
-out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/DRIFT/ { $1 = $1; print }')
+out=$(pre 2>&1 | awk '/DRIFT/ { $1 = $1; print }')
 want='DRIFT row marked done, issue #2 is open
 DRIFT row not marked done, issue #1 is closed
 DRIFT #3 has no roadmap mention: issue 3'
@@ -257,11 +262,11 @@ else no "marks and mentions drift both ways" "$want" "$out"; fi
 # An empty file on either side is still read as the side it is.
 printf '| ✅ | x | [#1](https://example.invalid/1) |\n' > "$FIX/roadmap.md"
 echo '[]' > "$FIX/issues.json"
-out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/row cites/ { $1 = $1; print }')
+out=$(pre 2>&1 | awk '/row cites/ { $1 = $1; print }')
 [ "$out" = "DRIFT row cites #1, which the tracker does not have" ] && ok "an empty board fails every row" || no "an empty board fails every row" "row cites #1" "$out"
 echo '## no rows' > "$FIX/roadmap.md"
 jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "I1: the first"}]' > "$FIX/issues.json"
-out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/roadmap mention/ { $1 = $1; print }')
+out=$(pre 2>&1 | awk '/roadmap mention/ { $1 = $1; print }')
 [ "$out" = "DRIFT #1 has no roadmap mention: I1: the first" ] && ok "a roadmap with no mentions fails every issue" || no "a roadmap with no mentions fails every issue" "#1 has no roadmap mention" "$out"
 
 # Comparison 8, from the case that filed it: a sibling worktree on `single-297`
@@ -285,7 +290,7 @@ DRIFT a plan comment by c, t3'
 echo '{"comments": []}' > "$FIX/comments.json"
 out=$(flight 29)
 [ "$out" = "ok no worktree, branch or plan names #29" ] && ok "a free issue reads clean" || no "a free issue reads clean" "ok" "$out"
-out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | grep -c '^8\.')
+out=$(pre 2>&1 | grep -c '^8\.')
 [ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
 
 echo "drift:"
