@@ -645,9 +645,10 @@ impl Worktree {
     /// [`Filter::diff_attribute`].
     fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
         let (diff, cleaned) = self.with_filter(|filter| filter.diff_attribute(&change.path))?;
-        // The blob holds what the skipped driver wrote and the worktree what it
-        // read, so the two do not diff. Git runs no clean filter on a symlink.
-        Ok(if cleaned && !change.maybe_symlink {
+        // A stored pointer against the content it stands for does not diff. Git
+        // runs no clean filter on a symlink.
+        let pointer = change.before.is_some() && change.after == Some(Side::Worktree);
+        Ok(if cleaned && pointer && !change.maybe_symlink {
             Some(false)
         } else {
             diff

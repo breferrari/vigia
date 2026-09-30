@@ -15,8 +15,9 @@ pub(crate) struct Filter {
     /// known to the index before deciding to convert it.
     index: gix::worktree::Index,
     objects: gix::OdbHandle,
-    /// Drivers with a clean or process program, which this pipeline never runs.
-    skipped: Vec<gix::bstr::BString>,
+    /// Whether Git LFS is configured. Its stored blob is a pointer rather than
+    /// the content, and this pipeline never runs it.
+    lfs: bool,
 }
 
 impl Filter {
@@ -33,13 +34,10 @@ impl Filter {
 
         let mut options = gix::filter::Pipeline::options(repo).map_err(Error::filter_setup)?;
         // See the module header. Both of these are rulings, not oversights. The
-        // drivers are never run; only their names are kept, to recognise a path
-        // one of them would have cleaned.
-        let skipped = std::mem::take(&mut options.drivers)
-            .into_iter()
-            .filter(|driver| driver.clean.is_some() || driver.process.is_some())
-            .map(|driver| driver.name)
-            .collect();
+        // drivers are never run; LFS is only recognised.
+        let lfs = std::mem::take(&mut options.drivers).iter().any(|driver| {
+            driver.name == "lfs" && (driver.clean.is_some() || driver.process.is_some())
+        });
         options.crlf_roundtrip_check = gix::filter::plumbing::pipeline::CrlfRoundTripCheck::Skip;
 
         let pipeline = gix::filter::plumbing::Pipeline::new(
@@ -52,20 +50,20 @@ impl Filter {
             stack,
             index,
             objects: repo.objects.clone(),
-            skipped,
+            lfs,
         })
     }
 
     /// What `rela_path`'s attributes say about diffing it: `diff` set, unset or
-    /// silent, and whether a driver this pipeline skips would clean it.
+    /// silent, and whether Git LFS stores it as a pointer.
     pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<bool>, bool)> {
         let Filter {
             stack,
             objects,
-            skipped,
+            lfs,
             ..
         } = self;
-        let names: &[&str] = if skipped.is_empty() {
+        let names: &[&str] = if !*lfs {
             &["diff"]
         } else {
             &["diff", "filter"]
@@ -78,9 +76,7 @@ impl Filter {
         let (mut diff, mut cleaned) = (None, false);
         for found in outcome.iter_selected() {
             match (found.assignment.name.as_str(), found.assignment.state) {
-                ("filter", gix::attrs::StateRef::Value(name)) => {
-                    cleaned = skipped.iter().any(|driver| driver == name.as_bstr());
-                }
+                ("filter", gix::attrs::StateRef::Value(name)) => cleaned = name.as_bstr() == "lfs",
                 ("diff", gix::attrs::StateRef::Unset) => diff = Some(false),
                 ("diff", gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_)) => {
                     diff = Some(true)

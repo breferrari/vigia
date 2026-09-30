@@ -89,11 +89,11 @@ fn binary_sniff_bounded() {
     );
 }
 
-/// A path whose clean filter is an external program, as Git LFS configures it,
-/// reads as binary: the blob is what the program wrote and the worktree is what
-/// it read. The program is never run to find that out.
+/// A path Git LFS stores reads as binary: the blob is a pointer and the
+/// worktree is the content. Other drivers, and LFS paths with no stored
+/// pointer, diff as text. No driver is run to find that out.
 #[test]
-fn skipped_driver_undiffable() {
+fn lfs_undiffable() {
     let scratch = Scratch::new("attr-driver");
     // Outside the worktree, so a run leaves no untracked file behind.
     let marker = scratch.root().with_extension("ran");
@@ -101,26 +101,28 @@ fn skipped_driver_undiffable() {
     let mark = marker.display().to_string().replace('\\', "/");
     scratch.git(&[
         "config",
-        "filter.ptr.clean",
+        "filter.lfs.clean",
         &format!("cat >/dev/null; echo ran > '{mark}'; echo pointer"),
     ]);
+    scratch.git(&["config", "filter.strip.clean", "cat"]);
     scratch.git(&["config", "filter.smudger.smudge", "cat"]);
     scratch.write(
         ".gitattributes",
-        "a.csv filter=ptr\nb.csv filter=proc\nplain.txt filter=unset-driver\nsmudged.txt filter=smudger\n",
+        "*.csv filter=lfs diff=lfs\nstripped.txt filter=strip\nplain.txt filter=unset-driver\nsmudged.txt filter=smudger\n",
     );
-    let names = ["a.csv", "b.csv", "plain.txt", "smudged.txt"];
+    let names = ["a.csv", "stripped.txt", "plain.txt", "smudged.txt"];
     for name in names {
         scratch.write(name, numbered_lines(5));
     }
     scratch.commit_all("initial");
-    // A process driver alone, the way LFS runs, configured after the commit so
-    // git never has to start it.
-    scratch.git(&["config", "filter.proc.process", "no-such-filter-process"]);
     for name in names {
         scratch.write(name, numbered_lines(6));
     }
-    std::fs::remove_file(&marker).expect("git ran the driver to store the pointer");
+    // New under the LFS pattern: no pointer stored, so nothing to disagree with.
+    scratch.write("new.csv", numbered_lines(3));
+    // Git ran this clean program to store the pointer, unless an installed
+    // git-lfs process took precedence. Either way the blob is a pointer.
+    let _ = std::fs::remove_file(&marker);
 
     let worktree = scratch.worktree();
     let changes = changes_sorted(&worktree);
@@ -131,19 +133,21 @@ fn skipped_driver_undiffable() {
             worktree.measure(change).expect("measure"),
         )
     };
-    for name in ["a.csv", "b.csv"] {
-        let (diff, span) = diff_of(name);
-        assert!(
-            diff.binary && diff.hunks.is_empty() && span.binary,
-            "{name} diffed its content against what its driver stored: {} hunks",
-            diff.hunks.len()
-        );
-    }
-    // A driver with no clean or process program is a no-op in git.
-    for name in ["plain.txt", "smudged.txt"] {
+    let (diff, span) = diff_of("a.csv");
+    assert!(
+        diff.binary && diff.hunks.is_empty() && span.binary,
+        "a.csv diffed its content against the pointer LFS stored, `diff=lfs` and all: {} hunks",
+        diff.hunks.len()
+    );
+    for (name, added) in [
+        ("stripped.txt", 1),
+        ("plain.txt", 1),
+        ("smudged.txt", 1),
+        ("new.csv", 3),
+    ] {
         let (diff, span) = diff_of(name);
         assert!(!diff.binary && !span.binary, "{name} read as binary");
-        assert_eq!((diff.added, diff.removed), (1, 0), "{name}");
+        assert_eq!((diff.added, diff.removed), (added, 0), "{name}");
     }
     assert!(
         !marker.exists(),
@@ -151,13 +155,33 @@ fn skipped_driver_undiffable() {
     );
 }
 
-/// Git runs no clean filter on a symlink, so a link under a skipped driver's
-/// pattern still diffs its target.
+/// LFS as it usually runs, a long-lived process with no clean program.
 #[test]
-fn skipped_driver_keeps_links() {
+fn lfs_process_only() {
+    let scratch = Scratch::new("attr-lfs-process");
+    scratch.write(".gitattributes", "*.csv filter=lfs\n");
+    scratch.write("a.csv", numbered_lines(5));
+    scratch.commit_all("initial");
+    // After the commit, so git never has to start it.
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    scratch.write("a.csv", numbered_lines(6));
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes.iter().find(|c| c.path == "a.csv").expect("listed");
+    assert!(
+        worktree.diff(change).expect("diff").binary,
+        "a process-only LFS path diffed as text"
+    );
+}
+
+/// Git runs no clean filter on a symlink, so a link under an LFS pattern still
+/// diffs its target.
+#[test]
+fn lfs_keeps_links() {
     let scratch = Scratch::new("attr-driver-link");
-    scratch.git(&["config", "filter.ptr.clean", "cat >/dev/null; echo pointer"]);
-    scratch.write(".gitattributes", "*.csv filter=ptr\n");
+    scratch.git(&["config", "filter.lfs.clean", "cat >/dev/null; echo pointer"]);
+    scratch.write(".gitattributes", "*.csv filter=lfs\n");
     if !support::committed_link(&scratch, "one.txt", "l.csv") {
         return;
     }
