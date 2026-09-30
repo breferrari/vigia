@@ -885,7 +885,6 @@ mod tests {
         assert!(!watched(&[".git", "objects", "ab", "cdef01"]));
         assert!(!watched(&[".git", "COMMIT_EDITMSG"]));
         assert!(!watched(&[".git", "config.lock"]));
-        assert!(!watched(&[".git", "info", "exclude"]));
 
         // The lock file itself is not the write, and that is deliberate rather than an
         // oversight this widening should have swept up.
@@ -914,6 +913,10 @@ mod tests {
         assert!(
             watched(&[".git", "info", "attributes"]),
             "an info/attributes write woke nothing"
+        );
+        assert!(
+            watched(&[".git", "info", "exclude"]),
+            "an info/exclude write woke nothing, so the untracked files it hides stayed listed"
         );
         assert!(
             !watched(&[".git", "info"]),
