@@ -73,11 +73,18 @@ if (inlineHits.length > 0) block("this command's inline body", inlineHits);
 
 if (!bodyFile) process.exit(0);
 
+// Fail open, and say so: a body that was scanned and one that was never read
+// must not look the same to the session.
+if (/[$%`]/.test(bodyFile)) {
+	console.error(`leak-guard: ${bodyFile} is not expanded in the command, so its body was not scanned. Pass the literal path.`);
+	process.exit(0);
+}
 let body = "";
 try {
 	const path = isAbsolute(bodyFile) ? bodyFile : resolve(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), bodyFile);
 	body = readFileSync(path, "utf8");
 } catch {
+	console.error(`leak-guard: could not read ${bodyFile}, so its body was not scanned.`);
 	process.exit(0);
 }
 

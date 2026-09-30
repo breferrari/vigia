@@ -352,7 +352,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
 | ⬜ | Three overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511) and again by [#508](https://github.com/breferrari/vigia/issues/508): a refactor of the two that predate the branches that found it.** [#519](https://github.com/breferrari/vigia/issues/519) is its duplicate, filed before this row was found and closed against it | [#515](https://github.com/breferrari/vigia/issues/515) |
 | ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
-| ⬜ | A body-file path the leak guard cannot read is allowed in silence. **Found by [#508](https://github.com/breferrari/vigia/issues/508), which published a session URL past it** | [#520](https://github.com/breferrari/vigia/issues/520) |
+| ✅ | A body-file path the leak guard cannot read is allowed in silence. **Found by [#508](https://github.com/breferrari/vigia/issues/508), which published a session URL past it** | [#520](https://github.com/breferrari/vigia/issues/520) |
 | ✅ | A gate can rebuild its expected value from the value under test, and one did | [#499](https://github.com/breferrari/vigia/issues/499) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |

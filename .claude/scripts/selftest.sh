@@ -31,6 +31,14 @@ expect() { # guard, expected exit, name, json
   [ "$got" -eq "$2" ] && ok "$3" || no "$3" "$2" "$got"
 }
 
+says() { # guard, expected exit, name, json, text stderr must carry
+  said=$(bash_call "$4" | node "$HERE/$1" 2>&1 >/dev/null)
+  got=$?
+  if [ "$got" -ne "$2" ]; then no "$3" "$2" "$got"
+  elif ! printf '%s' "$said" | grep -q "$5"; then no "$3 (said: $said)" "$2" "$got"
+  else ok "$3"; fi
+}
+
 echo "scan-guard:"
 expect scan-guard.mjs 2 "find rooted at / is blocked" 'find / -name "*.rs"'
 expect scan-guard.mjs 2 "find with a flag before / is blocked" 'find -L / -name x'
@@ -64,6 +72,8 @@ expect leak-guard.mjs 2 "a commit message file carrying the trailer is blocked" 
 expect leak-guard.mjs 0 "a clean commit is allowed" 'git commit -m "The version raise counts only the lines it moved"'
 expect leak-guard.mjs 0 "a clean commit from a file under the profile is allowed" "git commit -F $FIXW/clean.md"
 expect leak-guard.mjs 0 "a command that neither publishes nor commits is ignored" 'echo Claude-Session: x'
+says leak-guard.mjs 0 "an unreadable body file is let through, and said" "gh pr create --title t --body-file $FIXW/missing.md" "not scanned"
+says leak-guard.mjs 0 "an unexpanded body-file variable is let through, and said" 'P=x.md; gh pr create --body-file "$P"' "not expanded"
 
 echo "record-guard:"
 # A Stop call, on a scratch repository whose branch names an issue and whose
