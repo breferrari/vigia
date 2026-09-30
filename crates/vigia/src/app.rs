@@ -657,6 +657,12 @@ impl App {
         }
     }
 
+    /// The page of the gestures sheet, when it is drawn.
+    #[must_use]
+    pub const fn sheet_page(&self) -> Option<usize> {
+        self.sheet
+    }
+
     /// Whether the position list is drawn.
     #[must_use]
     pub const fn positions_open(&self) -> bool {
