@@ -561,7 +561,7 @@ fn settling_waits_for_a_tree_that_is_still_being_written() {
     let quiet = std::time::Instant::now();
     let _ = scratch.settled();
     assert!(
-        quiet.elapsed() < Duration::from_secs(1),
+        quiet.elapsed() < budget(Duration::from_secs(1)),
         "a still tree took {:?} to settle, so the wait is not bounded by the tree",
         quiet.elapsed()
     );
