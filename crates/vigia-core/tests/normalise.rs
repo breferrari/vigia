@@ -734,27 +734,37 @@ fn broken_config_followed() {
 #[test]
 fn missing_config_skipped() {
     let scratch = one_line_changed("normalise-missing-config");
+    // A key no system config sets, so losing the local one shows.
+    let attributes = scratch.path_of(".git/marks");
+    std::fs::write(
+        &attributes,
+        "a.txt binary
+",
+    )
+    .expect("write attributes");
+    let attributes = attributes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.attributesFile", &attributes]);
+
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    let read = |frame: &mut Frame| {
+    let binary = |frame: &mut Frame| {
         frame.advance().expect("advance");
         let at = frame
             .files()
             .iter()
             .position(|c| c.path == "a.txt")
             .expect("a.txt is changed");
-        let (_, diff) = frame.diff(at).expect("diff");
-        (diff.added, diff.removed)
+        frame.diff(at).expect("diff").1.binary
     };
-    let kept = read(&mut frame);
+    assert!(
+        binary(&mut frame),
+        "the control is wrong: core.attributesFile marks a.txt binary"
+    );
 
     let config = scratch.path_of(".git/config");
     let bytes = std::fs::read(&config).expect("read config");
     std::fs::remove_file(&config).expect("remove config");
-    let between = read(&mut frame);
+    let between = binary(&mut frame);
     std::fs::write(&config, bytes).expect("restore config");
-    assert_eq!(
-        between, kept,
-        "a missing config was loaded as none, and the diff dropped core.autocrlf"
-    );
+    assert!(between, "a missing config was loaded as none");
 }
