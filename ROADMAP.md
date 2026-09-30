@@ -364,7 +364,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
 | ✅ | I7 is measured without the highlighter, and the first parse costs 98ms | [#51](https://github.com/breferrari/vigia/issues/51) |
 | ⬜ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
-| ⬜ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
+| ✅ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
 | ✅ | `G` leaves the pane short, and the first scroll yanks it back a screenful | [#62](https://github.com/breferrari/vigia/issues/62) |
 | ✅ | The row wash drops a column under every wide glyph. **Not on screen: the backend never receives a wide glyph's second cell; the gate now reads what a terminal draws** | [#63](https://github.com/breferrari/vigia/issues/63) |
 | ⬜ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
