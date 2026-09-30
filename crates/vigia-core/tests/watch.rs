@@ -1020,3 +1020,32 @@ fn excludes_target_followed() {
         "a path the excludes file stopped ignoring never woke the watch"
     );
 }
+
+/// A config change that moves no rule file, here `core.ignoreCase`, still
+/// rebuilds the rules.
+#[test]
+fn ignore_case_followed() {
+    let scratch = committed_scratch("watch-ignore-case");
+    scratch.git(&["config", "core.ignoreCase", "true"]);
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    std::fs::write(scratch.path_of(".git/info/exclude"), "VIGIA-EXCLUDED/\n")
+        .expect("write exclude");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: core.ignoreCase did not fold the pattern"
+    );
+
+    scratch.git(&["config", "core.ignoreCase", "false"]);
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a config change that moved no rule file left the old rules"
+    );
+}
