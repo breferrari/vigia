@@ -2147,3 +2147,19 @@ fn wide_glyph_washed() {
         failing.first()
     );
 }
+
+/// The chrome's two inks read against the pane each palette is drawn for, at
+/// WCAG AA's 4.5:1 for text. `ansi` draws named colours on a pane it cannot
+/// know, and `nothing_a_reader_has_to_read_is_drawn_in_colour_eight` holds it.
+#[test]
+fn chrome_readable() {
+    for (name, theme, pane) in palettes() {
+        for (key, style) in [("chrome", theme.chrome), ("chrome_dim", theme.chrome_dim)] {
+            let ratio = contrast(rgb_of(style), pane);
+            assert!(
+                ratio >= 4.5,
+                "{name}'s {key} reads at {ratio:.2}:1 against its pane"
+            );
+        }
+    }
+}
