@@ -8,7 +8,7 @@
 // occur exactly once in `file`. Run it from the repository root on a clean
 // tree: the restore writes the saved bytes back and never checks anything out,
 // so uncommitted work cannot be lost, and a clean tree makes any leftover
-// change visible. Exit 0 all killed, 1 any survived, 2 aborted.
+// change visible. Exit 0 all killed, 1 any survived or broke, 2 aborted.
 
 import { createHash } from "node:crypto";
 import { execSync, spawnSync } from "node:child_process";
@@ -63,20 +63,28 @@ for (const m of battery) {
 	const original = readFileSync(m.file);
 	const before = hash(original);
 	restore = () => writeFileSync(m.file, original);
-	writeFileSync(m.file, original.toString("utf8").replace(m.old, () => m.new));
-	if (hash(readFileSync(m.file)) === before) abort(`${m.name}: the mutation left ${m.file} unchanged`);
-
-	const run = test();
-	restore();
-	restore = null;
+	let run;
+	try {
+		writeFileSync(m.file, original.toString("utf8").replace(m.old, () => m.new));
+		if (hash(readFileSync(m.file)) === before) {
+			restore();
+			abort(`${m.name}: the mutation left ${m.file} unchanged`);
+		}
+		run = test();
+	} finally {
+		restore();
+		restore = null;
+	}
 	if (hash(readFileSync(m.file)) !== before) abort(`${m.name}: ${m.file} did not come back byte for byte`);
 	if (dirty()) abort(`${m.name}: the tree is not clean after the restore:\n${dirty()}`);
 
 	const output = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
 	const failed = [...output.matchAll(/^test (\S+) \.\.\. FAILED/gm)].map((hit) => hit[1]);
-	const killed = run.status !== 0;
-	rows.push({ name: m.name, verdict: killed ? "KILLED" : "SURVIVED", by: failed.join(", ") });
+	// A mutation that does not compile was judged by the compiler, not the tests.
+	const broke = run.status !== 0 && failed.length === 0 && /^error(\[E\d+\])?:/m.test(output);
+	const verdict = run.status === 0 ? "SURVIVED" : broke ? "BROKE" : "KILLED";
+	rows.push({ name: m.name, verdict, by: failed.join(", ") });
 }
 
 for (const row of rows) console.log(`${row.verdict.padEnd(8)}  ${row.name}${row.by ? `  (${row.by})` : ""}`);
-process.exit(rows.some((row) => row.verdict === "SURVIVED") ? 1 : 0);
+process.exit(rows.some((row) => row.verdict !== "KILLED") ? 1 : 0);
