@@ -120,7 +120,7 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 
 ## 4. Build
 
-- **Runners are in CONTRIBUTING.md, Running things**: `cargo nextest run` for a suite, `cargo test --release --test <gate>` for a release gate, `cargo test --workspace --doc` for doctests.
+- **Runners: CONTRIBUTING.md, Running things.** `cargo nextest run` for a suite, `cargo test --release --test <gate>` for a release gate, `cargo test --doc` for doctests.
 - **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First, find a free `../vigia.*` worktree, because its `target/` is warm. Make sure that no other session uses it. Then run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
 - **If the reader is present,** run `vigia` in a side pane on the worktree. A reader who looked at the pane found defects that eleven green gates missed.
 - **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
