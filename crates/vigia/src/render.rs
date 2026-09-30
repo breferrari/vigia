@@ -2781,9 +2781,12 @@ const ROOMY_HEADING_INSET: usize = 2;
 /// Blank columns between a roomy row's keys cell and its verb.
 const ROOMY_GAP: usize = 8;
 
-/// Keyboard rows the ladder may never drop: `a`, `f` and `?`.
-const SHEET_KEEP: usize = 3;
-// It names two things and only one of them is a keep-set.
+/// The keyboard rows the width ladder never drops, by their first key. The
+/// last entries of [`DROP_ORDER`] are these, in this order.
+const SHEET_KEEP: [&str; 3] = ["a", "f", "?  Esc"];
+
+/// The fewest body rows a sheet page is worth drawing.
+const SHEET_FLOOR: usize = 3;
 
 /// Rows the sheet's frame costs, one border at each end.
 const SHEET_FRAME: usize = 2;
@@ -3411,13 +3414,13 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     // The floor, stated once and early rather than folded into the rung sequence. Below
     // it no rung fits on the height axis at all, and not only the paged ones: the
     // shortest rung above them is the two-column one, which is many times as tall.
-    if capacity < SHEET_KEEP {
+    if capacity < SHEET_FLOOR {
         return None;
     }
     // The row sets, widest first, so a pane with the columns for the mouse group
     // pages it rather than dropping it.
     let sets = std::iter::once((0, true))
-        .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(|from| (from, false)));
+        .chain((0..=KEYBOARD.len() - SHEET_KEEP.len()).map(|from| (from, false)));
 
     // The order is the ruling's: the roomy rung where there is room for it, then
     // every row in one column, then the two-column rung that buys height with
@@ -6281,14 +6284,13 @@ mod sheet_tables {
     #[test]
     fn the_last_rows_to_go_are_the_unguessable_three() {
         // §11.1: the unguessable outlives the reflexive.
-        let kept: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP..]
+        let kept: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP.len()..]
             .iter()
             .map(|&i| KEYBOARD[i].keys[0])
             .collect();
         assert_eq!(
-            kept,
-            vec!["a", "f", "?  Esc"],
-            "the rows the ladder keeps longest are not the three §11.1 names"
+            kept, SHEET_KEEP,
+            "the rows the ladder keeps longest are not the ones SHEET_KEEP names"
         );
     }
 
@@ -6387,7 +6389,7 @@ mod sheet_tables {
         // notes, and the standing toggle outlives them: it changes what is walked.
         // The menu's door outlives all of them, which is `DROP_ORDER`'s own rule.
         const EXPECTED: [&str; 5] = ["s", "o", "w", "b  /  B  /  O", "m  Esc"];
-        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
+        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP.len() - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
             .map(|&row| KEYBOARD[row].keys[0])
@@ -6457,7 +6459,7 @@ mod sheet_tables {
     /// whole table is short of rows for its own reasons.
     #[test]
     fn a_rung_that_has_given_up_a_gesture_refuses_the_line() {
-        for from in 1..=KEYBOARD.len() - SHEET_KEEP {
+        for from in 1..=KEYBOARD.len() - SHEET_KEEP.len() {
             for mouse in [true, false] {
                 assert!(
                     !purpose_fits(from, mouse, sheet_rows(from, mouse, false), usize::MAX),
