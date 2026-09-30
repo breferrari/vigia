@@ -142,7 +142,7 @@ A rule that survives being overruled re-fires on the next session, and he argues
 
 Contract files (`SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md`, this file, `.claude/`) keep the house style. Public files (README, CHANGELOG, CONTRIBUTING, the issue template, release notes, PR titles) use ordinary English and name what the user sees. `.github/public-dialect.txt` lists the banned phrases; `register.rs` and CI enforce it.
 
-When a subject would be a poor release note, put `Release-note: <one sentence>` in the commit body; squash drops the PR body. Every PR carries one label, `release` or `internal`, and only `release` reaches the CHANGELOG. `Release-note: none` goes with `internal`.
+When a subject would be a poor release note, put `Release-note: <one sentence>` in the commit body; squash drops the PR body. Every PR carries one label, `release` or `internal`, and only `release` reaches the CHANGELOG. `Release-note: none` goes with `internal`. An `internal` title starts with its kind (`ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, `chore:`); a `release` title has no prefix.
 
 ## Releasing
 

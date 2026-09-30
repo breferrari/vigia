@@ -54,6 +54,8 @@ What you control is the line a user reads. Put `Release-note: <one sentence>` in
 
 Pull requests are squash-merged with their commit messages, so a `Release-note:` line that is only in the pull request description is lost. Put it in a commit.
 
+Start the title of an `internal` pull request with a prefix that says what kind of work it is: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, or `chore:` for anything else. A `release` pull request has no prefix, because its title can become the changelog line. The prefix is for people reading the log. The label is what the release reads.
+
 A release stops when a merged pull request carries no label, both labels, or a `Release-note:` line that disagrees with its label, such as `none` on a `release` pull request. The stop names the pull request so a maintainer can fix the label. It is not something you need to watch. If every change since the last release is internal, no version is released.
 
 ## Public files and contract files
