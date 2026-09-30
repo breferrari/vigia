@@ -1024,7 +1024,23 @@ fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
             }
         }
     }
+    if (diff.lines as usize) < HEAT_BUCKETS {
+        return sampled(&buckets, diff.lines as usize);
+    }
     buckets
+}
+
+/// A short file's map, redrawn so every slice shows the line under its middle.
+///
+/// With fewer lines than slices, placing each line at one slice leaves the
+/// slices between two changed lines cool, so a solid change draws as dashes.
+/// Spreading a line's count over the slices it covers instead gives some lines
+/// two slices and some three, so a uniform change draws as alternating bands.
+fn sampled(placed: &[HeatBucket; HEAT_BUCKETS], lines: usize) -> [HeatBucket; HEAT_BUCKETS] {
+    // `placed` holds line `l` at the slice `bucket_of` gave it, and no two
+    // lines share one while lines < slices.
+    let at_line = |line: usize| placed[line * HEAT_BUCKETS / lines];
+    std::array::from_fn(|slice| at_line((2 * slice + 1) * lines / (2 * HEAT_BUCKETS)))
 }
 
 /// Where the top of the viewport sits.
@@ -2927,7 +2943,7 @@ mod tests {
     /// into the last bucket rather than dropped.
     #[test]
     fn a_removal_past_the_last_line_is_clamped_into_the_file() {
-        let map = heat_of(&diff(10, vec![hunk(11, &[LineKind::Removed])]));
+        let map = heat_of(&diff(120, vec![hunk(121, &[LineKind::Removed])]));
 
         assert_eq!(touched(&map), vec![HEAT_BUCKETS - 1]);
         assert_eq!(map[HEAT_BUCKETS - 1].removed, 1);
@@ -2956,10 +2972,10 @@ mod tests {
     /// after the first deletion in the file.
     #[test]
     fn a_removal_does_not_advance_the_working_tree_position() {
-        // Twelve lines, twelve buckets: one line each, so a drift of one row is
-        // a drift of one bucket and is visible.
+        // One line per bucket, so a drift of one row is a drift of one bucket
+        // and is visible.
         let map = heat_of(&diff(
-            12,
+            HEAT_BUCKETS as u32,
             vec![hunk(
                 1,
                 &[LineKind::Removed, LineKind::Removed, LineKind::Added],
@@ -2975,8 +2991,8 @@ mod tests {
         assert_eq!(map[0].added, 1);
     }
 
-    /// Fewer lines than buckets. Every bucket still has to be reachable, or a
-    /// short file would draw all its change at the left edge.
+    /// Fewer lines than buckets: a wholly changed file fills the strip rather
+    /// than drawing at the left edge or as dashes.
     #[test]
     fn a_file_shorter_than_the_bucket_count_still_projects() {
         let map = heat_of(&diff(
@@ -2988,10 +3004,39 @@ mod tests {
             ],
         ));
 
-        assert_eq!(
-            touched(&map),
-            vec![0, HEAT_BUCKETS / 3, 2 * HEAT_BUCKETS / 3]
-        );
+        assert_eq!(touched(&map), (0..HEAT_BUCKETS).collect::<Vec<_>>());
+    }
+
+    /// Swept over every short length and every run in it: changed lines that
+    /// touch draw slices that touch.
+    #[test]
+    fn short_run_stays_solid() {
+        for lines in 1..HEAT_BUCKETS as u32 {
+            for first in 1..=lines {
+                for last in first..=lines {
+                    let kinds = vec![LineKind::Added; (last - first + 1) as usize];
+                    let at = touched(&heat_of(&diff(lines, vec![hunk(first, &kinds)])));
+                    assert!(
+                        at.windows(2).all(|pair| pair[1] == pair[0] + 1),
+                        "lines {first}..={last} of {lines} drew slices {at:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A uniformly changed short file draws one band, not alternating ones.
+    #[test]
+    fn short_uniform_one_band() {
+        for lines in 1..HEAT_BUCKETS as u32 {
+            let kinds = vec![LineKind::Added; lines as usize];
+            let map = heat_of(&diff(lines, vec![hunk(1, &kinds)]));
+            assert!(
+                map.iter().all(|bucket| bucket.total() == map[0].total()),
+                "a wholly changed {lines}-line file drew {:?}",
+                map.iter().map(|bucket| bucket.total()).collect::<Vec<_>>()
+            );
+        }
     }
 
     /// A file with no working-tree side has nowhere to place anything. That is a
