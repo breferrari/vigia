@@ -2415,7 +2415,8 @@ fn ci_runs_title_check() {
 /// in bytes. Growing past the ceiling fails the build.
 ///
 /// `CLAUDE.md` gets about 300 bytes over its size on the commit that set this, so
-/// one sentence fits without a raise. The skill gets about 20 bytes.
+/// one sentence fits without a raise. The skill gets about 500 bytes, two
+/// or three sentences, on the reader's instruction of 2026-09-30.
 ///
 /// `SPEC.md` and `RULINGS.md` carry no byte ceiling. A size cap fails a clearer
 /// sentence and passes a shorter one that dropped an exception, which is the
@@ -2425,7 +2426,7 @@ fn ci_runs_title_check() {
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 2] = [
     ("CLAUDE.md", 17_700),
-    (".claude/skills/take-next/SKILL.md", 21_900),
+    (".claude/skills/take-next/SKILL.md", 22_400),
 ];
 
 /// Every invariant id the spec's table declares. One leaving fails the build.
