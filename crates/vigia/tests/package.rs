@@ -3155,7 +3155,10 @@ fn unslacked_steps(ci: &str) -> Vec<String> {
     without_comments(ci)
         .split("- name:")
         .skip(1)
-        .filter(|step| step.contains("cargo test") && !step.contains("VIGIA_BUDGET_SLACK:"))
+        .filter(|step| {
+            (step.contains("cargo test") || step.contains("cargo nextest"))
+                && !step.contains("VIGIA_BUDGET_SLACK:")
+        })
         .map(|step| step.lines().next().unwrap_or_default().trim().to_owned())
         .collect()
 }
@@ -3164,12 +3167,13 @@ fn unslacked_steps(ci: &str) -> Vec<String> {
 /// the step holds it to the raw bound. `watch.rs` ran that way unnoticed.
 #[test]
 fn ci_tests_get_slack() {
-    let fixture = "      - name: test\n        run: cargo test --workspace\n      \
+    let fixture = "      - name: test\n        run: cargo nextest run --workspace\n      \
+                   - name: doctests\n        run: cargo test --workspace --doc\n      \
                    - name: budgets\n        run: cargo test --test budgets\n        \
                    env:\n          VIGIA_BUDGET_SLACK: \"3\"\n";
     assert_eq!(
         unslacked_steps(fixture),
-        ["test"],
+        ["test", "doctests"],
         "the scan missed a test step with no slack"
     );
 
@@ -3184,6 +3188,70 @@ fn ci_tests_get_slack() {
         "ci.yml runs `cargo test` without VIGIA_BUDGET_SLACK in {bare:?}, so every \
          `budget()` bound those steps reach runs unloosened on a shared runner"
     );
+}
+
+/// The debug suite runs under nextest, every test and every failure, and the
+/// doctests keep a step of their own.
+///
+/// `cargo test` runs the binaries one after another and stops at the first
+/// that fails. Either of those coming back is a slower step that also says
+/// less when it is red.
+#[test]
+fn nextest_runs_the_suite() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = step_block(&ci, "test");
+    assert!(
+        step.contains("cargo nextest run --workspace --profile ci"),
+        "the test step does not run the workspace under nextest's ci profile: {step}"
+    );
+    assert!(
+        ci.contains("tool: nextest"),
+        "ci.yml installs no nextest binary, so the test step cannot run"
+    );
+    assert!(
+        ci.contains("cargo test --workspace --doc"),
+        "ci.yml runs no doctests, which nextest does not run"
+    );
+
+    let config = repo_file(".config/nextest.toml");
+    let profile = config
+        .split_once("[profile.ci]")
+        .map(|(_, rest)| rest)
+        .expect(".config/nextest.toml declares the ci profile");
+    assert!(
+        profile.contains("fail-fast = false"),
+        "the ci profile stops at the first failure, so a red run hides the rest: {profile}"
+    );
+    assert!(
+        !config.contains("retries"),
+        "the nextest config retries tests, so a flake can report as a pass"
+    );
+}
+
+/// Every cache is written from main only, and the documents job never writes.
+///
+/// A pull request restores main's cache and rebuilds the workspace crates,
+/// which the cache does not hold anyway. A branch that saves spends the
+/// quota on a copy of the same dependencies and evicts the one every branch
+/// reads.
+#[test]
+fn cache_saved_from_main_only() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@v2").skip(1).collect();
+    assert!(
+        uses.len() >= 6,
+        "ci.yml uses rust-cache {} time(s), so this gate reads too little",
+        uses.len()
+    );
+    for (n, block) in uses.iter().enumerate() {
+        let with = block.split("\n      -").next().unwrap_or_default();
+        assert!(
+            with.contains("save-if: ${{ github.ref == 'refs/heads/main' }}")
+                || with.contains("save-if: false"),
+            "rust-cache use {} saves from every branch:\n{with}",
+            n + 1
+        );
+    }
 }
 
 /// Runs `cited-gates.sh` in a scratch repository holding `t/a.rs` with

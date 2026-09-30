@@ -107,6 +107,8 @@ jobs:
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all -- --check
 
       # #131: both crates deny `rustdoc::broken_intra_doc_links` and no job ran
@@ -170,9 +172,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # The cache is written from main only, on every job. A pull request
+      # restores main's cache and builds its own delta, which rust-cache would
+      # not keep anyway: it caches dependencies, and the workspace crates are
+      # rebuilt on every run. Saving from every branch spends the repository's
+      # cache quota on copies of the same dependencies and evicts the one copy
+      # every branch reads.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.os }}-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Per platform, because `cfg(windows)` and `cfg(target_os = "macos")`
       # code is not compiled on Linux, so one run there lints a third of what
@@ -181,6 +190,21 @@ jobs:
 
       # Correctness first, in debug, where the structural budget gates still
       # apply and the absolute ones report that they are skipped.
+      #
+      # nextest rather than `cargo test`, for two reasons a run's log shows.
+      # `cargo test` runs the seventy test binaries one after another, so the
+      # step's time is their sum, seven minutes on Linux, and most of it is one
+      # binary's slow tail while every core idles. nextest schedules every test
+      # across every binary at once, so the step's time is closer to the
+      # longest test. And `cargo test` stops at the first failing binary, so a
+      # red run on one platform hides whether the rest ran; the `ci` profile
+      # in `.config/nextest.toml` runs everything and reports every failure.
+      # Each test is its own process, which is also why `relative.rs` can
+      # change the working directory without touching another test. Doctests
+      # are outside nextest's model and keep their own step.
+      #
+      # Installed as a prebuilt binary, the way `dist` is above: `cargo
+      # install` would build it from source on every run.
       #
       # **The slack belongs here too, and its absence was a hole.** The claim
       # above is true of every absolute gate that guards on
@@ -197,8 +221,15 @@ jobs:
       # in a shape this file already records: no step runs `watch.rs` in release,
       # so the assertion would then run NOWHERE. That is I7's hole below, reached
       # through the selector rather than the gate — green, and about nothing.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+      - name: doctests, which nextest does not run
+        run: cargo test --workspace --doc
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -220,6 +251,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Then the budgets, in release, because that is what they were set
       # against. Slack applies to the absolute wall-clock gates only: hosted
@@ -270,6 +303,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Not run for timings: a hosted runner cannot produce a number worth
       # comparing. Compiled so they cannot rot unnoticed.
       - run: cargo bench --no-run
@@ -283,6 +318,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # CLAUDE.md calls a C toolchain in the graph a spec change, not an
       # implementation detail. This is that rule with teeth: it is the whole
       # reason musl-static and Windows are cheap.
@@ -335,6 +372,8 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build --release --target x86_64-unknown-linux-musl
       # The claim in CLAUDE.md is a static binary with no cross-toolchain.
       # Building is half of it; being actually static is the other half.
