@@ -545,9 +545,8 @@ struct Pin {
     resolved: bool,
 }
 
-/// Resolved where the notes are placed, and parsed where its rows are kept: the
-/// clamp asks a quoted block's grammar as far as the last line it draws, in
-/// [`Answer::rows_in`], so the frame an answer arrives on parses a screenful.
+/// Resolved where the notes are placed. A quoted block is parsed where the rows
+/// are kept, in [`Answer::rows_in`], as far as the last line the clamp draws.
 #[derive(Debug, Clone)]
 struct Answer {
     /// What the agent wrote, whole. B20 sends that rather than what was drawn,
@@ -866,12 +865,17 @@ impl Section {
             Self::Bar { rows, own } => rows + usize::from(own),
         }
     }
+
+    /// Rows a note's sections take together.
+    fn total(sections: &[Self]) -> usize {
+        sections.iter().map(|section| section.rows()).sum()
+    }
 }
 
 /// What the window keeps of a section of `count` rows that starts `passed` rows
 /// in, as the section's own skip and take, or `None` where it keeps nothing:
 /// `have` rows are built already.
-fn window(
+fn section_window(
     passed: usize,
     count: usize,
     skip: usize,
@@ -897,8 +901,7 @@ impl Pin {
     }
 
     /// The note's rows as sections in draw order, counted without building a
-    /// row: the one expression of its shape, which the count sums and the build
-    /// walks, so the two cannot differ.
+    /// row. The count sums them and the build walks them.
     fn sections(&self, content: usize) -> Vec<Section> {
         let (room, boxed, inner) = note_widths(self.word, content);
         let mut out = Vec::new();
@@ -924,10 +927,7 @@ impl Pin {
 
     /// The display rows this note takes under a content width of `content`.
     fn count(&self, content: usize) -> usize {
-        self.sections(content)
-            .iter()
-            .map(|section| section.rows())
-            .sum()
+        Section::total(&self.sections(content))
     }
 
     /// The display rows of this note from the `skip`th, at most `take` of them,
@@ -944,7 +944,9 @@ impl Pin {
         let mut rows = Vec::new();
         let mut passed = 0usize;
         for &section in sections {
-            if let Some((from, want)) = window(passed, section.rows(), skip, take, rows.len()) {
+            if let Some((from, want)) =
+                section_window(passed, section.rows(), skip, take, rows.len())
+            {
                 match section {
                     Section::Top => row(&mut rows, self, NoteLead::Top, String::new(), false),
                     Section::Bottom => {
@@ -2328,7 +2330,7 @@ impl View {
         };
         let counts: Vec<usize> = sections
             .iter()
-            .map(|sections| sections.iter().map(|section| section.rows()).sum())
+            .map(|sections| Section::total(sections))
             .collect();
         let mut under: Vec<usize> = vec![0; breaks.len()];
         // Which pins sit under each logical row, in the order they were placed.

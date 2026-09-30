@@ -294,8 +294,7 @@ pub struct Uncompiled {
 }
 
 /// One block quoted in a note's answer, kept between frames and filled forward
-/// to the last line a frame draws, never rewound: the agent writes an answer
-/// once and rewrites it whole, so a hunk's checkpoints would buy nothing here.
+/// to the last line a frame draws. Never rewound: an answer is rewritten whole.
 struct Quote {
     /// The note this block belongs to.
     id: String,

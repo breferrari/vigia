@@ -7404,7 +7404,7 @@ fn one_file_screen(app: &App) -> vigia::Body {
 }
 
 #[test]
-fn an_answer_parses_what_it_draws() {
+fn parse_follows_the_window() {
     let scratch = fixture("notes-parse-window");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -7493,10 +7493,15 @@ fn note_rows_follow_the_window() {
         matches!(view.rows.last(), Some(Row::Note { .. })),
         "the screen's last row is not the answer's, so the answer is not what fills it"
     );
-    assert!(
-        view.built >= 1 && view.built <= height,
-        "{} note rows were built for a {height}-row body over a 10,000-line answer, \
-         so the rows follow the answer rather than the window",
+    let drawn = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Note { .. }))
+        .count();
+    assert_eq!(
+        view.built, drawn,
+        "{} note rows were built and {drawn} drawn for a {height}-row body over a \
+         10,000-line answer, so the rows follow the answer rather than the window",
         view.built
     );
 }

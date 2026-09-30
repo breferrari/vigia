@@ -3236,7 +3236,7 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
 /// of its frame, a first touch the spec leaves outside the steady budget, so it
 /// is recorded rather than budgeted.
 #[test]
-fn an_arriving_answer_holds_the_frame_budget() {
+fn arrival_holds_the_budget() {
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
