@@ -1854,8 +1854,12 @@ fn label_decides() {
     );
 
     // A section already written is the better text, so it is not overwritten.
-    let (passed, left, _) =
-        changelog_entry("existing", "0.1.0", "#1\trelease\tA change (#1)\n", CHANGELOG_BEFORE);
+    let (passed, left, _) = changelog_entry(
+        "existing",
+        "0.1.0",
+        "#1\trelease\tA change (#1)\n",
+        CHANGELOG_BEFORE,
+    );
     assert!(
         !passed && left == CHANGELOG_BEFORE,
         "the generator overwrote a section that was already written:\n{left}"
@@ -1936,7 +1940,9 @@ fn unlabelled_fails() {
     );
     for who in ["#41", "#42", "abc1234"] {
         assert!(
-            said.contains(&format!("::error::{who} is labelled neither release nor internal")),
+            said.contains(&format!(
+                "::error::{who} is labelled neither release nor internal"
+            )),
             "the refusal does not name {who}:\n{said}"
         );
     }
@@ -1980,7 +1986,8 @@ fn all_internal_refused() {
 #[cfg(unix)]
 #[test]
 fn dialect_subject_warned() {
-    let records = "#60\trelease\tThe third word is only, and it is the reading that goes inert (#60)\n";
+    let records =
+        "#60\trelease\tThe third word is only, and it is the reading that goes inert (#60)\n";
     let (passed, left, said) = changelog_entry("dialect", "0.2.0", records, CHANGELOG_BEFORE);
     assert!(passed, "a riddle subject blocked the release:\n{left}");
     assert!(
