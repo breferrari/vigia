@@ -228,9 +228,6 @@ const HEAT_RUNGS: [usize; 5] = [
 
 // Asserted rather than documented, because a rung that does not divide the source is
 // silent.
-// The settled rung is one of the ladder's.
-const _: () = assert!(SETTLED_HEAT == HEAT_RUNGS[2]);
-
 const _: () = {
     let mut rung = 0;
     while rung < HEAT_RUNGS.len() {
@@ -1233,9 +1230,8 @@ const ROW_LAYOUTS: [Columns; 11] = [
 /// The rung that draws no sparkline, named so the table's rows stay one line.
 const SPARK_NO: usize = SPARK_RUNGS[SPARK_NONE];
 
-/// The heat slices the settled layout draws: the widest rung that ships at
-/// every width below the rung above it.
-const SETTLED_HEAT: usize = HEAT_BUCKETS / 4;
+/// The heat slices [`SETTLED`] draws.
+const SETTLED_HEAT: usize = HEAT_RUNGS[2];
 
 /// The widest layout below the rung above it.
 const SETTLED: Columns = Columns::new(

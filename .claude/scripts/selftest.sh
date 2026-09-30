@@ -151,11 +151,17 @@ out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- no-such-command-here 2
 [ "$got" -eq 2 ] && unchanged && ok "a test command that never ran aborts" || no "a test command that never ran aborts (said: $out)" 2 "$got"
 
 # A mutation the compiler rejects is not one the tests caught.
-printf 'grep -q beta a.txt || { echo "error[E0425]: cannot find value"; exit 101; }\n' > "$FIX/compile.sh"
+printf 'grep -q beta a.txt || { echo "error[E0425]: cannot find value"; echo "error: could not compile \\`x\\`"; exit 101; }\n' > "$FIX/compile.sh"
 battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"}]'
 out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- sh "$FIXW/compile.sh" 2>&1); got=$?
 if [ "$got" -eq 1 ] && printf '%s' "$out" | grep -q '^BROKE *drop beta' && unchanged; then ok "a mutation that fails to compile is reported broke"
 else no "a mutation that fails to compile is reported broke (said: $out)" 1 "$got"; fi
+
+# Cargo prints an `error:` line after failed tests too, and that is a kill.
+printf 'grep -q beta a.txt || { echo "test x ... FAILED"; echo "error: test failed, to rerun pass --lib"; exit 101; }\n' > "$FIX/tests.sh"
+out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- sh "$FIXW/tests.sh" 2>&1); got=$?
+if [ "$got" -eq 0 ] && printf '%s' "$out" | grep -q '^KILLED *drop beta' && unchanged; then ok "a failed test run is a kill, not broke"
+else no "a failed test run is a kill, not broke (said: $out)" 0 "$got"; fi
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "all checks passed"; else echo "$FAIL check(s) failed"; fi

@@ -107,15 +107,15 @@ jobs:
       - name: the generated release workflow is current
         run: |
           set -euo pipefail
-          # A release download that answers 500 once is GitHub, not this change.
+          # The installer fetches the tarball itself, so the whole install retries.
           for attempt in 1 2 3; do
-            if curl --proto '=https' --tlsv1.2 -LsSf --retry 3 \
+            if curl --proto '=https' --tlsv1.2 -LsSf \
               https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
               | sh; then
               break
             fi
             [ "$attempt" -lt 3 ] || exit 1
-            sleep $((attempt * 15))
+            sleep $((attempt * 5))
           done
           dist generate --check
 

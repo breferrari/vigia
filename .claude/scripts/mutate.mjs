@@ -67,6 +67,7 @@ for (const m of battery) {
 	try {
 		writeFileSync(m.file, original.toString("utf8").replace(m.old, () => m.new));
 		if (hash(readFileSync(m.file)) === before) {
+			// `abort` exits the process, so the `finally` below never runs.
 			restore();
 			abort(`${m.name}: the mutation left ${m.file} unchanged`);
 		}
@@ -81,8 +82,9 @@ for (const m of battery) {
 
 	const output = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
 	const failed = [...output.matchAll(/^test (\S+) \.\.\. FAILED/gm)].map((hit) => hit[1]);
-	// A mutation that does not compile was judged by the compiler, not the tests.
-	const broke = run.status !== 0 && failed.length === 0 && /^error(\[E\d+\])?:/m.test(output);
+	// Cargo's own summary, not any `error:` line: a failed test run prints
+	// `error: test failed` too.
+	const broke = run.status !== 0 && /^error: (could not compile|linking with) /m.test(output);
 	const verdict = run.status === 0 ? "SURVIVED" : broke ? "BROKE" : "KILLED";
 	rows.push({ name: m.name, verdict, by: failed.join(", ") });
 }

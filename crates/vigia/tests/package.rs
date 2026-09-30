@@ -273,7 +273,7 @@ fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
     let header = format!("- name: {name}");
     let at = bump
         .find(&header)
-        .unwrap_or_else(|| panic!("bump.yml has no step named `{name}`"));
+        .unwrap_or_else(|| panic!("the workflow has no step named `{name}`"));
     let rest = &bump[at + header.len()..];
     rest.find("\n      - ").map_or(rest, |end| &rest[..end])
 }
@@ -2995,13 +2995,10 @@ fn ci_runs_cited_gates() {
 #[test]
 fn dist_install_retries() {
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let step = ci
-        .split_once("the generated release workflow is current")
-        .and_then(|(_, rest)| rest.split_once("dist generate --check"))
-        .map(|(step, _)| step)
-        .expect("ci.yml installs cargo-dist before `dist generate --check`");
+    let step = step_block(&ci, "the generated release workflow is current");
     assert!(
-        step.contains("for attempt in") && step.contains("--retry"),
-        "the cargo-dist install runs once, so one bad download fails the build:\n{step}"
+        step.contains("for attempt in") && step.contains("break") && step.contains("|| exit 1"),
+        "the cargo-dist install does not retry and then fail, so one bad download \
+         either fails the build or is swallowed:\n{step}"
     );
 }
