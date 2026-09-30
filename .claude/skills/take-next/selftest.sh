@@ -234,6 +234,36 @@ case "$line" in
   *)  no "a row is checked against the issue in its own cell" "no drift" "$line" ;;
 esac
 
+# Both directions of a mark that disagrees with its issue, and the mentions
+# comparison 7 reads: `#1,#2` names both, `a#3`, `#30` and `#1#3` name no #3.
+cat > "$FIX/roadmap.md" <<'ROW'
+## Phase 8 - look
+| | Task | Issue |
+|---|---|---|
+| ✅ | done early, see #1,#2 | [#2](https://example.invalid/2) |
+| ⬜ | left behind | [#1](https://example.invalid/1) |
+a#3, #30 and #1#3
+ROW
+jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "I1: the first"},
+        {number: 2, state: "OPEN", milestone: {title: "Phase 8 - look"}, title: "issue 2"},
+        {number: 3, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "issue 3"}]' > "$FIX/issues.json"
+out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/DRIFT/ { $1 = $1; print }')
+want='DRIFT row marked done, issue #2 is open
+DRIFT row not marked done, issue #1 is closed
+DRIFT #3 has no roadmap mention: issue 3'
+if [ "$out" = "$want" ]; then ok "marks and mentions drift both ways"
+else no "marks and mentions drift both ways" "$want" "$out"; fi
+
+# An empty file on either side is still read as the side it is.
+printf '| ✅ | x | [#1](https://example.invalid/1) |\n' > "$FIX/roadmap.md"
+echo '[]' > "$FIX/issues.json"
+out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/row cites/ { $1 = $1; print }')
+[ "$out" = "DRIFT row cites #1, which the tracker does not have" ] && ok "an empty board fails every row" || no "an empty board fails every row" "row cites #1" "$out"
+echo '## no rows' > "$FIX/roadmap.md"
+jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title: "I1: the first"}]' > "$FIX/issues.json"
+out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/roadmap mention/ { $1 = $1; print }')
+[ "$out" = "DRIFT #1 has no roadmap mention: I1: the first" ] && ok "a roadmap with no mentions fails every issue" || no "a roadmap with no mentions fails every issue" "#1 has no roadmap mention" "$out"
+
 echo "drift:"
 
 present() { # needle, file, name
