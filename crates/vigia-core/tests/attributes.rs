@@ -27,6 +27,10 @@ fn binary_attribute_wins() {
         "git calls a.txt binary and this diffed it as text"
     );
     assert!(diff.hunks.is_empty(), "a binary file drew hunks");
+    assert!(
+        worktree.measure(change).expect("measure").binary,
+        "the height treats a.txt as text while its diff is binary"
+    );
 }
 
 /// `diff` set on bytes that sniff as binary diffs them as text, as git does.
@@ -52,4 +56,8 @@ fn diff_attribute_wins() {
         "git diffs a.bin as text and this called it binary"
     );
     assert_eq!((diff.added, diff.removed), (1, 0));
+    assert!(
+        !worktree.measure(change).expect("measure").binary,
+        "the height treats a.bin as binary while its diff is text"
+    );
 }

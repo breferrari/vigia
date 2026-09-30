@@ -593,12 +593,17 @@ impl Worktree {
     /// What `.gitattributes` says about diffing `rela_path`. See
     /// [`Filter::diff_attribute`].
     fn diff_attribute(&self, rela_path: &str) -> Result<Option<bool>> {
+        self.with_filter(|filter| filter.diff_attribute(rela_path))
+    }
+
+    /// Run `f` on the filter, building it on first use.
+    fn with_filter<T>(&self, f: impl FnOnce(&mut Filter) -> Result<T>) -> Result<T> {
         let mut filter = self.filter.borrow_mut();
         let filter = match filter.as_mut() {
             Some(filter) => filter,
             None => filter.insert(Filter::new(&self.repo)?),
         };
-        filter.diff_attribute(rela_path)
+        f(filter)
     }
 
     /// Both sides of one change's diff, in the bytes git would compare.
@@ -665,12 +670,7 @@ impl Worktree {
             Err(source) => return Err(Error::read(rela_path, source)),
         };
 
-        let mut filter = self.filter.borrow_mut();
-        let filter = match filter.as_mut() {
-            Some(filter) => filter,
-            None => filter.insert(Filter::new(&self.repo)?),
-        };
-        filter.convert_to_git(rela_path, raw)
+        self.with_filter(|filter| filter.convert_to_git(rela_path, raw))
     }
 
     /// The bytes git stores for a symlink: its target path, and nothing else.

@@ -199,7 +199,10 @@ impl FileDiff {
 /// Whether a change is binary: the `diff` attribute where it says, and the
 /// bytes where it does not, which is git's order.
 fn binary(before: &[u8], after: &[u8], diff: Option<bool>) -> bool {
-    diff.map_or_else(|| is_binary(before) || is_binary(after), |text| !text)
+    match diff {
+        Some(text) => !text,
+        None => is_binary(before) || is_binary(after),
+    }
 }
 
 /// Whether `data` should be treated as binary.

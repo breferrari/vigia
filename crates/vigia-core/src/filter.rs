@@ -47,9 +47,8 @@ impl Filter {
         })
     }
 
-    /// What the `diff` attribute says of `rela_path`: `Some(false)` where it is
-    /// unset (as `binary` unsets it), `Some(true)` where it is set or names a
-    /// driver, and `None` where nothing says, which leaves it to the bytes.
+    /// The `diff` attribute of `rela_path`: `Some(true)` set or a driver,
+    /// `Some(false)` unset, as `binary` unsets it, `None` unspecified.
     pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<Option<bool>> {
         let Filter { stack, objects, .. } = self;
         let mut outcome = stack.selected_attribute_matches(["diff"]);
