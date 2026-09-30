@@ -47,7 +47,7 @@ A first PR is most likely to break these rules.
 
 Every pull request carries one of two labels before it merges: `release` or `internal`. A maintainer applies it, so you do not need write access to contribute. If you can set labels, set it yourself.
 
-- **`release`** means a user of `vigia` can see the change: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. The pull request is listed in `CHANGELOG.md` and in the GitHub Release.
+- **`release`** means the change ships in the binary: any file under `crates/*/src/` or `crates/*/assets/`, a dependency, or how `vigia` is installed. A change a user cannot see, such as a frame that costs less, is still a release. The pull request is listed in `CHANGELOG.md` and in the GitHub Release.
 - **`internal`** means everything else: CI, tests, documentation, the roadmap, the spec, scripts. The pull request is not listed anywhere.
 
 What you control is the line a user reads. Put `Release-note: <one sentence>` in the Release note section of the pull request description, or in a commit message body on your branch, and that sentence becomes the changelog line instead of your title. Put `Release-note: none` when the change is internal. Write the sentence for someone who has never opened this repository: name what changed in the pane, not the rule behind it. If you write nothing, the title of a `release` pull request becomes the line, so make the title readable on its own.
