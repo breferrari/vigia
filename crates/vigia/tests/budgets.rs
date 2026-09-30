@@ -3256,12 +3256,14 @@ fn an_arriving_answer_holds_the_frame_budget() {
             arrival.parsed,
             arrival.rows
         );
-        // Non-vacuity: the screen drew the block, in colour.
+        // Non-vacuity: the screen drew the block, in colour. Every line of the
+        // block is a `fn`, so every parsed line drew a class.
         assert!(
-            arrival.coloured >= 10,
-            "{} rows on the {name} pane carry a class the grammar gave them, so this \
-             gate timed a screen whose answer was not highlighted",
-            arrival.coloured
+            arrival.coloured as u64 >= arrival.parsed,
+            "{} rows on the {name} pane carry a class the grammar gave them for {} \
+             lines parsed, so this gate timed a screen whose answer was not highlighted",
+            arrival.coloured,
+            arrival.parsed
         );
         assert!(
             arrival.parsed >= 1,
