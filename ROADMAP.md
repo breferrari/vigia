@@ -381,7 +381,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | A wider pane can take a row off the body, and the diff pays it | [#283](https://github.com/breferrari/vigia/issues/283) |
 | ⬜ | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ✅ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
-| ⬜ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
+| ✅ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
 | ⬜ | The worktree name skips the control-character transformation content rows get | [#89](https://github.com/breferrari/vigia/issues/89) |
 | ⬜ | `render` promises any area is legal, and an area taller than its buffer panics | [#91](https://github.com/breferrari/vigia/issues/91) |
 | ✅ | The diff's total height is taken from the cache by presence, not by validity | [#84](https://github.com/breferrari/vigia/issues/84) |
@@ -574,7 +574,8 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | Off the Shelf, 2026-09-30 | Shelf triage: still real. The dated-claim preamble already existed, and no check read the reasons. Pre-flight check 9 now lists the open rows whose reason cites something that changed. |
 | Status walk config stale ([#606](https://github.com/breferrari/vigia/issues/606)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, and the shelf reason was a cost, not a ruling. One repository reloaded in place before the walk; only the watcher keeps the one it opened. |
 | Watcher excludes keep opened config ([#619](https://github.com/breferrari/vigia/issues/619)) | Off the Shelf, 2026-09-30 | Filed by #617 and still real. `gix` lets the watcher own its exclude stack, so the fix stays inside `watch.rs`. |
-| Burst cap evicts the oldest path ([#368](https://github.com/breferrari/vigia/issues/368)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. |
+| Error messages checked for double spaces ([#88](https://github.com/breferrari/vigia/issues/88)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. The instance was fixed in #440; this adds the gate over the class. |
+| Burst cap eviction order ([#368](https://github.com/breferrari/vigia/issues/368)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. |
 
 ---
 
