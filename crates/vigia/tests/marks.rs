@@ -19,6 +19,9 @@ use vigia_core::{Origin, Reading, Recency};
 /// mark has taken its own.
 const WIDE: u16 = 140;
 
+/// Source buckets to one slice of the 24 that [`WIDE`] draws.
+const WIDE_SLICE: usize = HEAT_BUCKETS / 24;
+
 /// The row the first file is drawn on: the header owns row 0.
 const FIRST: u16 = 1;
 
@@ -322,8 +325,7 @@ fn the_mark_arrives_before_the_pulse_and_outlives_it() {
 fn a_slice_holding_a_note_takes_the_notes_ink_and_keeps_its_glyph() {
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    // Two source buckets to a slice at this width.
-    notes.at[10] = true;
+    notes.at[5 * WIDE_SLICE] = true;
     let backend = drawn(WIDE, &one_file(notes, false), &theme);
     let inks = strip(&backend, FIRST);
 
@@ -355,8 +357,8 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
     // the two rules draw the same row.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[2] = true;
-    notes.at[22] = true;
+    notes.at[WIDE_SLICE] = true;
+    notes.at[11 * WIDE_SLICE] = true;
     let inks = strip(&drawn(WIDE, &one_file(notes, false), &theme), FIRST);
     let noted = noted_slices(&inks, &theme);
     assert_eq!(noted, vec![1, 11]);
@@ -364,11 +366,11 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
 
 #[test]
 fn a_notes_slice_folds_into_the_rung_the_strip_degrades_to() {
-    // Forty-eight source buckets projected onto twelve: a note in bucket 6 is in
-    // slice 1, and the fold is `any` rather than the counts' `sum`.
+    // A note in slice 1's last source bucket, and the fold is `any` rather
+    // than the counts' `sum`.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[6] = true;
+    notes.at[2 * (HEAT_BUCKETS / 12) - 1] = true;
     let inks = strip(&drawn(109, &one_file(notes, false), &theme), FIRST);
     assert_eq!(
         inks.len(),
