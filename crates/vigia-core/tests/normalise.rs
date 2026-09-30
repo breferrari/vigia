@@ -562,6 +562,16 @@ fn follows_git_state(name: &str, setup: impl Fn(&Scratch), change: impl Fn(&Scra
         truth,
         "the running frame kept a height or diff computed under git state that changed"
     );
+
+    support::settle_spans(&mut frame);
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    assert_eq!(read(&mut frame), truth, "an idle tick moved the diff");
+    assert_eq!(
+        delta(before, frame.stats()).computed,
+        0,
+        "an idle tick after the change recomputed, so it reloaded again"
+    );
 }
 
 /// The info/attributes file that marks `a.txt` binary.

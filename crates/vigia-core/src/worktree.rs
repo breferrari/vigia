@@ -52,7 +52,8 @@ pub struct Worktree {
     /// The files under the git dir that shape the clean filter: the
     /// configuration and `info/attributes`.
     filter_sources: [PathBuf; 2],
-    /// The config's fingerprint when `live` last loaded it.
+    /// The config's fingerprint when `live` last loaded it. `None` at open, so the
+    /// first tick reloads: a write between opening and a stat would be missed.
     loaded_config: Cell<Option<Fingerprint>>,
     /// How many reloads have landed, so a frame can drop what it cached before one.
     reloads: Cell<u64>,
@@ -76,7 +77,7 @@ impl Worktree {
             common.join("config"),
             common.join("info").join("attributes"),
         ];
-        let worktree = Self {
+        Ok(Self {
             live: RefCell::new(repo.clone()),
             opened: repo,
             workdir,
@@ -85,9 +86,7 @@ impl Worktree {
             loaded_config: Cell::new(None),
             reloads: Cell::new(0),
             deleted: Cell::new(false),
-        };
-        worktree.loaded_config.set(worktree.filter_prints()[0]);
-        Ok(worktree)
+        })
     }
 
     /// Absolute path of the working tree root.
@@ -718,10 +717,10 @@ impl Worktree {
         if repo.reload().is_ok() {
             self.loaded_config.set(now);
             self.reloads.set(self.reloads.get() + 1);
+            self.invalidate_filter();
         }
     }
 
-    /// How many reloads have landed since the worktree was opened.
     pub(crate) fn reloads(&self) -> u64 {
         self.reloads.get()
     }

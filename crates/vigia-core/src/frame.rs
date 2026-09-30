@@ -316,10 +316,9 @@ pub struct Frame<'w> {
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     attributes: HashMap<String, Option<Fingerprint>>,
-    /// The same for the files under the git dir that shape the filter.
-    filter_sources: [Option<Fingerprint>; 2],
-    /// The worktree's reload count as of the last tick, so a reload that lands
-    /// after its files moved still drops what was cached before it.
+    /// The same for `.git/info/attributes`, which the filter reads from disk.
+    info_attributes: Option<Fingerprint>,
+    /// The worktree's config reload count as of the last tick.
     reloads: u64,
     /// The failure [`Frame::diff`] last contained, held only so it can be handed
     /// back by reference.
@@ -367,7 +366,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
-            filter_sources: worktree.filter_prints(),
+            info_attributes: worktree.filter_prints()[1],
             reloads: worktree.reloads(),
             failure: None,
             staged: false,
@@ -397,8 +396,8 @@ impl<'w> Frame<'w> {
         // Before the walks, which read the config too. No settle check here: a new
         // repository's config is young for seconds. Missed: a same-length rewrite
         // inside one mtime granule.
-        let sources = self.worktree.filter_prints();
-        self.worktree.follow_config(sources[0]);
+        let [config, info_attributes] = self.worktree.filter_prints();
+        self.worktree.follow_config(config);
 
         let options = ChangeOptions {
             hide: self.hide.as_ref(),
@@ -451,8 +450,8 @@ impl<'w> Frame<'w> {
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
         let reloads = self.worktree.reloads();
-        let sources_moved = sources != self.filter_sources || reloads != self.reloads;
-        self.filter_sources = sources;
+        let sources_moved = info_attributes != self.info_attributes || reloads != self.reloads;
+        self.info_attributes = info_attributes;
         self.reloads = reloads;
         if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits
