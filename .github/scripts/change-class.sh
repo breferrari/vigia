@@ -14,7 +14,8 @@
 # CI runs is proved by running it. `Cargo.toml`, `Cargo.lock` and
 # `assets/syntaxes` are code: the grammar dump is what the coverage suite reads.
 # A markdown file under `crates/` is code too: `NOTICE.md` ships in the archive
-# and a test reads it.
+# and a test reads it. `.claude/scripts` are the guards that run on every
+# commit and publish, and they are code.
 #
 # `CI_FULL=true` in the environment answers full whatever the paths, for a
 # pull request that carries the `full-ci` label. A partial run that turns out
@@ -41,7 +42,8 @@ code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^[^/]+\.md$' \
     -e '^docs/[^/]+\.md$' \
     -e '^\.github/PULL_REQUEST_TEMPLATE\.md$' \
-    -e '^\.claude/' \
+    -e '^\.claude/skills/' \
+    -e '^\.claude/settings\.json$' \
     -e '^LICENSE$' \
     -e '^\.github/ISSUE_TEMPLATE/' \
     -e '^\.github/public-dialect\.txt$' \
