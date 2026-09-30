@@ -60,6 +60,15 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
           BASE: ${{ github.base_ref }}
 
+      # A gate the branch lost leaves the suite green, and the message that
+      # cites it is the only trace. The body arrives through env.
+      - name: cited gates exist
+        if: github.event_name == 'pull_request'
+        run: sh .github/scripts/cited-gates.sh "origin/${BASE}"
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.base_ref }}
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
