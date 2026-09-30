@@ -23,7 +23,8 @@ const ORDERING_GAP: Duration = Duration::from_millis(50);
 /// Quiet window for the ordering test.
 const ORDERING_QUIET: Duration = Duration::from_secs(1);
 
-/// The longest a burst held open by a continuous writer may last.
+/// The longest a burst held open by a continuous writer may last, before
+/// `budget` loosens it. CI sets the slack on every test step.
 const MAX_DELAY_BOUND: Duration = Duration::from_millis(500);
 
 /// Block on `next_tick`, but have another thread stop the watcher after
@@ -266,7 +267,6 @@ fn a_continuous_writer_still_gets_a_tick_within_max_delay() {
     let _ = stop_writing.send(());
     writer.join().expect("writer thread");
 
-    // Two assertions in one, and it is worth separating what each catches.
     assert!(
         tick.coalesced_for < budget(MAX_DELAY_BOUND),
         "the burst was held for {:?}, past the {:?} its max_delay allows",
