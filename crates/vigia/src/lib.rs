@@ -560,7 +560,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         let began = Instant::now();
         drain(&mut batch, wake, &rx, DRAIN_CAP);
 
+        // Whether any wake in the batch did something a paint could show. A repeat
+        // step applied above is one.
+        let mut touched = repeat.is_some();
         for wake in batch.drain(..) {
+            let untouched = !touched;
+            touched = true;
             match wake {
                 // Returning rather than breaking, so the reason travels with the exit,
                 // and `shell` drops on the way out to put the terminal back first.
@@ -574,6 +579,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // would be a message the sender did not ask for.
                 Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
+                    let pointer = shell.pointer();
                     // Checked before the event is interpreted, because a release is not
                     // an action and would otherwise fall through the `else` below with
                     // the repeat still armed.
@@ -726,9 +732,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         shell.grabbed = regions.grab_at(mouse.column, mouse.row);
                     }
                     let Some(action) = action_for(&event, regions) else {
-                        // Not every event is a request. Redrawing for a key release
-                        // or a mouse move would make the idle cost non-zero for a
-                        // reason nobody asked for.
+                        // Not every event is a request, and one that moved no mark
+                        // leaves nothing for the paint to show.
+                        if untouched && shell.pointer() == pointer {
+                            touched = false;
+                        }
                         continue;
                     };
                     // Asked for only by the one action that reads it, and that is the
@@ -812,6 +820,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.say(post::word(posted).to_owned(), Voice::Said, began)
                 }
             }
+        }
+
+        // Nothing to show, unless a deadline is due: under steady motion the
+        // timeout never fires, so a due one is settled and painted here.
+        if !touched && shell.patience(&frame, began) != Some(std::time::Duration::ZERO) {
+            continue;
         }
 
         // Before the paint: a notice either of them raises has to reach this frame.
@@ -1919,6 +1933,18 @@ impl Shell {
         self.regions
     }
 
+    /// Every mark the pointer stands on, so a move that changes none of them
+    /// can skip the paint.
+    fn pointer(&self) -> Pointer {
+        (
+            self.held,
+            self.grabbed,
+            self.hovered,
+            self.selected,
+            self.noting.clone(),
+        )
+    }
+
     /// Hand the warmer whatever the last paint drew plain, and let it wake us.
     fn request_warm(&mut self, worktree: &Worktree, tx: &Sender<Wake>) {
         if self
@@ -2132,6 +2158,15 @@ impl Shell {
         Ok(())
     }
 }
+
+/// The pointer's marks, compared across one input event.
+type Pointer = (
+    Option<Held>,
+    Option<Grabbed>,
+    Option<Hovered>,
+    Option<Selection>,
+    Option<notes::NoteDrag>,
+);
 
 /// Forward coalesced working-tree changes onto the shell's channel.
 fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>) {
@@ -3263,6 +3298,52 @@ mod tests {
             asked < drawn && drawn < recorded,
             "the interval is asked or recorded on the wrong side of the draw, so an \
              effect armed after a quiet spell is told the whole of it"
+        );
+    }
+
+    /// Structural, because the loop cannot be driven: a batch that asked for
+    /// nothing and moved no mark skips the paint unless a deadline is due.
+    #[test]
+    fn idle_motion_paints_nothing() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let turns = &code[code.find("'awake: loop {").expect("the loop is gone")..];
+
+        let drained = turns
+            .find("for wake in batch.drain(..)")
+            .expect("the batch is no longer drained");
+        let quiet = turns[drained..]
+            .find("action_for(&event, regions) else {")
+            .map(|at| drained + at)
+            .expect("the no-action arm is gone");
+        let arm = &turns[quiet..quiet + turns[quiet..].find("continue;").expect("no continue")];
+        assert!(
+            arm.contains("shell.pointer() == pointer") && arm.contains("touched = false"),
+            "an event that asked for nothing no longer checks the pointer's marks, so \
+             pointer motion paints a frame again:\n{arm}"
+        );
+
+        let guard = turns[quiet..]
+            .find("if !touched && shell.patience(")
+            .map(|at| quiet + at)
+            .expect("the paint is no longer behind the batch's flag");
+        let paint = turns[quiet..]
+            .find("shell.draw(")
+            .map(|at| quiet + at)
+            .expect("the batch no longer paints");
+        assert!(
+            guard < paint,
+            "the batch paints before it asks whether anything happened"
+        );
+        // A repeat step applied before the drain counts as work.
+        assert!(
+            turns.contains("let mut touched = repeat.is_some();"),
+            "a repeat step no longer marks its batch, so motion can swallow its paint"
         );
     }
 }

@@ -402,7 +402,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The bump cannot move a protected main, because the checks it needs can never arrive | [#143](https://github.com/breferrari/vigia/issues/143) |
 | ⬜ | The workflow gates read text, and text has more spellings than the mechanism | [#145](https://github.com/breferrari/vigia/issues/145) |
 | ✅ | decision: a bonus hint rung is never worth a row, and nobody ruled whether it is worth a readout | [#147](https://github.com/breferrari/vigia/issues/147) |
-| ⬜ | Pointer motion draws a full frame, and I1's letter says it should not | [#154](https://github.com/breferrari/vigia/issues/154) |
+| ✅ | Pointer motion draws a full frame, and I1's letter says it should not | [#154](https://github.com/breferrari/vigia/issues/154) |
 | ⬜ | §5.1 says the deliberate departures are two, and enumerates four | [#156](https://github.com/breferrari/vigia/issues/156) |
 | ✅ | The absolute frame budgets flake on shared runners, and the failure reads as a regression | [#178](https://github.com/breferrari/vigia/issues/178) |
 | ⬜ | Under a default tmux, a non-active pane may get no mouse events at all | [#188](https://github.com/breferrari/vigia/issues/188) |
