@@ -907,7 +907,8 @@ impl<'w> Frame<'w> {
 
     /// [`Self::diff`], plus a value `derive` computes from the diff, paid once per
     /// diff: the frame keeps it beside the diff and hands it back while the diff
-    /// is reused. A second call with another type replaces what the first kept.
+    /// is reused. One value per diff: a second derivation of the same type is
+    /// served the first's value, and one of another type replaces it.
     ///
     /// # Panics
     ///
@@ -923,7 +924,8 @@ impl<'w> Frame<'w> {
     ) -> Result<(&FileChange, &FileDiff, T)> {
         self.diff(index)?;
         let change = &self.files[index];
-        // A failed read is not cached, and its diff has no hunks to walk.
+        // A failed read is not cached, so its hunkless diff derives on every
+        // call, uncounted: the counter says once per diff, and nothing keeps this.
         let (diff, slot) = match self.cached.get_mut(change) {
             Some(Cached { diff, derived, .. }) => (&*diff, Some(derived)),
             None => (
