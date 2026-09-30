@@ -8,7 +8,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
-use crate::frame::Frame;
+use crate::frame::{Fingerprint, Frame, fingerprint};
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
 use crate::standing::Standing;
@@ -46,7 +46,13 @@ pub struct Worktree {
     filter: RefCell<Option<Filter>>,
     /// The repository reopened after its configuration changed, which the filter
     /// is built from. `repo` keeps the configuration it was opened with.
-    reread: RefCell<Option<gix::Repository>>,
+    reopened: RefCell<Option<gix::Repository>>,
+    /// The files under the git dir that shape the clean filter: the
+    /// configuration and `info/attributes`.
+    filter_sources: [PathBuf; 2],
+    /// What [`Self::filter_sources`] looked like when the filter's repository
+    /// was last opened, so a frame built later can tell it is stale.
+    opened_prints: Cell<[Option<Fingerprint>; 2]>,
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -62,13 +68,22 @@ impl Worktree {
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let repo = gix::discover(path).map_err(|e| Error::Discover(Box::new(e)))?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
-        Ok(Self {
+        let common = repo.common_dir();
+        let filter_sources = [
+            common.join("config"),
+            common.join("info").join("attributes"),
+        ];
+        let worktree = Self {
             repo,
             workdir,
             filter: RefCell::new(None),
-            reread: RefCell::new(None),
+            reopened: RefCell::new(None),
+            filter_sources,
+            opened_prints: Cell::new([None, None]),
             deleted: Cell::new(false),
-        })
+        };
+        worktree.opened_prints.set(worktree.filter_prints());
+        Ok(worktree)
     }
 
     /// Absolute path of the working tree root.
@@ -638,8 +653,8 @@ impl Worktree {
         let filter = match filter.as_mut() {
             Some(filter) => filter,
             None => {
-                let reread = self.reread.borrow();
-                filter.insert(Filter::new(reread.as_ref().unwrap_or(&self.repo))?)
+                let reopened = self.reopened.borrow();
+                filter.insert(Filter::new(reopened.as_ref().unwrap_or(&self.repo))?)
             }
         };
         f(filter)
@@ -670,26 +685,32 @@ impl Worktree {
         Ok(object.try_into_blob().map_err(|_| missing())?.take_data())
     }
 
-    /// Drop the cached clean filter, so the next read rebuilds it.
-    /// The files under the git dir that decide what the clean filter does:
-    /// the configuration and `info/attributes`.
-    pub(crate) fn filter_sources(&self) -> [PathBuf; 2] {
-        let common = self.repo.common_dir();
-        [
-            common.join("config"),
-            common.join("info").join("attributes"),
-        ]
+    /// What the files under the git dir that shape the clean filter look like now.
+    pub(crate) fn filter_prints(&self) -> [Option<Fingerprint>; 2] {
+        let [config, attributes] = &self.filter_sources;
+        [fingerprint(config), fingerprint(attributes)]
     }
 
-    /// Reopen the repository for the filter, so a configuration written since
-    /// it was opened applies to the next read.
-    pub(crate) fn reread_config(&self) -> Result<()> {
+    /// Reopen the repository for the filter when `now` differs from what it was
+    /// opened under. A config that does not parse, as one mid-write does, keeps
+    /// the previous one and is tried again on the next tick.
+    pub(crate) fn follow_config(&self, now: [Option<Fingerprint>; 2]) {
+        if now == self.opened_prints.get() {
+            return;
+        }
         let mut repo = self.repo.clone();
-        repo.reload().map_err(Error::filter_setup)?;
-        *self.reread.borrow_mut() = Some(repo);
-        Ok(())
+        if repo.reload().is_ok() {
+            *self.reopened.borrow_mut() = Some(repo);
+            self.opened_prints.set(now);
+        }
     }
 
+    /// What the files that shape the filter looked like when it was last opened.
+    pub(crate) fn opened_prints(&self) -> [Option<Fingerprint>; 2] {
+        self.opened_prints.get()
+    }
+
+    /// Drop the cached clean filter, so the next read rebuilds it.
     pub(crate) fn invalidate_filter(&self) {
         *self.filter.borrow_mut() = None;
     }

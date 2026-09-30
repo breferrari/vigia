@@ -35,7 +35,7 @@ pub struct FrameStats {
 
 /// A working-tree fingerprint that costs no read: size and modification time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fingerprint {
+pub(crate) struct Fingerprint {
     len: u64,
     mtime: SystemTime,
 }
@@ -182,7 +182,7 @@ struct Measured {
 }
 
 /// Fingerprint a working-tree file, or `None` when it cannot be.
-fn fingerprint(path: &Path) -> Option<Fingerprint> {
+pub(crate) fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let meta = std::fs::symlink_metadata(path).ok()?;
     Some(Fingerprint {
         len: meta.len(),
@@ -310,9 +310,8 @@ pub struct Frame<'w> {
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     attributes: HashMap<String, Option<Fingerprint>>,
-    /// The same for the files under the git dir that shape the filter, or
-    /// `None` before the first tick.
-    filter_sources: Option<[Option<Fingerprint>; 2]>,
+    /// The same for the files under the git dir that shape the filter.
+    filter_sources: [Option<Fingerprint>; 2],
     /// The failure [`Frame::diff`] last contained, held only so it can be handed
     /// back by reference.
     ///
@@ -359,7 +358,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
-            filter_sources: None,
+            filter_sources: worktree.opened_prints(),
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -435,21 +434,12 @@ impl<'w> Frame<'w> {
             .copied()
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
-        // Configuration and `info/attributes` are not in the changed set, so they
-        // are looked at on every tick: two stats against the walk's one per file.
-        let sources = self
-            .worktree
-            .filter_sources()
-            .map(|path| fingerprint(&path));
-        // Unlike the attributes above, a young mtime is not a reason to drop: a
-        // fresh repository's config is young on every tick of its first seconds,
-        // and a rewrite of the same length inside one mtime granule is the only
-        // change this misses.
-        let sources_moved = self.filter_sources.is_some_and(|before| before != sources);
-        if sources_moved {
-            self.worktree.reread_config()?;
-        }
-        self.filter_sources = Some(sources);
+        // No settle check here: a new repository's config is young for seconds.
+        // Missed: a same-length rewrite inside one mtime granule.
+        let sources = self.worktree.filter_prints();
+        let sources_moved = sources != self.filter_sources;
+        self.worktree.follow_config(sources);
+        self.filter_sources = sources;
         if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits
             // its own.

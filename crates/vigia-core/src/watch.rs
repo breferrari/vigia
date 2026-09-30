@@ -572,12 +572,18 @@ fn watched_in_git_dir(inside: &Path) -> bool {
     let first = first.as_os_str();
 
     // Only when it *is* that file: an `index`, `HEAD` or directory by that name
-    // somewhere below belongs to another worktree or a submodule.
+    // somewhere below belongs to another worktree or a submodule. `config`
+    // shapes the clean filter, which the frame checks for itself.
     if first == OsStr::new("index")
         || first == OsStr::new("HEAD")
         || first == OsStr::new("packed-refs")
+        || first == OsStr::new("config")
     {
         return inside.peek().is_none();
+    }
+    if first == OsStr::new("info") {
+        return inside.next().map(|c| c.as_os_str()) == Some(OsStr::new("attributes"))
+            && inside.peek().is_none();
     }
 
     // `refs/heads/`, at any depth, because a branch name may carry slashes.
@@ -727,7 +733,8 @@ mod tests {
         assert!(!watched(&[".git", "ORIG_HEAD"]));
         assert!(!watched(&[".git", "objects", "ab", "cdef01"]));
         assert!(!watched(&[".git", "COMMIT_EDITMSG"]));
-        assert!(!watched(&[".git", "config"]));
+        assert!(!watched(&[".git", "config.lock"]));
+        assert!(!watched(&[".git", "info", "exclude"]));
 
         // The lock file itself is not the write, and that is deliberate rather than an
         // oversight this widening should have swept up.
@@ -743,6 +750,24 @@ mod tests {
         );
         assert!(!watched(&[".git", "worktrees", "other", "index"]));
         assert!(!watched(&[".git", "modules", "sub", "index"]));
+    }
+
+    /// What shapes the clean filter wakes the watch, so a change to it reaches
+    /// the pane with nothing else written.
+    #[test]
+    fn filter_sources_wake() {
+        let watched = |parts: &[&str]| {
+            watched_in_git_dir(native(parts).strip_prefix(".git").expect("under .git"))
+        };
+        assert!(watched(&[".git", "config"]), "a config write woke nothing");
+        assert!(
+            watched(&[".git", "info", "attributes"]),
+            "an info/attributes write woke nothing"
+        );
+        assert!(
+            !watched(&[".git", "info"]),
+            "the info directory itself is not the file"
+        );
     }
 
     /// Neither of the refs the staged run watches is somewhere to scroll to.
