@@ -521,6 +521,7 @@ Ruled 2026-09-04, reader ([#374](https://github.com/breferrari/vigia/issues/374)
 **Stat both files every tick, rather than the two other options #111 named.** Asking `gix` whether the attribute state it rebuilt differs from the last one is the correct question, but `gix` exposes no cheap identity for "the attribute state", and building one means hashing the resolved stack on every tick. Accepting the limit and documenting it was what shipped before, and it left a stale diff on screen until the file was touched again. Two stats a tick measured as noise (3.43ms against 3.46ms p50 over this repository, three interleaved runs each), so the cheapest option that works was taken.
 
 **No settle check on the two files, unlike the attributes files in the changed set.** A new repository's config is young for its first seconds, so requiring a settled modification time dropped the caches on every tick, and two reuse gates in `tests/frame.rs` failed. The cost is the one change it misses: a rewrite of the same length inside one modification-time granule.
+
 ## §7 — how off-CPU time is counted
 
 **Per breaching frame on a fine clock, per round with a floor on a coarse one.** Ruled 2026-09-30, reader ([#270](https://github.com/breferrari/vigia/issues/270)). User-facing: none
