@@ -1648,9 +1648,10 @@ fn change_class_decides() {
     for (paths, class) in [
         ("README.md\nSPEC.md\ndocs/THEME.md\n", "docs"),
         (
-            ".claude/skills/take-next/SKILL.md\n.claude/scripts/mutate.mjs\n",
+            ".claude/skills/take-next/SKILL.md\n.claude/settings.json\n",
             "docs",
         ),
+        (".claude/scripts/mutate.mjs\n", "full"),
         (
             ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
             "docs",

@@ -505,11 +505,14 @@ jobs:
         with:
           shared-key: ubuntu-latest-test
           save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: the suites that read documents
         run: |
           set -euo pipefail
-          cargo test -p vigia --test package --test register --test sheet --test theme_docs
-          cargo test -p vigia-core --test coverage
+          cargo nextest run -p vigia --profile ci --test package --test register --test sheet --test theme_docs
+          cargo nextest run -p vigia-core --profile ci --test coverage
         env:
           VIGIA_BUDGET_SLACK: "3"
 
