@@ -501,13 +501,20 @@ impl<'repo> Watcher<'repo> {
     }
 }
 
-/// `info/exclude` in the common dir, and the file `core.excludesFile` names.
+/// `info/exclude` in the common dir, and the file `core.excludesFile` names or,
+/// unset, the default gix falls back to.
 fn rule_files_of(repo: &gix::Repository) -> [Option<PathBuf>; 2] {
     let excludes_file = repo
         .config_snapshot()
         .trusted_path("core.excludesFile")
         .ok()
-        .flatten();
+        .flatten()
+        .or_else(|| {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .or_else(|| gix::path::env::home_dir().map(|home| home.join(".config")))
+                .map(|config| config.join("git").join("ignore"))
+        });
     [
         Some(repo.common_dir().join("info").join("exclude")),
         excludes_file,
