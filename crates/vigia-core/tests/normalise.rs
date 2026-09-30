@@ -674,11 +674,66 @@ fn status_follows_config() {
     );
 }
 
-/// A reload that fails keeps the old config, and the caches built under it go
-/// when a later reload succeeds, though the config file itself did not move.
+/// A config gix cannot load keeps the one before it, and still lets an
+/// info/attributes change and a later mended config reach the running frame.
 #[test]
-fn failed_reload_retried() {
-    let scratch = one_line_changed("normalise-failed-reload");
+fn broken_config_followed() {
+    let scratch = one_line_changed("normalise-broken-config");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let read = |frame: &mut Frame| {
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        let (_, diff) = frame.diff(at).expect("diff");
+        (diff.added, diff.removed, diff.binary)
+    };
+    support::settle_spans(&mut frame);
+    let stale = read(&mut frame);
+    let before = frame.stats();
+    assert_eq!(read(&mut frame), stale, "an idle tick moved the diff");
+    assert_eq!(
+        delta(before, frame.stats()).computed,
+        0,
+        "an idle tick recomputed, so this cannot tell a dropped cache from a kept one"
+    );
+
+    // An include git reads with the config, and gix fails on.
+    std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
+    scratch.git(&["config", "core.autocrlf", "false"]);
+    scratch.git(&["config", "include.path", "extra"]);
+    assert_eq!(read(&mut frame), stale, "the reload was expected to fail");
+
+    support::settle_spans(&mut frame);
+    mark_binary(&scratch);
+    assert!(
+        read(&mut frame).2,
+        "an info/attributes change kept the diffs cached before it while the config failed"
+    );
+
+    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
+    std::fs::remove_file(scratch.path_of(".git/info/attributes")).expect("unmark");
+    scratch.git(&["config", "--unset", "include.path"]);
+    let truth = read(&mut scratch.worktree().frame());
+    assert_ne!(
+        truth, stale,
+        "the control is wrong: the change has to move the diff"
+    );
+    assert_eq!(
+        read(&mut frame),
+        truth,
+        "a mended config did not reach the running frame"
+    );
+}
+
+/// A config caught between a writer's delete and its rename is not loaded as
+/// no config at all.
+#[test]
+fn missing_config_skipped() {
+    let scratch = one_line_changed("normalise-missing-config");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     let read = |frame: &mut Frame| {
@@ -691,31 +746,15 @@ fn failed_reload_retried() {
         let (_, diff) = frame.diff(at).expect("diff");
         (diff.added, diff.removed)
     };
-    support::settle_spans(&mut frame);
-    let stale = read(&mut frame);
-    let before = frame.stats();
-    assert_eq!(read(&mut frame), stale, "an idle tick moved the diff");
-    assert_eq!(
-        delta(before, frame.stats()).computed,
-        0,
-        "an idle tick recomputed, so this cannot tell a dropped cache from a kept one"
-    );
+    let kept = read(&mut frame);
 
-    // An include git reads with the config, and nothing fingerprints.
-    std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
-    scratch.git(&["config", "core.autocrlf", "false"]);
-    scratch.git(&["config", "include.path", "extra"]);
-    assert_eq!(read(&mut frame), stale, "the reload was expected to fail");
-
-    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
-    let truth = read(&mut scratch.worktree().frame());
-    assert_ne!(
-        truth, stale,
-        "the control is wrong: the change has to move the diff"
-    );
+    let config = scratch.path_of(".git/config");
+    let bytes = std::fs::read(&config).expect("read config");
+    std::fs::remove_file(&config).expect("remove config");
+    let between = read(&mut frame);
+    std::fs::write(&config, bytes).expect("restore config");
     assert_eq!(
-        read(&mut frame),
-        truth,
-        "a reload that succeeded on unchanged config prints kept the old diffs"
+        between, kept,
+        "a missing config was loaded as none, and the diff dropped core.autocrlf"
     );
 }

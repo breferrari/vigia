@@ -43,7 +43,7 @@ pub struct Worktree {
     /// repository for its whole life and a reload cannot swap it under that.
     opened: gix::Repository,
     /// The repository under its current configuration, for every other reader.
-    /// A borrow must end inside the method that took it, or a reload panics.
+    /// A borrow must end inside the method that took it, or a reload waits a tick.
     live: RefCell<gix::Repository>,
     workdir: PathBuf,
     /// The clean filter: built on the first working-tree read after each
@@ -52,9 +52,9 @@ pub struct Worktree {
     /// The files under the git dir that shape the clean filter: the
     /// configuration and `info/attributes`.
     filter_sources: [PathBuf; 2],
-    /// What [`Self::filter_sources`] looked like when `live` last loaded them, so
-    /// a frame can tell its caches are stale.
-    loaded_prints: Cell<[Option<Fingerprint>; 2]>,
+    /// What [`Self::filter_sources`] looked like when `live` last tried to load
+    /// them, so a frame built later can tell its caches are stale.
+    tried_prints: Cell<[Option<Fingerprint>; 2]>,
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -81,10 +81,10 @@ impl Worktree {
             workdir,
             filter: RefCell::new(None),
             filter_sources,
-            loaded_prints: Cell::new([None, None]),
+            tried_prints: Cell::new([None, None]),
             deleted: Cell::new(false),
         };
-        worktree.loaded_prints.set(worktree.filter_prints());
+        worktree.tried_prints.set(worktree.filter_prints());
         Ok(worktree)
     }
 
@@ -232,8 +232,8 @@ impl Worktree {
         tree: gix::ObjectId,
         options: ChangeOptions<'_>,
     ) -> Result<Vec<FileChange>> {
-        let index = self
-            .repo()
+        let repo = self.repo();
+        let index = repo
             .index_or_empty()
             .map_err(|e| Error::Status(Box::new(e)))?;
 
@@ -250,14 +250,13 @@ impl Worktree {
         }
 
         let mut changes = Vec::new();
-        self.repo()
-            .tree_index_status(&tree, &index, None, renames, |change, _, _| {
-                if let Some(change) = staged_change(&change) {
-                    changes.push(change);
-                }
-                Ok(gix::diff::index::Action::Continue(()))
-            })
-            .map_err(|e| Error::Status(Box::new(e)))?;
+        repo.tree_index_status(&tree, &index, None, renames, |change, _, _| {
+            if let Some(change) = staged_change(&change) {
+                changes.push(change);
+            }
+            Ok(gix::diff::index::Action::Continue(()))
+        })
+        .map_err(|e| Error::Status(Box::new(e)))?;
         Ok(changes)
     }
 
@@ -447,8 +446,7 @@ impl Worktree {
             .transpose()?;
 
         let rewrites = options.track_renames.then(gix::diff::Rewrites::default);
-        let changes = self
-            .repo()
+        let changes = repo
             .diff_tree_to_tree(
                 before.as_ref(),
                 Some(&tree),
@@ -703,22 +701,26 @@ impl Worktree {
     }
 
     /// Reload the repository's configuration when `now` differs from what it was
-    /// loaded under. A config that does not parse, as one mid-write does, keeps
-    /// the previous one and is tried again on the next tick.
+    /// last tried under. A config that does not parse keeps the previous one
+    /// until the files move again, so a broken config costs one open, not one a
+    /// tick.
     pub(crate) fn follow_config(&self, now: [Option<Fingerprint>; 2]) {
-        if now == self.loaded_prints.get() {
+        // A missing config is a writer between its delete and its rename.
+        if now == self.tried_prints.get() || now[0].is_none() {
             return;
         }
-        let mut repo = self.repo().clone();
-        if repo.reload().is_ok() {
-            *self.live.borrow_mut() = repo;
-            self.loaded_prints.set(now);
-        }
+        // A borrow still held is a reader mid-call, and the next tick retries.
+        let Ok(mut repo) = self.live.try_borrow_mut() else {
+            return;
+        };
+        // `reload` replaces the repository only once the open succeeds.
+        let _ = repo.reload();
+        self.tried_prints.set(now);
     }
 
-    /// What the files that shape the filter looked like when last loaded.
-    pub(crate) fn loaded_prints(&self) -> [Option<Fingerprint>; 2] {
-        self.loaded_prints.get()
+    /// What the files that shape the filter looked like when last tried.
+    pub(crate) fn tried_prints(&self) -> [Option<Fingerprint>; 2] {
+        self.tried_prints.get()
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
