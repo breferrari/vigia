@@ -140,9 +140,9 @@ A rule that survives being overruled re-fires on the next session, and he argues
 
 ## Public language
 
-Contract files (`SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md`, this file, `.claude/`) keep the house style. Public files (README, CHANGELOG, CONTRIBUTING, the issue template, release notes, PR titles) use ordinary English and name what the user sees. `.github/public-dialect.txt` lists the banned phrases; `register.rs` and CI enforce it.
+Contract files (`SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md`, this file, `.claude/`) keep the house style. Public files (README, CHANGELOG, CONTRIBUTING, the issue and PR templates, release notes, PR titles) use ordinary English and name what the user sees. `.github/public-dialect.txt` lists the banned phrases; `register.rs` and CI enforce it.
 
-When a subject would be a poor release note, put `Release-note: <one sentence>` in the commit body; squash drops the PR body. `docs:`, `chore:` or `Release-note: none` marks work the pane does not show.
+When a subject would be a poor release note, put `Release-note: <one sentence>` in the commit body; squash drops the PR body. Every PR carries one label, `release` or `internal`, and only `release` reaches the CHANGELOG. `Release-note: none` goes with `internal`. An `internal` title starts with its kind (`ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, `chore:`); a `release` title has no prefix.
 
 ## Releasing
 
@@ -156,7 +156,7 @@ It raises the version, commits it to `main`, builds the four target artifacts, c
 
 Pick the level from the diff. On `0.x` a new feature **and** a breaking public API change both go in the **minor**. `patch` is for fixes that change no signature. `rehearse=true` runs the whole path and publishes nothing, and this is the way to check a change to the release machinery itself.
 
-Do not dispatch when every commit since the last tag is process-only (`docs:`, `chore:`, `Release-note: none`): the bump refuses it.
+Do not dispatch when every PR since the last tag is `internal`: the bump refuses it, and it refuses a PR labelled neither.
 
 **`RELEASE-SMOKE.md` is not this procedure.** It is a human pre-flight on three platforms that an agent cannot tick. Read it before a release that changes packaging, installation or the takeover.
 

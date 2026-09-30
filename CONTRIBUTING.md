@@ -40,15 +40,29 @@ A first PR is most likely to break these rules.
 - **Numbers or it did not happen.** A type signature is not evidence and a single green run is not evidence.
 - **Pure Rust.** Any dependency that pulls `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows, and CI fails the build if one appears.
 - **Do not hard-wrap prose.** Markdown files, PR bodies and commit message bodies do not wrap at all: one paragraph is one line, because GitHub renders a single newline as a line break.
-- **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body.
-- **A title can become a release note.** The release notes are written from the commits merged since the last release. To control the line, put `Release-note: <one sentence>` in a **commit message body** on your branch. It replaces the title in the notes. Pull requests are squash-merged with their commit messages, so a line that is only in the PR body is lost.
-- **A change the pane does not show gets no release note.** Title it `docs: ...` or `chore: ...`, or add `Release-note: none`. If every change since the last release is like that, no version is released.
+- **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body. A pull request has three sections, summary, test plan and release note, and GitHub fills the template in for you.
+- **A title can become a release note.** See the next section for how the release notes are built and what you control.
+
+## Release notes
+
+Every pull request carries one of two labels before it merges: `release` or `internal`. A maintainer applies it, so you do not need write access to contribute. If you can set labels, set it yourself.
+
+- **`release`** means a user of `vigia` can see the change: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. The pull request is listed in `CHANGELOG.md` and in the GitHub Release.
+- **`internal`** means everything else: CI, tests, documentation, the roadmap, the spec, scripts. The pull request is not listed anywhere.
+
+What you control is the line a user reads. Put `Release-note: <one sentence>` in the Release note section of the pull request description, or in a commit message body on your branch, and that sentence becomes the changelog line instead of your title. Put `Release-note: none` when the change is internal. Write the sentence for someone who has never opened this repository: name what changed in the pane, not the rule behind it. If you write nothing, the title of a `release` pull request becomes the line, so make the title readable on its own.
+
+The release reads the commit message first and the pull request description second, so a line in a commit wins. The CI check on wording, described below, reads commits only.
+
+Start the title of an `internal` pull request with a prefix that says what kind of work it is: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, or `chore:` for anything else. A `release` pull request has no prefix, because its title can become the changelog line. The prefix is for people reading the log. The label is what the release reads.
+
+A release stops when a merged pull request carries no label, both labels, or a `Release-note:` line that disagrees with its label, such as `none` on a `release` pull request. The stop names the pull request so a maintainer can fix the label. It is not something you need to watch. If every change since the last release is internal, no version is released.
 
 ## Public files and contract files
 
 Two kinds of document live here, and they are written differently.
 
-- **Public files** are `README.md`, `CHANGELOG.md`, this file and the issue template. Release notes are copied from `CHANGELOG.md`. Write them in ordinary English: the fact first, short sentences, common words. Name what a user sees change, not the rule behind it.
+- **Public files** are `README.md`, `CHANGELOG.md`, this file, the issue template and the pull request template. Release notes are copied from `CHANGELOG.md`. Write them in ordinary English: the fact first, short sentences, common words. Name what a user sees change, not the rule behind it.
 - **Contract files** are `SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md` and `CLAUDE.md`. They keep their own style: present tense, and each ruling names who made it and when.
 
 Phrases from the contract style are not allowed in public files. `.github/public-dialect.txt` lists them, and a test checks it. CI also checks your PR title and commit subjects against that list, and fails unless a commit body carries a `Release-note:` line. CI does not rerun when you only edit the PR title, so push a commit after renaming.

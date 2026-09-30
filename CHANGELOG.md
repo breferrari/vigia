@@ -2,44 +2,26 @@
 
 Every released version of `vigia`, newest first. The date is the day the release was cut.
 
-Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
+Each version lists the pull requests labelled `release`, one line each: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. Internal work such as CI, tests and documentation is not listed.
 
 ## [1.0.0] - 2026-09-30
 
 - Follow config and info/attributes changes in a running pane
 - Raise the heat strip to 48 slices on wide panes
-- Decide both scrollbars once for the map and the painter
-- Count the soak's sent ticks and gate the backlog
-- Give each main commit its own CI group
-- Size the CPU clock gate in scheduler ticks
 - Sample a short file's heat at each slice's middle
-- Gate every CI test step on budget slack
-- Count the height's bytes apart from the diff's
 - Stop reading a file once its first window says binary
-- Gate the height against the diff over a real worktree
-- Name the sheet's keep-set and its floor separately
-- Say when the leak guard could not scan a body
-- Key CI's concurrency group on the draft flag
 - Read WT_SESSION in WSL too, outside a multiplexer
 - Let .gitattributes decide what is binary before the bytes do
-- Borrow a row's sigil and gap rather than allocate them
 - Lay the regions out again when an overlay opens mid-batch
 - Give a row one character walk across all its runs
 - Paint nothing for pointer motion that moved no mark
 - Take the footer's second line only for a hint to fill
-- Gate the chrome's contrast against each palette's pane
 - Keep a hidden path from waking the watch
 - Let a theme set the caret row's weight
-- Gate the wash under wide glyphs as a terminal draws it
-- Gate that no track draws in the pane's own colour
 - Hold a step down at the end of the diff
-- Keep spec language in the contract files; write README and changelog in ordinary English.
 - Add a system palette built from the terminal's own colours
 - Mark only the burst's last write, and never a directory
-- Rule that the pulse mark names one file per burst
 - Serve other agents and say noted when unregistered
-- Rewrite the project documents in controlled plain English
-- Run the soak weekly for 30 minutes on a fixture that settles
 
 ## [0.50.1] - 2026-09-29
 

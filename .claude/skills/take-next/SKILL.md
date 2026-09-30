@@ -161,6 +161,8 @@ Then prove the result:
 
 ## 7. Mark ready and merge
 
+Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR with `gh pr edit <n> --add-label <label>`. The bump refuses a release while a merged PR carries neither or both. Default to `internal`. Apply `release` only when the approved plan changes what the pane shows or does, a key or gesture, a theme the reader loads, install (`vigia`, `vigia mcp`, brew or the installer), or the MCP tools. Process, CI, skill, `SPEC.md` wording, `ROADMAP.md`, gates and the harness are `internal`. If unsure, choose `internal` and say so in one line of the report. Do not guess `release`. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. A `release` title has no prefix.
+
 `gh pr ready` starts the matrix on three platforms and the Copilot review. Copilot has a quota. Mark the PR ready once, after the local suite is green and the plan diff is clean. A draft shows a green `ci complete` that ran nothing.
 
 ```sh
@@ -210,4 +212,4 @@ Then write briefly: the issue that you took, what shipped with numbers, and the 
 
 ## Writing
 
-The PR body, the issue comments, the commits and the report follow the house rules in `CLAUDE.md`: plain words, the fact first, one paragraph per line. Write the PR body the way that `/pr` does, and set it without a wait for approval. The body says what is true now and links the plan comment. It does not repeat the review. It has one line for each tool, then one line for each skipped finding with its reason.
+The PR body, the issue comments, the commits and the report follow the house rules in `CLAUDE.md`: plain words, the fact first, one paragraph per line. Write the PR body the way that `/pr` does, on the sections of `.github/PULL_REQUEST_TEMPLATE.md`, and set it without a wait for approval. The body says what is true now and links the plan comment. It does not repeat the review. It has one line for each tool, then one line for each skipped finding with its reason.

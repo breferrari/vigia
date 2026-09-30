@@ -838,6 +838,10 @@ fn public_prose_denylist() {
         ("README.md".to_owned(), read("README.md")),
         ("CONTRIBUTING.md".to_owned(), read("CONTRIBUTING.md")),
         ("CHANGELOG.md".to_owned(), changelog[..older].to_owned()),
+        (
+            ".github/PULL_REQUEST_TEMPLATE.md".to_owned(),
+            read(".github/PULL_REQUEST_TEMPLATE.md"),
+        ),
     ];
     let templates = root.join(".github/ISSUE_TEMPLATE");
     for entry in std::fs::read_dir(&templates)
@@ -851,7 +855,7 @@ fn public_prose_denylist() {
         files.push((name.clone(), read(&name)));
     }
     assert!(
-        files.len() >= 5,
+        files.len() >= 6,
         "only {} public file(s) found",
         files.len()
     );
