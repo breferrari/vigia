@@ -442,7 +442,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | Status walk config stale | [#606](https://github.com/breferrari/vigia/issues/606) |
 | ✅ | Watcher excludes keep opened config | [#619](https://github.com/breferrari/vigia/issues/619) |
 | ✅ | Exclude files frozen at watch start | [#621](https://github.com/breferrari/vigia/issues/621) |
-| ⬜ | Mixed release notes fail the bump | [#624](https://github.com/breferrari/vigia/issues/624) |
+| ✅ | Mixed release notes fail the bump | [#624](https://github.com/breferrari/vigia/issues/624) |
 
 **[#178](https://github.com/breferrari/vigia/issues/178) is an instrument finding and goes here rather than into a phase**, which is the rule of this file for a queue that serves the product and the mirror equally. Found while merging [#166](https://github.com/breferrari/vigia/issues/166). The absolute frame budgets fail on shared CI runners often enough to be a pattern, and each failure reads as a regression. `main` at `34f74ec` reported p99 98.96ms against the 48ms budget with **p50 9.25ms and max 255.40ms**. [#176](https://github.com/breferrari/vigia/pull/176) reported p99 73.14ms with **p50 3.67ms and max 179.78ms**, on a different test and a different platform. It passed on a re-run of the identical commit. The shape is the finding: a regression moves the median, and a runner that loses the CPU for a quantum moves two samples of 250. It is deferred and not fixed for two reasons. It did not block the product pass it interrupted (one re-run cleared it). And the fix is a ruling about where budgets are measured, not a patch. It is worth filing because [#142](https://github.com/breferrari/vigia/pull/142) already recorded one of these and reported it honestly. That is the right handling and also the warning: the third time, nobody reads the numbers. **Closed 2026-08-17 by [#212](https://github.com/breferrari/vigia/issues/212)**. It is the entry above, not a repeat of it. The gate attributes a breach with thread CPU time instead of re-measuring it and believing the result. So the gate can say whether the time went into work or into waiting for a CPU.
 
@@ -578,6 +578,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | Burst cap eviction order ([#368](https://github.com/breferrari/vigia/issues/368)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. |
 | Render buffer clip ([#91](https://github.com/breferrari/vigia/issues/91)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. The binary still cannot reach the panic. |
 | Exclude files frozen at watch start ([#621](https://github.com/breferrari/vigia/issues/621)) | Off the Shelf, 2026-09-30 | Filed by #619 and still real. Two stats a tick while events flow, none while idle. |
+| Mixed release notes fail the bump ([#624](https://github.com/breferrari/vigia/issues/624)) | Off the Shelf, 2026-09-30 | Taken by the unattended loop, whose merged #617 and #622 it breaks the next release on. Workflow work, which the loop takes when it blocks releasing the loop's own PRs. |
 
 ---
 

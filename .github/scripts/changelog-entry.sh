@@ -19,7 +19,9 @@
 # Intent lives on the label and on the trailer, never in the wording of the
 # subject. Per record:
 #
-#   Release-note: none      skipped. `release` on the PR contradicts it: fail.
+#   Release-note: none      skipped. `release` on the PR contradicts it: fail,
+#                           unless the PR also carries a real note, as a squash
+#                           of a release PR with follow-up commits does.
 #   Release-note: <text>    written as it stands. The PR must carry `release`.
 #   subject, `release`      written, minus the tracker's trailing `(#n)`.
 #   subject, `internal`     skipped.
@@ -58,15 +60,24 @@ if grep -qF "## [${version}]" "$changelog"; then
     exit 1
 fi
 
-# Read once, because the records are walked twice: once to decide, once to
-# name the ones in contract phrasing.
+# Read once, because the records are walked more than once.
 records=$(cat)
+
+# The pull requests that carry a real note somewhere in the range.
+noted=$(printf '%s\n' "$records" | awk -F '\t' '
+    NF == 3 && $3 ~ /^Release-note:/ {
+        note = $3
+        sub(/^Release-note:[ \t]*/, "", note)
+        sub(/[ \t]+$/, "", note)
+        if (note != "" && tolower(note) != "none") printf ",%s", $1
+    }
+')
 
 # One pass decides every record. Kept lines go to stdout prefixed `keep:`, and
 # everything else is a workflow annotation. The trailing `(#n)` references are
 # peeled here, one at a time, because a merge subject carries the issue's
 # number and the pull request's, and sometimes two issues'.
-decided=$(printf '%s\n' "$records" | awk '
+decided=$(printf '%s\n' "$records" | awk -v noted="$noted," '
     BEGIN { FS = "\t"; bad = 0 }
     function strip(s) {
         while (match(s, /[ \t]*\(#[0-9]+(,[ \t]*#[0-9]+)*\)[ \t]*$/)) s = substr(s, 1, RSTART - 1)
@@ -93,7 +104,9 @@ decided=$(printf '%s\n' "$records" | awk '
             sub(/^Release-note:[ \t]*/, "", note)
             sub(/[ \t]+$/, "", note)
             if (tolower(note) == "none") {
-                if (release) {
+                if (release && index(noted, "," who ",")) {
+                    print "::notice::skipped, Release-note: none beside a note: " who
+                } else if (release) {
                     print "::error::" who " says Release-note: none and is labelled release"
                     bad = 1
                 } else {
