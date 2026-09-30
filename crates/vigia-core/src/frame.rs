@@ -22,6 +22,8 @@ pub struct FrameStats {
     pub measured: u64,
     /// Bytes compared by computed diffs.
     pub bytes: u64,
+    /// Bytes read by [`Frame::height`] to count files it did not diff.
+    pub measured_bytes: u64,
     /// `stat` calls made, either to record a fingerprint or to check one.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
@@ -719,7 +721,7 @@ impl<'w> Frame<'w> {
         let (span, taken) = match measured {
             Ok(span) => {
                 self.stats.measured += 1;
-                self.stats.bytes += span.bytes;
+                self.stats.measured_bytes += span.bytes;
                 let worktree = if change.reads_worktree() {
                     self.stats.probes += 1;
                     fingerprint(&path).map(|print| Observed {
