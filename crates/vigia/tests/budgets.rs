@@ -3116,7 +3116,8 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     settle(&mut frame);
-    let mut app = App::new();
+    // Past the plain first frame, so a read with no warmup still parses.
+    let mut app = App::past_first_paint();
     let mut highlighter = Highlighter::eager();
     let mut warm = Highlighter::eager();
     let mut history = History::new();
