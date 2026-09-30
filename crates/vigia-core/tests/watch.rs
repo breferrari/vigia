@@ -1117,3 +1117,26 @@ fn exclude_edit_mid_wait() {
         "an exclude edit during one wait never reached the paths judged after it"
     );
 }
+
+/// Renaming the root `.gitignore` away drops its rules, though the event names
+/// the new path first.
+#[test]
+fn gitignore_renamed_away() {
+    let scratch = Scratch::new("watch-gitignore-renamed");
+    scratch.write(".gitignore", "vigia-excluded/\n");
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("initial");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    std::fs::rename(scratch.path_of(".gitignore"), scratch.path_of("ignore.bak"))
+        .expect("rename .gitignore");
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path a renamed-away .gitignore ignored never woke the watch"
+    );
+}

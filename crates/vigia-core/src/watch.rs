@@ -15,7 +15,7 @@ use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::Hidden;
 use crate::error::{Error, Result};
-use crate::frame::{Fingerprint, config_moved, fingerprint, followed_print};
+use crate::frame::{Fingerprint, config_moved, followed_print};
 use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
@@ -159,14 +159,11 @@ pub struct Watcher<'repo> {
     rule_files: [Option<PathBuf>; 2],
     /// What [`Self::rule_files`] looked like when the stack was built.
     rule_prints: [Option<Fingerprint>; 2],
-    /// Set when a reload lands, until a stack is built from it.
+    /// Set by anything that changes the rules, and cleared once a stack is built
+    /// from them.
     stack_stale: bool,
-    /// Whether this event has stated the rule files, so they cost two stats an
-    /// event rather than two a path.
-    rules_checked: bool,
-    /// Whether this wait has tried a reload, so a config that keeps failing costs
-    /// one reload a wait rather than one a path. A config write ends the wait.
-    reload_tried: bool,
+    /// When the rules were last refreshed. See [`RULES_EVERY`].
+    refreshed_at: Option<Instant>,
     /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
@@ -275,8 +272,7 @@ impl<'repo> Watcher<'repo> {
             rule_files,
             rule_prints,
             stack_stale: false,
-            rules_checked: false,
-            reload_tried: false,
+            refreshed_at: None,
             _worktree: PhantomData,
             roots,
             git_dir,
@@ -314,7 +310,6 @@ impl<'repo> Watcher<'repo> {
 
     /// Block until the working tree changes, then return one coalesced tick.
     pub fn next_tick(&mut self) -> Option<Tick> {
-        self.reload_tried = false;
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
@@ -379,7 +374,15 @@ impl<'repo> Watcher<'repo> {
             Message::Stop => return None,
             Message::Event(event) => event,
         };
-        self.rules_checked = false;
+        // Any `.gitignore` the event names, judged or not: a rename away from one
+        // names the new path first, and a hidden one still shapes the rules.
+        if event
+            .paths
+            .iter()
+            .any(|path| path.file_name() == Some(OsStr::new(".gitignore")))
+        {
+            self.stack_stale = true;
+        }
 
         // Reads are not changes. Most backends never report them, but inotify
         // can be configured to, and a monitor that redraws because something
@@ -404,7 +407,7 @@ impl<'repo> Watcher<'repo> {
             let watched = if inside == Path::new("index") {
                 self.index.moved()
             } else {
-                self.config_event(inside);
+                self.reload_due |= inside == Path::new("config");
                 watched_in_git_dir(inside)
             };
             return watched.then_some((Path::new(".git"), false));
@@ -416,7 +419,7 @@ impl<'repo> Watcher<'repo> {
                 || inside.starts_with("info")
                 || inside == Path::new("packed-refs")
                 || inside == Path::new("config");
-            self.config_event(inside);
+            self.reload_due |= inside == Path::new("config");
             return (shared && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
         }
 
@@ -452,26 +455,15 @@ impl<'repo> Watcher<'repo> {
             return None;
         }
 
-        // The stack reads the root `.gitignore` once, so an edit to any of them
-        // rebuilds it.
-        if rela.file_name() == Some(OsStr::new(".gitignore")) {
-            self.stack_stale = true;
-        }
         self.refresh_rules();
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
-    fn config_event(&mut self, inside: &Path) {
-        if inside == Path::new("config") {
-            self.reload_due = true;
-        }
-    }
-
     /// Reload the config as [`Worktree`](crate::Worktree) reloads its own, and
     /// mark the stack stale. One that does not load keeps the config before it,
-    /// and the next wait tries again.
+    /// and the next refresh tries again.
     fn reload_config(&mut self) {
-        let now = fingerprint(&self.config);
+        let now = followed_print(&self.config);
         if now == self.loaded_config {
             self.reload_due = false;
             return;
@@ -487,27 +479,31 @@ impl<'repo> Watcher<'repo> {
         }
     }
 
-    /// Reload the config if one is due, then rebuild the stack if a rule file
-    /// moved or something marked it stale. A rebuild that fails keeps the rules
-    /// from before it until a rule file moves again.
+    /// Reload the config if one is due, stat the rule files, and rebuild the stack
+    /// if anything marked it stale. At most once per [`RULES_EVERY`]; what fails
+    /// stays due and is tried at the next refresh.
     fn refresh_rules(&mut self) {
-        if self.reload_due && !self.reload_tried {
-            self.reload_tried = true;
+        let now = Instant::now();
+        if self
+            .refreshed_at
+            .is_some_and(|at| now.duration_since(at) < RULES_EVERY)
+        {
+            return;
+        }
+        self.refreshed_at = Some(now);
+        if self.reload_due {
             self.reload_config();
         }
-        if !self.rules_checked {
-            self.rules_checked = true;
-            let now = prints_of(&self.rule_files);
-            if now != self.rule_prints {
-                self.rule_prints = now;
-                self.stack_stale = true;
-            }
+        let prints = prints_of(&self.rule_files);
+        if prints != self.rule_prints {
+            self.rule_prints = prints;
+            self.stack_stale = true;
         }
-        if self.stack_stale {
+        if self.stack_stale
+            && let Ok(excludes) = excludes_of(&self.repo)
+        {
+            self.excludes = excludes;
             self.stack_stale = false;
-            if let Ok(excludes) = excludes_of(&self.repo) {
-                self.excludes = excludes;
-            }
         }
     }
 
@@ -520,6 +516,11 @@ impl<'repo> Watcher<'repo> {
         }
     }
 }
+
+/// The longest a rule edit waits to reach the paths judged after it. It bounds
+/// what a flood of ignored events costs in stats, reloads and rebuilds, and only
+/// decides whether an idle pane wakes: a burst that holds the edit ticks anyway.
+const RULES_EVERY: Duration = Duration::from_millis(100);
 
 /// `info/exclude` in the common dir, and the file `core.excludesFile` names or,
 /// unset, the default gix falls back to.
