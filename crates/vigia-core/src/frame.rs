@@ -189,7 +189,15 @@ struct Measured {
 
 /// Fingerprint a working-tree file, or `None` when it cannot be.
 pub(crate) fn fingerprint(path: &Path) -> Option<Fingerprint> {
-    let meta = std::fs::symlink_metadata(path).ok()?;
+    print_of(&std::fs::symlink_metadata(path).ok()?)
+}
+
+/// [`fingerprint`] of what a symlink points at.
+pub(crate) fn followed_print(path: &Path) -> Option<Fingerprint> {
+    print_of(&std::fs::metadata(path).ok()?)
+}
+
+fn print_of(meta: &std::fs::Metadata) -> Option<Fingerprint> {
     Some(Fingerprint {
         len: meta.len(),
         mtime: meta.modified().ok()?,

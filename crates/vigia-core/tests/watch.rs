@@ -985,6 +985,10 @@ fn info_exclude_followed() {
     );
 
     std::fs::write(scratch.path_of(".git/info/exclude"), "\n").expect("clear exclude");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an info/exclude edit produced no tick, so the file list kept its rows"
+    );
     while tick_within(&mut watcher, IDLE).is_some() {}
     scratch.write("vigia-excluded/b.o", "x\n");
     assert!(
@@ -1047,5 +1051,66 @@ fn ignore_case_followed() {
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "a config change that moved no rule file left the old rules"
+    );
+}
+
+/// A path the root `.gitignore` stops ignoring wakes the watch.
+#[test]
+fn gitignore_edit_followed() {
+    let scratch = Scratch::new("watch-gitignore-edit");
+    scratch.write(".gitignore", "vigia-excluded/\n");
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("initial");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: .gitignore did not ignore vigia-excluded/"
+    );
+
+    scratch.write(".gitignore", "\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a .gitignore edit produced no tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path .gitignore stopped ignoring never woke the watch"
+    );
+}
+
+/// An exclude edit reaches a watch that is already blocked waiting, with an
+/// ignored write between: one wait, not one per step.
+#[test]
+fn exclude_edit_mid_wait() {
+    let scratch = committed_scratch("watch-exclude-mid-wait");
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    std::fs::write(scratch.path_of(".git/info/exclude"), "vigia-excluded/\n")
+        .expect("write exclude");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    let root = scratch.path_of("");
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(DELAY);
+        std::fs::write(root.join("vigia-excluded/a.o"), "x\n").expect("write a.o");
+        std::thread::sleep(DELAY);
+        std::fs::write(root.join(".git/info/exclude"), "\n").expect("clear exclude");
+        std::thread::sleep(DELAY);
+        std::fs::write(root.join("vigia-excluded/b.o"), "x\n").expect("write b.o");
+    });
+    let tick = tick_within(&mut watcher, SETTLE);
+    writer.join().expect("writer");
+    assert!(
+        tick.is_some(),
+        "an exclude edit during one wait never reached the paths judged after it"
     );
 }

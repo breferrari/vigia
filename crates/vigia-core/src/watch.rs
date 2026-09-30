@@ -15,7 +15,7 @@ use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::Hidden;
 use crate::error::{Error, Result};
-use crate::frame::{Fingerprint, config_moved, fingerprint};
+use crate::frame::{Fingerprint, config_moved, fingerprint, followed_print};
 use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
@@ -161,9 +161,12 @@ pub struct Watcher<'repo> {
     rule_prints: [Option<Fingerprint>; 2],
     /// Set when a reload lands, until a stack is built from it.
     stack_stale: bool,
-    /// Whether this tick has refreshed the rules, so a config that keeps failing
-    /// costs one reload a tick rather than one a path.
-    refreshed: bool,
+    /// Whether this event has stated the rule files, so they cost two stats an
+    /// event rather than two a path.
+    rules_checked: bool,
+    /// Whether this wait has tried a reload, so a config that keeps failing costs
+    /// one reload a wait rather than one a path. A config event clears it.
+    reload_tried: bool,
     /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
@@ -272,7 +275,8 @@ impl<'repo> Watcher<'repo> {
             rule_files,
             rule_prints,
             stack_stale: false,
-            refreshed: false,
+            rules_checked: false,
+            reload_tried: false,
             _worktree: PhantomData,
             roots,
             git_dir,
@@ -310,7 +314,7 @@ impl<'repo> Watcher<'repo> {
 
     /// Block until the working tree changes, then return one coalesced tick.
     pub fn next_tick(&mut self) -> Option<Tick> {
-        self.refreshed = false;
+        self.reload_tried = false;
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
@@ -375,6 +379,7 @@ impl<'repo> Watcher<'repo> {
             Message::Stop => return None,
             Message::Event(event) => event,
         };
+        self.rules_checked = false;
 
         // Reads are not changes. Most backends never report them, but inotify
         // can be configured to, and a monitor that redraws because something
@@ -399,7 +404,7 @@ impl<'repo> Watcher<'repo> {
             let watched = if inside == Path::new("index") {
                 self.index.moved()
             } else {
-                self.reload_due |= inside == Path::new("config");
+                self.config_event(inside);
                 watched_in_git_dir(inside)
             };
             return watched.then_some((Path::new(".git"), false));
@@ -411,7 +416,7 @@ impl<'repo> Watcher<'repo> {
                 || inside.starts_with("info")
                 || inside == Path::new("packed-refs")
                 || inside == Path::new("config");
-            self.reload_due |= inside == Path::new("config");
+            self.config_event(inside);
             return (shared && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
         }
 
@@ -447,14 +452,26 @@ impl<'repo> Watcher<'repo> {
             return None;
         }
 
+        // The stack reads the root `.gitignore` once, so an edit to any of them
+        // rebuilds it.
+        if rela.file_name() == Some(OsStr::new(".gitignore")) {
+            self.stack_stale = true;
+        }
         self.refresh_rules();
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
-    /// Reload the config and the rules it names, such as `core.excludesFile`, as
-    /// [`Worktree`](crate::Worktree) reloads its own. One that does not load keeps
-    /// the rules from before it, and the next tick tries again.
-    fn reload_excludes(&mut self) {
+    fn config_event(&mut self, inside: &Path) {
+        if inside == Path::new("config") {
+            self.reload_due = true;
+            self.reload_tried = false;
+        }
+    }
+
+    /// Reload the config as [`Worktree`](crate::Worktree) reloads its own, and
+    /// mark the stack stale. One that does not load keeps the config before it,
+    /// and the next wait tries again.
+    fn reload_config(&mut self) {
         let now = fingerprint(&self.config);
         if now == self.loaded_config {
             self.reload_due = false;
@@ -471,23 +488,27 @@ impl<'repo> Watcher<'repo> {
         }
     }
 
-    /// Once a tick: reload the config if one is due, then rebuild the stack if a
-    /// file it read has moved. Two stats a tick while events flow.
+    /// Reload the config if one is due, then rebuild the stack if a rule file
+    /// moved or something marked it stale. A rebuild that fails keeps the rules
+    /// from before it until a rule file moves again.
     fn refresh_rules(&mut self) {
-        if self.refreshed {
-            return;
+        if self.reload_due && !self.reload_tried {
+            self.reload_tried = true;
+            self.reload_config();
         }
-        self.refreshed = true;
-        if self.reload_due {
-            self.reload_excludes();
+        if !self.rules_checked {
+            self.rules_checked = true;
+            let now = prints_of(&self.rule_files);
+            if now != self.rule_prints {
+                self.rule_prints = now;
+                self.stack_stale = true;
+            }
         }
-        let now = prints_of(&self.rule_files);
-        if (self.stack_stale || now != self.rule_prints)
-            && let Ok(excludes) = excludes_of(&self.repo)
-        {
-            self.excludes = excludes;
-            self.rule_prints = now;
+        if self.stack_stale {
             self.stack_stale = false;
+            if let Ok(excludes) = excludes_of(&self.repo) {
+                self.excludes = excludes;
+            }
         }
     }
 
@@ -522,9 +543,10 @@ fn rule_files_of(repo: &gix::Repository) -> [Option<PathBuf>; 2] {
 }
 
 fn prints_of(files: &[Option<PathBuf>; 2]) -> [Option<Fingerprint>; 2] {
+    // Followed, as gix follows it when it reads the file.
     files
         .each_ref()
-        .map(|file| file.as_deref().and_then(fingerprint))
+        .map(|file| file.as_deref().and_then(followed_print))
 }
 
 /// The ignore rules the repository's config and index name, detached from it.
@@ -707,8 +729,11 @@ fn watched_in_git_dir(inside: &Path) -> bool {
     {
         return inside.peek().is_none();
     }
+    // `attributes` shapes the filter, and `exclude` which untracked files show.
     if first == OsStr::new("info") {
-        return inside.next().map(|c| c.as_os_str()) == Some(OsStr::new("attributes"))
+        return inside
+            .next()
+            .is_some_and(|c| c.as_os_str() == "attributes" || c.as_os_str() == "exclude")
             && inside.peek().is_none();
     }
 
