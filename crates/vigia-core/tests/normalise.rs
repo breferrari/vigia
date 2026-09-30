@@ -156,14 +156,7 @@ fn text_unset_stops_normalising() {
 /// A `.gitattributes` written mid-session reaches the very next frame.
 #[test]
 fn attributes_written_mid_session_reach_the_next_frame() {
-    let scratch = Scratch::crlf_worktree("normalise-restat", None);
-    scratch.write("a.txt", numbered_lines(20));
-    scratch.commit_all("initial");
-    scratch.checkout("a.txt");
-    scratch.write_crlf(
-        "a.txt",
-        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
-    );
+    let scratch = one_line_changed("normalise-restat");
 
     let diff_of = |worktree: &Worktree| -> (u32, u32) {
         let mut frame = worktree.frame();
@@ -211,14 +204,7 @@ fn attributes_written_mid_session_reach_the_next_frame() {
 #[test]
 fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     // The gate above cannot see a cache, and that is why this one exists.
-    let scratch = Scratch::crlf_worktree("normalise-carried", None);
-    scratch.write("a.txt", numbered_lines(20));
-    scratch.commit_all("initial");
-    scratch.checkout("a.txt");
-    scratch.write_crlf(
-        "a.txt",
-        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
-    );
+    let scratch = one_line_changed("normalise-carried");
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -525,14 +511,7 @@ fn normalising_costs_no_extra_read_or_probe() {
 /// A running frame against a restarted one, after `change` rewrites something
 /// under `.git` that decides what the clean filter does to `a.txt`.
 fn follows_git_state(name: &str, change: impl Fn(&Scratch)) {
-    let scratch = Scratch::crlf_worktree(name, None);
-    scratch.write("a.txt", numbered_lines(20));
-    scratch.commit_all("initial");
-    scratch.checkout("a.txt");
-    scratch.write_crlf(
-        "a.txt",
-        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
-    );
+    let scratch = one_line_changed(name);
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -582,4 +561,18 @@ fn info_attributes_followed() {
         std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
             .expect("write info/attributes");
     });
+}
+
+/// `a.txt` committed with LF under `core.autocrlf=true`, held in CRLF with
+/// line 10 changed.
+fn one_line_changed(name: &str) -> Scratch {
+    let scratch = Scratch::crlf_worktree(name, None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    scratch.write_crlf(
+        "a.txt",
+        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
+    );
+    scratch
 }

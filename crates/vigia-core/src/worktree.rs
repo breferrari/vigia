@@ -47,6 +47,9 @@ pub struct Worktree {
     /// The repository reopened after its configuration changed, which the filter
     /// is built from. `repo` keeps the configuration it was opened with.
     reread: RefCell<Option<gix::Repository>>,
+    /// The files under the git dir that shape the clean filter: the
+    /// configuration and `info/attributes`.
+    filter_sources: [PathBuf; 2],
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -62,11 +65,17 @@ impl Worktree {
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let repo = gix::discover(path).map_err(|e| Error::Discover(Box::new(e)))?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
+        let common = repo.common_dir();
+        let filter_sources = [
+            common.join("config"),
+            common.join("info").join("attributes"),
+        ];
         Ok(Self {
             repo,
             workdir,
             filter: RefCell::new(None),
             reread: RefCell::new(None),
+            filter_sources,
             deleted: Cell::new(false),
         })
     }
@@ -670,26 +679,22 @@ impl Worktree {
         Ok(object.try_into_blob().map_err(|_| missing())?.take_data())
     }
 
-    /// Drop the cached clean filter, so the next read rebuilds it.
-    /// The files under the git dir that decide what the clean filter does:
-    /// the configuration and `info/attributes`.
-    pub(crate) fn filter_sources(&self) -> [PathBuf; 2] {
-        let common = self.repo.common_dir();
-        [
-            common.join("config"),
-            common.join("info").join("attributes"),
-        ]
+    /// The files under the git dir that shape the clean filter.
+    pub(crate) fn filter_sources(&self) -> &[PathBuf; 2] {
+        &self.filter_sources
     }
 
     /// Reopen the repository for the filter, so a configuration written since
-    /// it was opened applies to the next read.
-    pub(crate) fn reread_config(&self) -> Result<()> {
+    /// it was opened applies to the next read. A config that does not parse,
+    /// as one mid-write does, keeps the previous one.
+    pub(crate) fn reread_config(&self) {
         let mut repo = self.repo.clone();
-        repo.reload().map_err(Error::filter_setup)?;
-        *self.reread.borrow_mut() = Some(repo);
-        Ok(())
+        if repo.reload().is_ok() {
+            *self.reread.borrow_mut() = Some(repo);
+        }
     }
 
+    /// Drop the cached clean filter, so the next read rebuilds it.
     pub(crate) fn invalidate_filter(&self) {
         *self.filter.borrow_mut() = None;
     }
