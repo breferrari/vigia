@@ -1,5 +1,6 @@
 //! The frame path: I2a.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -31,6 +32,8 @@ pub struct FrameStats {
     /// Heights kept from an earlier read because their file moved inside the
     /// settle margin, each to be read again once it settles.
     pub deferred: u64,
+    /// Values [`Frame::diff_with`] derived from a diff, each once per diff.
+    pub derived: u64,
 }
 
 /// A working-tree fingerprint that costs no read: size and modification time.
@@ -174,6 +177,9 @@ impl<T> Cache<T> {
 struct Cached {
     taken: Taken,
     diff: FileDiff,
+    /// What [`Frame::diff_with`] derived from `diff`. Kept here rather than in
+    /// a cache of its own so it is dropped exactly when the diff is.
+    derived: Option<Box<dyn Any + Send + Sync>>,
 }
 
 /// One path's height, with everything needed to know it is still true.
@@ -887,9 +893,61 @@ impl<'w> Frame<'w> {
                 answered: true,
             },
         );
-        self.cached.put(change, Cached { taken, diff });
+        self.cached.put(
+            change,
+            Cached {
+                taken,
+                diff,
+                derived: None,
+            },
+        );
         let diff = &self.cached.get(change).expect("just inserted").diff;
         Ok((change, diff))
+    }
+
+    /// [`Self::diff`], plus a value `derive` computes from the diff, paid once per
+    /// diff: the frame keeps it beside the diff and hands it back while the diff
+    /// is reused. One value per diff: a second derivation of the same type is
+    /// served the first's value, and one of another type replaces it.
+    ///
+    /// # Panics
+    ///
+    /// As [`Self::diff`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::diff`].
+    pub fn diff_with<T: Any + Clone + Send + Sync>(
+        &mut self,
+        index: usize,
+        derive: impl FnOnce(&FileDiff) -> T,
+    ) -> Result<(&FileChange, &FileDiff, T)> {
+        self.diff(index)?;
+        let change = &self.files[index];
+        // A failed read is not cached, so its hunkless diff derives on every
+        // call, uncounted: the counter says once per diff, and nothing keeps this.
+        let (diff, slot) = match self.cached.get_mut(change) {
+            Some(Cached { diff, derived, .. }) => (&*diff, Some(derived)),
+            None => (
+                self.failure
+                    .as_ref()
+                    .expect("`diff` leaves a failure wherever it caches nothing"),
+                None,
+            ),
+        };
+        if let Some(value) = slot
+            .as_deref()
+            .and_then(|kept| kept.as_ref())
+            .and_then(|kept| kept.downcast_ref::<T>())
+        {
+            return Ok((change, diff, value.clone()));
+        }
+        let value = derive(diff);
+        if let Some(slot) = slot {
+            *slot = Some(Box::new(value.clone()));
+            self.stats.derived += 1;
+        }
+        Ok((change, diff, value))
     }
 }
 

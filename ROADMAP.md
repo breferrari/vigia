@@ -364,7 +364,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | The thesis workload, measured from real use rather than a fixture | [#72](https://github.com/breferrari/vigia/issues/72) |
 | ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
 | ✅ | I7 is measured without the highlighter, and the first parse costs 98ms | [#51](https://github.com/breferrari/vigia/issues/51) |
-| ⬜ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
+| ✅ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
 | ✅ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
 | ✅ | `G` leaves the pane short, and the first scroll yanks it back a screenful | [#62](https://github.com/breferrari/vigia/issues/62) |
 | ✅ | The row wash drops a column under every wide glyph. **Not on screen: the backend never receives a wide glyph's second cell; the gate now reads what a terminal draws** | [#63](https://github.com/breferrari/vigia/issues/63) |
@@ -579,6 +579,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | Render buffer clip ([#91](https://github.com/breferrari/vigia/issues/91)) | Off the Shelf, 2026-09-30 | Taken with an outside contributor's PR, which was reviewed and waiting. The binary still cannot reach the panic. |
 | Exclude files frozen at watch start ([#621](https://github.com/breferrari/vigia/issues/621)) | Off the Shelf, 2026-09-30 | Filed by #619 and still real. Two stats a tick while events flow, none while idle. |
 | Mixed release notes fail the bump ([#624](https://github.com/breferrari/vigia/issues/624)) | Off the Shelf, 2026-09-30 | Taken by the unattended loop, whose merged #617 and #622 it breaks the next release on. Workflow work, which the loop takes when it blocks releasing the loop's own PRs. |
+| The heat projection's cost follows the file ([#55](https://github.com/breferrari/vigia/issues/55)) | Off the Shelf, 2026-09-30 | Taken by the unattended loop when `next.sh` ran dry. The row's reason was that nothing had ever taken it, which is not a reason that can hold. The fix is a slot beside the cached diff: a file's heat strip is projected once per computed diff and served from the frame while that diff is reused, so a frame pays a copy per drawn heading and the walk over the hunks is paid once per computed diff |
 
 ---
 

@@ -12,7 +12,7 @@ use vigia::{
 };
 use vigia_core::{Frame, FrameStats, HighlightStats, Highlighter, History, Recency, Standing};
 
-use support::{Scratch, arm_settle, delta, materialise, settle, settle_spans};
+use support::{Scratch, arm_settle, delta, generated, materialise, settle, settle_spans};
 
 /// The wide fixture: enough files that reading all of them is unmistakable.
 const FILES: usize = 100;
@@ -1007,6 +1007,81 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
             .any(|heat| heat.iter().any(|bucket| bucket.total() > 0)),
         "every drawn heading has an empty heat strip, so the projection ran on a \
          reused diff and found nothing to place"
+    );
+}
+
+/// The heat strip the diff's first heading draws.
+fn top_heat(view: &vigia::View) -> [HeatBucket; HEAT_BUCKETS] {
+    view.rows
+        .iter()
+        .find_map(|row| match row {
+            Row::File(entry) if entry.path == "src/mod_0.rs" => Some(entry.heat),
+            _ => None,
+        })
+        .expect("the diff's first file draws its heading")
+}
+
+#[test]
+fn heat_once_per_diff() {
+    let scratch = Scratch::large_diff("shell-reads-heat-once", FEW_FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut view_once = |frame: &mut Frame| {
+        let before = frame.stats();
+        let view = app
+            .view(frame, &mut highlighter, &history, layout())
+            .expect("view");
+        (view, delta(before, frame.stats()))
+    };
+
+    let (first, cost) = view_once(&mut frame);
+    let whole = top_heat(&first);
+    assert!(
+        cost.derived > 0,
+        "the first screen projected no heat at all, so nothing below can tell a \
+         projection paid once from one never paid"
+    );
+    assert!(
+        whole.iter().all(|bucket| bucket.total() > 0),
+        "a file changed on every line drew a cool slice: {whole:?}"
+    );
+
+    let (_, cost) = view_once(&mut frame);
+    assert_eq!(
+        cost.derived, 0,
+        "a second screen over the same diffs projected {} heat strips again, so \
+         the projection follows the file on every frame rather than once per diff",
+        cost.derived
+    );
+
+    // The file's change shrinks to one line at the top, so its strip has to move.
+    let mut restored = generated(LINES, "before");
+    restored.insert_str(0, "// edited\n");
+    scratch.write("src/mod_0.rs", restored);
+    let before = frame.stats();
+    settle(&mut frame);
+    let rewritten = delta(before, frame.stats()).computed;
+    assert_eq!(
+        rewritten, 1,
+        "the rewrite recomputed {rewritten} diffs, not one"
+    );
+
+    let (third, cost) = view_once(&mut frame);
+    assert_eq!(
+        cost.derived, rewritten,
+        "{rewritten} diff was recomputed and {} strips were projected: a recomputed \
+         diff projects once, and nothing else does",
+        cost.derived
+    );
+    let moved = top_heat(&third);
+    assert!(
+        moved[0].total() > 0 && moved[1..].iter().all(|bucket| bucket.total() == 0),
+        "the rewritten file's strip did not follow its new diff: {moved:?}"
     );
 }
 

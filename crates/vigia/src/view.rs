@@ -1343,6 +1343,8 @@ struct Changed<'f> {
     /// The note box, as the anchor it is open on, when that anchor is in this
     /// file.
     boxed: Option<&'f crate::notes::Standing<'f>>,
+    /// Where the change sits in the file, projected once per diff by the frame.
+    heat: [HeatBucket; HEAT_BUCKETS],
 }
 
 /// Everything a row about this file needs, for either region.
@@ -1352,6 +1354,7 @@ fn entry_of(
     diff: &FileDiff,
     history: Option<&History>,
     notes: FileNotes,
+    heat: [HeatBucket; HEAT_BUCKETS],
 ) -> FileEntry {
     FileEntry {
         path: diff.path.clone(),
@@ -1364,7 +1367,7 @@ fn entry_of(
             .unwrap_or([0; HISTORY_BUCKETS]),
         recency: history.map_or(Recency::Cold, |watch| watch.recency(&diff.path)),
         newest: history.is_some_and(|watch| watch.newest(&diff.path)),
-        heat: heat_of(diff),
+        heat,
         notes,
     }
 }
@@ -1648,7 +1651,7 @@ impl View {
 
             while index < stop && view.rows.len() < height {
                 view.read += 1;
-                let (change, diff) = frame.diff(index)?;
+                let (change, diff, heat) = frame.diff_with(index, heat_of)?;
                 // Both halves of the tuple are immutable borrows of the same
                 // frame, so the kind needs no clone to be read alongside the
                 // diff.
@@ -1724,6 +1727,7 @@ impl View {
                         notes: file_notes,
                         marks,
                         boxed,
+                        heat,
                     },
                     // The pass is taken whatever this frame does with it, so the sweep
                     // in its `Drop` still runs and the cache stays bounded the way I3
@@ -2006,9 +2010,9 @@ impl View {
             match drawn.iter().rev().find(|(at, _)| *at == index) {
                 Some((_, entry)) => self.list.push(ListRow::from(entry.clone())),
                 None => {
-                    let (change, diff) = frame.diff(index)?;
+                    let (change, diff, heat) = frame.diff_with(index, heat_of)?;
                     let notes = notes_of(diff, &notes_at(change, index, pinned));
-                    let entry = entry_of(&change.kind, change.origin, diff, history, notes);
+                    let entry = entry_of(&change.kind, change.origin, diff, history, notes, heat);
                     self.list.push(ListRow::from(entry));
                 }
             }
@@ -2491,6 +2495,7 @@ impl View {
             notes,
             marks,
             boxed,
+            heat,
         } = file;
         let mut n = 0usize;
         let first = self.rows.len();
@@ -2503,14 +2508,14 @@ impl View {
         // Built for the row when the heading fits, and recorded when it does not and a
         // list exists to read the record.
         if n >= skip {
-            let entry = entry_of(kind, origin, diff, history, marks);
+            let entry = entry_of(kind, origin, diff, history, marks, heat);
             drawn.push((index, entry.clone()));
             heading = Some(self.rows.len());
             self.rows.push(Row::file(entry));
         } else if listed {
             self.recorded += 1;
             // Moved rather than cloned, because there is no row to draw it in.
-            drawn.push((index, entry_of(kind, origin, diff, history, marks)));
+            drawn.push((index, entry_of(kind, origin, diff, history, marks, heat)));
         }
         n += 1;
 
