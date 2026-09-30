@@ -31,6 +31,14 @@ expect() { # guard, expected exit, name, json
   [ "$got" -eq "$2" ] && ok "$3" || no "$3" "$2" "$got"
 }
 
+says() { # guard, expected exit, name, json, text stderr must carry
+  said=$(bash_call "$4" | node "$HERE/$1" 2>&1 >/dev/null)
+  got=$?
+  if [ "$got" -ne "$2" ]; then no "$3" "$2" "$got"
+  elif ! printf '%s' "$said" | grep -q "$5"; then no "$3 (said: $said)" "$2" "$got"
+  else ok "$3"; fi
+}
+
 echo "scan-guard:"
 expect scan-guard.mjs 2 "find rooted at / is blocked" 'find / -name "*.rs"'
 expect scan-guard.mjs 2 "find with a flag before / is blocked" 'find -L / -name x'
@@ -64,6 +72,8 @@ expect leak-guard.mjs 2 "a commit message file carrying the trailer is blocked" 
 expect leak-guard.mjs 0 "a clean commit is allowed" 'git commit -m "The version raise counts only the lines it moved"'
 expect leak-guard.mjs 0 "a clean commit from a file under the profile is allowed" "git commit -F $FIXW/clean.md"
 expect leak-guard.mjs 0 "a command that neither publishes nor commits is ignored" 'echo Claude-Session: x'
+says leak-guard.mjs 0 "an unreadable body file is let through, and said" "gh pr create --title t --body-file $FIXW/missing.md" "not scanned"
+says leak-guard.mjs 0 "an unexpanded body-file variable is let through, and said" 'P=x.md; gh pr create --body-file "$P"' "not expanded"
 
 echo "record-guard:"
 # A Stop call, on a scratch repository whose branch names an issue and whose
@@ -98,6 +108,60 @@ jq -n --arg cwd "$REPOW" '{cwd: $cwd, session_id: "s5", stop_hook_active: true}'
   | RECORD_GUARD_STATE=MERGED CLAUDE_PROJECT_DIR="$REPOW" VIGIL_VAULT="$VAULTW" TMP="$FIXW" TEMP="$FIXW" node "$HERE/record-guard.mjs" >/dev/null 2>&1
 got=$?
 [ "$got" -eq 0 ] && ok "a continuation the hook itself caused is not stopped again" || no "a continuation the hook itself caused is not stopped again" 0 "$got"
+
+echo "mutate.mjs:"
+# A repository whose one file carries a CRLF, and a "suite" that is red when
+# `beta` is missing.
+MUT="$FIX/mut"; MUTW=$(W "$MUT"); MUTATE=$(W "$(cd "$HERE" && pwd)/mutate.mjs")
+mkdir -p "$MUT"
+printf 'alpha beta\r\ngamma\n' > "$MUT/a.txt"
+git -C "$MUT" init -q && git -C "$MUT" config core.autocrlf false && git -C "$MUT" add a.txt && git -C "$MUT" -c user.name=t -c user.email=t@t commit -q -m init
+battery() { printf '%s' "$1" > "$FIX/battery.json"; }
+mutate() { (cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- grep -q beta a.txt 2>&1); }
+unchanged() { git -C "$MUT" diff --quiet && [ -z "$(git -C "$MUT" status --porcelain)" ]; }
+
+battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"},{"name":"drop gamma","file":"a.txt","old":"gamma","new":"GAMMA"}]'
+out=$(mutate); got=$?
+if [ "$got" -eq 1 ] && printf '%s' "$out" | grep -q '^KILLED *drop beta' && printf '%s' "$out" | grep -q '^SURVIVED *drop gamma'; then
+  ok "a killed and a surviving mutation are both reported"
+else no "a killed and a surviving mutation are both reported (said: $out)" 1 "$got"; fi
+unchanged && ok "a battery leaves the file byte-identical" || no "a battery leaves the file byte-identical" clean dirty
+
+battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"},{"name":"missed","file":"a.txt","old":"delta","new":"x"}]'
+out=$(mutate); got=$?
+if [ "$got" -eq 2 ] && printf '%s' "$out" | grep -q "occurs 0 times" && unchanged; then ok "a missed anchor aborts before anything runs"
+else no "a missed anchor aborts before anything runs (said: $out)" 2 "$got"; fi
+
+battery '[{"name":"twice","file":"a.txt","old":"a","new":"x"}]'
+out=$(mutate); got=$?
+[ "$got" -eq 2 ] && unchanged && ok "an anchor matching twice aborts" || no "an anchor matching twice aborts (said: $out)" 2 "$got"
+
+battery '[{"name":"same","file":"a.txt","old":"beta","new":"beta"}]'
+out=$(mutate); got=$?
+[ "$got" -eq 2 ] && unchanged && ok "a mutation that changes nothing aborts" || no "a mutation that changes nothing aborts (said: $out)" 2 "$got"
+
+printf 'work\n' > "$MUT/b.txt"
+battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"}]'
+out=$(mutate); got=$?
+if [ "$got" -eq 2 ] && printf '%s' "$out" | grep -q "commit first" && git -C "$MUT" diff --quiet; then ok "a dirty tree is refused before anything applies"
+else no "a dirty tree is refused before anything applies (said: $out)" 2 "$got"; fi
+rm -f "$MUT/b.txt"
+
+out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- no-such-command-here 2>&1); got=$?
+[ "$got" -eq 2 ] && unchanged && ok "a test command that never ran aborts" || no "a test command that never ran aborts (said: $out)" 2 "$got"
+
+# A mutation the compiler rejects is not one the tests caught.
+printf 'grep -q beta a.txt || { echo "error[E0425]: cannot find value"; echo "error: could not compile \\`x\\`"; exit 101; }\n' > "$FIX/compile.sh"
+battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"}]'
+out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- sh "$FIXW/compile.sh" 2>&1); got=$?
+if [ "$got" -eq 1 ] && printf '%s' "$out" | grep -q '^BROKE *drop beta' && unchanged; then ok "a mutation that fails to compile is reported broke"
+else no "a mutation that fails to compile is reported broke (said: $out)" 1 "$got"; fi
+
+# Cargo prints an `error:` line after failed tests too, and that is a kill.
+printf 'grep -q beta a.txt || { echo "test x ... FAILED"; echo "error: test failed, to rerun pass --lib"; exit 101; }\n' > "$FIX/tests.sh"
+out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- sh "$FIXW/tests.sh" 2>&1); got=$?
+if [ "$got" -eq 0 ] && printf '%s' "$out" | grep -q '^KILLED *drop beta' && unchanged; then ok "a failed test run is a kill, not broke"
+else no "a failed test run is a kill, not broke (said: $out)" 0 "$got"; fi
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "all checks passed"; else echo "$FAIL check(s) failed"; fi

@@ -71,16 +71,16 @@ impl Setting {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Follow => "follow the newest change",
-            Self::Rail => "left rail",
-            Self::Single => "one file only",
-            Self::Overview => "the file list alone",
-            Self::Staged => "staged changes",
-            Self::Wrap => "wrap long lines",
-            Self::Notes => "the note rows",
-            Self::Icons => "file icons",
-            Self::Links => "path links",
-            Self::Persist => "remember between runs",
+            Self::Follow => "Follow changes",
+            Self::Rail => "Left rail",
+            Self::Single => "Single file",
+            Self::Overview => "File list only",
+            Self::Staged => "Staged changes",
+            Self::Wrap => "Wrap lines",
+            Self::Notes => "Notes",
+            Self::Icons => "File icons",
+            Self::Links => "Path links",
+            Self::Persist => "Save settings",
         }
     }
 
@@ -184,7 +184,7 @@ pub const ROWS: [Row; 14] = [
 ];
 
 /// What the reset row spells.
-pub const RESET: &str = "reset to defaults";
+pub const RESET: &str = "Reset to defaults";
 
 impl Row {
     /// Whether the caret may land here.

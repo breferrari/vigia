@@ -1,0 +1,7 @@
+# The profile CI runs the debug suite under. `cargo test` stops at the first
+# failing binary and hides whether the rest ran; nextest runs every test and
+# reports every failure in one pass, which is what a red run on one platform
+# needs to say. Retries are deliberately absent: a flake reported as a pass is
+# a gate about nothing.
+[profile.ci]
+fail-fast = false

@@ -5,225 +5,211 @@ description: Take the next task from ROADMAP.md and ship it end to end. Use when
 
 # take-next
 
-Take **one** task from `ROADMAP.md` and carry it to done. Not part of a task, not three tasks, not a survey of what could be done. It lives in the repo so that it is version controlled. Do not move it out.
+Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of a task, several tasks, or a survey of possible work.
+
+**`unattended-loop`** in the arguments: read [`unattended-loop.md`](unattended-loop.md) first.
 
 > [!IMPORTANT]
-> **Run this to the end. Plan approval at step 3 is the one sanctioned stop.**
+> **Run this to the end. Plan approval in step 3 is the one routine stop.**
 >
-> The skill is invoked and left alone, often overnight. A step that can only complete by asking a question does not complete: the answer arrives hours later with the expensive work done and nothing merged. So the line is **what** versus **how**. What gets built is settled at step 3, where a question is free. Everything after it is execution, and execution questions have answers in this file:
+> The reader often starts the skill and leaves it alone overnight. If a step waits for an answer, the pass stalls until the reader replies. The reply often comes hours later, with the work done and nothing merged. So split **what** from **how**. Step 3 settles what gets built, and a question costs nothing there. Everything after step 3 is execution, and this file answers execution questions:
 >
-> - **The instruments are pre-authorized.** Invoking this skill is the request to run them, including the review agents `/simplify` and `/harden` spawn. Do not ask again at step 6.
-> - **Where a choice is documented, take the documented one** and say so in the report. That governs *how*. A documented refusal is a conclusion from a reason, and the reason gets checked (step 3).
-> - **Where a choice is open and nobody is there, take the branch that delivers what was asked, finish the pass, and put the question in the report.** "Conservative" never means "build less": under-building costs the reader the thing they asked for and leaves nothing on screen to say so, where over-building costs an afternoon they can see and reject.
+> - **The tools are pre-authorized.** The request to run this skill is also the request to run `/simplify`, `/two-axis-review`, `/code-review` and the agents that they start.
+> - **Apply review findings without asking.** Fix each finding that is worth a fix. In the PR body, list each finding that you skip, with a one-line reason. In a core area (step 6), if you cannot name why a finding is wrong, fix it. A finding that declines or narrows what the reader asked for is stop 4 below. Do not apply it as a fix.
+> - **A documented choice wins.** Take it and name it in the report. A documented refusal is a reason with a date. Make sure that the reason is still true (step 3).
+> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe. A missing feature gives the reader nothing to review. The reader can reject an extra feature in review.
 >
-> Four things still stop the pass, and all four are *what*-shaped: a finding that contradicts `SPEC.md` (step 4), discovering the task is two tasks (step 3), anything destructive outside this branch, and **reaching a conclusion that declines or narrows something the reader asked for**. That last one is not settled by plan approval: a decline riding inside a plan is one line in two thousand words, and approving a plan reads as *proceed*, not as *I agree not to get the thing I asked for* (#177). Ask it on its own, in one message, and wait. An unattended session may add. It may not subtract.
+> Four things stop the pass, and all four are about *what*:
 >
-> Step 3 is a real stop. An unattended pass that reaches it presents the plan and waits. It does not self-approve, and nobody being awake is not a yes. **"Ship it as is" is never one of the options.**
+> 1. A finding contradicts `SPEC.md` (step 4).
+> 2. The task is two tasks (step 3).
+> 3. An action is destructive outside this branch.
+> 4. You conclude that something the reader asked for must be declined or narrowed. Plan approval does not cover this. A decline inside a long plan is easy to miss. Approval of the plan is not approval of the decline. Ask the question in its own message, and wait.
+>
+> **An unattended session may add. It may not subtract.**
+>
+> Step 3 is a real stop. Present the plan and wait. Do not approve it yourself. If nobody answers, that is not approval. Do not offer "ship it as is" as an option.
 
-## 1. Find your place
+## 1. Find the task
 
 ```sh
 sh .claude/skills/take-next/next.sh            # the milestone to take from, then its open issues
-sh .claude/skills/take-next/next.sh --ranked   # the whole take order the answer came from
+sh .claude/skills/take-next/next.sh --ranked   # every eligible milestone in take order
 sh .claude/skills/take-next/preflight.sh       # does the spec still agree with the tracker
 ```
 
-The script picks the earliest **eligible** milestone. Three rules, each with the failure it exists to stop:
+`next.sh` selects the earliest eligible milestone:
 
-1. **Order is the phase number that begins the title**, because the milestone due date is null on every row here and a sort on a null key returns whatever the API sent first. A title not beginning `Phase <n>` sorts last rather than vanishing. That is cheaper than vanishing, not safe: a milestone renamed off the pattern skips its turn silently, which comparison 6 catches.
-2. **A description beginning `Shelf:` is never selected.** A shelf is permanently open and never next. Mark a shelf that way and nothing else.
-3. **A milestone with no open issues is not a place to look**, so a finished phase left open cannot answer. An empty answer is not an error: it means what is left is shelved, exhausted, or nothing at all. Read which before acting. Only the first leads anywhere, and taking from the shelf is a deliberate choice made after re-reading the deferral reason, which is a dated claim (#76).
+- **Order is the phase number at the start of the title.** Due dates are null, and a null sort returns API order. A title without `Phase <n>` sorts last and does not disappear. So a renamed milestone goes last, silently. Pre-flight check 6 finds this.
+- **A description that starts with `Shelf:` is never selected.** A shelf stays open and is never next. Take from a shelf only as a deliberate choice. First, read its dated reason for the deferral again.
+- **A milestone with no open issues is skipped.** Thus a finished phase that is still open is never selected. An empty answer means that the rest is shelved, finished, or empty. Find out which before you act.
 
-`sh .claude/skills/take-next/selftest.sh` asserts all three offline in about three seconds. Run it after any edit to `next.sh`, `preflight.sh` or these rules. **If you finish the last issue in a milestone, close the milestone.**
+After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. When you finish the last issue in a milestone, close the milestone.
 
-`ROADMAP.md` is the plan; the issues are the truth. If they disagree, the issues win and the roadmap is fixed in the same pass.
+`ROADMAP.md` declares the next task and links every issue, open or closed. The tracker holds the state of each issue. If the two disagree, fix the roadmap in the same pass.
 
 ### Pre-flight
 
-`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree, fetches the whole board, and exits non-zero on any mechanical hit. **Every hit is fixed in this pass**, not noted. It takes about twenty seconds, most of it two shell loops (#371). First it checks the board arrived whole, because a truncated fetch makes comparison 1 cry wolf while 2, 4 and 7 under-report. Then seven comparisons:
+`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4 and 6 to 8. Fix each of those hits in this pass. Checks 0, 5 and 9 are advisory: read them and act as they say.
 
-1. **Untracked.** An invariant the spec declares that no issue title names.
-2. **Orphan.** An issue naming an `I<n>` the spec no longer declares.
-3. **State.** A row marked `✅` whose issue is open, a row not marked done whose issue is closed, or a row citing an issue the tracker does not have.
-4. **Unfiled.** An open issue with no milestone. It is not deprioritised, it is **invisible**: `next.sh` filters by milestone and will never return it.
-5. **Untracked prerequisite.** The open `SPEC.md` §10 bullets are printed for judgement. One whose text orders work (*before*, *first*, *until*, *blocked*) with no issue behind it is a blocker no token match can see. File it, then decide whether it is in scope or is taken first, before planning.
-6. **Milestone drift.** `next.sh`'s answer must be the phase `ROADMAP.md`'s section order would choose, and every open milestone with work must have a `## Phase <n>` section. This is the only comparison that checks the first command's own answer.
-7. **Missing row.** An issue, any state, that the roadmap never mentions.
+First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1 and hides real drift from 2, 4 and 7. Then it runs these checks:
 
-If a finding is a false positive, fix the check rather than learning to skip it. The same holds for this file: **a command here that no longer does what it says is fixed the moment it is found**, in the pass that found it. That is a correction, not instrument work, and the shelf rule in step 4 does not reach it.
+0. No soak test runs on this machine (advisory).
+1. An issue title names each invariant in the spec.
+2. No issue names an invariant that the spec removed.
+3. The mark on each roadmap row agrees with the state of its issue, and the issue exists.
+4. Each open issue has a milestone, or `next.sh` never sees it.
+5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
+6. The answer from `next.sh` agrees with the section order in the roadmap. Each open milestone with work, except the Shelf, has a `## Phase <n>` section.
+7. Each issue, open or closed, has a roadmap row.
+8. Given an issue number, no worktree, branch or plan comment names it.
+9. Open shelf rows whose reason cites a closed issue, retired invariant or closed phase. Reread each reason.
 
-Then take the **topmost unstarted task in the eligible phase**. Do not skip ahead. If a later task genuinely blocks the current one, say so first, then take the blocker. If a task is `🔨 in progress`, check `git status` and the open PRs before starting anything: another session may be mid-flight.
+A false positive means that the check is wrong: fix it, never skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the Shelf rule in step 4 does not apply.
 
-### A decline is the most expensive thing this skill can produce
+Take the **topmost unstarted row** in the `ROADMAP.md` section of that phase. If a later task blocks it, say so and take the blocker. Then run `preflight.sh <n>`: another session can hold a ⬜ row.
 
-Four Phase 8 passes each spent a full session and delivered a "no", and one has since been reopened because both of its reasons were false. Three rules:
+### Declines
 
-- **A decline is reached early or it is not a decline.** The reason either holds under checking or it does not, and that is a question about facts, which is cheap. Hours spent after the reason is known are spent justifying, and the tell is prose getting longer while the argument does not get stronger.
-- **A decline carries a higher bar than a build.** A bad build is loud; a bad refusal is silent, and no gate can see the feature that does not exist. *"It would cost a wake"*, *"it needs a timer"* and *"no API reports that"* are claims with answers, and all three have been wrong here.
-- **When the reader asked for the thing, the default is build.** If the honest summary is *"possible, affordable, and I would have designed it differently"*, that is a preference. Build it.
+A decline costs more than a build, because a missing feature gives the reader nothing to review.
 
-A ruling's prose is sized to the ruling, not to the effort: the reason in the fewest words that can be falsified goes to `SPEC.md`, and the evidence trail goes to `RULINGS.md`.
+- Reach a decline early. Whether the reason holds is a question of fact. After you know the reason, more time only adds words that defend the decline.
+- A decline has a higher bar than a build: its reason must survive a check. A bad build is visible in review. A bad refusal is not visible, and no gate can find a feature that nobody built. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers. All three were wrong in this repo before.
+- If the reader asked for the thing, build it. "Possible, affordable, but I prefer another design" is a preference, not a reason.
+- Put the reason in `SPEC.md` in the fewest words that evidence can prove false. Put the evidence in `RULINGS.md`.
 
-### A `decision` issue is ruled first and built second, in the same pass
+### A `decision` issue is ruled first and built second
 
-**The `decision` label is the reader's. A session may not apply it, infer it, or write the roadmap row that implies it.** An issue arrives labelled `decision` or it is a build, and a build that reads like a decision is a build with a question in it: answer the question in the report, not in `SPEC.md`. A branch that both files a decision and rules on it is refused at publish by `.claude/scripts/decision-authority.mjs`.
+The `decision` label belongs to the reader. Do not apply it, infer it, or write a roadmap row that implies it. An issue without the label is a build. If a build issue contains a question, answer the question in the report, not in `SPEC.md`. `.claude/scripts/decision-authority.mjs` refuses a branch that both files a decision and rules on it.
 
-When the issue is labelled `decision`:
+For an issue with the `decision` label:
 
-- **The deliverable is the ruling**, in the `SPEC.md` section the issue names, plus its §10 bullet closed. A ruling filed only in the issue is not filed.
-- **The road not taken goes to `RULINGS.md`**, so the contract does not grow on a refusal.
-- **A ruling of *yes* is the first half of the pass.** The build gets its own issue and its own PR, and this pass takes it next. Stopping at the ruling shipped 0.11.1 with a feature the tool had been told about and did not have (#167, #206).
-- **Size is the only reason to stop after the ruling**, and then the report's first line says *"nothing the reader can see has changed yet; the build is #N"*.
-- **A ruling that cannot be made is a finding.** Say what would settle it and leave the issue open with that written down.
+- Put the ruling in the `SPEC.md` section that the issue names, with its `Ruled <date>, reader|session` line. Close its §10 bullet. A ruling that is only in the issue is not filed.
+- Put the rejected option in `RULINGS.md`.
+- A *yes* is half the pass. File the build as its own issue. Take it next, in its own PR. This is not stop 2, because the build is a separate issue, not a split. Size is the only reason to stop after the ruling. If the build is too big for this pass, start the report with "nothing yet" and the build issue (step 9).
+- If you cannot make a ruling, write what can settle it. Leave the issue open.
 
-## 2. Load the why before touching code
+## 2. Load the context
 
-**Read the repo first.** The issue carries acceptance criteria, `SPEC.md` carries the contract and, unusually, most of the reasoning: §10's open questions carry their measurements and the commit messages argue rather than announce. **On a research or look-and-feel row, the world comes first**: survey outside, form the view, then diff it against the record. Reading the rulings first anchors the survey to what was already decided, which is how a document recording yesterday's ceiling becomes tomorrow's (#318, and `SPEC.md` §0 says the same).
+Read the issue first. For a research or look-and-feel task, next find how other tools solve the problem. Then read the `SPEC.md` sections that the issue touches and the commits that changed those sections. This order keeps the record from limiting the options.
 
-Then the `vigil` MCP server, for the three things the repo deliberately does not hold: what cannot be public (the competitive read, the market position), what generalises past this repo (a `gix` limitation, a measurement trap), and what predates the code (why monitor-class rather than review-class).
+Then query `vigil` for the three things that the repo does not hold:
 
-```
-search   the decision you are about to touch
-recall   accumulated constraints; empty early, and empty is not evidence of none
-```
+- Private context, for example the competitive read.
+- Lessons from other projects, for example a `gix` limitation or a measurement trap.
+- History from before the code, for example why the product is monitor-class.
 
-Consulting the vault is deliberate, not reflexive: know which of the three you are asking for. Strategic context loaded while writing a public commit message is how it leaks, and the commit guard catches session artifacts (URLs, trailers, local paths), not strategy.
+Know which of the three you need. Use `search` for the decision that you will change. `recall` is often empty, and an empty result means nothing. Strategic context can leak into public text that you write with it in mind. The commit guard does not find that leak.
 
-## 3. Plan it, in plan mode, before touching code
+## 3. Plan, and wait for approval
 
-**Enter plan mode and write the plan. No code before an approved plan, and approved means a person answered.** The plan is the only artifact the finished work can be audited against: `/harden`'s plan-fidelity phase skips when no written plan exists, and a session once passed five clean audit rounds with 501 tests green while three promises short.
+Enter plan mode. Do not write code before a person approves the plan. Step 6 compares the shipped work with this plan.
 
-### The plan states what it stands on
+The plan contains these parts:
 
-Name, in the plan: the decisions it rests on, by title, from `search`, `recall` and `SPEC.md`; anything found that argues against the approach, and why you proceed regardless; and an explicit *"nothing recorded on this"* when the record is empty, which is a finding rather than a blank.
+- **What it rests on.** List the decisions by title, from `SPEC.md` and `vigil`. List each fact that argues against the approach, and why you continue. If the record is empty, write "nothing recorded". That empty result is a finding.
+- **Premises.** For each premise, write what must be true, how it can be false, and the answer with its source. The source is one of: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. A premise that the plan depends on must not stay *assumed*. Settle it before you present the plan. Read the source in `~/.cargo/registry`, write a probe, measure, or search the web. For facts about other libraries and terminals, use the world as the source, not memory. Settle premises in dependency order. Finding facts is your job, not the reader's job. Only product decisions go to the reader, in the plan. A decline is the exception, because it is stop 4.
+- **Checks on the record.** Quote the words of each invariant that you cite. Make sure that they apply to this case. For example, I1's budget is *0 wakeups while idle*, and a reader who uses the pane is not idle. Two features were refused on I1, and I1 did not apply to either. Quote each refusal that you cite, with its date, and mark it checked or not checked. Make sure that its reason is still true. A reason about something missing ("no API for this") becomes false fastest. If the reason is false, the question is open again. Do not find a new reason for the same conclusion. Give each budget with its current headroom ("2.4ms of 16ms"), not alone.
+- **Promises you can diff.** List the files, signatures and error codes. List the tests by name, with what each test asserts. List each deviation from `SPEC.md` with its reason, and list what is out of scope. "Fix the thing" promises nothing and passes every check. Size the list to the diff.
 
-### The record is evidence, not authority
+Measure to learn the answer. Do not run a measurement that can only support a no.
 
-`SPEC.md` says what must hold now. That is not the same as every sentence in it being beyond question, and three kinds of sentence are not equally solid:
+**One fresh context must hold the work.** The context must hold the issue, the spec sections, the changed files and the new tests. It must also have room to think. If it cannot, split the issue into child issues. Each child needs a full path through spec, code and gates. Mark which child blocks which. A split is stop 2. Show the split in the plan, and file the child issues after the reader approves. For a wide mechanical refactor, use expand then contract: add the new form, move the call sites in batches, then delete the old form.
 
-- **An invariant with a measurement behind it** is load-bearing. **Whether it reaches the case in front of you is a fresh question every time**: quote the row's own words. I1's budget is *0 wakeups while idle*, and nothing a reader's hand is doing is idle. Two features were refused on I1 and its gate could not have caught either.
-- **A refusal** is a conclusion from a moment: a reason and a date, and both expire. **Re-read the reason and check whether it is still true today.** A reason naming an absence (*"no API for this"*, *"the takeover does not enable X"*) expires fastest, because dependencies add things and nobody re-reads a refusal when they do; B10 was declined for a year on a line this repo had simply not written. When the reason collapses, the question reopens. It does not get a fresh reason for the same conclusion (#123).
-- **A budget** is a number chosen against a workload. **Invoked as a reason, it arrives with its current headroom**: not "this costs a wake" but "2.4ms of a 16ms frame". A budget at 19% is a budget with room, and saying so is what stops the number being used as a mood.
+Before you write code, post the approved plan as a comment on the issue. When you take a deviation, write it and its reason at that time. A reason that you write at review time does not count.
 
-**Do not run a measurement whose only possible use is to justify a no.** Measuring to find out is the most valuable thing in this repo's history: 442.71ms to 8.76ms, found by checking a premise. Measuring to build a case against something a reader asked for produces a number that was never going to change the answer.
+## 4. Build
 
-**A refusal cited in a plan is quoted, dated, and marked checked or not.** Relayed without those three, it is an unnamed premise.
+- **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First, find a free `../vigia.*` worktree, because its `target/` is warm. Make sure that no other session uses it. Then run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
+- **If the reader is present,** run `vigia` in a side pane on the worktree. A reader who looked at the pane found defects that eleven green gates missed.
+- **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
+- **Open a draft PR early** with `gh pr create --draft`. CI and Copilot skip drafts, so a push costs nothing.
+- **Write the failing test first** for each invariant. Watch it fail, then make it pass.
+- **A change to the frame path runs the budget gate.**
+- **Add no dependency that `SPEC.md` does not name.** First, propose it in the spec, in its own commit.
+- **If reality contradicts the spec, stop (stop 1).** Say which one you think is wrong, and wait. After the reader answers, change that one in its own commit. If reality contradicts the plan, decide which is wrong. If the plan is wrong, write the deviation and its reason on the issue at that time. Then correct the plan comment. Step 6 then compares against the plan as it is now.
+- **Each issue that you file gets a milestone and a roadmap row.** Fix in-scope findings in this PR. Do not move an in-scope finding to a new issue to close the PR. An out-of-scope finding goes to the Shelf. Give it a row in the Shelf table of `ROADMAP.md`. Put its dated reason in the Deferral shelf table. Use `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, a check, a skill or a workflow also goes to the Shelf. If that work blocks a product pass, do it, and make it as small as the blockage. Otherwise, leave it on the Shelf.
 
-### The plan names its premises, and settles the load-bearing ones itself
-
-A premise is what everyone took for granted. Write them as a short ledger before the plan body: what must be true, how it would be falsified, and the answer with its source, one of *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. **A load-bearing premise is not allowed to stay assumed.** Finding facts is this session's job and never Brenno's: read the source in `~/.cargo/registry`, write the throwaway probe, take the measurement, search the web. A premise about the outside world (*does this library expose that, do terminals honour it, what do the toolkits that solved this already use*) is checked against the outside world and never against memory, because a wrong fact about someone else's library produces a plan that is internally consistent and wrong. Work premises in dependency order.
-
-Only a genuinely open **decision**, a judgement about what the product should be that no probe can settle, goes to Brenno, and it goes in the plan, where it is free.
-
-### The plan must be diffable
-
-Every promise has to be checkable later by reading: modules and files touched, signatures and types, error codes and what emits them, tests by name and by what they assert, deviations from `SPEC.md` named upfront with the reason, and what is out of scope. "Fix the thing" passes any fidelity check because it promised nothing. Scale it to the diff.
-
-### The work has to fit one fresh context
-
-**Could a fresh session hold this whole issue, the spec sections it touches, the files it changes and the tests it adds, and still have room to reason about it?** If not, the issue is two issues: split the **issue**, give each child a complete path through spec, code and gates, and name the one it is blocked by. The day #77 was split in three, eleven PRs merged at a sixth of the size under the same gates. The audit is a bad place to learn the scope was wrong, because by then the rounds are paid for.
-
-The exception is a wide mechanical refactor whose blast radius fans across the codebase. Sequence it **expand then contract**: add the new form beside the old so nothing breaks, migrate call sites in batches each their own issue, delete the old form last. Do not force that shape onto ordinary work.
-
-### The plan has to outlive the session
-
-**Comment it on the issue before implementing**, then carry it into the PR body. A plan that lives only in the conversation dies at the next compaction.
-
-### Deviations
-
-Reality contradicts plans; deviating quietly is the failure. **Every deviation is a defect unless its justification was written down when it was taken.** A reason produced at audit time for a choice made an hour earlier is rationalisation. A plan-versus-reality conflict routes through step 4's rule: stop, decide which side is wrong, change that one in its own commit, and say which.
-
-## 4. Ship it
-
-- **The unit is the issue.** One issue, one branch, one worktree, one PR. If the issue is two things, split the issue first.
-- **Work in a worktree, never the main checkout.** `../vigia.a` and `../vigia.b` exist for passes and keep their `target/` warm. Take one with `git -C ../vigia.a checkout -B issue-<n>-<slug> origin/main`. The main checkout stays parked on `main`, so "read from `origin/main`" and "what the tree shows" never become different questions.
-- **If Brenno is present, `vigia` runs in a side pane on this worktree for the pass.** Six defects were found by a reader looking at the screen while eleven green gates sat over one of them. It costs nothing unattended, and step 9 says which kind of pass this was.
-- **An instrument run that outlives the pass gets a start-comment on its issue** the moment it starts: what is running, where its output lands, when it ends.
-- **Open the PR as a draft, early.** `gh pr create --draft` as soon as there is a branch worth pushing, with the plan in the body. `ci.yml` skips every job on a draft and Copilot does not review one, so pushes are free. Marking ready is the metered event, and step 7 owns it.
-- **Never defer a finding into a new issue to get the PR closed.** In scope means fixed here. Out of scope needs all three of a milestone, a `ROADMAP.md` row and a shelf entry with the reason, filed in one command: `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. Without a milestone the issue is invisible to `next.sh`.
-- **A finding about the process files to the Shelf.** A defect in a gate, a check, a skill or a workflow goes there with its dated reason, never into a phase. Instrument work is taken only when a product pass is blocked by it, sized to the blockage. A wrong command in this file is the exception step 1 names.
-- **An invariant is not landed until a test fails when it is violated.** Failing test first, watch it fail, make it pass.
-- **Budgets are tests.** If the task touches the frame path, the budget gate runs.
-- **No dependency `SPEC.md` does not name.** Propose it into the spec in its own commit, then use it.
-- **If reality contradicts the spec, stop.** Decide which is wrong, change that one deliberately, in its own commit, and say which you changed.
-
-## 5. Scope the checks to the diff
+## 5. Scope the checks
 
 ```sh
-git diff --name-only <base>..HEAD | grep -vE '\.md$|^\.github/ISSUE|^LICENSE'
+git diff --name-only <base>..HEAD | sh .github/scripts/change-class.sh | tail -1
 ```
 
-Empty means docs-only: skip `cargo test`, `cargo bench` and the budget gates. `Cargo.toml`, `Cargo.lock`, anything under `.github/workflows`, `.github/scripts` or `.claude/scripts` is **never** docs, whatever it is changed alongside. Log the scope decision in the PR body.
+`docs` means the diff is docs-only. Then skip the suite, the benches and the budget gates, and run the suites that CI's documents job runs: `cargo nextest run -p vigia --test package --test register --test sheet --test theme_docs` and `cargo nextest run -p vigia-core --test coverage`. `full` is code. In the PR body, write which scope you chose.
 
-## 6. Prove it, then say so honestly
+## 6. Review and prove
 
-- `cargo test` green, with the count. Budget gates green, with the numbers against the budgets. Failures stated plainly: a green summary over a skipped check is a lie with good manners.
-- **Diff the shipment against the plan.** Walk every promise and mark it delivered or not, and say the result out loud even when it is clean. Three shapes shipped behind five clean audit rounds once: **quietly narrowed** (per-file counts promised, paths shipped), **quietly collapsed** (a three-value union became two), **promised and absent** (an error code defined and never emitted). A deviation without a contemporaneous justification is corrected in this pass, not noted.
+**The kind of change decides the review.** A human eye judges feel. Thus look-and-feel work (layout, colour, keys, chrome) runs `/simplify` and puts a screenshot in the PR. All other work runs the full sequence below. Docs-only diffs and small code diffs are the exceptions, at the end of this step. The rule goes one way only. The core areas are the frame path, the watch engine, the diff oracle, the budget gates and the invariants. If look-and-feel work touches a core area, that part runs the full sequence. Do not use the lighter review on a core area.
 
-Then polish, and let the **diff** pick the instrument:
+**Before the review, diff the result against the plan.** Mark each promise delivered or not delivered. In this pass, fix each quietly narrowed scope, each dropped case and each unused definition. If a deviation has no reason written when you took it, remove the deviation in this pass: make the code match the plan. A reason that you write now does not count.
 
-- **Under ~200 lines across ≤3 files:** `/simplify` alone. `/harden` states this floor itself and wins if the two disagree.
-- **Larger, or anything the system stands on:** `/harden` until dry. It runs `/simplify` as one of its phases and carries its own plan-fidelity phase, so tell it the plan diff above is done.
-- **The surface picks the bar.** Engine and invariant work hardens until dry. Look-and-feel work (layout, colour, keys, chrome) is `/simplify` plus a screenshot in the PR, because the judge of feel is a human eye. The escalation is one-way: feel work that touches the frame path, the watch or an invariant takes the engine bar for that part.
-- **"Foundational" is not a self-assessment you get to lower.** The frame path, the watch engine, the diff oracle and the budget gates are the whole system. A first-pass "not worth fixing" has a one-pushback half-life here.
+The full sequence, in order. Apply what each step finds:
 
-Both instruments spawn parallel review agents, and this invocation authorised them. **Run the agents on Sonnet.** The reviewer personas are pinned to it and the orchestrator keeps the session's model, because the fan-out is what exhausts a session's limit and a Sonnet round found the last publish blocker. Pass two things into every brief:
+1. `/simplify`.
+2. `/two-axis-review` against `origin/main`. The Spec axis compares the diff with the issue and the plan comment. The Standards axis mostly repeats `/simplify`. Act only on what `/simplify` did not find.
+3. `/code-review high`.
+4. **Mutation check.** Remove each new gate's fix and see the gate fail. Commit, then use `.claude/scripts/mutate.mjs`.
 
-> Documentation is in scope for `/simplify` and is judged by the same rule as code: a comment exists where the code cannot explain itself. Keep why the obvious approach is wrong, an invariant a caller must hold, and a cost invisible at the call site. Delete restatements of the code, issue numbers, ruling ids, and any account of the change rather than the thing.
+Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
 
-> Read the code. Do not run builds, benchmarks, test suites, or anything else that consumes the machine. Every measurement you need is in this brief. If one is missing, name it and say what it would change, and I will run it and hand it back.
+Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run the review agents on Sonnet.
 
-Running is the orchestrator's job in both directions: one run, one consistent picture. Four agents building at once saturated this machine before anything in the loop noticed.
+Then prove the result:
 
-## 7. Mark it ready, and wait for both reviewers
+- For a code diff, report `cargo nextest run --workspace` and `cargo test --workspace --doc` green with the counts. Report the budget gates with numbers against the budgets. For a docs-only diff, report `register` and `package` green. State each failure plainly.
 
-**Marking ready is the one expensive action here.** `gh pr ready` fires `ready_for_review`, which wakes the matrix on three platforms and Copilot's automatic review, and Copilot is quota-limited. Mark ready once, when the work is finished, the suite is green locally and the plan diff is clean.
+## 7. Mark ready and merge
 
-> [!WARNING]
-> **A draft's checks prove nothing.** The jobs skip on a draft, and `ci complete` passes a draft that skipped everything, so a draft shows one green check that ran no tests. That is a gate that looks settled and proves nothing. The local suite is the only evidence until the run below has actually happened.
+Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR with `gh pr edit <n> --add-label <label>`. The bump refuses a release while a merged PR carries neither or both. Default to `internal`. Apply `release` only when the approved plan changes what the pane shows or does, a key or gesture, a theme the reader loads, install (`vigia`, `vigia mcp`, brew or the installer), or the MCP tools. Process, CI, skill, `SPEC.md` wording, `ROADMAP.md`, gates and the harness are `internal`. If unsure, choose `internal` and say so in one line of the report. Do not guess `release`. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. Start a `release` title with `fix:` for a defect or `feat:` for a new feature.
+
+Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix on three platforms and the Copilot review. Copilot has a quota. Mark the PR ready once, after the local suite is green and the plan diff is clean. A draft shows a green `ci complete` that ran nothing.
 
 ```sh
+t=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 gh pr ready <n>
-gh run list --branch <branch> --workflow ci --limit 1 --json databaseId,headSha --jq '.[0]'
+gh run list --branch <branch> --workflow ci --created ">=$t" --limit 1 --json databaseId,headSha --jq '.[0]'
 gh run watch <id> --exit-status
+gh run view <id> --json conclusion --jq .conclusion
 ```
 
-Watch the **run**, not the check list: `gh pr checks --watch` has returned before the matrix started, and a PR reached mergeable without one check having run (#301). The run's `headSha` must equal the PR's head, or the checks are about an earlier revision.
+Watch the run, not `gh pr checks`. List only the runs that started after the ready call. The run of the draft has the same `headSha` and a green conclusion, and it skipped every job. If the list is empty, the ready run is not in the queue yet. List again. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
 
-**Then Copilot, which nothing watches for you.** It arrives as a review from `copilot-pull-request-reviewer[bot]`, usually `COMMENTED`, and the substance is in the line comments, which carry the login `Copilot`:
+Then read the Copilot review, which nothing else watches. Find out whether the review arrived. Then read its line comments:
 
 ```sh
-gh api repos/{owner}/{repo}/pulls/<n>/reviews --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | .state'
+gh api repos/{owner}/{repo}/pulls/<n>/reviews --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | "\(.state)\n\(.body)"'
 gh api repos/{owner}/{repo}/pulls/<n>/comments --jq '.[] | select(.user.login == "Copilot") | "\(.path):\(.line)\n\(.body)\n"'
 ```
 
-Do not request a review before checking whether one is coming: an explicit request on top of the automatic one spends a second unit of quota. **Wait at most fifteen minutes after the run settles** (a session's number, 2026-09-03; move it freely). If nothing has arrived, proceed and say so in the report. Quota has run out before, and a wait with no exit condition is a pass that never ends.
+When the PR becomes ready, Copilot reviews it automatically. A manual request spends a second unit of quota. After the first ready run ends, wait up to fifteen minutes for the Copilot review. If no review arrives, continue and write that in the report. Reply to every comment. Fix it, or reply with the spec section or invariant that the fix breaks. A comment without a reply reads as agreement. Copilot comments do not bind you, and you must not ignore any of them. Put all fixes in one push. If you must do more than fix review comments, run `gh pr ready <n> --undo` first. The next ready call starts the matrix again and spends Copilot quota again.
 
-**Every Copilot comment gets one of two visible outcomes:** fixed in the diff, or declined in a reply naming the spec section or invariant it would violate. Silence reads as agreement. Copilot is not authoritative and not dismissible.
+When the latest run is green on the PR head and every comment has a reply, merge with `gh pr merge <n> --squash --delete-branch`. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 
-**Iterating after ready is the expensive shape.** Batch fixes into one push. For real iteration, `gh pr ready <n> --undo` returns to draft, where CI is quiet.
+## 8. Close the loop
 
-**Merge** when the run is green on the ready revision and every comment is answered: `gh pr merge <n> --squash --delete-branch`. Under a worktree the local branch delete fails after the merge has landed, so check the PR state before retrying.
+Do items 2 and 3 on the branch before step 7, so that they merge with the PR. Do items 1 and 4 after the merge.
 
-## 8. Close the loop, all four places
+1. **Issue.** Close it with the commit, the test count and the numbers.
+2. **`ROADMAP.md`.** Change the status of the row. Add a row for each issue that this pass filed or closed. If this pass moved an issue to the Shelf, add its rows to the Shelf and Deferral shelf tables. If it took an issue from the Shelf, add a line to the Pull-forward log.
+3. **`SPEC.md`.** If the contract changed, change it in its own commit on the branch.
+4. **Vault.** Use `record_work` for what happened. Use `remember` for a lesson that helps another project.
 
-1. **The issue.** Close it with the evidence: commit, test count, numbers.
-2. **`ROADMAP.md`.** Flip the status; add to the shelf or the pull-forward log if anything moved.
-3. **`SPEC.md`.** Only if the contract changed. Own commit.
-4. **The vault.** `record_work` for what happened here; `remember` for anything that would help a different project. Both when both are true.
-
-The vault write is the loop's least reliable step. If `record_work` refuses after one narrower retry (title and summary first, the rest in a second call), **file the note by hand** under `projects/vigia/notes/` and say so in the report, then comment the date and the field list on breferrari/obsidian-mind#244, because a documented workaround suppresses the bug report. After any success, read the note back: a success return is not evidence of a clean write. A Stop hook refuses, once, to end a session whose merged pass has no note naming its issue.
+If `record_work` fails after one smaller retry, write the note by hand under `projects/vigia/notes/`. Say so in the report. Then comment the date and the dropped fields on breferrari/obsidian-mind#244. Read each write back. If a merged pass has no note that names its issue, a Stop hook blocks the session end once.
 
 ## 9. Report
 
-**The first line is what a reader can now do that they could not before**, in the tool's own terms, or *nothing yet* naming the issue that will change it. No gate can check this: a pass once ended green, complete against its plan, and released a version in which nothing on screen had changed.
+1. **First line.** Write what the reader can do now that was not possible before. If nothing changed, write "nothing yet" and the issue that will change it.
+2. **Second line.** Write the latest release tag and the number of merged PRs after it. If this pass is not in a release, say so.
 
-**The second line is the release.** The latest tag, and how many merged PRs sit after it. If this pass's work is not in a release, say so: the reader has believed a feature shipped when it sat 22 commits behind the last tag.
+Then write briefly: the issue that you took, what shipped with numbers, and the next task (named, not started). Add these parts:
 
-Then what was taken, what shipped, the numbers, what moved on the roadmap, and the next task, named and not started. And, each under its own heading:
+- **Review.** What each tool and Copilot found, and what you applied or skipped.
+- **Plan diff.** Every promise delivered, or the deviations.
+- **What the record gave.** The recorded decisions that the work used, or none.
+- **Decisions taken without asking.** One line each: the branch that you took and the branch that you did not take.
+- **Pane.** What `vigia` showed that looked wrong, `none`, or `not open`.
 
-- **Review outcome.** Whether Copilot commented, how many, and what happened to each.
-- **Plan fidelity.** "Every promise delivered", or the deviations and what was done about them.
-- **Decisions taken without asking.** One line each, the branch chosen and the one not taken. This is the half that makes not stopping safe.
-- **What the record gave.** The recorded decisions the work stood on, or that there were none.
-- **`vigia observations`.** What the pane showed that read wrong, or `none`, or `pane not open, unattended pass` (#72).
+## Writing
+
+The PR body, the issue comments, the commits and the report follow the house rules in `CLAUDE.md`: plain words, the fact first, one paragraph per line. Write the PR body the way that `/pr` does, on the sections of `.github/PULL_REQUEST_TEMPLATE.md`, and set it without a wait for approval. The body says what is true now and links the plan comment. It does not repeat the review. It has one line for each tool, then one line for each skipped finding with its reason.

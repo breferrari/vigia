@@ -224,59 +224,146 @@ pub enum Background {
     Light,
 }
 
-/// Classify an OSC 11 reply, or say it is not one.
-pub fn background_of(reply: &[u8]) -> Option<Background> {
-    let text = std::str::from_utf8(reply).ok()?;
-    let at = text.find("]11;")?;
-    let body = &text[at + 4..];
-    let body = body.strip_prefix("rgb:")?;
-    let end = body
-        .find('\u{7}')
-        .or_else(|| body.find('\u{1b}'))
-        .unwrap_or(body.len());
+impl Background {
+    /// Which side of the line `rgb` sits on.
+    pub fn of((r, g, b): (u8, u8, u8)) -> Self {
+        let luminance = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+        if luminance > 127.5 {
+            Self::Light
+        } else {
+            Self::Dark
+        }
+    }
+}
+
+/// The colours a terminal reported for itself: its background, its default
+/// foreground, and the sixteen entries of its palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Colours {
+    /// OSC 11.
+    pub background: (u8, u8, u8),
+    /// OSC 10, when the terminal answered it.
+    pub foreground: Option<(u8, u8, u8)>,
+    /// OSC 4, by index, for each entry the terminal answered.
+    pub ansi: [Option<(u8, u8, u8)>; 16],
+}
+
+/// The `rgb:` colour that follows `marker` in `text`, each channel scaled to a
+/// byte whatever width the terminal wrote it at.
+fn rgb_after(text: &str, marker: &str) -> Option<(u8, u8, u8)> {
+    let at = text.find(marker)?;
+    let body = text[at + marker.len()..].strip_prefix("rgb:")?;
+    let end = body.find(['\u{7}', '\u{1b}']).unwrap_or(body.len());
     let mut channels = body[..end].split('/');
-    let mut channel = || -> Option<f32> {
+    let mut channel = || -> Option<u8> {
         let raw = channels.next()?.trim();
         if raw.is_empty() || raw.len() > 4 || !raw.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
         let value = u32::from_str_radix(raw, 16).ok()?;
-        let ceiling = (16u32.pow(raw.len() as u32) - 1) as f32;
-        Some(value as f32 / ceiling)
+        let ceiling = 16u32.pow(raw.len() as u32) - 1;
+        u8::try_from((value * 255 + ceiling / 2) / ceiling).ok()
     };
-    let (r, g, b) = (channel()?, channel()?, channel()?);
-    let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    Some(if luminance > 0.5 {
-        Background::Light
-    } else {
-        Background::Dark
+    Some((channel()?, channel()?, channel()?))
+}
+
+/// Classify an OSC 11 reply, or say it is not one.
+pub fn background_of(reply: &[u8]) -> Option<Background> {
+    let text = std::str::from_utf8(reply).ok()?;
+    Some(Background::of(rgb_after(text, "]11;")?))
+}
+
+/// Every colour a terminal's reply carries, or `None` without a background.
+pub fn colours_of(reply: &[u8]) -> Option<Colours> {
+    let text = std::str::from_utf8(reply).ok()?;
+    let mut ansi = [None; 16];
+    for (index, entry) in ansi.iter_mut().enumerate() {
+        *entry = rgb_after(text, &format!("]4;{index};"));
+    }
+    Some(Colours {
+        background: rgb_after(text, "]11;")?,
+        foreground: rgb_after(text, "]10;"),
+        ansi,
     })
 }
 
-/// Ask the terminal its background colour, waiting at most `timeout`.
+/// Whether `reply` holds a whole primary device attributes answer.
+#[cfg(any(unix, test))]
+fn attributes_in(reply: &[u8]) -> bool {
+    reply
+        .windows(3)
+        .position(|w| w == b"\x1b[?")
+        .is_some_and(|at| reply[at..].contains(&b'c'))
+}
+
+/// What to send: the background query, and with `palette` the foreground, the
+/// sixteen entries and a device attributes query behind them.
+#[cfg(any(unix, test))]
+fn query(palette: bool) -> Vec<u8> {
+    let mut query = b"\x1b]11;?\x1b\\".to_vec();
+    if palette {
+        query.extend_from_slice(b"\x1b]10;?\x1b\\");
+        for index in 0..16 {
+            query.extend_from_slice(format!("\x1b]4;{index};?\x1b\\").as_bytes());
+        }
+        query.extend_from_slice(b"\x1b[c");
+    }
+    query
+}
+
+/// Whether a reply to [`query`] is complete.
+#[cfg(any(unix, test))]
+fn answered(reply: &[u8], palette: bool) -> bool {
+    if palette {
+        // Every terminal answers device attributes, and in order, so a terminal
+        // that ignored the colour queries costs one round trip, not the timeout.
+        attributes_in(reply)
+    } else {
+        reply.contains(&0x07) || reply.windows(2).any(|w| w == b"\x1b\\")
+    }
+}
+
+/// How long a terminal that has begun answering the palette is given to finish.
+#[cfg(any(unix, test))]
+const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long [`ask`] waits in all. A terminal that has begun answering the
+/// palette is waited on to the end: an answer left unread reaches the event
+/// reader as keystrokes.
+#[cfg(any(unix, test))]
+fn wait_limit(palette: bool, begun: bool, timeout: std::time::Duration) -> std::time::Duration {
+    if palette && begun { ANSWERING } else { timeout }
+}
+
+/// Ask the terminal its background colour, and with `palette` its foreground
+/// and sixteen entries too, waiting at most `timeout` for a first answer. The
+/// raw reply.
 #[cfg(unix)]
-pub fn background(timeout: std::time::Duration) -> Option<Background> {
+pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
     use std::io::{Read, Write};
     use std::os::fd::AsFd;
 
-    let mut tty = std::fs::OpenOptions::new()
+    let mut reply = Vec::with_capacity(if palette { 512 } else { 64 });
+    let Ok(mut tty) = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
-        .ok()?;
+    else {
+        return reply;
+    };
     let raw = ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-    if !raw {
-        ratatui::crossterm::terminal::enable_raw_mode().ok()?;
+    if !raw && ratatui::crossterm::terminal::enable_raw_mode().is_err() {
+        return reply;
     }
-    let answer = (|| {
-        tty.write_all(b"\x1b]11;?\x1b\\").ok()?;
+    let _ = (|| {
+        tty.write_all(&query(palette)).ok()?;
         tty.flush().ok()?;
-        let deadline = std::time::Instant::now() + timeout;
-        let mut reply = Vec::with_capacity(64);
+        let start = std::time::Instant::now();
         loop {
+            let deadline = start + wait_limit(palette, !reply.is_empty(), timeout);
             let now = std::time::Instant::now();
             if now >= deadline {
-                return background_of(&reply);
+                return Some(());
             }
             let fd = tty.as_fd();
             let mut fds = [rustix::event::PollFd::new(
@@ -286,34 +373,34 @@ pub fn background(timeout: std::time::Duration) -> Option<Background> {
             let waited =
                 rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
             if waited == 0 {
-                return background_of(&reply);
+                continue;
             }
-            let mut buffer = [0u8; 64];
+            let mut buffer = [0u8; 256];
             let read = tty.read(&mut buffer).ok()?;
             if read == 0 {
-                return background_of(&reply);
+                return Some(());
             }
             reply.extend_from_slice(&buffer[..read]);
-            if reply.contains(&0x07) || reply.windows(2).any(|w| w == b"\x1b\\") {
-                return background_of(&reply);
+            if answered(&reply, palette) {
+                return Some(());
             }
         }
     })();
     if !raw {
         let _ = ratatui::crossterm::terminal::disable_raw_mode();
     }
-    answer
+    reply
 }
 
 /// The Windows half: no query, no answer, today's posture.
 #[cfg(not(unix))]
-pub fn background(_timeout: std::time::Duration) -> Option<Background> {
-    None
+pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
+    Vec::new()
 }
 
 #[cfg(test)]
 mod background_tests {
-    use super::{Background, background_of};
+    use super::{ANSWERING, Background, answered, background_of, colours_of, query, wait_limit};
 
     #[test]
     fn every_reply_shape_the_matrix_saw_classifies() {
@@ -364,6 +451,78 @@ mod background_tests {
             background_of(b"\x1b]11;rgb:fffff/ffff/ffff\x07"),
             None,
             "five digits is no channel the protocol has"
+        );
+    }
+
+    #[test]
+    fn palette_reply_parses() {
+        let mut reply = b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\\x1b]10;rgb:cccc/cccc/cccc\x07".to_vec();
+        reply.extend_from_slice(b"\x1b]4;1;rgb:cd/31/31\x07\x1b]4;2;rgb:0d0d/bcbc/7979\x1b\\");
+        reply.extend_from_slice(b"\x1b]4;12;rgb:3b/8e/ea\x07\x1b[?62;22c");
+        let palette = colours_of(&reply).expect("a background answered");
+
+        assert_eq!(palette.background, (0x1e, 0x1e, 0x1e));
+        assert_eq!(palette.foreground, Some((0xcc, 0xcc, 0xcc)));
+        assert_eq!(palette.ansi[1], Some((0xcd, 0x31, 0x31)));
+        assert_eq!(palette.ansi[2], Some((0x0d, 0xbc, 0x79)));
+        assert_eq!(
+            palette.ansi[12],
+            Some((0x3b, 0x8e, 0xea)),
+            "entry 12 was read as entry 1"
+        );
+        assert_eq!(
+            palette.ansi[0], None,
+            "an entry nobody answered has a colour"
+        );
+        assert!(
+            answered(&reply, true),
+            "the attributes answer did not end the wait"
+        );
+    }
+
+    #[test]
+    fn palette_needs_background() {
+        assert_eq!(colours_of(b"\x1b]10;rgb:cc/cc/cc\x07\x1b[?1;2c"), None);
+        assert_eq!(colours_of(b""), None);
+    }
+
+    #[test]
+    fn palette_query_shape() {
+        let asked = String::from_utf8(query(true)).expect("ascii");
+        assert!(
+            asked.starts_with("\x1b]11;?"),
+            "the background is not asked first"
+        );
+        assert_eq!(asked.matches("\x1b]4;").count(), 16);
+        assert!(asked.contains("\x1b]10;?"));
+        assert!(
+            asked.ends_with("\x1b[c"),
+            "nothing marks the end of the answers"
+        );
+        assert_eq!(query(false), b"\x1b]11;?\x1b\\", "the default query grew");
+
+        // The colour replies alone do not end a palette wait: more are coming.
+        assert!(!answered(b"\x1b]11;rgb:00/00/00\x07", true));
+        assert!(answered(b"\x1b]11;rgb:00/00/00\x07", false));
+    }
+
+    #[test]
+    fn answering_is_waited() {
+        let timeout = std::time::Duration::from_millis(150);
+        assert_eq!(
+            wait_limit(true, true, timeout),
+            ANSWERING,
+            "a half-read palette was cut off"
+        );
+        assert_eq!(
+            wait_limit(true, false, timeout),
+            timeout,
+            "a silent terminal was waited on"
+        );
+        assert_eq!(
+            wait_limit(false, true, timeout),
+            timeout,
+            "the default query grew a wait"
         );
     }
 }

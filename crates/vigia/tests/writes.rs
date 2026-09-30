@@ -450,7 +450,8 @@ fn one_gesture_writes_exactly_one_file() {
     let before = snapshot(root.path());
 
     // The press opens the box and writes nothing: the gesture is Enter.
-    let (anchor, existing) = opening(&view, line, app.notes()).expect("the press opened nothing");
+    let (anchor, existing) =
+        opening(&view, line, line, app.notes()).expect("the press opened nothing");
     app.open_box(anchor, existing.as_ref());
     for c in "use saturating_mul".chars() {
         app.box_edit(Input {

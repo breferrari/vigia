@@ -22,6 +22,8 @@ pub struct FrameStats {
     pub measured: u64,
     /// Bytes compared by computed diffs.
     pub bytes: u64,
+    /// Bytes read by [`Frame::height`] to count files it did not diff.
+    pub measured_bytes: u64,
     /// `stat` calls made, either to record a fingerprint or to check one.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
@@ -33,9 +35,15 @@ pub struct FrameStats {
 
 /// A working-tree fingerprint that costs no read: size and modification time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fingerprint {
+pub(crate) struct Fingerprint {
     len: u64,
     mtime: SystemTime,
+}
+
+/// Whether a config at `now` asks for a reload over the one loaded at `loaded`.
+/// Missing or empty is a writer between two steps, not a config.
+pub(crate) fn config_moved(now: Option<Fingerprint>, loaded: Option<Fingerprint>) -> bool {
+    now != loaded && now.is_some_and(|print| print.len > 0)
 }
 
 /// A fingerprint taken after a read, plus whether it may be trusted as one.
@@ -180,7 +188,7 @@ struct Measured {
 }
 
 /// Fingerprint a working-tree file, or `None` when it cannot be.
-fn fingerprint(path: &Path) -> Option<Fingerprint> {
+pub(crate) fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let meta = std::fs::symlink_metadata(path).ok()?;
     Some(Fingerprint {
         len: meta.len(),
@@ -308,6 +316,10 @@ pub struct Frame<'w> {
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     attributes: HashMap<String, Option<Fingerprint>>,
+    /// The same for `.git/info/attributes`, which the filter reads from disk.
+    info_attributes: Option<Fingerprint>,
+    /// The worktree's config reload count as of the last tick.
+    reloads: u64,
     /// The failure [`Frame::diff`] last contained, held only so it can be handed
     /// back by reference.
     ///
@@ -354,6 +366,8 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
+            info_attributes: worktree.filter_prints()[1],
+            reloads: worktree.reloads(),
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -378,6 +392,12 @@ impl<'w> Frame<'w> {
         // as it kept failing. A clock that cannot do its work stops, and the next
         // event brings the walk back.
         self.settles_at = None;
+
+        // Before the walks, which read the config too. No settle check here: a new
+        // repository's config is young for seconds. Missed: a same-length rewrite
+        // inside one mtime granule.
+        let [config, info_attributes] = self.worktree.filter_prints();
+        self.worktree.follow_config(config);
 
         let options = ChangeOptions {
             hide: self.hide.as_ref(),
@@ -429,7 +449,11 @@ impl<'w> Frame<'w> {
             .copied()
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
-        if !provable || attributes != self.attributes {
+        let reloads = self.worktree.reloads();
+        let sources_moved = info_attributes != self.info_attributes || reloads != self.reloads;
+        self.info_attributes = info_attributes;
+        self.reloads = reloads;
+        if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits
             // its own.
             self.stats.evicted += self.cached.len() as u64;
@@ -719,7 +743,7 @@ impl<'w> Frame<'w> {
         let (span, taken) = match measured {
             Ok(span) => {
                 self.stats.measured += 1;
-                self.stats.bytes += span.bytes;
+                self.stats.measured_bytes += span.bytes;
                 let worktree = if change.reads_worktree() {
                     self.stats.probes += 1;
                     fingerprint(&path).map(|print| Observed {

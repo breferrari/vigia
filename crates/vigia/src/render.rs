@@ -1,5 +1,6 @@
 //! Drawing a [`View`] into a buffer, and nothing else.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -216,11 +217,14 @@ const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
 /// What marks the row for the file the diff is currently inside.
 const CARET: &str = "▸";
 
-/// The weight that row's path takes on top of whatever recency gave it.
-const CURRENT_WEIGHT: Modifier = Modifier::BOLD;
-
 /// How many slices the heat strip may show, widest rung first.
-const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+const HEAT_RUNGS: [usize; 5] = [
+    HEAT_BUCKETS,
+    HEAT_BUCKETS / 2,
+    HEAT_BUCKETS / 4,
+    HEAT_BUCKETS / 8,
+    0,
+];
 
 // Asserted rather than documented, because a rung that does not divide the source is
 // silent.
@@ -526,6 +530,8 @@ pub struct Chrome {
     pub hovered: Option<Hovered>,
     /// The diff rows a drag has selected, when any are.
     pub selected: Option<Selection>,
+    /// The screen rows a drag from a gutter covers, when one is under way.
+    pub noting: Option<(u16, u16)>,
     /// Which bar is being scrolled and which way, when one is.
     pub scrolling: Option<(Grabbed, isize)>,
     /// The notes the footer counts beside the position.
@@ -1153,7 +1159,7 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
 pub const COUNT_CELL: usize = 5;
 
 /// Every shape a file row's right-hand side may take, widest first.
-const ROW_LAYOUTS: [Columns; 10] = [
+const ROW_LAYOUTS: [Columns; 11] = [
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[0],
@@ -1165,7 +1171,14 @@ const ROW_LAYOUTS: [Columns; 10] = [
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[0],
-        HEAT_RUNGS[0],
+        HEAT_RUNGS[1],
+        SPARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        MARK_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[1],
         SPARK_RUNGS[1],
     ),
     SETTLED,
@@ -1173,42 +1186,42 @@ const ROW_LAYOUTS: [Columns; 10] = [
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[0],
-        HEAT_RUNGS[1],
-        SPARK_RUNGS[2],
-    ),
-    Columns::new(
-        COUNT_CELL,
-        MARK_RUNGS[0],
-        PULSE_RUNGS[0],
         HEAT_RUNGS[2],
         SPARK_RUNGS[2],
-    ),
-    Columns::new(
-        COUNT_CELL,
-        MARK_RUNGS[0],
-        PULSE_RUNGS[0],
-        HEAT_RUNGS[2],
-        SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[0],
         HEAT_RUNGS[3],
+        SPARK_RUNGS[2],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        MARK_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[3],
+        SPARK_NO,
+    ),
+    Columns::new(
+        COUNT_CELL,
+        MARK_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[4],
         SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[0],
         PULSE_RUNGS[1],
-        HEAT_RUNGS[3],
+        HEAT_RUNGS[4],
         SPARK_NO,
     ),
     Columns::new(
         COUNT_CELL,
         MARK_RUNGS[1],
         PULSE_RUNGS[1],
-        HEAT_RUNGS[3],
+        HEAT_RUNGS[4],
         SPARK_NO,
     ),
     Columns::NOTHING,
@@ -1217,12 +1230,15 @@ const ROW_LAYOUTS: [Columns; 10] = [
 /// The rung that draws no sparkline, named so the table's rows stay one line.
 const SPARK_NO: usize = SPARK_RUNGS[SPARK_NONE];
 
+/// The heat slices [`SETTLED`] draws.
+const SETTLED_HEAT: usize = HEAT_RUNGS[2];
+
 /// The widest layout below the rung above it.
 const SETTLED: Columns = Columns::new(
     COUNT_CELL,
     MARK_RUNGS[0],
     PULSE_RUNGS[0],
-    HEAT_RUNGS[1],
+    SETTLED_HEAT,
     SPARK_RUNGS[1],
 );
 
@@ -1230,7 +1246,7 @@ const SETTLED: Columns = Columns::new(
 const SETTLED_CELLS: usize = reserved(counts_width(COUNT_CELL))
     + reserved(MARK_RUNGS[0])
     + reserved(1)
-    + reserved(HEAT_RUNGS[1])
+    + reserved(SETTLED_HEAT)
     + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block));
 
 /// The share of a row the glance elements may take, above the settled ladder.
@@ -1665,6 +1681,9 @@ impl<'a> Footer<'a> {
         // state to move up to it, and a body still worth showing underneath.
         let grows = width_of(HINT_RUNGS[HINT_BASELINE]) + gap(bare) > width
             && bare > 0
+            // And a hint to fill the line the state leaves, or the row is spent on
+            // nothing.
+            && !widest_fitting(&HINT_RUNGS, width).is_empty()
             && area.height >= 3 + MIN_BODY;
         let rows = if grows { 2 } else { 1 };
         // Charged the way the second footer line is, against the same floor: one
@@ -2006,10 +2025,32 @@ pub struct Areas {
     pub diff: Rect,
 }
 
+/// A region's scrollbar and what it measures: a screenful of `span` from `at`,
+/// out of `of`, all three in the region's own unit.
+#[derive(Debug, Clone, Copy)]
+struct Scroll {
+    bar: Bar,
+    at: u64,
+    span: u64,
+    of: u64,
+}
+
 impl Areas {
-    /// Whether each region is wide enough for a scrollbar at all.
-    fn bars(&self) -> (bool, bool) {
-        (affords_bar(self.list.width), affords_bar(self.diff.width))
+    /// Both regions' bars, decided here for the pointer's map and the painter
+    /// alike.
+    fn scrolls(&self, view: &View) -> (Scroll, Scroll) {
+        let scroll = |region: Rect, at: usize, span: usize, of: usize| {
+            let (at, span, of) = (at as u64, span as u64, of as u64);
+            let bar = bar_for(affords_bar(region.width), region.height, span, of);
+            Scroll { bar, at, span, of }
+        };
+        (
+            // In files, so the thumb's travel is the drag's.
+            scroll(self.list, view.list_top, view.list_span, view.files),
+            // In rows of the diff: the screenful stops being the region's height
+            // when a line wraps.
+            scroll(self.diff, view.rows_above, view.shown(), view.total_rows),
+        )
     }
 }
 
@@ -2142,22 +2183,9 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // here.
     let areas = body.areas(area);
 
-    // Asked through `bar_for`, which is what `render` asks.
-    let (list_bars, diff_bars) = areas.bars();
-    let list_bar = bar_for(
-        list_bars,
-        areas.list.height,
-        // A screenful in files, which is what this bar is measured in at both ends.
-        view.list_span as u64,
-        view.files as u64,
-    );
-    let diff_bar = bar_for(
-        diff_bars,
-        areas.diff.height,
-        // The screenful the thumb is painted from; the region's height parts from it under wrap.
-        view.shown() as u64,
-        view.total_rows as u64,
-    );
+    // What `render` paints, from the same call.
+    let (list, diff) = areas.scrolls(view);
+    let (list_bar, diff_bar) = (list.bar, diff.bar);
 
     let (gutter, text) = if body.diff > 0 && view.files > 0 {
         let span = content_span(areas.diff, area);
@@ -2354,6 +2382,7 @@ pub fn render(
         gripped: chrome.gripped,
         hovered: chrome.hovered,
         selected: chrome.selected.map(Selection::rows),
+        noting: chrome.noting,
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
         // Whichever overlay is up, and never both: an effect must not run over
@@ -2375,31 +2404,18 @@ pub fn render(
 
     // The geometry, once, from the same method the pointer reads.
     let areas = body.areas(area);
-    // The same pair `regions` reads, so the pointer never seeks a bar the screen
+    // The same bars `regions` reads, so the pointer never seeks a bar the screen
     // declined to draw.
-    let (list_bars, diff_bars) = areas.bars();
+    let (list_scroll, diff_scroll) = areas.scrolls(view);
 
     if body.list > 0 {
-        let region = areas.list;
-        // Counted in files, which is exactly what this region shows.
-        let full = region;
-        let (region, bar) =
-            painter.with_bar(region, list_bars, view.list_span as u64, view.files as u64);
+        let full = areas.list;
         // Before the content here, and it does not matter which, because a list row
         // carries no wash: the bar's cell and the row's cells never overlap.
-        if bar.drawn() {
-            painter.scrollbar(
-                full,
-                Grabbed::List,
-                bar,
-                view.list_top as u64,
-                // A screenful in files, so all three terms of this bar are one unit and
-                // its travel is the drag's travel.
-                view.list_span as u64,
-                view.files as u64,
-            );
+        if list_scroll.bar.drawn() {
+            painter.scrollbar(full, Grabbed::List, list_scroll);
         }
-        painter.list(region, full.width, view, area.width);
+        painter.list(list_scroll.bar.narrows(full), full.width, view, area.width);
     }
 
     if areas.rule.height > 0 {
@@ -2417,11 +2433,7 @@ pub fn render(
             body.diff_width,
             content_span(full, area).width
         );
-        // Counted in rows of the diff, not of the terminal: the thumb spans the
-        // screenful the pane holds, which stops being its height when a line wraps.
-        let screenful = view.shown() as u64;
-        // Asked rather than narrowed: nothing here draws to a narrowed rect.
-        let bar = bar_for(diff_bars, full.height, screenful, view.total_rows as u64);
+        // Not narrowed: nothing here draws to a narrowed rect.
         painter.body(
             full,
             view,
@@ -2434,15 +2446,8 @@ pub fn render(
                 hidden_of(view, chrome),
             ),
         );
-        if bar.drawn() {
-            painter.scrollbar(
-                full,
-                Grabbed::Diff,
-                bar,
-                view.rows_above as u64,
-                screenful,
-                view.total_rows as u64,
-            );
+        if diff_scroll.bar.drawn() {
+            painter.scrollbar(full, Grabbed::Diff, diff_scroll);
         }
     }
 
@@ -2777,9 +2782,12 @@ const ROOMY_HEADING_INSET: usize = 2;
 /// Blank columns between a roomy row's keys cell and its verb.
 const ROOMY_GAP: usize = 8;
 
-/// Keyboard rows the ladder may never drop: `a`, `f` and `?`.
-const SHEET_KEEP: usize = 3;
-// It names two things and only one of them is a keep-set.
+/// The keyboard rows the width ladder never drops, by their first key. The
+/// last entries of [`DROP_ORDER`] are these, in this order.
+const SHEET_KEEP: [&str; 3] = ["a", "f", "?  Esc"];
+
+/// The fewest body rows a sheet page is worth drawing.
+const SHEET_FLOOR: usize = 3;
 
 /// Rows the sheet's frame costs, one border at each end.
 const SHEET_FRAME: usize = 2;
@@ -3407,13 +3415,13 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     // The floor, stated once and early rather than folded into the rung sequence. Below
     // it no rung fits on the height axis at all, and not only the paged ones: the
     // shortest rung above them is the two-column one, which is many times as tall.
-    if capacity < SHEET_KEEP {
+    if capacity < SHEET_FLOOR {
         return None;
     }
     // The row sets, widest first, so a pane with the columns for the mouse group
     // pages it rather than dropping it.
     let sets = std::iter::once((0, true))
-        .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(|from| (from, false)));
+        .chain((0..=KEYBOARD.len() - SHEET_KEEP.len()).map(|from| (from, false)));
 
     // The order is the ruling's: the roomy rung where there is room for it, then
     // every row in one column, then the two-column rung that buys height with
@@ -3656,6 +3664,8 @@ struct Painter<'a> {
     hovered: Option<Hovered>,
     /// The screen rows a drag has selected, top and bottom inclusive.
     selected: Option<(u16, u16)>,
+    /// The rows a drag from a gutter covers, washed in the note's ink.
+    noting: Option<(u16, u16)>,
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(Grabbed, isize)>,
@@ -3708,7 +3718,7 @@ impl Painter<'_> {
         &mut self,
         x: u16,
         y: u16,
-        runs: &[(String, Style)],
+        runs: &[(impl AsRef<str>, Style)],
         clipped: bool,
         limit: usize,
     ) {
@@ -3729,7 +3739,7 @@ impl Painter<'_> {
                 break;
             }
             marked_in = *style;
-            at = self.put(at, y, text, usize::from(end - at), *style);
+            at = self.put(at, y, text.as_ref(), usize::from(end - at), *style);
         }
 
         if clipped {
@@ -4035,7 +4045,7 @@ impl Painter<'_> {
                 Rect {
                     y,
                     height: 1,
-                    // `area.x` is this region's leading column: `with_bar` narrows the
+                    // `area.x` is this region's leading column: `Bar::narrows` takes the
                     // *width* on the right without moving the origin, so it is the
                     // origin `render` handed down.
                     x: origin_x,
@@ -4105,15 +4115,9 @@ impl Painter<'_> {
         }
     }
 
-    /// Decide this region's scrollbar, and hand back the room left for content
-    /// along with the shape decided.
-    fn with_bar(&mut self, region: Rect, wide: bool, span: u64, of: u64) -> (Rect, Bar) {
-        let bar = bar_for(wide, region.height, span, of);
-        (bar.narrows(region), bar)
-    }
-
     /// Draw a one-column scrollbar down the right of `area`.
-    fn scrollbar(&mut self, area: Rect, whose: Grabbed, bar: Bar, at: u64, span: u64, of: u64) {
+    fn scrollbar(&mut self, area: Rect, whose: Grabbed, scroll: Scroll) {
+        let Scroll { bar, at, span, of } = scroll;
         // Width and height guarded here as well as by the caller. `render` only calls
         // this above `BAR_FLOOR` and only through `bar_for`, so a zero width cannot
         // reach it today, and the subtractions below would underflow if one ever did.
@@ -4799,6 +4803,12 @@ impl Painter<'_> {
         let marks: Option<Vec<Option<bool>>> =
             (!view.notes.marked.is_empty() || view.notes.boxed.is_some()).then(|| {
                 let mut marks = vec![None; shown];
+                // A range's lines above the one it hangs under take the ink too.
+                for &row in &view.notes.ranged {
+                    if let Some(slot) = marks.get_mut(row) {
+                        *slot = Some(false);
+                    }
+                }
                 for mark in &view.notes.marked {
                     if let Some(slot) = marks.get_mut(mark.row) {
                         *slot = Some(slot.unwrap_or(true) && mark.bare);
@@ -4989,6 +4999,13 @@ impl Painter<'_> {
             {
                 self.buf.set_style(row_wash, self.theme.selection);
             }
+            if self
+                .noting
+                .is_some_and(|(top, bottom)| (top..=bottom).contains(&y))
+            {
+                self.buf
+                    .set_style(row_wash, self.theme.selection.patch(self.theme.note_line));
+            }
         }
     }
 
@@ -5150,7 +5167,7 @@ impl Painter<'_> {
             self.theme.recency(heading.recency)
         };
         let ink = if current {
-            ink.add_modifier(CURRENT_WEIGHT)
+            ink.patch(self.theme.path_current)
         } else {
             ink
         };
@@ -5178,13 +5195,15 @@ impl Painter<'_> {
     /// whether anything was left over.
     fn content_runs(
         &mut self,
-        runs: &mut Vec<(String, Style)>,
+        runs: &mut Vec<(Cow<'static, str>, Style)>,
         text: &str,
         spans: &[Span],
         content: usize,
         emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
         let mut column = 0usize;
+        // One walk for the whole row, however many runs it is cut into.
+        let mut walked = 0u64;
         let mut at = 0usize;
         for span in spans {
             let end = (at + span.len).min(text.len());
@@ -5204,7 +5223,7 @@ impl Painter<'_> {
                 text,
                 start..end,
                 span.class,
-                &mut column,
+                (&mut column, &mut walked),
                 content,
                 emphasis,
             ) {
@@ -5220,7 +5239,7 @@ impl Painter<'_> {
                 text,
                 at..text.len(),
                 Class::Plain,
-                &mut column,
+                (&mut column, &mut walked),
                 content,
                 emphasis,
             );
@@ -5234,23 +5253,26 @@ impl Painter<'_> {
     #[allow(clippy::too_many_arguments)]
     fn push_split(
         &mut self,
-        runs: &mut Vec<(String, Style)>,
+        runs: &mut Vec<(Cow<'static, str>, Style)>,
         text: &str,
         range: std::ops::Range<usize>,
         class: Class,
-        column: &mut usize,
+        (column, walked): (&mut usize, &mut u64),
         content: usize,
         emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
-        let plain = |painter: &mut Self, runs: &mut Vec<(String, Style)>, column: &mut usize| {
+        let plain = |painter: &mut Self,
+                     runs: &mut Vec<(Cow<'static, str>, Style)>,
+                     column: &mut usize,
+                     walked: &mut u64| {
             let piece = text.get(range.start..range.end).unwrap_or_default();
-            painter.push_run(runs, piece, class, column, content, None)
+            painter.push_run(runs, piece, class, (column, walked), content, None)
         };
         // The colour and the ranges are one value: a patch with no ranges is
         // not a patch, so the pairing is in the type rather than in a filter
         // every caller has to remember.
         let Some((word, emph)) = emphasis.filter(|(_, emph)| !emph.is_empty()) else {
-            return plain(self, runs, column);
+            return plain(self, runs, column, walked);
         };
         let mut at = range.start;
         for span in emph {
@@ -5264,19 +5286,21 @@ impl Painter<'_> {
             let from = from.max(at);
             let to = to.min(range.end);
             let (Some(before), Some(inside)) = (text.get(at..from), text.get(from..to)) else {
-                return plain(self, runs, column);
+                return plain(self, runs, column, walked);
             };
-            if !before.is_empty() && self.push_run(runs, before, class, column, content, None) {
+            if !before.is_empty()
+                && self.push_run(runs, before, class, (column, walked), content, None)
+            {
                 return true;
             }
-            if self.push_run(runs, inside, class, column, content, Some(word)) {
+            if self.push_run(runs, inside, class, (column, walked), content, Some(word)) {
                 return true;
             }
             at = to;
         }
         if at < range.end {
             let piece = text.get(at..range.end).unwrap_or_default();
-            return self.push_run(runs, piece, class, column, content, None);
+            return self.push_run(runs, piece, class, (column, walked), content, None);
         }
         false
     }
@@ -5284,19 +5308,20 @@ impl Painter<'_> {
     /// Add one run to a row, and say whether the pane cut it short.
     fn push_run(
         &mut self,
-        runs: &mut Vec<(String, Style)>,
+        runs: &mut Vec<(Cow<'static, str>, Style)>,
         piece: &str,
         class: Class,
-        column: &mut usize,
+        (column, walked): (&mut usize, &mut u64),
         content: usize,
         word: Option<Color>,
     ) -> bool {
-        if *column >= content {
-            // Room ran out on an earlier run and this one has something to say,
-            // so the row continues and nothing more of it is walked.
+        if *column >= content || *walked >= walk_of(content) {
+            // Room or the row's walk is spent and this run has something to say,
+            // so the row continues.
             return true;
         }
-        let printed = printable(piece, column, content);
+        let printed = printable(piece, column, content, *walked);
+        *walked += printed.examined;
         self.paint.examined += printed.examined;
         let mut style = self.theme.class(class);
         if let Some(bg) = word {
@@ -5305,7 +5330,7 @@ impl Painter<'_> {
             // composes with the pane.
             style = style.bg(bg);
         }
-        runs.push((printed.text, style));
+        runs.push((printed.text.into(), style));
         printed.clipped
     }
 
@@ -5399,10 +5424,17 @@ impl Painter<'_> {
         // pushes a handful of runs, and reserving for all three hundred is fourteen
         // kilobytes a row of churn.
         let mut runs = Vec::with_capacity((spans.len() + 3).min(room + 2));
-        runs.push((sigil.to_string(), sigil_style));
+        // The three common sigils borrow rather than allocate, on every row.
+        let sigil: Cow<'static, str> = match sigil {
+            '+' => "+".into(),
+            '-' => "-".into(),
+            ' ' => " ".into(),
+            other => other.to_string().into(),
+        };
+        runs.push((sigil, sigil_style));
 
         // The gap `assets/preview.svg` has drawn since before any of this existed.
-        runs.push((SIGIL_GAP.to_owned(), diff));
+        runs.push((SIGIL_GAP.into(), diff));
 
         // Tab stops are counted from the start of the line's own content, not from the
         // left edge of the screen.
@@ -5424,7 +5456,7 @@ impl Painter<'_> {
         // Neovim's `'breakindent'`, paid out of the tail's own budget.
         let indent = indent.min(content);
         if indent > 0 {
-            runs.push((" ".repeat(indent), Style::new()));
+            runs.push((" ".repeat(indent).into(), Style::new()));
         }
         let clipped = self.content_runs(&mut runs, text, spans, content - indent, emphasis);
         self.paint.rows += 1;
@@ -5894,8 +5926,14 @@ struct Printed {
     column: usize,
 }
 
+/// Characters a row of `room` columns may examine, across all its runs.
+fn walk_of(room: usize) -> u64 {
+    room.saturating_mul(CHARS_PER_COLUMN)
+        .saturating_add(TAB_STOP) as u64
+}
+
 /// Make one line of file content safe to write into terminal cells.
-fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
+fn printable(text: &str, column: &mut usize, room: usize, spent: u64) -> Printed {
     // Sized from what will be kept rather than from what was offered. Four bytes
     // a column is the widest UTF-8 encoding, and a tab can expand past the end
     // by at most one stop.
@@ -5903,16 +5941,15 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
         text.len()
             .min(room.saturating_mul(4).saturating_add(TAB_STOP)),
     );
-    walk_printable(text, column, room, Some(out))
+    walk_printable(text, column, room, Some(out), spent)
 }
 
 /// Where a line has to break to fit `room` columns, or `None` when it fits.
 pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
     let mut column = 0usize;
-    let walked = walk_printable(text, &mut column, room, None);
+    let cut = walk_printable(text, &mut column, room, None, 0);
     // `column >= room` as well as `clipped`.
-    (walked.clipped && walked.column >= room && walked.at > 0 && walked.at < text.len())
-        .then_some(walked.at)
+    (cut.clipped && cut.column >= room && cut.at > 0 && cut.at < text.len()).then_some(cut.at)
 }
 
 /// Every byte offset a line breaks at, in order, to fit `room` columns a row.
@@ -5959,14 +5996,20 @@ fn emit(out: &mut Option<String>, c: char, times: usize) {
 }
 
 /// [`printable`] and [`split_at`] as one walk, with the string made optional.
-fn walk_printable(text: &str, column: &mut usize, room: usize, mut out: Option<String>) -> Printed {
+fn walk_printable(
+    text: &str,
+    column: &mut usize,
+    room: usize,
+    mut out: Option<String>,
+    spent: u64,
+) -> Printed {
     // `None` is [`split_at`] asking where the break falls, and it must stay `None` all
     // the way down rather than becoming an empty `String`: an empty one allocates the
     // moment anything is pushed into it, and this runs once per drawn content row per
     // frame.
-    let walk = room
-        .saturating_mul(CHARS_PER_COLUMN)
-        .saturating_add(TAB_STOP) as u64;
+
+    // What is left of the row's walk after the runs before this one.
+    let walk = walk_of(room).saturating_sub(spent);
     let mut examined = 0u64;
     // Where the grapheme being measured began, and what it has cost so far.
     let mut cluster = 0usize;
@@ -6049,6 +6092,23 @@ mod tests {
 
     use super::*;
 
+    /// Each bar's span and total are decided in one place, so the map the pointer
+    /// reads and the bar the painter draws cannot part.
+    #[test]
+    fn bars_decided_once() {
+        let source = include_str!("render.rs");
+        let code = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the file has code");
+        let calls = code.matches("bar_for(").count();
+        assert_eq!(
+            calls, 2,
+            "`bar_for(` appears {calls} times outside the tests; a second caller \
+             respells a bar's span, which is how two sites came apart before"
+        );
+    }
+
     /// A cell's style reduced to what the bar's rungs actually differ in.
     fn weight(style: Style) -> (Option<Color>, Modifier) {
         (style.fg, style.add_modifier)
@@ -6074,6 +6134,7 @@ mod tests {
             theme: &theme,
             glyphs: Glyphs::default(),
             selected: None,
+            noting: None,
             gutter: 0,
             inset: 0,
             trailing: 0,
@@ -6089,8 +6150,14 @@ mod tests {
         };
         // Scrollable by a wide margin, so both bars draw a thumb well short of
         // their track and the arrows exist to be read.
-        painter.scrollbar(list, Grabbed::List, Bar::Stepped, 0, 10, 100);
-        painter.scrollbar(diff, Grabbed::Diff, Bar::Stepped, 0, 10, 100);
+        let scrolling = Scroll {
+            bar: Bar::Stepped,
+            at: 0,
+            span: 10,
+            of: 100,
+        };
+        painter.scrollbar(list, Grabbed::List, scrolling);
+        painter.scrollbar(diff, Grabbed::Diff, scrolling);
         buf
     }
 
@@ -6235,14 +6302,13 @@ mod sheet_tables {
     #[test]
     fn the_last_rows_to_go_are_the_unguessable_three() {
         // §11.1: the unguessable outlives the reflexive.
-        let kept: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP..]
+        let kept: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP.len()..]
             .iter()
             .map(|&i| KEYBOARD[i].keys[0])
             .collect();
         assert_eq!(
-            kept,
-            vec!["a", "f", "?  Esc"],
-            "the rows the ladder keeps longest are not the three §11.1 names"
+            kept, SHEET_KEEP,
+            "the rows the ladder keeps longest are not the ones SHEET_KEEP names"
         );
     }
 
@@ -6341,7 +6407,7 @@ mod sheet_tables {
         // notes, and the standing toggle outlives them: it changes what is walked.
         // The menu's door outlives all of them, which is `DROP_ORDER`'s own rule.
         const EXPECTED: [&str; 5] = ["s", "o", "w", "b  /  B  /  O", "m  Esc"];
-        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
+        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP.len() - EXPECTED.len()..]
             .iter()
             .take(EXPECTED.len())
             .map(|&row| KEYBOARD[row].keys[0])
@@ -6411,7 +6477,7 @@ mod sheet_tables {
     /// whole table is short of rows for its own reasons.
     #[test]
     fn a_rung_that_has_given_up_a_gesture_refuses_the_line() {
-        for from in 1..=KEYBOARD.len() - SHEET_KEEP {
+        for from in 1..=KEYBOARD.len() - SHEET_KEEP.len() {
             for mouse in [true, false] {
                 assert!(
                     !purpose_fits(from, mouse, sheet_rows(from, mouse, false), usize::MAX),

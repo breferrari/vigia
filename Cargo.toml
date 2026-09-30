@@ -6,7 +6,7 @@ members = ["crates/vigia-core", "crates/vigia", "xtask"]
 # Both crates move together, because both are published together and a registry
 # will not take `vigia` until `vigia-core` resolves on it (SPEC.md section 9).
 # Independent versions would buy nothing and cost a second tag format.
-version = "0.49.0"
+version = "1.0.0"
 edition = "2024"
 # 1.89 rather than 1.85 because `graviola` declares it, and no release of it
 # satisfies `rustls-graviola` 0.4 at anything lower. Nothing else here needs
@@ -45,14 +45,14 @@ authors = ["Brenno Ferrari"]
 # so the duplication cannot be removed, only moved and then gated. Moved: the
 # two strings are now fifteen lines apart in one file rather than in two.
 # Gated: `crates/vigia/tests/package.rs::the_internal_dependency_tracks_the_workspace_version`.
-vigia-core = { path = "crates/vigia-core", version = "0.49.0" }
+vigia-core = { path = "crates/vigia-core", version = "1.0.0" }
 # Pure Rust throughout. Adding a dependency with a C build script is a spec
 # change, not an implementation detail; see CLAUDE.md.
 #
 # `default-features = false` is deliberate. gix's defaults pull in credentials,
 # mailmap, blame, worktree-archive and worktree-mutation, none of which a
 # read-only monitor uses, and all of which cost startup against I7.
-gix = { version = "0.87", default-features = false, features = [
+gix = { version = "0.88", default-features = false, features = [
     "status",
     "max-performance-safe",
     "sha1",
@@ -61,14 +61,6 @@ gix = { version = "0.87", default-features = false, features = [
     # so this adds nothing to the graph. Measured at 213 crates either way.
     "revision",
 ] }
-# Not used here, and declared only to bound a version. `tinyvec 1.13.0` does not
-# compile at all: it imports `alloc::vec` as a module, which shadows the `vec!`
-# macro it then calls, and the crate is `alloc`-only so no feature avoids it.
-# `unicode-normalization` asks for `^1` under `gix-utils`, so a fresh resolve
-# takes the broken one and `cargo install vigia` fails while CI, which builds
-# through the committed lock, cannot see it. That is #349's shape exactly.
-# Lift this the moment a fixed release exists; the bound blocks 1.13.1 too.
-tinyvec = ">=1.12, <1.13"
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
 # Under the `ratatui` organisation, and it schedules nothing: the host passes the
 # elapsed duration in, so I1's clock stays this program's. The `dsl` feature is
@@ -118,7 +110,7 @@ syntect = { version = "5.3", default-features = false, features = [
 # exact version in it with these exact default features. `regex` would have
 # looked equally free and is not: it is in the lock as a dev-dependency of
 # `criterion` alone, so taking it would grow the shipped binary.
-fancy-regex = "0.16"
+fancy-regex = "0.19"
 # The startup update check, SPEC.md section 11.1. One request per process, and
 # the only one this program makes.
 #
@@ -221,9 +213,18 @@ windows-sys = { version = "0.61", features = [
 #
 # Adds no crate either: crossterm already pulls it into both Unix graphs through
 # ratatui. Confirmed with `cargo tree -i`, on the same rule as the pair above.
-signal-hook = { version = "0.3", default-features = false, features = [
+signal-hook = { version = "0.4", default-features = false, features = [
     "iterator",
 ] }
+
+# Dependencies are optimised in the dev profile; the workspace crates are not.
+# The debug suite spends most of its time inside syntect and its regex engine,
+# which are an order of magnitude slower unoptimised, and nothing a test asserts
+# depends on a dependency being compiled for debugging. The workspace crates
+# keep debug assertions and fast incremental builds. Every absolute budget is
+# still measured against `release`.
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.
@@ -308,6 +309,10 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
+# The release workflow does not run on pull requests. dist's default runs
+# its plan job on every PR and lists the other six jobs as skipped; the
+# config is checked by `bump and release` with `rehearse=true` instead.
+pr-run-mode = "skip"
 # The grammar attribution rides along in every archive. The binary embeds a few
 # hundred third-party grammars, each under its own licence, and `dist` puts
 # README, LICENSE and CHANGELOG in an archive on its own but knows nothing about

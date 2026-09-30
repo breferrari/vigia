@@ -196,15 +196,14 @@ fn the_content_of_a_note_with_no_context_is_still_whole() {
 
 #[test]
 fn no_registration_attempts_no_connection() {
-    // The common case: a reader who never installed the hook. Nothing is
-    // opened, and the footer is told to say nothing at all.
+    // The common case: no hook installed, or an agent with none.
     let (_scratch, _root, registry) = registry("socket-none", &[]);
     let wire = Wire::default();
 
     let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Unregistered);
     assert!(wire.sessions().is_empty(), "something was opened");
-    assert_eq!(word(Posted::Unregistered), None);
+    assert_eq!(word(Posted::Unregistered), "noted");
 }
 
 #[test]
@@ -273,12 +272,12 @@ fn one_session_taking_it_is_sent_even_when_another_refuses() {
 }
 
 #[test]
-fn the_footer_says_sent_when_one_took_it_and_noted_when_none_did() {
+fn footer_words() {
     // `sent` cannot mean delivered: the channel writes nothing back, so the
     // strongest true claim is that the line left this process.
-    assert_eq!(word(Posted::Sent), Some("sent"));
-    assert_eq!(word(Posted::Failed), Some("noted"));
-    assert_eq!(word(Posted::Unregistered), None);
+    assert_eq!(word(Posted::Sent), "sent");
+    assert_eq!(word(Posted::Failed), "noted");
+    assert_eq!(word(Posted::Unregistered), "noted");
 }
 
 #[test]
@@ -395,7 +394,7 @@ fn a_registry_that_cannot_be_read_is_noted_rather_than_silent() {
     let wire = Wire::default();
     let posted = post_each(&registry, || "the note".to_owned(), wire.taking());
     assert_eq!(posted, Posted::Failed);
-    assert_eq!(word(posted), Some("noted"));
+    assert_eq!(word(posted), "noted");
     assert!(wire.sessions().is_empty(), "something was opened");
 }
 
@@ -425,6 +424,32 @@ fn a_note_on_the_old_side_carries_its_anchor_alone() {
         context_for(scratch.root(), &old).is_empty(),
         "a removed line has no working-tree neighbours to show"
     );
+}
+
+#[test]
+fn a_range_carries_every_line_it_covers_to_the_session() {
+    let scratch = Scratch::new("socket-range");
+    let text: String = (1..=40).map(|i| format!("line {i}\n")).collect();
+    scratch.write(PATH, text);
+
+    let mut note = anchored("n1", "all of these");
+    note.line = 30;
+    note.text = "line 30".to_owned();
+    note.first = Some(vigia_core::LineRef {
+        side: Side::New,
+        line: 5,
+        text: "line 5".to_owned(),
+    });
+    let around = context_for(scratch.root(), &note);
+    for line in [5, 17, 30] {
+        assert!(
+            around.iter().any(|(number, _)| *number == line),
+            "line {line} of the range never reaches the session: {around:?}"
+        );
+    }
+    let said = content(&note, &around);
+    assert!(said.contains(":5-30"), "{said}");
+    assert!(said.contains(">  5 | line 5"), "{said}");
 }
 
 /// A message builder that says how many times it was asked for one.

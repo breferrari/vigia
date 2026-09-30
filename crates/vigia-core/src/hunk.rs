@@ -6,7 +6,7 @@ use crate::notes::Side;
 pub const CONTEXT: u32 = 3;
 
 /// How many leading bytes are inspected when deciding if content is binary.
-const BINARY_SNIFF_LEN: usize = 8000;
+pub(crate) const BINARY_SNIFF_LEN: usize = 8000;
 
 /// The role a line plays in a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +124,57 @@ impl FileDiff {
             .collect()
     }
 
+    /// The lines from `first` to `last`, each a side and a number, in the order
+    /// their hunk holds them, as `(old, new, line)`. `None` when they are not in
+    /// one hunk in that order, which a range the pane wrote always is.
+    #[must_use]
+    pub fn range(&self, first: (Side, u32), last: (Side, u32)) -> Option<Vec<(u32, u32, &Line)>> {
+        let is = |(side, number): (Side, u32), &(old, new, line): &(u32, u32, &Line)| {
+            Side::of(line.kind) == side
+                && number
+                    == match side {
+                        Side::Old => old,
+                        Side::New => new,
+                    }
+        };
+        for hunk in &self.hunks {
+            let mut lines: Option<Vec<(u32, u32, &Line)>> = None;
+            for at in hunk.positions() {
+                if lines.is_none() && is(first, &at) {
+                    lines = Some(Vec::new());
+                }
+                if let Some(held) = lines.as_mut() {
+                    held.push(at);
+                    if is(last, &at) {
+                        return lines;
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// How a label names the lines from `first` to `last`: `3-6` where they are
+    /// all on one side, and `-5 +3-6` where they cross, old numbers with `-` and
+    /// new with `+`, as a hunk header spells them. `None` off one hunk.
+    #[must_use]
+    pub fn span_label(&self, first: (Side, u32), last: (Side, u32)) -> Option<String> {
+        let lines = self.range(first, last)?;
+        let on = |side: Side| -> Vec<u32> {
+            lines
+                .iter()
+                .filter(|(_, _, line)| Side::of(line.kind) == side)
+                .map(|&(old, new, _)| if side == Side::Old { old } else { new })
+                .collect()
+        };
+        let (old, new) = (on(Side::Old), on(Side::New));
+        Some(match (spelled(&old), spelled(&new)) {
+            (Some(old), Some(new)) => format!("-{old} +{new}"),
+            (Some(one), None) | (None, Some(one)) => one,
+            (None, None) => return None,
+        })
+    }
+
     /// A file with no hunks, and why it has none: `Some` where a side of it
     /// could not be read, `None` for a state this crate deliberately reads
     /// nothing for.
@@ -142,6 +193,15 @@ impl FileDiff {
             first_line: None,
             bytes: 0,
         }
+    }
+}
+
+/// Whether a change is binary: the `diff` attribute where it says, and the
+/// bytes where it does not, which is git's order.
+fn binary(before: &[u8], after: &[u8], diff: Option<bool>) -> bool {
+    match diff {
+        Some(text) => !text,
+        None => is_binary(before) || is_binary(after),
     }
 }
 
@@ -241,9 +301,9 @@ fn bounds(
 }
 
 /// How tall this file's diff is, without building any of it.
-pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
+pub(crate) fn measure(before: &[u8], after: &[u8], diff: Option<bool>) -> FileSpan {
     let bytes = (before.len() + after.len()) as u64;
-    if is_binary(before) || is_binary(after) {
+    if binary(before, after, diff) {
         return FileSpan {
             binary: true,
             bytes,
@@ -278,10 +338,10 @@ pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
     span
 }
 
-pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
+pub(crate) fn compute(path: String, before: &[u8], after: &[u8], diff: Option<bool>) -> FileDiff {
     let bytes = (before.len() + after.len()) as u64;
 
-    if is_binary(before) || is_binary(after) {
+    if binary(before, after, diff) {
         return FileDiff {
             path,
             binary: true,
@@ -407,6 +467,16 @@ fn first_line_of(bytes: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(line).into_owned())
 }
 
+/// `5`, or `3-6`, for ascending numbers; `None` for none.
+fn spelled(numbers: &[u32]) -> Option<String> {
+    let (first, last) = (numbers.first()?, numbers.last()?);
+    Some(if first == last {
+        first.to_string()
+    } else {
+        format!("{first}-{last}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     //! Plus the one property [`measure`] exists for, below: it agrees with
@@ -422,7 +492,7 @@ mod tests {
     fn the_line_count_is_the_working_tree_side_not_the_index_side() {
         let before = b"a\nb\nc\nd\ne\n";
         let after = b"a\nb\n";
-        let diff = compute("src/lib.rs".to_owned(), before, after);
+        let diff = compute("src/lib.rs".to_owned(), before, after, None);
 
         assert_eq!(diff.lines, 2, "counted something other than the worktree");
         assert_eq!(diff.removed, 3, "the fixture did not actually shrink");
@@ -432,7 +502,7 @@ mod tests {
     /// both this and the test above by accident.
     #[test]
     fn a_file_that_grew_reports_the_longer_side() {
-        let diff = compute("src/lib.rs".to_owned(), b"a\n", b"a\nb\nc\n");
+        let diff = compute("src/lib.rs".to_owned(), b"a\n", b"a\nb\nc\n", None);
 
         assert_eq!(diff.lines, 3);
         assert_eq!(diff.added, 2, "the fixture did not actually grow");
@@ -442,7 +512,7 @@ mod tests {
     /// agent makes (`SPEC.md` §11.1) and the one where the two sides differ most.
     #[test]
     fn an_addition_counts_the_whole_new_file() {
-        let diff = compute("src/new.rs".to_owned(), b"", b"one\ntwo\nthree\n");
+        let diff = compute("src/new.rs".to_owned(), b"", b"one\ntwo\nthree\n", None);
 
         assert_eq!(diff.lines, 3);
     }
@@ -451,7 +521,7 @@ mod tests {
     /// change within and the count is zero rather than the index's length.
     #[test]
     fn a_removal_reports_no_lines_because_there_is_no_file_left() {
-        let diff = compute("src/gone.rs".to_owned(), b"a\nb\nc\n", b"");
+        let diff = compute("src/gone.rs".to_owned(), b"a\nb\nc\n", b"", None);
 
         assert_eq!(diff.lines, 0);
         assert_eq!(diff.removed, 3);
@@ -462,7 +532,7 @@ mod tests {
     #[test]
     fn a_binary_file_reports_no_line_count() {
         let binary = b"\x00\x01\n\x02\n\x03";
-        let diff = compute("assets/banner.jpg".to_owned(), b"", binary);
+        let diff = compute("assets/banner.jpg".to_owned(), b"", binary, None);
 
         assert!(diff.binary, "the fixture did not sniff as binary");
         assert_eq!(diff.lines, 0);
@@ -473,19 +543,24 @@ mod tests {
     /// with the cap and the CRLF strip both exercised.
     #[test]
     fn the_first_line_prefers_the_worktree_and_falls_back_for_a_deletion() {
-        let both = compute("a.rs".to_owned(), b"old first\nx\n", b"new first\nx\n");
+        let both = compute(
+            "a.rs".to_owned(),
+            b"old first\nx\n",
+            b"new first\nx\n",
+            None,
+        );
         assert_eq!(both.first_line.as_deref(), Some("new first"));
 
-        let gone = compute("a.rs".to_owned(), b"#!/bin/sh\nx\n", b"");
+        let gone = compute("a.rs".to_owned(), b"#!/bin/sh\nx\n", b"", None);
         assert_eq!(gone.first_line.as_deref(), Some("#!/bin/sh"));
 
-        let binary = compute("a.bin".to_owned(), b"", b"\x00\x01\n\x02");
+        let binary = compute("a.bin".to_owned(), b"", b"\x00\x01\n\x02", None);
         assert_eq!(binary.first_line, None);
 
-        let empty = compute("a.rs".to_owned(), b"", b"");
+        let empty = compute("a.rs".to_owned(), b"", b"", None);
         assert_eq!(empty.first_line, None);
 
-        let crlf = compute("a.rs".to_owned(), b"", b"first\r\nsecond\r\n");
+        let crlf = compute("a.rs".to_owned(), b"", b"first\r\nsecond\r\n", None);
         assert_eq!(crlf.first_line.as_deref(), Some("first"));
     }
 
@@ -494,7 +569,7 @@ mod tests {
     #[test]
     fn the_first_line_is_capped_and_never_longer() {
         let long = vec![b'x'; 10_000];
-        let diff = compute("bundle.js".to_owned(), b"", &long);
+        let diff = compute("bundle.js".to_owned(), b"", &long, None);
         assert_eq!(diff.first_line.as_ref().map(String::len), Some(256));
 
         // A cut through a four-byte character: 255 ASCII bytes then one lead
@@ -502,14 +577,14 @@ mod tests {
         // cap is on bytes read, so the answer is 258 and still bounded.
         let mut split = vec![b'x'; 255];
         split.extend_from_slice("🔥".as_bytes());
-        let diff = compute("bundle.js".to_owned(), b"", &split);
+        let diff = compute("bundle.js".to_owned(), b"", &split, None);
         assert_eq!(diff.first_line.as_ref().map(String::len), Some(258));
     }
 
     /// A file with no trailing newline still counts its last line.
     #[test]
     fn a_file_with_no_trailing_newline_counts_its_last_line() {
-        let diff = compute("src/lib.rs".to_owned(), b"", b"a\nb");
+        let diff = compute("src/lib.rs".to_owned(), b"", b"a\nb", None);
 
         assert_eq!(diff.lines, 2);
     }
@@ -517,7 +592,7 @@ mod tests {
     /// An empty working-tree file is zero lines rather than one empty line.
     #[test]
     fn an_empty_file_has_no_lines() {
-        let diff = compute("src/empty.rs".to_owned(), b"a\n", b"");
+        let diff = compute("src/empty.rs".to_owned(), b"a\n", b"", None);
 
         assert_eq!(diff.lines, 0);
     }
@@ -618,8 +693,8 @@ c"
         ];
 
         for (label, before, after) in cases {
-            let computed = compute("src/lib.rs".to_owned(), &before, &after);
-            let measured = measure(&before, &after);
+            let computed = compute("src/lib.rs".to_owned(), &before, &after, None);
+            let measured = measure(&before, &after, None);
             assert_eq!(
                 (measured.hunks, measured.lines),
                 rows(&computed),

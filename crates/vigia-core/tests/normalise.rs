@@ -122,7 +122,7 @@ fn a_normalised_diff_matches_git_hunk_for_hunk() {
 
 /// Normalisation follows the attributes rather than the platform.
 #[test]
-fn the_binary_attribute_turns_normalisation_off() {
+fn text_unset_stops_normalising() {
     let changed = |attributes: Option<&str>, name: &str| -> (u32, u32) {
         let scratch = Scratch::crlf_worktree(name, attributes);
         scratch.write("a.txt", numbered_lines(20));
@@ -145,9 +145,9 @@ fn the_binary_attribute_turns_normalisation_off() {
         "line endings alone are not a change when git would normalise them"
     );
     assert_eq!(
-        changed(Some("a.txt binary\n"), "normalise-attr-binary"),
+        changed(Some("a.txt -text\n"), "normalise-attr-text"),
         (20, 20),
-        "`binary` implies `-text`, so git converts nothing and every line really \
+        "`-text` turns conversion off, so every line really \
          does differ; reporting no change here would mean the attributes are \
          being ignored"
     );
@@ -156,14 +156,7 @@ fn the_binary_attribute_turns_normalisation_off() {
 /// A `.gitattributes` written mid-session reaches the very next frame.
 #[test]
 fn attributes_written_mid_session_reach_the_next_frame() {
-    let scratch = Scratch::crlf_worktree("normalise-restat", None);
-    scratch.write("a.txt", numbered_lines(20));
-    scratch.commit_all("initial");
-    scratch.checkout("a.txt");
-    scratch.write_crlf(
-        "a.txt",
-        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
-    );
+    let scratch = one_line_changed("normalise-restat");
 
     let diff_of = |worktree: &Worktree| -> (u32, u32) {
         let mut frame = worktree.frame();
@@ -185,9 +178,9 @@ fn attributes_written_mid_session_reach_the_next_frame() {
          attributes change, or there is no stale answer to catch"
     );
 
-    // The agent in the other pane marks the file binary, so `-text` applies and
+    // The agent in the other pane unsets `text` on the file, so
     // the CRLF difference stops being normalised away.
-    scratch.write(".gitattributes", "a.txt binary\n");
+    scratch.write(".gitattributes", "a.txt -text\n");
 
     let restarted = diff_of(&scratch.worktree());
     assert_eq!(
@@ -211,14 +204,7 @@ fn attributes_written_mid_session_reach_the_next_frame() {
 #[test]
 fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     // The gate above cannot see a cache, and that is why this one exists.
-    let scratch = Scratch::crlf_worktree("normalise-carried", None);
-    scratch.write("a.txt", numbered_lines(20));
-    scratch.commit_all("initial");
-    scratch.checkout("a.txt");
-    scratch.write_crlf(
-        "a.txt",
-        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
-    );
+    let scratch = one_line_changed("normalise-carried");
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -520,4 +506,281 @@ fn normalising_costs_no_extra_read_or_probe() {
          file it was handed",
         crlf.probes, lf.probes
     );
+}
+
+/// A running frame against a restarted one, after `change` rewrites something
+/// under `.git` that decides what the clean filter does to `a.txt`. `setup`
+/// runs before the frame opens.
+fn follows_git_state(name: &str, setup: impl Fn(&Scratch), change: impl Fn(&Scratch)) {
+    let scratch = one_line_changed(name);
+    setup(&scratch);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    support::settle_spans(&mut frame);
+    let at = |frame: &Frame| {
+        frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed")
+    };
+    let rows = |frame: &mut Frame| frame.height(|_, span| span.lines as usize).expect("height");
+    let read = |frame: &mut Frame| {
+        let height = rows(frame);
+        let (_, diff) = frame.diff(at(frame)).expect("diff");
+        (height, diff.added, diff.removed, diff.binary)
+    };
+    let stale = read(&mut frame);
+
+    // Carried before the change, or a frame that caches nothing passes below.
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    assert_eq!(read(&mut frame), stale, "an idle tick moved the diff");
+    let idle = delta(before, frame.stats());
+    assert_eq!(
+        (idle.computed, idle.measured),
+        (0, 0),
+        "an idle tick recomputed, so nothing is carried and this cannot tell a \
+         dropped cache from a kept one"
+    );
+
+    change(&scratch);
+
+    let restarted = scratch.worktree();
+    let mut cold = restarted.frame();
+    cold.advance().expect("advance");
+    let truth = read(&mut cold);
+    assert_ne!(
+        truth, stale,
+        "the control is wrong: the change has to move the diff"
+    );
+
+    frame.advance().expect("advance");
+    assert_eq!(
+        read(&mut frame),
+        truth,
+        "the running frame kept a height or diff computed under git state that changed"
+    );
+
+    support::settle_spans(&mut frame);
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    assert_eq!(read(&mut frame), truth, "an idle tick moved the diff");
+    assert_eq!(
+        delta(before, frame.stats()).computed,
+        0,
+        "an idle tick after the change recomputed, so it reloaded again"
+    );
+}
+
+/// The info/attributes file that marks `a.txt` binary.
+fn mark_binary(scratch: &Scratch) {
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
+        .expect("write info/attributes");
+}
+
+#[test]
+fn autocrlf_change_followed() {
+    follows_git_state(
+        "normalise-autocrlf",
+        |_| {},
+        |scratch| {
+            scratch.git(&["config", "core.autocrlf", "false"]);
+        },
+    );
+}
+
+#[test]
+fn info_attributes_followed() {
+    follows_git_state("normalise-info-attributes", |_| {}, mark_binary);
+}
+
+#[test]
+fn info_attributes_removed() {
+    follows_git_state("normalise-info-removed", mark_binary, |scratch| {
+        std::fs::remove_file(scratch.path_of(".git/info/attributes"))
+            .expect("remove info/attributes");
+    });
+}
+
+/// `a.txt` committed with LF under `core.autocrlf=true`, held in CRLF with
+/// line 10 changed.
+fn one_line_changed(name: &str) -> Scratch {
+    let scratch = Scratch::crlf_worktree(name, None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    scratch.write_crlf(
+        "a.txt",
+        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
+    );
+    scratch
+}
+
+/// A frame built after the config changed, on a worktree opened before it,
+/// still diffs under the new config. A server that builds a frame per request
+/// lives exactly like this.
+#[test]
+fn late_frame_follows() {
+    let scratch = one_line_changed("normalise-late-frame");
+    let worktree = scratch.worktree();
+    scratch.git(&["config", "core.autocrlf", "false"]);
+
+    let diff_of = |worktree: &Worktree| {
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        let (_, diff) = frame.diff(at).expect("diff");
+        (diff.added, diff.removed)
+    };
+    let truth = diff_of(&scratch.worktree());
+    assert_eq!(
+        diff_of(&worktree),
+        truth,
+        "a frame built after the change diffed under the config the worktree opened with"
+    );
+}
+
+/// A file that differs from its blob only in line endings is listed or not by
+/// the config in force now, in a running frame as in a fresh one.
+#[test]
+fn status_follows_config() {
+    let scratch = Scratch::crlf_worktree("normalise-status-config", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    // The same bytes again, so the index's stat no longer vouches for them and
+    // the walk has to compare content.
+    scratch.write_crlf("a.txt", &numbered_lines(20));
+
+    let listed = |frame: &Frame| frame.files().iter().any(|c| c.path == "a.txt");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        !listed(&frame),
+        "the control is wrong: under core.autocrlf=true a.txt is unchanged"
+    );
+
+    scratch.git(&["config", "core.autocrlf", "false"]);
+    let restarted = scratch.worktree();
+    let mut cold = restarted.frame();
+    cold.advance().expect("advance");
+    assert!(
+        listed(&cold),
+        "the control is wrong: under core.autocrlf=false a.txt is changed"
+    );
+
+    frame.advance().expect("advance");
+    assert!(
+        listed(&frame),
+        "the running frame listed files under the config it was opened with"
+    );
+}
+
+/// A config gix cannot load keeps the one before it, and still lets an
+/// info/attributes change and a later mended config reach the running frame.
+#[test]
+fn broken_config_followed() {
+    let scratch = one_line_changed("normalise-broken-config");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let read = |frame: &mut Frame| {
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        let (_, diff) = frame.diff(at).expect("diff");
+        (diff.added, diff.removed, diff.binary)
+    };
+    support::settle_spans(&mut frame);
+    let stale = read(&mut frame);
+    let before = frame.stats();
+    assert_eq!(read(&mut frame), stale, "an idle tick moved the diff");
+    assert_eq!(
+        delta(before, frame.stats()).computed,
+        0,
+        "an idle tick recomputed, so this cannot tell a dropped cache from a kept one"
+    );
+
+    // An include git reads with the config, and gix fails on.
+    std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
+    scratch.git(&["config", "core.autocrlf", "false"]);
+    scratch.git(&["config", "include.path", "extra"]);
+    assert_eq!(read(&mut frame), stale, "the reload was expected to fail");
+
+    support::settle_spans(&mut frame);
+    mark_binary(&scratch);
+    assert!(
+        read(&mut frame).2,
+        "an info/attributes change kept the diffs cached before it while the config failed"
+    );
+
+    std::fs::remove_file(scratch.path_of(".git/info/attributes")).expect("unmark");
+    assert_eq!(
+        read(&mut frame),
+        stale,
+        "the reload was expected to fail still"
+    );
+
+    // The included file alone, so no fingerprinted file moves: only the retry
+    // and the reload count can bring the frame round.
+    support::settle_spans(&mut frame);
+    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
+    let truth = read(&mut scratch.worktree().frame());
+    assert_ne!(
+        truth, stale,
+        "the control is wrong: the change has to move the diff"
+    );
+    assert_eq!(
+        read(&mut frame),
+        truth,
+        "a mended include never reached the running frame"
+    );
+}
+
+/// A config caught between a writer's steps, missing or empty, is not loaded
+/// as no config at all.
+#[test]
+fn missing_config_skipped() {
+    let scratch = one_line_changed("normalise-missing-config");
+    // A key no system config sets, so losing the local one shows.
+    let marks = scratch.path_of(".git/marks");
+    std::fs::write(&marks, "a.txt binary\n").expect("write attributes");
+    let marks = marks.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.attributesFile", &marks]);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let binary = |frame: &mut Frame| {
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        frame.diff(at).expect("diff").1.binary
+    };
+    assert!(
+        binary(&mut frame),
+        "the control is wrong: core.attributesFile marks a.txt binary"
+    );
+
+    let config = scratch.path_of(".git/config");
+    let bytes = std::fs::read(&config).expect("read config");
+    std::fs::remove_file(&config).expect("remove config");
+    let missing = binary(&mut frame);
+    std::fs::write(&config, "").expect("truncate config");
+    let empty = binary(&mut frame);
+    std::fs::write(&config, bytes).expect("restore config");
+    assert!(missing, "a missing config was loaded as none");
+    assert!(empty, "an empty config was loaded as none");
 }
