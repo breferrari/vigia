@@ -297,24 +297,7 @@ fn the_same_key_twice_is_refused_rather_than_last_wins() {
 /// A lost continuation backslash turns the next line's indentation into spaces
 /// inside the message, and that string is only read when the error is printed.
 /// Every variant is named, so a new one fails to compile until it is listed here.
-/// Listing it does not add a sample to the test below; that has to be done by hand.
-fn assert_single_spaced(err: &ConfigError) {
-    let msg = match err {
-        ConfigError::Unwritable { .. }
-        | ConfigError::Unreadable { .. }
-        | ConfigError::UnknownKey { .. }
-        | ConfigError::BadPattern { .. }
-        | ConfigError::UnknownValue { .. }
-        | ConfigError::MissingValue { .. }
-        | ConfigError::MissingSeparator { .. }
-        | ConfigError::RepeatedKey { .. } => err.to_string(),
-    };
-    assert!(
-        !msg.contains("  "),
-        "{err:?} renders with a double space: {msg:?}"
-    );
-}
-
+/// Listing it does not add a sample to the list below; that has to be done by hand.
 #[test]
 fn config_error_spacing() {
     let path = std::path::PathBuf::from("/tmp/config");
@@ -353,7 +336,20 @@ fn config_error_spacing() {
         },
     ];
     for err in &errors {
-        assert_single_spaced(err);
+        let msg = match err {
+            ConfigError::Unwritable { .. }
+            | ConfigError::Unreadable { .. }
+            | ConfigError::UnknownKey { .. }
+            | ConfigError::BadPattern { .. }
+            | ConfigError::UnknownValue { .. }
+            | ConfigError::MissingValue { .. }
+            | ConfigError::MissingSeparator { .. }
+            | ConfigError::RepeatedKey { .. } => err.to_string(),
+        };
+        assert!(
+            !msg.contains("  "),
+            "{err:?} renders with a double space: {msg:?}"
+        );
     }
 }
 

@@ -1270,25 +1270,7 @@ fn a_second_base_is_refused_rather_than_silently_winning() {
 /// A lost continuation backslash turns the next line's indentation into spaces
 /// inside the message, and that string is only read when the error is printed.
 /// Every variant is named, so a new one fails to compile until it is listed here.
-/// Listing it does not add a sample to the test below; that has to be done by hand.
-fn assert_single_spaced(err: &ThemeError) {
-    let msg = match err {
-        ThemeError::UnknownKey { .. }
-        | ThemeError::UnknownColour { .. }
-        | ThemeError::UnknownModifier { .. }
-        | ThemeError::MissingValue { .. }
-        | ThemeError::MissingSeparator { .. }
-        | ThemeError::UnknownBase { .. }
-        | ThemeError::RepeatedBase { .. }
-        | ThemeError::LateBase { .. }
-        | ThemeError::Unreadable { .. } => err.to_string(),
-    };
-    assert!(
-        !msg.contains("  "),
-        "{err:?} renders with a double space: {msg:?}"
-    );
-}
-
+/// Listing it does not add a sample to the list below; that has to be done by hand.
 #[test]
 fn theme_error_spacing() {
     let errors = [
@@ -1321,7 +1303,21 @@ fn theme_error_spacing() {
         },
     ];
     for err in &errors {
-        assert_single_spaced(err);
+        let msg = match err {
+            ThemeError::UnknownKey { .. }
+            | ThemeError::UnknownColour { .. }
+            | ThemeError::UnknownModifier { .. }
+            | ThemeError::MissingValue { .. }
+            | ThemeError::MissingSeparator { .. }
+            | ThemeError::UnknownBase { .. }
+            | ThemeError::RepeatedBase { .. }
+            | ThemeError::LateBase { .. }
+            | ThemeError::Unreadable { .. } => err.to_string(),
+        };
+        assert!(
+            !msg.contains("  "),
+            "{err:?} renders with a double space: {msg:?}"
+        );
     }
 }
 
