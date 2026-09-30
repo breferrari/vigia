@@ -575,7 +575,7 @@ fn graded_heat() -> View {
         added: 12,
         removed: 0,
     };
-    heat[1 * slice] = HeatBucket {
+    heat[slice] = HeatBucket {
         added: 7,
         removed: 0,
     };
