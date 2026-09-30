@@ -402,6 +402,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         branch_point: None,
         screen: View::default(),
         regions: Regions::default(),
+        laid: Overlays::default(),
         held: None,
         grabbed: None,
         hovered: None,
@@ -579,6 +580,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // would be a message the sender did not ask for.
                 Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
+                    shell.relayout(&frame)?;
                     let pointer = shell.pointer();
                     // Checked before the event is interpreted, because a release is not
                     // an action and would otherwise fall through the `else` below with
@@ -1041,6 +1043,8 @@ struct Shell {
     screen: View,
     /// Where the last painted screen's regions and scrollbars were.
     regions: Regions,
+    /// The overlays [`Self::regions`] was laid out for.
+    laid: Overlays,
     /// What a mouse button is currently being held down on, if anything.
     held: Option<Held>,
     /// The bar a drag is currently moving, if one is.
@@ -1945,6 +1949,39 @@ impl Shell {
         )
     }
 
+    /// The sheet's page, and whether the menu and the position list are up.
+    fn overlays(&self) -> Overlays {
+        (
+            self.app.sheet_page(),
+            self.app.menu_open(),
+            self.app.positions_open(),
+        )
+    }
+
+    /// Lay the regions out again when an overlay opened or closed since the last
+    /// paint. A batch paints once, so without this a click in the same batch as
+    /// `?` is judged against a screen with no sheet on it.
+    fn relayout(&mut self, frame: &vigia_core::Frame) -> Result<(), Failure> {
+        if self.overlays() == self.laid {
+            return Ok(());
+        }
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            crate::app::Stood {
+                standing: frame.standing(),
+                now: epoch_now(),
+            },
+            self.pointing(),
+            self.elsewhere,
+            &self.root,
+        );
+        let area = self.area()?;
+        self.regions = render::regions(area, &chrome, &self.screen);
+        self.laid = self.overlays();
+        Ok(())
+    }
+
     /// Hand the warmer whatever the last paint drew plain, and let it wake us.
     fn request_warm(&mut self, worktree: &Worktree, tx: &Sender<Wake>) {
         if self
@@ -2155,6 +2192,7 @@ impl Shell {
             self.deselect();
         }
         self.regions = painted;
+        self.laid = self.overlays();
         Ok(())
     }
 }
@@ -2167,6 +2205,8 @@ type Pointer = (
     Option<Selection>,
     Option<notes::NoteDrag>,
 );
+/// The sheet's page, and whether the menu and the position list are drawn.
+type Overlays = (Option<usize>, bool, bool);
 
 /// Forward coalesced working-tree changes onto the shell's channel.
 fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>) {
@@ -3344,6 +3384,36 @@ mod tests {
         assert!(
             turns.contains("let mut touched = repeat.is_some();"),
             "a repeat step no longer marks its batch, so motion can swallow its paint"
+        );
+    }
+
+    /// Structural, because the loop cannot be driven: every input event is judged
+    /// against regions laid out for the overlays up now, not the last paint's.
+    #[test]
+    fn input_reads_fresh_regions() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let arm = &code[code.find("Wake::Input(event) => {").expect("no input arm")..];
+        let relaid = arm
+            .find("shell.relayout(&frame)?;")
+            .expect("the arm no longer relays out");
+        let read = arm
+            .find("shell.regions()")
+            .expect("the arm no longer reads regions");
+        assert!(
+            relaid < read,
+            "an input event reads the regions before they are laid out for the overlays up"
+        );
+
+        let drawer = &code[code.find("\n    fn draw<").expect("`Shell::draw` is gone")..];
+        assert!(
+            drawer.contains("self.laid = self.overlays();"),
+            "the paint no longer records what it laid out, so every event relays out"
         );
     }
 }
