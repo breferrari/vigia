@@ -151,7 +151,7 @@ The full sequence, in order. Apply what each step finds:
 3. `/code-review high`.
 4. **Mutation check.** Remove each new gate's fix and see the gate fail. Commit, then use `.claude/scripts/mutate.mjs`.
 
-Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise. A side PR runs this step for its class too. A code change committed after `/code-review` gets one `/code-review` of that change.
+Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
 
 Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run the review agents on Sonnet.
 
@@ -163,7 +163,7 @@ Then prove the result:
 
 Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR with `gh pr edit <n> --add-label <label>`. The bump refuses a release while a merged PR carries neither or both. Default to `internal`. Apply `release` only when the approved plan changes what the pane shows or does, a key or gesture, a theme the reader loads, install (`vigia`, `vigia mcp`, brew or the installer), or the MCP tools. Process, CI, skill, `SPEC.md` wording, `ROADMAP.md`, gates and the harness are `internal`. If unsure, choose `internal` and say so in one line of the report. Do not guess `release`. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. Start a `release` title with `fix:` for a defect or `feat:` for a new feature.
 
-Before `gh pr ready`, check that every review ran on the final head. `gh pr ready` starts the matrix on three platforms and the Copilot review. Copilot has a quota. Mark the PR ready once, after the local suite is green and the plan diff is clean. A draft shows a green `ci complete` that ran nothing.
+Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix on three platforms and the Copilot review. Copilot has a quota. Mark the PR ready once, after the local suite is green and the plan diff is clean. A draft shows a green `ci complete` that ran nothing.
 
 ```sh
 t=$(date -u +%Y-%m-%dT%H:%M:%SZ)
