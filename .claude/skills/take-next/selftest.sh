@@ -279,7 +279,7 @@ jq -n '{comments: [
 flight() { # issue -> comparison 8's lines, space-normalised
   PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" \
   PREFLIGHT_REFS_FILE="$FIX/refs.txt" PREFLIGHT_COMMENTS_FILE="$FIX/comments.json" PREFLIGHT_ISSUE_LIMIT=10 \
-    sh "$PRE" "$1" 2>&1 | awk '/^8\./ { on = 1; next } on && /^ / { $1 = $1; print }'
+    sh "$PRE" "$1" 2>&1 | awk '/^[0-9]+\./ { on = /^8\./; next } on && /^ / { $1 = $1; print }'
 }
 out=$(flight 297)
 want='DRIFT worktree C:/Dev/vigia.b on single-297
@@ -292,6 +292,27 @@ out=$(flight 29)
 [ "$out" = "ok no worktree, branch or plan names #29" ] && ok "a free issue reads clean" || no "a free issue reads clean" "ok" "$out"
 out=$(pre 2>&1 | grep -c '^8\.')
 [ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
+
+# Comparison 9 reads only an open row's Why cell. #4 cites closed #1 and a
+# retired I9, #5 cites open #4 and a declared I1 and names #7 outside its Why
+# cell, #6 names #1 only where it
+# surfaced, and #7 is closed.
+cat > "$FIX/roadmap.md" <<'ROW'
+## Deferral shelf
+| Item | Surfaced | Moved to | Why |
+|---|---|---|---|
+| four ([#4](https://example.invalid/4)) | #2, 2026-01-01 | Shelf | waits on #1 and I9, then #1 again |
+| five ([#5](https://example.invalid/5)) | #2, 2026-01-01 | Shelf, after #7 | waits on #4 and I1 |
+| six ([#6](https://example.invalid/6)) | #1, 2026-01-01 | Shelf | found in #1 |
+| seven ([#7](https://example.invalid/7)) | #2, 2026-01-01 | Shelf | waits on #1 |
+## Pull-forward log
+| eight ([#8](https://example.invalid/8)) | #2 | Shelf | waits on #1 |
+ROW
+jq -n '[range(1; 9) | {number: ., milestone: {title: "Shelf"}, title: "issue \(.)",
+  state: (if . == 1 or . == 7 then "CLOSED" else "OPEN" end)}]' > "$FIX/issues.json"
+out=$(pre 2>&1 | awk '/^9\./ { on = 1; next } on && /^ / { $1 = $1; print }')
+want='read #4: its reason cites #1 (closed), I9 (retired)'
+[ "$out" = "$want" ] && ok "a shelf reason naming a closed issue is surfaced" || no "a shelf reason naming a closed issue is surfaced" "$want" "$out"
 
 echo "drift:"
 
