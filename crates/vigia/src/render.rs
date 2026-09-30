@@ -5200,6 +5200,8 @@ impl Painter<'_> {
         emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
         let mut column = 0usize;
+        // One walk for the whole row, however many runs it is cut into.
+        let mut walked = 0u64;
         let mut at = 0usize;
         for span in spans {
             let end = (at + span.len).min(text.len());
@@ -5219,7 +5221,7 @@ impl Painter<'_> {
                 text,
                 start..end,
                 span.class,
-                &mut column,
+                (&mut column, &mut walked),
                 content,
                 emphasis,
             ) {
@@ -5235,7 +5237,7 @@ impl Painter<'_> {
                 text,
                 at..text.len(),
                 Class::Plain,
-                &mut column,
+                (&mut column, &mut walked),
                 content,
                 emphasis,
             );
@@ -5253,19 +5255,22 @@ impl Painter<'_> {
         text: &str,
         range: std::ops::Range<usize>,
         class: Class,
-        column: &mut usize,
+        (column, walked): (&mut usize, &mut u64),
         content: usize,
         emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
-        let plain = |painter: &mut Self, runs: &mut Vec<(String, Style)>, column: &mut usize| {
+        let plain = |painter: &mut Self,
+                     runs: &mut Vec<(String, Style)>,
+                     column: &mut usize,
+                     walked: &mut u64| {
             let piece = text.get(range.start..range.end).unwrap_or_default();
-            painter.push_run(runs, piece, class, column, content, None)
+            painter.push_run(runs, piece, class, (column, walked), content, None)
         };
         // The colour and the ranges are one value: a patch with no ranges is
         // not a patch, so the pairing is in the type rather than in a filter
         // every caller has to remember.
         let Some((word, emph)) = emphasis.filter(|(_, emph)| !emph.is_empty()) else {
-            return plain(self, runs, column);
+            return plain(self, runs, column, walked);
         };
         let mut at = range.start;
         for span in emph {
@@ -5279,19 +5284,21 @@ impl Painter<'_> {
             let from = from.max(at);
             let to = to.min(range.end);
             let (Some(before), Some(inside)) = (text.get(at..from), text.get(from..to)) else {
-                return plain(self, runs, column);
+                return plain(self, runs, column, walked);
             };
-            if !before.is_empty() && self.push_run(runs, before, class, column, content, None) {
+            if !before.is_empty()
+                && self.push_run(runs, before, class, (column, walked), content, None)
+            {
                 return true;
             }
-            if self.push_run(runs, inside, class, column, content, Some(word)) {
+            if self.push_run(runs, inside, class, (column, walked), content, Some(word)) {
                 return true;
             }
             at = to;
         }
         if at < range.end {
             let piece = text.get(at..range.end).unwrap_or_default();
-            return self.push_run(runs, piece, class, column, content, None);
+            return self.push_run(runs, piece, class, (column, walked), content, None);
         }
         false
     }
@@ -5302,16 +5309,17 @@ impl Painter<'_> {
         runs: &mut Vec<(String, Style)>,
         piece: &str,
         class: Class,
-        column: &mut usize,
+        (column, walked): (&mut usize, &mut u64),
         content: usize,
         word: Option<Color>,
     ) -> bool {
-        if *column >= content {
-            // Room ran out on an earlier run and this one has something to say,
-            // so the row continues and nothing more of it is walked.
+        if *column >= content || *walked >= walk_of(content) {
+            // Room or the row's walk ran out on an earlier run and this one has
+            // something to say, so the row continues and nothing more is walked.
             return true;
         }
-        let printed = printable(piece, column, content);
+        let printed = printable(piece, column, content, *walked);
+        *walked += printed.examined;
         self.paint.examined += printed.examined;
         let mut style = self.theme.class(class);
         if let Some(bg) = word {
@@ -5909,8 +5917,14 @@ struct Printed {
     column: usize,
 }
 
+/// Characters a row of `room` columns may examine, across all its runs.
+fn walk_of(room: usize) -> u64 {
+    room.saturating_mul(CHARS_PER_COLUMN)
+        .saturating_add(TAB_STOP) as u64
+}
+
 /// Make one line of file content safe to write into terminal cells.
-fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
+fn printable(text: &str, column: &mut usize, room: usize, spent: u64) -> Printed {
     // Sized from what will be kept rather than from what was offered. Four bytes
     // a column is the widest UTF-8 encoding, and a tab can expand past the end
     // by at most one stop.
@@ -5918,13 +5932,13 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
         text.len()
             .min(room.saturating_mul(4).saturating_add(TAB_STOP)),
     );
-    walk_printable(text, column, room, Some(out))
+    walk_printable(text, column, room, Some(out), spent)
 }
 
 /// Where a line has to break to fit `room` columns, or `None` when it fits.
 pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
     let mut column = 0usize;
-    let walked = walk_printable(text, &mut column, room, None);
+    let walked = walk_printable(text, &mut column, room, None, 0);
     // `column >= room` as well as `clipped`.
     (walked.clipped && walked.column >= room && walked.at > 0 && walked.at < text.len())
         .then_some(walked.at)
@@ -5974,14 +5988,19 @@ fn emit(out: &mut Option<String>, c: char, times: usize) {
 }
 
 /// [`printable`] and [`split_at`] as one walk, with the string made optional.
-fn walk_printable(text: &str, column: &mut usize, room: usize, mut out: Option<String>) -> Printed {
+fn walk_printable(
+    text: &str,
+    column: &mut usize,
+    room: usize,
+    mut out: Option<String>,
+    spent: u64,
+) -> Printed {
     // `None` is [`split_at`] asking where the break falls, and it must stay `None` all
     // the way down rather than becoming an empty `String`: an empty one allocates the
     // moment anything is pushed into it, and this runs once per drawn content row per
     // frame.
-    let walk = room
-        .saturating_mul(CHARS_PER_COLUMN)
-        .saturating_add(TAB_STOP) as u64;
+    // What is left of the row's walk after the runs before this one.
+    let walk = walk_of(room).saturating_sub(spent);
     let mut examined = 0u64;
     // Where the grapheme being measured began, and what it has cost so far.
     let mut cluster = 0usize;

@@ -388,7 +388,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | `Worktree::measure` has no test over a real repository | [#86](https://github.com/breferrari/vigia/issues/86) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 | ✅ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them. **Already true by #214 and #322's values; gated here** | [#98](https://github.com/breferrari/vigia/issues/98) |
-| ⬜ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
+| ✅ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
 | ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ✅ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
 | ⬜ | The clipboard write's failure branch is unreachable by any test | [#392](https://github.com/breferrari/vigia/issues/392) |

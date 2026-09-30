@@ -503,3 +503,74 @@ fn an_unparsed_extension_costs_no_parse() {
          anything"
     );
 }
+
+/// A row's walk is one budget however many spans colour it: the same zero-width
+/// line split into more runs examines no more of itself, and draws the same cells.
+#[test]
+fn spans_share_walk() {
+    let group = "\u{200b}\u{200d}\u{fe0f}\u{0301}";
+    let text = group.repeat(500);
+    let chrome = App::new().chrome(
+        "fixture",
+        None,
+        vigia::Stood {
+            standing: &Standing::Current,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let drawn = |runs: usize, width: u16| {
+        let area = Rect::new(0, 0, width, 6);
+        let spans = (0..runs)
+            .map(|_| vigia_core::Span {
+                len: group.len() * 500 / runs.max(1),
+                class: vigia_core::Class::Plain,
+            })
+            .take(runs)
+            .collect();
+        let view = View {
+            rows: vec![Row::Line {
+                kind: vigia_core::LineKind::Context,
+                number: 1,
+                text: text.clone(),
+                spans,
+                emph: Vec::new(),
+            }],
+            files: 1,
+            ..View::default()
+        };
+        let mut buf = Buffer::empty(area);
+        let stats = render(
+            &mut buf,
+            area,
+            &view,
+            &Theme::default(),
+            Glyphs::default(),
+            &chrome,
+        );
+        let cells: Vec<String> = buf
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().to_owned())
+            .collect();
+        (stats.examined, cells)
+    };
+
+    for width in [40, 80, 120] {
+        let (alone, alone_cells) = drawn(0, width);
+        for runs in [10, 100] {
+            let (split, split_cells) = drawn(runs, width);
+            assert_eq!(
+                split, alone,
+                "at {width} columns the row examined {split} characters in {runs} spans and \
+                 {alone} in none"
+            );
+            assert!(
+                split_cells == alone_cells,
+                "at {width} columns {runs} spans drew different cells than none"
+            );
+        }
+    }
+}
