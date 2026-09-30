@@ -580,7 +580,7 @@ impl Worktree {
             return Ok(FileDiff::without_hunks(change.path.clone(), None));
         }
 
-        let diff = self.diff_attribute(&change.path)?;
+        let diff = self.diff_attribute(change)?;
         if let Some(read) = self.early_binary(change, diff) {
             let mut binary = hunk::compute(change.path.clone(), &[], &[], Some(false));
             binary.bytes = read;
@@ -609,7 +609,7 @@ impl Worktree {
             return Ok(hunk::FileSpan::default());
         }
 
-        let diff = self.diff_attribute(&change.path)?;
+        let diff = self.diff_attribute(change)?;
         if let Some(read) = self.early_binary(change, diff) {
             let mut binary = hunk::measure(&[], &[], Some(false));
             binary.bytes = read;
@@ -641,10 +641,10 @@ impl Worktree {
         hunk::is_binary(&window).then_some(window.len() as u64)
     }
 
-    /// What `.gitattributes` says about diffing `rela_path`. See
+    /// What `.gitattributes` says about diffing `change`. See
     /// [`Filter::diff_attribute`].
-    fn diff_attribute(&self, rela_path: &str) -> Result<Option<bool>> {
-        self.with_filter(|filter| filter.diff_attribute(rela_path))
+    fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
+        self.with_filter(|filter| filter.diff_attribute(&change.path, change.maybe_symlink))
     }
 
     /// Run `f` on the filter, building it on first use.

@@ -90,45 +90,62 @@ fn binary_sniff_bounded() {
 }
 
 /// A path whose clean filter is an external program, as Git LFS configures it,
-/// reads as binary: the blob is what the program wrote, the worktree is the
-/// content, and diffing one against the other draws a rewrite of neither.
+/// reads as binary: the blob is what the program wrote and the worktree is what
+/// it read. The program is never run to find that out.
 #[test]
 fn skipped_driver_undiffable() {
     let scratch = Scratch::new("attr-driver");
-    scratch.git(&["config", "filter.ptr.clean", "cat >/dev/null; echo pointer"]);
+    // Outside the worktree, so a run leaves no untracked file behind.
+    let marker = scratch.root().with_extension("ran");
+    let _ = std::fs::remove_file(&marker);
+    let mark = marker.display().to_string().replace('\\', "/");
+    scratch.git(&[
+        "config",
+        "filter.ptr.clean",
+        &format!("cat >/dev/null; echo ran > '{mark}'; echo pointer"),
+    ]);
+    scratch.git(&["config", "filter.smudger.smudge", "cat"]);
     scratch.write(
         ".gitattributes",
-        "*.csv filter=ptr\nplain.txt filter=unset-driver\n",
+        "a.csv filter=ptr\nb.csv filter=proc\nplain.txt filter=unset-driver\nsmudged.txt filter=smudger\n",
     );
-    scratch.write("a.csv", numbered_lines(5));
-    scratch.write("plain.txt", numbered_lines(5));
+    for name in ["a.csv", "b.csv", "plain.txt", "smudged.txt"] {
+        scratch.write(name, numbered_lines(5));
+    }
     scratch.commit_all("initial");
-    scratch.write("a.csv", numbered_lines(6));
-    scratch.write("plain.txt", numbered_lines(6));
+    // A process driver alone, the way LFS runs, configured after the commit so
+    // git never has to start it.
+    scratch.git(&["config", "filter.proc.process", "no-such-filter-process"]);
+    for name in ["a.csv", "b.csv", "plain.txt", "smudged.txt"] {
+        scratch.write(name, numbered_lines(6));
+    }
+    std::fs::remove_file(&marker).expect("git ran the driver to store the pointer");
 
     let worktree = scratch.worktree();
     let changes = changes_sorted(&worktree);
-    let change = changes.iter().find(|c| c.path == "a.csv").expect("listed");
-    let diff = worktree.diff(change).expect("diff");
+    let diff_of = |name: &str| {
+        let change = changes.iter().find(|c| c.path == name).expect("listed");
+        (
+            worktree.diff(change).expect("diff"),
+            worktree.measure(change).expect("measure"),
+        )
+    };
+    for name in ["a.csv", "b.csv"] {
+        let (diff, span) = diff_of(name);
+        assert!(
+            diff.binary && diff.hunks.is_empty() && span.binary,
+            "{name} diffed its content against what its driver stored: {} hunks",
+            diff.hunks.len()
+        );
+    }
+    // A driver with no clean or process program is a no-op in git.
+    for name in ["plain.txt", "smudged.txt"] {
+        let (diff, span) = diff_of(name);
+        assert!(!diff.binary && !span.binary, "{name} read as binary");
+        assert_eq!((diff.added, diff.removed), (1, 0), "{name}");
+    }
     assert!(
-        diff.binary && diff.hunks.is_empty(),
-        "a.csv diffed its content against the pointer its driver stored: {} hunks",
-        diff.hunks.len()
+        !marker.exists(),
+        "the clean driver ran, which is a process per file per frame"
     );
-    assert!(
-        worktree.measure(change).expect("measure").binary,
-        "the height treats a.csv as text while its diff is binary"
-    );
-
-    // A driver named but never configured is a no-op in git, so the file diffs.
-    let change = changes
-        .iter()
-        .find(|c| c.path == "plain.txt")
-        .expect("listed");
-    let diff = worktree.diff(change).expect("diff");
-    assert!(
-        !diff.binary,
-        "a driver with no program made plain.txt binary"
-    );
-    assert_eq!((diff.added, diff.removed), (1, 0));
 }

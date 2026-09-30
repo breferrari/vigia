@@ -15,7 +15,7 @@ pub(crate) struct Filter {
     /// known to the index before deciding to convert it.
     index: gix::worktree::Index,
     objects: gix::OdbHandle,
-    /// Drivers with a program configured, which this pipeline never runs.
+    /// Drivers with a clean or process program, which this pipeline never runs.
     skipped: Vec<gix::bstr::BString>,
 }
 
@@ -54,10 +54,12 @@ impl Filter {
         })
     }
 
-    /// Whether `rela_path` diffs as text: `Some(true)` when `diff` is set or
-    /// names a driver, `Some(false)` when it is unset, as `binary` unsets it, or
-    /// when a skipped driver cleans the path, `None` when nothing says.
-    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<Option<bool>> {
+    /// Whether `rela_path` diffs as text, or `None` when nothing says.
+    ///
+    /// `Some(false)` when `diff` is unset, as `binary` unsets it, or when a
+    /// skipped driver cleans the path. Git runs no clean filter on a symlink, so
+    /// `link` ignores the driver.
+    pub(crate) fn diff_attribute(&mut self, rela_path: &str, link: bool) -> Result<Option<bool>> {
         let Filter {
             stack,
             objects,
@@ -75,7 +77,7 @@ impl Filter {
                 // The blob holds what the program wrote and the worktree holds
                 // what it read, so the two do not diff.
                 ("filter", gix::attrs::StateRef::Value(name))
-                    if skipped.iter().any(|driver| driver == name.as_bstr()) =>
+                    if !link && skipped.iter().any(|driver| driver == name.as_bstr()) =>
                 {
                     return Ok(Some(false));
                 }

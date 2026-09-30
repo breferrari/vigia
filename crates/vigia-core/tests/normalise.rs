@@ -335,8 +335,8 @@ fn an_external_clean_driver_is_never_run() {
     // binary rather than as a diff git would not draw.
     assert!(
         diff.binary && (diff.added, diff.removed) == (0, 0),
-        "reported +{} −{}. 20/20 would mean the driver ran, which is a process \
-         per file per frame and is what §6 forbids",
+        "reported +{} −{} for a path whose clean driver this pipeline does not \
+         run, so the two sides it compared were never comparable",
         diff.added,
         diff.removed
     );
