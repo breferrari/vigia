@@ -2194,7 +2194,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 2] = [
     ("CLAUDE.md", 17_700),
-    (".claude/skills/take-next/SKILL.md", 20983),
+    (".claude/skills/take-next/SKILL.md", 20922),
 ];
 
 /// Every invariant id the spec's table declares. One leaving fails the build.

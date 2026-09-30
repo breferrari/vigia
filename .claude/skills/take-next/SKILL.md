@@ -5,7 +5,9 @@ description: Take the next task from ROADMAP.md and ship it end to end. Use when
 
 # take-next
 
-Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of a task, several tasks, or a survey of possible work. This file lives in the repo so that it is versioned. Keep it here.
+Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of a task, several tasks, or a survey of possible work.
+
+**`unattended-loop`** in the arguments: read [`unattended-loop.md`](unattended-loop.md) first.
 
 > [!IMPORTANT]
 > **Run this to the end. Plan approval in step 3 is the one routine stop.**
@@ -36,7 +38,7 @@ sh .claude/skills/take-next/next.sh --ranked   # every eligible milestone in tak
 sh .claude/skills/take-next/preflight.sh       # does the spec still agree with the tracker
 ```
 
-`next.sh` selects the earliest eligible milestone. Each rule prevents a failure that occurred before:
+`next.sh` selects the earliest eligible milestone:
 
 - **Order is the phase number at the start of the title.** The due date of every milestone is null. A sort on a null key returns the milestones in the order that the API sent them. A title without `Phase <n>` sorts last and does not disappear. Thus a renamed milestone goes after all the others, with no warning. Pre-flight check 6 finds this.
 - **A description that starts with `Shelf:` is never selected.** A shelf stays open and is never next. Take from a shelf only as a deliberate choice. First, read its dated reason for the deferral again.
@@ -48,7 +50,7 @@ After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/
 
 ### Pre-flight
 
-`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4, 6 and 7. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say. The script takes about twenty seconds.
+`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4, 6 and 7. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say.
 
 First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1. It also causes checks 2, 4 and 7 to miss real drift. Then it runs these checks:
 
