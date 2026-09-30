@@ -397,8 +397,8 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
 | ✅ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
 | ✅ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
-| ✅ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
 | ✅ | `MIN_TICKS` restates `MIN_FRAMES`, and the queue it looks like it guards is unbounded | [#114](https://github.com/breferrari/vigia/issues/114) |
+| ✅ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
 | ⬜ | 0.1.1: trusted publishing, so the crates.io token stops existing | [#141](https://github.com/breferrari/vigia/issues/141) |
 | ✅ | The bump cannot move a protected main, because the checks it needs can never arrive | [#143](https://github.com/breferrari/vigia/issues/143) |
 | ⬜ | The workflow gates read text, and text has more spellings than the mechanism | [#145](https://github.com/breferrari/vigia/issues/145) |
