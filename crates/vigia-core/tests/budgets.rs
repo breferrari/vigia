@@ -6,9 +6,9 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
-    highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise, settle, time,
-    time_cpu,
+    CLOCK_TICK, COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta,
+    highlight_delta, highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise,
+    settle, time, time_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -1169,6 +1169,24 @@ fn short_stall_fine() {
     // Three 50ms frames descheduled with 3ms of work each: a fine clock sees
     // the stall frame by frame and acquits it.
     judge_round(FINE, 16, (247, 5_000, 4_900), (3, 50_000, 3_000));
+}
+
+#[test]
+fn coarse_round_acquits() {
+    // How a coarse clock rounds a stall: the breaching frames each read a whole
+    // tick and the frames between them read none. Only the round sum sees that
+    // 225 frames spent their time off-CPU.
+    let tick = COARSE_TICK.as_micros() as u64;
+    judge_round(COARSE_TICK, 16, (225, 4_000, 0), (25, 20_000, tick + 5_000));
+}
+
+#[test]
+fn platform_tick() {
+    assert_eq!(
+        CLOCK_TICK == COARSE_TICK,
+        cfg!(windows),
+        "only Windows' thread clock counts in scheduler ticks"
+    );
 }
 
 #[test]
