@@ -48,7 +48,7 @@ pub struct Tick {
     /// The distinct files written in this tick, spelled the way
     /// [`crate::FileChange::path`] spells them.
     pub paths: Vec<String>,
-    /// How many further paths this burst touched past [`HISTORY_PATHS`].
+    /// How many paths this burst evicted to stay within [`HISTORY_PATHS`].
     pub dropped: u32,
 }
 
