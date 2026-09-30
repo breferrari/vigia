@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -39,20 +39,24 @@ impl Default for ChangeOptions<'_> {
 
 /// A working tree under observation.
 pub struct Worktree {
-    repo: gix::Repository,
+    /// The repository as opened. Only the watcher reads it, because it borrows the
+    /// repository for its whole life and a reload cannot swap it under that.
+    opened: gix::Repository,
+    /// The repository under its current configuration, for every other reader.
+    /// A borrow must end inside the method that took it, or a reload waits a tick.
+    live: RefCell<gix::Repository>,
     workdir: PathBuf,
     /// The clean filter: built on the first working-tree read after each
     /// [`Frame::advance`], and not before.
     filter: RefCell<Option<Filter>>,
-    /// The repository reopened after its configuration changed, which the filter
-    /// is built from. `repo` keeps the configuration it was opened with.
-    reopened: RefCell<Option<gix::Repository>>,
     /// The files under the git dir that shape the clean filter: the
     /// configuration and `info/attributes`.
     filter_sources: [PathBuf; 2],
-    /// What [`Self::filter_sources`] looked like when the filter's repository
-    /// was last opened, so a frame built later can tell it is stale.
-    opened_prints: Cell<[Option<Fingerprint>; 2]>,
+    /// The config's fingerprint when `live` last loaded it. `None` at open, so the
+    /// first tick reloads: a write between opening and a stat would be missed.
+    loaded_config: Cell<Option<Fingerprint>>,
+    /// How many reloads have landed, so a frame can drop what it cached before one.
+    reloads: Cell<u64>,
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -73,17 +77,16 @@ impl Worktree {
             common.join("config"),
             common.join("info").join("attributes"),
         ];
-        let worktree = Self {
-            repo,
+        Ok(Self {
+            live: RefCell::new(repo.clone()),
+            opened: repo,
             workdir,
             filter: RefCell::new(None),
-            reopened: RefCell::new(None),
             filter_sources,
-            opened_prints: Cell::new([None, None]),
+            loaded_config: Cell::new(None),
+            reloads: Cell::new(0),
             deleted: Cell::new(false),
-        };
-        worktree.opened_prints.set(worktree.filter_prints());
-        Ok(worktree)
+        })
     }
 
     /// Absolute path of the working tree root.
@@ -91,9 +94,13 @@ impl Worktree {
         &self.workdir
     }
 
+    fn repo(&self) -> Ref<'_, gix::Repository> {
+        self.live.borrow()
+    }
+
     /// The branch HEAD names, shortened, or `None` when HEAD is detached.
     pub fn branch(&self) -> Option<String> {
-        let name = self.repo.head_name().ok()??;
+        let name = self.repo().head_name().ok()??;
         Some(name.shorten().to_string())
     }
 
@@ -164,7 +171,7 @@ impl Worktree {
 
     fn walk(&self, walk: Walk) -> Result<gix::status::index_worktree::Iter> {
         use gix::status::plumbing::index_as_worktree_with_renames::Sorting;
-        self.repo
+        self.repo()
             .status(gix::progress::Discard)
             .map_err(|e| Error::Status(Box::new(e)))?
             // Collapsed would report a changed directory as one entry. A
@@ -210,10 +217,11 @@ impl Worktree {
 
     /// The index against `HEAD^{tree}`, collected.
     fn staged(&self, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
-        let tree = match self.repo.head_tree_id() {
+        let repo = self.repo();
+        let tree = match repo.head_tree_id() {
             Ok(id) => id.detach(),
             // Unborn, detached at nothing, or an unreadable `HEAD`.
-            Err(_) => self.repo.empty_tree().id().detach(),
+            Err(_) => repo.empty_tree().id().detach(),
         };
         self.against_index(tree, options)
     }
@@ -225,8 +233,8 @@ impl Worktree {
         tree: gix::ObjectId,
         options: ChangeOptions<'_>,
     ) -> Result<Vec<FileChange>> {
-        let index = self
-            .repo
+        let repo = self.repo();
+        let index = repo
             .index_or_empty()
             .map_err(|e| Error::Status(Box::new(e)))?;
 
@@ -243,14 +251,13 @@ impl Worktree {
         }
 
         let mut changes = Vec::new();
-        self.repo
-            .tree_index_status(&tree, &index, None, renames, |change, _, _| {
-                if let Some(change) = staged_change(&change) {
-                    changes.push(change);
-                }
-                Ok(gix::diff::index::Action::Continue(()))
-            })
-            .map_err(|e| Error::Status(Box::new(e)))?;
+        repo.tree_index_status(&tree, &index, None, renames, |change, _, _| {
+            if let Some(change) = staged_change(&change) {
+                changes.push(change);
+            }
+            Ok(gix::diff::index::Action::Continue(()))
+        })
+        .map_err(|e| Error::Status(Box::new(e)))?;
         Ok(changes)
     }
 
@@ -266,13 +273,13 @@ impl Worktree {
     ///
     /// There is no other branch to measure from, or no commit in common with it.
     pub fn branch_point(&self) -> Result<(gix::ObjectId, String)> {
-        let head = self
-            .repo
+        let repo = self.repo();
+        let head = repo
             .head_id()
             .map_err(|e| Error::Standing(Box::new(e)))?
             .detach();
         for (reference, named) in self.candidates() {
-            let Ok(other) = self.repo.find_reference(reference.as_str()) else {
+            let Ok(other) = repo.find_reference(reference.as_str()) else {
                 continue;
             };
             let Ok(other) = other.into_fully_peeled_id() else {
@@ -285,7 +292,7 @@ impl Worktree {
             if other == head {
                 continue;
             }
-            if let Ok(base) = self.repo.merge_base(head, other) {
+            if let Ok(base) = repo.merge_base(head, other) {
                 return Ok((base.detach(), named));
             }
         }
@@ -296,7 +303,7 @@ impl Worktree {
     /// put in the header.
     fn candidates(&self) -> Vec<(String, String)> {
         let mut out = Vec::new();
-        if let Ok(Some(head)) = self.repo.head_ref()
+        if let Ok(Some(head)) = self.repo().head_ref()
             && let Some(Ok(upstream)) = head.remote_tracking_ref_name(gix::remote::Direction::Fetch)
         {
             // `refs/remotes/origin/main` reads as `origin/main`, which is what a
@@ -326,16 +333,15 @@ impl Worktree {
     ///
     /// HEAD is unborn, or the walk fails, which is [`Error::History`].
     pub fn commits_from(&self, after: Option<gix::ObjectId>, want: usize) -> Result<Page> {
+        let repo = self.repo();
         let tip = match after {
             Some(id) => id,
-            None => self
-                .repo
+            None => repo
                 .head_id()
                 .map_err(|e| Error::History(Box::new(e)))?
                 .detach(),
         };
-        let walk = self
-            .repo
+        let walk = repo
             .rev_walk([tip])
             .all()
             .map_err(|e| Error::History(Box::new(e)))?;
@@ -422,8 +428,8 @@ impl Worktree {
         // position's own object and nothing else: a commit that cannot be read is a
         // place nobody can stand. The parent and the diff between them are the
         // comparison, which leaves the reader where they are.
-        let commit = self
-            .repo
+        let repo = self.repo();
+        let commit = repo
             .find_object(at)
             .map_err(|e| Error::Standing(Box::new(e)))?
             .peel_to_commit()
@@ -433,8 +439,7 @@ impl Worktree {
         let parent = commit.parent_ids().next().map(gix::Id::detach);
         let before = parent
             .map(|parent| {
-                self.repo
-                    .find_object(parent)
+                repo.find_object(parent)
                     .map_err(|e| Error::Comparison(Box::new(e)))?
                     .peel_to_tree()
                     .map_err(|e| Error::Comparison(Box::new(e)))
@@ -442,8 +447,7 @@ impl Worktree {
             .transpose()?;
 
         let rewrites = options.track_renames.then(gix::diff::Rewrites::default);
-        let changes = self
-            .repo
+        let changes = repo
             .diff_tree_to_tree(
                 before.as_ref(),
                 Some(&tree),
@@ -477,7 +481,7 @@ impl Worktree {
         // A position measures from a commit and the walk below diffs a tree, so
         // the peel is the whole of the difference between the two.
         let tree = self
-            .repo
+            .repo()
             .find_object(base)
             .map_err(|e| Error::Standing(Box::new(e)))?
             .peel_to_tree()
@@ -550,7 +554,7 @@ impl Worktree {
     ///
     /// The filesystem watcher cannot be armed on this worktree.
     pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
-        Watcher::new(&self.repo, &self.workdir, options)
+        Watcher::new(&self.opened, &self.workdir, options)
     }
 
     /// Start a frame over this working tree.
@@ -660,10 +664,7 @@ impl Worktree {
         let mut filter = self.filter.borrow_mut();
         let filter = match filter.as_mut() {
             Some(filter) => filter,
-            None => {
-                let reopened = self.reopened.borrow();
-                filter.insert(Filter::new(reopened.as_ref().unwrap_or(&self.repo))?)
-            }
+            None => filter.insert(Filter::new(&self.repo())?),
         };
         f(filter)
     }
@@ -689,7 +690,8 @@ impl Worktree {
         let missing = || Error::MissingBlob {
             path: path.to_owned(),
         };
-        let object = self.repo.find_object(id).map_err(|_| missing())?;
+        let repo = self.repo();
+        let object = repo.find_object(id).map_err(|_| missing())?;
         Ok(object.try_into_blob().map_err(|_| missing())?.take_data())
     }
 
@@ -699,23 +701,28 @@ impl Worktree {
         [fingerprint(config), fingerprint(attributes)]
     }
 
-    /// Reopen the repository for the filter when `now` differs from what it was
-    /// opened under. A config that does not parse, as one mid-write does, keeps
-    /// the previous one and is tried again on the next tick.
-    pub(crate) fn follow_config(&self, now: [Option<Fingerprint>; 2]) {
-        if now == self.opened_prints.get() {
+    /// Reload the repository's configuration when `now` differs from the config
+    /// it last loaded. A reload that fails, as one mid-write does, is tried again
+    /// on the next tick.
+    pub(crate) fn follow_config(&self, now: Option<Fingerprint>) {
+        // Missing or empty is a writer between two steps, not a config.
+        if now == self.loaded_config.get() || now.is_none_or(Fingerprint::is_empty) {
             return;
         }
-        let mut repo = self.repo.clone();
+        // A borrow still held is a reader mid-call, and the next tick retries.
+        let Ok(mut repo) = self.live.try_borrow_mut() else {
+            return;
+        };
+        // `reload` replaces the repository only once the open succeeds.
         if repo.reload().is_ok() {
-            *self.reopened.borrow_mut() = Some(repo);
-            self.opened_prints.set(now);
+            self.loaded_config.set(now);
+            self.reloads.set(self.reloads.get() + 1);
+            self.invalidate_filter();
         }
     }
 
-    /// What the files that shape the filter looked like when it was last opened.
-    pub(crate) fn opened_prints(&self) -> [Option<Fingerprint>; 2] {
-        self.opened_prints.get()
+    pub(crate) fn reloads(&self) -> u64 {
+        self.reloads.get()
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
