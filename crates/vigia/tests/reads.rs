@@ -1022,7 +1022,7 @@ fn top_heat(view: &vigia::View) -> [HeatBucket; HEAT_BUCKETS] {
 }
 
 #[test]
-fn heat_projected_once_per_diff() {
+fn heat_once_per_diff() {
     let scratch = Scratch::large_diff("shell-reads-heat-once", FEW_FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1063,13 +1063,19 @@ fn heat_projected_once_per_diff() {
     let mut restored = generated(LINES, "before");
     restored.insert_str(0, "// edited\n");
     scratch.write("src/mod_0.rs", restored);
+    let before = frame.stats();
     settle(&mut frame);
+    let rewritten = delta(before, frame.stats()).computed;
+    assert_eq!(
+        rewritten, 1,
+        "the rewrite recomputed {rewritten} diffs, not one"
+    );
 
     let (third, cost) = view_once(&mut frame);
     assert_eq!(
-        cost.derived, 1,
-        "one file was rewritten and {} strips were projected: a recomputed diff \
-         projects once, and nothing else does",
+        cost.derived, rewritten,
+        "{rewritten} diff was recomputed and {} strips were projected: a recomputed \
+         diff projects once, and nothing else does",
         cost.derived
     );
     let moved = top_heat(&third);
