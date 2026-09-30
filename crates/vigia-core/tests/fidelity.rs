@@ -879,3 +879,118 @@ fn editing_a_symlinks_target_leaves_the_link_out_of_the_changed_set() {
         "editing a link's target reported the link as changed, which git does not"
     );
 }
+
+/// What `measure` counts, as the fields a drawn diff reports.
+fn counted(span: &vigia_core::FileSpan) -> (u32, u32, u32, u32, bool) {
+    (
+        span.hunks,
+        span.lines,
+        span.added,
+        span.removed,
+        span.binary,
+    )
+}
+
+/// The same fields off a computed diff. A span's lines are the rows its hunks
+/// draw, where a diff's `lines` is the whole file.
+fn drawn(diff: &vigia_core::FileDiff) -> (u32, u32, u32, u32, bool) {
+    let rows: usize = diff.hunks.iter().map(|hunk| hunk.lines.len()).sum();
+    (
+        u32::try_from(diff.hunks.len()).expect("a sane hunk count"),
+        u32::try_from(rows).expect("a sane row count"),
+        diff.added,
+        diff.removed,
+        diff.binary,
+    )
+}
+
+/// The height a change is measured at is the diff it draws, over a real
+/// worktree: a modification, an addition, a removal, a rename, a binary file and
+/// a last line with no newline.
+#[test]
+fn measure_matches_diff() {
+    let scratch = Scratch::new("measure-fidelity");
+    scratch.write("modified.txt", numbered_lines(40));
+    scratch.write("removed.txt", numbered_lines(9));
+    scratch.write("moved.txt", numbered_lines(12));
+    scratch.write("image.bin", "a\u{0}b\n");
+    scratch.write("tail.txt", "one\ntwo");
+    scratch.commit_all("initial");
+
+    scratch.write(
+        "modified.txt",
+        numbered_lines(40).replace("line 7\n", "seven\n"),
+    );
+    scratch.remove("removed.txt");
+    scratch.write("added.txt", numbered_lines(3));
+    std::fs::rename(
+        scratch.path_of("moved.txt"),
+        scratch.path_of("elsewhere.txt"),
+    )
+    .expect("move the fixture file");
+    scratch.write("image.bin", "a\u{0}c\n");
+    scratch.write("tail.txt", "one\ntwo\nthree");
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    assert!(
+        changes.len() >= 6,
+        "the fixture lost a change: {changes:#?}"
+    );
+    for change in &changes {
+        let span = worktree.measure(change).expect("measure");
+        let diff = worktree.diff(change).expect("diff");
+        assert_eq!(
+            counted(&span),
+            drawn(&diff),
+            "{} measures (hunks, lines, added, removed, binary) differently from the diff it draws",
+            change.path
+        );
+    }
+}
+
+/// A file deleted between the walk and the measure costs its height, not the
+/// frame: the measuring twin of `one_unreadable_path_does_not_end_the_stream`.
+#[test]
+fn unreadable_measure_degrades() {
+    let scratch = Scratch::new("measure-resilience");
+    scratch.write("a.txt", "one\n");
+    scratch.write("b.txt", "two\n");
+    scratch.commit_all("initial");
+    scratch.write("a.txt", "one changed\n");
+    scratch.write("b.txt", "two changed\n");
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    scratch.remove("a.txt");
+    for change in &changes {
+        worktree
+            .measure(change)
+            .unwrap_or_else(|e| panic!("measuring {} after deletion failed: {e}", change.path));
+    }
+}
+
+/// A removed binary file, where only the old side has bytes to sniff, measures
+/// and draws as binary.
+#[test]
+fn binary_removal_measures() {
+    let scratch = Scratch::new("measure-binary-removal");
+    scratch.write("image.bin", "a\u{0}b\n");
+    scratch.commit_all("initial");
+    scratch.remove("image.bin");
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "image.bin")
+        .expect("the removal is listed");
+    assert!(
+        worktree.measure(change).expect("measure").binary,
+        "the height took a binary removal as text"
+    );
+    assert!(
+        worktree.diff(change).expect("diff").binary,
+        "the diff took a binary removal as text"
+    );
+}
