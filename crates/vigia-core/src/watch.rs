@@ -1,6 +1,6 @@
 //! The watch and coalesce engine: I1.
 
-use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
@@ -48,7 +48,7 @@ pub struct Tick {
     /// The distinct files written in this tick, spelled the way
     /// [`crate::FileChange::path`] spells them.
     pub paths: Vec<String>,
-    /// How many further paths this burst touched past [`HISTORY_PATHS`].
+    /// How many paths this burst evicted to stay within [`HISTORY_PATHS`].
     pub dropped: u32,
 }
 
@@ -62,7 +62,7 @@ impl Tick {
 /// The paths accumulated while a burst is still being coalesced.
 #[derive(Debug, Default)]
 struct Burst {
-    seen: HashSet<String>,
+    order: VecDeque<String>,
     newest: Option<String>,
     dropped: u32,
 }
@@ -70,30 +70,30 @@ struct Burst {
 impl Burst {
     /// Record a followable path, which by construction is the newest so far.
     fn push(&mut self, path: String) {
-        if !self.seen.contains(&path) {
-            if self.seen.len() >= HISTORY_PATHS {
-                // Displace something rather than refuse this one. Refusing would
-                // eventually refuse the newest path, and losing that is losing follow
-                // mode's answer at the exact moment it had one.
-                let victim = self.seen.iter().next().cloned();
-                if let Some(victim) = victim {
-                    self.seen.remove(&victim);
-                }
-                self.dropped += 1;
-            }
-            self.seen.insert(path.clone());
+        if self.order.contains(&path) {
+            self.newest = Some(path);
+            return;
         }
+        if self.order.len() >= HISTORY_PATHS {
+            // Lose the oldest. Refusing the arrival would eventually refuse the
+            // newest, which is follow mode's answer.
+            self.order.pop_front();
+            self.dropped += 1;
+        }
+        self.order.push_back(path.clone());
         self.newest = Some(path);
     }
 
     /// The paths, with the newest moved to the end.
-    fn finish(mut self) -> (Vec<String>, u32) {
-        let Some(newest) = self.newest else {
-            return (self.seen.into_iter().collect(), self.dropped);
-        };
-        self.seen.remove(&newest);
-        let mut paths: Vec<String> = self.seen.into_iter().collect();
-        paths.push(newest);
+    fn finish(self) -> (Vec<String>, u32) {
+        let mut paths = Vec::from(self.order);
+        if let Some(pos) = self
+            .newest
+            .and_then(|newest| paths.iter().position(|path| *path == newest))
+        {
+            let newest = paths.remove(pos);
+            paths.push(newest);
+        }
         (paths, self.dropped)
     }
 }
@@ -1037,6 +1037,40 @@ mod tests {
 
             assert_eq!(paths.last().map(String::as_str), Some("f9999"));
             assert_eq!(paths.len(), HISTORY_PATHS, "and it did not exceed the cap");
+        }
+
+        /// The victim is fixed by arrival order, so the same burst drops the same
+        /// path on every run.
+        #[test]
+        fn oldest_evicted_first() {
+            let mut burst = Burst::default();
+            for n in 0..HISTORY_PATHS + 1 {
+                burst.push(format!("f{n}"));
+            }
+            let (paths, dropped) = burst.finish();
+            let expected: Vec<String> = (1..=HISTORY_PATHS).map(|n| format!("f{n}")).collect();
+            assert_eq!(dropped, 1);
+            assert_eq!(paths, expected);
+        }
+
+        /// Oldest by arrival, not least recently touched: the history store
+        /// orders by recency.
+        #[test]
+        fn repeat_keeps_its_place() {
+            let mut burst = Burst::default();
+            for n in 0..HISTORY_PATHS {
+                burst.push(format!("f{n}"));
+            }
+            burst.push("f0".to_owned());
+            burst.push(format!("f{HISTORY_PATHS}"));
+            let (paths, dropped) = burst.finish();
+
+            let expected: Vec<String> = (1..=HISTORY_PATHS).map(|n| format!("f{n}")).collect();
+            assert_eq!(dropped, 1);
+            assert_eq!(
+                paths, expected,
+                "the repeat moved f0 to the back, so f1 was evicted instead"
+            );
         }
     }
 }
