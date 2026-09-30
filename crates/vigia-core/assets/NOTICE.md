@@ -271,6 +271,8 @@ FNV-1a 64 of each vendored source as compiled into the dump. `tests/coverage.rs`
 - `V Module.sublime-syntax`: 191acf6e70755b7d
 - `V.sublime-syntax`: 502c6f9584a831dc
 
+The base set is two-face `0.5.2+bat-0.26.1`.
+
 ## two-face acknowledgements
 
 Most of the code for generating both theme and syntax dumps along with the
