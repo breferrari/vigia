@@ -2184,7 +2184,7 @@ fn intent_conflict_fails() {
 
 /// A squashed release PR with follow-up commits carries one real note and a
 /// `none` per later commit. The note is written and the `none` lines skipped;
-/// a release PR with only `none` still fails.
+/// a release PR with only `none` still fails, whatever other PRs carry.
 #[cfg(unix)]
 #[test]
 fn mixed_notes_pass() {
@@ -2205,7 +2205,8 @@ fn mixed_notes_pass() {
     let (passed, _, said) = changelog_entry(
         "only-none",
         "0.2.0",
-        "#41\trelease\tRelease-note: none\n",
+        "#40\trelease\tRelease-note: A real line\n\
+         #41\trelease\tRelease-note: none\n",
         CHANGELOG_BEFORE,
     );
     assert!(
