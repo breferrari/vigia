@@ -310,6 +310,9 @@ pub struct Frame<'w> {
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     attributes: HashMap<String, Option<Fingerprint>>,
+    /// The same for the files under the git dir that shape the filter, or
+    /// `None` before the first tick.
+    filter_sources: Option<[Option<Fingerprint>; 2]>,
     /// The failure [`Frame::diff`] last contained, held only so it can be handed
     /// back by reference.
     ///
@@ -356,6 +359,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
+            filter_sources: None,
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -431,7 +435,22 @@ impl<'w> Frame<'w> {
             .copied()
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
-        if !provable || attributes != self.attributes {
+        // Configuration and `info/attributes` are not in the changed set, so they
+        // are looked at on every tick: two stats against the walk's one per file.
+        let sources = self
+            .worktree
+            .filter_sources()
+            .map(|path| fingerprint(&path));
+        // Unlike the attributes above, a young mtime is not a reason to drop: a
+        // fresh repository's config is young on every tick of its first seconds,
+        // and a rewrite of the same length inside one mtime granule is the only
+        // change this misses.
+        let sources_moved = self.filter_sources.is_some_and(|before| before != sources);
+        if sources_moved {
+            self.worktree.reread_config()?;
+        }
+        self.filter_sources = Some(sources);
+        if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits
             // its own.
             self.stats.evicted += self.cached.len() as u64;
