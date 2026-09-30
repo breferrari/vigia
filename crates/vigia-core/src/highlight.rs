@@ -119,6 +119,9 @@ pub struct HighlightStats {
     /// Blocks quoted in a note's answer that were parsed. One per block per
     /// write, since the parse outlives every frame that draws the same text.
     pub quoted: u64,
+    /// Lines of those blocks run through the parser, a subset of `lines`: a
+    /// block is parsed as far as the last line a frame draws.
+    pub quoted_lines: u64,
 }
 
 /// Scope prefixes and what each one means, most specific first.
@@ -311,7 +314,11 @@ struct Quote {
     /// The grammar this block drew plain waiting for, where nothing had compiled
     /// one when it was parsed.
     deferred: Option<Scope>,
-    /// Spans per line, covering each line's bytes exactly.
+    /// Where the grammar stands after `lines`, so the next line asked for parses
+    /// from there. `None` where the block draws plain.
+    parse: Option<Side>,
+    /// Spans per line, covering each line's bytes exactly, filled forward to the
+    /// last line a frame drew and never rebuilt.
     lines: Vec<Vec<Span>>,
 }
 
@@ -940,6 +947,19 @@ impl Highlighter {
         path: &str,
         lines: &[String],
     ) -> &[Vec<Span>] {
+        self.quoted_to(id, ordinal, token, path, lines, lines.len())
+    }
+
+    fn quoted_to(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+        upto: usize,
+    ) -> &[Vec<Span>] {
+        let upto = upto.min(lines.len());
         let digest = digest_of(token, lines);
         let found = self
             .quotes
@@ -960,7 +980,6 @@ impl Highlighter {
                 // `&mut self` alone the borrow checker sees one whole thing.
                 let Self {
                     syntaxes,
-                    table,
                     quotes,
                     stats,
                     attempted,
@@ -985,30 +1004,12 @@ impl Highlighter {
                 let deferred = syntax
                     .map(|syntax| syntax.scope)
                     .filter(|scope| !compiled(*scope, attempted.as_deref()));
-                let parsed = syntax.filter(|_| deferred.is_none()).map(|syntax| {
-                    // One side, not two: a quoted block is one stream of text
-                    // and has no index side to keep apart from a working-tree one.
-                    let mut side = Side::new(syntax);
-                    let mut buf = String::new();
-                    lines
-                        .iter()
-                        .map(|text| {
-                            stats.lines += 1;
-                            stats.bytes += text.len() as u64;
-                            buf.clear();
-                            buf.push_str(text);
-                            buf.push('\n');
-                            side.spans(&buf, text, syntaxes, table)
-                        })
-                        .collect()
-                });
-                let filled = match parsed {
-                    Some(filled) => {
-                        stats.quoted += 1;
-                        filled
-                    }
-                    None => lines.iter().map(|text| plain(text.len())).collect(),
-                };
+                // One side, not two: a quoted block is one stream of text and
+                // has no index side to keep apart from a working-tree one.
+                let parse = syntax.filter(|_| deferred.is_none()).map(Side::new);
+                if parse.is_some() {
+                    stats.quoted += 1;
+                }
                 let built = Quote {
                     id: id.to_owned(),
                     ordinal,
@@ -1016,7 +1017,8 @@ impl Highlighter {
                     live: false,
                     missed: false,
                     deferred,
-                    lines: filled,
+                    parse,
+                    lines: Vec::new(),
                 };
                 // Over the stale entry where there was one, so a note whose answer
                 // the agent keeps rewriting does not walk down the vector.
@@ -1032,6 +1034,36 @@ impl Highlighter {
                 }
             }
         };
+
+        // Filled forward to the last line the frame draws and no further, so the
+        // frame a block arrives on costs a screenful of it.
+        {
+            let Self {
+                syntaxes,
+                table,
+                quotes,
+                stats,
+                ..
+            } = self;
+            let quote = &mut quotes[slot];
+            let mut buf = String::new();
+            while quote.lines.len() < upto {
+                let text = &lines[quote.lines.len()];
+                let spans = match &mut quote.parse {
+                    Some(side) => {
+                        stats.lines += 1;
+                        stats.quoted_lines += 1;
+                        stats.bytes += text.len() as u64;
+                        buf.clear();
+                        buf.push_str(text);
+                        buf.push('\n');
+                        side.spans(&buf, text, syntaxes, table)
+                    }
+                    None => plain(text.len()),
+                };
+                quote.lines.push(spans);
+            }
+        }
 
         // The demand, renewed every frame it is still true, which is `spans`'
         // own rule and not a flourish: every frame after the first hits the
@@ -1109,6 +1141,23 @@ impl Pass<'_> {
         lines: &[String],
     ) -> &[Vec<Span>] {
         self.highlighter.quoted(id, ordinal, token, path, lines)
+    }
+
+    /// [`Self::quoted`] as far as line `upto`: the block is parsed forward to
+    /// there and no further, so a frame drawing the top of a long answer parses
+    /// the lines it draws. What comes back covers the lines parsed so far, which
+    /// is at least `upto` of them.
+    pub fn quoted_to(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+        upto: usize,
+    ) -> &[Vec<Span>] {
+        self.highlighter
+            .quoted_to(id, ordinal, token, path, lines, upto)
     }
 
     /// Counters for what the highlighter has done, mid-pass.

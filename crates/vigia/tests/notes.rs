@@ -7382,3 +7382,127 @@ fn an_answer_with_carriage_returns_draws_no_stray_mark() {
         "the unprintable mark reached the pane: {under:?}"
     );
 }
+
+/// A note under the fixture's edited line, answered with `reply`.
+fn long_answered(reply: &str) -> vigia_core::Note {
+    vigia_core::Note {
+        id: "answered".to_owned(),
+        path: PATH.to_owned(),
+        side: Side::New,
+        line: 5,
+        text: EDITED.to_owned(),
+        first: None,
+        body: BODY.to_owned(),
+        status: Status::Seen,
+        reply: Some(reply.to_owned()),
+        written: std::time::SystemTime::now(),
+    }
+}
+
+/// The ordinary pane's body for one file.
+fn one_file_screen(app: &App) -> vigia::Body {
+    body_layout(
+        PANE,
+        &app.chrome(
+            "fixture",
+            None,
+            vigia::Stood {
+                standing: &Standing::Current,
+                now: 0,
+            },
+            Pointing::default(),
+            Default::default(),
+            "",
+        ),
+        1,
+        1,
+    )
+}
+
+#[test]
+fn an_answer_parses_what_it_draws() {
+    let scratch = fixture("notes-parse-window");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+    let rows = screen.diff as u64;
+
+    let block = support::generated(2_000, "quoted");
+    app.set_notes(vec![long_answered(&format!("```rust\n{block}```"))]);
+
+    let before = highlighter.stats().quoted_lines;
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let arrival = highlighter.stats().quoted_lines - before;
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the screen drew no note row, so nothing here was parsed for a reason"
+    );
+    assert!(
+        arrival >= 1,
+        "the arrival parsed nothing, so the block drew plain and this gate reads nothing"
+    );
+    assert!(
+        arrival <= rows,
+        "the arrival parsed {arrival} lines of a 2,000-line block for a {rows}-row body, \
+         so the parse follows the block rather than the window"
+    );
+
+    let before = highlighter.stats().quoted_lines;
+    app.view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert_eq!(
+        highlighter.stats().quoted_lines - before,
+        0,
+        "a second screen over the same answer parsed again"
+    );
+
+    app.apply(
+        Action::Scroll(isize::try_from(screen.diff).expect("a sane depth")),
+        &mut frame,
+        screen.diff,
+    )
+    .expect("scroll");
+    let before = highlighter.stats().quoted_lines;
+    app.view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    let further = highlighter.stats().quoted_lines - before;
+    assert!(
+        further <= rows,
+        "a screenful down parsed {further} more lines for a {rows}-row body"
+    );
+}
+
+#[test]
+fn note_rows_follow_the_window() {
+    let scratch = fixture("notes-rows-window");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+    let height = screen.diff;
+
+    app.set_notes(vec![long_answered(&support::generated(10_000, "prose"))]);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert_eq!(view.rows.len(), height, "the screen did not fill");
+    assert!(
+        matches!(view.rows.last(), Some(Row::Note { .. })),
+        "the screen's last row is not the answer's, so the answer is not what fills it"
+    );
+    assert!(
+        view.built >= 1 && view.built <= height,
+        "{} note rows were built for a {height}-row body over a 10,000-line answer, \
+         so the rows follow the answer rather than the window",
+        view.built
+    );
+}

@@ -527,6 +527,8 @@ struct Pin {
     /// Index into the logical rows.
     row: usize,
     id: String,
+    /// The file the note is on, whose grammar a block with no fence name takes.
+    path: String,
     body: String,
     reply: Option<Answer>,
     /// The word on the last body row.
@@ -543,9 +545,9 @@ struct Pin {
     resolved: bool,
 }
 
-/// Resolved where the notes are placed rather than in [`Pin::rows`], which the
-/// layout calls more than once a frame while it clamps: a quoted block's grammar
-/// is asked for on the frame the agent writes it and on no other.
+/// Resolved where the notes are placed, and parsed where its rows are kept: the
+/// clamp asks a quoted block's grammar as far as the last line it draws, in
+/// [`Answer::rows_in`], so the frame an answer arrives on parses a screenful.
 #[derive(Debug, Clone)]
 struct Answer {
     /// What the agent wrote, whole. B20 sends that rather than what was drawn,
@@ -554,31 +556,84 @@ struct Answer {
     parts: Vec<Part>,
 }
 
-/// A [`crate::quote::Chunk`] once its block has been through the highlighter.
+/// A [`crate::quote::Chunk`], its block numbered among the answer's so the
+/// highlighter keeps one parse per block.
 #[derive(Debug, Clone)]
 enum Part {
     Prose(String),
-    /// Spans are empty where no grammar answered.
     Code {
+        token: Option<String>,
+        ordinal: usize,
         lines: Vec<String>,
-        spans: Vec<Vec<Span>>,
     },
 }
 
 impl Answer {
-    fn rows(&self, room: usize) -> Vec<CodeRow> {
+    /// Rows one part takes at `room` columns, counted without building one.
+    fn part_count(part: &Part, room: usize) -> usize {
+        match part {
+            Part::Prose(text) => prose_count(text, room, true),
+            Part::Code { lines, .. } => crate::quote::code_row_count(lines, room),
+        }
+    }
+
+    /// Rows the answer takes at `room` columns, counted without building one.
+    fn count(&self, room: usize) -> usize {
+        let rows: usize = self
+            .parts
+            .iter()
+            .map(|part| Self::part_count(part, room))
+            .sum();
+        // A resolved note draws its answer and nothing else, so an answer with
+        // no rows of its own is one empty row rather than the whole note gone.
+        rows.max(1)
+    }
+
+    /// The answer's rows from the `skip`th, at most `take` of them. A quoted
+    /// block in the window has its grammar asked as far as its last drawn line,
+    /// and draws plain with no pass to ask.
+    fn rows_in(
+        &self,
+        room: usize,
+        skip: usize,
+        take: usize,
+        mut pass: Option<&mut Pass<'_>>,
+        id: &str,
+        path: &str,
+    ) -> Vec<CodeRow> {
         let mut out = Vec::new();
+        let mut passed = 0usize;
         for part in &self.parts {
+            if out.len() >= take {
+                break;
+            }
+            let rows = Self::part_count(part, room);
+            // Passed over whole, so none of its rows is built.
+            if passed + rows <= skip {
+                passed += rows;
+                continue;
+            }
+            let (from, want) = (skip.saturating_sub(passed), take - out.len());
             match part {
-                Part::Prose(text) => out.extend(prose_runs(text, room)),
-                Part::Code { lines, spans } => {
-                    out.extend(crate::quote::code_rows(lines, spans, room));
+                Part::Prose(text) => out.extend(prose_runs_in(text, room, from, want)),
+                Part::Code {
+                    token,
+                    ordinal,
+                    lines,
+                } => {
+                    let drawn = crate::quote::code_lines_in(lines, room, from, want);
+                    let spans: &[Vec<Span>] = match (pass.as_deref_mut(), drawn) {
+                        (Some(pass), Some(drawn)) => {
+                            pass.quoted_to(id, *ordinal, token.as_deref(), path, lines, drawn.end)
+                        }
+                        _ => &[],
+                    };
+                    out.extend(crate::quote::code_rows_in(lines, spans, room, from, want));
                 }
             }
+            passed += rows;
         }
-        // A resolved note draws its answer and nothing else, so an answer with
-        // no rows of its own is the whole note gone from the pane.
-        if out.is_empty() {
+        if passed == 0 && skip == 0 && take > 0 {
             out.push(CodeRow {
                 text: String::new(),
                 runs: Vec::new(),
@@ -589,41 +644,88 @@ impl Answer {
     }
 }
 
-/// [`prose_rows`] with each paragraph's backticked runs unwrapped and marked.
-/// Beside it rather than replacing it: the reader's own words go through that
-/// one, and a backtick they typed is a character they typed.
-fn prose_runs(text: &str, room: usize) -> Vec<CodeRow> {
-    crate::quote::lines_of(text)
-        .flat_map(|paragraph| {
-            let paragraph = crate::render::detabbed(paragraph);
-            let (paragraph, runs) = crate::quote::inline(&paragraph);
-            prose_pieces(&paragraph, room)
-                .into_iter()
-                .map(|piece| CodeRow {
-                    text: paragraph[piece.clone()].to_owned(),
-                    runs: crate::quote::rebase(&runs, &piece),
-                    indent: 0,
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
+/// Every row `text` breaks into at `room` columns, in order, as the paragraph
+/// it is a piece of, the piece, and the paragraph's runs where `inlined`
+/// unwrapped its backticks. Prose breaks at every newline, then at the last
+/// blank that fits, and inside a word only when the word alone is wider than
+/// the row; the blank a row breaks on is drawn on neither row, and empty text
+/// is one empty row, so a note with no body still has a row for its word.
+/// `each` answers whether to go on, so a count and a window are one walk
+/// stopped at different rows.
+fn prose_walk(
+    text: &str,
+    room: usize,
+    inlined: bool,
+    mut each: impl FnMut(&str, std::ops::Range<usize>, &[Run]) -> bool,
+) {
+    for paragraph in crate::quote::lines_of(text) {
+        let paragraph = crate::render::detabbed(paragraph);
+        let (paragraph, runs) = if inlined {
+            crate::quote::inline(&paragraph)
+        } else {
+            (std::borrow::Cow::Borrowed(&*paragraph), Vec::new())
+        };
+        for piece in prose_pieces(&paragraph, room) {
+            if !each(&paragraph, piece, &runs) {
+                return;
+            }
+        }
+    }
 }
 
-/// `text` in rows of at most `room` columns, broken the way prose breaks: at
-/// every newline, then at the last blank that fits, and inside a word only when
-/// the word alone is wider than the row. The blank a row breaks on is drawn on
-/// neither row. Empty text is one empty row, so a note with no body still has a
-/// row for its word.
-fn prose_rows(text: &str, room: usize) -> Vec<String> {
-    crate::quote::lines_of(text)
-        .flat_map(|paragraph| {
-            let paragraph = crate::render::detabbed(paragraph);
-            prose_pieces(&paragraph, room)
-                .into_iter()
-                .map(|piece| paragraph[piece].to_owned())
-                .collect::<Vec<_>>()
-        })
-        .collect()
+/// Rows `text` takes at `room` columns.
+fn prose_count(text: &str, room: usize, inlined: bool) -> usize {
+    let mut rows = 0usize;
+    prose_walk(text, room, inlined, |_, _, _| {
+        rows += 1;
+        true
+    });
+    rows
+}
+
+/// Columns the last row of `text` takes at `room` columns.
+fn last_prose_width(text: &str, room: usize) -> usize {
+    let mut last = 0usize;
+    prose_walk(text, room, false, |paragraph, piece, _| {
+        last = crate::render::width_of(&paragraph[piece]);
+        true
+    });
+    last
+}
+
+/// The agent's prose from the `skip`th row, at most `take` rows, each
+/// paragraph's backticked runs unwrapped and marked. Beside [`prose_rows_in`]
+/// rather than replacing it: the reader's own words go through that one, and a
+/// backtick they typed is a character they typed.
+fn prose_runs_in(text: &str, room: usize, skip: usize, take: usize) -> Vec<CodeRow> {
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    prose_walk(text, room, true, |paragraph, piece, runs| {
+        if at >= skip {
+            out.push(CodeRow {
+                text: paragraph[piece.clone()].to_owned(),
+                runs: crate::quote::rebase(runs, &piece),
+                indent: 0,
+            });
+        }
+        at += 1;
+        out.len() < take
+    });
+    out
+}
+
+/// `text` in rows of at most `room` columns, from the `skip`th, at most `take`.
+fn prose_rows_in(text: &str, room: usize, skip: usize, take: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    prose_walk(text, room, false, |paragraph, piece, _| {
+        if at >= skip {
+            out.push(paragraph[piece].to_owned());
+        }
+        at += 1;
+        out.len() < take
+    });
+    out
 }
 
 /// Where one paragraph breaks into rows of at most `room` columns, as byte
@@ -760,53 +862,115 @@ fn answer_row(rows: &mut Vec<Row>, pin: &Pin, lead: NoteLead, drawn: CodeRow, la
     });
 }
 
+/// The widths a note draws at under a content width of `content`: the room
+/// beside the lead, whether the body is boxed, and the room inside the box.
+fn note_widths(word: &str, content: usize) -> (usize, bool, usize) {
+    (
+        content.saturating_sub(NOTE_LEAD),
+        content >= crate::render::edge_width(word),
+        content.saturating_sub(BOX_FRAME),
+    )
+}
+
 impl Pin {
-    /// The display rows this note takes under a content width of `content`.
-    fn rows(&self, content: usize) -> Vec<Row> {
-        let room = content.saturating_sub(NOTE_LEAD);
-        let boxed = content >= crate::render::edge_width(self.word);
-        let inner = content.saturating_sub(BOX_FRAME);
-        let pieces = |text: &str| prose_rows(text, room);
-        let mut rows = Vec::new();
-        if !self.resolved || self.reply.is_none() {
-            if boxed {
-                row(&mut rows, self, NoteLead::Top, String::new(), false);
-                for text in prose_rows(&self.body, inner) {
-                    row(&mut rows, self, NoteLead::Body, text, false);
-                }
-                row(
-                    &mut rows,
-                    self,
-                    NoteLead::Bottom,
-                    self.word.to_owned(),
-                    true,
-                );
+    /// Whether the word takes a row of its own under the bar: the last body row
+    /// has no room for it, and the reader's words are never cut to fit it.
+    fn word_takes_a_row(&self, room: usize) -> bool {
+        let last = last_prose_width(&self.body, room);
+        let gap = usize::from(last > 0);
+        self.word.len() <= room && last + gap + self.word.len() > room
+    }
+
+    /// Whether the body is drawn, which is every note but a resolved one that
+    /// carries an answer.
+    fn draws_body(&self) -> bool {
+        !self.resolved || self.reply.is_none()
+    }
+
+    /// The display rows this note takes under a content width of `content`,
+    /// counted without building one: the layout asks more than once a frame
+    /// while it clamps, and a note can be taller than the pane.
+    fn count(&self, content: usize) -> usize {
+        let (room, boxed, inner) = note_widths(self.word, content);
+        let mut rows = 0usize;
+        if self.draws_body() {
+            rows += if boxed {
+                2 + prose_count(&self.body, inner, false)
             } else {
-                let mut body = pieces(&self.body);
-                // The word shares the last row, or takes one of its own where
-                // that row has none: the reader's words are never cut to fit it.
-                let last = body
-                    .last()
-                    .map_or(0, |piece| crate::render::width_of(piece));
-                let gap = usize::from(last > 0);
-                if self.word.len() <= room && last + gap + self.word.len() > room {
-                    body.push(String::new());
+                prose_count(&self.body, room, false) + usize::from(self.word_takes_a_row(room))
+            };
+        }
+        if let Some(reply) = &self.reply {
+            rows += reply.count(room);
+        }
+        rows
+    }
+
+    /// The display rows of this note from the `skip`th, at most `take` of them,
+    /// in the order and count [`Self::count`] gives.
+    fn rows_in(
+        &self,
+        content: usize,
+        skip: usize,
+        take: usize,
+        pass: Option<&mut Pass<'_>>,
+    ) -> Vec<Row> {
+        let (room, boxed, inner) = note_widths(self.word, content);
+        let mut rows = Vec::new();
+        let mut passed = 0usize;
+        let mut pass = pass;
+        // Appends what the window keeps of one section of `count` rows, `build`
+        // taking the section's own skip and take.
+        let mut section =
+            |rows: &mut Vec<Row>,
+             count: usize,
+             build: &mut dyn FnMut(&mut Vec<Row>, usize, usize)| {
+                if passed + count > skip && rows.len() < take {
+                    build(rows, skip.saturating_sub(passed), take - rows.len());
                 }
-                let count = body.len();
-                for (piece, text) in body.into_iter().enumerate() {
-                    row(&mut rows, self, NoteLead::Bar, text, piece + 1 == count);
-                }
+                passed += count;
+            };
+        if self.draws_body() {
+            if boxed {
+                section(&mut rows, 1, &mut |rows, _, _| {
+                    row(rows, self, NoteLead::Top, String::new(), false);
+                });
+                let body = prose_count(&self.body, inner, false);
+                section(&mut rows, body, &mut |rows, from, want| {
+                    for text in prose_rows_in(&self.body, inner, from, want) {
+                        row(rows, self, NoteLead::Body, text, false);
+                    }
+                });
+                section(&mut rows, 1, &mut |rows, _, _| {
+                    row(rows, self, NoteLead::Bottom, self.word.to_owned(), true);
+                });
+            } else {
+                let own = self.word_takes_a_row(room);
+                let count = prose_count(&self.body, room, false) + usize::from(own);
+                section(&mut rows, count, &mut |rows, from, want| {
+                    let mut texts = prose_rows_in(&self.body, room, from, want);
+                    // The word's own row is the one past the body's last.
+                    if own && texts.len() < want {
+                        texts.push(String::new());
+                    }
+                    for (piece, text) in texts.into_iter().enumerate() {
+                        row(rows, self, NoteLead::Bar, text, from + piece + 1 == count);
+                    }
+                });
             }
         }
         if let Some(reply) = &self.reply {
-            for (piece, drawn) in reply.rows(room).into_iter().enumerate() {
-                let lead = if piece == 0 {
-                    NoteLead::Reply
-                } else {
-                    NoteLead::Blank
-                };
-                answer_row(&mut rows, self, lead, drawn, false);
-            }
+            section(&mut rows, reply.count(room), &mut |rows, from, want| {
+                let drawn = reply.rows_in(room, from, want, pass.take(), &self.id, &self.path);
+                for (piece, drawn) in drawn.into_iter().enumerate() {
+                    let lead = if from + piece == 0 {
+                        NoteLead::Reply
+                    } else {
+                        NoteLead::Blank
+                    };
+                    answer_row(rows, self, lead, drawn, false);
+                }
+            });
         }
         rows
     }
@@ -895,24 +1059,22 @@ fn notes_at<'n>(
     held
 }
 
-/// `reply` split into words and quoted blocks, each block through the grammar
-/// its fence names or the note's own file's. The ordinal is the block's place
+/// `reply` split into words and quoted blocks. The ordinal is the block's place
 /// among this answer's, so an answer can quote twice and each half keep a parse.
-fn answer_of(note: &Note, reply: &str, mut highlighter: Option<&mut Pass<'_>>) -> Answer {
+/// Nothing is parsed here: the rows the clamp keeps ask for their grammar.
+fn answer_of(reply: &str) -> Answer {
     let mut parts = Vec::new();
     let mut ordinal = 0usize;
     for chunk in crate::quote::chunks(reply) {
         match chunk {
             Chunk::Prose(text) => parts.push(Part::Prose(text)),
             Chunk::Code { token, lines } => {
-                let spans = match highlighter.as_deref_mut() {
-                    Some(pass) => pass
-                        .quoted(&note.id, ordinal, token.as_deref(), &note.path, &lines)
-                        .to_vec(),
-                    None => Vec::new(),
-                };
+                parts.push(Part::Code {
+                    token,
+                    ordinal,
+                    lines,
+                });
                 ordinal += 1;
-                parts.push(Part::Code { lines, spans });
             }
         }
     }
@@ -1160,6 +1322,9 @@ pub struct View {
     pub read: usize,
     /// [`FileEntry`] values built for the record rather than for a row.
     pub recorded: usize,
+    /// Note rows built for this screen, which the window bounds: a note taller
+    /// than the pane is counted whole and built only where the clamp keeps it.
+    pub built: usize,
     /// The busiest bucket any tracked file holds, which every sparkline on this
     /// screen is drawn against.
     pub scale: Scale,
@@ -1518,6 +1683,7 @@ impl View {
             total_rows: 0,
             churn: None,
             rows_above: 0,
+            built: 0,
             files,
             hidden: frame.hidden(),
             // Until the walk below runs, the request is passed through with only its
@@ -1803,7 +1969,15 @@ impl View {
                 && (anchored || single || (view.top.row > 0 && !view.landed))
                 && view.top != floor);
 
-        let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked, rows);
+        let trimmed = view.wrap_rows(
+            width,
+            wrap,
+            height,
+            at_bottom,
+            &walked,
+            rows,
+            highlight.then_some(&mut highlighter),
+        );
         view.ended &= index >= stop && consumed;
 
         // After the walk, because only the walk knows where the diff landed.
@@ -2036,10 +2210,7 @@ impl View {
             crate::render::content_width(gutter, width)
         };
         let mut under: usize = if drawn {
-            // Counted by building, where a diff line is counted by its breaks
-            // alone: a note's row shape follows its text, its state and its width
-            // at once, and a second expression of it is one the clamp can differ on.
-            walked.pins.iter().map(|pin| pin.rows(content).len()).sum()
+            walked.pins.iter().map(|pin| pin.count(content)).sum()
         } else {
             0
         };
@@ -2066,6 +2237,7 @@ impl View {
     /// the bottom clamp trimmed off the front: [`Self::top`] still names the first.
     /// The display rows are a line's continuations and, when `drawn`, the rows of
     /// the notes pinned under it, and both are counted in the same unit.
+    #[allow(clippy::too_many_arguments)]
     fn wrap_rows(
         &mut self,
         width: usize,
@@ -2074,6 +2246,7 @@ impl View {
         at_bottom: bool,
         walked: &Walked,
         drawn: bool,
+        mut pass: Option<&mut Pass<'_>>,
     ) -> usize {
         let pins = &walked.pins;
         // Only where a width was passed, so a caller that named none leaves
@@ -2101,24 +2274,32 @@ impl View {
                 _ => Vec::new(),
             })
             .collect();
-        // Built once, so the clamp and the emit below agree on their count.
-        let mut under: Vec<Vec<Row>> = vec![Vec::new(); breaks.len()];
-        if drawn {
-            for pin in pins {
-                under[pin.row].extend(pin.rows(content));
-            }
+        // Counted here and built below, only as far as the window reaches: a
+        // note can be taller than the pane, and the count is what the clamp
+        // needs of the rows it drops.
+        let counts: Vec<usize> = if drawn {
+            pins.iter().map(|pin| pin.count(content)).collect()
+        } else {
+            Vec::new()
+        };
+        let mut under: Vec<usize> = vec![0; breaks.len()];
+        for (pin, count) in pins.iter().zip(&counts) {
+            under[pin.row] += count;
         }
         // The box stands first under its line, whatever else is pinned there,
-        // and whether or not the rows are shown: a mode is not a toggle.
+        // and whether or not the rows are shown: a mode is not a toggle. Built
+        // whole: it is the reader's draft.
         let mut boxed_rows = 0usize;
         let mut caret_at = 0usize;
+        let mut box_built: Vec<Row> = Vec::new();
         if let Some(boxed) = &walked.boxed {
             let (rows, caret) = box_rows(boxed, content);
             boxed_rows = rows.len();
             caret_at = caret;
-            under[boxed.row].splice(0..0, rows);
+            under[boxed.row] += boxed_rows;
+            box_built = rows;
         }
-        let cost = |at: usize| breaks[at].len() + 1 + under[at].len();
+        let cost = |at: usize| breaks[at].len() + 1 + under[at];
         let total: usize = (0..breaks.len()).map(cost).sum();
 
         // Nothing on this screen wraps and nothing sits under a row, so the rows
@@ -2201,6 +2382,7 @@ impl View {
         // The display row each logical row's own first piece landed on, so the
         // marks and the segments can be carried across the split.
         let mut landed: Vec<Option<usize>> = vec![None; breaks.len()];
+        let mut built = 0usize;
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
                 continue;
@@ -2283,13 +2465,35 @@ impl View {
                     }
                 }
             }
-            for note_row in std::mem::take(&mut under[at]) {
+            // The rows under this line, as far as the window reaches: the box
+            // whole and then skipped like any row, each note from the first row
+            // it keeps.
+            let mut pending: Vec<Row> = Vec::new();
+            if walked.boxed.as_ref().is_some_and(|boxed| boxed.row == at) {
+                for row in std::mem::take(&mut box_built) {
+                    if skip > 0 {
+                        skip -= 1;
+                    } else {
+                        pending.push(row);
+                    }
+                }
+            }
+            for (pin, &count) in pins.iter().zip(&counts) {
+                if pin.row != at {
+                    continue;
+                }
+                let from = skip.min(count);
+                skip -= from;
+                let want = height.saturating_sub(out.len() + pending.len());
+                if from < count && want > 0 {
+                    let rows = pin.rows_in(content, from, want, pass.as_deref_mut());
+                    built += rows.len();
+                    pending.extend(rows);
+                }
+            }
+            for note_row in pending {
                 if out.len() >= height {
                     break;
-                }
-                if skip > 0 {
-                    skip -= 1;
-                    continue;
                 }
                 // Recorded as a wrapped line's is: the rows hold prose broken at
                 // blanks drawn on neither side, so rejoining them spaces it wrong.
@@ -2309,6 +2513,7 @@ impl View {
         }
         self.rows = out;
         self.whole = whole;
+        self.built = built;
         self.notes.marked = pins
             .iter()
             .filter(|pin| pin.marks)
@@ -2600,7 +2805,7 @@ impl View {
             self.notes.segments.push((first, diff.path.clone(), origin));
         }
         if !notes.is_empty() {
-            pin(pins, &notes, diff, heading, &placed, highlighter);
+            pin(pins, &notes, diff, heading, &placed);
         }
         if let Some(stand_in) = boxed {
             *box_pin = place_box(stand_in, diff, heading, &placed);
@@ -2762,7 +2967,6 @@ fn pin(
     diff: &FileDiff,
     heading: Option<usize>,
     placed: &[(Side, u32, usize)],
-    mut highlighter: Option<&mut Pass<'_>>,
 ) {
     let mut rows = Rows::of(diff);
     for note in notes {
@@ -2782,11 +2986,9 @@ fn pin(
         pins.push(Pin {
             row,
             id: note.id.clone(),
+            path: note.path.clone(),
             body: note.body.clone(),
-            reply: note
-                .reply
-                .as_deref()
-                .map(|reply| answer_of(note, reply, highlighter.as_deref_mut())),
+            reply: note.reply.as_deref().map(answer_of),
             word,
             faded,
             marks,

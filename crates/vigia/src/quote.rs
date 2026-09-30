@@ -209,28 +209,59 @@ pub struct CodeRow {
     pub indent: usize,
 }
 
-/// A quoted block's lines as rows of at most `room` columns, with `spans` from
-/// the grammar covering each line.
+/// Where `line` breaks to fit `room` columns, or nowhere with no room to break
+/// into, in which case the row is the line and the painter clips it. There is
+/// never a cut per byte, so the line's own length bounds the walk without
+/// inventing a number for it.
+fn cuts_of(line: &str, room: usize) -> Vec<usize> {
+    if room == 0 {
+        return Vec::new();
+    }
+    crate::render::breaks_of(line, room, line.len())
+}
+
+/// Rows a quoted block takes at `room` columns, counted from its breaks alone.
 #[must_use]
-pub fn code_rows(lines: &[String], spans: &[Vec<Span>], room: usize) -> Vec<CodeRow> {
+pub fn code_row_count(lines: &[String], room: usize) -> usize {
+    lines.iter().map(|line| 1 + cuts_of(line, room).len()).sum()
+}
+
+/// A quoted block's lines as rows of at most `room` columns, with `spans` from
+/// the grammar covering each line: the rows from the `skip`th, at most `take`
+/// of them, built from the first line that reaches the window and no earlier
+/// one. A line's spans are plain where `spans` stops short of it.
+#[must_use]
+pub fn code_rows_in(
+    lines: &[String],
+    spans: &[Vec<Span>],
+    room: usize,
+    skip: usize,
+    take: usize,
+) -> Vec<CodeRow> {
     let mut out = Vec::new();
+    let mut passed = 0usize;
     for (at, line) in lines.iter().enumerate() {
-        let runs = runs_of(spans.get(at).map_or(&[][..], Vec::as_slice), line.len());
-        // No room to break into, so the row is the line and the painter clips it.
-        if room == 0 {
-            out.push(CodeRow {
-                text: line.clone(),
-                runs,
-                indent: 0,
-            });
+        if out.len() >= take {
+            break;
+        }
+        let cuts = cuts_of(line, room);
+        // Passed over whole, so its runs are never built.
+        if passed + cuts.len() < skip {
+            passed += cuts.len() + 1;
             continue;
         }
-        // There is never a cut per byte, so the line's own length bounds the walk
-        // without inventing a number for it.
-        let cuts = crate::render::breaks_of(line, room, line.len());
+        let runs = runs_of(spans.get(at).map_or(&[][..], Vec::as_slice), line.len());
         let indent = crate::render::indent_of(line, room);
         let mut start = 0usize;
         for cut in cuts.iter().copied().chain(std::iter::once(line.len())) {
+            if passed < skip {
+                passed += 1;
+                start = cut;
+                continue;
+            }
+            if out.len() >= take {
+                break;
+            }
             out.push(CodeRow {
                 text: line[start..cut].to_owned(),
                 runs: merged(rebase(&runs, &(start..cut))),
@@ -242,6 +273,33 @@ pub fn code_rows(lines: &[String], spans: &[Vec<Span>], room: usize) -> Vec<Code
         }
     }
     out
+}
+
+/// The lines whose rows a window of [`code_rows_in`] draws, as `first..last`,
+/// or `None` where the window falls past the block.
+#[must_use]
+pub fn code_lines_in(
+    lines: &[String],
+    room: usize,
+    skip: usize,
+    take: usize,
+) -> Option<Range<usize>> {
+    if take == 0 {
+        return None;
+    }
+    let mut passed = 0usize;
+    let mut first = None;
+    for (at, line) in lines.iter().enumerate() {
+        let rows = 1 + cuts_of(line, room).len();
+        if passed + rows > skip {
+            first.get_or_insert(at);
+        }
+        passed += rows;
+        if passed >= skip + take {
+            return first.map(|first| first..at + 1);
+        }
+    }
+    first.map(|first| first..lines.len())
 }
 
 /// One run per span, and the whole line plain where the highlighter gave none.

@@ -610,6 +610,7 @@ pub fn highlight_delta(before: HighlightStats, after: HighlightStats) -> Highlig
         bytes: after.bytes - before.bytes,
         evicted: after.evicted - before.evicted,
         quoted: after.quoted - before.quoted,
+        quoted_lines: after.quoted_lines - before.quoted_lines,
     }
 }
 
