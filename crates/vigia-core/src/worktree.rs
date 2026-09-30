@@ -8,7 +8,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
-use crate::frame::Frame;
+use crate::frame::{Fingerprint, Frame, fingerprint};
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
 use crate::standing::Standing;
@@ -46,7 +46,7 @@ pub struct Worktree {
     filter: RefCell<Option<Filter>>,
     /// The repository reopened after its configuration changed, which the filter
     /// is built from. `repo` keeps the configuration it was opened with.
-    reread: RefCell<Option<gix::Repository>>,
+    reopened: RefCell<Option<gix::Repository>>,
     /// The files under the git dir that shape the clean filter: the
     /// configuration and `info/attributes`.
     filter_sources: [PathBuf; 2],
@@ -74,7 +74,7 @@ impl Worktree {
             repo,
             workdir,
             filter: RefCell::new(None),
-            reread: RefCell::new(None),
+            reopened: RefCell::new(None),
             filter_sources,
             deleted: Cell::new(false),
         })
@@ -647,8 +647,8 @@ impl Worktree {
         let filter = match filter.as_mut() {
             Some(filter) => filter,
             None => {
-                let reread = self.reread.borrow();
-                filter.insert(Filter::new(reread.as_ref().unwrap_or(&self.repo))?)
+                let reopened = self.reopened.borrow();
+                filter.insert(Filter::new(reopened.as_ref().unwrap_or(&self.repo))?)
             }
         };
         f(filter)
@@ -679,18 +679,19 @@ impl Worktree {
         Ok(object.try_into_blob().map_err(|_| missing())?.take_data())
     }
 
-    /// The files under the git dir that shape the clean filter.
-    pub(crate) fn filter_sources(&self) -> &[PathBuf; 2] {
-        &self.filter_sources
+    /// What the files under the git dir that shape the clean filter look like now.
+    pub(crate) fn filter_prints(&self) -> [Option<Fingerprint>; 2] {
+        let [config, attributes] = &self.filter_sources;
+        [fingerprint(config), fingerprint(attributes)]
     }
 
     /// Reopen the repository for the filter, so a configuration written since
     /// it was opened applies to the next read. A config that does not parse,
     /// as one mid-write does, keeps the previous one.
-    pub(crate) fn reread_config(&self) {
+    pub(crate) fn reopen(&self) {
         let mut repo = self.repo.clone();
         if repo.reload().is_ok() {
-            *self.reread.borrow_mut() = Some(repo);
+            *self.reopened.borrow_mut() = Some(repo);
         }
     }
 

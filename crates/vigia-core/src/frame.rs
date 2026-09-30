@@ -35,7 +35,7 @@ pub struct FrameStats {
 
 /// A working-tree fingerprint that costs no read: size and modification time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fingerprint {
+pub(crate) struct Fingerprint {
     len: u64,
     mtime: SystemTime,
 }
@@ -181,14 +181,8 @@ struct Measured {
     answered: bool,
 }
 
-/// What the files that shape the clean filter look like now.
-fn filter_prints(worktree: &Worktree) -> [Option<Fingerprint>; 2] {
-    let [config, attributes] = worktree.filter_sources();
-    [fingerprint(config), fingerprint(attributes)]
-}
-
 /// Fingerprint a working-tree file, or `None` when it cannot be.
-fn fingerprint(path: &Path) -> Option<Fingerprint> {
+pub(crate) fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let meta = std::fs::symlink_metadata(path).ok()?;
     Some(Fingerprint {
         len: meta.len(),
@@ -364,7 +358,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
-            filter_sources: filter_prints(worktree),
+            filter_sources: worktree.filter_prints(),
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -442,10 +436,10 @@ impl<'w> Frame<'w> {
             .all(|print| settled(print.mtime, taken_at));
         // No settle check here: a new repository's config is young for seconds.
         // Missed: a same-length rewrite inside one mtime granule.
-        let sources = filter_prints(self.worktree);
+        let sources = self.worktree.filter_prints();
         let sources_moved = sources != self.filter_sources;
         if sources_moved {
-            self.worktree.reread_config();
+            self.worktree.reopen();
         }
         self.filter_sources = sources;
         if !provable || attributes != self.attributes || sources_moved {

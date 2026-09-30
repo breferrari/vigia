@@ -509,9 +509,11 @@ fn normalising_costs_no_extra_read_or_probe() {
 }
 
 /// A running frame against a restarted one, after `change` rewrites something
-/// under `.git` that decides what the clean filter does to `a.txt`.
-fn follows_git_state(name: &str, change: impl Fn(&Scratch)) {
+/// under `.git` that decides what the clean filter does to `a.txt`. `setup`
+/// runs before the frame opens.
+fn follows_git_state(name: &str, setup: impl Fn(&Scratch), change: impl Fn(&Scratch)) {
     let scratch = one_line_changed(name);
+    setup(&scratch);
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -523,43 +525,73 @@ fn follows_git_state(name: &str, change: impl Fn(&Scratch)) {
             .position(|c| c.path == "a.txt")
             .expect("a.txt is changed")
     };
-    let (_, diff) = frame.diff(at(&frame)).expect("diff");
-    let stale = (diff.added, diff.removed, diff.binary);
+    let rows = |frame: &mut Frame| frame.height(|_, span| span.lines as usize).expect("height");
+    let read = |frame: &mut Frame| {
+        let height = rows(frame);
+        let (_, diff) = frame.diff(at(frame)).expect("diff");
+        (height, diff.added, diff.removed, diff.binary)
+    };
+    let stale = read(&mut frame);
+
+    // Carried before the change, or a frame that caches nothing passes below.
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    assert_eq!(read(&mut frame), stale, "an idle tick moved the diff");
+    let idle = delta(before, frame.stats());
+    assert_eq!(
+        (idle.computed, idle.measured),
+        (0, 0),
+        "an idle tick recomputed, so nothing is carried and this cannot tell a \
+         dropped cache from a kept one"
+    );
 
     change(&scratch);
 
     let restarted = scratch.worktree();
     let mut cold = restarted.frame();
     cold.advance().expect("advance");
-    let (_, fresh) = cold.diff(at(&cold)).expect("diff");
-    let truth = (fresh.added, fresh.removed, fresh.binary);
+    let truth = read(&mut cold);
     assert_ne!(
         truth, stale,
         "the control is wrong: the change has to move the diff"
     );
 
     frame.advance().expect("advance");
-    let (_, diff) = frame.diff(at(&frame)).expect("diff");
     assert_eq!(
-        (diff.added, diff.removed, diff.binary),
+        read(&mut frame),
         truth,
-        "the running frame kept a diff computed under git state that changed"
+        "the running frame kept a height or diff computed under git state that changed"
     );
+}
+
+/// The info/attributes file that marks `a.txt` binary.
+fn mark_binary(scratch: &Scratch) {
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
+        .expect("write info/attributes");
 }
 
 #[test]
 fn autocrlf_change_followed() {
-    follows_git_state("normalise-autocrlf", |scratch| {
-        scratch.git(&["config", "core.autocrlf", "false"]);
-    });
+    follows_git_state(
+        "normalise-autocrlf",
+        |_| {},
+        |scratch| {
+            scratch.git(&["config", "core.autocrlf", "false"]);
+        },
+    );
 }
 
 #[test]
 fn info_attributes_followed() {
-    follows_git_state("normalise-info-attributes", |scratch| {
-        std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
-        std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
-            .expect("write info/attributes");
+    follows_git_state("normalise-info-attributes", |_| {}, mark_binary);
+}
+
+#[test]
+fn info_attributes_removed() {
+    follows_git_state("normalise-info-removed", mark_binary, |scratch| {
+        std::fs::remove_file(scratch.path_of(".git/info/attributes"))
+            .expect("remove info/attributes");
     });
 }
 

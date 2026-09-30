@@ -515,3 +515,9 @@ Ruled 2026-09-04, reader ([#374](https://github.com/breferrari/vigia/issues/374)
 **The objection.** Without the total, a prose ceiling can be raised whenever it is convenient. That was already true. Visibility is the enforcement either way, because a raise stays a visible, reviewed line in a diff. The fact that most undercuts this ruling: `SPEC.md` grew 1,538 bytes over the same two days the ratchet was working. Every one of those bytes was argued for and paid for. The alternative is unbounded, so the ceiling stays, but it is softer than it looks, and that number shows it.
 
 `crates/vigia/tests/package.rs::no_ledger_carries_a_byte_ceiling` stops a ledger from being quietly returned to the budget. It names the two ledgers and fails with the reason, not with a number.
+
+## §5 — following config and info/attributes
+
+**Stat both files every tick, rather than the two other options #111 named.** Asking `gix` whether the attribute state it rebuilt differs from the last one is the correct question, but `gix` exposes no cheap identity for "the attribute state", and building one means hashing the resolved stack on every tick. Accepting the limit and documenting it was what shipped before, and it left a stale diff on screen until the file was touched again. Two stats a tick measured as noise (3.43ms against 3.46ms p50 over this repository, three interleaved runs each), so the cheapest option that works was taken.
+
+**No settle check on the two files, unlike the attributes files in the changed set.** A new repository's config is young for its first seconds, so requiring a settled modification time dropped the caches on every tick, and two reuse gates in `tests/frame.rs` failed. The cost is the one change it misses: a rewrite of the same length inside one modification-time granule.
