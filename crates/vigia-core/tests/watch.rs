@@ -790,3 +790,17 @@ fn hidden_dir_sleeps() {
         "a hidden directory made after arming woke the watch"
     );
 }
+
+/// A `git config` write with nothing else changing still ticks, since it can
+/// change what the clean filter makes of every file.
+#[test]
+fn config_write_ticks() {
+    let scratch = committed_scratch("watch-config");
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.git(&["config", "core.autocrlf", "false"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a config write produced no tick, so the pane never re-reads the filter"
+    );
+}

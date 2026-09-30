@@ -608,3 +608,31 @@ fn one_line_changed(name: &str) -> Scratch {
     );
     scratch
 }
+
+/// A frame built after the config changed, on a worktree opened before it,
+/// still diffs under the new config. A server that builds a frame per request
+/// lives exactly like this.
+#[test]
+fn late_frame_follows() {
+    let scratch = one_line_changed("normalise-late-frame");
+    let worktree = scratch.worktree();
+    scratch.git(&["config", "core.autocrlf", "false"]);
+
+    let diff_of = |worktree: &Worktree| {
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        let (_, diff) = frame.diff(at).expect("diff");
+        (diff.added, diff.removed)
+    };
+    let truth = diff_of(&scratch.worktree());
+    assert_eq!(
+        diff_of(&worktree),
+        truth,
+        "a frame built after the change diffed under the config the worktree opened with"
+    );
+}

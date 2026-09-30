@@ -358,7 +358,7 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
-            filter_sources: worktree.filter_prints(),
+            filter_sources: worktree.opened_prints(),
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -438,9 +438,7 @@ impl<'w> Frame<'w> {
         // Missed: a same-length rewrite inside one mtime granule.
         let sources = self.worktree.filter_prints();
         let sources_moved = sources != self.filter_sources;
-        if sources_moved {
-            self.worktree.reopen();
-        }
+        self.worktree.follow_config(sources);
         self.filter_sources = sources;
         if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits
