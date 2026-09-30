@@ -1090,9 +1090,12 @@ fn gitignore_edit_followed() {
 #[test]
 fn exclude_edit_mid_wait() {
     let scratch = committed_scratch("watch-exclude-mid-wait");
-    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
-    std::fs::write(scratch.path_of(".git/info/exclude"), "vigia-excluded/\n")
-        .expect("write exclude");
+    // Named by core.excludesFile under `.git`, where no event wakes the pane,
+    // so only the next path judged can notice the edit.
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let spelled = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &spelled]);
     scratch.write("vigia-excluded/keep", "x\n");
     let scratch = scratch.settled();
     let worktree = scratch.worktree();
@@ -1103,7 +1106,7 @@ fn exclude_edit_mid_wait() {
         std::thread::sleep(DELAY);
         std::fs::write(root.join("vigia-excluded/a.o"), "x\n").expect("write a.o");
         std::thread::sleep(DELAY);
-        std::fs::write(root.join(".git/info/exclude"), "\n").expect("clear exclude");
+        std::fs::write(root.join(".git/ignores"), "\n").expect("clear excludes");
         std::thread::sleep(DELAY);
         std::fs::write(root.join("vigia-excluded/b.o"), "x\n").expect("write b.o");
     });

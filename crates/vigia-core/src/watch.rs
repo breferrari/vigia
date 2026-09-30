@@ -165,7 +165,7 @@ pub struct Watcher<'repo> {
     /// event rather than two a path.
     rules_checked: bool,
     /// Whether this wait has tried a reload, so a config that keeps failing costs
-    /// one reload a wait rather than one a path. A config event clears it.
+    /// one reload a wait rather than one a path. A config write ends the wait.
     reload_tried: bool,
     /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
@@ -464,7 +464,6 @@ impl<'repo> Watcher<'repo> {
     fn config_event(&mut self, inside: &Path) {
         if inside == Path::new("config") {
             self.reload_due = true;
-            self.reload_tried = false;
         }
     }
 
