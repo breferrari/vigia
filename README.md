@@ -563,5 +563,3 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 ## 🤝 Contributing
 
 Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging and committing, branch browsing, comment threads or a GUI. [`ROADMAP.md`](ROADMAP.md#non-goals-permanent) lists them.
-
-Five issues are labelled [`good first issue`](https://github.com/breferrari/vigia/labels/good%20first%20issue).
