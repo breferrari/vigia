@@ -1789,12 +1789,20 @@ fn changelog_entry(
         .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
-    child
+    // A script that exits before reading everything closes the pipe first; its
+    // exit status and output are what the cases judge.
+    if let Err(e) = child
         .stdin
         .take()
         .expect("the child's stdin is a pipe")
         .write_all(subjects.as_bytes())
-        .expect("the subjects reach the script");
+    {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "the subjects reach the script: {e}"
+        );
+    }
     let out = child.wait_with_output().expect("the script exits");
 
     let left = read(&path);
