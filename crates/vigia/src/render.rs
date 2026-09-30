@@ -1,5 +1,6 @@
 //! Drawing a [`View`] into a buffer, and nothing else.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -3713,7 +3714,7 @@ impl Painter<'_> {
         &mut self,
         x: u16,
         y: u16,
-        runs: &[(String, Style)],
+        runs: &[(impl AsRef<str>, Style)],
         clipped: bool,
         limit: usize,
     ) {
@@ -3734,7 +3735,7 @@ impl Painter<'_> {
                 break;
             }
             marked_in = *style;
-            at = self.put(at, y, text, usize::from(end - at), *style);
+            at = self.put(at, y, text.as_ref(), usize::from(end - at), *style);
         }
 
         if clipped {
@@ -5196,7 +5197,7 @@ impl Painter<'_> {
     /// whether anything was left over.
     fn content_runs(
         &mut self,
-        runs: &mut Vec<(String, Style)>,
+        runs: &mut Vec<(Cow<'static, str>, Style)>,
         text: &str,
         spans: &[Span],
         content: usize,
@@ -5254,7 +5255,7 @@ impl Painter<'_> {
     #[allow(clippy::too_many_arguments)]
     fn push_split(
         &mut self,
-        runs: &mut Vec<(String, Style)>,
+        runs: &mut Vec<(Cow<'static, str>, Style)>,
         text: &str,
         range: std::ops::Range<usize>,
         class: Class,
@@ -5263,7 +5264,7 @@ impl Painter<'_> {
         emphasis: Option<(Color, &[std::ops::Range<u32>])>,
     ) -> bool {
         let plain = |painter: &mut Self,
-                     runs: &mut Vec<(String, Style)>,
+                     runs: &mut Vec<(Cow<'static, str>, Style)>,
                      column: &mut usize,
                      walked: &mut u64| {
             let piece = text.get(range.start..range.end).unwrap_or_default();
@@ -5309,7 +5310,7 @@ impl Painter<'_> {
     /// Add one run to a row, and say whether the pane cut it short.
     fn push_run(
         &mut self,
-        runs: &mut Vec<(String, Style)>,
+        runs: &mut Vec<(Cow<'static, str>, Style)>,
         piece: &str,
         class: Class,
         (column, walked): (&mut usize, &mut u64),
@@ -5331,7 +5332,7 @@ impl Painter<'_> {
             // composes with the pane.
             style = style.bg(bg);
         }
-        runs.push((printed.text, style));
+        runs.push((printed.text.into(), style));
         printed.clipped
     }
 
@@ -5425,10 +5426,17 @@ impl Painter<'_> {
         // pushes a handful of runs, and reserving for all three hundred is fourteen
         // kilobytes a row of churn.
         let mut runs = Vec::with_capacity((spans.len() + 3).min(room + 2));
-        runs.push((sigil.to_string(), sigil_style));
+        // The three common sigils borrow rather than allocate, on every row.
+        let sigil: Cow<'static, str> = match sigil {
+            '+' => "+".into(),
+            '-' => "-".into(),
+            ' ' => " ".into(),
+            other => other.to_string().into(),
+        };
+        runs.push((sigil, sigil_style));
 
         // The gap `assets/preview.svg` has drawn since before any of this existed.
-        runs.push((SIGIL_GAP.to_owned(), diff));
+        runs.push((SIGIL_GAP.into(), diff));
 
         // Tab stops are counted from the start of the line's own content, not from the
         // left edge of the screen.
@@ -5450,7 +5458,7 @@ impl Painter<'_> {
         // Neovim's `'breakindent'`, paid out of the tail's own budget.
         let indent = indent.min(content);
         if indent > 0 {
-            runs.push((" ".repeat(indent), Style::new()));
+            runs.push((" ".repeat(indent).into(), Style::new()));
         }
         let clipped = self.content_runs(&mut runs, text, spans, content - indent, emphasis);
         self.paint.rows += 1;
