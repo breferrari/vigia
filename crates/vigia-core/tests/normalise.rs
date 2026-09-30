@@ -297,7 +297,8 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     );
 }
 
-/// A configured external clean driver is not executed.
+/// A configured external clean driver is not executed, and its path reads as
+/// binary.
 #[test]
 fn an_external_clean_driver_is_never_run() {
     let scratch = Scratch::crlf_worktree("normalise-driver", None);
@@ -330,9 +331,10 @@ fn an_external_clean_driver_is_never_run() {
         .diff(a)
         .expect("a required driver we decline to run must not fail the frame");
 
-    assert_eq!(
-        (diff.added, diff.removed),
-        (1, 1),
+    // Without the driver the two sides are not comparable, so the path reads as
+    // binary rather than as a diff git would not draw.
+    assert!(
+        diff.binary && (diff.added, diff.removed) == (0, 0),
         "reported +{} −{}. 20/20 would mean the driver ran, which is a process \
          per file per frame and is what §6 forbids",
         diff.added,

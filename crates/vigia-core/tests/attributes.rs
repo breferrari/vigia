@@ -88,3 +88,47 @@ fn binary_sniff_bounded() {
         diff.bytes
     );
 }
+
+/// A path whose clean filter is an external program, as Git LFS configures it,
+/// reads as binary: the blob is what the program wrote, the worktree is the
+/// content, and diffing one against the other draws a rewrite of neither.
+#[test]
+fn skipped_driver_undiffable() {
+    let scratch = Scratch::new("attr-driver");
+    scratch.git(&["config", "filter.ptr.clean", "cat >/dev/null; echo pointer"]);
+    scratch.write(
+        ".gitattributes",
+        "*.csv filter=ptr\nplain.txt filter=unset-driver\n",
+    );
+    scratch.write("a.csv", numbered_lines(5));
+    scratch.write("plain.txt", numbered_lines(5));
+    scratch.commit_all("initial");
+    scratch.write("a.csv", numbered_lines(6));
+    scratch.write("plain.txt", numbered_lines(6));
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes.iter().find(|c| c.path == "a.csv").expect("listed");
+    let diff = worktree.diff(change).expect("diff");
+    assert!(
+        diff.binary && diff.hunks.is_empty(),
+        "a.csv diffed its content against the pointer its driver stored: {} hunks",
+        diff.hunks.len()
+    );
+    assert!(
+        worktree.measure(change).expect("measure").binary,
+        "the height treats a.csv as text while its diff is binary"
+    );
+
+    // A driver named but never configured is a no-op in git, so the file diffs.
+    let change = changes
+        .iter()
+        .find(|c| c.path == "plain.txt")
+        .expect("listed");
+    let diff = worktree.diff(change).expect("diff");
+    assert!(
+        !diff.binary,
+        "a driver with no program made plain.txt binary"
+    );
+    assert_eq!((diff.added, diff.removed), (1, 0));
+}

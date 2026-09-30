@@ -15,6 +15,8 @@ pub(crate) struct Filter {
     /// known to the index before deciding to convert it.
     index: gix::worktree::Index,
     objects: gix::OdbHandle,
+    /// Drivers with a program configured, which this pipeline never runs.
+    skipped: Vec<gix::bstr::BString>,
 }
 
 impl Filter {
@@ -31,7 +33,11 @@ impl Filter {
 
         let mut options = gix::filter::Pipeline::options(repo).map_err(Error::filter_setup)?;
         // See the module header. Both of these are rulings, not oversights.
-        options.drivers = Vec::new();
+        let skipped = std::mem::take(&mut options.drivers)
+            .into_iter()
+            .filter(|driver| driver.clean.is_some() || driver.process.is_some())
+            .map(|driver| driver.name)
+            .collect();
         options.crlf_roundtrip_check = gix::filter::plumbing::pipeline::CrlfRoundTripCheck::Skip;
 
         let pipeline = gix::filter::plumbing::Pipeline::new(
@@ -44,26 +50,43 @@ impl Filter {
             stack,
             index,
             objects: repo.objects.clone(),
+            skipped,
         })
     }
 
-    /// The `diff` attribute of `rela_path`: `Some(true)` set or a driver,
-    /// `Some(false)` unset, as `binary` unsets it, `None` unspecified.
+    /// Whether `rela_path` diffs as text: `Some(true)` when `diff` is set or
+    /// names a driver, `Some(false)` when it is unset, as `binary` unsets it, or
+    /// when a skipped driver cleans the path, `None` when nothing says.
     pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<Option<bool>> {
-        let Filter { stack, objects, .. } = self;
-        let mut outcome = stack.selected_attribute_matches(["diff"]);
+        let Filter {
+            stack,
+            objects,
+            skipped,
+            ..
+        } = self;
+        let mut outcome = stack.selected_attribute_matches(["diff", "filter"]);
         let entry = stack
             .at_path(Path::new(rela_path), None, &*objects)
             .map_err(|source| Error::filter(rela_path, source))?;
         entry.matching_attributes(&mut outcome);
-        Ok(outcome
-            .iter_selected()
-            .next()
-            .and_then(|found| match found.assignment.state {
-                gix::attrs::StateRef::Unset => Some(false),
-                gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_) => Some(true),
-                gix::attrs::StateRef::Unspecified => None,
-            }))
+        let mut diff = None;
+        for found in outcome.iter_selected() {
+            match (found.assignment.name.as_str(), found.assignment.state) {
+                // The blob holds what the program wrote and the worktree holds
+                // what it read, so the two do not diff.
+                ("filter", gix::attrs::StateRef::Value(name))
+                    if skipped.iter().any(|driver| driver == name.as_bstr()) =>
+                {
+                    return Ok(Some(false));
+                }
+                ("diff", gix::attrs::StateRef::Unset) => diff = Some(false),
+                ("diff", gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_)) => {
+                    diff = Some(true)
+                }
+                _ => {}
+            }
+        }
+        Ok(diff)
     }
 
     /// `content`, as git would store it for `rela_path`.
@@ -78,6 +101,7 @@ impl Filter {
             stack,
             index,
             objects,
+            ..
         } = self;
 
         let entry = stack
