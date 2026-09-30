@@ -315,7 +315,11 @@ struct Report {
     samples: Vec<Sample>,
     frames: u64,
     full_frames: u64,
+    /// Ticks the frame loop took off the channel.
     ticks: u64,
+    /// Ticks the watch thread put on it. The channel is unbounded, so the gap
+    /// is a queue this process's RSS carries.
+    sent: u64,
     /// Rounds the writer completed.
     rounds: u64,
     /// Files the writer created, which is how many paths this run invented.
@@ -384,13 +388,14 @@ impl Report {
     fn print(&self) {
         let mb = mib;
         println!(
-            "soak: window {:?}, {} samples, {} frames ({} full), {} ticks, \
+            "soak: window {:?}, {} samples, {} frames ({} full), {} of {} ticks taken, \
              {} write rounds, {} files created, {} store wakes",
             self.window,
             self.samples.len(),
             self.frames,
             self.full_frames,
             self.ticks,
+            self.sent,
             self.rounds,
             self.created,
             self.store_wakes
@@ -667,6 +672,8 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: 
     // The product's own shape: the watcher owns its repository on its own thread,
     // because `gix::Repository` is `Send` and not `Sync`, and it is detached because
     // nothing can wake a blocked `next_tick` except a `Stop`.
+    let sent = std::sync::Arc::new(AtomicU64::new(0));
+    let sending = std::sync::Arc::clone(&sent);
     std::thread::spawn(move || {
         let worktree = Worktree::discover(&root).expect("discover for the watch thread");
         let mut watcher = worktree
@@ -676,6 +683,7 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: 
             if tx.send(tick.paths).is_err() {
                 return;
             }
+            sending.fetch_add(1, Ordering::Relaxed);
         }
     });
 
@@ -692,6 +700,7 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: 
     drop(store_watch);
     report.store_armed = store_armed;
     report.store_wakes = store_wakes.load(Ordering::Relaxed);
+    report.sent = sent.load(Ordering::Relaxed);
     report
 }
 
@@ -876,6 +885,7 @@ fn drive(
         frames,
         full_frames,
         ticks,
+        sent: 0,
         rounds: rounds.load(Ordering::Relaxed),
         created: created.load(Ordering::Relaxed),
         fixture_files,
@@ -892,8 +902,16 @@ fn drive(
 
 /// Floors below which this soak proved nothing.
 const MIN_FRAMES: u64 = 40;
-const MIN_TICKS: u64 = 40;
 const MIN_ROUNDS: u64 = 50;
+
+/// Ticks the loop may leave on the channel when the window closes: the ones in
+/// flight, not a queue.
+const MAX_BACKLOG: u64 = 8;
+
+/// Whether the loop kept up with the watch thread.
+fn kept_up(sent: u64, taken: u64) -> bool {
+    sent.saturating_sub(taken) <= MAX_BACKLOG
+}
 
 impl Report {
     /// Every claim I3 makes that this process can see.
@@ -910,13 +928,18 @@ impl Report {
             self.store_wakes, self.window
         );
         assert!(
-            self.frames >= MIN_FRAMES && self.ticks >= MIN_TICKS,
-            "I3: {} frames from {} ticks over {:?}, under the {MIN_FRAMES} and \
-             {MIN_TICKS} this gate needs, so the bounds below describe a monitor \
-             that was not running",
+            self.frames >= MIN_FRAMES,
+            "I3: {} frames over {:?}, under the {MIN_FRAMES} this gate needs, so the \
+             bounds below describe a monitor that was not running",
             self.frames,
-            self.ticks,
             self.window
+        );
+        assert!(
+            kept_up(self.sent, self.ticks),
+            "I3: the watch thread sent {} ticks and the loop took {}, so a queue grew \
+             inside the process whose RSS is the measurement",
+            self.sent,
+            self.ticks
         );
         assert!(
             self.rounds >= MIN_ROUNDS,
@@ -2316,4 +2339,18 @@ mod statistic {
             );
         }
     }
+}
+
+/// The backlog bound, since only a real soak builds a report.
+#[test]
+fn backlog_bounded() {
+    assert!(kept_up(100, 100), "a loop that took every tick fell behind");
+    assert!(
+        kept_up(100, 100 - MAX_BACKLOG),
+        "ticks in flight read as a queue"
+    );
+    assert!(
+        !kept_up(100, 100 - MAX_BACKLOG - 1),
+        "a queue past the bound passed"
+    );
 }
