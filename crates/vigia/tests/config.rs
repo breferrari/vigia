@@ -294,6 +294,65 @@ fn the_same_key_twice_is_refused_rather_than_last_wins() {
     );
 }
 
+/// A lost continuation backslash turns the next line's indentation into spaces
+/// inside the message, and that string is only read when the error is printed.
+/// Every variant is named, so a new one fails to compile until it is listed here.
+/// Listing it does not add a sample to the list below; that has to be done by hand.
+#[test]
+fn config_error_spacing() {
+    let path = std::path::PathBuf::from("/tmp/config");
+    let errors = [
+        ConfigError::Unwritable {
+            path: path.clone(),
+            why: "permission denied".to_owned(),
+        },
+        ConfigError::Unreadable {
+            path,
+            why: "permission denied".to_owned(),
+        },
+        ConfigError::UnknownKey {
+            line: 12,
+            key: "foo".to_owned(),
+        },
+        // A real engine error spans lines on purpose, so the sample is one line.
+        ConfigError::BadPattern {
+            line: 12,
+            why: "unclosed group".to_owned(),
+        },
+        ConfigError::UnknownValue {
+            line: 12,
+            key: "rail".to_owned(),
+            value: "maybe".to_owned(),
+        },
+        ConfigError::MissingValue { line: 12 },
+        ConfigError::MissingSeparator {
+            line: 12,
+            text: "x".to_owned(),
+        },
+        ConfigError::RepeatedKey {
+            line: 12,
+            key: "rail".to_owned(),
+            first: 3,
+        },
+    ];
+    for err in &errors {
+        let msg = match err {
+            ConfigError::Unwritable { .. }
+            | ConfigError::Unreadable { .. }
+            | ConfigError::UnknownKey { .. }
+            | ConfigError::BadPattern { .. }
+            | ConfigError::UnknownValue { .. }
+            | ConfigError::MissingValue { .. }
+            | ConfigError::MissingSeparator { .. }
+            | ConfigError::RepeatedKey { .. } => err.to_string(),
+        };
+        assert!(
+            !msg.contains("  "),
+            "{err:?} renders with a double space: {msg:?}"
+        );
+    }
+}
+
 #[test]
 fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
     // The three the theme parser's own header calls out, gated here because the
