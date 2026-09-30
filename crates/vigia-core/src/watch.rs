@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,6 +15,7 @@ use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::Hidden;
 use crate::error::{Error, Result};
+use crate::frame::{Fingerprint, config_moved, fingerprint};
 use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
@@ -142,7 +144,21 @@ pub struct Watcher<'repo> {
     tx: Sender<Message>,
     /// Dropping this stops the OS watch, so it must outlive the receiver.
     _backend: notify::RecommendedWatcher,
-    excludes: gix::AttributeStack<'repo>,
+    /// Owned rather than borrowed, so a config write can reload it.
+    repo: gix::Repository,
+    excludes: gix::worktree::Stack,
+    /// The common dir's config, which `repo` loads.
+    config: PathBuf,
+    /// The config's fingerprint when `repo` last loaded it.
+    loaded_config: Option<Fingerprint>,
+    /// Set by a config event, and at start so a write before the watch armed is
+    /// not missed. The next path judged reloads.
+    reload_due: bool,
+    /// Whether this tick has tried, so a config that keeps failing costs one
+    /// reload a tick rather than one a path.
+    reload_tried: bool,
+    /// Unused. Keeps `Watcher<'repo>` source-compatible.
+    _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
     /// The git dir, in every spelling as for `roots`. A linked worktree, a submodule
@@ -160,23 +176,18 @@ pub struct Watcher<'repo> {
 }
 
 impl<'repo> Watcher<'repo> {
+    /// `loaded_config` is the config's fingerprint when `repo` loaded it, or
+    /// `None` when unknown, which reloads on the first path judged.
     pub(crate) fn new(
-        repo: &'repo gix::Repository,
+        repo: &gix::Repository,
+        config: &Path,
+        loaded_config: Option<Fingerprint>,
         workdir: &Path,
         options: WatchOptions,
     ) -> Result<Self> {
         // Everything that reads the repository happens before the watch is armed, so
         // the watcher never observes its own construction.
-        let index = repo
-            .index_or_empty()
-            .map_err(|e| Error::Watch(Box::new(e)))?;
-        let excludes = repo
-            .excludes(
-                &index,
-                None,
-                gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
-            )
-            .map_err(|e| Error::Watch(Box::new(e)))?;
+        let excludes = excludes_of(repo)?;
 
         let roots = roots_of(workdir);
         // A linked worktree's common dir comes back as `<git dir>/../..`, which would
@@ -230,13 +241,26 @@ impl<'repo> Watcher<'repo> {
                     .watch(&heads, RecursiveMode::Recursive)
                     .map_err(|e| Error::Watch(Box::new(e)))?;
             }
+            // For `info/attributes`, which a non-recursive watch above cannot see.
+            let info = dir.join("info");
+            if info.is_dir() {
+                backend
+                    .watch(&info, RecursiveMode::NonRecursive)
+                    .map_err(|e| Error::Watch(Box::new(e)))?;
+            }
         }
 
         Ok(Self {
             rx,
             tx,
             _backend: backend,
+            repo: repo.clone(),
             excludes,
+            config: config.to_path_buf(),
+            loaded_config,
+            reload_due: true,
+            reload_tried: false,
+            _worktree: PhantomData,
             roots,
             git_dir,
             common_dir,
@@ -273,6 +297,7 @@ impl<'repo> Watcher<'repo> {
 
     /// Block until the working tree changes, then return one coalesced tick.
     pub fn next_tick(&mut self) -> Option<Tick> {
+        self.reload_tried = false;
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
@@ -361,14 +386,20 @@ impl<'repo> Watcher<'repo> {
             let watched = if inside == Path::new("index") {
                 self.index.moved()
             } else {
+                self.reload_due |= inside == Path::new("config");
                 watched_in_git_dir(inside)
             };
             return watched.then_some((Path::new(".git"), false));
         }
         if let Some(inside) = within(&self.common_dir, path) {
-            // Only the refs: other worktrees' index and `HEAD` are here too.
-            let refs = inside.starts_with("refs") || inside == Path::new("packed-refs");
-            return (refs && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
+            // Other worktrees' index and `HEAD` live here too, so only the refs and
+            // the files that shape the filter are taken.
+            let shared = inside.starts_with("refs")
+                || inside.starts_with("info")
+                || inside == Path::new("packed-refs")
+                || inside == Path::new("config");
+            self.reload_due |= inside == Path::new("config");
+            return (shared && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
         }
 
         // Outside the worktree entirely. Nothing we display depends on it.
@@ -403,17 +434,60 @@ impl<'repo> Watcher<'repo> {
             return None;
         }
 
+        if self.reload_due {
+            self.reload_excludes();
+        }
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
+    /// Reload the config and the rules it names, such as `core.excludesFile`, as
+    /// [`Worktree`](crate::Worktree) reloads its own. One that does not load keeps
+    /// the rules from before it, and the next tick tries again.
+    fn reload_excludes(&mut self) {
+        if self.reload_tried {
+            return;
+        }
+        self.reload_tried = true;
+        let now = fingerprint(&self.config);
+        if now == self.loaded_config {
+            self.reload_due = false;
+            return;
+        }
+        if !config_moved(now, self.loaded_config) {
+            return;
+        }
+        if self.repo.reload().is_ok()
+            && let Ok(excludes) = excludes_of(&self.repo)
+        {
+            self.excludes = excludes;
+            self.loaded_config = now;
+            self.reload_due = false;
+        }
+    }
+
     fn is_ignored(&mut self, rela: &Path, mode: gix::index::entry::Mode) -> bool {
-        match self.excludes.at_path(rela, Some(mode)) {
+        match self.excludes.at_path(rela, Some(mode), &self.repo.objects) {
             Ok(platform) => platform.is_excluded(),
             // If the rules cannot be consulted, do not filter. A wasted sweep
             // is cheaper than a change the monitor never showed.
             Err(_) => false,
         }
     }
+}
+
+/// The ignore rules the repository's config and index name, detached from it.
+fn excludes_of(repo: &gix::Repository) -> Result<gix::worktree::Stack> {
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| Error::Watch(Box::new(e)))?;
+    Ok(repo
+        .excludes(
+            &index,
+            None,
+            gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
+        )
+        .map_err(|e| Error::Watch(Box::new(e)))?
+        .detach())
 }
 
 /// The worktree's own index, and what it held when an event was last judged.

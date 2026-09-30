@@ -813,3 +813,154 @@ fn config_write_ticks() {
         "a config write produced no tick, so the pane never re-reads the filter"
     );
 }
+
+/// A path ignored through `core.excludesFile` wakes the watch once the config
+/// stops naming that file, without a restart.
+#[test]
+fn excludes_file_followed() {
+    let scratch = Scratch::new("watch-excludes-file");
+    scratch.write("a.txt", "x\n");
+    scratch.commit_all("initial");
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: core.excludesFile did not ignore vigia-excluded/"
+    );
+
+    scratch.git(&["config", "--unset", "core.excludesFile"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the config write produced no tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path the config stopped ignoring never woke the watch"
+    );
+}
+
+/// The same in a linked worktree, whose config lives in the common dir.
+#[test]
+fn linked_excludes_followed() {
+    let scratch = linked_scratch("watch-linked-excludes");
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.write("linked/vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.write("linked/vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: core.excludesFile did not ignore vigia-excluded/"
+    );
+
+    scratch.git(&["config", "--unset", "core.excludesFile"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a config write in the common dir produced no tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    scratch.write("linked/vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path the common config stopped ignoring never woke the watch"
+    );
+}
+
+/// A `core.excludesFile` set after the worktree opened and before the watch
+/// armed sends no event the watch can see, and still applies.
+#[test]
+fn excludes_before_watch() {
+    let scratch = committed_scratch("watch-excludes-early");
+    let worktree = scratch.worktree();
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a config written before the watch armed was never loaded"
+    );
+    scratch.write("a.txt", "changed\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the watch was not live, so the quiet above proves nothing"
+    );
+}
+
+/// A config that fails to load is tried again on the next tick, without
+/// another config write.
+#[test]
+fn failed_excludes_retried() {
+    let scratch = committed_scratch("watch-excludes-retry");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // An include gix fails on, so the reload this config write asks for fails.
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.git(&["config", "include.path", "extra"]);
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the control is wrong: the reload was expected to fail"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a failed reload was not tried again on the next tick"
+    );
+    scratch.write("a.txt", "changed\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the watch was not live, so the quiet above proves nothing"
+    );
+}
+
+/// A linked worktree's `info/attributes` lives in the common dir, outside its
+/// tree, and a write to it still wakes the pane.
+#[test]
+fn linked_info_attributes_ticks() {
+    let scratch = linked_scratch("watch-linked-info");
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    let scratch = scratch.settled();
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
+        .expect("write attributes");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an info/attributes write in the common dir produced no tick"
+    );
+}

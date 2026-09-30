@@ -440,7 +440,8 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
 | ⬜ | A subject the notes filter drops is only a workflow notice | [#524](https://github.com/breferrari/vigia/issues/524) |
 | ✅ | Status walk config stale | [#606](https://github.com/breferrari/vigia/issues/606) |
-| ⬜ | Watcher excludes keep opened config | [#619](https://github.com/breferrari/vigia/issues/619) |
+| ✅ | Watcher excludes keep opened config | [#619](https://github.com/breferrari/vigia/issues/619) |
+| ⬜ | Exclude files frozen at watch start | [#621](https://github.com/breferrari/vigia/issues/621) |
 
 **[#178](https://github.com/breferrari/vigia/issues/178) is an instrument finding and goes here rather than into a phase**, which is the rule of this file for a queue that serves the product and the mirror equally. Found while merging [#166](https://github.com/breferrari/vigia/issues/166). The absolute frame budgets fail on shared CI runners often enough to be a pattern, and each failure reads as a regression. `main` at `34f74ec` reported p99 98.96ms against the 48ms budget with **p50 9.25ms and max 255.40ms**. [#176](https://github.com/breferrari/vigia/pull/176) reported p99 73.14ms with **p50 3.67ms and max 179.78ms**, on a different test and a different platform. It passed on a re-run of the identical commit. The shape is the finding: a regression moves the median, and a runner that loses the CPU for a quantum moves two samples of 250. It is deferred and not fixed for two reasons. It did not block the product pass it interrupted (one re-run cleared it). And the fix is a ruling about where budgets are measured, not a patch. It is worth filing because [#142](https://github.com/breferrari/vigia/pull/142) already recorded one of these and reported it honestly. That is the right handling and also the warning: the third time, nobody reads the numbers. **Closed 2026-08-17 by [#212](https://github.com/breferrari/vigia/issues/212)**. It is the entry above, not a repeat of it. The gate attributes a breach with thread CPU time instead of re-measuring it and believing the result. So the gate can say whether the time went into work or into waiting for a CPU.
 
@@ -524,6 +525,7 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | Rename tracking and the non-streaming walk, at ten thousand changed files ([#48](https://github.com/breferrari/vigia/issues/48)) | #34, 2026-07-31 | Shelf | A frame-path redesign measured at a scale no reader has reported. The §10 bullets stay open. |
 | Status walk config stale ([#606](https://github.com/breferrari/vigia/issues/606)) | #111, 2026-09-30 | Shelf | Found by #111's altitude review. Reloading the one repository means a borrow at each of its 12 readers, on the status path. The diff is already correct, and only a file that differs by line endings alone can be listed wrongly. |
 | Watcher excludes keep opened config ([#619](https://github.com/breferrari/vigia/issues/619)) | #606, 2026-09-30 | Shelf | Found by #617's review. Only a changed `core.excludesFile` shows it, and the fix changes how the shell holds its watcher. |
+| Exclude files frozen at watch start ([#621](https://github.com/breferrari/vigia/issues/621)) | #619, 2026-09-30 | Shelf | Found by #619's review. It predates #619, and only an edit to `.git/info/exclude` or the excludes file shows it. |
 
 ### A deferral reason is a dated claim like any other
 
@@ -569,6 +571,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | `take-next` step 1 cannot see a session already inside the row it hands you ([#303](https://github.com/breferrari/vigia/issues/303)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, since unattended runs post no plan and nothing read worktrees or branches. Pre-flight check 8 now does. |
 | A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | Off the Shelf, 2026-09-30 | Shelf triage: still real. The dated-claim preamble already existed, and no check read the reasons. Pre-flight check 9 now lists the open rows whose reason cites something that changed. |
 | Status walk config stale ([#606](https://github.com/breferrari/vigia/issues/606)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, and the shelf reason was a cost, not a ruling. One repository reloaded in place before the walk; only the watcher keeps the one it opened. |
+| Watcher excludes keep opened config ([#619](https://github.com/breferrari/vigia/issues/619)) | Off the Shelf, 2026-09-30 | Filed by #617 and still real. `gix` lets the watcher own its exclude stack, so the fix stays inside `watch.rs`. |
 
 ---
 
