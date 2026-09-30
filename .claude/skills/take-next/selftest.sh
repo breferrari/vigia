@@ -310,7 +310,7 @@ cat > "$FIX/roadmap.md" <<'ROW'
 ROW
 jq -n '[range(1; 9) | {number: ., milestone: {title: "Shelf"}, title: "issue \(.)",
   state: (if . == 1 or . == 7 then "CLOSED" else "OPEN" end)}]' > "$FIX/issues.json"
-out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/^9\./ { on = 1; next } on && /^ / { $1 = $1; print }')
+out=$(pre 2>&1 | awk '/^9\./ { on = 1; next } on && /^ / { $1 = $1; print }')
 want='read #4: its reason cites #1 (closed), I9 (retired)'
 [ "$out" = "$want" ] && ok "a shelf reason naming a closed issue is surfaced" || no "a shelf reason naming a closed issue is surfaced" "$want" "$out"
 
