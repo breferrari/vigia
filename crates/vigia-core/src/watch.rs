@@ -15,6 +15,7 @@ use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::Hidden;
 use crate::error::{Error, Result};
+use crate::frame::{Fingerprint, fingerprint};
 use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
@@ -146,6 +147,9 @@ pub struct Watcher<'repo> {
     /// Owned rather than borrowed, so a config write can reload it.
     repo: gix::Repository,
     excludes: gix::worktree::Stack,
+    /// The config's fingerprint when `repo` last loaded it.
+    loaded_config: Option<Fingerprint>,
+    /// Keeps the lifetime vigia-core 1.0 published on this type.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
@@ -233,6 +237,7 @@ impl<'repo> Watcher<'repo> {
             _backend: backend,
             repo: repo.clone(),
             excludes,
+            loaded_config: None,
             _worktree: PhantomData,
             roots,
             git_dir,
@@ -357,10 +362,10 @@ impl<'repo> Watcher<'repo> {
         if let Some(inside) = within(&self.git_dir, path) {
             let watched = if inside == Path::new("index") {
                 self.index.moved()
-            } else if inside == Path::new("config") {
-                self.follow_config();
-                true
             } else {
+                if inside == Path::new("config") {
+                    self.reload_excludes(path);
+                }
                 watched_in_git_dir(inside)
             };
             return watched.then_some((Path::new(".git"), false));
@@ -406,13 +411,20 @@ impl<'repo> Watcher<'repo> {
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
-    /// Reload the config and the rules it names, such as `core.excludesFile`. A
-    /// config that does not load keeps the rules from before it.
-    fn follow_config(&mut self) {
+    /// Reload the config and the rules it names, such as `core.excludesFile`, as
+    /// [`Worktree`](crate::Worktree) reloads its own. A config that does not load
+    /// keeps the rules from before it until its next event.
+    fn reload_excludes(&mut self, config: &Path) {
+        let now = fingerprint(config);
+        // One write sends several events. Missing or empty is a writer mid-step.
+        if now == self.loaded_config || now.is_none_or(Fingerprint::is_empty) {
+            return;
+        }
         if self.repo.reload().is_ok()
             && let Ok(excludes) = excludes_of(&self.repo)
         {
             self.excludes = excludes;
+            self.loaded_config = now;
         }
     }
 
