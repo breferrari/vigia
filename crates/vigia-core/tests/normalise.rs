@@ -122,7 +122,7 @@ fn a_normalised_diff_matches_git_hunk_for_hunk() {
 
 /// Normalisation follows the attributes rather than the platform.
 #[test]
-fn the_binary_attribute_turns_normalisation_off() {
+fn text_unset_stops_normalising() {
     let changed = |attributes: Option<&str>, name: &str| -> (u32, u32) {
         let scratch = Scratch::crlf_worktree(name, attributes);
         scratch.write("a.txt", numbered_lines(20));
@@ -145,9 +145,9 @@ fn the_binary_attribute_turns_normalisation_off() {
         "line endings alone are not a change when git would normalise them"
     );
     assert_eq!(
-        changed(Some("a.txt binary\n"), "normalise-attr-binary"),
+        changed(Some("a.txt -text\n"), "normalise-attr-text"),
         (20, 20),
-        "`binary` implies `-text`, so git converts nothing and every line really \
+        "`-text` turns conversion off, so every line really \
          does differ; reporting no change here would mean the attributes are \
          being ignored"
     );
@@ -185,9 +185,9 @@ fn attributes_written_mid_session_reach_the_next_frame() {
          attributes change, or there is no stale answer to catch"
     );
 
-    // The agent in the other pane marks the file binary, so `-text` applies and
+    // The agent in the other pane unsets `text` on the file, so
     // the CRLF difference stops being normalised away.
-    scratch.write(".gitattributes", "a.txt binary\n");
+    scratch.write(".gitattributes", "a.txt -text\n");
 
     let restarted = diff_of(&scratch.worktree());
     assert_eq!(

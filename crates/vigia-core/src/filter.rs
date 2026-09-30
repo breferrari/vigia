@@ -47,6 +47,26 @@ impl Filter {
         })
     }
 
+    /// What the `diff` attribute says of `rela_path`: `Some(false)` where it is
+    /// unset (as `binary` unsets it), `Some(true)` where it is set or names a
+    /// driver, and `None` where nothing says, which leaves it to the bytes.
+    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<Option<bool>> {
+        let Filter { stack, objects, .. } = self;
+        let mut outcome = stack.selected_attribute_matches(["diff"]);
+        let entry = stack
+            .at_path(Path::new(rela_path), None, &*objects)
+            .map_err(|source| Error::filter(rela_path, source))?;
+        entry.matching_attributes(&mut outcome);
+        Ok(outcome
+            .iter_selected()
+            .next()
+            .and_then(|found| match found.assignment.state {
+                gix::attrs::StateRef::Unset => Some(false),
+                gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_) => Some(true),
+                gix::attrs::StateRef::Unspecified => None,
+            }))
+    }
+
     /// `content`, as git would store it for `rela_path`.
     pub(crate) fn convert_to_git(&mut self, rela_path: &str, content: Vec<u8>) -> Result<Vec<u8>> {
         let path = Path::new(rela_path);

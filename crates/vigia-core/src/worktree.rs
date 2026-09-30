@@ -562,7 +562,8 @@ impl Worktree {
         }
 
         let (before, after) = self.sides(change, probes)?;
-        Ok(hunk::compute(change.path.clone(), &before, &after))
+        let diff = self.diff_attribute(&change.path)?;
+        Ok(hunk::compute(change.path.clone(), &before, &after, diff))
     }
 
     /// How tall one change's diff is, without building any of it.
@@ -585,7 +586,19 @@ impl Worktree {
         }
 
         let (before, after) = self.sides(change, probes)?;
-        Ok(hunk::measure(&before, &after))
+        let diff = self.diff_attribute(&change.path)?;
+        Ok(hunk::measure(&before, &after, diff))
+    }
+
+    /// What `.gitattributes` says about diffing `rela_path`. See
+    /// [`Filter::diff_attribute`].
+    fn diff_attribute(&self, rela_path: &str) -> Result<Option<bool>> {
+        let mut filter = self.filter.borrow_mut();
+        let filter = match filter.as_mut() {
+            Some(filter) => filter,
+            None => filter.insert(Filter::new(&self.repo)?),
+        };
+        filter.diff_attribute(rela_path)
     }
 
     /// Both sides of one change's diff, in the bytes git would compare.
