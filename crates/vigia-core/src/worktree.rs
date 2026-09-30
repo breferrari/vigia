@@ -8,7 +8,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
-use crate::frame::{Fingerprint, Frame, fingerprint};
+use crate::frame::{Fingerprint, Frame, config_moved, fingerprint};
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
 use crate::standing::Standing;
@@ -701,8 +701,7 @@ impl Worktree {
     /// it last loaded. A reload that fails, as one mid-write does, is tried again
     /// on the next tick.
     pub(crate) fn follow_config(&self, now: Option<Fingerprint>) {
-        // Missing or empty is a writer between two steps, not a config.
-        if now == self.loaded_config.get() || now.is_none_or(Fingerprint::is_empty) {
+        if !config_moved(now, self.loaded_config.get()) {
             return;
         }
         // A borrow still held is a reader mid-call, and the next tick retries.

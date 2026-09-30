@@ -849,3 +849,36 @@ fn excludes_file_followed() {
         "a path the config stopped ignoring never woke the watch"
     );
 }
+
+/// The same in a linked worktree, whose config lives in the common dir.
+#[test]
+fn linked_excludes_followed() {
+    let scratch = linked_scratch("watch-linked-excludes");
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "build/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.write("linked/build/keep", "x\n");
+    let scratch = scratch.settled();
+
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.write("linked/build/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: core.excludesFile did not ignore build/"
+    );
+
+    scratch.git(&["config", "--unset", "core.excludesFile"]);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a config write in the common dir produced no tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    scratch.write("linked/build/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path the common config stopped ignoring never woke the watch"
+    );
+}

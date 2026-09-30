@@ -15,7 +15,7 @@ use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::Hidden;
 use crate::error::{Error, Result};
-use crate::frame::{Fingerprint, fingerprint};
+use crate::frame::{Fingerprint, config_moved, fingerprint};
 use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
@@ -149,7 +149,7 @@ pub struct Watcher<'repo> {
     excludes: gix::worktree::Stack,
     /// The config's fingerprint when `repo` last loaded it.
     loaded_config: Option<Fingerprint>,
-    /// Keeps the lifetime vigia-core 1.0 published on this type.
+    /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
@@ -371,9 +371,16 @@ impl<'repo> Watcher<'repo> {
             return watched.then_some((Path::new(".git"), false));
         }
         if let Some(inside) = within(&self.common_dir, path) {
-            // Only the refs: other worktrees' index and `HEAD` are here too.
-            let refs = inside.starts_with("refs") || inside == Path::new("packed-refs");
-            return (refs && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
+            // The refs and the files that shape the filter: other worktrees' index
+            // and `HEAD` are here too.
+            let shared = inside.starts_with("refs")
+                || inside.starts_with("info")
+                || inside == Path::new("packed-refs")
+                || inside == Path::new("config");
+            if inside == Path::new("config") {
+                self.reload_excludes(path);
+            }
+            return (shared && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
         }
 
         // Outside the worktree entirely. Nothing we display depends on it.
@@ -415,9 +422,9 @@ impl<'repo> Watcher<'repo> {
     /// [`Worktree`](crate::Worktree) reloads its own. A config that does not load
     /// keeps the rules from before it until its next event.
     fn reload_excludes(&mut self, config: &Path) {
+        // One write sends several events, and only a moved config reloads.
         let now = fingerprint(config);
-        // One write sends several events. Missing or empty is a writer mid-step.
-        if now == self.loaded_config || now.is_none_or(Fingerprint::is_empty) {
+        if !config_moved(now, self.loaded_config) {
             return;
         }
         if self.repo.reload().is_ok()

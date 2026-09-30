@@ -40,10 +40,10 @@ pub(crate) struct Fingerprint {
     mtime: SystemTime,
 }
 
-impl Fingerprint {
-    pub(crate) fn is_empty(self) -> bool {
-        self.len == 0
-    }
+/// Whether a config at `now` asks for a reload over the one loaded at `loaded`.
+/// Missing or empty is a writer between two steps, not a config.
+pub(crate) fn config_moved(now: Option<Fingerprint>, loaded: Option<Fingerprint>) -> bool {
+    now != loaded && now.is_some_and(|print| print.len > 0)
 }
 
 /// A fingerprint taken after a read, plus whether it may be trusted as one.
