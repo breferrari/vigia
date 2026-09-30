@@ -105,4 +105,12 @@ impl Samples {
                 sum.saturating_add(each.saturating_sub(budget))
             })
     }
+
+    /// The whole of every sample that exceeded `budget`, summed.
+    pub fn wall_over(&self, budget: Duration) -> Duration {
+        self.values[..self.len()]
+            .iter()
+            .filter(|each| **each > budget)
+            .fold(Duration::ZERO, |sum, each| sum.saturating_add(*each))
+    }
 }

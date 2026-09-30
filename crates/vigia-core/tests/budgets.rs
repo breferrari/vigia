@@ -1106,3 +1106,73 @@ fn the_excess_a_round_spends_over_budget_counts_only_the_samples_that_exceeded_i
         "one 500ms sample against a 10ms budget is 490ms, and the rest are under"
     );
 }
+
+/// `fast` samples at 5ms wall and 4.9ms CPU, then `slow` of pure work at `ms`.
+fn tail_of_work(fast: usize, slow: usize, ms: u64) -> (Samples, Option<Samples>) {
+    let (mut wall, mut cpu) = (Samples::new(fast + slow), Samples::new(fast + slow));
+    for _ in 0..fast {
+        wall.push(Duration::from_millis(5));
+        cpu.push(Duration::from_micros(4_900));
+    }
+    for _ in 0..slow {
+        wall.push(Duration::from_millis(ms));
+        cpu.push(Duration::from_millis(ms));
+    }
+    (wall, Some(cpu))
+}
+
+#[test]
+#[should_panic(expected = "cannot attribute")]
+fn short_tail_after_fast_frames_fails() {
+    // 247 fast frames bank 24.7ms of off-CPU noise, which would pay for the 24ms
+    // three frames of work spend over budget.
+    let (first, _) = tail_of_work(247, 3, 18);
+    holds_p99_rounds(
+        "three frames of work after fast ones",
+        Duration::from_millis(10),
+        &first,
+        String::new,
+        || tail_of_work(247, 3, 18),
+    );
+}
+
+#[test]
+#[should_panic(expected = "cannot attribute")]
+fn short_tail_under_quantum_fails() {
+    // Three 20ms frames of work, each read as one 15.625ms tick: 13.1ms of
+    // deficit against 12ms over, so the clock's rounding would acquit the work.
+    let round = || {
+        let (mut wall, mut cpu) = (Samples::new(100), Samples::new(100));
+        for _ in 0..97 {
+            wall.push(Duration::from_millis(15));
+            cpu.push(Duration::from_millis(15));
+        }
+        for _ in 0..3 {
+            wall.push(Duration::from_millis(20));
+            cpu.push(Duration::from_micros(15_625));
+        }
+        (wall, Some(cpu))
+    };
+    let (first, _) = round();
+    holds_p99_rounds(
+        "three frames of work under a coarse clock",
+        Duration::from_millis(16),
+        &first,
+        String::new,
+        round,
+    );
+}
+
+#[test]
+fn wall_over_sums_breaching_samples() {
+    let budget = Duration::from_millis(10);
+    assert_eq!(
+        flat(100, 10).wall_over(budget),
+        Duration::ZERO,
+        "at budget is not over"
+    );
+    assert_eq!(
+        spiked(10, 2).wall_over(budget),
+        Duration::from_millis(1_000)
+    );
+}
