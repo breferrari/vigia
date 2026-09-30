@@ -964,3 +964,59 @@ fn linked_info_attributes_ticks() {
         "an info/attributes write in the common dir produced no tick"
     );
 }
+
+/// A path `.git/info/exclude` stops ignoring wakes the watch, with the config
+/// unchanged.
+#[test]
+fn info_exclude_followed() {
+    let scratch = committed_scratch("watch-info-exclude");
+    std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+    std::fs::write(scratch.path_of(".git/info/exclude"), "vigia-excluded/\n")
+        .expect("write exclude");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: info/exclude did not ignore vigia-excluded/"
+    );
+
+    std::fs::write(scratch.path_of(".git/info/exclude"), "\n").expect("clear exclude");
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path info/exclude stopped ignoring never woke the watch"
+    );
+}
+
+/// The same through the file `core.excludesFile` names.
+#[test]
+fn excludes_target_followed() {
+    let scratch = committed_scratch("watch-excludes-target");
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let spelled = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &spelled]);
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "the control is wrong: core.excludesFile did not ignore vigia-excluded/"
+    );
+
+    std::fs::write(&excludes, "\n").expect("clear excludes");
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "a path the excludes file stopped ignoring never woke the watch"
+    );
+}

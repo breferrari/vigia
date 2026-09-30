@@ -154,9 +154,16 @@ pub struct Watcher<'repo> {
     /// Set by a config event, and at start so a write before the watch armed is
     /// not missed. The next path judged reloads.
     reload_due: bool,
-    /// Whether this tick has tried, so a config that keeps failing costs one
-    /// reload a tick rather than one a path.
-    reload_tried: bool,
+    /// `info/exclude` and the file `core.excludesFile` names, which the stack
+    /// read when it was built.
+    rule_files: [Option<PathBuf>; 2],
+    /// What [`Self::rule_files`] looked like when the stack was built.
+    rule_prints: [Option<Fingerprint>; 2],
+    /// Set when a reload lands, until a stack is built from it.
+    stack_stale: bool,
+    /// Whether this tick has refreshed the rules, so a config that keeps failing
+    /// costs one reload a tick rather than one a path.
+    refreshed: bool,
     /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
@@ -187,6 +194,9 @@ impl<'repo> Watcher<'repo> {
     ) -> Result<Self> {
         // Everything that reads the repository happens before the watch is armed, so
         // the watcher never observes its own construction.
+        // Stated before the stack reads them, so a write in between is seen.
+        let rule_files = rule_files_of(repo);
+        let rule_prints = prints_of(&rule_files);
         let excludes = excludes_of(repo)?;
 
         let roots = roots_of(workdir);
@@ -259,7 +269,10 @@ impl<'repo> Watcher<'repo> {
             config: config.to_path_buf(),
             loaded_config,
             reload_due: true,
-            reload_tried: false,
+            rule_files,
+            rule_prints,
+            stack_stale: false,
+            refreshed: false,
             _worktree: PhantomData,
             roots,
             git_dir,
@@ -297,7 +310,7 @@ impl<'repo> Watcher<'repo> {
 
     /// Block until the working tree changes, then return one coalesced tick.
     pub fn next_tick(&mut self) -> Option<Tick> {
-        self.reload_tried = false;
+        self.refreshed = false;
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
@@ -434,9 +447,7 @@ impl<'repo> Watcher<'repo> {
             return None;
         }
 
-        if self.reload_due {
-            self.reload_excludes();
-        }
+        self.refresh_rules();
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
@@ -444,10 +455,6 @@ impl<'repo> Watcher<'repo> {
     /// [`Worktree`](crate::Worktree) reloads its own. One that does not load keeps
     /// the rules from before it, and the next tick tries again.
     fn reload_excludes(&mut self) {
-        if self.reload_tried {
-            return;
-        }
-        self.reload_tried = true;
         let now = fingerprint(&self.config);
         if now == self.loaded_config {
             self.reload_due = false;
@@ -456,12 +463,31 @@ impl<'repo> Watcher<'repo> {
         if !config_moved(now, self.loaded_config) {
             return;
         }
-        if self.repo.reload().is_ok()
+        if self.repo.reload().is_ok() {
+            self.rule_files = rule_files_of(&self.repo);
+            self.stack_stale = true;
+            self.loaded_config = now;
+            self.reload_due = false;
+        }
+    }
+
+    /// Once a tick: reload the config if one is due, then rebuild the stack if a
+    /// file it read has moved. Two stats a tick while events flow.
+    fn refresh_rules(&mut self) {
+        if self.refreshed {
+            return;
+        }
+        self.refreshed = true;
+        if self.reload_due {
+            self.reload_excludes();
+        }
+        let now = prints_of(&self.rule_files);
+        if (self.stack_stale || now != self.rule_prints)
             && let Ok(excludes) = excludes_of(&self.repo)
         {
             self.excludes = excludes;
-            self.loaded_config = now;
-            self.reload_due = false;
+            self.rule_prints = now;
+            self.stack_stale = false;
         }
     }
 
@@ -473,6 +499,25 @@ impl<'repo> Watcher<'repo> {
             Err(_) => false,
         }
     }
+}
+
+/// `info/exclude` in the common dir, and the file `core.excludesFile` names.
+fn rule_files_of(repo: &gix::Repository) -> [Option<PathBuf>; 2] {
+    let excludes_file = repo
+        .config_snapshot()
+        .trusted_path("core.excludesFile")
+        .ok()
+        .flatten();
+    [
+        Some(repo.common_dir().join("info").join("exclude")),
+        excludes_file,
+    ]
+}
+
+fn prints_of(files: &[Option<PathBuf>; 2]) -> [Option<Fingerprint>; 2] {
+    files
+        .each_ref()
+        .map(|file| file.as_deref().and_then(fingerprint))
 }
 
 /// The ignore rules the repository's config and index name, detached from it.
