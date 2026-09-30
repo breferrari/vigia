@@ -117,7 +117,8 @@ pub struct HighlightStats {
     /// Hunks dropped because they left the viewport.
     pub evicted: u64,
     /// Blocks quoted in a note's answer whose parse began. One per block per
-    /// write, since the parse outlives every frame that draws the same text.
+    /// write while the note's file is drawn, since the parse outlives every
+    /// frame that asks for it.
     pub quoted: u64,
     /// Lines of those blocks run through the parser, a subset of `lines`: a
     /// block is parsed as far as the last line a frame draws.

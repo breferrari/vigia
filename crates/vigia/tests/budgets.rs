@@ -3119,7 +3119,6 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
     // Past the plain first frame, so a read with no warmup still parses.
     let mut app = App::past_first_paint();
     let mut highlighter = Highlighter::eager();
-    let mut warm = Highlighter::eager();
     let mut history = History::new();
     let screen = layout_of(&app, pane, FILES);
     let theme = Theme::default();
@@ -3159,10 +3158,11 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
     };
 
     let mut edits = 0usize;
+    // One highlighter for both arms: every sample is a fresh digest, so nothing
+    // an arm keeps could serve the other.
     let mut next_frame = |frame: &mut Frame,
                           app: &mut App,
-                          cold: &mut Highlighter,
-                          warm: &mut Highlighter,
+                          highlighter: &mut Highlighter,
                           history: &mut History,
                           fenced: bool| {
         scratch.edit_line(
@@ -3172,38 +3172,24 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
         );
         edits += 1;
         app.set_notes(note(fenced, edits));
-        let held = if fenced { warm } else { cold };
         time_cpu(|| {
             sample(history, scratch.root(), EDITED_PATH);
-            shell_frame(frame, app, held, history, &mut buf, &theme, screen);
+            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
         })
     };
 
     let samples = timed.then(|| {
         for _ in 0..WARMUP_FRAMES {
             for fenced in [true, false] {
-                next_frame(
-                    &mut frame,
-                    &mut app,
-                    &mut highlighter,
-                    &mut warm,
-                    &mut history,
-                    fenced,
-                );
+                next_frame(&mut frame, &mut app, &mut highlighter, &mut history, fenced);
             }
         }
         let (mut fenced_frames, mut prose_frames) =
             (Samples::new(SAMPLED_FRAMES), Samples::new(SAMPLED_FRAMES));
         for _ in 0..SAMPLED_FRAMES {
             for fenced in [true, false] {
-                let (wall, _) = next_frame(
-                    &mut frame,
-                    &mut app,
-                    &mut highlighter,
-                    &mut warm,
-                    &mut history,
-                    fenced,
-                );
+                let (wall, _) =
+                    next_frame(&mut frame, &mut app, &mut highlighter, &mut history, fenced);
                 if fenced {
                     fenced_frames.push(wall);
                 } else {
@@ -3215,12 +3201,12 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
     });
 
     // One more arrival, read rather than timed: what it parsed and what it drew.
-    let before = warm.stats().quoted_lines;
+    let before = highlighter.stats().quoted_lines;
     app.set_notes(note(true, usize::MAX));
     let view = app
-        .view(&mut frame, &mut warm, &history, screen)
+        .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
-    let parsed = warm.stats().quoted_lines - before;
+    let parsed = highlighter.stats().quoted_lines - before;
     let coloured = coloured_note_rows(&view);
     Arrival {
         timed: samples,

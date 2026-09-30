@@ -7468,7 +7468,73 @@ fn parse_follows_the_window() {
 }
 
 #[test]
-fn note_rows_follow_the_window() {
+fn return_costs_a_screenful() {
+    // A second hunk below the note, taller than the pane, so the pane can sit
+    // past the note's rows.
+    let scratch = Scratch::new("notes-parse-kept");
+    scratch.write(PATH, numbered_lines(200));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    for line in 150..190 {
+        scratch.edit_line(PATH, line, "    changed below the note");
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = one_file_screen(&app);
+
+    let block = support::generated(300, "quoted");
+    app.set_notes(vec![left_as(
+        "answered",
+        BODY,
+        Status::Seen,
+        Some(&format!("```rust\n{block}```")),
+    )]);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the screen drew no note row"
+    );
+
+    // Past the block's rows, twice, which is the sweep's grace, then back.
+    app.apply(Action::Scroll(400), &mut frame, screen.diff)
+        .expect("scroll");
+    for _ in 0..2 {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        assert!(
+            !view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+            "the screen still shows the note, so this scrolled nowhere"
+        );
+    }
+    app.apply(Action::Scroll(-400), &mut frame, screen.diff)
+        .expect("scroll back");
+    let before = highlighter.stats().quoted_lines;
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Note { .. })),
+        "the screen drew no note row on the way back"
+    );
+    // The note left the pane with its line, so the pass swept its block; the
+    // return parses the rows it draws and no more.
+    let again = highlighter.stats().quoted_lines - before;
+    assert!(
+        again <= screen.diff as u64,
+        "coming back to a swept block parsed {again} lines for a {}-row body, so the          return costs the block rather than the window",
+        screen.diff
+    );
+}
+
+#[test]
+fn rows_follow_the_window() {
     let scratch = fixture("notes-rows-window");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

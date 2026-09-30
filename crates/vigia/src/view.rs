@@ -579,6 +579,22 @@ impl Answer {
             .sum()
     }
 
+    /// Asks the highlighter for every block and parses nothing, so a block whose
+    /// rows are off the window this frame keeps its parse, and a grammar it
+    /// waits for is still demanded.
+    fn keep(&self, pass: &mut Pass<'_>, id: &str, path: &str) {
+        for part in &self.parts {
+            if let Part::Code {
+                token,
+                ordinal,
+                lines,
+            } = part
+            {
+                pass.quoted_to(id, *ordinal, token.as_deref(), path, lines, 0);
+            }
+        }
+    }
+
     /// The answer's rows from the `skip`th, at most `take` of them. A quoted
     /// block in the window has its grammar asked as far as its last drawn line,
     /// and draws plain with no pass to ask.
@@ -2354,6 +2370,14 @@ impl View {
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at];
         let total: usize = (0..breaks.len()).map(cost).sum();
+        // Every pinned answer, drawn or not: the pass sweeps what it is not asked for.
+        if let Some(pass) = pass.as_deref_mut() {
+            for pin in pins.iter().filter(|_| drawn) {
+                if let Some(reply) = &pin.reply {
+                    reply.keep(pass, &pin.id, &pin.path);
+                }
+            }
+        }
 
         // Nothing on this screen wraps and nothing sits under a row, so the rows
         // are the display rows and every index already names one.
