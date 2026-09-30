@@ -561,7 +561,7 @@ fn settling_waits_for_a_tree_that_is_still_being_written() {
     let quiet = std::time::Instant::now();
     let _ = scratch.settled();
     assert!(
-        quiet.elapsed() < Duration::from_secs(1),
+        quiet.elapsed() < budget(Duration::from_secs(1)),
         "a still tree took {:?} to settle, so the wait is not bounded by the tree",
         quiet.elapsed()
     );
@@ -722,6 +722,9 @@ fn hidden_write_sleeps() {
     scratch.write("gen/out.txt", "x\n");
     scratch.write("src/a.rs", "x\n");
     scratch.commit_all("initial");
+    // The setup's own `.git` writes must land before the watch arms, or a late
+    // one reads here as a hidden write waking it.
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     let options = WatchOptions {
         quiet: ORDERING_QUIET,
@@ -770,6 +773,7 @@ fn hidden_dir_sleeps() {
     let scratch = Scratch::new("watch-hidden-dir");
     scratch.write("src/a.rs", "x\n");
     scratch.commit_all("initial");
+    let scratch = scratch.settled();
     let worktree = scratch.worktree();
     let options = WatchOptions {
         quiet: ORDERING_QUIET,
