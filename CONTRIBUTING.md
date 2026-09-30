@@ -40,7 +40,7 @@ A first PR is most likely to break these rules.
 - **Numbers or it did not happen.** A type signature is not evidence and a single green run is not evidence.
 - **Pure Rust.** Any dependency that pulls `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows, and CI fails the build if one appears.
 - **Do not hard-wrap prose.** Markdown files, PR bodies and commit message bodies do not wrap at all: one paragraph is one line, because GitHub renders a single newline as a line break.
-- **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body.
+- **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body. A pull request follows `.github/PULL_REQUEST_TEMPLATE.md`, and GitHub fills it in for you.
 - **A title can become a release note.** See the next section for how the release notes are built and what you control.
 
 ## Release notes
@@ -62,7 +62,7 @@ A release stops when a merged pull request carries no label, both labels, or a `
 
 Two kinds of document live here, and they are written differently.
 
-- **Public files** are `README.md`, `CHANGELOG.md`, this file and the issue template. Release notes are copied from `CHANGELOG.md`. Write them in ordinary English: the fact first, short sentences, common words. Name what a user sees change, not the rule behind it.
+- **Public files** are `README.md`, `CHANGELOG.md`, this file, the issue template and the pull request template. Release notes are copied from `CHANGELOG.md`. Write them in ordinary English: the fact first, short sentences, common words. Name what a user sees change, not the rule behind it.
 - **Contract files** are `SPEC.md`, `RULINGS.md`, `REVOCATIONS.md`, `ROADMAP.md` and `CLAUDE.md`. They keep their own style: present tense, and each ruling names who made it and when.
 
 Phrases from the contract style are not allowed in public files. `.github/public-dialect.txt` lists them, and a test checks it. CI also checks your PR title and commit subjects against that list, and fails unless a commit body carries a `Release-note:` line. CI does not rerun when you only edit the PR title, so push a commit after renaming.

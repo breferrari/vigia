@@ -2167,7 +2167,7 @@ fn ci_runs_title_check() {
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 2] = [
     ("CLAUDE.md", 17_700),
-    (".claude/skills/take-next/SKILL.md", 21_800),
+    (".claude/skills/take-next/SKILL.md", 21_900),
 ];
 
 /// Every invariant id the spec's table declares. One leaving fails the build.

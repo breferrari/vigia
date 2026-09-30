@@ -212,4 +212,4 @@ Then write briefly: the issue that you took, what shipped with numbers, and the 
 
 ## Writing
 
-The PR body, the issue comments, the commits and the report follow the house rules in `CLAUDE.md`: plain words, the fact first, one paragraph per line. Write the PR body the way that `/pr` does, and set it without a wait for approval. The body says what is true now and links the plan comment. It does not repeat the review. It has one line for each tool, then one line for each skipped finding with its reason.
+The PR body, the issue comments, the commits and the report follow the house rules in `CLAUDE.md`: plain words, the fact first, one paragraph per line. Write the PR body the way that `/pr` does, on the sections of `.github/PULL_REQUEST_TEMPLATE.md`, and set it without a wait for approval. The body says what is true now and links the plan comment. It does not repeat the review. It has one line for each tool, then one line for each skipped finding with its reason.
