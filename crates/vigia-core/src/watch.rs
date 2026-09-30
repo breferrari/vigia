@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher as _};
 
+use crate::Hidden;
 use crate::error::{Error, Result};
 use crate::history::HISTORY_PATHS;
 
@@ -154,6 +155,8 @@ pub struct Watcher<'repo> {
     options: WatchOptions,
     stats: WatchStats,
     delivered: Arc<AtomicU64>,
+    /// The reader's `hide` pattern, which keeps a path from waking the watch.
+    hidden: Option<Hidden>,
 }
 
 impl<'repo> Watcher<'repo> {
@@ -241,7 +244,13 @@ impl<'repo> Watcher<'repo> {
             options,
             stats: WatchStats::default(),
             delivered,
+            hidden: None,
         })
+    }
+
+    /// Keep every path `hide` covers from waking the watch.
+    pub fn hide(&mut self, hide: Option<Hidden>) {
+        self.hidden = hide;
     }
 
     /// A handle that can wake this watcher from another thread.
@@ -368,6 +377,13 @@ impl<'repo> Watcher<'repo> {
         if rela.starts_with(".git") {
             return None;
         }
+        // Before the syscall below, so a hidden file costs one match.
+        let spelled = self.hidden.as_ref().and(followable(rela));
+        if let (Some(hidden), Some(spelled)) = (&self.hidden, &spelled)
+            && hidden.is_hidden(spelled)
+        {
+            return None;
+        }
 
         // The mode is not cosmetic. A rule like `target/` matches directories only, and
         // creating `target/debug/x.o` also emits an event for `target` itself.
@@ -378,6 +394,14 @@ impl<'repo> Watcher<'repo> {
             // directory could hide a deleted file behind a rule like `build/`.
             _ => gix::index::entry::Mode::FILE,
         };
+        // A directory's own event, hidden by the spelling its contents start with.
+        // Only an existing one: a deleted file named like it must still wake.
+        if mode == gix::index::entry::Mode::DIR
+            && let (Some(hidden), Some(spelled)) = (&self.hidden, &spelled)
+            && hidden.is_hidden(&format!("{spelled}/"))
+        {
+            return None;
+        }
 
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }

@@ -299,8 +299,8 @@ pub fn epoch_now() -> i64 {
 ///
 /// The history store is fed from the burst and never from the walk, so the walk's
 /// own filter cannot reach it: a hidden path left in here spends one of I10's 256
-/// tracked slots and holds a sparkline for a row nothing draws. It suppresses the
-/// sample and not the wake, which still arrives and is still walked.
+/// tracked slots and holds a sparkline for a row nothing draws. The watcher
+/// already drops what the pattern covers, so this is a second guard on one rule.
 #[doc(hidden)]
 #[must_use]
 pub fn shown(mut paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<String> {
@@ -465,7 +465,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
 
     // Armed only now.
-    spawn_watch(path.to_path_buf(), tx.clone());
+    spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
 
     // And the store's own, an event source beside the tree's: what the agent
     // writes there is a wake, never a poll.
@@ -2134,7 +2134,7 @@ impl Shell {
 }
 
 /// Forward coalesced working-tree changes onto the shell's channel.
-fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
+fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>) {
     std::thread::spawn(move || {
         let worktree = match Worktree::discover(&path) {
             Ok(worktree) => worktree,
@@ -2150,6 +2150,7 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
                 return;
             }
         };
+        watcher.hide(hide);
 
         // The tick says only that something changed, which is all the shell needs:
         // every tick triggers one status walk, and a walk finds whatever the events
