@@ -307,6 +307,9 @@ struct Sample {
     /// Body height of the last frame drawn, which is what bounds the hunk
     /// cache.
     body: usize,
+    /// Ticks the watch thread had sent and the loop had not taken. The channel
+    /// is unbounded, so a queue here is carried in this process's RSS.
+    backlog: u64,
 }
 
 /// Everything one soak produced.
@@ -315,6 +318,7 @@ struct Report {
     samples: Vec<Sample>,
     frames: u64,
     full_frames: u64,
+    /// Ticks the frame loop took off the channel.
     ticks: u64,
     /// Rounds the writer completed.
     rounds: u64,
@@ -384,13 +388,14 @@ impl Report {
     fn print(&self) {
         let mb = mib;
         println!(
-            "soak: window {:?}, {} samples, {} frames ({} full), {} ticks, \
+            "soak: window {:?}, {} samples, {} frames ({} full), {} ticks ({:?} behind, early and late), \
              {} write rounds, {} files created, {} store wakes",
             self.window,
             self.samples.len(),
             self.frames,
             self.full_frames,
             self.ticks,
+            self.backlogs(),
             self.rounds,
             self.created,
             self.store_wakes
@@ -667,6 +672,8 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: 
     // The product's own shape: the watcher owns its repository on its own thread,
     // because `gix::Repository` is `Send` and not `Sync`, and it is detached because
     // nothing can wake a blocked `next_tick` except a `Stop`.
+    let sent = std::sync::Arc::new(AtomicU64::new(0));
+    let sending = std::sync::Arc::clone(&sent);
     std::thread::spawn(move || {
         let worktree = Worktree::discover(&root).expect("discover for the watch thread");
         let mut watcher = worktree
@@ -676,6 +683,7 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: 
             if tx.send(tick.paths).is_err() {
                 return;
             }
+            sending.fetch_add(1, Ordering::Relaxed);
         }
     });
 
@@ -685,7 +693,7 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration, state: 
 
     let mut report = std::thread::scope(|scope| {
         scope.spawn(|| workload(scratch, files, lines, &stop, &rounds, &created));
-        let report = drive(scratch, files, window, &rx, &rounds, &created);
+        let report = drive(scratch, files, window, &rx, &sent, &rounds, &created);
         stop.store(true, Ordering::Relaxed);
         report
     });
@@ -701,6 +709,7 @@ fn drive(
     fixture_files: usize,
     window: Duration,
     rx: &mpsc::Receiver<Vec<String>>,
+    sent: &AtomicU64,
     rounds: &AtomicU64,
     created: &AtomicU64,
 ) -> Report {
@@ -760,6 +769,7 @@ fn drive(
                 tracked_history: history.tracked(),
                 files: frame.files().len(),
                 body: body.diff,
+                backlog: sent.load(Ordering::Relaxed).saturating_sub(ticks),
             });
             continue;
         }
@@ -773,23 +783,27 @@ fn drive(
                     "the watch thread ended after {frames} frames, so the rest of this window would measure a process with nothing to do"
                 )
             }
-            Ok(paths) => {
-                ticks += 1;
-                // Sampled on the wake, before the walk, exactly where `vigia::run`
-                // samples it.
-                history.record(paths.iter().map(String::as_str), Instant::now());
-                // Advance first, follow second: the path is looked up in the
-                // file list, and before the walk that list is the previous
-                // frame's. `vigia::run` says why.
-                match frame.advance() {
-                    Ok(()) => {
-                        if let Some(path) = paths.last() {
-                            app.follow(path, &frame);
+            // Everything already queued behind it too, and one paint for the lot,
+            // as `vigia::run` drains.
+            Ok(first) => {
+                for paths in std::iter::once(first).chain(rx.try_iter().take(DRAIN_CAP - 1)) {
+                    ticks += 1;
+                    // Sampled on the wake, before the walk, exactly where `vigia::run`
+                    // samples it.
+                    history.record(paths.iter().map(String::as_str), Instant::now());
+                    // Advance first, follow second: the path is looked up in the
+                    // file list, and before the walk that list is the previous
+                    // frame's. `vigia::run` says why.
+                    match frame.advance() {
+                        Ok(()) => {
+                            if let Some(path) = paths.last() {
+                                app.follow(path, &frame);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        failed += 1;
-                        last_error = Some(e.to_string());
+                        Err(e) => {
+                            failed += 1;
+                            last_error = Some(e.to_string());
+                        }
                     }
                 }
             }
@@ -892,8 +906,28 @@ fn drive(
 
 /// Floors below which this soak proved nothing.
 const MIN_FRAMES: u64 = 40;
-const MIN_TICKS: u64 = 40;
 const MIN_ROUNDS: u64 = 50;
+
+/// `vigia::run`'s `DRAIN_CAP`: wakes taken per paint.
+const DRAIN_CAP: usize = 64;
+
+/// How far the backlog may rise from the window's first half to its second.
+/// Ticks in flight are there in both halves, and a queue is only in the second.
+const MAX_BACKLOG: u64 = 8;
+
+/// Whether the loop kept up: the late backlog, against the early one.
+fn kept_up(early: u64, late: u64) -> bool {
+    late <= early + MAX_BACKLOG
+}
+
+impl Report {
+    /// The most ticks queued in the first half of the window, and in the second.
+    fn backlogs(&self) -> (u64, u64) {
+        let half = self.samples.len() / 2;
+        let most = |samples: &[Sample]| samples.iter().map(|s| s.backlog).max().unwrap_or(0);
+        (most(&self.samples[..half]), most(&self.samples[half..]))
+    }
+}
 
 impl Report {
     /// Every claim I3 makes that this process can see.
@@ -910,14 +944,30 @@ impl Report {
             self.store_wakes, self.window
         );
         assert!(
-            self.frames >= MIN_FRAMES && self.ticks >= MIN_TICKS,
-            "I3: {} frames from {} ticks over {:?}, under the {MIN_FRAMES} and \
-             {MIN_TICKS} this gate needs, so the bounds below describe a monitor \
-             that was not running",
+            self.frames >= MIN_FRAMES,
+            "I3: {} frames over {:?}, under the {MIN_FRAMES} this gate needs, so the \
+             bounds below describe a monitor that was not running",
             self.frames,
-            self.ticks,
             self.window
         );
+        // A throughput claim, so it binds the optimised build the budgets were
+        // set against. A debug build on a loaded runner can fall behind the
+        // writer and says only that.
+        let (early, late) = self.backlogs();
+        if cfg!(debug_assertions) {
+            if !kept_up(early, late) {
+                eprintln!(
+                    "note: the debug build fell from {early} ticks behind to {late}; \
+                     the release soak holds the loop to keeping up"
+                );
+            }
+        } else {
+            assert!(
+                kept_up(early, late),
+                "I3: the loop fell from {early} ticks behind to {late}, so a queue grew \
+                 inside the process whose RSS is the measurement"
+            );
+        }
         assert!(
             self.rounds >= MIN_ROUNDS,
             "I3: the writer completed {} rounds, under {MIN_ROUNDS}, so nothing \
@@ -2316,4 +2366,23 @@ mod statistic {
             );
         }
     }
+}
+
+/// The backlog bound, since only a real soak builds a report.
+#[test]
+fn backlog_bounded() {
+    assert!(kept_up(0, 0), "an empty channel read as a queue");
+    assert!(kept_up(12, 12), "a steady number in flight read as a queue");
+    assert!(
+        kept_up(0, MAX_BACKLOG),
+        "a rise inside the bound read as a queue"
+    );
+    assert!(
+        !kept_up(0, MAX_BACKLOG + 1),
+        "a queue past the bound passed"
+    );
+    assert!(
+        include_str!("../src/lib.rs").contains(&format!("const DRAIN_CAP: usize = {DRAIN_CAP};")),
+        "the soak drains {DRAIN_CAP} ticks per paint and `vigia::run` no longer does"
+    );
 }
