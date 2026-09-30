@@ -2981,3 +2981,19 @@ fn ci_runs_cited_gates() {
         "the lint job does not run cited-gates.sh with the PR body:\n{lint}"
     );
 }
+
+/// The lint job's one network download retries, so a release CDN that answers
+/// 500 once does not turn `main` red.
+#[test]
+fn dist_install_retries() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = ci
+        .split_once("the generated release workflow is current")
+        .and_then(|(_, rest)| rest.split_once("dist generate --check"))
+        .map(|(step, _)| step)
+        .expect("ci.yml installs cargo-dist before `dist generate --check`");
+    assert!(
+        step.contains("for attempt in") && step.contains("--retry"),
+        "the cargo-dist install runs once, so one bad download fails the build:\n{step}"
+    );
+}
