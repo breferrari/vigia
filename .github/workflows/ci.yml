@@ -60,8 +60,7 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
           BASE: ${{ github.base_ref }}
 
-      # A gate the branch lost leaves the suite green, and the message that
-      # cites it is the only trace. The body arrives through env.
+      # The body arrives through env, never into the script.
       - name: cited gates exist
         if: github.event_name == 'pull_request'
         run: sh .github/scripts/cited-gates.sh "origin/${BASE}"

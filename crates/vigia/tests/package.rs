@@ -2020,13 +2020,25 @@ fn dialect_subject_warned() {
     );
 }
 
-/// Runs `title-check.sh` in a scratch repository: one base commit, then
-/// `commits` as `(subject, body)`. Returns whether it passed and what it said.
+/// Runs `.github/scripts/<script> base` in a scratch repository, with `env`
+/// set. `commits` runs after one base commit tagged `base` that holds `files`.
+/// Returns whether it passed and what it said.
 #[cfg(unix)]
-fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, String) {
-    let dir = std::env::temp_dir().join(format!("vigia-title-{}-{case}", std::process::id()));
+fn run_in_scratch(
+    case: &str,
+    files: &[(&str, &str)],
+    commits: &[(&str, &str)],
+    script: &str,
+    env: (&str, &str),
+) -> (bool, String) {
+    let dir = std::env::temp_dir().join(format!("vigia-{script}-{}-{case}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    for (path, text) in files {
+        let at = dir.join(path);
+        std::fs::create_dir_all(at.parent().expect("a file has a parent")).expect("fixture dir");
+        std::fs::write(at, text).expect("write the fixture");
+    }
     let git = |args: &[&str]| {
         let out = Command::new("git")
             .args([
@@ -2048,6 +2060,7 @@ fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, Stri
         );
     };
     git(&["init", "-q"]);
+    git(&["add", "."]);
     git(&["commit", "-q", "--allow-empty", "-m", "base"]);
     git(&["tag", "base"]);
     for (subject, body) in commits {
@@ -2058,17 +2071,24 @@ fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, Stri
         git(&args);
     }
     let out = Command::new("sh")
-        .arg(repo_root().join(".github/scripts/title-check.sh"))
+        .arg(repo_root().join(".github/scripts").join(script))
         .arg("base")
-        .env("TITLE", title)
+        .env(env.0, env.1)
         .current_dir(&dir)
         .output()
-        .expect("title-check.sh runs");
+        .unwrap_or_else(|e| panic!("{script} runs: {e}"));
     let _ = std::fs::remove_dir_all(&dir);
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
     )
+}
+
+/// Runs `title-check.sh` in a scratch repository: one base commit, then
+/// `commits` as `(subject, body)`. Returns whether it passed and what it said.
+#[cfg(unix)]
+fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, String) {
+    run_in_scratch(case, &[], commits, "title-check.sh", ("TITLE", title))
 }
 
 /// CI rejects contract phrasing in a title or subject unless a commit body
@@ -2960,56 +2980,12 @@ fn ci_tests_get_slack() {
 /// `fn kept`, over one commit whose body is `message`.
 #[cfg(unix)]
 fn cited_gates(case: &str, message: &str, body: &str) -> (bool, String) {
-    let dir = std::env::temp_dir().join(format!("vigia-cited-{}-{case}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("t"))
-        .unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
-    std::fs::write(dir.join("t/a.rs"), "fn kept() {}\nfn kept_more() {}\n")
-        .expect("write the fixture");
-    let git = |args: &[&str]| {
-        let out = Command::new("git")
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .current_dir(&dir)
-            .output()
-            .expect("git runs");
-        assert!(
-            out.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    };
-    git(&["init", "-q"]);
-    git(&["add", "."]);
-    git(&["commit", "-q", "-m", "base"]);
-    git(&["tag", "base"]);
-    git(&[
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "change",
-        "-m",
-        message,
-    ]);
-    let out = Command::new("sh")
-        .arg(repo_root().join(".github/scripts/cited-gates.sh"))
-        .arg("base")
-        .env("BODY", body)
-        .current_dir(&dir)
-        .output()
-        .expect("cited-gates.sh runs");
-    let _ = std::fs::remove_dir_all(&dir);
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
+    run_in_scratch(
+        case,
+        &[("t/a.rs", "fn kept() {}\nfn kept_more() {}\n")],
+        &[("change", message)],
+        "cited-gates.sh",
+        ("BODY", body),
     )
 }
 

@@ -18,10 +18,7 @@ missing=0
 for cite in $cited; do
     file="${cite%%::*}"
     name="${cite#*::}"
-    found=$(git ls-files | grep -E "(^|/)${file}\$" | while IFS= read -r path; do
-        grep -lE "fn ${name}([^a-z0-9_]|\$)" "$path" || true
-    done)
-    if [ -z "$found" ]; then
+    if ! git grep -qE "fn ${name}([^a-z0-9_]|\$)" -- "${file}" "*/${file}"; then
         echo "::error::${cite} is cited and no ${file} defines fn ${name}"
         missing=$((missing + 1))
     fi
