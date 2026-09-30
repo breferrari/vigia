@@ -61,3 +61,30 @@ fn diff_attribute_wins() {
         "the height treats a.bin as binary while its diff is text"
     );
 }
+
+/// A large binary file costs the sniff window to diff, not its size: the bytes
+/// after the first NUL-bearing window are never read.
+#[test]
+fn binary_sniff_bounded() {
+    let scratch = Scratch::new("attr-sniff");
+    let mut big = vec![0u8; 1 << 20];
+    big[0] = b'a';
+    scratch.write("big.bin", &big);
+    scratch.commit_all("initial");
+    big[1] = b'b';
+    scratch.write("big.bin", &big);
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "big.bin")
+        .expect("listed");
+    let diff = worktree.diff(change).expect("diff");
+    assert!(diff.binary, "a file of NULs was not called binary");
+    assert!(
+        diff.bytes <= 2 * 8000,
+        "diffing a 1 MiB binary file compared {} bytes, where the sniff needs 8000",
+        diff.bytes
+    );
+}
