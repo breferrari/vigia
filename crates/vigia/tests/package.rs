@@ -2182,6 +2182,38 @@ fn intent_conflict_fails() {
     );
 }
 
+/// A squashed release PR with follow-up commits carries one real note and a
+/// `none` per later commit. The note is written and the `none` lines skipped;
+/// a release PR with only `none` still fails.
+#[cfg(unix)]
+#[test]
+fn mixed_notes_pass() {
+    let records = "#40\trelease\tRelease-note: none\n\
+                   #40\trelease\tRelease-note: A real line\n\
+                   #40\trelease\tRelease-note: none\n";
+    let (passed, left, said) = changelog_entry("mixed", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        passed,
+        "a release PR with a real note and follow-up nones failed:\n{said}"
+    );
+    assert_eq!(
+        bullets(&left, "0.2.0"),
+        ["- A real line"],
+        "the mixed PR did not write its one note:\n{left}"
+    );
+
+    let (passed, _, said) = changelog_entry(
+        "only-none",
+        "0.2.0",
+        "#41\trelease\tRelease-note: none\n",
+        CHANGELOG_BEFORE,
+    );
+    assert!(
+        !passed && said.contains("::error::#41 "),
+        "a release PR with only Release-note: none passed:\n{said}"
+    );
+}
+
 /// A pull request with neither label fails the bump and is named, whatever
 /// its subject says. A commit with no pull request is named by its SHA.
 #[cfg(unix)]
