@@ -1291,3 +1291,37 @@ fn a_quote_survives_one_pass_that_passes_it_over_and_not_two() {
     drop(highlighter.pass());
     assert_eq!(ask(&mut highlighter), 1, "the quote was never swept at all");
 }
+
+/// The `two-face` release the dump was built from, as `NOTICE.md` records it,
+/// matches the one `Cargo.lock` resolves. A bump without `cargo run -p xtask`
+/// leaves the dump on the old grammars and every other gate green.
+#[test]
+fn dump_base_version_current() {
+    if !in_repository() {
+        return;
+    }
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let lock = std::fs::read_to_string(manifest.join("../../Cargo.lock")).expect("read Cargo.lock");
+    let locked = lock
+        .split("[[package]]")
+        .find(|entry| entry.contains("name = \"two-face\""))
+        .and_then(|entry| {
+            entry
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("version = "))
+        })
+        .map(|version| version.trim_matches('"').to_owned())
+        .expect("two-face is in the lock file");
+    let notice =
+        std::fs::read_to_string(manifest.join("assets/NOTICE.md")).expect("read NOTICE.md");
+    let recorded = notice
+        .lines()
+        .find_map(|line| line.strip_prefix("The base set is two-face `"))
+        .and_then(|rest| rest.split('`').next())
+        .expect("NOTICE.md records the two-face release the dump was built from");
+    assert_eq!(
+        recorded, locked,
+        "the dump was built from two-face {recorded} and Cargo.lock resolves {locked}; \
+         run `cargo run -p xtask`"
+    );
+}

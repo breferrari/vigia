@@ -21,10 +21,12 @@ use vigia::{
     Change, Committed, Config, Glyphs, Hovered, LEAVING, Ledger, NoteCount, NoteEffects, NoteLead,
     Pointing, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, Region, Regions, Row, Theme,
     Timed, View, Viewport, WORD_INSET, body_layout, box_cells, box_entrance, box_exit, box_route,
-    commit, count_cell, edge_at, effect_interval, has_room, hover_after, note_cells, opening,
-    press_at, regions, render, repainted, selection_after, withdraw,
+    commit, count_cell, drag_after, edge_at, effect_interval, has_room, hover_after, note_cells,
+    opening, press_at, regions, render, repainted, selection_after, withdraw,
 };
-use vigia_core::{ChangeKind, Frame, Highlighter, History, Side, Standing, Status, Store, key};
+use vigia_core::{
+    ChangeKind, Frame, Highlighter, History, LineRef, Side, Standing, Status, Store, key,
+};
 
 use support::{Scratch, TempDir, files_in, note, numbered_lines};
 
@@ -373,22 +375,35 @@ impl Rig {
             "the loop routes a press to the open box, so this never reaches the \
              gutter with one up"
         );
-        let Some(offset) = press_at(&painted.view, painted.laid, &press(column, row)) else {
-            return false;
-        };
-        // The loop's own refusals, in its own order.
-        if !has_room(painted.laid) {
+        self.drag_opens(painted, column, row, row)
+    }
+
+    /// The loop's own routing of a drag from the gutter at `column`, from row
+    /// `from` to row `to`: press, drag and release through `drag_after`, and the
+    /// box opened over the span it ended with. `false` where the press began no
+    /// drag.
+    fn drag_opens(&mut self, painted: &Painted, column: u16, from: u16, to: u16) -> bool {
+        let (view, laid) = (&painted.view, painted.laid);
+        let (begun, _) = drag_after(view, laid, &press(column, from), None);
+        if begun.is_none() || !has_room(laid) {
             return false;
         }
-        let (anchor, existing) = opening(&painted.view, offset, self.app.notes())
-            .expect("a note press resolved to no anchor");
+        let dragged = at(MouseEventKind::Drag(MouseButton::Left), column, to);
+        let (moving, _) = drag_after(view, laid, &dragged, begun);
+        let (standing, ended) = drag_after(view, laid, &release(column, to), moving);
+        assert!(standing.is_none(), "the release left the drag standing");
+        let (first, last) = ended
+            .expect("the release ended no drag")
+            .offsets(view, laid.diff.top)
+            .expect("the pressed line is on screen");
+        let (anchor, existing) =
+            opening(view, first, last, self.app.notes()).expect("the drag resolved to no anchor");
         let existing = existing.or_else(|| self.app.box_over(&anchor).cloned());
         self.app.open_box(anchor, existing.as_ref());
         self.box_effect = Some(Timed::armed(box_entrance(&self.theme), self.clock));
         self.advance(BOX_ARRIVING + ARRIVING_FRAME);
-        // The entrance was spent by the clock and never drawn, so the next paint
-        // tells whatever it arms nothing of that spell, as the shell's
-        // `effect_interval` would.
+        // Spent by the clock and never drawn, so the next paint tells whatever it
+        // arms nothing of it, as the shell's `effect_interval` would.
         self.elapsed = Duration::ZERO;
         true
     }
@@ -2000,6 +2015,378 @@ fn a_moved_line_keeps_its_note_and_the_store_is_not_rewritten() {
         fs::read(&file).expect("the note file"),
         bytes,
         "the pane rewrote the store on a move, and the pane writes only on a gesture"
+    );
+}
+
+/// A note over `line 3` to `line 6` of the fixture, the way a drag writes one.
+fn ranged(id: &str) -> vigia_core::Note {
+    vigia_core::Note {
+        first: Some(LineRef {
+            side: Side::New,
+            line: 3,
+            text: "line 3".to_owned(),
+        }),
+        ..note(id, 6, "line 6", "all of these")
+    }
+}
+
+#[test]
+fn a_drag_from_the_gutter_opens_the_box_over_the_range_and_enter_keeps_it() {
+    let scratch = fixture("notes-range-drag");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, origin) = plain.gutter();
+    let (from, to) = (plain.row_of("line 3"), plain.row_of("line 6"));
+    assert!(
+        rig.drag_opens(&plain, left + 1, from, to),
+        "the drag opened nothing"
+    );
+
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(to);
+    assert!(
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-5 +3-6 ─"),
+        "the box does not name the range it covers: {:?}",
+        rows[0]
+    );
+
+    rig.type_text("all of these");
+    rig.enter();
+    let listing = rig.store.list().expect("list");
+    assert_eq!(listing.notes.len(), 1, "{:?}", listing.notes);
+    let written = &listing.notes[0];
+    assert_eq!((written.side, written.line), (Side::New, 6), "{written:?}");
+    assert_eq!(
+        written.first,
+        Some(LineRef {
+            side: Side::New,
+            line: 3,
+            text: "line 3".to_owned(),
+        }),
+        "the note lost the range the drag covered"
+    );
+}
+
+#[test]
+fn a_drag_stops_at_the_edge_of_the_hunk_it_began_in() {
+    // Two hunks, so a drag that left its own would land on a line of the next.
+    let scratch = Scratch::new("notes-range-clamp");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, origin) = plain.gutter();
+    let from = plain.row_of("line 3");
+    let next_hunk = plain.row_of("line 23");
+    assert!(
+        next_hunk > plain.row_of("line 8"),
+        "the second hunk is not below"
+    );
+    assert!(rig.drag_opens(&plain, left + 1, from, next_hunk));
+
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(opened.row_of("line 8"));
+    assert!(
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-5 +3-8 ─"),
+        "the range left its hunk: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn a_drag_over_another_note_makes_a_second_note_and_leaves_the_first() {
+    let scratch = fixture("notes-range-over");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store
+        .put(&note("n1", 4, "line 4", "about four"))
+        .expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, origin) = painted.gutter();
+    let (from, to) = (painted.row_of("line 3"), painted.row_of("line 6"));
+    // The note on line 4 draws rows between the two ends, which the drag crosses.
+    assert!(painted.notes_under(painted.row_of("line 4")).len() == 1);
+    assert!(rig.drag_opens(&painted, left + 1, from, to));
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(opened.row_of("line 6"));
+    assert!(
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-5 +3-6 ─"),
+        "{:?}",
+        rows[0]
+    );
+    rig.type_text("all of these");
+    rig.enter();
+
+    let listing = rig.store.list().expect("list");
+    assert_eq!(listing.notes.len(), 2, "{:?}", listing.notes);
+    let first = listing
+        .notes
+        .iter()
+        .find(|n| n.id == "n1")
+        .expect("the first note");
+    assert_eq!((first.line, first.first.as_ref()), (4, None), "{first:?}");
+    let second = listing
+        .notes
+        .iter()
+        .find(|n| n.id != "n1")
+        .expect("the range");
+    assert_eq!(second.line, 6);
+    assert_eq!(second.first.as_ref().map(|f| f.line), Some(3));
+}
+
+#[test]
+fn a_drag_whose_release_never_arrives_ends_on_the_next_sign_of_it() {
+    let scratch = fixture("notes-range-lost");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, _) = painted.gutter();
+    let y = painted.row_of("line 3");
+    // Motion with no button, a window that lost focus, a press somewhere else.
+    for ender in [moved(left + 1, y), Event::FocusLost, press(0, 0)] {
+        let (begun, _) = drag_after(&painted.view, painted.laid, &press(left + 1, y), None);
+        assert!(begun.is_some(), "the press began no drag");
+        let (after, ended) = drag_after(&painted.view, painted.laid, &ender, begun);
+        assert!(
+            after.is_none() && ended.is_none(),
+            "{ender:?} left the drag standing, so every click after it is swallowed"
+        );
+    }
+}
+
+#[test]
+fn a_range_never_leaves_the_hunk_of_its_last_line() {
+    // Two hunks; the ends a drag stored can fall in both once the screen moves.
+    let scratch = Scratch::new("notes-range-shifted");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let top = painted.laid.diff.top;
+    let offset = |needle: &str| usize::from(painted.row_of(needle) - top);
+    let (_, anchor) = painted
+        .view
+        .anchor_over(offset("line 3"), offset("line 23"))
+        .expect("an anchor");
+    assert_eq!(anchor.line, 23);
+    let first = anchor.first.expect("a range");
+    assert!(
+        first.line >= 22,
+        "the range reached back across a hunk to line {}",
+        first.line
+    );
+}
+
+#[test]
+fn a_drag_upward_stops_at_the_top_of_the_hunk_it_began_in() {
+    let scratch = Scratch::new("notes-range-up");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, origin) = plain.gutter();
+    let from = plain.row_of("line 27");
+    let above = plain.row_of("line 3");
+    assert!(rig.drag_opens(&plain, left + 1, from, above));
+    let opened = rig.paint(&mut frame, PANE, Pointing::default());
+    let rows = opened.box_under(opened.row_of("line 27"));
+    assert!(
+        rows[0][usize::from(origin)..].starts_with("┌ note · src/watch.rs:-25 +22-27 ─"),
+        "an upward drag left its hunk: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn a_drag_follows_its_line_when_a_write_moves_the_diff_under_it() {
+    let scratch = Scratch::new("notes-range-moved");
+    scratch.write(PATH, numbered_lines(30));
+    scratch.commit_all("baseline");
+    scratch.edit_line(PATH, 4, EDITED);
+    scratch.edit_line(PATH, 24, "line twenty-five, rewritten");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let before = rig.paint(&mut frame, TALL, Pointing::default());
+    let (left, _, _) = before.gutter();
+    let (view, laid) = (&before.view, before.laid);
+    let (begun, _) = drag_after(view, laid, &press(left + 1, before.row_of("line 27")), None);
+    let dragged = at(
+        MouseEventKind::Drag(MouseButton::Left),
+        left + 1,
+        before.row_of("line 23"),
+    );
+    let (held, _) = drag_after(view, laid, &dragged, begun);
+    let held = held.expect("the drag is standing");
+
+    // The agent writes above, and every row under the hand moves down.
+    let text = std::fs::read_to_string(scratch.path_of(PATH)).expect("read");
+    scratch.write(PATH, format!("new 1\nnew 2\nnew 3\nnew 4\n{text}"));
+    frame.advance().expect("advance after the write");
+    let after = rig.paint(&mut frame, TALL, Pointing::default());
+    let top = after.laid.diff.top;
+    let pressed = usize::from(after.row_of("line 27") - top);
+    let (first, last) = held
+        .offsets(&after.view, top)
+        .expect("the pressed line is still on screen");
+    let (hunk_top, hunk_bottom) = after.view.hunk_rows(pressed).expect("a hunk");
+    assert!(
+        hunk_top <= first && last <= hunk_bottom,
+        "the drag covers rows {first}..={last} outside its hunk {hunk_top}..={hunk_bottom}"
+    );
+    assert_eq!(
+        last, pressed,
+        "the drag no longer ends on the line it was pressed on"
+    );
+    let (_, anchor) = after.view.anchor_over(first, last).expect("an anchor");
+    assert_eq!(anchor.text, "line 27");
+}
+
+#[test]
+fn a_press_and_release_on_one_row_is_a_note_on_one_line_as_before() {
+    let scratch = fixture("notes-range-one");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, _) = plain.gutter();
+    let y = plain.row_of(EDITED);
+    assert!(rig.drag_opens(&plain, left + 1, y, y));
+    rig.type_text("one line");
+    rig.enter();
+
+    let listing = rig.store.list().expect("list");
+    assert_eq!(listing.notes.len(), 1);
+    assert_eq!(listing.notes[0].first, None, "{:?}", listing.notes[0]);
+    // Byte for byte what a version that knows nothing of ranges writes and reads.
+    let file = files_in(rig.store.dir())
+        .into_iter()
+        .next()
+        .expect("the note's file");
+    let written = std::fs::read_to_string(rig.store.dir().join(file)).expect("read the note");
+    assert!(
+        !written.contains("first"),
+        "a note on one line wrote range fields an older reader refuses:\n{written}"
+    );
+}
+
+#[test]
+fn every_line_of_a_range_draws_the_notes_ink() {
+    let scratch = fixture("notes-range-ink");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&ranged("n1")).expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let top = painted.laid.diff.top;
+    let lit: Vec<u16> = painted
+        .view
+        .notes
+        .ranged
+        .iter()
+        .map(|&row| top + u16::try_from(row).expect("a screen row"))
+        .collect();
+    for line in ["line 3", "line 4", EDITED] {
+        assert!(
+            lit.contains(&painted.row_of(line)),
+            "{line:?} is inside the range and draws no mark: {lit:?}"
+        );
+    }
+    assert!(
+        !lit.contains(&painted.row_of("line 7")),
+        "a line past the range took its ink"
+    );
+    assert_eq!(painted.notes_under(painted.row_of("line 6")).len(), 1);
+
+    // With the rows hidden the marks stay, the range's among them.
+    rig.app
+        .apply(Action::ToggleNotes, &mut frame, 0)
+        .expect("hide the rows");
+    let hidden = rig.paint(&mut frame, PANE, Pointing::default());
+    let lit: Vec<u16> = hidden
+        .view
+        .notes
+        .ranged
+        .iter()
+        .map(|&row| top + u16::try_from(row).expect("a screen row"))
+        .collect();
+    assert!(
+        lit.contains(&hidden.row_of("line 4")),
+        "with the note rows hidden the range lost its marks: {lit:?}"
+    );
+}
+
+#[test]
+fn an_edited_first_line_draws_the_range_changed() {
+    let scratch = fixture("notes-range-changed");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&ranged("n1")).expect("put");
+    rig.reload();
+
+    scratch.edit_line(PATH, 2, "line three, rewritten");
+    frame.advance().expect("advance after the edit");
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = painted.row_of("line 6");
+    assert!(
+        painted.note_word(y).contains("changed"),
+        "the range's first line changed and the note says {:?}",
+        painted.note_word(y)
+    );
+}
+
+#[test]
+fn a_click_on_the_line_a_range_hangs_under_reopens_it_with_its_range() {
+    let scratch = fixture("notes-range-reopen");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    rig.store.put(&ranged("n1")).expect("put");
+    rig.reload();
+
+    let painted = rig.paint(&mut frame, PANE, Pointing::default());
+    let (left, _, _) = painted.gutter();
+    assert!(rig.press_opens(&painted, left + 1, painted.row_of("line 6")));
+    rig.type_text(" and more");
+    rig.enter();
+    let listing = rig.store.list().expect("list");
+    assert_eq!(listing.notes.len(), 1, "{:?}", listing.notes);
+    assert_eq!(
+        listing.notes[0].first,
+        ranged("n1").first,
+        "editing a range's note from its last line dropped the range"
     );
 }
 

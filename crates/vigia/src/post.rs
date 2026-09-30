@@ -61,8 +61,8 @@ pub fn permit() -> Option<Permit> {
 /// What Enter's post came to, and the only thing the footer is told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Posted {
-    /// No session has registered against this worktree, which is every reader
-    /// who has not installed the hook. Nothing was opened.
+    /// No session has registered against this worktree: the hook is not
+    /// installed, or the agent is not Claude Code. Nothing was opened.
     Unregistered,
     /// At least one registered session took the line.
     Sent,
@@ -72,15 +72,12 @@ pub enum Posted {
     Failed,
 }
 
-/// What the footer says, or `None` for the silence a reader with no hook gets:
-/// telling them *noted* on every Enter would be a word about a rung they never
-/// asked for.
+/// What the footer says. *noted* means nothing live took the line.
 #[must_use]
-pub fn word(posted: Posted) -> Option<&'static str> {
+pub fn word(posted: Posted) -> &'static str {
     match posted {
-        Posted::Unregistered => None,
-        Posted::Sent => Some("sent"),
-        Posted::Failed => Some("noted"),
+        Posted::Sent => "sent",
+        Posted::Unregistered | Posted::Failed => "noted",
     }
 }
 
@@ -114,7 +111,8 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     // Writing to a String cannot fail, so the results are discarded, which is
     // what `encode` does for the record one crate over.
     let mut out = String::new();
-    let _ = writeln!(out, "vigia note on {}:{}", note.path, note.line);
+    let from = note.span().map_or(note.line, |(first, _)| first);
+    let _ = writeln!(out, "vigia note on {}:{}", note.path, note.label());
     let _ = writeln!(out, "\n{}", note.body);
     if !context.is_empty() {
         let width = context
@@ -124,7 +122,11 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
             .unwrap_or(1);
         out.push('\n');
         for (number, text) in context {
-            let mark = if *number == note.line { '>' } else { ' ' };
+            let mark = if (from..=note.line).contains(number) {
+                '>'
+            } else {
+                ' '
+            };
             let _ = writeln!(out, "{mark} {number:>width$} | {text}");
         }
     }
@@ -267,7 +269,10 @@ pub fn post_each(
 #[must_use]
 pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
     match note.side {
-        Side::New => crate::notes::around(workdir, &note.path, note.line),
+        Side::New => {
+            let from = note.span().map_or(note.line, |(first, _)| first);
+            crate::notes::around_span(workdir, &note.path, from, note.line)
+        }
         Side::Old => Vec::new(),
     }
 }

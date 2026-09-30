@@ -238,6 +238,7 @@ struct Track {
     samples: [u32; HISTORY_SAMPLES],
     /// Ordinal of the last tick that named this path.
     tick: u64,
+    write: u64,
     /// Bytes this path held when it was last weighed, if it ever has been.
     bytes: Option<u64>,
 }
@@ -248,10 +249,11 @@ impl Track {
         self.tick == tick
     }
 
-    fn new(tick: u64) -> Self {
+    fn new(tick: u64, write: u64) -> Self {
         Self {
             samples: [0; HISTORY_SAMPLES],
             tick,
+            write,
             bytes: None,
         }
     }
@@ -326,7 +328,7 @@ impl Track {
 /// history.record(["src/lib.rs", "Cargo.toml"], now);
 ///
 /// // Both were named by the newest tick, so both pulse. Follow mode moves to
-/// // one of them; the pulse is what says the other moved too.
+/// // the last one, and only it carries the `●`.
 /// assert_eq!(history.recency("src/lib.rs"), Recency::Pulse);
 /// assert_eq!(history.recency("Cargo.toml"), Recency::Pulse);
 /// assert_eq!(history.recency("README.md"), Recency::Cold);
@@ -340,6 +342,8 @@ pub struct History {
     tracks: HashMap<String, Track>,
     /// Ticks that named at least one path.
     tick: u64,
+    /// Path writes recorded, so the last one names the file that `●` marks.
+    write: u64,
     /// When the newest sample opened, which is the grid the window rolls on.
     opened: Instant,
     /// What a drawn bucket's height is divided by, one figure per
@@ -365,6 +369,7 @@ impl History {
         Self {
             tracks: HashMap::new(),
             tick: 0,
+            write: 0,
             opened: now,
             scales: [0; SPARK_GROUPS.len()],
             scratch: Vec::new(),
@@ -396,9 +401,11 @@ impl History {
                 named = true;
             }
             self.stats.recorded += 1;
+            self.write += 1;
 
             if let Some(track) = self.tracks.get_mut(path) {
                 track.tick = self.tick;
+                track.write = self.write;
                 track.wrote(bytes);
                 continue;
             }
@@ -406,7 +413,7 @@ impl History {
             if self.tracks.len() >= HISTORY_PATHS {
                 self.evict_one();
             }
-            let mut track = Track::new(self.tick);
+            let mut track = Track::new(self.tick, self.write);
             // The first write of a path has no earlier size to differ from, so it
             // weighs the floor and leaves the baseline behind for the next one.
             track.wrote(bytes);
@@ -434,13 +441,13 @@ impl History {
         self.tracks.get(path).map(Track::levelled)
     }
 
-    /// Whether the newest burst named this path, which is what the `●` marks.
+    /// Whether this path is the newest burst's last write, which the `●` marks.
     pub fn newest(&self, path: &str) -> bool {
-        // `self.tick` is zero until something is recorded and no track can exist
+        // `self.write` is zero until something is recorded and no track can exist
         // before then, so this never reads a mark out of an empty store.
         self.tracks
             .get(path)
-            .is_some_and(|track| track.named_by(self.tick))
+            .is_some_and(|track| track.write == self.write)
     }
 
     /// Which rung of the recency ladder this path is on.
@@ -765,7 +772,7 @@ mod tests {
     fn a_bucket_saturates_rather_than_wrapping() {
         let now = base();
         let mut history = History::starting_at(now);
-        let mut track = Track::new(1);
+        let mut track = Track::new(1, 1);
         track.samples[HISTORY_SAMPLES - 1] = u32::MAX;
         // Both ends of the weight, because a sample has one: the floor a
         // sizeless write takes, and a full-range one from a large edit. Neither

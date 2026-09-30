@@ -1,14 +1,36 @@
 #!/bin/sh
-# Writes one release's section into CHANGELOG.md, from the commit subjects of
-# the range being released.
+# Writes one release's section into CHANGELOG.md, from the labelled pull
+# requests in the range being released.
 #
 # Lives in a file rather than inline in the workflow for the reason
 # raise-version.sh does: a filter decides what a user is told about a release,
-# and a filter nothing drives is a wish. The test feeds it fixed subjects and
+# and a filter nothing drives is a wish. The test feeds it fixed records and
 # reads back the section, so the rules below are checkable without a release.
 #
-# Subjects arrive on stdin, one per line, newest first, which is what
-# `git log --format=%s` gives and the order the section is written in.
+# Records arrive on stdin, newest first, one per commit or per `Release-note:`
+# line, as three tab-separated fields:
+#
+#   who     `#<n>` for the pull request the commit merged, or the short SHA
+#           when none was found
+#   labels  the pull request's labels, comma-separated, or empty
+#   text    the commit subject, or one `Release-note: <text>` line from its
+#           body in the subject's place
+#
+# Intent lives on the label and on the trailer, never in the wording of the
+# subject. Per record:
+#
+#   Release-note: none      skipped. `release` on the PR contradicts it: fail.
+#   Release-note: <text>    written as it stands. The PR must carry `release`.
+#   subject, `release`      written, minus the tracker's trailing `(#n)`.
+#   subject, `internal`     skipped.
+#   subject, neither        fail, naming the PR. Unlabelled is an error, not a
+#                           guess: the old subject list let factory work
+#                           through whenever its wording was ordinary.
+#   both labels             fail.
+#
+# A range that keeps nothing exits 1, so the bump stops before a version is
+# cut. Every failure in the range is named before the exit, so one run shows
+# every PR that needs a label.
 #
 # Usage: changelog-entry.sh <version> <date> [changelog]
 #   version   the version being released, three numeric components
@@ -36,135 +58,105 @@ if grep -qF "## [${version}]" "$changelog"; then
     exit 1
 fi
 
-# **The two filters are different rules and neither subsumes the other.**
-#
-# The first drops the repository's own prefix convention: a subject beginning
-# `roadmap:` or `spec:` is work on the written layer, which a user of the binary
-# cannot observe. `feat:` and `fix:` are deliberately absent, because those
-# describe the product and predate the prose-title convention.
-#
-# The second drops the subjects that describe the same work without a prefix,
-# which is most of them: a row moving on the roadmap, a phase reordering, a
-# ruling being written, a token the release needed. It matches anywhere in the
-# subject rather than at an anchor, because the internal thing is as often the
-# object as the subject, and case-insensitively, because `ROADMAP.md` and `the
-# roadmap` are the same subject twice.
-#
-# **Scoping the range to `crates/` instead was tried and does not work here.**
-# It is the usual way to do this and it looks stricter, but this repository
-# gates its own prose from tests, so a commit that only edits ROADMAP.md still
-# touches `crates/vigia/tests/package.rs` to move a ceiling. Measured over
-# 0.34.0 to 0.38.0, the path scope kept every document commit in the range.
-#
-# The list is tuned against the subjects this repository has and is a heuristic,
-# not a rule, and its two directions do not cost the same. Something internal
-# that slips through is one odd line a reader skims past. A visible change it
-# drops is a reader upgrading into a pane with a key missing and notes saying
-# nothing moved, and nothing downstream can catch that, because the section is
-# the only place the change was ever going to be named. That asymmetry is why
-# the allow pass below wins over this list, and why an emptied range is reported
-# rather than summarised.
-#
-# **`token` is not on that list, because the pane draws one.** The header's
-# position token is pressed, so the word carries a credential sense and a visible
-# one at once, and a word carrying both cannot sit in a list whose mistakes are
-# the expensive ones. The release's own token subjects name the release or the
-# bump as well, which is what catches them instead. One of them names neither and
-# reaches a reader as an odd line, which is the direction this file is willing to
-# be wrong in.
-#
-# An entry needing a word boundary writes it the long way round, as
-# `(^|[^a-zA-Z])word([^a-zA-Z]|$)`. `\b` is a GNU extension POSIX ERE does not
-# define, and while the release runs on one runner whose grep has it, the test
-# driving this filter is `cfg(unix)` and runs wherever the suite does.
-internal_prefix='^(roadmap|spec|docs?|ci|chore|deps?|take-next|skill|test|refactor|perf|style|build|process|steering|mockup|harden|release|vault writes)(\([^)]*\))?: '
-internal_subject='(roadmap|spec\.md|the spec|rulings?|revocation|withdrawn|written layer|phase [0-9]|the shelf|shelved|readme|claude\.md|clippy|cargo doc|ci complete|workflow|pre-flight|version raise|release note|the release |the bump |take-next|the skill|the harness|the record|budget table|mutation|audit|ceiling|proposal|declined|adopted|review agent|assertion|the mockup|funding|\.yml|§|^track the |^#[0-9]|^b[0-9]+[ :]|^[0-9]+\.[0-9]+,)'
+# Read once, because the records are walked twice: once to decide, once to
+# name the ones in contract phrasing.
+records=$(cat)
 
-# **A subject naming something a reader can press or set survives that list, and
-# so does one naming the pane.** The list matches anywhere in a subject, so one
-# internal word decides a whole sentence, and the rule that a revoked ruling is
-# deleted alongside the change it governed makes that sentence ordinary: the
-# subject removing a key names the ruling too. The backticks are what make
-# `single`, `wrap` and `links` safe to name.
-#
-# `the pane` is that rule reaching a sentence with no key in it. A change a reader
-# can see is a change to the pane, and measured over every first-parent subject to
-# 0.48.0, no subject naming it carries an internal word, while two that shipped
-# visible work were dropped for a word elsewhere in the sentence. The cost runs the
-# other way: a subject about this machinery that names the pane survives too, and
-# takes one of the prefixes above to stay out, the prefix pass running before this
-# one.
-#
-# The character class cannot go stale and the settings are held to `config.rs` by
-# a test. The named keys are typed here, and a new one reaches this file by hand.
-visible_subject='([Tt]he pane|`([A-Za-z?/]|Esc|Enter|Tab|Space|Home|End|PgUp|PgDn|Page (Up|Down)|Up|Down|Left|Right|follow|rail|single|overview|staged|wrap|notes|icons|links|persist|hide)`)'
+# One pass decides every record. Kept lines go to stdout prefixed `keep:`, and
+# everything else is a workflow annotation. The trailing `(#n)` references are
+# peeled here, one at a time, because a merge subject carries the issue's
+# number and the pull request's, and sometimes two issues'.
+decided=$(printf '%s\n' "$records" | awk '
+    BEGIN { FS = "\t"; bad = 0 }
+    function strip(s) {
+        while (match(s, /[ \t]*\(#[0-9]+(,[ \t]*#[0-9]+)*\)[ \t]*$/)) s = substr(s, 1, RSTART - 1)
+        sub(/[ \t]+$/, "", s)
+        return s
+    }
+    NF == 0 { next }
+    NF != 3 {
+        print "::error::malformed record, expected who<TAB>labels<TAB>text: " $0
+        bad = 1
+        next
+    }
+    {
+        who = $1; labels = "," $2 ","; text = $3
+        release = index(labels, ",release,") > 0
+        internal = index(labels, ",internal,") > 0
+        if (release && internal) {
+            print "::error::" who " is labelled both release and internal"
+            bad = 1
+            next
+        }
+        if (text ~ /^Release-note:/) {
+            note = text
+            sub(/^Release-note:[ \t]*/, "", note)
+            sub(/[ \t]+$/, "", note)
+            if (tolower(note) == "none") {
+                if (release) {
+                    print "::error::" who " says Release-note: none and is labelled release"
+                    bad = 1
+                } else {
+                    print "::notice::skipped, Release-note: none: " who
+                }
+                next
+            }
+            if (note == "") {
+                print "::error::" who " carries an empty Release-note"
+                bad = 1
+                next
+            }
+            if (internal) {
+                print "::error::" who " is labelled internal and carries Release-note: " note
+                bad = 1
+                next
+            }
+            if (!release) {
+                print "::error::" who " carries Release-note: " note " and no release label"
+                bad = 1
+                next
+            }
+            print "keep:" strip(note)
+            next
+        }
+        if (internal) {
+            print "::notice::skipped as internal: " who " " text
+            next
+        }
+        if (!release) {
+            print "::error::" who " is labelled neither release nor internal: " text
+            bad = 1
+            next
+        }
+        kept = strip(text)
+        if (kept != "") print "keep:" kept
+    }
+    END { exit bad }
+') || failed=1
+: "${failed:=0}"
 
-# Read once, because the emptied-range branch below writes the range out and
-# cannot go back to stdin for it.
-subjects=$(cat)
+printf '%s\n' "$decided" | grep -v '^keep:' | grep -v '^$' || true
 
-# `|| true` on the grep, because it exits 1 when it filters everything out and
-# `set -e` would kill the script on the assignment rather than let the empty
-# case below be handled.
-#
-# The second pass is `awk` rather than a second `grep` because its rule is a
-# conjunction, dropping a subject the list matches and the allow pass does not,
-# and splitting that over two greps would reorder the range, which is written
-# newest first. The patterns reach it through the environment rather than `-v`,
-# for the reason the entries do below: `-v` interprets backslash escapes, and
-# both patterns carry `\.`.
-kept=$(printf '%s\n' "$subjects" | grep -Ev "$internal_prefix" || true)
-kept=$(printf '%s\n' "$kept" | INTERNAL="$internal_subject" VISIBLE="$visible_subject" awk '
-    $0 ~ ENVIRON["VISIBLE"] { print; next }
-    tolower($0) ~ ENVIRON["INTERNAL"] { next }
-    { print }
-')
-
-# **Every subject the filter drops is named in the run's log.** A drop is
-# invisible everywhere else: the section is the only place the change was going
-# to appear, so a range that keeps nine subjects and loses the tenth reads as a
-# complete section, and the emptied-range branch below cannot see that case.
-#
-# Matched whole rather than by pattern, because a subject carrying `?` or `[` is
-# a subject about a key and `case` would read those as globs.
-printf '%s\n' "$subjects" | KEPT="$kept" awk '
-    BEGIN { n = split(ENVIRON["KEPT"], k, "\n"); for (i = 1; i <= n; i++) keep[k[i]] = 1 }
-    NF && !($0 in keep) { print "::notice::filtered as internal: " $0 }
-'
-
-# Trailing `(#123)` references are the tracker's, not the reader's. The loop
-# peels them one at a time because a merge subject carries the issue's number
-# and the pull request's, and sometimes two issues'.
-strip_references() {
-    sed -E -e :a \
-           -e 's/[[:space:]]*\((#[0-9]+(,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$//' \
-           -e ta \
-           -e 's/[[:space:]]+$//' \
-        | grep -v '^$' \
-        || true
-}
-
-entries=$(printf '%s\n' "$kept" | strip_references | sed -E 's/^/- /')
-
-# **An empty section is written rather than skipped, and an emptied range says
-# what it held.** A version with no section makes `dist` fall back to the
-# install instructions alone, with no warning anywhere, so the release that had
-# nothing to report and the release whose notes were lost look identical to a
-# reader. A sentence claiming nothing moved does not tell them apart either: it
-# is a conclusion drawn from a word list's silence over free prose, and twice in
-# this repository's releases that list emptied a range because a subject named a
-# key and a ruling in one breath. So the range is written out instead, and the
-# reader has the thing the filter could not see.
-if [ -z "$entries" ]; then
-    range=$(printf '%s\n' "$subjects" | strip_references | sed -E 's/^/  - /')
-    if [ -z "$range" ]; then
-        entries="- No commit sits between this release and the one before it."
-    else
-        entries=$(printf '%s\n%s\n' \
-            "- Nothing in this release's commits matched what a reader of the pane can see. That is as likely to be this filter dropping a change as a release with nothing in it, so every commit in the range is listed here unfiltered rather than summarised:" \
-            "$range")
-    fi
+if [ "$failed" -ne 0 ]; then
+    echo "::error::label every pull request in the range release or internal, and put Release-note: none only on internal ones"
+    exit 1
 fi
+
+kept=$(printf '%s\n' "$decided" | sed -n 's/^keep://p')
+
+if [ -z "$kept" ]; then
+    printf '%s\n' "$records" | awk -F'\t' 'NF == 3 { print "::notice::process only: " $1 " " $3 }'
+    echo "::error::nothing user-facing since the last release, so ${version} is not released"
+    exit 1
+fi
+
+# A kept line in contract phrasing reaches the notes as written. CI rejects
+# those on the pull request; this only names any that got through.
+printf '%s\n' "$kept" \
+    | sh "$(dirname "$0")/title-check.sh" --match \
+    | sed 's/^/::warning::contract phrasing in the release notes: /'
+
+entries=$(printf '%s\n' "$kept" | sed -E 's/^/- /')
 
 # Written above the newest existing section, so the file stays newest first.
 # `awk` rather than `sed`, because the insertion is a block and the anchor is

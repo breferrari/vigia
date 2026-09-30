@@ -103,6 +103,7 @@ fn main() {
         dump_path.parent().expect("the dump has a parent"),
         &root.join("assets").join("syntaxes"),
         &extra_names,
+        &two_face_version(&root),
     );
 
     let mut names: Vec<&str> = set.syntaxes().iter().map(|s| s.name.as_str()).collect();
@@ -336,7 +337,7 @@ fn incompatible_patterns(def: &SyntaxDefinition) -> Vec<String> {
 /// every release archive. `bat` and `two-face` both ship theirs with the
 /// artefact. `sources` is where the vendored `.sublime-syntax` files are read
 /// from; `dir` is where the notice lands.
-fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
+fn write_notice(dir: &Path, sources: &Path, extra_names: &[String], base: &str) {
     let mut md = String::new();
     md.push_str("# Grammar attribution\n\n");
     md.push_str(
@@ -470,6 +471,9 @@ fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
         }
         md.push('\n');
     }
+    // `tests/coverage.rs` holds this to `Cargo.lock`, which is what catches a
+    // bump that never reran this.
+    let _ = writeln!(md, "The base set is two-face `{base}`.\n");
     md.push_str("## two-face acknowledgements\n\n");
     md.push_str(&two_face::acknowledgement::listing().to_md());
 

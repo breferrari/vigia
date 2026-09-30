@@ -10,7 +10,7 @@
 
 **Your agent writes in one pane. `vigia` watches in the pane beside it, and carries your words back.**
 
-It is a live diff monitor, and that is the half you can see. The other half is a wire: point at a line, say one sentence, and it reaches the agent that wrote it.
+It shows the working-tree diff live, as the agent writes it. Click a line, type one sentence, and it goes to the agent that wrote that line.
 
 </div>
 
@@ -20,9 +20,9 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 
 ## 🔭 Why
 
-**This is not a diff viewer you open.** A diff viewer answers *what changed*, once, when you ask. Agentic engineering does not work like that: the agent edits **fast**, **wide**, and while you are reading something else, and the scrollback tells you what it *said* it did rather than what landed.
+**This is not a diff viewer you open.** A diff viewer shows *what changed* once, when you ask. A coding agent edits **fast**, across **many files**, often while you are reading something else. Its scrollback tells you what it *said* it did, not what actually changed on disk.
 
-`vigia` is the surface between the two of you. It watches what actually lands, continuously and without being touched, and it carries a sentence from you back to the agent, anchored to the line you were looking at. One pane writes. One pane watches, and answers.
+`vigia` shows what actually changed, continuously, without you touching it. It also sends a sentence from you back to the agent, tied to the line you were looking at. One pane writes. One pane watches, and answers.
 
 |  |  |
 |---|---|
@@ -34,7 +34,7 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 | ⌨️ **Nothing to learn first** | `?` draws every gesture, `m` every setting. `~/.config/vigia/config` decides what it opens as |
 
 > [!NOTE]
-> **A monitor, not a reviewer**, and not because it does less. It browses history and carries your notes to the agent. Because of what it *asks*: a reviewer is something you launch, work through and finish. `vigia` is already open, correct before you touch it, and still correct if you never do.
+> **A monitor, not a reviewer.** It can browse history and send your notes to the agent, but it asks nothing of you. A reviewer is something you launch, work through and finish. `vigia` is already open, correct before you touch it, and still correct if you never do.
 
 ---
 
@@ -43,11 +43,11 @@ It is a live diff monitor, and that is the half you can see. The other half is a
 **1. Install it and point it at a repo.**
 
 ```sh
-cargo install vigia                          # or brew install breferrari/tap/vigia
+cargo install vigia
 vigia                                        # the tree you are in
 ```
 
-Leave it in the pane beside your agent. There is nothing to configure and nothing to press.
+No Rust toolchain? Use Homebrew or a prebuilt installer, under [Other installs](#other-installs) below. Leave it in the pane beside your agent. There is nothing to configure and nothing to press.
 
 **2. Let it follow.** As your agent writes, files appear in the pinned list at the top and the diff scrolls itself to whatever landed last. The sparkline says *when*, the heat strip says *where in the file*, the counters say *how much*. You are meant to glance, not to read.
 
@@ -64,10 +64,18 @@ The note goes to the agent anchored to that file and that line. Its answer arriv
 
 **5. Forget the rest.** Press `?` and every gesture is on screen. Press `m` and every setting is. Neither moves a row.
 
+<a id="other-installs"></a>
+
 <details>
-<summary><b>Other ways to install</b></summary>
+<summary><b>Other installs: Homebrew, prebuilt binaries, <code>--version</code></b></summary>
 
 <br>
+
+Homebrew, on macOS and Linux:
+
+```sh
+brew install breferrari/tap/vigia
+```
 
 A prebuilt binary, with no toolchain at all:
 
@@ -141,7 +149,7 @@ Every file gets the same row in both regions:
 | `▸` | **caret** | 📍 *where you are.* The diff below is inside this file |
 | `M` | **kind** | modified, added, deleted, renamed |
 | `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
-| `●` | **pulse** | ⚡ it changed on the newest tick |
+| `●` | **pulse** | ⚡ the file written last |
 | `✎` `↳` `✓` | **note mark** | 📝 your note is here, and where it stands |
 | green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
@@ -190,7 +198,7 @@ It is scaled **across every tracked file**, not against the row's own maximum, a
 
 <br>
 
-The dot marks the file named by the newest tick, and it lasts exactly one tick, so it **cuts rather than fades**. The path's own brightness is the same signal, slower: the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
+The dot marks the file written last, and it moves when another file is written, so it **cuts rather than fades**. The path's own brightness is the same signal, wider and slower: every file in the newest burst draws brightest, and the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
 
 The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered because you looked at it, no row becomes special by being pointed at, and the next key means exactly what it would have meant, unless you have a note box open, which is the one thing here you are inside until you leave it. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone. A line you left a note on stays marked, and that is not a selection either: you put it there, it outlives the pane, and it goes when the note does.
 
@@ -278,7 +286,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | just point | it marks itself |
 | `Shift`+drag | your terminal selects text |
 
-**`m` opens every setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `remember between runs` keeps what you flip for next time; `reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
+**`m` opens every setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `Save settings` keeps what you flip for next time, and `Reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
 
 > [!TIP]
 > Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every other key still means what it meant. On a pane too small to hold the whole table, `?` again turns the page and the last one closes it; the title bar says how many of them you are looking at.
@@ -379,7 +387,7 @@ The resource is `vigia://notes`, and the server announces every change to the st
 }
 ```
 
-`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line, **noted** when a session was registered and none took it, and nothing at all when none is. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
+`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line and **noted** when nothing live did, so the note is waiting in the store. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
 
 `vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
 
@@ -435,6 +443,14 @@ A user-scoped server is started from your own config directory rather than from 
 
 </details>
 
+### Other agents
+
+The server and `pending` work with any agent. The live push does not.
+
+- **The server is plain MCP over stdio**, so any client can run it. For Codex: `codex mcp add vigia -- vigia mcp`. Claude Code tells the server which project it is in. Other clients do not, so the server serves the worktree it was started in. If your agent starts somewhere else, set the client's `cwd` for the server to the worktree. The server names the worktree in its handshake, so the agent can see which one it has.
+- **`vigia mcp pending` reads nothing from its hook**, so any prompt hook that passes a command's output to the model can run it. Codex's `UserPromptSubmit` hook is one.
+- **`vigia mcp register` is Claude Code's alone.** It records a socket that only Claude Code opens. Under any other agent a note waits in the store until the agent next calls `notes`, and the footer says **noted**.
+
 ---
 
 ## ⚡ Promises
@@ -474,7 +490,7 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 A palette, a colour depth, which drawing glyphs your font carries, what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
 
 ```sh
-VIGIA_THEME=dark vigia          # a built-in palette, or a path to your own
+VIGIA_THEME=dark vigia          # ansi, dark, light or system, or a path to your own
 NO_COLOR=1 vigia                # every ladder collapses to something readable
 ```
 
@@ -491,7 +507,7 @@ NO_COLOR=1 vigia                # every ladder collapses to something readable
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what *no polling timer* requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
 | [two-face](https://codeberg.org/CosmicHarper/two-face) | The 217 grammars, [bat](https://github.com/sharkdp/bat)'s curated set |
-| [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a change can be seen arriving |
+| [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a note or a message can be seen arriving |
 | [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text, its caret, its undo |
 | [fancy-regex](https://github.com/fancy-regex/fancy-regex) | The `hide` pattern |
 
@@ -513,7 +529,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 | 🔨 | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
 
-There is no Phase 5 in that table: the shelf, where deferred work waits with the dated reason it was deferred for, was numbered as one until August and kept its milestone.
+There is no Phase 5. That number belonged to the list of deferred work, which is no longer a phase.
 
 Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked. [`CHANGELOG.md`](CHANGELOG.md) is every released version and what moved in it.
 
@@ -524,9 +540,7 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 **It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header with its position token, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, the note box open on a line, and the status bar.
 
-**The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. **One is left.** The header reads the worktree's name rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree.
-
-Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them. **One more came forward in August 2026**: the sparklines are drawn in the cyan the binary has used since the ramp landed rather than the green they were first mocked in, which is the ruling that green already means *added* two rows down. **Four more in September**: the header's position token and the `▾` that says a list lives behind it, both of which the picture predated; the run's total where the picture used to put the mode word, which was written down as a departure and is not one, since the word draws there only when there is nothing to count and this pane has three files; `m config` back on the status bar, which #80 had cut when there was no config menu for it to name; and the note box, which had never been drawn at all. A picture of a monitor that only ever watches describes half of what this is.
+**The picture is part of the specification.** Where it and the binary disagree, one of them has a bug, unless the difference is written down. One difference is written down: the header shows the worktree's name rather than `vigia`, because at 40 columns the name of the tree is the useful fact.
 
 </details>
 
@@ -548,6 +562,6 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code.
+Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging and committing, branch browsing, comment threads or a GUI. [`ROADMAP.md`](ROADMAP.md#non-goals-permanent) lists them.
 
 Five issues are labelled [`good first issue`](https://github.com/breferrari/vigia/labels/good%20first%20issue).

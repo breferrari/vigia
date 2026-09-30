@@ -2272,6 +2272,7 @@ fn a_frame_full_of_notes_holds_the_frame_budget() {
                 } else {
                     "a line the file no longer holds".to_owned()
                 },
+                first: None,
                 body: "the reader's words, one row each".to_owned(),
                 status: Status::Open,
                 reply: None,
@@ -2414,6 +2415,7 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
                 side: Side::New,
                 line: *line,
                 text: (*text).to_owned(),
+                first: None,
                 body: "the reader's words, one row each".to_owned(),
                 status: Status::Resolved,
                 reply: Some("swapped for saturating_mul; the unwrap_or went with it".to_owned()),
@@ -2766,6 +2768,7 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                 side: Side::New,
                 line: *line,
                 text: (*text).to_owned(),
+                first: None,
                 body: "the reader's words, one row each".to_owned(),
                 status: Status::Open,
                 reply: None,
@@ -2785,7 +2788,8 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
         .iter()
         .position(|row| matches!(row, Row::Line { .. }))
         .expect("a content row on the timed screen");
-    let (anchor, existing) = opening(&view, offset, app.notes()).expect("a line to open on");
+    let (anchor, existing) =
+        opening(&view, offset, offset, app.notes()).expect("a line to open on");
     app.open_box(anchor, existing.as_ref());
     for c in "the settle margin is two seconds and the walk waits it out before it reads the height again, which is what keeps the burst off the frame; the wait is the frame's to own and the wake at its end is the one that reads, so nothing here polls and nothing here reads twice".chars() {
         app.box_edit(Input {
@@ -2955,6 +2959,7 @@ fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
                 side: Side::New,
                 line: *line,
                 text: (*text).to_owned(),
+                first: None,
                 body: "the reader's words".to_owned(),
                 status: Status::Seen,
                 reply: Some(answer(fenced)),

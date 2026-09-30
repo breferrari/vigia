@@ -2,6 +2,9 @@
 
 use std::collections::HashSet;
 use std::ffi::OsStr;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::{Read, Seek, SeekFrom};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecursiveMode, Watcher as _};
 
+use crate::Hidden;
 use crate::error::{Error, Result};
+use crate::frame::{Fingerprint, config_moved, fingerprint};
 use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
@@ -139,34 +144,67 @@ pub struct Watcher<'repo> {
     tx: Sender<Message>,
     /// Dropping this stops the OS watch, so it must outlive the receiver.
     _backend: notify::RecommendedWatcher,
-    excludes: gix::AttributeStack<'repo>,
+    /// Owned rather than borrowed, so a config write can reload it.
+    repo: gix::Repository,
+    excludes: gix::worktree::Stack,
+    /// The common dir's config, which `repo` loads.
+    config: PathBuf,
+    /// The config's fingerprint when `repo` last loaded it.
+    loaded_config: Option<Fingerprint>,
+    /// Set by a config event, and at start so a write before the watch armed is
+    /// not missed. The next path judged reloads.
+    reload_due: bool,
+    /// Whether this tick has tried, so a config that keeps failing costs one
+    /// reload a tick rather than one a path.
+    reload_tried: bool,
+    /// Unused. Keeps `Watcher<'repo>` source-compatible.
+    _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
+    /// The git dir, in every spelling as for `roots`. A linked worktree, a submodule
+    /// or a separate `GIT_DIR` keeps it outside the worktree.
+    git_dir: Vec<PathBuf>,
+    /// The common dir, when it is not the git dir. Empty otherwise. It holds the
+    /// branch refs, and also other worktrees' `HEAD` and index.
+    common_dir: Vec<PathBuf>,
+    index: IndexWatch,
     options: WatchOptions,
     stats: WatchStats,
     delivered: Arc<AtomicU64>,
+    /// The reader's `hide` pattern, which keeps a path from waking the watch.
+    hidden: Option<Hidden>,
 }
 
 impl<'repo> Watcher<'repo> {
+    /// `loaded_config` is the config's fingerprint when `repo` loaded it, or
+    /// `None` when unknown, which reloads on the first path judged.
     pub(crate) fn new(
-        repo: &'repo gix::Repository,
+        repo: &gix::Repository,
+        config: &Path,
+        loaded_config: Option<Fingerprint>,
         workdir: &Path,
         options: WatchOptions,
     ) -> Result<Self> {
         // Everything that reads the repository happens before the watch is armed, so
         // the watcher never observes its own construction.
-        let index = repo
-            .index_or_empty()
-            .map_err(|e| Error::Watch(Box::new(e)))?;
-        let excludes = repo
-            .excludes(
-                &index,
-                None,
-                gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
-            )
-            .map_err(|e| Error::Watch(Box::new(e)))?;
+        let excludes = excludes_of(repo)?;
 
         let roots = roots_of(workdir);
+        // A linked worktree's common dir comes back as `<git dir>/../..`, which would
+        // match as a path under the git dir.
+        let tidy = |dir: &Path| {
+            let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+            gix::path::normalize(dir.as_path().into(), &dir)
+                .map_or_else(|| dir.clone(), std::borrow::Cow::into_owned)
+        };
+        let (git, common) = (tidy(repo.git_dir()), tidy(repo.common_dir()));
+        let git_dir = spellings_of(&git, &roots);
+        let common_dir = if common == git {
+            Vec::new()
+        } else {
+            spellings_of(&common, &roots)
+        };
+        let index = IndexWatch::new(repo);
 
         let (tx, rx) = mpsc::channel();
 
@@ -187,17 +225,56 @@ impl<'repo> Watcher<'repo> {
         backend
             .watch(workdir, RecursiveMode::Recursive)
             .map_err(|e| Error::Watch(Box::new(e)))?;
+        // Not recursive: `objects/` churns on every write.
+        let inside = |dir: &Path| roots.iter().any(|root| dir.starts_with(root));
+        for dir in [git_dir.first(), common_dir.first()].into_iter().flatten() {
+            if inside(dir) {
+                continue;
+            }
+            backend
+                .watch(dir, RecursiveMode::NonRecursive)
+                .map_err(|e| Error::Watch(Box::new(e)))?;
+            // A linked worktree's git dir has no refs of its own.
+            let heads = dir.join("refs").join("heads");
+            if heads.is_dir() {
+                backend
+                    .watch(&heads, RecursiveMode::Recursive)
+                    .map_err(|e| Error::Watch(Box::new(e)))?;
+            }
+            // For `info/attributes`, which a non-recursive watch above cannot see.
+            let info = dir.join("info");
+            if info.is_dir() {
+                backend
+                    .watch(&info, RecursiveMode::NonRecursive)
+                    .map_err(|e| Error::Watch(Box::new(e)))?;
+            }
+        }
 
         Ok(Self {
             rx,
             tx,
             _backend: backend,
+            repo: repo.clone(),
             excludes,
+            config: config.to_path_buf(),
+            loaded_config,
+            reload_due: true,
+            reload_tried: false,
+            _worktree: PhantomData,
             roots,
+            git_dir,
+            common_dir,
+            index,
             options,
             stats: WatchStats::default(),
             delivered,
+            hidden: None,
         })
+    }
+
+    /// Keep every path `hide` covers from waking the watch.
+    pub fn hide(&mut self, hide: Option<Hidden>) {
+        self.hidden = hide;
     }
 
     /// A handle that can wake this watcher from another thread.
@@ -220,6 +297,7 @@ impl<'repo> Watcher<'repo> {
 
     /// Block until the working tree changes, then return one coalesced tick.
     pub fn next_tick(&mut self) -> Option<Tick> {
+        self.reload_tried = false;
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
@@ -300,17 +378,42 @@ impl<'repo> Watcher<'repo> {
         Some(accepted)
     }
 
-    /// This event's path relative to the worktree, or `None` when nothing the
-    /// display depends on is behind it.
-    fn relative<'p>(&mut self, path: &'p Path) -> Option<&'p Path> {
-        let rela = self
-            .roots
-            .iter()
-            // Outside the worktree entirely. Nothing we display depends on it.
-            .find_map(|root| path.strip_prefix(root).ok())?;
+    /// This event's path relative to the worktree, and whether it is a
+    /// directory, or `None` when nothing the display depends on is behind it.
+    fn relative<'p>(&mut self, path: &'p Path) -> Option<(&'p Path, bool)> {
+        // A git-dir event comes back as `.git`, which `followable` never follows.
+        if let Some(inside) = within(&self.git_dir, path) {
+            let watched = if inside == Path::new("index") {
+                self.index.moved()
+            } else {
+                self.reload_due |= inside == Path::new("config");
+                watched_in_git_dir(inside)
+            };
+            return watched.then_some((Path::new(".git"), false));
+        }
+        if let Some(inside) = within(&self.common_dir, path) {
+            // Other worktrees' index and `HEAD` live here too, so only the refs and
+            // the files that shape the filter are taken.
+            let shared = inside.starts_with("refs")
+                || inside.starts_with("info")
+                || inside == Path::new("packed-refs")
+                || inside == Path::new("config");
+            self.reload_due |= inside == Path::new("config");
+            return (shared && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
+        }
 
-        if rela.components().next().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
-            return watched_in_git_dir(rela).then_some(rela);
+        // Outside the worktree entirely. Nothing we display depends on it.
+        let rela = within(&self.roots, path)?;
+        // A linked worktree's `.git` file, or a `.git` that is not this repository's.
+        if rela.starts_with(".git") {
+            return None;
+        }
+        // Before the syscall below, so a hidden file costs one match.
+        let spelled = self.hidden.as_ref().and(followable(rela));
+        if let (Some(hidden), Some(spelled)) = (&self.hidden, &spelled)
+            && hidden.is_hidden(spelled)
+        {
+            return None;
         }
 
         // The mode is not cosmetic. A rule like `target/` matches directories only, and
@@ -322,18 +425,177 @@ impl<'repo> Watcher<'repo> {
             // directory could hide a deleted file behind a rule like `build/`.
             _ => gix::index::entry::Mode::FILE,
         };
+        // A directory's own event, hidden by the spelling its contents start with.
+        // Only an existing one: a deleted file named like it must still wake.
+        if mode == gix::index::entry::Mode::DIR
+            && let (Some(hidden), Some(spelled)) = (&self.hidden, &spelled)
+            && hidden.is_hidden(&format!("{spelled}/"))
+        {
+            return None;
+        }
 
-        (!self.is_ignored(rela, mode)).then_some(rela)
+        if self.reload_due {
+            self.reload_excludes();
+        }
+        (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
+    }
+
+    /// Reload the config and the rules it names, such as `core.excludesFile`, as
+    /// [`Worktree`](crate::Worktree) reloads its own. One that does not load keeps
+    /// the rules from before it, and the next tick tries again.
+    fn reload_excludes(&mut self) {
+        if self.reload_tried {
+            return;
+        }
+        self.reload_tried = true;
+        let now = fingerprint(&self.config);
+        if now == self.loaded_config {
+            self.reload_due = false;
+            return;
+        }
+        if !config_moved(now, self.loaded_config) {
+            return;
+        }
+        if self.repo.reload().is_ok()
+            && let Ok(excludes) = excludes_of(&self.repo)
+        {
+            self.excludes = excludes;
+            self.loaded_config = now;
+            self.reload_due = false;
+        }
     }
 
     fn is_ignored(&mut self, rela: &Path, mode: gix::index::entry::Mode) -> bool {
-        match self.excludes.at_path(rela, Some(mode)) {
+        match self.excludes.at_path(rela, Some(mode), &self.repo.objects) {
             Ok(platform) => platform.is_excluded(),
             // If the rules cannot be consulted, do not filter. A wasted sweep
             // is cheaper than a change the monitor never showed.
             Err(_) => false,
         }
     }
+}
+
+/// The ignore rules the repository's config and index name, detached from it.
+fn excludes_of(repo: &gix::Repository) -> Result<gix::worktree::Stack> {
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| Error::Watch(Box::new(e)))?;
+    Ok(repo
+        .excludes(
+            &index,
+            None,
+            gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
+        )
+        .map_err(|e| Error::Watch(Box::new(e)))?
+        .detach())
+}
+
+/// The worktree's own index, and what it held when an event was last judged.
+///
+/// Git rewrites the index whenever a refresh updates stat data, which an IDE, a
+/// git GUI or a prompt running `git status` does on a timer, and a `touch`
+/// rewrites nothing at all. Neither changes an entry, so neither changes what
+/// the pane shows, and a walk on each of them is an idle pane doing work.
+struct IndexWatch {
+    path: PathBuf,
+    hash: gix::hash::Kind,
+    /// `None` when it could not be read, so the next event is taken.
+    print: Option<IndexPrint>,
+}
+
+struct IndexPrint {
+    /// `None` when git wrote no checksum, as `index.skipHash` does, since a
+    /// zero there matches every index and so proves nothing.
+    checksum: Option<Vec<u8>>,
+    digest: u64,
+}
+
+impl IndexWatch {
+    /// Starts with no print, so the first index event always walks. Seeding from
+    /// the index read here would hide a change written between the pane's first
+    /// walk and this watch arming: no event reports it, and every later refresh
+    /// would match the seed.
+    fn new(repo: &gix::Repository) -> Self {
+        Self {
+            path: repo.index_path(),
+            hash: repo.object_hash(),
+            print: None,
+        }
+    }
+
+    /// Whether the index has changed what it says since it was last asked.
+    /// Anything unreadable counts as a change: a wasted walk is cheaper than a
+    /// staged file the pane never showed.
+    fn moved(&mut self) -> bool {
+        if let Some(print) = &self.print
+            && print.checksum.is_some()
+            && print.checksum == self.trailer()
+        {
+            return false;
+        }
+        // Unverified: a check would hash the whole file on every refresh.
+        let fresh = gix::index::File::at(&self.path, self.hash, true, Default::default())
+            .ok()
+            .map(|file| IndexPrint::of(&file));
+        let moved = fresh.is_none()
+            || self.print.as_ref().map(|p| p.digest) != fresh.as_ref().map(|p| p.digest);
+        self.print = fresh;
+        moved
+    }
+
+    /// The checksum git wrote last, from the file's final bytes alone.
+    fn trailer(&self) -> Option<Vec<u8>> {
+        let len = self.hash.len_in_bytes();
+        let mut file = std::fs::File::open(&self.path).ok()?;
+        file.seek(SeekFrom::End(-i64::try_from(len).ok()?)).ok()?;
+        let mut trailer = vec![0; len];
+        file.read_exact(&mut trailer).ok()?;
+        Some(trailer)
+    }
+}
+
+impl IndexPrint {
+    fn of(file: &gix::index::File) -> Self {
+        // The flags that change what status reports. The rest are bookkeeping a
+        // refresh may toggle, `FSMONITOR_VALID` among them.
+        let meaning = gix::index::entry::Flags::STAGE_MASK
+            | gix::index::entry::Flags::ASSUME_VALID
+            | gix::index::entry::Flags::INTENT_TO_ADD
+            | gix::index::entry::Flags::SKIP_WORKTREE;
+        let mut digest = DefaultHasher::new();
+        for entry in file.entries() {
+            entry.path(file).hash(&mut digest);
+            entry.id.hash(&mut digest);
+            entry.mode.bits().hash(&mut digest);
+            (entry.flags & meaning).bits().hash(&mut digest);
+        }
+        Self {
+            checksum: file
+                .checksum()
+                .filter(|id| !id.is_null())
+                .map(|id| id.as_bytes().to_vec()),
+            digest: digest.finish(),
+        }
+    }
+}
+
+/// `path` relative to the first of `roots` it is under.
+fn within<'p>(roots: &[PathBuf], path: &'p Path) -> Option<&'p Path> {
+    roots.iter().find_map(|root| path.strip_prefix(root).ok())
+}
+
+/// Every spelling of `dir`, with each worktree root's spelling when it is under one.
+fn spellings_of(dir: &Path, roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = roots_of(dir);
+    if let Some(rela) = within(roots, dir) {
+        for root in roots {
+            let spelling = root.join(rela);
+            if !all.contains(&spelling) {
+                all.push(spelling);
+            }
+        }
+    }
+    all
 }
 
 /// Every spelling of a watched root that an event path might carry.
@@ -353,14 +615,20 @@ pub(crate) fn roots_of(workdir: &Path) -> Vec<PathBuf> {
 /// Fold the paths one event named into what that event meant.
 fn accept_paths<'p>(
     paths: &'p [PathBuf],
-    mut resolve: impl FnMut(&'p Path) -> Option<&'p Path>,
+    mut resolve: impl FnMut(&'p Path) -> Option<(&'p Path, bool)>,
 ) -> Accepted {
     let mut accepted = Accepted::default();
     for path in paths.iter().rev() {
-        let Some(rela) = resolve(path) else {
+        let Some((rela, dir)) = resolve(path) else {
             continue;
         };
         accepted.relevant = true;
+        // Relevant, because a directory made after the watch was armed is seen
+        // only through its own event. Never the newest: Windows reports the
+        // parent after a save inside it, and no row is a directory.
+        if dir {
+            continue;
+        }
         accepted.newest = followable(rela);
         if accepted.newest.is_some() {
             break;
@@ -369,26 +637,27 @@ fn accept_paths<'p>(
     accepted
 }
 
-/// Where the view should move for a worktree-relative path an event named, or
-/// `None` when there is nowhere to move.
-fn watched_in_git_dir(rela: &Path) -> bool {
-    if rela.file_name() == Some(OsStr::new("index")) {
-        return true;
-    }
-
-    // Everything below is judged on the path *within* `.git`, so strip it once.
-    let mut inside = rela.components();
-    inside.next();
-    let mut inside = inside.peekable();
+/// Whether a write at `inside`, a path within the git dir, can change the pane.
+fn watched_in_git_dir(inside: &Path) -> bool {
+    let mut inside = inside.components().peekable();
     let Some(first) = inside.next() else {
         return false;
     };
     let first = first.as_os_str();
 
-    if first == OsStr::new("HEAD") || first == OsStr::new("packed-refs") {
-        // Only when it *is* that file: a directory called `HEAD` somewhere below
-        // is not one, and `refs/heads/HEAD` reaches the arm underneath.
+    // Only when it *is* that file: an `index`, `HEAD` or directory by that name
+    // somewhere below belongs to another worktree or a submodule. `config`
+    // shapes the clean filter, which the frame checks for itself.
+    if first == OsStr::new("index")
+        || first == OsStr::new("HEAD")
+        || first == OsStr::new("packed-refs")
+        || first == OsStr::new("config")
+    {
         return inside.peek().is_none();
+    }
+    if first == OsStr::new("info") {
+        return inside.next().map(|c| c.as_os_str()) == Some(OsStr::new("attributes"))
+            && inside.peek().is_none();
     }
 
     // `refs/heads/`, at any depth, because a branch name may carry slashes.
@@ -504,7 +773,9 @@ mod tests {
     /// A branch tip moving is a change the monitor must see, and until it did not.
     #[test]
     fn a_branch_tip_moving_is_a_change_the_monitor_must_see() {
-        let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
+        let watched = |parts: &[&str]| {
+            watched_in_git_dir(native(parts).strip_prefix(".git").expect("under .git"))
+        };
 
         assert!(watched(&[".git", "index"]), "staging, as it always was");
         assert!(watched(&[".git", "HEAD"]), "a checkout, or detaching");
@@ -526,7 +797,9 @@ mod tests {
     /// what was already on screen.
     #[test]
     fn the_rest_of_the_git_directory_still_wakes_nothing() {
-        let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
+        let watched = |parts: &[&str]| {
+            watched_in_git_dir(native(parts).strip_prefix(".git").expect("under .git"))
+        };
 
         assert!(!watched(&[".git", "refs", "remotes", "origin", "main"]));
         assert!(!watched(&[".git", "refs", "tags", "v1.0.0"]));
@@ -534,7 +807,8 @@ mod tests {
         assert!(!watched(&[".git", "ORIG_HEAD"]));
         assert!(!watched(&[".git", "objects", "ab", "cdef01"]));
         assert!(!watched(&[".git", "COMMIT_EDITMSG"]));
-        assert!(!watched(&[".git", "config"]));
+        assert!(!watched(&[".git", "config.lock"]));
+        assert!(!watched(&[".git", "info", "exclude"]));
 
         // The lock file itself is not the write, and that is deliberate rather than an
         // oversight this widening should have swept up.
@@ -547,6 +821,26 @@ mod tests {
         assert!(
             !watched(&[".git", "worktrees", "other", "HEAD"]),
             "another worktree's HEAD is another worktree's business"
+        );
+        assert!(!watched(&[".git", "worktrees", "other", "index"]));
+        assert!(!watched(&[".git", "modules", "sub", "index"]));
+    }
+
+    /// What shapes the clean filter wakes the watch, so a change to it reaches
+    /// the pane with nothing else written.
+    #[test]
+    fn filter_sources_wake() {
+        let watched = |parts: &[&str]| {
+            watched_in_git_dir(native(parts).strip_prefix(".git").expect("under .git"))
+        };
+        assert!(watched(&[".git", "config"]), "a config write woke nothing");
+        assert!(
+            watched(&[".git", "info", "attributes"]),
+            "an info/attributes write woke nothing"
+        );
+        assert!(
+            !watched(&[".git", "info"]),
+            "the info directory itself is not the file"
         );
     }
 
@@ -584,8 +878,8 @@ mod tests {
 
     /// Everything is inside the worktree and nothing is ignored, so the tests
     /// below are about the order rule and only the order rule.
-    fn take_all(path: &Path) -> Option<&Path> {
-        Some(path)
+    fn take_all(path: &Path) -> Option<(&Path, bool)> {
+        Some((path, false))
     }
 
     /// The one case where the order of an event's paths is observable, and the reason
@@ -617,6 +911,23 @@ mod tests {
 
         assert!(accepted.relevant);
         assert_eq!(accepted.newest.as_deref(), Some("src/a.rs"));
+    }
+
+    /// A directory event still wakes the pane, and names nothing to follow.
+    #[test]
+    fn directory_is_not_newest() {
+        let paths = [native(&["src", "a.rs"]), native(&["src"])];
+        let accepted = accept_paths(&paths, |path| Some((path, path == Path::new("src"))));
+
+        assert!(accepted.relevant);
+        assert_eq!(accepted.newest.as_deref(), Some("src/a.rs"));
+
+        let accepted = accept_paths(&paths[1..], |path| Some((path, true)));
+        assert!(
+            accepted.relevant,
+            "a new directory stopped producing a tick"
+        );
+        assert_eq!(accepted.newest, None);
     }
 
     /// Relevant and unfollowable are different answers and both have to

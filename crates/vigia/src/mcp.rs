@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 use vigia_core::{
     CONTEXT, FileDiff, Frame, Hunk, LineKind, Listing, Note, Placement, Registration, Side, Status,
-    Store, StoreWatch, Worktree, names_a_record, resolve, run_of,
+    Store, StoreWatch, Worktree, first_of, names_a_record, resolve, run_of,
 };
 
 use crate::VERSION;
@@ -112,6 +112,19 @@ impl Server {
         self.notice.as_deref()
     }
 
+    /// The handshake's instructions, naming the worktree served or why there
+    /// is none. A client that sets no project variable starts the server in
+    /// its own directory, which can be another repository's.
+    fn instructions(&self) -> String {
+        match &self.site {
+            Ok(site) => format!(
+                "{INSTRUCTIONS} Notes here are for the worktree at {}.",
+                site.worktree.workdir().display()
+            ),
+            Err(why) => format!("{INSTRUCTIONS} There are none to serve: {why}."),
+        }
+    }
+
     /// Whether the handshake has happened.
     #[must_use]
     pub fn initialised(&self) -> bool {
@@ -177,7 +190,7 @@ impl Server {
         match method {
             "initialize" => {
                 self.initialised = true;
-                Ok(initialize(params))
+                Ok(initialize(params, &self.instructions()))
             }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": tools() })),
@@ -361,18 +374,22 @@ impl Site {
             "side": note.side.name(),
             "line": note.line,
             "text": note.text,
+            "first_line": note.first.as_ref().map(|first| first.line),
+            "first_text": note.first.as_ref().map(|first| &first.text),
             "body": note.body,
             "status": note.status.name(),
             "reply": note.reply,
             "written": written,
             "placement": placement,
             "resolves": placed.current_line.is_some(),
-            "line_changed": line_changed,
+            "line_changed": line_changed || placed.first_changed,
             "adrift": placed.placement.is_none(),
             "current_line": placed.current_line,
             "current_text": placed.current_text,
             "current_path": placed.current_path,
             "context": context,
+            "current_first_line": placed.first_line,
+            "lines": placed.lines,
         })
     }
 
@@ -402,10 +419,8 @@ impl Site {
             // pane draws with its reason and the note under its heading as gone.
             Err(_) => Placed {
                 placement: Some(Placement::Gone),
-                current_line: None,
-                current_text: None,
                 current_path: Some(frame.files()[at].path.clone()),
-                context: Vec::new(),
+                ..Placed::adrift(Vec::new())
             },
         }
     }
@@ -432,12 +447,22 @@ impl Site {
             Side::New => self.around(&current_path, centre),
             Side::Old => around_old(diff, centre),
         };
+        let first = note.first.as_ref().and_then(|start| {
+            first_of(note, &diff.rows_on(start.side), placement).map(|at| (start.side, at))
+        });
+        let lines = match (first, current_line) {
+            (Some((side, at)), Some(to)) => range_lines(diff, (side, at.line), (note.side, to)),
+            _ => Vec::new(),
+        };
         Placed {
             placement: Some(placement),
             current_line,
             current_text,
             current_path: Some(current_path),
             context,
+            first_line: first.map(|(_, at)| at.line),
+            first_changed: first.is_some_and(|(_, at)| at.changed),
+            lines,
         }
     }
 
@@ -519,14 +544,27 @@ fn around_old(diff: &FileDiff, centre: u32) -> Vec<(u32, String)> {
         .collect()
 }
 
-/// Where a note's line is now, as the agent is told. `None` for the placement
-/// is a file the diff does not hold, which is adrift.
+/// The text of every line from `first` to `last`, in hunk order; empty off one
+/// hunk.
+fn range_lines(diff: &FileDiff, first: (Side, u32), last: (Side, u32)) -> Vec<String> {
+    diff.range(first, last)
+        .map(|lines| lines.iter().map(|(_, _, line)| line.text.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Where a note is now, as the agent is told; no placement is adrift.
 struct Placed {
     placement: Option<Placement>,
     current_line: Option<u32>,
     current_text: Option<String>,
     current_path: Option<String>,
     context: Vec<(u32, String)>,
+    /// Where a range's first line is now, when it has one and it was found.
+    first_line: Option<u32>,
+    /// Whether that line's text moved under it.
+    first_changed: bool,
+    /// Every line of the range as it stands, first to last.
+    lines: Vec<String>,
 }
 
 impl Placed {
@@ -537,11 +575,14 @@ impl Placed {
             current_text: None,
             current_path: None,
             context,
+            first_line: None,
+            first_changed: false,
+            lines: Vec::new(),
         }
     }
 }
 
-fn initialize(params: &Value) -> Value {
+fn initialize(params: &Value, instructions: &str) -> Value {
     let asked = params.get("protocolVersion").and_then(Value::as_str);
     let version = asked
         .filter(|version| PROTOCOL_VERSIONS.contains(version))
@@ -550,7 +591,7 @@ fn initialize(params: &Value) -> Value {
         "protocolVersion": version,
         "capabilities": { "tools": {}, "resources": { "listChanged": true } },
         "serverInfo": { "name": "vigia", "version": VERSION },
-        "instructions": INSTRUCTIONS,
+        "instructions": instructions,
     })
 }
 

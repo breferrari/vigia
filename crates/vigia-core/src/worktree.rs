@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
-use crate::frame::Frame;
+use crate::frame::{Fingerprint, Frame, config_moved, fingerprint};
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
 use crate::standing::Standing;
@@ -39,11 +39,24 @@ impl Default for ChangeOptions<'_> {
 
 /// A working tree under observation.
 pub struct Worktree {
-    repo: gix::Repository,
+    /// The repository under its current configuration. The watcher takes a clone.
+    /// A borrow must end inside the method that took it, or a reload waits a tick.
+    live: RefCell<gix::Repository>,
     workdir: PathBuf,
     /// The clean filter: built on the first working-tree read after each
     /// [`Frame::advance`], and not before.
     filter: RefCell<Option<Filter>>,
+    /// The files under the git dir that shape the clean filter: the
+    /// configuration and `info/attributes`.
+    filter_sources: [PathBuf; 2],
+    /// The config's fingerprint when `live` last loaded it. `None` at open, so the
+    /// first tick reloads: a write between opening and a stat would be missed.
+    loaded_config: Cell<Option<Fingerprint>>,
+    /// How many reloads have landed, so a frame can drop what it cached before one.
+    reloads: Cell<u64>,
+    /// Whether the last tracked walk found a deletion, which lasts until it is
+    /// committed or restored, so the next walk goes straight to tracking.
+    deleted: Cell<bool>,
 }
 
 impl Worktree {
@@ -54,12 +67,21 @@ impl Worktree {
     /// `path` is not inside a git repository, or the repository it finds is bare and has no
     /// worktree to compare against.
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
-        let repo = gix::discover(path)?;
+        let repo = gix::discover(path).map_err(|e| Error::Discover(Box::new(e)))?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
+        let common = repo.common_dir();
+        let filter_sources = [
+            common.join("config"),
+            common.join("info").join("attributes"),
+        ];
         Ok(Self {
-            repo,
+            live: RefCell::new(repo),
             workdir,
             filter: RefCell::new(None),
+            filter_sources,
+            loaded_config: Cell::new(None),
+            reloads: Cell::new(0),
+            deleted: Cell::new(false),
         })
     }
 
@@ -68,9 +90,13 @@ impl Worktree {
         &self.workdir
     }
 
+    fn repo(&self) -> Ref<'_, gix::Repository> {
+        self.live.borrow()
+    }
+
     /// The branch HEAD names, shortened, or `None` when HEAD is detached.
     pub fn branch(&self) -> Option<String> {
-        let name = self.repo.head_name().ok()??;
+        let name = self.repo().head_name().ok()??;
         Some(name.shorten().to_string())
     }
 
@@ -102,27 +128,58 @@ impl Worktree {
         origin: Origin,
         options: ChangeOptions<'h>,
     ) -> Result<Changes<'h>> {
-        match origin {
-            Origin::Unstaged => {
-                let iter = self
-                    .repo
-                    .status(gix::progress::Discard)
-                    .map_err(|e| Error::Status(Box::new(e)))?
-                    // Collapsed would report a changed directory as one entry. A
-                    // monitor has to name the file that changed.
-                    .untracked_files(gix::status::UntrackedFiles::Files)
-                    .index_worktree_rewrites(
-                        options.track_renames.then(gix::diff::Rewrites::default),
-                    )
-                    .into_index_worktree_iter(Vec::<BString>::new())
-                    .map_err(|e| Error::Status(Box::new(e)))?;
-                Ok(Changes::over(Inner::Streamed(iter), options.hide))
-            }
-            Origin::Staged => Ok(Changes::over(
-                Inner::Collected(self.staged(options)?.into_iter()),
-                options.hide,
-            )),
+        let inner = match origin {
+            Origin::Unstaged => self.unstaged(options.track_renames)?,
+            Origin::Staged => Inner::Collected(self.staged(options)?.into_iter()),
+        };
+        Ok(Changes::over(inner, options.hide))
+    }
+
+    /// The working tree against the index.
+    ///
+    /// A rename pairs a deletion with an addition, so a walk that finds no
+    /// deletion reads the same with tracking off. Tracking is what costs: `gix`
+    /// reads and hashes every untracked file as a candidate whether or not
+    /// anything was deleted, which is most of a walk over many. So the walk runs
+    /// without it first, sorted as the tracking walk sorts, and again with it only
+    /// when a deletion turned up.
+    fn unstaged(&self, track_renames: bool) -> Result<Inner> {
+        if !track_renames {
+            return Ok(Inner::Streamed(self.walk(Walk::Streamed)?));
         }
+        if !self.deleted.get()
+            && let Ok(plain) = Inner::Streamed(self.walk(Walk::Sorted)?).collect::<Result<Vec<_>>>()
+            && !plain.iter().any(|c| c.kind == ChangeKind::Removed)
+        {
+            return Ok(Inner::Collected(plain.into_iter()));
+        }
+        // Collected rather than streamed costs nothing: tracking buffers the walk.
+        let tracked: Vec<FileChange> =
+            Inner::Streamed(self.walk(Walk::Renames)?).collect::<Result<_>>()?;
+        // A rename's source is a deletion the plain walk would report as one.
+        self.deleted.set(
+            tracked
+                .iter()
+                .any(|c| matches!(c.kind, ChangeKind::Removed | ChangeKind::Renamed { .. })),
+        );
+        Ok(Inner::Collected(tracked.into_iter()))
+    }
+
+    fn walk(&self, walk: Walk) -> Result<gix::status::index_worktree::Iter> {
+        use gix::status::plumbing::index_as_worktree_with_renames::Sorting;
+        self.repo()
+            .status(gix::progress::Discard)
+            .map_err(|e| Error::Status(Box::new(e)))?
+            // Collapsed would report a changed directory as one entry. A
+            // monitor has to name the file that changed.
+            .untracked_files(gix::status::UntrackedFiles::Files)
+            .index_worktree_options_mut(|options| {
+                options.sorting = (walk == Walk::Sorted).then_some(Sorting::ByPathCaseSensitive);
+            })
+            // Sorts too, which is what makes `Sorted` the same order.
+            .index_worktree_rewrites((walk == Walk::Renames).then(gix::diff::Rewrites::default))
+            .into_index_worktree_iter(Vec::<BString>::new())
+            .map_err(|e| Error::Status(Box::new(e)))
     }
 
     /// How many changes one comparison holds, without keeping any of them.
@@ -156,10 +213,11 @@ impl Worktree {
 
     /// The index against `HEAD^{tree}`, collected.
     fn staged(&self, options: ChangeOptions<'_>) -> Result<Vec<FileChange>> {
-        let tree = match self.repo.head_tree_id() {
+        let repo = self.repo();
+        let tree = match repo.head_tree_id() {
             Ok(id) => id.detach(),
             // Unborn, detached at nothing, or an unreadable `HEAD`.
-            Err(_) => self.repo.empty_tree().id().detach(),
+            Err(_) => repo.empty_tree().id().detach(),
         };
         self.against_index(tree, options)
     }
@@ -171,8 +229,8 @@ impl Worktree {
         tree: gix::ObjectId,
         options: ChangeOptions<'_>,
     ) -> Result<Vec<FileChange>> {
-        let index = self
-            .repo
+        let repo = self.repo();
+        let index = repo
             .index_or_empty()
             .map_err(|e| Error::Status(Box::new(e)))?;
 
@@ -182,26 +240,20 @@ impl Worktree {
             gix::status::tree_index::TrackRenames::Disabled
         };
 
-        let mut changes = Vec::new();
-        let walked = self
-            .repo
-            .tree_index_status(&tree, &index, None, renames, |change, _, _| {
-                if let Some(change) = staged_change(&change) {
-                    changes.push(change);
-                }
-                Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
-            });
-
-        // A sparse index yields no staged run rather than a dead pane.
-        if let Err(e) = walked {
-            if matches!(
-                e,
-                gix::status::tree_index::Error::TreeIndexDiff(gix::diff::index::Error::IsSparse)
-            ) {
-                return Ok(Vec::new());
-            }
-            return Err(Error::Status(Box::new(e)));
+        // A sparse index yields no staged run rather than a dead pane. Asked before
+        // the walk, because the walk reports it only as a message.
+        if index.is_sparse() {
+            return Ok(Vec::new());
         }
+
+        let mut changes = Vec::new();
+        repo.tree_index_status(&tree, &index, None, renames, |change, _, _| {
+            if let Some(change) = staged_change(&change) {
+                changes.push(change);
+            }
+            Ok(gix::diff::index::Action::Continue(()))
+        })
+        .map_err(|e| Error::Status(Box::new(e)))?;
         Ok(changes)
     }
 
@@ -217,13 +269,13 @@ impl Worktree {
     ///
     /// There is no other branch to measure from, or no commit in common with it.
     pub fn branch_point(&self) -> Result<(gix::ObjectId, String)> {
-        let head = self
-            .repo
+        let repo = self.repo();
+        let head = repo
             .head_id()
             .map_err(|e| Error::Standing(Box::new(e)))?
             .detach();
         for (reference, named) in self.candidates() {
-            let Ok(other) = self.repo.find_reference(reference.as_str()) else {
+            let Ok(other) = repo.find_reference(reference.as_str()) else {
                 continue;
             };
             let Ok(other) = other.into_fully_peeled_id() else {
@@ -236,7 +288,7 @@ impl Worktree {
             if other == head {
                 continue;
             }
-            if let Ok(base) = self.repo.merge_base(head, other) {
+            if let Ok(base) = repo.merge_base(head, other) {
                 return Ok((base.detach(), named));
             }
         }
@@ -247,7 +299,7 @@ impl Worktree {
     /// put in the header.
     fn candidates(&self) -> Vec<(String, String)> {
         let mut out = Vec::new();
-        if let Ok(Some(head)) = self.repo.head_ref()
+        if let Ok(Some(head)) = self.repo().head_ref()
             && let Some(Ok(upstream)) = head.remote_tracking_ref_name(gix::remote::Direction::Fetch)
         {
             // `refs/remotes/origin/main` reads as `origin/main`, which is what a
@@ -277,16 +329,15 @@ impl Worktree {
     ///
     /// HEAD is unborn, or the walk fails, which is [`Error::History`].
     pub fn commits_from(&self, after: Option<gix::ObjectId>, want: usize) -> Result<Page> {
+        let repo = self.repo();
         let tip = match after {
             Some(id) => id,
-            None => self
-                .repo
+            None => repo
                 .head_id()
                 .map_err(|e| Error::History(Box::new(e)))?
                 .detach(),
         };
-        let walk = self
-            .repo
+        let walk = repo
             .rev_walk([tip])
             .all()
             .map_err(|e| Error::History(Box::new(e)))?;
@@ -314,7 +365,7 @@ impl Worktree {
         let commit = info.object().map_err(|e| Error::History(Box::new(e)))?;
         let subject = commit
             .message()
-            .map_err(|e| Error::History(Box::new(e)))?
+            .map_err(|e| Error::History(e.into()))?
             .summary()
             .to_string();
         let when = commit
@@ -373,8 +424,8 @@ impl Worktree {
         // position's own object and nothing else: a commit that cannot be read is a
         // place nobody can stand. The parent and the diff between them are the
         // comparison, which leaves the reader where they are.
-        let commit = self
-            .repo
+        let repo = self.repo();
+        let commit = repo
             .find_object(at)
             .map_err(|e| Error::Standing(Box::new(e)))?
             .peel_to_commit()
@@ -384,8 +435,7 @@ impl Worktree {
         let parent = commit.parent_ids().next().map(gix::Id::detach);
         let before = parent
             .map(|parent| {
-                self.repo
-                    .find_object(parent)
+                repo.find_object(parent)
                     .map_err(|e| Error::Comparison(Box::new(e)))?
                     .peel_to_tree()
                     .map_err(|e| Error::Comparison(Box::new(e)))
@@ -393,8 +443,7 @@ impl Worktree {
             .transpose()?;
 
         let rewrites = options.track_renames.then(gix::diff::Rewrites::default);
-        let changes = self
-            .repo
+        let changes = repo
             .diff_tree_to_tree(
                 before.as_ref(),
                 Some(&tree),
@@ -428,7 +477,7 @@ impl Worktree {
         // A position measures from a commit and the walk below diffs a tree, so
         // the peel is the whole of the difference between the two.
         let tree = self
-            .repo
+            .repo()
             .find_object(base)
             .map_err(|e| Error::Standing(Box::new(e)))?
             .peel_to_tree()
@@ -501,7 +550,13 @@ impl Worktree {
     ///
     /// The filesystem watcher cannot be armed on this worktree.
     pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
-        Watcher::new(&self.repo, &self.workdir, options)
+        Watcher::new(
+            &self.repo(),
+            &self.filter_sources[0],
+            self.loaded_config.get(),
+            &self.workdir,
+            options,
+        )
     }
 
     /// Start a frame over this working tree.
@@ -531,8 +586,14 @@ impl Worktree {
             return Ok(FileDiff::without_hunks(change.path.clone(), None));
         }
 
+        let diff = self.diff_attribute(change)?;
+        if let Some(read) = self.early_binary(change, diff) {
+            let mut binary = hunk::compute(change.path.clone(), &[], &[], Some(false));
+            binary.bytes = read;
+            return Ok(binary);
+        }
         let (before, after) = self.sides(change, probes)?;
-        Ok(hunk::compute(change.path.clone(), &before, &after))
+        Ok(hunk::compute(change.path.clone(), &before, &after, diff))
     }
 
     /// How tall one change's diff is, without building any of it.
@@ -554,8 +615,60 @@ impl Worktree {
             return Ok(hunk::FileSpan::default());
         }
 
+        let diff = self.diff_attribute(change)?;
+        if let Some(read) = self.early_binary(change, diff) {
+            let mut binary = hunk::measure(&[], &[], Some(false));
+            binary.bytes = read;
+            return Ok(binary);
+        }
         let (before, after) = self.sides(change, probes)?;
-        Ok(hunk::measure(&before, &after))
+        Ok(hunk::measure(&before, &after, diff))
+    }
+
+    /// The bytes read to learn a change is binary before reading all of it, or
+    /// `None` when that takes the whole change: the attribute unsets `diff`, or
+    /// the working-tree side's first sniff window holds a NUL.
+    fn early_binary(&self, change: &FileChange, diff: Option<bool>) -> Option<u64> {
+        use std::io::Read;
+        match diff {
+            Some(false) => return Some(0),
+            Some(true) => return None,
+            None => {}
+        }
+        // A symlink's bytes are its target, which `read_worktree` handles.
+        if change.after != Some(Side::Worktree) || change.maybe_symlink {
+            return None;
+        }
+        let file = std::fs::File::open(self.workdir.join(&change.path)).ok()?;
+        let mut window = Vec::with_capacity(hunk::BINARY_SNIFF_LEN);
+        file.take(hunk::BINARY_SNIFF_LEN as u64)
+            .read_to_end(&mut window)
+            .ok()?;
+        hunk::is_binary(&window).then_some(window.len() as u64)
+    }
+
+    /// What `.gitattributes` says about diffing `change`. See
+    /// [`Filter::diff_attribute`].
+    fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
+        let (diff, cleaned) = self.with_filter(|filter| filter.diff_attribute(&change.path))?;
+        // A stored pointer against the content it stands for does not diff. Git
+        // runs no clean filter on a symlink.
+        let pointer = change.before.is_some() && change.after == Some(Side::Worktree);
+        Ok(if cleaned && pointer && !change.maybe_symlink {
+            Some(false)
+        } else {
+            diff
+        })
+    }
+
+    /// Run `f` on the filter, building it on first use.
+    fn with_filter<T>(&self, f: impl FnOnce(&mut Filter) -> Result<T>) -> Result<T> {
+        let mut filter = self.filter.borrow_mut();
+        let filter = match filter.as_mut() {
+            Some(filter) => filter,
+            None => filter.insert(Filter::new(&self.repo())?),
+        };
+        f(filter)
     }
 
     /// Both sides of one change's diff, in the bytes git would compare.
@@ -579,8 +692,38 @@ impl Worktree {
         let missing = || Error::MissingBlob {
             path: path.to_owned(),
         };
-        let object = self.repo.find_object(id).map_err(|_| missing())?;
+        let repo = self.repo();
+        let object = repo.find_object(id).map_err(|_| missing())?;
         Ok(object.try_into_blob().map_err(|_| missing())?.take_data())
+    }
+
+    /// What the files under the git dir that shape the clean filter look like now.
+    pub(crate) fn filter_prints(&self) -> [Option<Fingerprint>; 2] {
+        let [config, attributes] = &self.filter_sources;
+        [fingerprint(config), fingerprint(attributes)]
+    }
+
+    /// Reload the repository's configuration when `now` differs from the config
+    /// it last loaded. A reload that fails, as one mid-write does, is tried again
+    /// on the next tick.
+    pub(crate) fn follow_config(&self, now: Option<Fingerprint>) {
+        if !config_moved(now, self.loaded_config.get()) {
+            return;
+        }
+        // A borrow still held is a reader mid-call, and the next tick retries.
+        let Ok(mut repo) = self.live.try_borrow_mut() else {
+            return;
+        };
+        // `reload` replaces the repository only once the open succeeds.
+        if repo.reload().is_ok() {
+            self.loaded_config.set(now);
+            self.reloads.set(self.reloads.get() + 1);
+            self.invalidate_filter();
+        }
+    }
+
+    pub(crate) fn reloads(&self) -> u64 {
+        self.reloads.get()
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
@@ -622,12 +765,7 @@ impl Worktree {
             Err(source) => return Err(Error::read(rela_path, source)),
         };
 
-        let mut filter = self.filter.borrow_mut();
-        let filter = match filter.as_mut() {
-            Some(filter) => filter,
-            None => filter.insert(Filter::new(&self.repo)?),
-        };
-        filter.convert_to_git(rela_path, raw)
+        self.with_filter(|filter| filter.convert_to_git(rela_path, raw))
     }
 
     /// The bytes git stores for a symlink: its target path, and nothing else.
@@ -711,6 +849,17 @@ pub struct Changes<'h> {
     inner: Inner,
     hide: Option<&'h Hidden>,
     hidden: usize,
+}
+
+/// Which status walk to take over the working tree.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Walk {
+    /// As the threads finish, so the first change arrives first.
+    Streamed,
+    /// Buffered and in path order, without rename tracking.
+    Sorted,
+    /// With rename tracking, which sorts as well.
+    Renames,
 }
 
 /// Which comparison is being walked.

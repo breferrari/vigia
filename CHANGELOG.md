@@ -2,56 +2,90 @@
 
 Every released version of `vigia`, newest first. The date is the day the release was cut.
 
-Before 1.0, a minor release can change behaviour. Anything that moves a key, a gesture or the default look is called out here.
+Each version lists the pull requests labelled `release`, one line each: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. Internal work such as CI, tests and documentation is not listed.
+
+## [1.0.0] - 2026-09-30
+
+- Follow config and info/attributes changes in a running pane
+- Raise the heat strip to 48 slices on wide panes
+- Sample a short file's heat at each slice's middle
+- Stop reading a file once its first window says binary
+- Read WT_SESSION in WSL too, outside a multiplexer
+- Let .gitattributes decide what is binary before the bytes do
+- Lay the regions out again when an overlay opens mid-batch
+- Give a row one character walk across all its runs
+- Paint nothing for pointer motion that moved no mark
+- Take the footer's second line only for a hint to fill
+- Keep a hidden path from waking the watch
+- Let a theme set the caret row's weight
+- Hold a step down at the end of the diff
+- Add a system palette built from the terminal's own colours
+- Mark only the burst's last write, and never a directory
+- Serve other agents and say noted when unregistered
+
+## [0.50.1] - 2026-09-29
+
+- Less CPU on an empty pane. After `git reset --hard` to a clean tree, the pane no longer recounts staged changes on every redraw.
+- Internal: plain-writing rules for contributors. (#547)
+
+## [0.50.0] - 2026-09-28
+
+- Leave a note on a range of lines: press a line number and drag. The box opens under the last line and names the range, for example `path:12-15`. `Esc` during the drag cancels it.
+- The agent's writes no longer animate over the diff, so a burst of writes no longer makes the pane blink. The pulse and the heat strip still show where they landed.
+- The `m` settings menu labels each row with a short name: Follow changes, Left rail, Single file, File list only, Staged changes, Wrap lines, Notes, File icons, Path links, Save settings, Reset to defaults. Config file keys are unchanged.
+- Less CPU while idle. A write to `.git/index` that changes no entry no longer starts a git status scan, and a scan over many untracked files is faster (164.6ms to 10.1ms over 6,000 files).
+- Dependencies updated to their latest releases, including gix 0.88. The tinyvec version pin is removed.
+- The mcs tech pack drops two fields mcs no longer reads, so the pack validates without warnings.
+- Internal: a code comment rewritten.
 
 ## [0.49.0] - 2026-09-13
 
-- The agent's answer draws its quoted code as code
-- The third word is only, and it is the reading that goes inert
+- Code in the agent's answer is drawn as code. Fenced blocks lose their fences and are syntax highlighted; words in backticks lose the backticks. Copying still gives the exact text the agent wrote.
+- `O` switches between everything since a commit and that one commit alone. The header shows `only <id>`. In that view follow, notes, `a`, the sparkline and the pulse are off.
 
 ## [0.48.0] - 2026-09-11
 
-- A list behind the token puts the pane at any commit
-- The pack card leads with what vigia is, so the description reads for a newcomer
+- Press `B`, or click the position in the header, to open a list of places the pane can show: the working tree, the branch point, and every commit behind it. Pick one with the arrows and `Enter`. A `▾` after the position says the list is there.
+- The mcs tech pack's description now says what vigia is.
 
 ## [0.47.0] - 2026-09-11
 
-- Nothing keeps a toggle the reader flipped, and remember between runs is what does
-- Nothing shows the reader their own settings, and the config menu is what does
-- The pane remembers a toggle, and the config menu is where the reader sees it
+- Toggles can be remembered between runs: turn on `remember between runs` in the `m` menu (named `Save settings` since 0.50.0). `reset to defaults` restores the defaults.
+- `m` opens a settings menu that shows every toggle and its current state. Change one with the arrows and `Space`, or with the mouse.
+- Internal: the design decision behind the settings menu. No change to the pane. (#513)
 
 ## [0.46.0] - 2026-09-10
 
-- The pane can stand at the branch point, and the header says where it is
-- Nothing keeps a path out of the pane, and `hide` is what does
-- An mcs tech pack installs the notes server and its hooks
-- Ledgers leave the byte budget, and the cross-file total is deleted
-- The suite is swept for gates that rebuild their expected value, and one was the only one
+- `b` shows the diff since the branch point instead of the working tree. The header says where the pane is, for example `current` or `since main`.
+- New `hide` setting in `~/.config/vigia/config`: a regular expression for paths to keep out of the pane, for example `hide = ^target/|\.lock$`. The header counts hidden files.
+- An mcs tech pack installs the notes server and its hooks: `mcs pack add breferrari/vigia`, then `mcs sync --global`.
+- Internal: repository documents that record events no longer count toward the prose byte budget. (#502)
+- Internal: test suite checked for tests that compute their own expected value. (#500)
 
 ## [0.45.0] - 2026-09-10
 
-- The body draws the file list alone, and `o` is what asks for it
-- The gestures sheet opens on what the pane is
+- `o` shows the file list alone, without the diff. `overview = on` in the config file starts there.
+- The `?` sheet starts with a short description of what the pane is.
 
 ## [0.44.0] - 2026-09-09
 
-- A subject naming a key survives the notes filter, and an emptied range says what it held
-- The displaced binary has one name, and vigia deletes it
-- A row's frame is drawn to the width its text was wrapped at
-- The Windows upgrade moves the held binary aside rather than stopping the servers
-- The header's total counts in the columns the rows count in
+- Windows upgrade: the moved-aside binary always has one name, `vigia.exe.old`, and vigia deletes it on its next start. Upgrades no longer leave copies behind.
+- A note box on a narrow pane now wraps its text to the box's real width. Before, text broke early and left empty columns.
+- The README's Windows upgrade steps now rename the running binary instead of stopping the servers, so open agent sessions keep working.
+- The header's total lines up with the `+` and `-` columns of the file rows.
+- Internal: the release-notes filter keeps changes that name a key. (#487)
 
 ## [0.43.0] - 2026-09-09
 
-- The header's right-hand side counts the run in lines
-- A note's left side takes it back, and the sheet says so
-- The smoke list checks the copy routes, which no gate can reach
-- A copy inside tmux goes through tmux, which is the one hand allowed to set the clipboard
-- A drag over a note sends the note, and its edges send nothing
-- The file list marks which file holds a note, and the strip marks where in it
-- The resolve line holds an announcement's minute, and the hold runs no motion
-- The enclosure is the same answered or not, and the arrow stands in its rule
-- 0.42.0 says what it removed, and the filter that hid it is filed
+- The header shows the total lines added and removed across all changed files.
+- Point at a note's left side and click the `✕` to take the note back. The `?` sheet lists this.
+- Drag-to-copy works inside tmux, with no tmux configuration.
+- Dragging over a note copies the note and the agent's reply. The box's border copies nothing.
+- The file list marks which files hold a note (`✎` waiting, `↳` answered, `✓` resolved), and the heat strip marks where in the file.
+- A resolved note's answer now stays for a minute instead of a few seconds, and nothing animates while it stays.
+- A note's box looks the same whether or not the agent answered, and the answer's arrow hangs from the box's left edge.
+- Internal: the manual release checklist covers the copy paths. (#480)
+- Internal: 0.42.0's notes corrected to list what it removed. (#470)
 
 ## [0.42.0] - 2026-09-08
 

@@ -59,14 +59,14 @@ pub use menu::{
     menu_route,
 };
 pub use motion::{
-    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING, ARRIVING_FRAME, BOX_ARRIVING, LEAVING,
-    NOTICE_ARRIVING, NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
-    SAID_ARRIVING, Timed, effect_interval, length,
+    ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, NOTICE_ARRIVING,
+    NOTICE_LINGER, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE, SAID_ARRIVING, Timed,
+    effect_interval, length,
 };
 pub use notes::{
-    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteEffects, SWEEP, Settled, TRANSITION,
-    box_entrance, box_exit, box_route, commit, edge_at, has_room, leaving, opening, press_at,
-    resolve_arrival, withdraw, word_arrival,
+    Alerts, BoxRoute, Change, Committed, Ledger, NoteBox, NoteDrag, NoteEffects, SWEEP, Settled,
+    TRANSITION, box_entrance, box_exit, box_route, commit, drag_after, edge_at, has_room, leaving,
+    opening, press_at, resolve_arrival, withdraw, word_arrival,
 };
 pub use positions::{Facts, Places, Positions, PositionsRoute, positions_route, resume_from};
 pub use post::Posted;
@@ -78,7 +78,7 @@ pub use render::{
     diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
-pub use terminal::{Background, Screen, Session, background_of};
+pub use terminal::{Background, Colours, Screen, Session, background_of, colours_of};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
@@ -128,6 +128,24 @@ enum Wake {
     Notes,
     /// Enter's post to the registered agent sessions came back.
     Posted(Posted),
+}
+
+/// The staged count an empty pane shows. Counted again only after a tick, or after a
+/// frame that did not show it.
+fn elsewhere_of(
+    kept: Counted,
+    stale: &mut bool,
+    drawn: bool,
+    count: impl FnOnce() -> Counted,
+) -> Counted {
+    if !drawn {
+        *stale = true;
+        Counted::default()
+    } else if std::mem::take(stale) {
+        count()
+    } else {
+        kept
+    }
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
@@ -281,8 +299,8 @@ pub fn epoch_now() -> i64 {
 ///
 /// The history store is fed from the burst and never from the walk, so the walk's
 /// own filter cannot reach it: a hidden path left in here spends one of I10's 256
-/// tracked slots and holds a sparkline for a row nothing draws. It suppresses the
-/// sample and not the wake, which still arrives and is still walked.
+/// tracked slots and holds a sparkline for a row nothing draws. The watcher
+/// already drops what the pattern covers, so this is a second guard on one rule.
 #[doc(hidden)]
 #[must_use]
 pub fn shown(mut paths: Vec<String>, hide: Option<&vigia_core::Hidden>) -> Vec<String> {
@@ -307,8 +325,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     // Same rule one input over: an error painted inside a TUI that then hands
     // the terminal back is an error nobody sees. `SPEC.md` §11.1.
-    let detected = terminal::background(std::time::Duration::from_millis(150));
-    let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok(), detected)?;
+    // The palette is asked for only when it will be used, so the default costs
+    // one query and not eighteen.
+    let wanted = theme::wants_colours(|key| std::env::var(key).ok());
+    let reply = terminal::ask(std::time::Duration::from_millis(150), wanted);
+    let colours = terminal::colours_of(&reply);
+    let theme = theme::from_env(
+        Depth::detect()?,
+        |key| std::env::var(key).ok(),
+        terminal::background_of(&reply),
+        colours.as_ref(),
+    )?;
 
     // Resolved once before the screen is taken, so the frame path never asks the
     // environment anything. An unrecognised value is refused, not defaulted.
@@ -360,7 +387,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
         // that draws something.
-        effects: EffectManager::default(),
         notice_effects: EffectManager::default(),
         painted: Instant::now(),
         highlighter: Highlighter::new(),
@@ -376,10 +402,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         branch_point: None,
         screen: View::default(),
         regions: Regions::default(),
+        laid: Overlays::default(),
         held: None,
         grabbed: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         scrolling_until: None,
         next: None,
@@ -393,6 +421,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         store_watch: None,
         notes_stale: false,
         places_stale: false,
+        elsewhere_stale: true,
         ledger: Ledger::default(),
         note_effects: NoteEffects::default(),
         box_effect: None,
@@ -437,7 +466,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
 
     // Armed only now.
-    spawn_watch(path.to_path_buf(), tx.clone());
+    spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
 
     // And the store's own, an event source beside the tree's: what the agent
     // writes there is a wake, never a poll.
@@ -532,7 +561,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         let began = Instant::now();
         drain(&mut batch, wake, &rx, DRAIN_CAP);
 
+        // Whether any wake in the batch did something a paint could show. A repeat
+        // step applied above is one.
+        let mut touched = repeat.is_some();
         for wake in batch.drain(..) {
+            let untouched = !touched;
+            touched = true;
             match wake {
                 // Returning rather than breaking, so the reason travels with the exit,
                 // and `shell` drops on the way out to put the terminal back first.
@@ -546,6 +580,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // would be a message the sender did not ask for.
                 Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
+                    shell.relayout(&frame)?;
+                    let pointer = shell.pointer();
                     // Checked before the event is interpreted, because a release is not
                     // an action and would otherwise fall through the `else` below with
                     // the repeat still armed.
@@ -633,11 +669,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             MenuRoute::Through => {}
                         }
                     }
-                    // A press on a content row's gutter opens the box and never begins
-                    // a selection, which is B20 and B21 sharing no cell: it is answered
-                    // here and the wash below never sees it.
-                    if let Some(offset) = notes::press_at(&shell.screen, regions, &event) {
-                        shell.open_box(offset, Instant::now());
+                    // Before the wash: a drag from a gutter is a note, never a selection.
+                    let (noting, ended) =
+                        notes::drag_after(&shell.screen, regions, &event, shell.noting.take());
+                    shell.noting = noting;
+                    if let Some(span) = ended {
+                        shell.open_box(&span, Instant::now());
+                        continue;
+                    }
+                    // A drag's own pointer events stop here; a key still reaches Esc,
+                    // and the event that ended a drag goes on to its own handler.
+                    if shell.noting.is_some() && matches!(event, Event::Mouse(_)) {
                         continue;
                     }
                     // And a press on a note's own left side takes that note back,
@@ -692,9 +734,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         shell.grabbed = regions.grab_at(mouse.column, mouse.row);
                     }
                     let Some(action) = action_for(&event, regions) else {
-                        // Not every event is a request. Redrawing for a key release
-                        // or a mouse move would make the idle cost non-zero for a
-                        // reason nobody asked for.
+                        // Not every event is a request, and one that moved no mark
+                        // leaves nothing for the paint to show.
+                        if untouched && shell.pointer() == pointer {
+                            touched = false;
+                        }
                         continue;
                     };
                     // Asked for only by the one action that reads it, and that is the
@@ -720,6 +764,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.written = true;
                     // The list's facts describe runs, so a write moves them too.
                     shell.places_stale = true;
+                    shell.elsewhere_stale = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time and only a wake the
                     // loop was having moves it. Parked too, so the sparkline is whole
@@ -738,13 +783,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         continue;
                     }
                     shell.app.clear_notice();
-                    // Armed here rather than in `App::follow`, because a change
-                    // arrives whether or not the viewport moves to it.
-                    for path in &paths {
-                        shell
-                            .effects
-                            .add_unique_effect(path.clone(), motion::coalescing(ARRIVING));
-                    }
                     // A walk that fails describes the whole tree rather than one
                     // path in it, so the previous frame is still the best thing to
                     // draw and the footer says why. One file's own failure never
@@ -781,11 +819,15 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // is one listing.
                 Wake::Notes => shell.notes_stale = true,
                 Wake::Posted(posted) => {
-                    if let Some(word) = post::word(posted) {
-                        shell.say(word.to_owned(), Voice::Said, began);
-                    }
+                    shell.say(post::word(posted).to_owned(), Voice::Said, began)
                 }
             }
+        }
+
+        // Nothing to show, unless a deadline is due: under steady motion the
+        // timeout never fires, so a due one is settled and painted here.
+        if !touched && shell.patience(&frame, began) != Some(std::time::Duration::ZERO) {
+            continue;
         }
 
         // Before the paint: a notice either of them raises has to reach this frame.
@@ -964,10 +1006,7 @@ fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
 struct Shell {
     session: Session,
     app: App,
-    /// Keyed by path, so a second write replaces an effect rather than stacking.
-    effects: EffectManager<String>,
-    /// The footer's own: the diff's are clipped to it, and one manager processed
-    /// twice advances every effect in it twice a frame.
+    /// The footer's messages, clipped to the footer.
     notice_effects: EffectManager<String>,
     /// When the previous frame painted. The time since it is what an effect is
     /// told, through `effect_interval`, which may answer none of it.
@@ -1004,6 +1043,8 @@ struct Shell {
     screen: View,
     /// Where the last painted screen's regions and scrollbars were.
     regions: Regions,
+    /// The overlays [`Self::regions`] was laid out for.
+    laid: Overlays,
     /// What a mouse button is currently being held down on, if anything.
     held: Option<Held>,
     /// The bar a drag is currently moving, if one is.
@@ -1012,6 +1053,8 @@ struct Shell {
     hovered: Option<Hovered>,
     /// The diff rows a drag has selected, in screen rows of the last paint.
     selected: Option<Selection>,
+    /// A drag from a gutter under way, which ends by opening the box.
+    noting: Option<notes::NoteDrag>,
     /// Which way the viewport is currently being moved, and until when.
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
@@ -1045,6 +1088,8 @@ struct Shell {
     /// Whether the list's facts are owed a walk: set when the tree moves, the list opens
     /// or the pane does, so the arrows re-measure nothing.
     places_stale: bool,
+    /// Whether `elsewhere` needs a new count. Counting reads every tree under `HEAD`.
+    elsewhere_stale: bool,
     /// What the pane holds of the store between wakes: the notes as listed and
     /// the ones on their way off the screen.
     ledger: Ledger,
@@ -1101,6 +1146,10 @@ impl Shell {
             gripped: self.gripped(),
             hovered: self.hovered(),
             selected: self.selected,
+            noting: self
+                .noting
+                .as_ref()
+                .and_then(|drag| drag.rows(&self.screen, self.regions.diff.top)),
             scrolling: self.scrolling,
         }
     }
@@ -1124,8 +1173,7 @@ impl Shell {
     /// the next frame and by the record of whether one drew, so the two cannot
     /// disagree about what counts as an effect.
     fn effects_running(&self) -> bool {
-        self.effects.is_running()
-            || self.notice_effects.is_running()
+        self.notice_effects.is_running()
             || self.note_effects.is_running()
             || self.box_effect.as_ref().is_some_and(Timed::is_running)
             || self.menu_effect.as_ref().is_some_and(Timed::is_running)
@@ -1230,12 +1278,14 @@ impl Shell {
     ) -> vigia_core::Result<bool> {
         // The rung `Esc` climbs over quitting, reachable only while the button is
         // down. Without it a tap mid-drag ends the program.
-        if action == Action::Escape && self.selected.is_some() {
+        if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {
             self.deselect();
+            self.noting = None;
             return Ok(true);
         }
         if action != Action::Redraw {
             self.deselect();
+            self.noting = None;
         }
         let before = self.app.settings();
         let opened = self.app.positions_open();
@@ -1338,7 +1388,7 @@ impl Shell {
     /// note already there when there is one, and arm its entrance. With no store
     /// to write to, and on a pane too narrow to draw the box, there is nothing
     /// to open: the footer says so instead.
-    fn open_box(&mut self, offset: usize, now: Instant) {
+    fn open_box(&mut self, span: &notes::NoteDrag, now: Instant) {
         if self.store.is_none() {
             self.say(state::no_home(), Voice::Alert, now);
             return;
@@ -1351,7 +1401,10 @@ impl Shell {
             );
             return;
         }
-        let Some((anchor, existing)) = notes::opening(&self.screen, offset, self.app.notes())
+        let Some((from, to)) = span.offsets(&self.screen, self.regions.diff.top) else {
+            return;
+        };
+        let Some((anchor, existing)) = notes::opening(&self.screen, from, to, self.app.notes())
         else {
             return;
         };
@@ -1884,6 +1937,51 @@ impl Shell {
         self.regions
     }
 
+    /// Every mark the pointer stands on, so a move that changes none of them
+    /// can skip the paint.
+    fn pointer(&self) -> Pointer {
+        (
+            self.held,
+            self.grabbed,
+            self.hovered,
+            self.selected,
+            self.noting.clone(),
+        )
+    }
+
+    /// The sheet's page, and whether the menu and the position list are up.
+    fn overlays(&self) -> Overlays {
+        (
+            self.app.sheet_page(),
+            self.app.menu_open(),
+            self.app.positions_open(),
+        )
+    }
+
+    /// Lay the regions out again when an overlay opened or closed since the last
+    /// paint. A batch paints once, so without this a click in the same batch as
+    /// `?` is judged against a screen with no sheet on it.
+    fn relayout(&mut self, frame: &vigia_core::Frame) -> Result<(), Failure> {
+        if self.overlays() == self.laid {
+            return Ok(());
+        }
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            crate::app::Stood {
+                standing: frame.standing(),
+                now: epoch_now(),
+            },
+            self.pointing(),
+            self.elsewhere,
+            &self.root,
+        );
+        let area = self.area()?;
+        self.regions = render::regions(area, &chrome, &self.screen);
+        self.laid = self.overlays();
+        Ok(())
+    }
+
     /// Hand the warmer whatever the last paint drew plain, and let it wake us.
     fn request_warm(&mut self, worktree: &Worktree, tx: &Sender<Wake>) {
         if self
@@ -2003,13 +2101,16 @@ impl Shell {
 
         // On a frame with nothing to draw, where the work went, which for a commit
         // that changed nothing is not whatever happens to be staged now.
-        self.elsewhere = if self.screen.files == 0 && !self.app.staged() && frame.is_live() {
-            worktree
-                .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
-                .unwrap_or_default()
-        } else {
-            Counted::default()
-        };
+        self.elsewhere = elsewhere_of(
+            self.elsewhere,
+            &mut self.elsewhere_stale,
+            self.screen.files == 0 && !self.app.staged() && frame.is_live(),
+            || {
+                worktree
+                    .count_of(vigia_core::Origin::Staged, self.hide.as_ref())
+                    .unwrap_or_default()
+            },
+        );
 
         // Rebuilt so a notice raised by the collect above, and the notes it
         // counted, reach this frame rather than the next one. Safe to differ from
@@ -2036,7 +2137,6 @@ impl Shell {
             self.effects_ran,
             now.saturating_duration_since(self.painted),
         );
-        let effects = &mut self.effects;
         let notice_effects = &mut self.notice_effects;
         let note_effects = &mut self.note_effects;
         let box_effect = &mut self.box_effect;
@@ -2053,17 +2153,9 @@ impl Shell {
             // retired here, between the layout and the paint that uses them.
             chrome.hovered = repainted(chrome.hovered, was, painted);
             chrome.selected = repainted(chrome.selected, was, painted);
+            chrome.noting = repainted(chrome.noting, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
-            // After the widgets, because an effect works on the cells they drew. The
-            // diff's own region only: a heading arriving is not a reason to disturb
-            // the header, the footer or the map.
-            let over = Rect::new(
-                painted.diff.left,
-                painted.diff.top,
-                painted.diff.width,
-                painted.diff.rows,
-            );
-            effects.process_effects(since.into(), f.buffer_mut(), over);
+            // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
             // off screen draws no cells and its effect waits, and `settle_notes`
             // retires it at its own end whether it ever drew or not.
@@ -2093,16 +2185,31 @@ impl Shell {
         self.painted = now;
         self.effects_ran = self.effects_running();
         self.hovered = chrome.hovered;
+        if chrome.noting.is_none() {
+            self.noting = None;
+        }
         if chrome.selected.is_none() {
             self.deselect();
         }
         self.regions = painted;
+        self.laid = self.overlays();
         Ok(())
     }
 }
 
+/// The pointer's marks, compared across one input event.
+type Pointer = (
+    Option<Held>,
+    Option<Grabbed>,
+    Option<Hovered>,
+    Option<Selection>,
+    Option<notes::NoteDrag>,
+);
+/// The sheet's page, and whether the menu and the position list are drawn.
+type Overlays = (Option<usize>, bool, bool);
+
 /// Forward coalesced working-tree changes onto the shell's channel.
-fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
+fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>) {
     std::thread::spawn(move || {
         let worktree = match Worktree::discover(&path) {
             Ok(worktree) => worktree,
@@ -2118,6 +2225,7 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
                 return;
             }
         };
+        watcher.hide(hide);
 
         // The tick says only that something changed, which is all the shell needs:
         // every tick triggers one status walk, and a walk finds whatever the events
@@ -2308,6 +2416,22 @@ mod tests {
     }
 
     #[test]
+    fn a_write_the_agent_makes_arms_no_motion() {
+        // Armed per write, it blinks under an agent writing line after line.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let tick = shipped
+            .split("Wake::Tick(")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost(message) =>").next())
+            .expect("the tick arm is gone");
+        assert!(
+            !tick.contains("effect"),
+            "the tick arm arms an effect, so every write draws a motion over the diff"
+        );
+    }
+
+    #[test]
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
         // than driven. Each of these was a defect: a span the collect resolved to
@@ -2320,9 +2444,12 @@ mod tests {
             "shell.send_wash(span);",
             "self.app.select(None);",
             // Neither is reachable from a test, and both shipped once.
-            "if action == Action::Escape && self.selected.is_some() {",
+            "if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {",
             "if action != Action::Redraw {",
             "if chrome.selected.is_none() {",
+            // A note drag ends the same way when the layout moves under it.
+            "chrome.noting = repainted(chrome.noting, was, painted);",
+            "if chrome.noting.is_none() {",
             "self.screen.lines_in(span.offsets(self.regions.diff.top))",
         ] {
             assert!(
@@ -2478,6 +2605,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_run_the_pane_is_not_drawing_is_counted_once_per_tick() {
+        let one = Counted {
+            shown: 1,
+            hidden: 0,
+        };
+        let two = Counted {
+            shown: 2,
+            hidden: 0,
+        };
+        let mut stale = true;
+        let kept = elsewhere_of(Counted::default(), &mut stale, true, || one);
+        assert_eq!(kept, one, "the first paint did not count");
+        // A repaint with no tick, as the history ages.
+        let kept = elsewhere_of(kept, &mut stale, true, || two);
+        assert_eq!(kept, one, "a repaint with no tick counted again");
+        stale = true;
+        let kept = elsewhere_of(kept, &mut stale, true, || two);
+        assert_eq!(kept, two, "a tick did not count again");
+        // A frame that hides it, then one that shows it again.
+        let kept = elsewhere_of(kept, &mut stale, false, || one);
+        assert_eq!(kept, Counted::default());
+        let kept = elsewhere_of(kept, &mut stale, true, || one);
+        assert_eq!(kept, one, "a frame that emptied kept an old count");
+
+        // The pane counts only through `elsewhere_of`, and the tick marks it stale.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        assert_eq!(
+            shipped
+                .matches("count_of(vigia_core::Origin::Staged")
+                .count(),
+            1,
+            "the staged count is called outside `elsewhere_of`"
+        );
+        assert!(
+            shipped.contains("&mut self.elsewhere_stale,")
+                && shipped.contains("elsewhere_stale: true,"),
+            "`paint` no longer counts through the stale flag"
+        );
+        let tick = shipped
+            .split("Wake::Tick(paths) => {")
+            .nth(1)
+            .and_then(|rest| rest.split("Wake::WatchLost").next())
+            .expect("the tick arm is gone");
+        assert!(
+            tick.contains("shell.elsewhere_stale = true;"),
+            "a tick no longer marks the staged count stale"
+        );
+    }
+
     /// The footer says **sent** rather than copied, because OSC 52 has no reply. Both
     /// spellings live inside a method that owns a terminal, so they are read here.
     #[test]
@@ -2545,8 +2723,8 @@ mod tests {
             .find("if shell.app.box_open() {")
             .expect("the input arm no longer asks whether the box owns the keys");
         let press = shipped
-            .find("notes::press_at(&shell.screen, regions, &event)")
-            .expect("the input arm no longer routes a gutter press to the box");
+            .find("notes::drag_after(&shell.screen, regions, &event, shell.noting.take())")
+            .expect("the input arm no longer routes a gutter drag to the box");
         let wash = shipped
             .find("selection_after(&event, regions, shell.selected)")
             .expect("the input arm no longer opens a wash");
@@ -2595,7 +2773,7 @@ mod tests {
         // drawn screen can catch: without it a press on a pane too narrow to
         // draw the box still takes every key.
         let open = shipped
-            .split("fn open_box(&mut self, offset: usize, now: Instant) {")
+            .split("fn open_box(&mut self, span: &notes::NoteDrag, now: Instant) {")
             .nth(1)
             .and_then(|rest| rest.split("\n    }\n").next())
             .expect("`open_box` is gone");
@@ -2916,7 +3094,7 @@ mod tests {
             .filter(|name| name.ends_with("effect") || name.ends_with("effects"))
             .collect();
         assert!(
-            managers.len() >= 5,
+            managers.len() >= 4,
             "`Shell` declares {} effect fields, so this gate is reading its shape \
              wrongly rather than its fields: {managers:?}",
             managers.len()
@@ -3160,6 +3338,82 @@ mod tests {
             asked < drawn && drawn < recorded,
             "the interval is asked or recorded on the wrong side of the draw, so an \
              effect armed after a quiet spell is told the whole of it"
+        );
+    }
+
+    /// Structural, because the loop cannot be driven: a batch that asked for
+    /// nothing and moved no mark skips the paint unless a deadline is due.
+    #[test]
+    fn idle_motion_paints_nothing() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let turns = &code[code.find("'awake: loop {").expect("the loop is gone")..];
+
+        let drained = turns
+            .find("for wake in batch.drain(..)")
+            .expect("the batch is no longer drained");
+        let quiet = turns[drained..]
+            .find("action_for(&event, regions) else {")
+            .map(|at| drained + at)
+            .expect("the no-action arm is gone");
+        let arm = &turns[quiet..quiet + turns[quiet..].find("continue;").expect("no continue")];
+        assert!(
+            arm.contains("shell.pointer() == pointer") && arm.contains("touched = false"),
+            "an event that asked for nothing no longer checks the pointer's marks, so \
+             pointer motion paints a frame again:\n{arm}"
+        );
+
+        let guard = turns[quiet..]
+            .find("if !touched && shell.patience(")
+            .map(|at| quiet + at)
+            .expect("the paint is no longer behind the batch's flag");
+        let paint = turns[quiet..]
+            .find("shell.draw(")
+            .map(|at| quiet + at)
+            .expect("the batch no longer paints");
+        assert!(
+            guard < paint,
+            "the batch paints before it asks whether anything happened"
+        );
+        // A repeat step applied before the drain counts as work.
+        assert!(
+            turns.contains("let mut touched = repeat.is_some();"),
+            "a repeat step no longer marks its batch, so motion can swallow its paint"
+        );
+    }
+
+    /// Structural, because the loop cannot be driven: every input event is judged
+    /// against regions laid out for the overlays up now, not the last paint's.
+    #[test]
+    fn input_reads_fresh_regions() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let arm = &code[code.find("Wake::Input(event) => {").expect("no input arm")..];
+        let relaid = arm
+            .find("shell.relayout(&frame)?;")
+            .expect("the arm no longer relays out");
+        let read = arm
+            .find("shell.regions()")
+            .expect("the arm no longer reads regions");
+        assert!(
+            relaid < read,
+            "an input event reads the regions before they are laid out for the overlays up"
+        );
+
+        let drawer = &code[code.find("\n    fn draw<").expect("`Shell::draw` is gone")..];
+        assert!(
+            drawer.contains("self.laid = self.overlays();"),
+            "the paint no longer records what it laid out, so every event relays out"
         );
     }
 }

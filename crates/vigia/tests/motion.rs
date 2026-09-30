@@ -12,8 +12,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use tachyonfx::pattern::{AnyPattern, SweepPattern};
 use vigia::motion::{
-    self, ARRIVING, ARRIVING_FRAME, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
-    Timed, effect_interval, length,
+    self, ARRIVING_FRAME, LEAVING, RESOLVE_ARRIVING, RESOLVE_BEAT, RESOLVED_DEPARTURE,
+    SAID_ARRIVING, Timed, effect_interval, length,
 };
 
 /// The pane the gates here draw on.
@@ -59,26 +59,26 @@ fn every_motion() -> Vec<(&'static str, tachyonfx::Effect, Duration, Duration)> 
         ),
         (
             "fading in",
-            motion::fading(Color::Blue, ARRIVING, AnyPattern::default(), false),
-            ARRIVING,
-            ARRIVING / 2,
+            motion::fading(Color::Blue, SAID_ARRIVING, AnyPattern::default(), false),
+            SAID_ARRIVING,
+            SAID_ARRIVING / 2,
         ),
         (
             "fading out",
             motion::fading(
                 Color::Blue,
-                ARRIVING,
+                SAID_ARRIVING,
                 SweepPattern::right_to_left(12).into(),
                 true,
             ),
-            ARRIVING,
-            ARRIVING / 2,
+            SAID_ARRIVING,
+            SAID_ARRIVING / 2,
         ),
         (
             "coalescing",
-            motion::coalescing(ARRIVING),
-            ARRIVING,
-            ARRIVING / 2,
+            motion::coalescing(SAID_ARRIVING),
+            SAID_ARRIVING,
+            SAID_ARRIVING / 2,
         ),
     ]
 }

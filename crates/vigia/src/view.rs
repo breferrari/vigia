@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use vigia_core::{
     ChangeKind, Churn, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
-    Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status, resolve,
-    run_of,
+    LineRef, Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status,
+    first_of, resolve, run_of,
 };
 
 use crate::quote::{Chunk, CodeRow, Run};
@@ -455,6 +455,8 @@ pub struct Anchor {
     /// Its whole text, which is what finds it again after an edit above moves
     /// the number.
     pub text: String,
+    /// The first line, when a drag from the gutter covered more than this one.
+    pub first: Option<LineRef>,
     /// The run the row was drawn in. A path in both runs draws the same line
     /// twice, so nothing else says which of them the reader pressed.
     pub origin: Origin,
@@ -489,6 +491,9 @@ pub struct Noted {
     /// The row of the line the note box is open under, when that line is on
     /// this screen, so the number keeps the note's ink while the box is up.
     pub boxed: Option<usize>,
+    /// Rows inside a range above the line its note hangs under, which carry
+    /// the note's ink and are no target for reopening it.
+    pub ranged: Vec<usize>,
 }
 
 /// Columns a note row spends before its text: the lead and its gap.
@@ -507,7 +512,9 @@ struct BoxPin {
     row: usize,
     /// Whether `row` is the anchored line rather than the file's heading.
     marks: bool,
-    /// `path:line`, for the top edge.
+    /// The logical row the range begins on, when it covers more than `row`.
+    from: Option<usize>,
+    /// `path:line` or `path:first-last`, for the top edge.
     label: String,
     lines: Vec<String>,
     /// As a line and a character within it.
@@ -529,6 +536,8 @@ struct Pin {
     /// Whether `row` is the note's own line, which carries the mark, rather than
     /// the file's heading.
     marks: bool,
+    /// The logical row the range begins on, when it covers more than `row`.
+    from: Option<usize>,
     /// Whether the agent has resolved it, so its reply alone is drawn, or its
     /// body where the agent left no reply.
     resolved: bool,
@@ -804,7 +813,7 @@ impl Pin {
 }
 
 /// Slices a file's length is divided into for the heat strip.
-pub const HEAT_BUCKETS: usize = 24;
+pub const HEAT_BUCKETS: usize = 48;
 
 /// What a drawn sparkline bucket's height is divided by, one figure per rung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -942,12 +951,22 @@ impl NoteMark {
 }
 
 /// What the reader's notes on one file put on its row and on its heat strip.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileNotes {
     /// `None` where the file holds no note at all.
     pub mark: Option<NoteMark>,
     /// Which slices hold an unresolved one; presence and not state, per §11.1.
     pub at: [bool; HEAT_BUCKETS],
+}
+
+// By hand, since `Default` stops at arrays of 32.
+impl Default for FileNotes {
+    fn default() -> Self {
+        Self {
+            mark: None,
+            at: [false; HEAT_BUCKETS],
+        }
+    }
 }
 
 /// What `notes` put on `diff`'s file. The **stored** line is used and not the pane's
@@ -1015,7 +1034,23 @@ fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
             }
         }
     }
+    if (diff.lines as usize) < HEAT_BUCKETS {
+        return sampled(&buckets, diff.lines as usize);
+    }
     buckets
+}
+
+/// A short file's map, redrawn so every slice shows the line under its middle.
+///
+/// With fewer lines than slices, placing each line at one slice leaves the
+/// slices between two changed lines cool, so a solid change draws as dashes.
+/// Spreading a line's count over the slices it covers instead gives some lines
+/// two slices and some three, so a uniform change draws as alternating bands.
+fn sampled(placed: &[HeatBucket; HEAT_BUCKETS], lines: usize) -> [HeatBucket; HEAT_BUCKETS] {
+    // `placed` holds line `l` at the slice `bucket_of` gave it, and no two
+    // lines share one while lines < slices.
+    let at_line = |line: usize| placed[line * HEAT_BUCKETS / lines];
+    std::array::from_fn(|slice| at_line((2 * slice + 1) * lines / (2 * HEAT_BUCKETS)))
 }
 
 /// Where the top of the viewport sits.
@@ -1119,6 +1154,8 @@ pub struct View {
     pub top: Position,
     /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
     pub landed: bool,
+    /// Whether this frame drew the last row of the diff.
+    pub ended: bool,
     /// Files this viewport asked the frame for, drawn or merely crossed.
     pub read: usize,
     /// [`FileEntry`] values built for the record rather than for a row.
@@ -1487,6 +1524,7 @@ impl View {
                 row: position.row,
             },
             landed: false,
+            ended: false,
             read: 0,
             recorded: 0,
             scale: Scale(history.map_or_else(Default::default, History::scales)),
@@ -1762,6 +1800,7 @@ impl View {
                 && view.top != floor);
 
         let trimmed = view.wrap_rows(width, wrap, height, at_bottom, &walked, rows);
+        view.ended &= index >= stop && consumed;
 
         // After the walk, because only the walk knows where the diff landed.
         view.take_list(
@@ -1803,8 +1842,68 @@ impl View {
             side: Side::of(*kind),
             line: *number,
             text: self.line_at(head),
+            first: None,
             origin: path.1,
         })
+    }
+
+    /// What a note over rows `from..=to` would pin to, with the row its last line
+    /// is on: each end moved inward to the nearest line row, so a drag that ends
+    /// on a note's own rows still lands on code. The first line is `None` when
+    /// both ends are one line.
+    pub fn anchor_over(&self, from: usize, to: usize) -> Option<(usize, Anchor)> {
+        let (from, to) = (from.min(to), from.max(to));
+        let (last, mut anchor) = (from..=to)
+            .rev()
+            .find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
+        // The screen may have moved under the drag, so the first line is looked
+        // for inside the last line's hunk and never past it.
+        let top = self.hunk_rows(last).map_or(last, |(top, _)| top);
+        let (first, head) =
+            (from.max(top)..=last).find_map(|offset| Some((offset, self.anchor_at(offset)?)))?;
+        if self.head_of(first) != self.head_of(last) {
+            anchor.first = Some(LineRef {
+                side: head.side,
+                line: head.line,
+                text: head.text,
+            });
+        }
+        Some((last, anchor))
+    }
+
+    /// The row `anchor`'s line is drawn on here: where its number still carries
+    /// its text, or failing that the first row carrying its text in its file,
+    /// since an edit above moves the number. `None` off this screen.
+    pub fn offset_of(&self, anchor: &Anchor) -> Option<usize> {
+        let same = |at: &Anchor| {
+            at.path == anchor.path
+                && at.origin == anchor.origin
+                && at.side == anchor.side
+                && at.text == anchor.text
+        };
+        let rows =
+            || (0..self.rows.len()).filter_map(|offset| Some((offset, self.anchor_at(offset)?)));
+        rows()
+            .find(|(_, at)| same(at) && at.line == anchor.line)
+            .or_else(|| rows().find(|(_, at)| same(at)))
+            .map(|(offset, _)| self.head_of(offset))
+    }
+
+    /// The rows of the hunk row `offset` is in, from its first row to its last,
+    /// or `None` off a hunk's rows. A note's range may not leave them.
+    pub fn hunk_rows(&self, offset: usize) -> Option<(usize, usize)> {
+        let inside = |row: &Row| matches!(row, Row::Line { .. }) || row.is_display();
+        if !self.rows.get(offset).is_some_and(inside) {
+            return None;
+        }
+        let top = (0..offset)
+            .rev()
+            .find(|&at| !inside(&self.rows[at]))
+            .map_or(0, |at| at + 1);
+        let bottom = (offset + 1..self.rows.len())
+            .find(|&at| !inside(&self.rows[at]))
+            .map_or(self.rows.len() - 1, |at| at - 1);
+        Some((top, bottom))
     }
 
     /// The notes marked on the line row `offset` is on, by id.
@@ -2021,6 +2120,7 @@ impl View {
         // Nothing on this screen wraps and nothing sits under a row, so the rows
         // are the display rows and every index already names one.
         if total == breaks.len() {
+            self.ended = total <= height;
             self.notes.marked = pins
                 .iter()
                 .filter(|pin| pin.marks)
@@ -2035,6 +2135,7 @@ impl View {
                 .as_ref()
                 .filter(|boxed| boxed.marks)
                 .map(|boxed| boxed.row);
+            self.notes.ranged = ranged_rows(pins, walked.boxed.as_ref());
             return 0;
         }
 
@@ -2065,6 +2166,9 @@ impl View {
                 .max(ends.saturating_sub(height))
                 .clamp(floor, ceiling);
         }
+        // Whether the last collected row is on screen, which `collect` narrows to
+        // the diff's last row.
+        self.ended = total.saturating_sub(dropped) <= height;
         let mut from = 0usize;
         let mut above = dropped;
         while from < breaks.len() && above >= cost(from) {
@@ -2217,6 +2321,10 @@ impl View {
             .as_ref()
             .filter(|boxed| boxed.marks)
             .and_then(|boxed| landed[boxed.row]);
+        self.notes.ranged = ranged_rows(pins, walked.boxed.as_ref())
+            .into_iter()
+            .filter_map(|at| landed[at])
+            .collect();
         // A segment names the first row of its file still on screen, which after
         // the trim may be a later row than the one the walk recorded.
         let segments = std::mem::take(&mut self.notes.segments);
@@ -2508,29 +2616,110 @@ struct Walked {
     boxed: Option<BoxPin>,
 }
 
-/// The logical row a note's line landed on, the word it carries there, whether
-/// its rows dim, and whether the row is the line rather than the heading;
-/// `None` off this screen, which is not a state.
+/// Where a note landed: the logical row of its last line, the word it carries
+/// there, whether its rows dim, whether the row is the line rather than the
+/// heading, and the logical row its range begins on. `None` off this screen,
+/// which is not a state.
+struct Landed {
+    row: usize,
+    word: &'static str,
+    faded: bool,
+    marks: bool,
+    from: Option<usize>,
+    /// The range's first and last lines where they stand now, when it is drawn
+    /// as one.
+    ends: Option<((Side, u32), (Side, u32))>,
+}
+
+/// The logical rows of every range on this screen above the line it hangs
+/// under, the box's included.
+fn ranged_rows(pins: &[Pin], boxed: Option<&BoxPin>) -> Vec<usize> {
+    pins.iter()
+        .filter(|pin| pin.marks)
+        .filter_map(|pin| Some((pin.from?, pin.row)))
+        .chain(
+            boxed
+                .filter(|boxed| boxed.marks)
+                .and_then(|boxed| Some((boxed.from?, boxed.row))),
+        )
+        .flat_map(|(from, row)| from..row)
+        .collect()
+}
+
+/// A file's rows on each side, taken once and only when a note asks for them.
+struct Rows<'d> {
+    diff: &'d FileDiff,
+    new: Option<Vec<(u32, &'d str)>>,
+    old: Option<Vec<(u32, &'d str)>>,
+}
+
+impl<'d> Rows<'d> {
+    fn of(diff: &'d FileDiff) -> Self {
+        Self {
+            diff,
+            new: None,
+            old: None,
+        }
+    }
+
+    fn on(&mut self, side: Side) -> &[(u32, &'d str)] {
+        let diff = self.diff;
+        match side {
+            Side::New => self.new.get_or_insert_with(|| diff.rows_on(Side::New)),
+            Side::Old => self.old.get_or_insert_with(|| diff.rows_on(Side::Old)),
+        }
+    }
+}
+
 fn placed_at(
     note: &Note,
-    rows: &[(u32, &str)],
+    rows: &mut Rows<'_>,
     heading: Option<usize>,
     placed: &[(Side, u32, usize)],
-) -> Option<(usize, &'static str, bool, bool)> {
-    let row_of = |number: u32| {
+) -> Option<Landed> {
+    let row_of = |side: Side, number: u32| {
         placed
             .iter()
-            .find(|(side, at, _)| *side == note.side && *at == number)
+            .find(|(at_side, at, _)| *at_side == side && *at == number)
             .map(|(_, _, row)| *row)
     };
-    let (row, word, faded, marks) = match resolve(note, rows) {
+    let last = resolve(note, rows.on(note.side));
+    let (row, mut word, mut faded, marks) = match last {
         Placement::At(number) | Placement::Moved(number) => {
-            (row_of(number), note.status.name(), false, true)
+            (row_of(note.side, number), note.status.name(), false, true)
         }
-        Placement::Changed => (row_of(note.line), "changed", true, true),
+        Placement::Changed => (row_of(note.side, note.line), "changed", true, true),
         Placement::Gone => (heading, "gone", false, false),
     };
-    row.map(|row| (row, word, faded, marks))
+    let row = row?;
+    let first = note
+        .first
+        .as_ref()
+        .and_then(|start| first_of(note, rows.on(start.side), last).map(|at| (start.side, at)));
+    if first.is_some_and(|(_, at)| at.changed) {
+        word = "changed";
+        faded = true;
+    }
+    let from = first
+        .and_then(|(side, at)| row_of(side, at.line))
+        .filter(|&from| from < row);
+    let last_line = match last {
+        Placement::At(number) | Placement::Moved(number) => Some(number),
+        Placement::Changed => Some(note.line),
+        Placement::Gone => None,
+    };
+    let ends = first
+        .filter(|_| from.is_some())
+        .zip(last_line)
+        .map(|((side, at), line)| ((side, at.line), (note.side, line)));
+    Some(Landed {
+        row,
+        word,
+        faded,
+        marks,
+        from,
+        ends,
+    })
 }
 
 /// Place the box the way a note is placed, so it follows its line as one does.
@@ -2540,12 +2729,18 @@ fn place_box(
     heading: Option<usize>,
     placed: &[(Side, u32, usize)],
 ) -> Option<BoxPin> {
-    let rows = diff.rows_on(stand_in.note.side);
-    let (row, _, _, marks) = placed_at(&stand_in.note, &rows, heading, placed)?;
+    let landed = placed_at(&stand_in.note, &mut Rows::of(diff), heading, placed)?;
+    let note = &stand_in.note;
+    let span = landed
+        .ends
+        .and_then(|(first, last)| diff.span_label(first, last))
+        .unwrap_or_else(|| note.line.to_string());
+    let label = format!("{}:{span}", note.path);
     Some(BoxPin {
-        row,
-        marks,
-        label: format!("{}:{}", stand_in.note.path, stand_in.note.line),
+        row: landed.row,
+        marks: landed.marks,
+        from: landed.from,
+        label,
         lines: stand_in.lines.to_vec(),
         cursor: stand_in.cursor,
     })
@@ -2564,16 +2759,19 @@ fn pin(
     placed: &[(Side, u32, usize)],
     mut highlighter: Option<&mut Pass<'_>>,
 ) {
-    let mut on_new: Option<Vec<(u32, &str)>> = None;
-    let mut on_old: Option<Vec<(u32, &str)>> = None;
+    let mut rows = Rows::of(diff);
     for note in notes {
-        let rows = match note.side {
-            Side::New => on_new.get_or_insert_with(|| diff.rows_on(Side::New)),
-            Side::Old => on_old.get_or_insert_with(|| diff.rows_on(Side::Old)),
-        };
         // Off screen this frame, which is not a state: the row it belongs on is
         // not drawn, so neither is it.
-        let Some((row, word, faded, marks)) = placed_at(note, rows, heading, placed) else {
+        let Some(Landed {
+            row,
+            word,
+            faded,
+            marks,
+            from,
+            ..
+        }) = placed_at(note, &mut rows, heading, placed)
+        else {
             continue;
         };
         pins.push(Pin {
@@ -2587,6 +2785,7 @@ fn pin(
             word,
             faded,
             marks,
+            from,
             resolved: note.status == Status::Resolved,
         });
     }
@@ -2606,6 +2805,7 @@ mod tests {
         BoxPin {
             row: 0,
             marks: true,
+            from: None,
             label: "src/watch.rs:5".to_owned(),
             lines: lines.iter().map(|line| (*line).to_owned()).collect(),
             cursor,
@@ -2753,7 +2953,7 @@ mod tests {
     /// into the last bucket rather than dropped.
     #[test]
     fn a_removal_past_the_last_line_is_clamped_into_the_file() {
-        let map = heat_of(&diff(10, vec![hunk(11, &[LineKind::Removed])]));
+        let map = heat_of(&diff(120, vec![hunk(121, &[LineKind::Removed])]));
 
         assert_eq!(touched(&map), vec![HEAT_BUCKETS - 1]);
         assert_eq!(map[HEAT_BUCKETS - 1].removed, 1);
@@ -2782,10 +2982,10 @@ mod tests {
     /// after the first deletion in the file.
     #[test]
     fn a_removal_does_not_advance_the_working_tree_position() {
-        // Twelve lines, twelve buckets: one line each, so a drift of one row is
-        // a drift of one bucket and is visible.
+        // One line per bucket, so a drift of one row is a drift of one bucket
+        // and is visible.
         let map = heat_of(&diff(
-            12,
+            HEAT_BUCKETS as u32,
             vec![hunk(
                 1,
                 &[LineKind::Removed, LineKind::Removed, LineKind::Added],
@@ -2801,8 +3001,8 @@ mod tests {
         assert_eq!(map[0].added, 1);
     }
 
-    /// Fewer lines than buckets. Every bucket still has to be reachable, or a
-    /// short file would draw all its change at the left edge.
+    /// Fewer lines than buckets: a wholly changed file fills the strip rather
+    /// than drawing at the left edge or as dashes.
     #[test]
     fn a_file_shorter_than_the_bucket_count_still_projects() {
         let map = heat_of(&diff(
@@ -2814,10 +3014,47 @@ mod tests {
             ],
         ));
 
-        assert_eq!(
-            touched(&map),
-            vec![0, HEAT_BUCKETS / 3, 2 * HEAT_BUCKETS / 3]
-        );
+        assert_eq!(touched(&map), (0..HEAT_BUCKETS).collect::<Vec<_>>());
+    }
+
+    /// Swept over every short length and every run in it: changed lines that
+    /// touch draw slices that touch.
+    #[test]
+    fn short_run_stays_solid() {
+        for lines in 1..HEAT_BUCKETS as u32 {
+            for first in 1..=lines {
+                for last in first..=lines {
+                    let kinds = vec![LineKind::Added; (last - first + 1) as usize];
+                    let at = touched(&heat_of(&diff(lines, vec![hunk(first, &kinds)])));
+                    // Each drawn slice's middle lies inside the run, in lines.
+                    let (b, l) = (HEAT_BUCKETS, lines as usize);
+                    let (first, last) = (first as usize, last as usize);
+                    let inside = |s: usize| {
+                        (2 * s + 1) * l >= 2 * b * (first - 1) && (2 * s + 1) * l < 2 * b * last
+                    };
+                    assert!(
+                        !at.is_empty()
+                            && at.windows(2).all(|pair| pair[1] == pair[0] + 1)
+                            && at.iter().all(|&s| inside(s)),
+                        "lines {first}..={last} of {lines} drew slices {at:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A uniformly changed short file draws one band, not alternating ones.
+    #[test]
+    fn short_uniform_one_band() {
+        for lines in 1..HEAT_BUCKETS as u32 {
+            let kinds = vec![LineKind::Added; lines as usize];
+            let map = heat_of(&diff(lines, vec![hunk(1, &kinds)]));
+            assert!(
+                map.iter().all(|bucket| bucket.total() == map[0].total()),
+                "a wholly changed {lines}-line file drew {:?}",
+                map.iter().map(|bucket| bucket.total()).collect::<Vec<_>>()
+            );
+        }
     }
 
     /// A file with no working-tree side has nowhere to place anything. That is a

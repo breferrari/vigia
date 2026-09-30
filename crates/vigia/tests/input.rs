@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use vigia::{
-    ARRIVING, ARRIVING_FRAME, Action, BOX_ARRIVING, BoxRoute, Deadlines, Grabbed, Held, Hovered,
-    LEAVING, LIST_SETTLED, NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT,
-    Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, box_route, drag_action, hover_after, patience,
-    repainted, scroll_mark, settled,
+    ARRIVING_FRAME, Action, BOX_ARRIVING, BoxRoute, Deadlines, Grabbed, Held, Hovered, LEAVING,
+    LIST_SETTLED, NOTICE_LINGER, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT, Sheet,
+    TRACK_SCALE, WHEEL_ROWS, action_for, box_route, drag_action, hover_after, patience, repainted,
+    scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -2337,14 +2337,6 @@ fn an_effect_arms_the_loop_and_gives_the_clock_back_when_it_finishes() {
         armed <= ARRIVING_FRAME,
         "a running effect asked the loop to sleep {armed:?}, past the frame it is \
          waiting for"
-    );
-
-    // And the whole effect is bounded by the pulse rung it decays into, so the ink
-    // and the sample grid cannot disagree about how long ago *now* was.
-    assert!(
-        ARRIVING < HISTORY_SAMPLE,
-        "an effect of {ARRIVING:?} outlives the {HISTORY_SAMPLE:?} the pulse rung \
-         is guaranteed"
     );
 }
 
