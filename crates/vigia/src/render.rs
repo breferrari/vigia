@@ -2009,10 +2009,32 @@ pub struct Areas {
     pub diff: Rect,
 }
 
+/// A region's scrollbar and what it measures: a screenful of `span` from `at`,
+/// out of `of`, all three in the region's own unit.
+#[derive(Debug, Clone, Copy)]
+struct Scroll {
+    bar: Bar,
+    at: u64,
+    span: u64,
+    of: u64,
+}
+
 impl Areas {
-    /// Whether each region is wide enough for a scrollbar at all.
-    fn bars(&self) -> (bool, bool) {
-        (affords_bar(self.list.width), affords_bar(self.diff.width))
+    /// Both regions' bars, decided here for the pointer's map and the painter
+    /// alike.
+    fn scrolls(&self, view: &View) -> (Scroll, Scroll) {
+        let scroll = |region: Rect, at: usize, span: usize, of: usize| {
+            let (at, span, of) = (at as u64, span as u64, of as u64);
+            let bar = bar_for(affords_bar(region.width), region.height, span, of);
+            Scroll { bar, at, span, of }
+        };
+        (
+            // In files, so the thumb's travel is the drag's.
+            scroll(self.list, view.list_top, view.list_span, view.files),
+            // In rows of the diff: the screenful stops being the region's height
+            // when a line wraps.
+            scroll(self.diff, view.rows_above, view.shown(), view.total_rows),
+        )
     }
 }
 
@@ -2145,22 +2167,9 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // here.
     let areas = body.areas(area);
 
-    // Asked through `bar_for`, which is what `render` asks.
-    let (list_bars, diff_bars) = areas.bars();
-    let list_bar = bar_for(
-        list_bars,
-        areas.list.height,
-        // A screenful in files, which is what this bar is measured in at both ends.
-        view.list_span as u64,
-        view.files as u64,
-    );
-    let diff_bar = bar_for(
-        diff_bars,
-        areas.diff.height,
-        // The screenful the thumb is painted from; the region's height parts from it under wrap.
-        view.shown() as u64,
-        view.total_rows as u64,
-    );
+    // What `render` paints, from the same call.
+    let (list, diff) = areas.scrolls(view);
+    let (list_bar, diff_bar) = (list.bar, diff.bar);
 
     let (gutter, text) = if body.diff > 0 && view.files > 0 {
         let span = content_span(areas.diff, area);
@@ -2379,31 +2388,18 @@ pub fn render(
 
     // The geometry, once, from the same method the pointer reads.
     let areas = body.areas(area);
-    // The same pair `regions` reads, so the pointer never seeks a bar the screen
+    // The same bars `regions` reads, so the pointer never seeks a bar the screen
     // declined to draw.
-    let (list_bars, diff_bars) = areas.bars();
+    let (list_scroll, diff_scroll) = areas.scrolls(view);
 
     if body.list > 0 {
-        let region = areas.list;
-        // Counted in files, which is exactly what this region shows.
-        let full = region;
-        let (region, bar) =
-            painter.with_bar(region, list_bars, view.list_span as u64, view.files as u64);
+        let full = areas.list;
         // Before the content here, and it does not matter which, because a list row
         // carries no wash: the bar's cell and the row's cells never overlap.
-        if bar.drawn() {
-            painter.scrollbar(
-                full,
-                Grabbed::List,
-                bar,
-                view.list_top as u64,
-                // A screenful in files, so all three terms of this bar are one unit and
-                // its travel is the drag's travel.
-                view.list_span as u64,
-                view.files as u64,
-            );
+        if list_scroll.bar.drawn() {
+            painter.scrollbar(full, Grabbed::List, list_scroll);
         }
-        painter.list(region, full.width, view, area.width);
+        painter.list(list_scroll.bar.narrows(full), full.width, view, area.width);
     }
 
     if areas.rule.height > 0 {
@@ -2421,11 +2417,7 @@ pub fn render(
             body.diff_width,
             content_span(full, area).width
         );
-        // Counted in rows of the diff, not of the terminal: the thumb spans the
-        // screenful the pane holds, which stops being its height when a line wraps.
-        let screenful = view.shown() as u64;
-        // Asked rather than narrowed: nothing here draws to a narrowed rect.
-        let bar = bar_for(diff_bars, full.height, screenful, view.total_rows as u64);
+        // Not narrowed: nothing here draws to a narrowed rect.
         painter.body(
             full,
             view,
@@ -2438,15 +2430,8 @@ pub fn render(
                 hidden_of(view, chrome),
             ),
         );
-        if bar.drawn() {
-            painter.scrollbar(
-                full,
-                Grabbed::Diff,
-                bar,
-                view.rows_above as u64,
-                screenful,
-                view.total_rows as u64,
-            );
+        if diff_scroll.bar.drawn() {
+            painter.scrollbar(full, Grabbed::Diff, diff_scroll);
         }
     }
 
@@ -4044,7 +4029,7 @@ impl Painter<'_> {
                 Rect {
                     y,
                     height: 1,
-                    // `area.x` is this region's leading column: `with_bar` narrows the
+                    // `area.x` is this region's leading column: `Bar::narrows` takes the
                     // *width* on the right without moving the origin, so it is the
                     // origin `render` handed down.
                     x: origin_x,
@@ -4114,15 +4099,9 @@ impl Painter<'_> {
         }
     }
 
-    /// Decide this region's scrollbar, and hand back the room left for content
-    /// along with the shape decided.
-    fn with_bar(&mut self, region: Rect, wide: bool, span: u64, of: u64) -> (Rect, Bar) {
-        let bar = bar_for(wide, region.height, span, of);
-        (bar.narrows(region), bar)
-    }
-
     /// Draw a one-column scrollbar down the right of `area`.
-    fn scrollbar(&mut self, area: Rect, whose: Grabbed, bar: Bar, at: u64, span: u64, of: u64) {
+    fn scrollbar(&mut self, area: Rect, whose: Grabbed, scroll: Scroll) {
+        let Scroll { bar, at, span, of } = scroll;
         // Width and height guarded here as well as by the caller. `render` only calls
         // this above `BAR_FLOOR` and only through `bar_for`, so a zero width cannot
         // reach it today, and the subtractions below would underflow if one ever did.
@@ -6097,6 +6076,23 @@ mod tests {
 
     use super::*;
 
+    /// Each bar's span and total are decided in one place, so the map the pointer
+    /// reads and the bar the painter draws cannot part.
+    #[test]
+    fn bars_decided_once() {
+        let source = include_str!("render.rs");
+        let code = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the file has code");
+        let calls = code.matches("bar_for(").count();
+        assert_eq!(
+            calls, 2,
+            "`bar_for(` appears {calls} times outside the tests; a second caller \
+             respells a bar's span, which is how two sites came apart before"
+        );
+    }
+
     /// A cell's style reduced to what the bar's rungs actually differ in.
     fn weight(style: Style) -> (Option<Color>, Modifier) {
         (style.fg, style.add_modifier)
@@ -6138,8 +6134,14 @@ mod tests {
         };
         // Scrollable by a wide margin, so both bars draw a thumb well short of
         // their track and the arrows exist to be read.
-        painter.scrollbar(list, Grabbed::List, Bar::Stepped, 0, 10, 100);
-        painter.scrollbar(diff, Grabbed::Diff, Bar::Stepped, 0, 10, 100);
+        let scrolling = Scroll {
+            bar: Bar::Stepped,
+            at: 0,
+            span: 10,
+            of: 100,
+        };
+        painter.scrollbar(list, Grabbed::List, scrolling);
+        painter.scrollbar(diff, Grabbed::Diff, scrolling);
         buf
     }
 
