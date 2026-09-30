@@ -5,7 +5,8 @@ mod support;
 use std::time::{Duration, SystemTime};
 
 use support::{
-    Scratch, arm_settle, committed_link, delta, index_of, materialise, settle, settle_spans,
+    Scratch, arm_settle, committed_link, delta, generated, index_of, materialise, settle,
+    settle_spans,
 };
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
@@ -1299,5 +1300,39 @@ fn a_symlink_read_reports_the_type_probe_it_spent() {
         "the height walk reported {} stats over one symlink where two are due, \
          so `measure`'s type probe is uncounted even though `diff`'s is",
         walked.probes
+    );
+}
+
+#[test]
+fn derived_once_per_diff() {
+    let scratch = Scratch::large_diff("frame-derived", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let before = frame.stats();
+    let (_, _, lines) = frame.diff_with(0, |diff| diff.lines).expect("diff");
+    let (_, _, again) = frame.diff_with(0, |diff| diff.lines).expect("diff");
+    let cost = delta(before, frame.stats());
+    assert_eq!(lines, LINES as u32);
+    assert_eq!(again, lines, "the kept value is not the one derived");
+    assert_eq!(
+        cost.derived, 1,
+        "two asks over one reused diff derived {} values",
+        cost.derived
+    );
+    assert_eq!(cost.computed, 0, "a settled diff was recomputed");
+
+    // A longer file is a new diff, and the value kept beside the old one goes with it.
+    scratch.write(FIRST, generated(LINES + 5, "after"));
+    settle(&mut frame);
+    let before = frame.stats();
+    let (_, _, longer) = frame.diff_with(0, |diff| diff.lines).expect("diff");
+    let cost = delta(before, frame.stats());
+    assert_eq!(longer, LINES as u32 + 5, "the value kept outlived its diff");
+    assert_eq!(
+        cost.derived, 1,
+        "a recomputed diff derived {} values where one is due",
+        cost.derived
     );
 }

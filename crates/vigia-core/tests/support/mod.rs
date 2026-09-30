@@ -624,6 +624,7 @@ pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         probes: after.probes - before.probes,
         evicted: after.evicted - before.evicted,
         deferred: after.deferred - before.deferred,
+        derived: after.derived - before.derived,
     }
 }
 
