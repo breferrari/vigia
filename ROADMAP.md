@@ -435,7 +435,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | Nothing holds the written layer's two lists against the documents that exist | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Clippy lints one platform, denies for three | [#376](https://github.com/breferrari/vigia/issues/376) |
 | ✅ | A row's wrap and its frame are sized by two expressions that disagree by two columns | [#474](https://github.com/breferrari/vigia/issues/474) |
-| ⬜ | A hidden directory wakes the watch on macOS | [#599](https://github.com/breferrari/vigia/issues/599) |
+| ✅ | A hidden directory wakes the watch on macOS | [#599](https://github.com/breferrari/vigia/issues/599) |
 | ✅ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
 | ⬜ | A subject the notes filter drops is only a workflow notice | [#524](https://github.com/breferrari/vigia/issues/524) |
 | ⬜ | Status walk config stale | [#606](https://github.com/breferrari/vigia/issues/606) |
@@ -510,7 +510,6 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | An agent's write is how the grammar compile arrives ([#129](https://github.com/breferrari/vigia/issues/129)) | #72, 2026-08-07 | Phase 8 | This repository's first finding from a *worktree* rather than from a fixture. It is a shape `SPEC.md` §10 already knew about, arriving by a route nobody wrote down. §10 lists the ways a reader meets a cold grammar parse and every one is a key they pressed: `G`, a follow jump, scrolling up. |
 | No seam between this crate and `gix` ([#74](https://github.com/breferrari/vigia/issues/74)) | Craft review, 2026-07-31 | Phase 5 | The status walk, rename tracking, the attributes stack and the filter machinery are consumed directly and widely. So §3's budgets are a **transitive** property of a pre-1.0 dependency's implementation. |
 | Pointer motion draws a full frame ([#154](https://github.com/breferrari/vigia/issues/154)) | I1, 2026-08-15 | Phase 8 | Found while ruling [#123](https://github.com/breferrari/vigia/issues/123), which changes no source: this has been true since the mouse landed in Phase 2. |
-| A hidden directory wakes the watch on macOS ([#599](https://github.com/breferrari/vigia/issues/599)) | #592, 2026-09-30 | Shelf | Seen once, in CI, on a branch that touched no watch code. A tick carried four relevant events and no paths. Which directory let it through cannot be told from the tick, and settling it needs a macOS run with the event paths logged. |
 | A note's rows are built whole before the clamp trims them ([#530](https://github.com/breferrari/vigia/issues/530)) | 2026-09-12 | Shelf | Not an I9 breach: the steady frame holds at 12.6ms. Only the frame an answer arrives on scales with its length, and that is paid once. |
 | Three overlays are kept apart by hand in eight places ([#515](https://github.com/breferrari/vigia/issues/515)) | #511, 2026-09-11 | Shelf | A structural refactor across the Shell. Nothing is broken: B22 holds today, by hand. |
 | What a prompting session does with a posted note is unobserved ([#444](https://github.com/breferrari/vigia/issues/444)) | B21, 2026-09-07 | Shelf | Needs a person running two panes with a session that prompts. An agent cannot observe it. |
