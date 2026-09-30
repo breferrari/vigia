@@ -373,7 +373,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | The settle margin's cost is bounded structurally and unbounded temporally | [#73](https://github.com/breferrari/vigia/issues/73) |
 | ⬜ | The `gix` status surface is load-bearing on every budget with no seam | [#74](https://github.com/breferrari/vigia/issues/74) |
 | ✅ | A push to `main` was cancelled where the concurrency guard says it cannot be | [#75](https://github.com/breferrari/vigia/issues/75) |
-| ⬜ | `take-next`: a deferral reason is a dated claim and nothing re-reads one | [#76](https://github.com/breferrari/vigia/issues/76) |
+| ✅ | `take-next`: a deferral reason is a dated claim and nothing re-reads one | [#76](https://github.com/breferrari/vigia/issues/76) |
 | ✅ | The wheel ignores the pointer, and the thumb it draws cannot be grabbed | [#79](https://github.com/breferrari/vigia/issues/79) |
 | ✅ | A washed row may be reaching the scrollbar column, or the terminal is | [#81](https://github.com/breferrari/vigia/issues/81) |
 | ✅ | The row's two fixed runs allocate a byte each, per content row per frame | [#171](https://github.com/breferrari/vigia/issues/171) |
@@ -507,6 +507,7 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | `take-next` picks a phase by an undefined sort ([#83](https://github.com/breferrari/vigia/issues/83)) | The Phase 4 re-housing, 2026-08-01 | Phase 5 | Step 1 sorts milestones by `due_on` and **every milestone here has none**, so the order is whatever the API returns. |
 | The diff's total height can be one edit stale ([#84](https://github.com/breferrari/vigia/issues/84)) | [#66](https://github.com/breferrari/vigia/issues/66)'s branch, 2026-08-02 | Phase 5 | Found while building the row-exact bar and **attempted on the branch that found it**. That is where the deferral is owed an argument rather than a note. |
 | A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | The shelf itself, 2026-08-01 | Phase 5 | Second instance, so it is a pattern rather than an incident. [#19](https://github.com/breferrari/vigia/issues/19)'s reason named a precondition Phase 2 then met. It sat expired for a whole phase until a session happened to read the shelf. The section above this table exists because of it. |
+| A `main` run was cancelled at queue time ([#75](https://github.com/breferrari/vigia/issues/75)) | #65's merge, 2026-08-01 | Phase 5 | `ci.yml` sets `cancel-in-progress` false on `main` and says why in a comment: *"a commit nobody verified lands looking like it was"*. The run for `5c8af44` was cancelled before a single job started. |
 | An agent's write is how the grammar compile arrives ([#129](https://github.com/breferrari/vigia/issues/129)) | #72, 2026-08-07 | Phase 8 | This repository's first finding from a *worktree* rather than from a fixture. It is a shape `SPEC.md` §10 already knew about, arriving by a route nobody wrote down. §10 lists the ways a reader meets a cold grammar parse and every one is a key they pressed: `G`, a follow jump, scrolling up. |
 | No seam between this crate and `gix` ([#74](https://github.com/breferrari/vigia/issues/74)) | Craft review, 2026-07-31 | Phase 5 | The status walk, rename tracking, the attributes stack and the filter machinery are consumed directly and widely. So §3's budgets are a **transitive** property of a pre-1.0 dependency's implementation. |
 | Pointer motion draws a full frame ([#154](https://github.com/breferrari/vigia/issues/154)) | I1, 2026-08-15 | Phase 8 | Found while ruling [#123](https://github.com/breferrari/vigia/issues/123), which changes no source: this has been true since the mouse landed in Phase 2. |
@@ -563,6 +564,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | §5.1's departure count contradicts itself ([#156](https://github.com/breferrari/vigia/issues/156)) | Off the Shelf, 2026-09-30 | Shelf triage: the ledger names one open departure, and three sentences elsewhere still counted two or three. |
 | The pre-flight's cheapest-looking loop is not its slow one ([#371](https://github.com/breferrari/vigia/issues/371)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, the run measured 27 seconds. Two awk passes bring it to 5.5. |
 | `take-next` step 1 cannot see a session already inside the row it hands you ([#303](https://github.com/breferrari/vigia/issues/303)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, since unattended runs post no plan and nothing read worktrees or branches. Pre-flight check 8 now does. |
+| A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | Off the Shelf, 2026-09-30 | Shelf triage: still real. The dated-claim preamble already existed, and no check read the reasons. Pre-flight check 9 now lists the open rows whose reason cites something that changed. |
 
 ---
 
