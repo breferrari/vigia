@@ -525,10 +525,9 @@ fn spans_share_walk() {
         let area = Rect::new(0, 0, width, 6);
         let spans = (0..runs)
             .map(|_| vigia_core::Span {
-                len: group.len() * 500 / runs.max(1),
+                len: group.len() * 500 / runs,
                 class: vigia_core::Class::Plain,
             })
-            .take(runs)
             .collect();
         let view = View {
             rows: vec![Row::Line {

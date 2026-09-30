@@ -5314,8 +5314,8 @@ impl Painter<'_> {
         word: Option<Color>,
     ) -> bool {
         if *column >= content || *walked >= walk_of(content) {
-            // Room or the row's walk ran out on an earlier run and this one has
-            // something to say, so the row continues and nothing more is walked.
+            // Room or the row's walk is spent and this run has something to say,
+            // so the row continues.
             return true;
         }
         let printed = printable(piece, column, content, *walked);
@@ -5938,10 +5938,9 @@ fn printable(text: &str, column: &mut usize, room: usize, spent: u64) -> Printed
 /// Where a line has to break to fit `room` columns, or `None` when it fits.
 pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
     let mut column = 0usize;
-    let walked = walk_printable(text, &mut column, room, None, 0);
+    let cut = walk_printable(text, &mut column, room, None, 0);
     // `column >= room` as well as `clipped`.
-    (walked.clipped && walked.column >= room && walked.at > 0 && walked.at < text.len())
-        .then_some(walked.at)
+    (cut.clipped && cut.column >= room && cut.at > 0 && cut.at < text.len()).then_some(cut.at)
 }
 
 /// Every byte offset a line breaks at, in order, to fit `room` columns a row.
@@ -5999,6 +5998,7 @@ fn walk_printable(
     // the way down rather than becoming an empty `String`: an empty one allocates the
     // moment anything is pushed into it, and this runs once per drawn content row per
     // frame.
+
     // What is left of the row's walk after the runs before this one.
     let walk = walk_of(room).saturating_sub(spent);
     let mut examined = 0u64;
