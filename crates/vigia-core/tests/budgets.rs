@@ -984,7 +984,10 @@ fn the_cpu_clock_tells_waiting_from_working() {
     // else's load as its own. A clock that cannot do it once in five is broken,
     // which is what this exists to catch. The sleeping half needs no rounds,
     // since load can only push CPU time down and its bound is an upper one.
-    let busy = Duration::from_millis(80);
+    // `GetThreadTimes` counts in scheduler ticks, the coarsest thread clock
+    // here. Eight of them keep one lost tick to an eighth of the window.
+    let quantum = Duration::from_micros(15_625);
+    let busy = quantum * 8;
     let mut best = Duration::ZERO;
     let mut wall = Duration::ZERO;
     for _ in 0..5 {

@@ -412,7 +412,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | WSL inside Windows Terminal gets no row wash, because `WT_SESSION` is read only on Windows | [#226](https://github.com/breferrari/vigia/issues/226) |
 | ✅ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
 | ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung | [#237](https://github.com/breferrari/vigia/issues/237) |
-| ⬜ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
+| ✅ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
 | ⬜ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
 | ⬜ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
 | ✅ | The churn band measures how many files were written, not how much changed. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#232](https://github.com/breferrari/vigia/issues/232) |
@@ -544,6 +544,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | A release that removes a key can be filed as internal ([#467](https://github.com/breferrari/vigia/issues/467)) | Out of the Shelf, 2026-09-09 | Shelved the day it was found, as instrument work with no product pass blocked by it. Taken because the deferral's own reason was measured and did not survive it: the word that emptied 0.42.0 emptied three release ranges in fifty-five, two of the three wrongly, and a fourth release lost a key's line out of a section that was never empty. A filter nobody can see failing does not wait for a pass to be blocked by it. |
 | `G` leaves the pane short, and the first scroll yanks it back ([#62](https://github.com/breferrari/vigia/issues/62)) | Off the Shelf, 2026-09-29 | Phase 8 had nothing left to take: #332 is blocked on crossterm. The reason it was shelved (a `G` rework that reverses §11.1) did not apply, because holding a step down at the end fixes the jolt with `G` unchanged |
 | `watch.rs` takes budget slack and CI never gives it any ([#263](https://github.com/breferrari/vigia/issues/263)) | Off the Shelf, 2026-09-30 | Shelf triage: #291 set the slack on the test step. What was left was a gate so it cannot silently go again. |
+| The CPU attribution clock under-reports on a loaded Windows runner ([#246](https://github.com/breferrari/vigia/issues/246)) | Off the Shelf, 2026-09-30 | Shelf triage: #440's best-of-five has held since. What was left was deriving the window from the 15.625ms tick and saying so in §7. |
 | §5.1's departure count contradicts itself ([#156](https://github.com/breferrari/vigia/issues/156)) | Off the Shelf, 2026-09-30 | Shelf triage: the ledger names one open departure, and three sentences elsewhere still counted two or three. |
 | The pre-flight's cheapest-looking loop is not its slow one ([#371](https://github.com/breferrari/vigia/issues/371)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, the run measured 27 seconds. Two awk passes bring it to 5.5. |
 
