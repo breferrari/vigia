@@ -4,6 +4,15 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Each version lists the pull requests labelled `release`, one line each: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. Internal work such as CI, tests and documentation is not listed.
 
+## [1.0.1] - 2026-09-30
+
+- An edit to .git/info/exclude or to the core.excludesFile target now changes which files wake the pane without a restart.
+- After a write to more than 256 files at once, the pane shows activity on the most recent of them, and the same ones every time.
+- A path that core.excludesFile stops ignoring now wakes the pane without a restart.
+- Changing core.autocrlf while the pane is open now updates the file list, not just the diffs.
+- Read a path an unrun driver cleans as binary
+- Wake on config writes and follow them in every frame
+
 ## [1.0.0] - 2026-09-30
 
 - Follow config and info/attributes changes in a running pane
