@@ -437,7 +437,6 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | Nothing holds the written layer's two lists against the documents that exist | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Clippy lints one platform, denies for three | [#376](https://github.com/breferrari/vigia/issues/376) |
 | ✅ | A row's wrap and its frame are sized by two expressions that disagree by two columns | [#474](https://github.com/breferrari/vigia/issues/474) |
-| ⬜ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
 | ⬜ | A hidden directory wakes the watch on macOS | [#599](https://github.com/breferrari/vigia/issues/599) |
 | ✅ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
 | ⬜ | A subject the notes filter drops is only a workflow notice | [#524](https://github.com/breferrari/vigia/issues/524) |
