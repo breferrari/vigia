@@ -50,9 +50,9 @@ After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/
 
 ### Pre-flight
 
-`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4, 6 and 7. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say.
+`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4 and 6 to 8. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say.
 
-First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1. It also causes checks 2, 4 and 7 to miss real drift. Then it runs these checks:
+First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1 and hides real drift from 2, 4 and 7. Then it runs these checks:
 
 0. No soak test runs on this machine (advisory).
 1. An issue title names each invariant in the spec.
@@ -62,10 +62,11 @@ First, the script makes sure that the whole board arrived. A truncated fetch cau
 5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
 6. The answer from `next.sh` agrees with the section order in the roadmap. Each open milestone with work, except the Shelf, has a `## Phase <n>` section.
 7. Each issue, open or closed, has a roadmap row.
+8. Given an issue number, no worktree, branch or plan comment names it.
 
-A false positive means that the check is wrong. Fix the check. Do not learn to skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the Shelf rule in step 4 does not apply.
+A false positive means that the check is wrong: fix it, never skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the Shelf rule in step 4 does not apply.
 
-Take the **topmost unstarted row** in the `ROADMAP.md` section of that phase. If a later task blocks it, say so and take the blocker. If a task is `🔨 in progress`, read `git status` and the open PRs first. Another session can own that task.
+Take the **topmost unstarted row** in the `ROADMAP.md` section of that phase. If a later task blocks it, say so and take the blocker. Then run `preflight.sh <n>`: another session can hold a ⬜ row.
 
 ### Declines
 
