@@ -39,10 +39,19 @@ for (const m of battery) {
 	if (count !== 1) abort(`${m.name}: the anchor occurs ${count} times in ${m.file}, not once`);
 }
 
-const test = () => spawnSync(command.join(" "), { shell: true, encoding: "utf8", maxBuffer: 1 << 28 });
+// The caller's shell, since cmd.exe on Windows may not resolve what Git Bash does.
+const shell = process.env.SHELL || true;
+const test = () => spawnSync(command.join(" "), { shell, encoding: "utf8", maxBuffer: 1 << 28 });
 // Red before any mutation means red for a reason no mutation caused, and a
 // command that never ran is one of those.
-if (test().status !== 0) abort("the test command is red on the unmutated tree");
+const baseline = test();
+if (baseline.status !== 0) {
+	const said = `${baseline.stdout ?? ""}${baseline.stderr ?? ""}`.trim().split("
+").slice(-20).join("
+");
+	abort(`the test command is red on the unmutated tree:
+${said}`);
+}
 
 let restore = null;
 for (const signal of ["SIGINT", "SIGTERM"]) {
