@@ -2898,3 +2898,18 @@ fn dependencies_in_readme() {
         "NOT_IN_README lists {stale:?}, which the table names or no manifest declares"
     );
 }
+
+/// A ready run is never cancelled by the draft run a push made just before it.
+#[test]
+fn ready_run_survives() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    let group = ci
+        .lines()
+        .find(|line| line.trim_start().starts_with("group:"))
+        .expect("ci.yml has a concurrency group");
+    assert!(
+        group.contains("github.event.pull_request.draft"),
+        "the concurrency group is not keyed on the draft flag, so a push and the \
+         ready event cancel each other and the survivor can be the skipped run: {group}"
+    );
+}
