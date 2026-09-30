@@ -691,7 +691,15 @@ fn failed_reload_retried() {
         let (_, diff) = frame.diff(at).expect("diff");
         (diff.added, diff.removed)
     };
+    support::settle_spans(&mut frame);
     let stale = read(&mut frame);
+    let before = frame.stats();
+    assert_eq!(read(&mut frame), stale, "an idle tick moved the diff");
+    assert_eq!(
+        delta(before, frame.stats()).computed,
+        0,
+        "an idle tick recomputed, so this cannot tell a dropped cache from a kept one"
+    );
 
     // An include git reads with the config, and nothing fingerprints.
     std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
