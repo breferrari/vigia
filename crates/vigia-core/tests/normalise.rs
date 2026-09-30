@@ -521,3 +521,65 @@ fn normalising_costs_no_extra_read_or_probe() {
         crlf.probes, lf.probes
     );
 }
+
+/// A running frame against a restarted one, after `change` rewrites something
+/// under `.git` that decides what the clean filter does to `a.txt`.
+fn follows_git_state(name: &str, change: impl Fn(&Scratch)) {
+    let scratch = Scratch::crlf_worktree(name, None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    scratch.write_crlf(
+        "a.txt",
+        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
+    );
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    support::settle_spans(&mut frame);
+    let at = |frame: &Frame| {
+        frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed")
+    };
+    let (_, diff) = frame.diff(at(&frame)).expect("diff");
+    let stale = (diff.added, diff.removed, diff.binary);
+
+    change(&scratch);
+
+    let restarted = scratch.worktree();
+    let mut cold = restarted.frame();
+    cold.advance().expect("advance");
+    let (_, fresh) = cold.diff(at(&cold)).expect("diff");
+    let truth = (fresh.added, fresh.removed, fresh.binary);
+    assert_ne!(
+        truth, stale,
+        "the control is wrong: the change has to move the diff"
+    );
+
+    frame.advance().expect("advance");
+    let (_, diff) = frame.diff(at(&frame)).expect("diff");
+    assert_eq!(
+        (diff.added, diff.removed, diff.binary),
+        truth,
+        "the running frame kept a diff computed under git state that changed"
+    );
+}
+
+#[test]
+fn autocrlf_change_followed() {
+    follows_git_state("normalise-autocrlf", |scratch| {
+        scratch.git(&["config", "core.autocrlf", "false"]);
+    });
+}
+
+#[test]
+fn info_attributes_followed() {
+    follows_git_state("normalise-info-attributes", |scratch| {
+        std::fs::create_dir_all(scratch.path_of(".git/info")).expect("info dir");
+        std::fs::write(scratch.path_of(".git/info/attributes"), "a.txt binary\n")
+            .expect("write info/attributes");
+    });
+}

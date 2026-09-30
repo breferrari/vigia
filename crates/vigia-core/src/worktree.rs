@@ -44,6 +44,9 @@ pub struct Worktree {
     /// The clean filter: built on the first working-tree read after each
     /// [`Frame::advance`], and not before.
     filter: RefCell<Option<Filter>>,
+    /// The repository reopened after its configuration changed, which the filter
+    /// is built from. `repo` keeps the configuration it was opened with.
+    reread: RefCell<Option<gix::Repository>>,
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -63,6 +66,7 @@ impl Worktree {
             repo,
             workdir,
             filter: RefCell::new(None),
+            reread: RefCell::new(None),
             deleted: Cell::new(false),
         })
     }
@@ -633,7 +637,10 @@ impl Worktree {
         let mut filter = self.filter.borrow_mut();
         let filter = match filter.as_mut() {
             Some(filter) => filter,
-            None => filter.insert(Filter::new(&self.repo)?),
+            None => {
+                let reread = self.reread.borrow();
+                filter.insert(Filter::new(reread.as_ref().unwrap_or(&self.repo))?)
+            }
         };
         f(filter)
     }
@@ -664,6 +671,25 @@ impl Worktree {
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
+    /// The files under the git dir that decide what the clean filter does:
+    /// the configuration and `info/attributes`.
+    pub(crate) fn filter_sources(&self) -> [PathBuf; 2] {
+        let common = self.repo.common_dir();
+        [
+            common.join("config"),
+            common.join("info").join("attributes"),
+        ]
+    }
+
+    /// Reopen the repository for the filter, so a configuration written since
+    /// it was opened applies to the next read.
+    pub(crate) fn reread_config(&self) -> Result<()> {
+        let mut repo = self.repo.clone();
+        repo.reload().map_err(Error::filter_setup)?;
+        *self.reread.borrow_mut() = Some(repo);
+        Ok(())
+    }
+
     pub(crate) fn invalidate_filter(&self) {
         *self.filter.borrow_mut() = None;
     }
