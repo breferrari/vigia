@@ -85,15 +85,15 @@ impl Burst {
     }
 
     /// The paths, with the newest moved to the end.
-    fn finish(mut self) -> (Vec<String>, u32) {
-        let Some(newest) = self.newest else {
-            return (self.order.into_iter().collect(), self.dropped);
-        };
-        if let Some(pos) = self.order.iter().position(|path| path == &newest) {
-            self.order.remove(pos);
+    fn finish(self) -> (Vec<String>, u32) {
+        let mut paths = Vec::from(self.order);
+        if let Some(pos) = self
+            .newest
+            .and_then(|newest| paths.iter().position(|path| *path == newest))
+        {
+            let newest = paths.remove(pos);
+            paths.push(newest);
         }
-        let mut paths: Vec<String> = self.order.into_iter().collect();
-        paths.push(newest);
         (paths, self.dropped)
     }
 }
@@ -1053,8 +1053,8 @@ mod tests {
             assert_eq!(paths, expected);
         }
 
-        /// Oldest by arrival, not least recently touched. The history store
-        /// already orders by recency, and a burst lives for one burst only.
+        /// Oldest by arrival, not least recently touched: the history store
+        /// orders by recency.
         #[test]
         fn repeat_keeps_its_place() {
             let mut burst = Burst::default();
