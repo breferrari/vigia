@@ -40,6 +40,12 @@ pub(crate) struct Fingerprint {
     mtime: SystemTime,
 }
 
+impl Fingerprint {
+    pub(crate) fn is_empty(self) -> bool {
+        self.len == 0
+    }
+}
+
 /// A fingerprint taken after a read, plus whether it may be trusted as one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Observed {
@@ -312,6 +318,9 @@ pub struct Frame<'w> {
     attributes: HashMap<String, Option<Fingerprint>>,
     /// The same for the files under the git dir that shape the filter.
     filter_sources: [Option<Fingerprint>; 2],
+    /// The worktree's reload count as of the last tick, so a reload that lands
+    /// after its files moved still drops what was cached before it.
+    reloads: u64,
     /// The failure [`Frame::diff`] last contained, held only so it can be handed
     /// back by reference.
     ///
@@ -358,7 +367,8 @@ impl<'w> Frame<'w> {
             cached: Cache::default(),
             spans: Cache::default(),
             attributes: HashMap::new(),
-            filter_sources: worktree.tried_prints(),
+            filter_sources: worktree.filter_prints(),
+            reloads: worktree.reloads(),
             failure: None,
             staged: false,
             standing: Standing::default(),
@@ -388,7 +398,7 @@ impl<'w> Frame<'w> {
         // repository's config is young for seconds. Missed: a same-length rewrite
         // inside one mtime granule.
         let sources = self.worktree.filter_prints();
-        self.worktree.follow_config(sources);
+        self.worktree.follow_config(sources[0]);
 
         let options = ChangeOptions {
             hide: self.hide.as_ref(),
@@ -440,8 +450,10 @@ impl<'w> Frame<'w> {
             .copied()
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
-        let sources_moved = sources != self.filter_sources;
+        let reloads = self.worktree.reloads();
+        let sources_moved = sources != self.filter_sources || reloads != self.reloads;
         self.filter_sources = sources;
+        self.reloads = reloads;
         if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits
             // its own.

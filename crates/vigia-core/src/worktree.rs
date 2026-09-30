@@ -52,9 +52,10 @@ pub struct Worktree {
     /// The files under the git dir that shape the clean filter: the
     /// configuration and `info/attributes`.
     filter_sources: [PathBuf; 2],
-    /// What [`Self::filter_sources`] looked like when `live` last tried to load
-    /// them, so a frame built later can tell its caches are stale.
-    tried_prints: Cell<[Option<Fingerprint>; 2]>,
+    /// The config's fingerprint when `live` last loaded it.
+    loaded_config: Cell<Option<Fingerprint>>,
+    /// How many reloads have landed, so a frame can drop what it cached before one.
+    reloads: Cell<u64>,
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
@@ -81,10 +82,11 @@ impl Worktree {
             workdir,
             filter: RefCell::new(None),
             filter_sources,
-            tried_prints: Cell::new([None, None]),
+            loaded_config: Cell::new(None),
+            reloads: Cell::new(0),
             deleted: Cell::new(false),
         };
-        worktree.tried_prints.set(worktree.filter_prints());
+        worktree.loaded_config.set(worktree.filter_prints()[0]);
         Ok(worktree)
     }
 
@@ -700,13 +702,12 @@ impl Worktree {
         [fingerprint(config), fingerprint(attributes)]
     }
 
-    /// Reload the repository's configuration when `now` differs from what it was
-    /// last tried under. A config that does not parse keeps the previous one
-    /// until the files move again, so a broken config costs one open, not one a
-    /// tick.
-    pub(crate) fn follow_config(&self, now: [Option<Fingerprint>; 2]) {
-        // A missing config is a writer between its delete and its rename.
-        if now == self.tried_prints.get() || now[0].is_none() {
+    /// Reload the repository's configuration when `now` differs from the config
+    /// it last loaded. A reload that fails, as one mid-write does, is tried again
+    /// on the next tick.
+    pub(crate) fn follow_config(&self, now: Option<Fingerprint>) {
+        // Missing or empty is a writer between two steps, not a config.
+        if now == self.loaded_config.get() || now.is_none_or(Fingerprint::is_empty) {
             return;
         }
         // A borrow still held is a reader mid-call, and the next tick retries.
@@ -714,13 +715,15 @@ impl Worktree {
             return;
         };
         // `reload` replaces the repository only once the open succeeds.
-        let _ = repo.reload();
-        self.tried_prints.set(now);
+        if repo.reload().is_ok() {
+            self.loaded_config.set(now);
+            self.reloads.set(self.reloads.get() + 1);
+        }
     }
 
-    /// What the files that shape the filter looked like when last tried.
-    pub(crate) fn tried_prints(&self) -> [Option<Fingerprint>; 2] {
-        self.tried_prints.get()
+    /// How many reloads have landed since the worktree was opened.
+    pub(crate) fn reloads(&self) -> u64 {
+        self.reloads.get()
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.

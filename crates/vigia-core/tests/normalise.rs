@@ -714,9 +714,17 @@ fn broken_config_followed() {
         "an info/attributes change kept the diffs cached before it while the config failed"
     );
 
-    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
     std::fs::remove_file(scratch.path_of(".git/info/attributes")).expect("unmark");
-    scratch.git(&["config", "--unset", "include.path"]);
+    assert_eq!(
+        read(&mut frame),
+        stale,
+        "the reload was expected to fail still"
+    );
+
+    // The included file alone, so no fingerprinted file moves: only the retry
+    // and the reload count can bring the frame round.
+    support::settle_spans(&mut frame);
+    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
     let truth = read(&mut scratch.worktree().frame());
     assert_ne!(
         truth, stale,
@@ -725,25 +733,20 @@ fn broken_config_followed() {
     assert_eq!(
         read(&mut frame),
         truth,
-        "a mended config did not reach the running frame"
+        "a mended include never reached the running frame"
     );
 }
 
-/// A config caught between a writer's delete and its rename is not loaded as
-/// no config at all.
+/// A config caught between a writer's steps, missing or empty, is not loaded
+/// as no config at all.
 #[test]
 fn missing_config_skipped() {
     let scratch = one_line_changed("normalise-missing-config");
     // A key no system config sets, so losing the local one shows.
-    let attributes = scratch.path_of(".git/marks");
-    std::fs::write(
-        &attributes,
-        "a.txt binary
-",
-    )
-    .expect("write attributes");
-    let attributes = attributes.to_str().expect("utf-8 path").replace('\\', "/");
-    scratch.git(&["config", "core.attributesFile", &attributes]);
+    let marks = scratch.path_of(".git/marks");
+    std::fs::write(&marks, "a.txt binary\n").expect("write attributes");
+    let marks = marks.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.attributesFile", &marks]);
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -764,7 +767,10 @@ fn missing_config_skipped() {
     let config = scratch.path_of(".git/config");
     let bytes = std::fs::read(&config).expect("read config");
     std::fs::remove_file(&config).expect("remove config");
-    let between = binary(&mut frame);
+    let missing = binary(&mut frame);
+    std::fs::write(&config, "").expect("truncate config");
+    let empty = binary(&mut frame);
     std::fs::write(&config, bytes).expect("restore config");
-    assert!(between, "a missing config was loaded as none");
+    assert!(missing, "a missing config was loaded as none");
+    assert!(empty, "an empty config was loaded as none");
 }
