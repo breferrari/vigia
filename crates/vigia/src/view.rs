@@ -3016,8 +3016,16 @@ mod tests {
                 for last in first..=lines {
                     let kinds = vec![LineKind::Added; (last - first + 1) as usize];
                     let at = touched(&heat_of(&diff(lines, vec![hunk(first, &kinds)])));
+                    // Each drawn slice's middle lies inside the run, in lines.
+                    let (b, l) = (HEAT_BUCKETS, lines as usize);
+                    let (first, last) = (first as usize, last as usize);
+                    let inside = |s: usize| {
+                        (2 * s + 1) * l >= 2 * b * (first - 1) && (2 * s + 1) * l < 2 * b * last
+                    };
                     assert!(
-                        at.windows(2).all(|pair| pair[1] == pair[0] + 1),
+                        !at.is_empty()
+                            && at.windows(2).all(|pair| pair[1] == pair[0] + 1)
+                            && at.iter().all(|&s| inside(s)),
                         "lines {first}..={last} of {lines} drew slices {at:?}"
                     );
                 }
