@@ -1061,7 +1061,7 @@ fn heat_projected_once_per_diff() {
 
     // The file's change shrinks to one line at the top, so its strip has to move.
     let mut restored = generated(LINES, "before");
-    restored.replace_range(..0, "// edited\n");
+    restored.insert_str(0, "// edited\n");
     scratch.write("src/mod_0.rs", restored);
     settle(&mut frame);
 

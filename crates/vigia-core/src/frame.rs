@@ -923,30 +923,29 @@ impl<'w> Frame<'w> {
     ) -> Result<(&FileChange, &FileDiff, T)> {
         self.diff(index)?;
         let change = &self.files[index];
-        match self.cached.get_mut(change) {
-            Some(cached) => {
-                if let Some(value) = cached
-                    .derived
+        // A failed read is not cached, and its diff has no hunks to walk.
+        let (diff, slot) = match self.cached.get_mut(change) {
+            Some(Cached { diff, derived, .. }) => (&*diff, Some(derived)),
+            None => (
+                self.failure
                     .as_ref()
-                    .and_then(|kept| kept.downcast_ref::<T>())
-                {
-                    return Ok((change, &cached.diff, value.clone()));
-                }
-                let value = derive(&cached.diff);
-                cached.derived = Some(Box::new(value.clone()));
-                self.stats.derived += 1;
-                Ok((change, &cached.diff, value))
-            }
-            None => {
-                // A failed read is not cached, and its diff has no hunks to walk.
-                self.stats.derived += 1;
-                let failure = self
-                    .failure
-                    .as_ref()
-                    .expect("`diff` leaves a failure wherever it caches nothing");
-                Ok((change, failure, derive(failure)))
-            }
+                    .expect("`diff` leaves a failure wherever it caches nothing"),
+                None,
+            ),
+        };
+        if let Some(value) = slot
+            .as_deref()
+            .and_then(|kept| kept.as_ref())
+            .and_then(|kept| kept.downcast_ref::<T>())
+        {
+            return Ok((change, diff, value.clone()));
         }
+        let value = derive(diff);
+        if let Some(slot) = slot {
+            *slot = Some(Box::new(value.clone()));
+            self.stats.derived += 1;
+        }
+        Ok((change, diff, value))
     }
 }
 
