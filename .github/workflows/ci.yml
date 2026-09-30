@@ -42,6 +42,41 @@ concurrency:
 # run: the same jobs fire on `ready_for_review`, and branch protection reads the
 # result of that run rather than of a run that was skipped.
 jobs:
+  # **What a pull request changed decides what runs.** A pull request that
+  # touches only documents, skills, templates or images runs the suites that
+  # read documents on one platform and skips the matrix, the budgets, the
+  # benches and the musl build: nothing they measure moved. Anything else runs
+  # everything, and so does a push to main or a dispatch, which carry no pull
+  # request to read. `change-class.sh` holds the list of what counts as a
+  # document and is driven by a test; a path it does not know is code, so a
+  # file added later runs too much rather than too little. The `full-ci`
+  # label on the pull request forces the full run. `ci-complete.sh` reads
+  # the class so the skips it expects are the only skips it accepts.
+  changes:
+    name: what changed
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    outputs:
+      class: ${{ steps.class.outputs.class }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: class
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr diff "${{ github.event.pull_request.number }}" --name-only > changed
+          else
+            : > changed
+          fi
+          if gh pr view "${{ github.event.pull_request.number }}" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'full-ci'; then
+            export CI_FULL=true
+          fi
+          out=$(sh .github/scripts/change-class.sh < changed)
+          printf '%s\n' "$out"
+          echo "class=$(printf '%s\n' "$out" | tail -1)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   lint:
     name: fmt and docs
     if: github.event.pull_request.draft != true
@@ -121,7 +156,8 @@ jobs:
 
   test:
     name: test (${{ matrix.os }})
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
     strategy:
       # Windows and macOS fail for different reasons than Linux does, and
@@ -135,6 +171,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.os }}-test
 
       # Per platform, because `cfg(windows)` and `cfg(target_os = "macos")`
       # code is not compiled on Linux, so one run there lints a third of what
@@ -171,7 +209,8 @@ jobs:
   # in the order it always has: the two budgets binaries, then first paint.
   budgets:
     name: budgets (${{ matrix.os }})
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -224,7 +263,8 @@ jobs:
 
   benches:
     name: benches compile
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -236,7 +276,8 @@ jobs:
 
   pure-rust:
     name: no C toolchain
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -285,7 +326,8 @@ jobs:
 
   musl:
     name: static musl binary
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -407,10 +449,35 @@ jobs:
   # draft, and a draft cannot be merged in any case, so the run it would be
   # protecting cannot happen. `ready_for_review` is in this workflow's trigger
   # list so the full matrix runs the moment the work is claimed finished.
+  # The suites that read a document, on one platform, for a pull request that
+  # changed only documents. `package.rs::docs_suites_named` holds this list to
+  # the tests that read a document at the repository root or under `docs/`.
+  # The cache is the ubuntu test job's, restored and never saved, so a docs
+  # pull request neither builds cold nor overwrites the fuller cache.
+  docs:
+    name: documents
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class == 'docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-latest-test
+          save-if: false
+      - name: the suites that read documents
+        run: |
+          set -euo pipefail
+          cargo test -p vigia --test package --test register --test sheet --test theme_docs
+          cargo test -p vigia-core --test coverage
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
   ci-complete:
     name: ci complete
     if: always()
-    needs: [lint, test, budgets, benches, pure-rust, musl]
+    needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -420,9 +487,11 @@ jobs:
         run: |
           sh .github/scripts/ci-complete.sh \
             '${{ github.event.pull_request.draft }}' \
-            '${{ needs.lint.result }}' \
-            '${{ needs.test.result }}' \
-            '${{ needs.budgets.result }}' \
-            '${{ needs.benches.result }}' \
-            '${{ needs.pure-rust.result }}' \
-            '${{ needs.musl.result }}'
+            '${{ needs.changes.outputs.class }}' \
+            'lint=${{ needs.lint.result }}' \
+            'test=${{ needs.test.result }}' \
+            'budgets=${{ needs.budgets.result }}' \
+            'benches=${{ needs.benches.result }}' \
+            'pure-rust=${{ needs.pure-rust.result }}' \
+            'musl=${{ needs.musl.result }}' \
+            'docs=${{ needs.docs.result }}'

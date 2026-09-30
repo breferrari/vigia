@@ -1462,11 +1462,12 @@ fn the_version_raise_counts_the_lines_it_moved_and_nothing_else() {
 
 /// Drives the judgement `ci complete` runs, with fabricated leg results.
 #[cfg(unix)]
-fn ci_complete(draft: &str, legs: &[&str]) -> bool {
+fn ci_complete(draft: &str, class: &str, legs: &[&str]) -> bool {
     let script = repo_root().join(".github/scripts/ci-complete.sh");
     std::process::Command::new("sh")
         .arg(&script)
         .arg(draft)
+        .arg(class)
         .args(legs)
         .output()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()))
@@ -1474,68 +1475,304 @@ fn ci_complete(draft: &str, legs: &[&str]) -> bool {
         .success()
 }
 
-/// A draft's skipped legs are not a failure, and everything else still is.
+/// The legs `ci.yml` passes, in its order.
+#[cfg(unix)]
+const LEGS: [&str; 7] = [
+    "lint",
+    "test",
+    "budgets",
+    "benches",
+    "pure-rust",
+    "musl",
+    "docs",
+];
+
+/// `LEGS` paired with `results`, as `name=result`.
+#[cfg(unix)]
+fn legs(results: [&str; 7]) -> Vec<String> {
+    LEGS.iter()
+        .zip(results)
+        .map(|(name, result)| format!("{name}={result}"))
+        .collect()
+}
+
+/// A draft's skipped legs are not a failure, a docs pull request's skipped
+/// heavy legs are not a failure, and every other skip and every failure is.
 #[cfg(unix)]
 #[test]
-fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
-    const OK: [&str; 5] = ["success"; 5];
+fn ci_complete_judgement() {
+    const S: &str = "success";
+    const K: &str = "skipped";
+    let full = legs([S, S, S, S, S, S, K]);
+    let docs = legs([S, K, K, K, K, K, S]);
+    let all_skipped = legs([K; 7]);
+    fn strs(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
 
-    assert!(ci_complete("false", &OK), "a full green run has to pass");
-    // A push carries no pull request, so the workflow passes an empty draft
-    // flag. Reading that as "not a draft" is the whole of it, and reading it as
-    // an error turned every push to `main` red.
     assert!(
-        ci_complete("", &OK),
-        "a push has no pull request and its draft flag is empty, which is not an error"
+        ci_complete("false", "full", &strs(&full)),
+        "a full green run has to pass"
+    );
+    // A push carries no pull request, so the workflow passes an empty draft
+    // flag and an empty class. Reading those as "not a draft, run everything"
+    // is the whole of it, and reading them as an error turned every push to
+    // `main` red.
+    assert!(
+        ci_complete("", "", &strs(&full)),
+        "a push has no pull request; its draft flag and class are empty, which is not an error"
     );
     assert!(
-        ci_complete("true", &["skipped"; 5]),
+        ci_complete("true", "", &strs(&all_skipped)),
         "a draft skips every leg by design and the matrix runs on ready_for_review"
     );
+    assert!(
+        ci_complete("false", "docs", &strs(&docs)),
+        "a docs pull request runs the documents leg and skips the heavy ones by design"
+    );
 
-    for (draft, legs, why) in [
+    for (draft, class, results, why) in [
         (
             "false",
-            ["success", "skipped", "success", "success", "success"],
-            "a leg that skipped on a ready PR is the absent matrix this gate exists for",
+            "full",
+            [S, K, S, S, S, S, K],
+            "a heavy leg that skipped on a full run is the absent matrix this gate exists for",
+        ),
+        (
+            "false",
+            "",
+            [S, K, K, K, K, K, S],
+            "a docs-shaped run with no class is a classifier that never ran, not a docs pull request",
+        ),
+        (
+            "false",
+            "docs",
+            [S, K, K, K, K, K, K],
+            "a docs pull request whose documents leg skipped ran nothing",
+        ),
+        (
+            "false",
+            "docs",
+            [S, K, "failure", K, K, K, S],
+            "a docs pull request cannot launder a failing heavy leg through its skips",
         ),
         (
             "true",
-            ["skipped", "success", "skipped", "skipped", "skipped"],
+            "",
+            [K, S, K, K, K, K, K],
             "a draft that ran some legs and skipped others is a partial run",
         ),
         (
             "false",
-            ["success", "failure", "success", "success", "success"],
+            "full",
+            [S, "failure", S, S, S, S, K],
             "a failing leg fails the gate",
         ),
         (
             "true",
-            ["skipped", "failure", "skipped", "skipped", "skipped"],
+            "",
+            [K, "failure", K, K, K, K, K],
             "a draft cannot launder a failing leg through its skips",
         ),
         (
             "false",
-            ["success", "cancelled", "success", "success", "success"],
+            "full",
+            [S, "cancelled", S, S, S, S, K],
             "a cancelled leg never reported and is not a pass",
         ),
         (
             "",
-            ["skipped", "skipped", "skipped", "skipped", "skipped"],
+            "",
+            [K, K, K, K, K, K, K],
             "a push is never a draft, so legs that all skipped on one did not run and should have",
         ),
-        (
-            "",
-            ["success", "failure", "success", "success", "success"],
-            "a failing leg on a push fails the gate like any other",
-        ),
     ] {
-        assert!(!ci_complete(draft, &legs), "{why}");
+        assert!(!ci_complete(draft, class, &strs(&legs(results))), "{why}");
     }
 
     assert!(
-        !ci_complete("false", &[]),
+        !ci_complete("false", "full", &[]),
         "no results at all means the workflow stopped passing them, not that every leg passed"
+    );
+    assert!(
+        !ci_complete("false", "full", &["success"]),
+        "a bare result with no leg name is the old calling shape, and the script must refuse it"
+    );
+}
+
+/// Drives `change-class.sh` with a list of paths and returns its last line.
+#[cfg(unix)]
+fn change_class(paths: &str) -> String {
+    change_class_with(paths, "")
+}
+
+/// The same, with the `full-ci` label set.
+#[cfg(unix)]
+fn change_class_forced(paths: &str) -> String {
+    change_class_with(paths, "true")
+}
+
+#[cfg(unix)]
+fn change_class_with(paths: &str, forced: &str) -> String {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let script = repo_root().join(".github/scripts/change-class.sh");
+    let mut child = std::process::Command::new("sh")
+        .arg(&script)
+        .env("CI_FULL", forced)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
+    child
+        .stdin
+        .take()
+        .expect("the child's stdin is a pipe")
+        .write_all(paths.as_bytes())
+        .expect("the paths reach the script");
+    let out = child.wait_with_output().expect("the script exits");
+    assert!(out.status.success(), "change-class.sh failed on {paths:?}");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Documents, skills, templates and images are `docs`; anything else, an
+/// empty list included, is `full`.
+#[cfg(unix)]
+#[test]
+fn change_class_decides() {
+    for (paths, class) in [
+        ("README.md\nSPEC.md\ndocs/THEME.md\n", "docs"),
+        (
+            ".claude/skills/take-next/SKILL.md\n.claude/scripts/mutate.mjs\n",
+            "docs",
+        ),
+        (
+            ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
+            "docs",
+        ),
+        ("assets/preview.svg\nLICENSE\n", "docs"),
+        ("README.md\ncrates/vigia/src/lib.rs\n", "full"),
+        ("README.md\n.github/workflows/ci.yml\n", "full"),
+        ("README.md\n.github/scripts/ci-complete.sh\n", "full"),
+        ("Cargo.toml\n", "full"),
+        ("assets/syntaxes/dump.bin\n", "full"),
+        ("crates/vigia-core/assets/NOTICE.md\n", "full"),
+        ("crates/vigia/tests/package.rs\n", "full"),
+        ("", "full"),
+        ("\n\n", "full"),
+    ] {
+        assert_eq!(change_class(paths), class, "the class of {paths:?}");
+    }
+    assert_eq!(
+        change_class_forced("README.md\n"),
+        "full",
+        "the full-ci label did not force the full run"
+    );
+}
+
+/// Every job that skips on a docs pull request says so, and the documents
+/// job runs only then.
+#[test]
+fn heavy_legs_gated() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    for job in ["test", "budgets", "benches", "pure-rust", "musl"] {
+        let block = ci
+            .split_once(&format!("\n  {job}:\n"))
+            .map(|(_, rest)| rest.split("\n  ").take(6).collect::<Vec<_>>().join("\n  "))
+            .unwrap_or_else(|| panic!("ci.yml declares the {job} job"));
+        assert!(
+            block.contains("needs: [changes]")
+                && block.contains("needs.changes.outputs.class != 'docs'"),
+            "the {job} job does not skip on a docs pull request:\n{block}"
+        );
+    }
+    let docs = ci
+        .split_once("\n  docs:\n")
+        .map(|(_, rest)| rest.split("\n  ").take(6).collect::<Vec<_>>().join("\n  "))
+        .expect("ci.yml declares the docs job");
+    assert!(
+        docs.contains("needs.changes.outputs.class == 'docs'"),
+        "the docs job does not run only on a docs pull request:\n{docs}"
+    );
+}
+
+/// The documents job names every test binary that reads a document.
+///
+/// A test that reads `README.md`, `SPEC.md` or `docs/THEME.md` has to run when
+/// only that document changed. Scanned by string literal, because a read is
+/// a path in the source and nothing else marks it.
+#[test]
+fn docs_suites_named() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = ci
+        .split_once("the suites that read documents")
+        .map(|(_, rest)| rest.split("\n      -").next().unwrap_or_default())
+        .expect("ci.yml has the documents step");
+
+    const DOCUMENTS: [&str; 9] = [
+        "README",
+        "SPEC",
+        "ROADMAP",
+        "RULINGS",
+        "CLAUDE",
+        "CHANGELOG",
+        "CONTRIBUTING",
+        "RELEASE-SMOKE",
+        "REVOCATIONS",
+    ];
+    let mut missing = Vec::new();
+    for crate_dir in ["crates/vigia", "crates/vigia-core"] {
+        let tests = repo_root().join(crate_dir).join("tests");
+        for entry in std::fs::read_dir(&tests)
+            .unwrap_or_else(|e| panic!("read {}: {e}", tests.display()))
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let source = read(&path);
+            // A fixture named README.md is not a read of the repository's. A
+            // read resolves from the crate directory or the repository root.
+            let resolves = source.contains("CARGO_MANIFEST_DIR") || source.contains("repo_root()");
+            let reads = resolves
+                && source.lines().any(|line| {
+                    let line = line.trim_start();
+                    !line.starts_with("//")
+                        && (DOCUMENTS.iter().any(|name| {
+                            line.contains(&format!("\"{name}.md\""))
+                                || line.contains(&format!("/{name}.md\""))
+                        }) || line.contains("docs/THEME.md\"")
+                            || line.contains("docs/CONFIG.md\"")
+                            || line.contains("docs/TECHPACK.md\""))
+                });
+            if !reads {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if !step.contains(&format!("--test {name}")) {
+                missing.push(format!("{crate_dir}/tests/{name}.rs"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "these tests read a document and the documents job does not run them, so a \
+         docs-only pull request can break what they check:\n{}",
+        missing.join("\n")
+    );
+    assert!(
+        step.contains("--test package") && step.contains("--test register"),
+        "the documents step lost package or register:\n{step}"
     );
 }
 
@@ -1555,8 +1792,20 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
         "ci.yml does not pass the draft expression to the script, so the gate's draft \
          cases are testing an argument production never sends"
     );
-    for leg in ["lint", "test", "budgets", "benches", "pure-rust", "musl"] {
-        let arg = format!("needs.{leg}.result");
+    assert!(
+        ci.contains("'${{ needs.changes.outputs.class }}'"),
+        "ci.yml does not pass the class to the script, so a docs pull request's skips          and a broken classifier's skips are judged alike"
+    );
+    for leg in [
+        "lint",
+        "test",
+        "budgets",
+        "benches",
+        "pure-rust",
+        "musl",
+        "docs",
+    ] {
+        let arg = format!("'{leg}=${{{{ needs.{leg}.result }}}}'");
         assert!(
             ci.contains(&arg),
             "ci.yml does not pass {arg} to the script, so that leg is judged by nothing"
