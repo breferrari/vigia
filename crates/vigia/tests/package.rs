@@ -2020,13 +2020,25 @@ fn dialect_subject_warned() {
     );
 }
 
-/// Runs `title-check.sh` in a scratch repository: one base commit, then
-/// `commits` as `(subject, body)`. Returns whether it passed and what it said.
+/// Runs `.github/scripts/<script> base` in a scratch repository, with `env`
+/// set. `commits` runs after one base commit tagged `base` that holds `files`.
+/// Returns whether it passed and what it said.
 #[cfg(unix)]
-fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, String) {
-    let dir = std::env::temp_dir().join(format!("vigia-title-{}-{case}", std::process::id()));
+fn run_in_scratch(
+    case: &str,
+    files: &[(&str, &str)],
+    commits: &[(&str, &str)],
+    script: &str,
+    env: (&str, &str),
+) -> (bool, String) {
+    let dir = std::env::temp_dir().join(format!("vigia-{script}-{}-{case}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    for (path, text) in files {
+        let at = dir.join(path);
+        std::fs::create_dir_all(at.parent().expect("a file has a parent")).expect("fixture dir");
+        std::fs::write(at, text).expect("write the fixture");
+    }
     let git = |args: &[&str]| {
         let out = Command::new("git")
             .args([
@@ -2048,6 +2060,7 @@ fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, Stri
         );
     };
     git(&["init", "-q"]);
+    git(&["add", "."]);
     git(&["commit", "-q", "--allow-empty", "-m", "base"]);
     git(&["tag", "base"]);
     for (subject, body) in commits {
@@ -2058,17 +2071,24 @@ fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, Stri
         git(&args);
     }
     let out = Command::new("sh")
-        .arg(repo_root().join(".github/scripts/title-check.sh"))
+        .arg(repo_root().join(".github/scripts").join(script))
         .arg("base")
-        .env("TITLE", title)
+        .env(env.0, env.1)
         .current_dir(&dir)
         .output()
-        .expect("title-check.sh runs");
+        .unwrap_or_else(|e| panic!("{script} runs: {e}"));
     let _ = std::fs::remove_dir_all(&dir);
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
     )
+}
+
+/// Runs `title-check.sh` in a scratch repository: one base commit, then
+/// `commits` as `(subject, body)`. Returns whether it passed and what it said.
+#[cfg(unix)]
+fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, String) {
+    run_in_scratch(case, &[], commits, "title-check.sh", ("TITLE", title))
 }
 
 /// CI rejects contract phrasing in a title or subject unless a commit body
@@ -2953,5 +2973,58 @@ fn ci_tests_get_slack() {
         bare.is_empty(),
         "ci.yml runs `cargo test` without VIGIA_BUDGET_SLACK in {bare:?}, so every \
          `budget()` bound those steps reach runs unloosened on a shared runner"
+    );
+}
+
+/// Runs `cited-gates.sh` in a scratch repository holding `t/a.rs` with
+/// `fn kept`, over one commit whose body is `message`.
+#[cfg(unix)]
+fn cited_gates(case: &str, message: &str, body: &str) -> (bool, String) {
+    run_in_scratch(
+        case,
+        &[("t/a.rs", "fn kept() {}\nfn kept_more() {}\n")],
+        &[("change", message)],
+        "cited-gates.sh",
+        ("BODY", body),
+    )
+}
+
+/// A commit or PR body that cites a gate the branch does not define fails.
+#[cfg(unix)]
+#[test]
+fn cited_gates_exist() {
+    let (passed, said) = cited_gates("kept", "Gate: `a.rs::kept`.", "");
+    assert!(passed, "a gate the branch defines failed:\n{said}");
+
+    let (passed, said) = cited_gates("prefix", "Gate: `a.rs::kep`.", "");
+    assert!(
+        !passed,
+        "a name that is only a prefix of a gate passed:\n{said}"
+    );
+
+    let (passed, said) = cited_gates("file", "Gate: `b.rs::kept`.", "");
+    assert!(!passed, "a gate cited in the wrong file passed:\n{said}");
+
+    let (passed, said) = cited_gates("body", "No gate.", "Gate: `a.rs::gone`.");
+    assert!(!passed, "a PR body citing a missing gate passed:\n{said}");
+    assert!(
+        said.contains("a.rs::gone"),
+        "the missing gate was not named:\n{said}"
+    );
+}
+
+/// The lint job checks cited gates on pull requests, with the body and history.
+#[test]
+fn ci_runs_cited_gates() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let lint = ci
+        .split_once("\n  lint:")
+        .and_then(|(_, rest)| rest.split_once("\n  test:"))
+        .map(|(lint, _)| lint)
+        .expect("ci.yml has a lint job before its test job");
+    assert!(
+        lint.contains("sh .github/scripts/cited-gates.sh")
+            && lint.contains("github.event.pull_request.body"),
+        "the lint job does not run cited-gates.sh with the PR body:\n{lint}"
     );
 }
