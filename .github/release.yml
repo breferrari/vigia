@@ -1,0 +1,12 @@
+# What "Generate release notes" lists, so it agrees with CHANGELOG.md: pull
+# requests labelled `release`, and nothing else. There is no catch-all
+# category on purpose. A `*` entry is how unlabelled CI work ends up in a
+# GitHub Release.
+changelog:
+  exclude:
+    labels:
+      - internal
+  categories:
+    - title: Changes
+      labels:
+        - release

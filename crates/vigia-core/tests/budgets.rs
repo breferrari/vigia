@@ -6,12 +6,13 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    Scratch, absolute_gates_apply, budget, delta, highlight_delta, highlight_window, holds_p99,
-    holds_p99_rounds, materialise, settle, time, time_cpu,
+    COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
+    highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise, settle, time,
+    time_cpu,
 };
 use vigia_core::{
-    FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
-    Worktree,
+    ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
+    LineKind, RETAINED_HUNKS, Samples, Worktree,
 };
 
 /// I4: first paint on a 100k-line diff.
@@ -153,6 +154,104 @@ fn a_frame_recomputes_only_what_changed() {
         many_cost.evicted, 0,
         "editing a file evicted {} cached diffs",
         many_cost.evicted
+    );
+}
+
+/// Untracked files in the rename fixture: enough that weighing each one as a
+/// rename candidate would be most of a walk.
+const UNTRACKED: usize = 2_000;
+
+#[test]
+fn rename_tracking_costs_nothing_when_nothing_was_deleted() {
+    let scratch = Scratch::new("budget-renames-untracked");
+    scratch.write("tracked.txt", "a\n");
+    scratch.commit_all("initial");
+    for i in 0..UNTRACKED {
+        scratch.write(&format!("out/d{}/f{i}.txt", i % 20), "line\n");
+    }
+    let worktree = scratch.worktree();
+
+    let walk = |track_renames: bool| {
+        let options = ChangeOptions {
+            track_renames,
+            ..ChangeOptions::default()
+        };
+        worktree
+            .changes_with(options)
+            .expect("enumerate")
+            .map(|c| c.expect("change"))
+            .collect::<Vec<_>>()
+    };
+    // A deletion that was restored no longer counts: the walk that saw it gone
+    // is the one that stops going straight to tracking.
+    scratch.remove("tracked.txt");
+    assert!(walk(true).iter().any(|c| c.kind == ChangeKind::Removed));
+    scratch.git(&["checkout", "--", "tracked.txt"]);
+
+    let tracked = walk(true);
+    assert_eq!(
+        tracked.len(),
+        UNTRACKED,
+        "the fixture is not what this gate measures"
+    );
+    assert!(tracked.iter().all(|c| c.kind == ChangeKind::Added));
+
+    // Interleaved, so a machine that slows down slows both sides.
+    let (mut on, mut off) = (Duration::MAX, Duration::MAX);
+    for _ in 0..7 {
+        on = on.min(time(|| drop(walk(true))));
+        off = off.min(time(|| drop(walk(false))));
+    }
+    assert!(
+        on <= off * 3,
+        "with nothing deleted, the walk took {on:?} tracking renames and {off:?} without, \
+         so every untracked file is being weighed as a rename that cannot exist"
+    );
+}
+
+/// Tracked files in the deletion fixture: enough that comparing the index is
+/// most of a walk, so a walk taken twice shows.
+const TRACKED: usize = 3_000;
+
+#[test]
+fn a_lasting_deletion_costs_one_walk_a_tick_not_two() {
+    let scratch = Scratch::new("budget-renames-deleted");
+    for i in 0..TRACKED {
+        scratch.write(&format!("src/d{}/f{i}.txt", i % 30), "line\n");
+    }
+    scratch.commit_all("initial");
+    scratch.remove("src/d0/f0.txt");
+    let worktree = scratch.worktree();
+
+    let walk = |track_renames: bool| {
+        let options = ChangeOptions {
+            track_renames,
+            ..ChangeOptions::default()
+        };
+        worktree
+            .changes_with(options)
+            .expect("enumerate")
+            .map(|c| c.expect("change"))
+            .collect::<Vec<_>>()
+    };
+    let tracked = walk(true);
+    assert_eq!(
+        tracked.len(),
+        1,
+        "the fixture is not what this gate measures"
+    );
+    assert_eq!(tracked[0].kind, ChangeKind::Removed);
+
+    // Interleaved, so a machine that slows down slows both sides.
+    let (mut on, mut off) = (Duration::MAX, Duration::MAX);
+    for _ in 0..7 {
+        on = on.min(time(|| drop(walk(true))));
+        off = off.min(time(|| drop(walk(false))));
+    }
+    assert!(
+        on.as_secs_f64() <= off.as_secs_f64() * 1.5,
+        "with a deletion standing in the tree, a tick took {on:?} tracking renames and \
+         {off:?} without, so each tick is walking the tree twice"
     );
 }
 
@@ -886,7 +985,10 @@ fn the_cpu_clock_tells_waiting_from_working() {
     // else's load as its own. A clock that cannot do it once in five is broken,
     // which is what this exists to catch. The sleeping half needs no rounds,
     // since load can only push CPU time down and its bound is an upper one.
-    let busy = Duration::from_millis(80);
+    // `GetThreadTimes` counts in scheduler ticks, the coarsest thread clock
+    // here. Eight of them keep one lost tick to an eighth of the window.
+    let quantum = COARSE_TICK;
+    let busy = quantum * 8;
     let mut best = Duration::ZERO;
     let mut wall = Duration::ZERO;
     for _ in 0..5 {
@@ -1003,5 +1105,101 @@ fn the_excess_a_round_spends_over_budget_counts_only_the_samples_that_exceeded_i
         spiked(100, 1).excess_over(budget),
         Duration::from_millis(490),
         "one 500ms sample against a 10ms budget is 490ms, and the rest are under"
+    );
+}
+
+/// A round of `fast` then `slow` samples, each `(count, wall, cpu)` in
+/// microseconds.
+fn round_of(fast: (usize, u64, u64), slow: (usize, u64, u64)) -> (Samples, Option<Samples>) {
+    let n = fast.0 + slow.0;
+    let (mut wall, mut cpu) = (Samples::new(n), Samples::new(n));
+    for (count, w, c) in [fast, slow] {
+        for _ in 0..count {
+            wall.push(Duration::from_micros(w));
+            cpu.push(Duration::from_micros(c));
+        }
+    }
+    (wall, Some(cpu))
+}
+
+/// [`holds_p99_ticked`] over the same round twice, against a clock of `tick`.
+fn judge_round(tick: Duration, budget_ms: u64, fast: (usize, u64, u64), slow: (usize, u64, u64)) {
+    let (first, _) = round_of(fast, slow);
+    holds_p99_ticked(
+        "a fixture round",
+        Duration::from_millis(budget_ms),
+        &first,
+        String::new,
+        || round_of(fast, slow),
+        tick,
+    );
+}
+
+/// A clock that reads each frame exactly.
+const FINE: Duration = Duration::from_micros(1);
+
+/// 247 fast frames bank 24.7ms of off-CPU noise, which would pay for the 24ms
+/// three frames of work spend over budget.
+const SHORT_TAIL: ((usize, u64, u64), (usize, u64, u64)) =
+    ((247, 5_000, 4_900), (3, 18_000, 18_000));
+
+#[test]
+#[should_panic(expected = "work done")]
+fn short_tail_fine() {
+    judge_round(FINE, 10, SHORT_TAIL.0, SHORT_TAIL.1);
+}
+
+#[test]
+#[should_panic(expected = "cannot attribute")]
+fn short_tail_coarse() {
+    judge_round(COARSE_TICK, 10, SHORT_TAIL.0, SHORT_TAIL.1);
+}
+
+#[test]
+#[should_panic(expected = "cannot attribute")]
+fn coarse_clock_fails() {
+    // Three 20ms frames of work, each read as one tick: 13.1ms of deficit
+    // against 12ms over, so the clock's rounding would acquit the work.
+    let tick = COARSE_TICK.as_micros() as u64;
+    judge_round(COARSE_TICK, 16, (97, 15_000, 15_000), (3, 20_000, tick));
+}
+
+#[test]
+fn short_stall_fine() {
+    // Three 50ms frames descheduled with 3ms of work each: a fine clock sees
+    // the stall frame by frame and acquits it.
+    judge_round(FINE, 16, (247, 5_000, 4_900), (3, 50_000, 3_000));
+}
+
+#[test]
+fn coarse_round_acquits() {
+    // How a coarse clock rounds a stall: the breaching frames each read a whole
+    // tick and the frames between them read none. Only the round sum sees that
+    // 225 frames spent their time off-CPU.
+    let tick = COARSE_TICK.as_micros() as u64;
+    judge_round(COARSE_TICK, 16, (225, 4_000, 0), (25, 20_000, tick + 5_000));
+}
+
+#[test]
+fn floor_edge() {
+    // At the floor a coarse clock decides, and a round spent off-CPU is acquitted.
+    let floor = (COARSE_TICK * FLOOR_TICKS).as_micros() as u64;
+    judge_round(COARSE_TICK, 10, (0, 0, 0), (1, floor, 1_000));
+    let under =
+        std::panic::catch_unwind(|| judge_round(COARSE_TICK, 10, (0, 0, 0), (1, floor - 1, 1_000)));
+    assert!(
+        under.is_err(),
+        "a breach one microsecond under the floor was attributed"
+    );
+}
+
+#[test]
+fn breach_over_pairs() {
+    let (wall, cpu) = round_of((2, 5_000, 5_000), (2, 30_000, 10_000));
+    let cpu = cpu.expect("a clock");
+    assert_eq!(
+        wall.breach_over(&cpu, Duration::from_millis(10)),
+        (Duration::from_millis(60), Duration::from_millis(40)),
+        "two breaching frames of 30ms wall and 10ms CPU are 60ms, 40ms of it off-CPU"
     );
 }

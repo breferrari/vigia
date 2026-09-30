@@ -38,7 +38,7 @@ const RATIO_CEILING: [(&str, u64); 9] = [
     ("vigia-core/src/change.rs", 4705),
     ("vigia/src/input.rs", 4351),
     ("vigia/src/app.rs", 4145),
-    ("vigia-core/src/history.rs", 3327),
+    ("vigia-core/src/history.rs", 3310),
     ("vigia/src/render.rs", 3213),
     ("vigia/src/glyphs.rs", 3947),
     ("vigia/src/lib.rs", 3469),
@@ -721,6 +721,158 @@ fn no_prose_paragraph_is_hard_wrapped() {
          inside one renders as a break the author did not write. Join them; do \
          not reflow to a wider column:\n{}",
         breaches.len(),
+        breaches.join("\n")
+    );
+}
+
+/// The phrases in `.github/public-dialect.txt`, lowercased. A trailing `*` is kept
+/// and marks a prefix.
+fn dialect() -> Vec<String> {
+    let path = crates_root().join("../.github/public-dialect.txt");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Each phrase `text` uses, on word boundaries, outside fences, code spans and
+/// link targets. The same rule `title-check.sh` applies to titles.
+fn dialect_hits(text: &str, phrases: &[String]) -> Vec<String> {
+    let mut prose = String::new();
+    let mut fence = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            fence = !fence;
+            continue;
+        }
+        if fence {
+            continue;
+        }
+        let mut code = false;
+        for part in line.split('`') {
+            if !code {
+                prose.push_str(part);
+            }
+            prose.push(' ');
+            code = !code;
+        }
+        prose.push('\n');
+    }
+    let prose = prose
+        .split_whitespace()
+        .filter(|word| !word.contains("](") && !word.contains("://"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+
+    let edge = |c: Option<char>| c.is_none_or(|c| !c.is_ascii_alphanumeric());
+    phrases
+        .iter()
+        .filter(|phrase| {
+            let (stem, prefix) = phrase
+                .strip_suffix('*')
+                .map_or((phrase.as_str(), false), |stem| (stem, true));
+            prose.match_indices(stem).any(|(at, _)| {
+                edge(prose[..at].chars().next_back())
+                    && (prefix || edge(prose[at + stem.len()..].chars().next()))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// The matcher misses the plain words its phrases are built from.
+#[test]
+fn dialect_matcher_bounds() {
+    let phrases = dialect();
+    assert!(
+        phrases.len() >= 5,
+        "the dialect list holds {} phrase(s)",
+        phrases.len()
+    );
+    for plain in [
+        "the rule",
+        "ruled out",
+        "a screen reader",
+        "a reader of the report",
+        "inertial",
+        "uses `is what does` in code",
+    ] {
+        let hits = dialect_hits(plain, &phrases);
+        assert!(
+            hits.is_empty(),
+            "{plain:?} is plain English and matched {hits:?}"
+        );
+    }
+    for phrase in &phrases {
+        let written = phrase
+            .strip_suffix('*')
+            .map_or_else(|| phrase.clone(), |stem| format!("{stem}26"));
+        assert_eq!(
+            dialect_hits(&format!("Before {written} after."), &phrases).len(),
+            1,
+            "the matcher misses {phrase:?}"
+        );
+    }
+}
+
+/// Public files carry no phrase from the contract files' style.
+///
+/// `CHANGELOG.md` is read from 0.42.0 up. Older sections are left as released.
+#[test]
+fn public_prose_denylist() {
+    let root = crates_root().join("..");
+    let read = |relative: &str| {
+        std::fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|e| panic!("read {relative}: {e}"))
+    };
+
+    let changelog = read("CHANGELOG.md");
+    let older = changelog
+        .find("## [0.41.0]")
+        .expect("CHANGELOG.md still has its 0.41.0 section");
+    let mut files = vec![
+        ("README.md".to_owned(), read("README.md")),
+        ("CONTRIBUTING.md".to_owned(), read("CONTRIBUTING.md")),
+        ("CHANGELOG.md".to_owned(), changelog[..older].to_owned()),
+        (
+            ".github/PULL_REQUEST_TEMPLATE.md".to_owned(),
+            read(".github/PULL_REQUEST_TEMPLATE.md"),
+        ),
+    ];
+    let templates = root.join(".github/ISSUE_TEMPLATE");
+    for entry in std::fs::read_dir(&templates)
+        .unwrap_or_else(|e| panic!("read {}: {e}", templates.display()))
+        .flatten()
+    {
+        let name = format!(
+            ".github/ISSUE_TEMPLATE/{}",
+            entry.file_name().to_string_lossy()
+        );
+        files.push((name.clone(), read(&name)));
+    }
+    assert!(
+        files.len() >= 6,
+        "only {} public file(s) found",
+        files.len()
+    );
+
+    let phrases = dialect();
+    let breaches: Vec<String> = files
+        .iter()
+        .flat_map(|(name, body)| {
+            dialect_hits(body, &phrases)
+                .into_iter()
+                .map(move |phrase| format!("  {name}: {phrase:?}"))
+        })
+        .collect();
+    assert!(
+        breaches.is_empty(),
+        "public files use contract phrasing. Say what a user sees instead, or \
+         quote an identifier in backticks:\n{}",
         breaches.join("\n")
     );
 }

@@ -232,6 +232,23 @@ fn m_is_what_opens_the_config_menu() {
 }
 
 #[test]
+fn every_row_names_its_setting_in_at_most_three_words() {
+    // A settings list names each setting, and prose describing what it does
+    // is what these rows read as before.
+    for label in SETTINGS.map(Setting::label).into_iter().chain([RESET]) {
+        assert!(
+            label.split_whitespace().count() <= 3,
+            "{label:?} is a phrase, not a setting's name"
+        );
+        let mut chars = label.chars();
+        assert!(
+            chars.next().is_some_and(char::is_uppercase) && chars.all(|c| !c.is_uppercase()),
+            "{label:?} is not in sentence case"
+        );
+    }
+}
+
+#[test]
 fn the_menu_draws_every_view_toggle_and_the_word_for_where_it_stands() {
     // Driven through the real `App` rather than a hand-built `Chrome`, so the
     // assignment that fills each row from the pane's own state is inside what
@@ -899,7 +916,7 @@ fn an_overlay_swallows_the_bars_and_the_gutter_under_it() {
 #[test]
 fn the_caret_steps_over_the_rule_and_the_air_around_it() {
     // The rule and its air are rows a caret may not sit on, so a step is a step over
-    // the rows that answer to one: three keystrokes from `path links` would otherwise
+    // the rows that answer to one: three keystrokes from `Path links` would otherwise
     // land on a blank and do nothing twice.
     let mut pane = Pane::open("menu-steps");
     pane.with(|app, frame, highlighter, history| {

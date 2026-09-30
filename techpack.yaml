@@ -30,7 +30,6 @@ components:
   - id: notes-server
     displayName: vigia notes
     description: Reads the notes the reader pinned to the diff, and replies to or resolves them
-    dependencies: [vigia-cli]
     mcp:
       name: vigia
       command: vigia
@@ -40,18 +39,9 @@ components:
   # All three fail open, so they are safe to install once and forget: see the
   # scripts. Register runs on both ends of a session because its stdin payload is
   # what tells one from the other.
-  #
-  # The two register components are `isRequired` because they are one mechanism
-  # split across two events: the start records the socket and the end clears it,
-  # so a session that registers and never clears leaves a stale one behind. That
-  # is also what makes the shared destination safe. Neither can be deselected, so
-  # neither one's removal is ever the other's business, which the schema does not
-  # otherwise say how to resolve.
   - id: hook-register-start
     displayName: Socket registered on session start
     description: Records the session's socket beside the note store, so a note posts into it
-    dependencies: [vigia-cli]
-    isRequired: true
     hookEvent: SessionStart
     hook:
       source: .techpack/hooks/register.sh
@@ -60,8 +50,6 @@ components:
   - id: hook-register-end
     displayName: Socket cleared on session end
     description: Clears the session's socket when it ends
-    dependencies: [vigia-cli]
-    isRequired: true
     hookEvent: SessionEnd
     hook:
       source: .techpack/hooks/register.sh
@@ -70,7 +58,6 @@ components:
   - id: hook-pending
     displayName: Pending notes reported before a prompt
     description: Puts one line in front of the next prompt saying what the notes are waiting on
-    dependencies: [vigia-cli]
     hookEvent: UserPromptSubmit
     hook:
       source: .techpack/hooks/pending.sh
@@ -79,7 +66,6 @@ components:
 templates:
   - sectionIdentifier: notes
     contentFile: .techpack/templates/notes.md
-    dependencies: [notes-server]
 
 supplementaryDoctorChecks:
   # Reported, never installed: putting a package manager on the machine is the

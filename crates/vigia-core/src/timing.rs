@@ -105,4 +105,26 @@ impl Samples {
                 sum.saturating_add(each.saturating_sub(budget))
             })
     }
+
+    /// Over the samples that exceeded `budget`: their whole wall time, and the
+    /// part of it `cpu` did not spend running. `cpu` holds the same frames in the
+    /// same order.
+    ///
+    /// # Panics
+    ///
+    /// The two hold different numbers of samples, so they cannot be the same frames.
+    pub fn breach_over(&self, cpu: &Samples, budget: Duration) -> (Duration, Duration) {
+        assert_eq!(
+            self.len(),
+            cpu.len(),
+            "wall and CPU samples are not the same frames"
+        );
+        self.values[..self.len()]
+            .iter()
+            .zip(&cpu.values[..cpu.len()])
+            .filter(|(wall, _)| **wall > budget)
+            .fold((Duration::ZERO, Duration::ZERO), |(wall, off), (w, c)| {
+                (wall + *w, off + w.saturating_sub(*c))
+            })
+    }
 }

@@ -737,27 +737,44 @@ fn a_256color_entry_is_matched_anywhere_in_the_name() {
 }
 
 #[test]
-fn wt_session_is_read_only_on_windows() {
-    // Pinning what happens today rather than asserting it is right.
+fn wt_session_promotes() {
     assert_eq!(
         Depth::from_env(false, env(&[("WT_SESSION", "abc")])).expect("a rung"),
-        Depth::Ansi16,
-        "off Windows the session variable is not read, so the floor applies"
+        Depth::Truecolor,
+        "off Windows, as in WSL, Windows Terminal naming itself was not read"
     );
     assert_eq!(
         Depth::from_env(true, env(&[("WT_SESSION", "abc")])).expect("a rung"),
         Depth::Truecolor,
         "on Windows it is the terminal naming itself"
     );
-    // And the case a reader actually hits: WSL in Windows Terminal, whose TERM
-    // is what decides today.
+    // The case a reader hits: WSL in Windows Terminal, whose TERM says 256.
     assert_eq!(
         Depth::from_env(
             false,
             env(&[("WT_SESSION", "abc"), ("TERM", "xterm-256color")])
         )
         .expect("a rung"),
-        Depth::Ansi256,
-        "WSL in Windows Terminal takes its rung from TERM"
+        Depth::Truecolor,
+        "WSL in Windows Terminal took its rung from TERM and lost the row wash"
     );
+    // A multiplexer keeps the variable and may not pass 24-bit through it.
+    for (name, value) in [
+        ("TMUX", "/tmp/tmux-1000/default,1,0"),
+        ("STY", "1.pts-0.host"),
+    ] {
+        assert_eq!(
+            Depth::from_env(
+                false,
+                env(&[
+                    ("WT_SESSION", "abc"),
+                    ("TERM", "xterm-256color"),
+                    (name, value)
+                ])
+            )
+            .expect("a rung"),
+            Depth::Ansi256,
+            "inside {name} the session variable was taken as the terminal's word"
+        );
+    }
 }

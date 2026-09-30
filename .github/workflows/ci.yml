@@ -18,11 +18,16 @@ env:
   RUSTFLAGS: -D warnings
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # On a branch, only the newest push is worth checking. On main every commit
-  # gets a full run: superseding them means the slowest leg, which is Windows,
-  # is the one perpetually cancelled, and a commit nobody verified lands looking
-  # like it was.
+  # Keyed on the draft flag too: a push made while the PR is a draft and the
+  # `ready_for_review` event after it land in different groups, so the ready
+  # run, the only one whose legs run, is never cancelled by a skipped one.
+  #
+  # On main every commit gets a full run, so each commit is its own group. A
+  # group holds one pending run and cancels the older one whatever
+  # `cancel-in-progress` says, so three merges in a row left the middle one
+  # unrun.
+  group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || github.event.pull_request.draft }}
+  # On a branch, only the newest push is worth checking.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Every job below carries `if: github.event.pull_request.draft != true`, and it
@@ -37,16 +42,73 @@ concurrency:
 # run: the same jobs fire on `ready_for_review`, and branch protection reads the
 # result of that run rather than of a run that was skipped.
 jobs:
+  # **What a pull request changed decides what runs.** A pull request that
+  # touches only documents, skills, templates or images runs the suites that
+  # read documents on one platform and skips the matrix, the budgets, the
+  # benches and the musl build: nothing they measure moved. Anything else runs
+  # everything, and so does a push to main or a dispatch, which carry no pull
+  # request to read. `change-class.sh` holds the list of what counts as a
+  # document and is driven by a test; a path it does not know is code, so a
+  # file added later runs too much rather than too little. The `full-ci`
+  # label on the pull request forces the full run. `ci-complete.sh` reads
+  # the class so the skips it expects are the only skips it accepts.
+  changes:
+    name: what changed
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    outputs:
+      class: ${{ steps.class.outputs.class }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: class
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr diff "${{ github.event.pull_request.number }}" --name-only > changed
+          else
+            : > changed
+          fi
+          if gh pr view "${{ github.event.pull_request.number }}" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'full-ci'; then
+            export CI_FULL=true
+          fi
+          out=$(sh .github/scripts/change-class.sh < changed)
+          printf '%s\n' "$out"
+          echo "class=$(printf '%s\n' "$out" | tail -1)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   lint:
     name: fmt and docs
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # A title becomes a release note unless a commit body carries
+      # `Release-note:`. The title arrives through env, never into the script.
+      - name: titles read as plain English
+        if: github.event_name == 'pull_request'
+        run: sh .github/scripts/title-check.sh "origin/${BASE}"
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.base_ref }}
+
+      # The body arrives through env, never into the script.
+      - name: cited gates exist
+        if: github.event_name == 'pull_request'
+        run: sh .github/scripts/cited-gates.sh "origin/${BASE}"
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.base_ref }}
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all -- --check
 
       # #131: both crates deny `rustdoc::broken_intra_doc_links` and no job ran
@@ -82,14 +144,22 @@ jobs:
       - name: the generated release workflow is current
         run: |
           set -euo pipefail
-          curl --proto '=https' --tlsv1.2 -LsSf \
-            https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
-            | sh
+          # The installer fetches the tarball itself, so the whole install retries.
+          for attempt in 1 2 3; do
+            if curl --proto '=https' --tlsv1.2 -LsSf \
+              https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
+              | sh; then
+              break
+            fi
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep $((attempt * 5))
+          done
           dist generate --check
 
   test:
-    name: test and budgets (${{ matrix.os }})
-    if: github.event.pull_request.draft != true
+    name: test (${{ matrix.os }})
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
     strategy:
       # Windows and macOS fail for different reasons than Linux does, and
@@ -102,7 +172,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # The cache is written from main only, on every job. A pull request
+      # restores main's cache and builds its own delta, which rust-cache would
+      # not keep anyway: it caches dependencies, and the workspace crates are
+      # rebuilt on every run. Saving from every branch spends the repository's
+      # cache quota on copies of the same dependencies and evicts the one copy
+      # every branch reads.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.os }}-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Per platform, because `cfg(windows)` and `cfg(target_os = "macos")`
       # code is not compiled on Linux, so one run there lints a third of what
@@ -111,6 +190,21 @@ jobs:
 
       # Correctness first, in debug, where the structural budget gates still
       # apply and the absolute ones report that they are skipped.
+      #
+      # nextest rather than `cargo test`, for two reasons a run's log shows.
+      # `cargo test` runs the seventy test binaries one after another, so the
+      # step's time is their sum, seven minutes on Linux, and most of it is one
+      # binary's slow tail while every core idles. nextest schedules every test
+      # across every binary at once, so the step's time is closer to the
+      # longest test. And `cargo test` stops at the first failing binary, so a
+      # red run on one platform hides whether the rest ran; the `ci` profile
+      # in `.config/nextest.toml` runs everything and reports every failure.
+      # Each test is its own process, which is also why `relative.rs` can
+      # change the working directory without touching another test. Doctests
+      # are outside nextest's model and keep their own step.
+      #
+      # Installed as a prebuilt binary, the way `dist` is above: `cargo
+      # install` would build it from source on every run.
       #
       # **The slack belongs here too, and its absence was a hole.** The claim
       # above is true of every absolute gate that guards on
@@ -127,10 +221,38 @@ jobs:
       # in a shape this file already records: no step runs `watch.rs` in release,
       # so the assertion would then run NOWHERE. That is I7's hole below, reached
       # through the selector rather than the gate — green, and about nothing.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci
         env:
           VIGIA_BUDGET_SLACK: "3"
+      - name: doctests, which nextest does not run
+        run: cargo test --workspace --doc
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
+  # The budgets in their own job per platform, beside the test job rather
+  # than after it. They are a separate release build either way, and running
+  # them after the debug suite put three to six minutes on the critical path
+  # of every lane for nothing the ordering bought. Each budget step still runs
+  # in the order it always has: the two budgets binaries, then first paint.
+  budgets:
+    name: budgets (${{ matrix.os }})
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Then the budgets, in release, because that is what they were set
       # against. Slack applies to the absolute wall-clock gates only: hosted
@@ -174,24 +296,30 @@ jobs:
 
   benches:
     name: benches compile
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Not run for timings: a hosted runner cannot produce a number worth
       # comparing. Compiled so they cannot rot unnoticed.
       - run: cargo bench --no-run
 
   pure-rust:
     name: no C toolchain
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # CLAUDE.md calls a C toolchain in the graph a spec change, not an
       # implementation detail. This is that rule with teeth: it is the whole
       # reason musl-static and Windows are cheap.
@@ -235,7 +363,8 @@ jobs:
 
   musl:
     name: static musl binary
-    if: github.event.pull_request.draft != true
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -243,6 +372,8 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build --release --target x86_64-unknown-linux-musl
       # The claim in CLAUDE.md is a static binary with no cross-toolchain.
       # Building is half of it; being actually static is the other half.
@@ -357,10 +488,38 @@ jobs:
   # draft, and a draft cannot be merged in any case, so the run it would be
   # protecting cannot happen. `ready_for_review` is in this workflow's trigger
   # list so the full matrix runs the moment the work is claimed finished.
+  # The suites that read a document, on one platform, for a pull request that
+  # changed only documents. `package.rs::docs_suites_named` holds this list to
+  # the tests that read a document at the repository root or under `docs/`.
+  # The cache is the ubuntu test job's, restored and never saved, so a docs
+  # pull request neither builds cold nor overwrites the fuller cache.
+  docs:
+    name: documents
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class == 'docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-latest-test
+          save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - name: the suites that read documents
+        run: |
+          set -euo pipefail
+          cargo nextest run -p vigia --profile ci --test package --test register --test sheet --test theme_docs
+          cargo nextest run -p vigia-core --profile ci --test coverage
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
   ci-complete:
     name: ci complete
     if: always()
-    needs: [lint, test, benches, pure-rust, musl]
+    needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -370,8 +529,11 @@ jobs:
         run: |
           sh .github/scripts/ci-complete.sh \
             '${{ github.event.pull_request.draft }}' \
-            '${{ needs.lint.result }}' \
-            '${{ needs.test.result }}' \
-            '${{ needs.benches.result }}' \
-            '${{ needs.pure-rust.result }}' \
-            '${{ needs.musl.result }}'
+            '${{ needs.changes.outputs.class }}' \
+            'lint=${{ needs.lint.result }}' \
+            'test=${{ needs.test.result }}' \
+            'budgets=${{ needs.budgets.result }}' \
+            'benches=${{ needs.benches.result }}' \
+            'pure-rust=${{ needs.pure-rust.result }}' \
+            'musl=${{ needs.musl.result }}' \
+            'docs=${{ needs.docs.result }}'

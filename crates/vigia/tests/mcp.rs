@@ -47,6 +47,7 @@ fn pinned(id: &str, path: &str, side: Side, line: u32, text: &str) -> Note {
         side,
         line,
         text: text.to_owned(),
+        first: None,
         body: format!("about {id}"),
         status: Status::Open,
         reply: None,
@@ -175,6 +176,13 @@ fn initialize(server: &mut Server, version: &str) -> Value {
     )
 }
 
+fn instructions_of(server: &mut Server) -> String {
+    initialize(server, "2025-06-18")["instructions"]
+        .as_str()
+        .expect("instructions")
+        .to_owned()
+}
+
 #[test]
 fn the_client_version_is_echoed_when_the_server_speaks_it_and_the_latest_answers_otherwise() {
     let rig = Rig::new("mcp-version");
@@ -201,6 +209,36 @@ fn the_client_version_is_echoed_when_the_server_speaks_it_and_the_latest_answers
         "the instructions teach the loop: {instructions}"
     );
     assert!(server.initialised());
+}
+
+#[test]
+fn handshake_names_worktree() {
+    // A client that sets no project variable starts the server wherever it
+    // was itself started, so the agent has to be able to see which store it
+    // reads before its first call.
+    let rig = Rig::new("mcp-names-worktree");
+    let mut server = rig.server();
+    let instructions = instructions_of(&mut server);
+    let served = document(&mut server, false)["worktree"]
+        .as_str()
+        .expect("the listing names its worktree")
+        .to_owned();
+    assert!(
+        instructions.contains(&served),
+        "{served} is not in the handshake: {instructions}"
+    );
+}
+
+#[test]
+fn handshake_carries_refusal() {
+    let root = TempDir::new("mcp-state");
+    let holder = TempDir::new("mcp-no-repo-handshake");
+    let mut server = Server::open(Some(holder.path()), env_at(root.path()));
+    let instructions = instructions_of(&mut server);
+    assert!(
+        instructions.contains("not inside a git worktree"),
+        "the refusal is not in the handshake: {instructions}"
+    );
 }
 
 #[test]
@@ -279,6 +317,41 @@ fn notes_on_an_empty_store_answers_an_empty_list_and_no_error() {
         !rig.store.dir().exists(),
         "a listing creates nothing: the store appears on the first write"
     );
+}
+
+#[test]
+fn notes_carries_a_ranges_first_line_and_every_line_in_it() {
+    let rig = Rig::new("mcp-range");
+    // From the removed fifth line, across its replacement, to the sixth.
+    let ranged = Note {
+        first: Some(vigia_core::LineRef {
+            side: Side::Old,
+            line: 5,
+            text: "line 5".to_owned(),
+        }),
+        ..pinned("range-1", PATH, Side::New, 6, "line 6")
+    };
+    rig.store.put(&ranged).expect("the pane writes");
+    let mut server = rig.server();
+    let first = document(&mut server, false);
+    let listed = note_named(&first, "range-1");
+    assert_eq!(listed["first_line"], 5);
+    assert_eq!(listed["first_text"], "line 5");
+    assert_eq!(listed["current_first_line"], 5);
+    assert_eq!(listed["line_changed"], false);
+    assert_eq!(
+        listed["lines"],
+        serde_json::json!(["line 5", EDITED, "line 6"]),
+        "the agent is not sent every line of the range, in order"
+    );
+
+    // A note on one line is sent no range.
+    let one = pinned("one-1", PATH, Side::New, 6, "line 6");
+    rig.store.put(&one).expect("the pane writes");
+    let again = document(&mut server, false);
+    let listed = note_named(&again, "one-1");
+    assert!(listed["first_line"].is_null(), "{listed}");
+    assert_eq!(listed["lines"], serde_json::json!([]));
 }
 
 #[test]

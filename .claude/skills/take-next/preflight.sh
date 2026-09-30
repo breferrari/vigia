@@ -19,8 +19,14 @@
 # the ref's copies and for the tracker fetch, so a mutation ("delete an
 # invariant row", "flip a row's mark", "hand it a board at the cap") can prove
 # each comparison fires. A drift check that cannot report "no drift" has not
-# been tested, and neither has one that cannot report drift.
+# been tested, and neither has one that cannot report drift. Comparison 8 has
+# two more: PREFLIGHT_REFS_FILE for the worktrees and branches, and
+# PREFLIGHT_COMMENTS_FILE for the issue's comments.
+#
+# Usage: preflight.sh [issue]. Comparison 8 runs only when given the issue.
 set -u
+TAKEN="${1:-}"
+case "$TAKEN" in *[!0-9]*) echo "usage: preflight.sh [issue number]" >&2; exit 2 ;; esac
 REF="${PREFLIGHT_REF:-origin/main}"
 # Five of the seven comparisons read the tracker fetch, so a short one is not
 # one defect but five. Overridable the way REF is, and for the same reason:
@@ -125,30 +131,21 @@ done < "$tmp/issue-invariants.txt"
 [ "$found" -eq 0 ] && ok "no issue names a retired invariant"
 
 say "3. state — roadmap marks vs issue state:"
-found=0
-grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]' "$tmp/roadmap.md" | while IFS= read -r row; do
-  # The row's own issue is the one in its last cell, not the first link in it.
-  # Six rows cite a second issue in their task prose (`Revoked by`, `Closed by`,
-  # `Deferred by`), and reading the first link checked those rows against the
-  # wrong issue. Five of the six agreed by luck, both being closed; the sixth is
-  # a shelf row whose deferral cites a closed issue while its own is open, and
-  # that one reported drift on a roadmap that was correct.
-  n=$(printf '%s' "$row" | grep -oE '\[#[0-9]+\]' | tail -1 | tr -dc '0-9')
-  state=$(awk -F'\t' -v n="$n" '$1 == n { print $2 }' "$tmp/issues.tsv")
-  # A row citing an issue the board does not have used to `continue`, which is the
-  # same silence #369 was about and not the same cause: truncation is one way to
-  # get here, and a deleted issue, a transferred one and a mistyped `#N` are three
-  # more that no fetch size would fix. The board guard above cannot see any of
-  # them, because it counts what arrived rather than what was asked for.
-  if [ -z "$state" ]; then
-    printf '  DRIFT row cites #%s, which the tracker does not have\n' "$n"
-    continue
-  fi
-  case "$row" in
-    "| ✅"*) [ "$state" = "OPEN" ] && printf '  DRIFT row marked done, issue #%s is open\n' "$n" ;;
-    *)      [ "$state" = "CLOSED" ] && printf '  DRIFT row not marked done, issue #%s is closed\n' "$n" ;;
-  esac
-done > "$tmp/state.out"
+# One awk for every row, since a process per row is most of the run.
+grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]' "$tmp/roadmap.md" |
+awk -F'\t' '
+  FILENAME == ARGV[1] { state[$1] = $2; next }
+  {
+    # A row names its issue in its last cell. Six rows cite a second issue in
+    # their task prose (`Revoked by`, `Closed by`), so the first link is wrong.
+    match($0, /\[#[0-9]+\]$/)
+    n = substr($0, RSTART + 2, RLENGTH - 3)
+    # A deleted issue, a transferred one and a mistyped `#N` all land here, and
+    # the board guard above cannot see them: it counts what arrived.
+    if (!(n in state)) { printf "  DRIFT row cites #%s, which the tracker does not have\n", n; next }
+    if (index($0, "| ✅") == 1) { if (state[n] == "OPEN") printf "  DRIFT row marked done, issue #%s is open\n", n }
+    else if (state[n] == "CLOSED") printf "  DRIFT row not marked done, issue #%s is closed\n", n
+  }' "$tmp/issues.tsv" - > "$tmp/state.out"
 if [ -s "$tmp/state.out" ]; then cat "$tmp/state.out"; findings=$((findings + $(wc -l < "$tmp/state.out"))); else ok "every roadmap mark agrees with its issue"; fi
 
 say "4. unfiled — open issues with no milestone (invisible to step 1 forever):"
@@ -190,14 +187,71 @@ else
 fi
 
 say "7. missing row — issues the roadmap never mentions (the direction the 2026-08-03 sweep found four gaps in):"
-found=0
-cut -f1 "$tmp/issues.tsv" > "$tmp/nums.txt"
-while IFS= read -r n; do
-  if ! grep -qE "${B}#${n}${A}" "$tmp/roadmap.md"; then
-    title=$(awk -F'\t' -v n="$n" '$1 == n { print $4 }' "$tmp/issues.tsv")
-    hit "#$n has no roadmap mention: $title"; found=1
+# Every `#N` the roadmap mentions, collected in one pass. A mention has no
+# letter or digit on either side. `grep -o` with boundary groups would consume
+# the separator and lose the second of `#1,#2`.
+awk -F'\t' '
+  FILENAME == ARGV[1] {
+    off = 0
+    while (match(substr($0, off + 1), /#[0-9]+/)) {
+      s = off + RSTART; e = s + RLENGTH
+      if (substr($0, s - 1, 1) !~ /[A-Za-z0-9]/ && substr($0, e, 1) !~ /[A-Za-z0-9]/) seen[substr($0, s + 1, RLENGTH - 1)] = 1
+      off = e - 1
+    }
+    next
+  }
+  !($1 in seen) { printf "  DRIFT #%s has no roadmap mention: %s\n", $1, $4 }' "$tmp/roadmap.md" "$tmp/issues.tsv" > "$tmp/missing.out"
+if [ -s "$tmp/missing.out" ]; then cat "$tmp/missing.out"; findings=$((findings + $(wc -l < "$tmp/missing.out"))); else ok "every issue has a roadmap mention"; fi
+
+# 8 answers "is this issue in flight", not "is anything", so it needs the issue.
+# A session holds an issue before its row says so: step 3 posts the plan on the
+# issue and step 8 flips the row, so no step marks it started.
+if [ -n "$TAKEN" ]; then
+  say "8. in flight — another session's work on #$TAKEN:"
+  if [ -n "${PREFLIGHT_REFS_FILE:-}" ]; then cp "$PREFLIGHT_REFS_FILE" "$tmp/refs.txt"
+  else
+    { git worktree list --porcelain | awk '/^worktree / { w = substr($0, 10) } /^branch refs\/heads\// { print "worktree " w " on " substr($0, 19) }'
+      git branch -a --format='branch %(refname:short)'; } > "$tmp/refs.txt"
   fi
-done < "$tmp/nums.txt"
-[ "$found" -eq 0 ] && ok "every issue has a roadmap mention"
+  if [ -n "${PREFLIGHT_COMMENTS_FILE:-}" ]; then cp "$PREFLIGHT_COMMENTS_FILE" "$tmp/comments.json"
+  else gh issue view "$TAKEN" --json comments > "$tmp/comments.json" || exit 2; fi
+  grep -E "[^0-9]${TAKEN}([^0-9]|\$)" "$tmp/refs.txt" | sed 's/^/  DRIFT /' > "$tmp/flight.out"
+  jq -r '.comments[] | select(.body | test("^\\W*(approved )?plan\\b"; "i")) | "  DRIFT a plan comment by \(.author.login), \(.createdAt)"' "$tmp/comments.json" | tr -d '\r' >> "$tmp/flight.out"
+  if [ -s "$tmp/flight.out" ]; then cat "$tmp/flight.out"; findings=$((findings + $(wc -l < "$tmp/flight.out"))); else ok "no worktree, branch or plan names #$TAKEN"; fi
+fi
+
+# 9 cannot say a reason is false, only that it names something that changed
+# since: a closed issue, a retired invariant, a phase with no open milestone.
+# Only the Why cell counts. The Surfaced cell names where the row came from,
+# which is closed by the time anyone reads it.
+say "9. stale reasons — open shelf rows whose reason names what has since changed (read these):"
+if [ -s "$tmp/ms.json" ]; then jq -r '.[].title' "$tmp/ms.json" | tr -d '\r' > "$tmp/open-ms.txt"; else : > "$tmp/open-ms.txt"; fi
+awk '/^## Deferral shelf/ { on = 1; next } /^## / { on = 0 } on && /^\| [^-|]/' "$tmp/roadmap.md" |
+awk -F'\t' '
+  FILENAME == ARGV[1] { state[$1] = $2; next }
+  FILENAME == ARGV[2] { declared[$1] = 1; next }
+  FILENAME == ARGV[3] { phases = 1; if (match($0, /^Phase [0-9]+/)) open[substr($0, 1, RLENGTH)] = 1; next }
+  {
+    split($0, cell, "|")
+    if (!match(cell[2], /\[#[0-9]+\]/)) next
+    own = substr(cell[2], RSTART + 2, RLENGTH - 3)
+    if (state[own] != "OPEN") next
+    why = cell[5]; out = ""
+    split(cell[3], surfaced, ",")
+    for (w = why; match(w, /#[0-9]+/); w = substr(w, RSTART + RLENGTH)) {
+      m = substr(w, RSTART + 1, RLENGTH - 1)
+      if (state[m] == "CLOSED" && surfaced[1] !~ ("#" m "$") && index(out, " #" m " ") == 0) out = out " #" m " (closed),"
+    }
+    for (w = why; match(w, /I[0-9]+[a-z]?/); w = substr(w, RSTART + RLENGTH)) {
+      t = substr(w, RSTART, RLENGTH)
+      if (substr(w, RSTART + RLENGTH, 1) !~ /[A-Za-z0-9]/ && substr(w, RSTART - 1, 1) !~ /[A-Za-z0-9]/ && !(t in declared)) out = out " " t " (retired),"
+    }
+    for (w = why; phases && match(w, /Phase [0-9]+/); w = substr(w, RSTART + RLENGTH)) {
+      p = substr(w, RSTART, RLENGTH)
+      if (!(p in open) && index(out, " " p " ") == 0) out = out " " p " (closed),"
+    }
+    if (out != "") { sub(/,$/, "", out); printf "  read  #%s: its reason cites%s\n", own, out }
+  }' "$tmp/issues.tsv" "$tmp/spec-invariants.txt" "$tmp/open-ms.txt" - > "$tmp/stale.out"
+if [ -s "$tmp/stale.out" ]; then cat "$tmp/stale.out"; else ok "no open shelf reason names a closed issue, retired invariant or closed phase"; fi
 
 if [ "$findings" -eq 0 ]; then say "pre-flight clean"; else say "$findings finding(s) — fix in this pass, not a note"; exit 1; fi

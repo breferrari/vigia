@@ -43,6 +43,7 @@ fn chrome() -> Chrome {
         gripped: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         overview: false,
         worktree: "vigia".to_owned(),
@@ -80,6 +81,7 @@ fn three_kinds() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -352,6 +354,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // carries a modifier as part of its meaning: `path_hover` underlines,
         // which is the whole of what keeps it apart from the recency ladder.
         path_hover,
+        // A delta patched onto a path: `ansi` gives it no colour, and any colour
+        // a theme gives it is a path's, so it is read.
+        path_current,
         kind,
         hunk,
         gutter,
@@ -440,6 +445,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("path_live", path_live),
         ("path_cold", path_cold),
         ("path_hover", path_hover),
+        ("path_current", path_current),
         ("gutter", gutter),
         ("kind", kind),
         ("hunk", hunk),
@@ -563,19 +569,21 @@ const GRADED_PANE: u16 = 140;
 /// A file whose heat profile has a slice in each band.
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
+    // One drawn slice apart: [`GRADED_PANE`] draws twenty-four.
+    let slice = HEAT_BUCKETS / 24;
     heat[0] = HeatBucket {
         added: 12,
         removed: 0,
     };
-    heat[1] = HeatBucket {
+    heat[slice] = HeatBucket {
         added: 7,
         removed: 0,
     };
-    heat[2] = HeatBucket {
+    heat[2 * slice] = HeatBucket {
         added: 4,
         removed: 0,
     };
-    heat[3] = HeatBucket {
+    heat[3 * slice] = HeatBucket {
         added: 3,
         removed: 0,
     };
@@ -583,6 +591,7 @@ fn graded_heat() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -905,22 +914,30 @@ fn the_three_note_marks_are_three_colours_at_every_depth_that_has_any() {
     }
 }
 
+/// No track draws in the pane's own colour at any depth, where it would be
+/// invisible.
 #[test]
-fn a_sparkline_track_is_never_the_colour_behind_it() {
-    // The failure a track has that a bucket does not: quantising into the background.
-    for (name, base, behind) in [
-        ("dark", Theme::dark(), Color::Black),
-        ("light", Theme::light(), Color::White),
+fn tracks_off_pane() {
+    for (name, base, behind, grey) in [
+        ("dark", Theme::dark(), Color::Black, Color::DarkGray),
+        ("light", Theme::light(), Color::White, Color::Gray),
     ] {
-        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
             let theme = base.resolve(depth);
-            assert_ne!(
-                theme.spark_track.fg,
-                Some(behind),
-                "{name} at {depth:?} draws the sparkline track in the colour of \
-                 the pane behind it, so a launched worktree draws a blank column \
-                 again"
-            );
+            for (track, style) in [
+                ("spark_track", theme.spark_track),
+                ("heat_track", theme.heat_track),
+                ("bar_track", theme.bar_track),
+            ] {
+                assert_ne!(
+                    style.fg,
+                    Some(behind),
+                    "{name} at {depth:?} draws {track} in the colour of the pane behind it"
+                );
+                if depth == Depth::Ansi16 {
+                    assert_eq!(style.fg, Some(grey), "{name}'s {track} at sixteen colours");
+                }
+            }
         }
     }
 }
@@ -1309,7 +1326,7 @@ fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
     ];
 
     for (why, pairs) in cases {
-        let theme = theme::from_env(Depth::Ansi16, env_of(pairs), None).expect("a theme");
+        let theme = theme::from_env(Depth::Ansi16, env_of(pairs), None, None).expect("a theme");
         assert!(
             !matches!(theme.added.fg, Some(Color::Rgb(..))),
             "{why}: reached the renderer unresolved"
@@ -1338,7 +1355,7 @@ fn a_theme_is_resolved_to_the_depth_it_will_be_drawn_at() {
     // palette already in colours this terminal can show, so the renderer never
     // converts anything.
     let env = |key: &str| (key == "VIGIA_THEME").then(|| "dark".to_owned());
-    let flat = theme::from_env(Depth::Ansi16, env, None).expect("a theme");
+    let flat = theme::from_env(Depth::Ansi16, env, None, None).expect("a theme");
     assert!(
         !matches!(flat.added.fg, Some(Color::Rgb(..))),
         "the palette reached the renderer unresolved"
@@ -1384,7 +1401,7 @@ added = #ff0000
     );
     let env = env_of(vec![("HOME".to_owned(), home.display().to_string())]);
 
-    let theme = theme::from_env(Depth::Truecolor, env, None).expect("a theme");
+    let theme = theme::from_env(Depth::Truecolor, env, None, None).expect("a theme");
     assert_eq!(theme.added.fg, Some(Color::Rgb(0xff, 0x00, 0x00)));
     assert_eq!(theme.keyword, Theme::dark().keyword, "the base was ignored");
 }
@@ -1406,7 +1423,7 @@ added = #ff0000
         ("VIGIA_THEME".to_owned(), "light".to_owned()),
     ]);
 
-    let theme = theme::from_env(Depth::Truecolor, env, None).expect("a theme");
+    let theme = theme::from_env(Depth::Truecolor, env, None, None).expect("a theme");
     assert_eq!(theme, Theme::light().resolve(Depth::Truecolor));
 }
 
@@ -1416,7 +1433,7 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
     let absent = home_with("absent", None);
     let env = env_of(vec![("HOME".to_owned(), absent.display().to_string())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
@@ -1428,7 +1445,7 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
         ),
     );
     let env = env_of(vec![("HOME".to_owned(), broken.display().to_string())]);
-    let err = theme::from_env(Depth::Truecolor, env, None).expect_err("refused");
+    let err = theme::from_env(Depth::Truecolor, env, None, None).expect_err("refused");
     assert!(err.to_string().contains("line 1"), "{err}");
 }
 
@@ -1446,14 +1463,14 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
     );
     let env = env_of(vec![("USERPROFILE".to_owned(), home.display().to_string())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor)
     );
 
     // And an empty one is no home at all, rather than a lookup rooted at `/`.
     let env = env_of(vec![("HOME".to_owned(), "  ".to_owned())]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
@@ -1472,7 +1489,7 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
         ("USERPROFILE".to_owned(), home.display().to_string()),
     ]);
     assert_eq!(
-        theme::from_env(Depth::Truecolor, env, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, env, None, None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "an empty HOME hid a good USERPROFILE"
     );
@@ -1796,25 +1813,25 @@ fn the_detected_background_picks_the_showcase_and_never_outranks_a_word() {
 
     // A terminal that answered picks the showcase for its side.
     assert_eq!(
-        theme::from_env(Depth::Truecolor, none, Some(Background::Dark)).expect("a theme"),
+        theme::from_env(Depth::Truecolor, none, Some(Background::Dark), None).expect("a theme"),
         Theme::dark().resolve(Depth::Truecolor),
         "a dark answer did not pick the dark showcase"
     );
     assert_eq!(
-        theme::from_env(Depth::Truecolor, none, Some(Background::Light)).expect("a theme"),
+        theme::from_env(Depth::Truecolor, none, Some(Background::Light), None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "a light answer did not pick the light showcase"
     );
     // No answer keeps the palette that assumes nothing.
     assert_eq!(
-        theme::from_env(Depth::Truecolor, none, None).expect("a theme"),
+        theme::from_env(Depth::Truecolor, none, None, None).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor),
         "silence did not keep the fallback"
     );
     // And a reader's own word still wins over any guess.
     let named = |key: &str| (key == "VIGIA_THEME").then(|| "light".to_owned());
     assert_eq!(
-        theme::from_env(Depth::Truecolor, named, Some(Background::Dark)).expect("a theme"),
+        theme::from_env(Depth::Truecolor, named, Some(Background::Dark), None).expect("a theme"),
         Theme::light().resolve(Depth::Truecolor),
         "detection outranked VIGIA_THEME"
     );
@@ -1919,5 +1936,232 @@ fn a_noted_line_stays_brighter_than_a_pointer_resting_on_it() {
             "{name} draws a hovered line as bold as a noted one in the same ink, so the \
              two are one thing where colour is gone"
         );
+    }
+}
+
+/// Four terminals' own answers: a dark editor theme, a light one, xterm's pure
+/// black, and a warm dark one.
+/// Background, foreground, red and green.
+type Answer = [(u8, u8, u8); 4];
+
+const TERMINALS: [(&str, Answer); 4] = [
+    (
+        "vscode-dark",
+        [
+            (0x1e, 0x1e, 0x1e),
+            (0xcc, 0xcc, 0xcc),
+            (0xcd, 0x31, 0x31),
+            (0x0d, 0xbc, 0x79),
+        ],
+    ),
+    (
+        "solarized-light",
+        [
+            (0xfd, 0xf6, 0xe3),
+            (0x65, 0x7b, 0x83),
+            (0xdc, 0x32, 0x2f),
+            (0x85, 0x99, 0x00),
+        ],
+    ),
+    (
+        "xterm",
+        [
+            (0x00, 0x00, 0x00),
+            (0xff, 0xff, 0xff),
+            (0xcd, 0x00, 0x00),
+            (0x00, 0xcd, 0x00),
+        ],
+    ),
+    (
+        "gruvbox",
+        [
+            (0x28, 0x28, 0x28),
+            (0xeb, 0xdb, 0xb2),
+            (0xcc, 0x24, 0x1d),
+            (0x98, 0x97, 0x1a),
+        ],
+    ),
+];
+
+fn answer_of([pane, ink, red, green]: Answer) -> vigia::Colours {
+    let mut ansi = [None; 16];
+    ansi[1] = Some(red);
+    ansi[2] = Some(green);
+    vigia::Colours {
+        background: pane,
+        foreground: Some(ink),
+        ansi,
+    }
+}
+
+/// What a wash costs the ink on it, as a share of the contrast the ink had on
+/// the bare pane: 1 costs nothing.
+fn cost(ink: (u8, u8, u8), wash: (u8, u8, u8), pane: (u8, u8, u8)) -> f64 {
+    contrast(ink, wash) / contrast(ink, pane)
+}
+
+/// `system` washes the diff from the terminal's own colours, as visibly as the
+/// quietest showcase wash and at no greater cost to the text on it than the
+/// costliest showcase wash.
+#[test]
+fn system_washes_diff() {
+    let (mut seen, mut row_cost, mut word_cost) = (f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    for (_, theme, pane) in palettes() {
+        let ink = rgb_of(theme.context);
+        let bg = |style: Style| channels_of(style.bg.expect("a wash"), "showcase wash");
+        for (row, word) in [
+            (bg(theme.added_row), bg(theme.added_word)),
+            (bg(theme.removed_row), bg(theme.removed_word)),
+        ] {
+            seen = seen.min(contrast(row, pane));
+            row_cost = row_cost.min(cost(ink, row, pane));
+            word_cost = word_cost.min(cost(ink, word, pane));
+        }
+    }
+
+    for (name, colours) in TERMINALS {
+        let palette = answer_of(colours);
+        let [pane, ink, ..] = colours;
+        let theme = Theme::system(Some(&palette)).resolve(Depth::Truecolor);
+        let wash = |style: Style, which| channels_of(style.bg.expect("a system wash"), which);
+        let added = wash(theme.added_row, "added row");
+        let removed = wash(theme.removed_row, "removed row");
+        assert_ne!(
+            added, removed,
+            "{name}: an addition and a removal share a wash"
+        );
+
+        for (which, row, word) in [
+            ("added", added, wash(theme.added_word, "added word")),
+            ("removed", removed, wash(theme.removed_word, "removed word")),
+        ] {
+            let visible = contrast(row, pane);
+            assert!(
+                visible >= seen - 0.01,
+                "{name}'s {which} row stands {visible:.2}:1 from its pane, under the \
+                 quietest showcase wash at {seen:.2}:1"
+            );
+            let spent = cost(ink, row, pane);
+            assert!(
+                spent >= row_cost,
+                "{name}'s {which} row keeps {spent:.2} of the text's contrast, under \
+                 the showcases' {row_cost:.2}"
+            );
+            let spent = cost(ink, word, pane);
+            assert!(
+                spent >= word_cost,
+                "{name}'s {which} word wash keeps {spent:.2} of the text's contrast, \
+                 under the showcases' {word_cost:.2}"
+            );
+            assert!(
+                contrast(word, pane) > visible,
+                "{name}'s {which} word wash is no hotter than its row"
+            );
+        }
+    }
+}
+
+/// With no answer, or no green and red, `system` is `ansi`: nothing it
+/// cannot see is guessed.
+#[test]
+fn system_without_answers() {
+    assert_eq!(Theme::system(None), Theme::ansi());
+    let silent = vigia::Colours {
+        background: (0, 0, 0),
+        foreground: None,
+        ansi: [None; 16],
+    };
+    assert_eq!(
+        Theme::system(Some(&silent)),
+        Theme::ansi(),
+        "a background alone is not enough to wash a diff"
+    );
+    assert_eq!(Theme::named("system"), Some(Theme::ansi()));
+}
+
+/// `VIGIA_THEME=system` takes the terminal's answer; detection alone never does.
+#[test]
+fn system_is_chosen() {
+    let palette = answer_of(TERMINALS[0].1);
+    let named = |key: &str| (key == "VIGIA_THEME").then(|| "system".to_owned());
+    assert_eq!(
+        theme::from_env(
+            Depth::Truecolor,
+            named,
+            Some(vigia::Background::Dark),
+            Some(&palette)
+        )
+        .expect("a theme"),
+        Theme::system(Some(&palette)).resolve(Depth::Truecolor),
+    );
+    let none = |_: &str| None;
+    assert_eq!(
+        theme::from_env(
+            Depth::Truecolor,
+            none,
+            Some(vigia::Background::Dark),
+            Some(&palette)
+        )
+        .expect("a theme"),
+        Theme::dark().resolve(Depth::Truecolor),
+        "an answered palette displaced the showcase nobody asked to replace"
+    );
+}
+
+/// A wide glyph keeps the wash under both of its columns, at every width, as a
+/// terminal draws it. A backend never receives a wide glyph's second cell, and a
+/// terminal paints the glyph's own background across both, so that cell counts
+/// as the glyph's.
+#[test]
+fn wide_glyph_washed() {
+    let dark = Theme::dark().resolve(Depth::Truecolor);
+    let wash = wash_of(dark, true);
+    // The line numbers take the gutter's tone rather than the row's.
+    let tone = dark.added_gutter.bg.expect("a gutter tone");
+    let mut view = three_kinds();
+    view.rows[ADDED as usize - 1] = line(LineKind::Added, 2, "日本語のテキストです");
+
+    let mut failing = Vec::new();
+    for width in 10..=120u16 {
+        let backend = draw(width, 8, &view, dark);
+        let buffer = backend.buffer();
+        // The gutter, which takes the tone, is everything left of the sigil.
+        let sigil = (0..width)
+            .find(|&x| buffer[(x, ADDED)].symbol() == "+")
+            .expect("the added row draws its sigil");
+        let washed = |x: u16| {
+            let cell = &buffer[(x, ADDED)];
+            if cell.bg == wash || (x < sigil && cell.bg == tone) {
+                return true;
+            }
+            let before = &buffer[(x - 1, ADDED)];
+            ratatui::text::Span::raw(before.symbol()).width() == 2 && before.bg == wash
+        };
+        let holes: Vec<u16> = (1..width).filter(|&x| !washed(x)).collect();
+        if !holes.is_empty() {
+            failing.push((width, holes));
+        }
+    }
+    assert!(
+        failing.is_empty(),
+        "the wash is missing at {} widths, first {:?}",
+        failing.len(),
+        failing.first()
+    );
+}
+
+/// The chrome's two inks read against the pane each palette is drawn for, at
+/// WCAG AA's 4.5:1 for text. `ansi` draws named colours on a pane it cannot
+/// know, and `nothing_a_reader_has_to_read_is_drawn_in_colour_eight` holds it.
+#[test]
+fn chrome_readable() {
+    for (name, theme, pane) in palettes() {
+        for (key, style) in [("chrome", theme.chrome), ("chrome_dim", theme.chrome_dim)] {
+            let ratio = contrast(rgb_of(style), pane);
+            assert!(
+                ratio >= 4.5,
+                "{name}'s {key} reads at {ratio:.2}:1 against its pane"
+            );
+        }
     }
 }

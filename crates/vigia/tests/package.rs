@@ -3,8 +3,10 @@
 #[path = "support/mod.rs"]
 mod screen;
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 /// The two shapes a test uses to read outside this package.
 const PATH_ATTRIBUTE: &str = concat!("#[path = \"..", "/../");
@@ -257,12 +259,21 @@ fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
     );
 }
 
+/// The hand-off's dispatch of the release. The push step dispatches bump.yml too,
+/// when the default branch moved under it, so the file's first dispatch is not this.
+fn hand_off_dispatch(bump: &str) -> String {
+    run_commands(step_block(bump, "hand off to the release"))
+        .into_iter()
+        .find(|command| command.contains("gh workflow run"))
+        .expect("bump.yml dispatches the release")
+}
+
 /// The step named `name`, from its `- name:` to the next step's.
 fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
     let header = format!("- name: {name}");
     let at = bump
         .find(&header)
-        .unwrap_or_else(|| panic!("bump.yml has no step named `{name}`"));
+        .unwrap_or_else(|| panic!("the workflow has no step named `{name}`"));
     let rest = &bump[at + header.len()..];
     rest.find("\n      - ").map_or(rest, |end| &rest[..end])
 }
@@ -989,6 +1000,35 @@ fn the_purity_gate_derives_its_targets_from_the_release_config() {
     }
 }
 
+/// A bump whose push lost a race with a merge starts the release again, and any other
+/// rejected push fails.
+#[test]
+fn a_bump_that_lost_a_race_is_dispatched_again() {
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let commit = step_block(&bump, "commit the bump");
+    let moved = commit
+        .find(r#"[ "$now" = "$(git rev-parse HEAD~1)" ]"#)
+        .expect("the push step does not check whether the default branch moved");
+    let retry = commit
+        .find("gh workflow run bump.yml")
+        .expect("the push step does not dispatch the release again");
+    assert!(
+        moved < retry,
+        "the release is dispatched again before checking the default branch moved"
+    );
+    let landed = commit
+        .find(r#"[ "$now" = "$(git rev-parse HEAD)" ] && exit 0"#)
+        .expect("a push that landed but reported failure is taken for a lost race");
+    assert!(
+        landed < retry,
+        "a push that landed is dispatched again, stranding its version"
+    );
+    assert!(
+        commit[retry..].contains("exit 1"),
+        "a retried run carries on, so the hand-off runs on a bump that never landed"
+    );
+}
+
 /// The button that cuts a release reaches the workflow that performs one.
 #[test]
 fn the_release_button_reaches_the_release() {
@@ -1011,10 +1051,7 @@ fn the_release_button_reaches_the_release() {
     // workflow run` takes one and a typo there is a 404 at release time.
     let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
     let commands = run_commands(&bump);
-    let dispatch = commands
-        .iter()
-        .find(|command| command.contains("gh workflow run"))
-        .expect("bump.yml dispatches the release");
+    let dispatch = hand_off_dispatch(&bump);
 
     // The word immediately after `gh workflow run`, not a mention anywhere in
     // the step. A `run: |` body is one string here, and that body ends with an
@@ -1141,17 +1178,14 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     assert_precedes(
         &bump,
         "git commit",
-        "gh workflow run",
+        "gh workflow run release.yml",
         "bump.yml dispatches the release before it commits the version, so the \
          release would build whatever the default branch carried beforehand",
     );
 
     // A rehearsal dispatches `dry-run` and a real release does not, and the polarity is
     // the assertion.
-    let dispatch = commands
-        .iter()
-        .find(|command| command.contains("gh workflow run"))
-        .expect("bump.yml dispatches the release");
+    let dispatch = hand_off_dispatch(&bump);
     assert!(
         dispatch.contains(r#"= "true" ]; then tag=dry-run"#),
         "the rehearsal's tag no longer depends on `rehearse` being true in the \
@@ -1428,11 +1462,12 @@ fn the_version_raise_counts_the_lines_it_moved_and_nothing_else() {
 
 /// Drives the judgement `ci complete` runs, with fabricated leg results.
 #[cfg(unix)]
-fn ci_complete(draft: &str, legs: &[&str]) -> bool {
+fn ci_complete(draft: &str, class: &str, legs: &[&str]) -> bool {
     let script = repo_root().join(".github/scripts/ci-complete.sh");
     std::process::Command::new("sh")
         .arg(&script)
         .arg(draft)
+        .arg(class)
         .args(legs)
         .output()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()))
@@ -1440,68 +1475,305 @@ fn ci_complete(draft: &str, legs: &[&str]) -> bool {
         .success()
 }
 
-/// A draft's skipped legs are not a failure, and everything else still is.
+/// The legs `ci.yml` passes, in its order.
+#[cfg(unix)]
+const LEGS: [&str; 7] = [
+    "lint",
+    "test",
+    "budgets",
+    "benches",
+    "pure-rust",
+    "musl",
+    "docs",
+];
+
+/// `LEGS` paired with `results`, as `name=result`.
+#[cfg(unix)]
+fn legs(results: [&str; 7]) -> Vec<String> {
+    LEGS.iter()
+        .zip(results)
+        .map(|(name, result)| format!("{name}={result}"))
+        .collect()
+}
+
+/// A draft's skipped legs are not a failure, a docs pull request's skipped
+/// heavy legs are not a failure, and every other skip and every failure is.
 #[cfg(unix)]
 #[test]
-fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
-    const OK: [&str; 5] = ["success"; 5];
+fn ci_complete_judgement() {
+    const S: &str = "success";
+    const K: &str = "skipped";
+    let full = legs([S, S, S, S, S, S, K]);
+    let docs = legs([S, K, K, K, K, K, S]);
+    let all_skipped = legs([K; 7]);
+    fn strs(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
 
-    assert!(ci_complete("false", &OK), "a full green run has to pass");
-    // A push carries no pull request, so the workflow passes an empty draft
-    // flag. Reading that as "not a draft" is the whole of it, and reading it as
-    // an error turned every push to `main` red.
     assert!(
-        ci_complete("", &OK),
-        "a push has no pull request and its draft flag is empty, which is not an error"
+        ci_complete("false", "full", &strs(&full)),
+        "a full green run has to pass"
+    );
+    // A push carries no pull request, so the workflow passes an empty draft
+    // flag and an empty class. Reading those as "not a draft, run everything"
+    // is the whole of it, and reading them as an error turned every push to
+    // `main` red.
+    assert!(
+        ci_complete("", "", &strs(&full)),
+        "a push has no pull request; its draft flag and class are empty, which is not an error"
     );
     assert!(
-        ci_complete("true", &["skipped"; 5]),
+        ci_complete("true", "", &strs(&all_skipped)),
         "a draft skips every leg by design and the matrix runs on ready_for_review"
     );
+    assert!(
+        ci_complete("false", "docs", &strs(&docs)),
+        "a docs pull request runs the documents leg and skips the heavy ones by design"
+    );
 
-    for (draft, legs, why) in [
+    for (draft, class, results, why) in [
         (
             "false",
-            ["success", "skipped", "success", "success", "success"],
-            "a leg that skipped on a ready PR is the absent matrix this gate exists for",
+            "full",
+            [S, K, S, S, S, S, K],
+            "a heavy leg that skipped on a full run is the absent matrix this gate exists for",
+        ),
+        (
+            "false",
+            "",
+            [S, K, K, K, K, K, S],
+            "a docs-shaped run with no class is a classifier that never ran, not a docs pull request",
+        ),
+        (
+            "false",
+            "docs",
+            [S, K, K, K, K, K, K],
+            "a docs pull request whose documents leg skipped ran nothing",
+        ),
+        (
+            "false",
+            "docs",
+            [S, K, "failure", K, K, K, S],
+            "a docs pull request cannot launder a failing heavy leg through its skips",
         ),
         (
             "true",
-            ["skipped", "success", "skipped", "skipped", "skipped"],
+            "",
+            [K, S, K, K, K, K, K],
             "a draft that ran some legs and skipped others is a partial run",
         ),
         (
             "false",
-            ["success", "failure", "success", "success", "success"],
+            "full",
+            [S, "failure", S, S, S, S, K],
             "a failing leg fails the gate",
         ),
         (
             "true",
-            ["skipped", "failure", "skipped", "skipped", "skipped"],
+            "",
+            [K, "failure", K, K, K, K, K],
             "a draft cannot launder a failing leg through its skips",
         ),
         (
             "false",
-            ["success", "cancelled", "success", "success", "success"],
+            "full",
+            [S, "cancelled", S, S, S, S, K],
             "a cancelled leg never reported and is not a pass",
         ),
         (
             "",
-            ["skipped", "skipped", "skipped", "skipped", "skipped"],
+            "",
+            [K, K, K, K, K, K, K],
             "a push is never a draft, so legs that all skipped on one did not run and should have",
         ),
-        (
-            "",
-            ["success", "failure", "success", "success", "success"],
-            "a failing leg on a push fails the gate like any other",
-        ),
     ] {
-        assert!(!ci_complete(draft, &legs), "{why}");
+        assert!(!ci_complete(draft, class, &strs(&legs(results))), "{why}");
     }
 
     assert!(
-        !ci_complete("false", &[]),
+        !ci_complete("false", "full", &[]),
         "no results at all means the workflow stopped passing them, not that every leg passed"
+    );
+    assert!(
+        !ci_complete("false", "full", &["success"]),
+        "a bare result with no leg name is the old calling shape, and the script must refuse it"
+    );
+}
+
+/// Drives `change-class.sh` with a list of paths and returns its last line.
+#[cfg(unix)]
+fn change_class(paths: &str) -> String {
+    change_class_with(paths, "")
+}
+
+/// The same, with the `full-ci` label set.
+#[cfg(unix)]
+fn change_class_forced(paths: &str) -> String {
+    change_class_with(paths, "true")
+}
+
+#[cfg(unix)]
+fn change_class_with(paths: &str, forced: &str) -> String {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let script = repo_root().join(".github/scripts/change-class.sh");
+    let mut child = std::process::Command::new("sh")
+        .arg(&script)
+        .env("CI_FULL", forced)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
+    child
+        .stdin
+        .take()
+        .expect("the child's stdin is a pipe")
+        .write_all(paths.as_bytes())
+        .expect("the paths reach the script");
+    let out = child.wait_with_output().expect("the script exits");
+    assert!(out.status.success(), "change-class.sh failed on {paths:?}");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Documents, skills, templates and images are `docs`; anything else, an
+/// empty list included, is `full`.
+#[cfg(unix)]
+#[test]
+fn change_class_decides() {
+    for (paths, class) in [
+        ("README.md\nSPEC.md\ndocs/THEME.md\n", "docs"),
+        (
+            ".claude/skills/take-next/SKILL.md\n.claude/settings.json\n",
+            "docs",
+        ),
+        (".claude/scripts/mutate.mjs\n", "full"),
+        (
+            ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
+            "docs",
+        ),
+        ("assets/preview.svg\nLICENSE\n", "docs"),
+        ("README.md\ncrates/vigia/src/lib.rs\n", "full"),
+        ("README.md\n.github/workflows/ci.yml\n", "full"),
+        ("README.md\n.github/scripts/ci-complete.sh\n", "full"),
+        ("Cargo.toml\n", "full"),
+        ("assets/syntaxes/dump.bin\n", "full"),
+        ("crates/vigia-core/assets/NOTICE.md\n", "full"),
+        ("crates/vigia/tests/package.rs\n", "full"),
+        ("", "full"),
+        ("\n\n", "full"),
+    ] {
+        assert_eq!(change_class(paths), class, "the class of {paths:?}");
+    }
+    assert_eq!(
+        change_class_forced("README.md\n"),
+        "full",
+        "the full-ci label did not force the full run"
+    );
+}
+
+/// Every job that skips on a docs pull request says so, and the documents
+/// job runs only then.
+#[test]
+fn heavy_legs_gated() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    for job in ["test", "budgets", "benches", "pure-rust", "musl"] {
+        let block = ci
+            .split_once(&format!("\n  {job}:\n"))
+            .map(|(_, rest)| rest.split("\n  ").take(6).collect::<Vec<_>>().join("\n  "))
+            .unwrap_or_else(|| panic!("ci.yml declares the {job} job"));
+        assert!(
+            block.contains("needs: [changes]")
+                && block.contains("needs.changes.outputs.class != 'docs'"),
+            "the {job} job does not skip on a docs pull request:\n{block}"
+        );
+    }
+    let docs = ci
+        .split_once("\n  docs:\n")
+        .map(|(_, rest)| rest.split("\n  ").take(6).collect::<Vec<_>>().join("\n  "))
+        .expect("ci.yml declares the docs job");
+    assert!(
+        docs.contains("needs.changes.outputs.class == 'docs'"),
+        "the docs job does not run only on a docs pull request:\n{docs}"
+    );
+}
+
+/// The documents job names every test binary that reads a document.
+///
+/// A test that reads `README.md`, `SPEC.md` or `docs/THEME.md` has to run when
+/// only that document changed. Scanned by string literal, because a read is
+/// a path in the source and nothing else marks it.
+#[test]
+fn docs_suites_named() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = ci
+        .split_once("the suites that read documents")
+        .map(|(_, rest)| rest.split("\n      -").next().unwrap_or_default())
+        .expect("ci.yml has the documents step");
+
+    const DOCUMENTS: [&str; 9] = [
+        "README",
+        "SPEC",
+        "ROADMAP",
+        "RULINGS",
+        "CLAUDE",
+        "CHANGELOG",
+        "CONTRIBUTING",
+        "RELEASE-SMOKE",
+        "REVOCATIONS",
+    ];
+    let mut missing = Vec::new();
+    for crate_dir in ["crates/vigia", "crates/vigia-core"] {
+        let tests = repo_root().join(crate_dir).join("tests");
+        for entry in std::fs::read_dir(&tests)
+            .unwrap_or_else(|e| panic!("read {}: {e}", tests.display()))
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let source = read(&path);
+            // A fixture named README.md is not a read of the repository's. A
+            // read resolves from the crate directory or the repository root.
+            let resolves = source.contains("CARGO_MANIFEST_DIR") || source.contains("repo_root()");
+            let reads = resolves
+                && source.lines().any(|line| {
+                    let line = line.trim_start();
+                    !line.starts_with("//")
+                        && (DOCUMENTS.iter().any(|name| {
+                            line.contains(&format!("\"{name}.md\""))
+                                || line.contains(&format!("/{name}.md\""))
+                        }) || line.contains("docs/THEME.md\"")
+                            || line.contains("docs/CONFIG.md\"")
+                            || line.contains("docs/TECHPACK.md\""))
+                });
+            if !reads {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if !step.contains(&format!("--test {name}")) {
+                missing.push(format!("{crate_dir}/tests/{name}.rs"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "these tests read a document and the documents job does not run them, so a \
+         docs-only pull request can break what they check:\n{}",
+        missing.join("\n")
+    );
+    assert!(
+        step.contains("--test package") && step.contains("--test register"),
+        "the documents step lost package or register:\n{step}"
     );
 }
 
@@ -1521,8 +1793,20 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
         "ci.yml does not pass the draft expression to the script, so the gate's draft \
          cases are testing an argument production never sends"
     );
-    for leg in ["lint", "test", "benches", "pure-rust", "musl"] {
-        let arg = format!("needs.{leg}.result");
+    assert!(
+        ci.contains("'${{ needs.changes.outputs.class }}'"),
+        "ci.yml does not pass the class to the script, so a docs pull request's skips          and a broken classifier's skips are judged alike"
+    );
+    for leg in [
+        "lint",
+        "test",
+        "budgets",
+        "benches",
+        "pure-rust",
+        "musl",
+        "docs",
+    ] {
+        let arg = format!("'{leg}=${{{{ needs.{leg}.result }}}}'");
         assert!(
             ci.contains(&arg),
             "ci.yml does not pass {arg} to the script, so that leg is judged by nothing"
@@ -1681,6 +1965,21 @@ fn the_bump_writes_the_changelog_it_publishes() {
          over the script proves nothing about the release: {step}"
     );
     assert!(
+        step.contains("grep '^Release-note:'") && step.contains("--format='%B'"),
+        "bump.yml's changelog step does not read Release-note lines from commit \
+         bodies, so a PR title always becomes the note: {step}"
+    );
+    assert!(
+        step.contains("--json labels") && step.contains("\\t%s\\t%s\\n"),
+        "bump.yml's changelog step does not pass each pull request's labels to \
+         the script, so the label cannot decide what the release says: {step}"
+    );
+    assert!(
+        step.contains("commits/${sha}/pulls"),
+        "bump.yml's changelog step does not look a commit up by SHA, so a subject \
+         with no (#n) reaches the script with no pull request: {step}"
+    );
+    assert!(
         step.contains("git describe --tags --abbrev=0"),
         "bump.yml's changelog step does not start the range at the previous \
          release: {step}"
@@ -1710,7 +2009,7 @@ fn the_bump_writes_the_changelog_it_publishes() {
     );
 }
 
-/// Drives the generator against fixed subjects, in a scratch directory of its
+/// Drives the generator against fixed records, in a scratch directory of its
 /// own. Returns whether it passed, the file it left behind, and what it said.
 ///
 /// Read to end rather than waited on, because with the log captured a `wait`
@@ -1740,12 +2039,20 @@ fn changelog_entry(
         .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
-    child
+    // A script that exits before reading everything closes the pipe first; its
+    // exit status and output are what the cases judge.
+    if let Err(e) = child
         .stdin
         .take()
         .expect("the child's stdin is a pipe")
         .write_all(subjects.as_bytes())
-        .expect("the subjects reach the script");
+    {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "the subjects reach the script: {e}"
+        );
+    }
     let out = child.wait_with_output().expect("the script exits");
 
     let left = read(&path);
@@ -1757,219 +2064,401 @@ fn changelog_entry(
     )
 }
 
-/// The generator keeps what a reader of the pane can see and drops the rest.
+/// One changelog before any release under test writes to it.
+#[cfg(unix)]
+const CHANGELOG_BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+/// The bullets the generator wrote under `version`.
+#[cfg(unix)]
+fn bullets<'a>(changelog: &'a str, version: &str) -> Vec<&'a str> {
+    let heading = format!("## [{version}]");
+    changelog
+        .lines()
+        .skip_while(|line| !line.starts_with(&heading))
+        .skip(1)
+        .take_while(|line| !line.starts_with("## ["))
+        .filter(|line| line.starts_with("- "))
+        .collect()
+}
+
+/// The label decides, and the subject's wording decides nothing.
 ///
-/// The filter is the only part of the release that decides what a user is
-/// told, and it is a heuristic over commit subjects, so it is driven here
-/// rather than trusted. One subject of each class it sorts on: prefixed
-/// internal work, unprefixed internal work naming a document, a credential
-/// subject the release machinery owns, a subject whose visible half shares a
-/// sentence with an internal word, two naming the pane over a word that would
-/// otherwise drop them, and two changes a reader can observe, whose trailing
-/// references belong to the tracker and come off.
-///
-/// The two naming the pane are the direction this file is least able to be
-/// wrong in. A visible change has no mention anywhere but the section, so the
-/// filter dropping one is invisible to every check downstream, and the words
-/// that drop it match anywhere in the sentence rather than at an anchor.
+/// One subject, twice: the same factory sentence is dropped under `internal`
+/// and written under `release`. The old subject list would have passed it
+/// both times, since it carries no prefix and no word the list knew.
 #[cfg(unix)]
 #[test]
-fn the_changelog_entry_keeps_what_a_reader_can_see() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let subjects = "roadmap: a row moves\n\
-                    The roadmap marks a row done (#449)\n\
-                    The release token is the one that already exists (#146)\n\
-                    `Esc` closes the sheet, and the ruling that said otherwise is revoked (#394)\n\
-                    `w` wraps a long line, capped at two (#272) (#344)\n\
-                    B12: the keymap gets a sheet over the pane, not a longer hint bar (#273)\n\
-                    A click on the position token opens the list (#508)\n\
-                    The pane stops showing what is no longer there (#340) (#341)\n";
-    let (passed, left, _) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
-    assert!(
-        passed,
-        "the generator refused a section it can write:\n{left}"
-    );
-
-    let written: Vec<&str> = left
-        .lines()
-        .skip_while(|line| !line.starts_with("## [0.2.0]"))
-        .take_while(|line| !line.starts_with("## [0.1.0]"))
-        .filter(|line| line.starts_with("- "))
-        .collect();
+fn label_decides() {
+    let records = "#10\tinternal\tGive each main commit its own CI group (#10)\n\
+                   #11\trelease\tGive each main commit its own CI group (#11)\n\
+                   #12\trelease,bug\tA click on the position token opens the list (#508) (#12)\n";
+    let (passed, left, said) = changelog_entry("label", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a labelled range:\n{said}");
     assert_eq!(
-        written,
+        bullets(&left, "0.2.0"),
         [
-            "- `Esc` closes the sheet, and the ruling that said otherwise is revoked",
-            "- `w` wraps a long line, capped at two",
-            "- B12: the keymap gets a sheet over the pane, not a longer hint bar",
+            "- Give each main commit its own CI group",
             "- A click on the position token opens the list",
-            "- The pane stops showing what is no longer there",
         ],
-        "the generator kept the wrong subjects:\n{left}"
+        "the label did not decide the section:\n{left}"
+    );
+    assert!(
+        said.contains("skipped as internal: #10"),
+        "the log does not name the skipped pull request:\n{said}"
+    );
+    assert!(
+        !said.contains("#11") && !said.contains("#12"),
+        "the log names a kept pull request as skipped:\n{said}"
     );
 
     // A section already written is the better text, so it is not overwritten.
-    // A re-run of a release reaches this, and so does a section written by
-    // hand.
-    let (passed, left, _) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
+    let (passed, left, _) = changelog_entry(
+        "existing",
+        "0.1.0",
+        "#1\trelease\tA change (#1)\n",
+        CHANGELOG_BEFORE,
+    );
     assert!(
-        !passed && left == BEFORE,
+        !passed && left == CHANGELOG_BEFORE,
         "the generator overwrote a section that was already written:\n{left}"
     );
 }
 
-/// A range the filter empties is reported, not summarised as nothing moving.
-///
-/// A sentence saying nothing moved is a conclusion drawn from a word list's
-/// silence over free prose, and the section is the only place the change was
-/// ever going to be named, so nothing downstream can catch it being wrong. The
-/// range itself is what is honest to write: a reader who can see the change the
-/// filter could not is then looking at it.
-///
-/// The section still has to exist, because a missing one makes `dist` fall back
-/// to the install instructions with no warning anywhere.
+/// A `Release-note:` line is the bullet, not the subject, and `none` on an
+/// `internal` pull request writes nothing.
 #[cfg(unix)]
 #[test]
-fn the_changelog_entry_reports_an_empty_result_rather_than_asserting_it() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let subjects = "The masthead is removed, and the ruling that kept it is revoked (#462)\n\
-                    roadmap: a row moves\n";
-    let (passed, left, _) = changelog_entry("empty", "0.3.0", subjects, BEFORE);
-    assert!(
-        passed,
-        "the generator refused a range it had dropped everything from:\n{left}"
+fn note_wins() {
+    let records = "#20\trelease\tRelease-note: Paint nothing for idle pointer motion\n\
+                   #21\tinternal\tRelease-note: none\n\
+                   #22\trelease\tRelease-note: Show the staged count on an empty pane (#9)\n\
+                   #23\trelease\tThe pane stops showing what is gone (#23)\n";
+    let (passed, left, said) = changelog_entry("notes", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a noted range:\n{said}");
+    assert_eq!(
+        bullets(&left, "0.2.0"),
+        [
+            "- Paint nothing for idle pointer motion",
+            "- Show the staged count on an empty pane",
+            "- The pane stops showing what is gone",
+        ],
+        "notes were not written as they stand, in order:\n{left}"
     );
     assert!(
-        left.contains("## [0.3.0]"),
-        "a range the filter emptied left no section, so the release would fall \
-         back to the install instructions in silence:\n{left}"
+        said.contains("Release-note: none: #21"),
+        "the log does not name the pull request whose note is none:\n{said}"
     );
+}
 
-    for subject in [
-        "The masthead is removed, and the ruling that kept it is revoked",
-        "roadmap: a row moves",
+/// A label and a trailer that disagree fail the bump, and so does a pull
+/// request with no label or both. Every failure in the range is named.
+#[cfg(unix)]
+#[test]
+fn intent_conflict_fails() {
+    let records = "#30\trelease\tRelease-note: none\n\
+                   #31\tinternal\tRelease-note: A key moves\n\
+                   #32\t\tRelease-note: A key moves\n\
+                   #33\trelease,internal\tBoth labels (#33)\n\
+                   #34\trelease\tA good one (#34)\n";
+    let (passed, left, said) = changelog_entry("conflict", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE,
+        "a range with a disagreement cut a version:\n{left}"
+    );
+    for (who, why) in [
+        ("#30", "none and is labelled release"),
+        ("#31", "labelled internal and carries Release-note"),
+        ("#32", "no release label"),
+        ("#33", "both release and internal"),
     ] {
         assert!(
-            left.contains(subject),
-            "the section does not carry {subject:?}, so a reader is told what the \
-             filter concluded and never shown what it read:\n{left}"
+            said.contains(&format!("::error::{who} ")) && said.contains(why),
+            "the refusal does not name {who} ({why}):\n{said}"
         );
     }
     assert!(
-        !left.contains("Nothing a user of the pane can see moved"),
-        "the section still asserts nothing moved, over a range whose one commit \
-         removed a key and its setting:\n{left}"
+        !said.contains("::error::#34"),
+        "the refusal names a pull request that was right:\n{said}"
     );
 }
 
-/// The generator names every subject it drops, in the log of the run that drops
-/// it.
-///
-/// A drop is invisible everywhere else. The section is the only place the change
-/// was going to appear, so a range that keeps nine subjects and loses the tenth
-/// reads as a complete section, and the branch above cannot see that case.
-///
-/// The kept subject is asserted absent as well, because a log naming the whole
-/// range would satisfy the other half while reporting no decision at all.
+/// A pull request with neither label fails the bump and is named, whatever
+/// its subject says. A commit with no pull request is named by its SHA.
 #[cfg(unix)]
 #[test]
-fn the_changelog_entry_names_every_subject_it_drops() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let subjects = "roadmap: a row moves\n\
-                    The roadmap marks a row done (#449)\n\
-                    The pane stops showing what is no longer there (#340)\n";
-    let (passed, left, said) = changelog_entry("dropped", "0.2.0", subjects, BEFORE);
+fn unlabelled_fails() {
+    let records = "#40\trelease\tThe pane draws a thing (#40)\n\
+                   #41\t\tGive each main commit its own CI group (#41)\n\
+                   #42\tbug\tThe pane draws another thing (#42)\n\
+                   abc1234\t\tA direct push\n";
+    let (passed, left, said) = changelog_entry("unlabelled", "0.2.0", records, CHANGELOG_BEFORE);
     assert!(
-        passed,
-        "the generator refused a section it can write:\n{left}"
+        !passed && left == CHANGELOG_BEFORE,
+        "an unlabelled pull request cut a version:\n{left}"
     );
-
-    for dropped in [
-        "roadmap: a row moves",
-        "The roadmap marks a row done (#449)",
-    ] {
+    for who in ["#41", "#42", "abc1234"] {
         assert!(
-            said.contains(&format!("filtered as internal: {dropped}")),
-            "the run's log does not name {dropped:?}, so a release that loses one \
-             line out of ten loses it in silence:\n{said}"
+            said.contains(&format!(
+                "::error::{who} is labelled neither release nor internal"
+            )),
+            "the refusal does not name {who}:\n{said}"
         );
     }
     assert!(
-        !said.contains("The pane stops showing"),
-        "the log names a subject the filter kept, so it reports the range rather \
-         than the decision:\n{said}"
+        !said.contains("::error::#40"),
+        "the refusal names the labelled pull request:\n{said}"
     );
 }
 
-/// Every config key reaches the filter that decides what a release says.
-///
-/// That filter keeps a subject naming something a reader can press or set, and
-/// it names the settings literally. A key added to the config and not to the
-/// pattern is a change a reader can make in their own file and never be told
-/// about, on any release whose subject also carries an internal word.
-///
-/// The assignment line is read alone rather than the whole script, because the
-/// prose above it names the settings too and would satisfy a search over the
-/// file.
+/// A range that keeps nothing is refused, so the bump stops before a version
+/// is cut. An empty range is refused the same way.
+#[cfg(unix)]
 #[test]
-fn every_config_key_reaches_the_changelog_filter() {
-    let script = repo_file(".github/scripts/changelog-entry.sh");
-    let pattern = script
-        .lines()
-        .find(|line| line.starts_with("visible_subject="))
-        .expect("changelog-entry.sh assigns visible_subject");
-
-    // Split on the alternation's own punctuation, so a key that is merely a
-    // substring of another alternative does not count as named.
-    let named: Vec<&str> = pattern.split(['|', '(', ')']).collect();
-    let missing: Vec<&str> = vigia::config::KEYS
-        .into_iter()
-        .chain(vigia::config::VALUES)
-        .filter(|key| !named.contains(key))
-        .collect();
+fn all_internal_refused() {
+    let records = "#50\tinternal\tdocs: tidy the README (#50)\n\
+                   #51\tinternal\tRelease-note: none\n";
+    let (passed, left, said) = changelog_entry("process", "0.2.0", records, CHANGELOG_BEFORE);
     assert!(
-        missing.is_empty(),
-        "the release notes filter does not name {}, so a subject changing only \
-         that setting is dropped whenever it shares a sentence with an internal \
-         word:\n{pattern}",
-        missing.join(" or ")
+        !passed && left == CHANGELOG_BEFORE,
+        "a process-only range cut a version:\n{left}"
+    );
+    assert!(
+        said.contains("nothing user-facing"),
+        "the refusal says nothing:\n{said}"
+    );
+
+    let (passed, left, said) = changelog_entry("empty", "0.2.0", "", CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("nothing user-facing"),
+        "an empty range cut a version:\n{said}"
+    );
+
+    // One labelled subject is enough to release, trailer or not.
+    let records = "#52\tinternal\tdocs: tidy the README (#52)\n\
+                   #53\trelease\tThe pane draws a thing (#53)\n";
+    let (passed, left, _) = changelog_entry("one-visible", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "a range with a visible change was refused:\n{left}");
+}
+
+/// A kept line in contract phrasing is released with a warning, not refused.
+#[cfg(unix)]
+#[test]
+fn dialect_subject_warned() {
+    let records =
+        "#60\trelease\tThe third word is only, and it is the reading that goes inert (#60)\n";
+    let (passed, left, said) = changelog_entry("dialect", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "a riddle subject blocked the release:\n{left}");
+    assert!(
+        said.contains("::warning::contract phrasing in the release notes: The third word"),
+        "the riddle subject was not named:\n{said}"
     );
 }
 
-/// What each prose document is allowed to weigh, in bytes.
+/// A record without its three fields is refused, not read as a subject.
+#[cfg(unix)]
+#[test]
+fn bare_subject_refused() {
+    let records = "The pane draws a thing (#70)\n";
+    let (passed, left, said) = changelog_entry("bare", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("malformed record"),
+        "a bare subject reached the section without a label:\n{said}"
+    );
+}
+
+/// Runs `.github/scripts/<script> base` in a scratch repository, with `env`
+/// set. `commits` runs after one base commit tagged `base` that holds `files`.
+/// Returns whether it passed and what it said.
+#[cfg(unix)]
+fn run_in_scratch(
+    case: &str,
+    files: &[(&str, &str)],
+    commits: &[(&str, &str)],
+    script: &str,
+    env: (&str, &str),
+) -> (bool, String) {
+    let dir = std::env::temp_dir().join(format!("vigia-{script}-{}-{case}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    for (path, text) in files {
+        let at = dir.join(path);
+        std::fs::create_dir_all(at.parent().expect("a file has a parent")).expect("fixture dir");
+        std::fs::write(at, text).expect("write the fixture");
+    }
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["add", "."]);
+    git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&["tag", "base"]);
+    for (subject, body) in commits {
+        let mut args = vec!["commit", "-q", "--allow-empty", "-m", subject];
+        if !body.is_empty() {
+            args.extend(["-m", body]);
+        }
+        git(&args);
+    }
+    let out = Command::new("sh")
+        .arg(repo_root().join(".github/scripts").join(script))
+        .arg("base")
+        .env(env.0, env.1)
+        .current_dir(&dir)
+        .output()
+        .unwrap_or_else(|e| panic!("{script} runs: {e}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+/// Runs `title-check.sh` in a scratch repository: one base commit, then
+/// `commits` as `(subject, body)`. Returns whether it passed and what it said.
+#[cfg(unix)]
+fn title_check(case: &str, title: &str, commits: &[(&str, &str)]) -> (bool, String) {
+    run_in_scratch(case, &[], commits, "title-check.sh", ("TITLE", title))
+}
+
+/// CI rejects contract phrasing in a title or subject unless a commit body
+/// carries `Release-note:`. The PR body does not count, since squash drops it.
+#[cfg(unix)]
+#[test]
+fn title_check_rejects() {
+    const RIDDLE: &str = "Nothing keeps a toggle, and remember is what does";
+
+    let (passed, said) = title_check("title", RIDDLE, &[("Remember toggles", "")]);
+    assert!(!passed, "a riddle title with no note passed:\n{said}");
+
+    let (passed, said) = title_check("subject", "Remember toggles", &[(RIDDLE, "")]);
+    assert!(
+        !passed,
+        "a riddle commit subject with no note passed:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "rescued",
+        RIDDLE,
+        &[(RIDDLE, "Release-note: Remember toggles between runs")],
+    );
+    assert!(
+        passed,
+        "a riddle title and subject with a note in the same commit failed:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "other-commit",
+        "Remember toggles",
+        &[
+            ("docs: plain", "Release-note: Remember toggles between runs"),
+            (RIDDLE, ""),
+        ],
+    );
+    assert!(
+        !passed,
+        "a trailer on one commit excused another commit's riddle subject:\n{said}"
+    );
+
+    let (passed, said) = title_check(
+        "plain",
+        "Remember toggles between runs",
+        &[("Remember toggles", "")],
+    );
+    assert!(passed, "a plain title failed:\n{said}");
+
+    let (passed, said) = title_check("code", "Rename `is what does` helper", &[("Rename it", "")]);
+    assert!(passed, "a phrase inside backticks failed:\n{said}");
+}
+
+/// The lint job runs the title check on pull requests, with history to diff.
+#[test]
+fn ci_runs_title_check() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let lint = ci
+        .split_once("\n  lint:")
+        .and_then(|(_, rest)| rest.split_once("\n  test:"))
+        .map(|(lint, _)| lint)
+        .expect("ci.yml has a lint job before its test job");
+    assert!(
+        lint.contains("sh .github/scripts/title-check.sh"),
+        "the lint job does not run title-check.sh:\n{lint}"
+    );
+    assert!(
+        lint.contains("fetch-depth: 0"),
+        "the lint job checks out without history, so the PR's commits cannot be read"
+    );
+    assert!(
+        lint.contains("TITLE: ${{ github.event.pull_request.title }}")
+            && !lint.contains("title-check.sh \"${{"),
+        "the PR title must reach the script through env, never the command line"
+    );
+}
+
+/// The two documents every session reads first, and the most each may weigh
+/// in bytes. Growing past the ceiling fails the build.
 ///
-/// Prose says what holds and why, so it should get shorter as rulings are
-/// replaced, and a ceiling equal to today's size is what makes a pass adding a
-/// paragraph go and find one to delete. The two a session reads before anything
-/// else are here for the same reason from the other side: a rule stated three
-/// times in the skill costs the pass the room it needs to reason.
+/// `CLAUDE.md` gets about 300 bytes over its size on the commit that set this, so
+/// one sentence fits without a raise. The skill gets about 500 bytes, two
+/// or three sentences, on the reader's instruction of 2026-09-30.
+///
+/// `SPEC.md` and `RULINGS.md` carry no byte ceiling. A size cap fails a clearer
+/// sentence and passes a shorter one that dropped an exception, which is the
+/// wrong way round for a contract. What the contract must keep is every
+/// invariant, and [`SPEC_INVARIANTS`] holds that instead.
 ///
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
-///
-/// `SPEC.md` rose 1,706 bytes for B21's quoted code. A fenced block in an answer is a
-/// second way a note row is drawn, and what it costs the contract is the rules a reader
-/// cannot see in the code: what counts as a fence, that a code row breaks at the column
-/// where every other row here breaks at a blank, which grammar answers and what happens
-/// when none does, that an answer always draws a row, and that the copy still carries the
-/// markup the pane dropped. That last one would be re-derived: a pane that stopped drawing
-/// backticks and a clipboard that keeps them look like a defect until something says they
-/// are one rule. The clause a few sentences earlier gained five words in the same pass,
-/// because the answer being unmarked stopped being true the moment it could be coloured,
-/// and a contract that contradicts itself in one paragraph is worse than a longer one.
-/// §6's count of what parses moved from two to three, which is a correction rather than a
-/// raise: the sentence is how `compiled` is knowable at all, and a third parser it did not
-/// name makes it false. Two clauses under it went with the count, because a warmer that
-/// opens no file cannot be described by a paragraph that says a real file is the only way
-/// in. A raise with no new surface behind it is the thing this number is for.
-const WRITTEN_LAYER_BUDGET: [(&str, usize); 4] = [
-    ("SPEC.md", 407118),
-    ("RULINGS.md", 103037),
-    ("CLAUDE.md", 17304),
-    (".claude/skills/take-next/SKILL.md", 25813),
+const WRITTEN_LAYER_BUDGET: [(&str, usize); 2] = [
+    ("CLAUDE.md", 17_700),
+    (".claude/skills/take-next/SKILL.md", 22_400),
 ];
+
+/// Every invariant id the spec's table declares. One leaving fails the build.
+///
+/// The row shape is the one `preflight.sh` reads: a table row whose first cell
+/// is the bold id.
+const SPEC_INVARIANTS: [&str; 11] = [
+    "I1", "I2a", "I2b", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10",
+];
+
+/// The invariant ids whose table row is missing from `spec`.
+fn missing_invariants(spec: &str) -> Vec<&'static str> {
+    SPEC_INVARIANTS
+        .into_iter()
+        .filter(|id| {
+            let cell = format!("| **{id}**");
+            !spec.lines().any(|line| line.starts_with(&cell))
+        })
+        .collect()
+}
+
+/// The documents in [`WRITTEN_LAYER_BUDGET`] that `weigh` puts over their ceiling.
+fn over_budget(weigh: impl Fn(&str) -> usize) -> Vec<String> {
+    WRITTEN_LAYER_BUDGET
+        .into_iter()
+        .filter_map(|(name, ceiling)| {
+            let bytes = weigh(name);
+            (bytes > ceiling)
+                .then(|| format!(" {name}: {bytes} bytes against a ceiling of {ceiling}"))
+        })
+        .collect()
+}
 
 /// The documents that record events rather than argue positions.
 ///
@@ -2357,27 +2846,92 @@ fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
     );
 }
 
-/// Each prose document weighs no more than its budget.
+/// Each capped document weighs no more than its ceiling.
 #[test]
 fn the_written_layer_stays_under_its_budget() {
     let root = repo_root();
-    let mut over = Vec::new();
-
-    for (name, ceiling) in WRITTEN_LAYER_BUDGET {
-        let bytes = read(&root.join(name)).len();
-        if bytes > ceiling {
-            over.push(format!(
-                " {name}: {bytes} bytes against a ceiling of {ceiling}"
-            ));
-        }
-    }
-
+    let over = over_budget(|name| read(&root.join(name)).len());
     assert!(
         over.is_empty(),
-        "the written layer grew past its budget:\n{}\n\nLower the ceiling when prose \
-         comes out. Raising one to fit what was added is what this refuses: go and \
-         find the paragraph this one replaces.",
+        "grew past its ceiling:\n{}\n\nCut a sentence rather than raising the number. \
+         This gate is for CLAUDE.md and the skill only: SPEC.md and RULINGS.md have \
+         no byte cap.",
         over.join("\n")
+    );
+}
+
+/// A document one byte over its ceiling is reported.
+#[test]
+fn ceiling_overflow_fails() {
+    let over = over_budget(|name| {
+        WRITTEN_LAYER_BUDGET
+            .iter()
+            .find(|(capped, _)| *capped == name)
+            .map(|(_, ceiling)| ceiling + 1)
+            .expect("every name weighed is in the budget")
+    });
+    assert_eq!(
+        over.len(),
+        WRITTEN_LAYER_BUDGET.len(),
+        "a byte over the ceiling went unreported: {over:?}"
+    );
+}
+
+/// The spec's table declares every invariant.
+#[test]
+fn spec_invariant_ids() {
+    let missing = missing_invariants(&repo_file("SPEC.md"));
+    assert!(
+        missing.is_empty(),
+        "SPEC.md's invariant table no longer has a row for {}. An invariant is \
+         deleted by a ruling in RULINGS.md and a change to this list, never by an edit \
+         that lost the row",
+        missing.join(", ")
+    );
+}
+
+/// A spec that grew by a paragraph still passes.
+#[test]
+fn spec_grows_freely() {
+    let paragraph = "The pane redraws when the worktree changes and at no other time. ";
+    let mut longer = repo_file("SPEC.md");
+    while longer.len() < 404_954 + 2_048 {
+        longer.push_str(paragraph);
+    }
+    assert!(
+        missing_invariants(&longer).is_empty(),
+        "a spec 2k bytes past its last capped size must pass: only a lost invariant fails"
+    );
+}
+
+/// The contract carries no byte ceiling.
+#[test]
+fn contract_uncapped() {
+    let capped: Vec<&str> = ["SPEC.md", "RULINGS.md"]
+        .into_iter()
+        .filter(|doc| WRITTEN_LAYER_BUDGET.iter().any(|(name, _)| name == doc))
+        .collect();
+    assert!(
+        capped.is_empty(),
+        "{} is back under a byte ceiling. A size cap fails a clearer sentence and \
+         passes one that dropped an exception; `spec_invariant_ids` is the gate instead",
+        capped.join(" and ")
+    );
+}
+
+/// A spec that lost an invariant's row fails.
+#[test]
+fn lost_invariant_fails() {
+    let spec = repo_file("SPEC.md");
+    let without: String = spec
+        .lines()
+        .filter(|line| !line.starts_with("| **I7**"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        missing_invariants(&without),
+        ["I7"],
+        "deleting I7's row must be the one thing this gate reports"
     );
 }
 
@@ -2450,5 +3004,320 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
         missing.is_empty(),
         "the sheet opens on {missing:?} and SPEC.md quotes neither, so the \
          document describes a surface the binary no longer has"
+    );
+}
+
+/// Direct dependencies that `README.md`'s `Built with` table leaves out on purpose.
+const NOT_IN_README: [&str; 7] = [
+    "libc",
+    "rustix",
+    "rustls-graviola",
+    "serde_json",
+    "signal-hook",
+    "ureq",
+    "windows-sys",
+];
+
+/// Every direct dependency of every workspace member, as (name, dev), sorted
+/// and unique. Members depending on each other are left out.
+fn direct_dependencies() -> &'static [(String, bool)] {
+    static FOUND: OnceLock<Vec<(String, bool)>> = OnceLock::new();
+    FOUND.get_or_init(|| {
+        let output = Command::new(env!("CARGO"))
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--no-deps",
+                "--offline",
+            ])
+            .current_dir(repo_root())
+            .output()
+            .expect("cargo runs");
+        assert!(
+            output.status.success(),
+            "`cargo metadata` failed:
+{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
+
+        let found: BTreeSet<(String, bool)> = metadata["packages"]
+            .as_array()
+            .expect("metadata lists packages")
+            .iter()
+            .flat_map(|package| package["dependencies"].as_array().expect("a list"))
+            .filter(|dependency| dependency["path"].is_null())
+            .map(|dependency| {
+                let name = dependency["name"].as_str().expect("a name").to_owned();
+                (name, dependency["kind"] == "dev")
+            })
+            .collect();
+        assert!(
+            found.len() >= 15,
+            "found only {} dependencies, so the scan is broken and every assertion              built on it is vacuous",
+            found.len()
+        );
+        found.into_iter().collect()
+    })
+}
+
+/// The text of one `## ` section of a document, heading included.
+fn section<'a>(document: &'a str, heading: &str) -> &'a str {
+    let start = document
+        .find(heading)
+        .unwrap_or_else(|| panic!("no section headed {heading:?}"));
+    let rest = &document[start + heading.len()..];
+    let end = rest
+        .find("\n## ")
+        .map_or(document.len(), |i| start + heading.len() + i);
+    &document[start..end]
+}
+
+/// `SPEC.md` §6 names every direct dependency, dev and build ones included.
+#[test]
+fn dependencies_in_spec() {
+    let spec = repo_file("SPEC.md");
+    let architecture = section(&spec, "\n## 6. ");
+    let missing: BTreeSet<&str> = direct_dependencies()
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .filter(|name| !architecture.contains(&format!("`{name}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the manifests declare {missing:?} and SPEC.md §6 never names them. §6 \
+         names every direct dependency with what it buys and what it adds to the graph"
+    );
+}
+
+/// Every dependency but a dev one is in the README's `Built with` table or on
+/// [`NOT_IN_README`], and that list holds only dependencies absent from the table.
+#[test]
+fn dependencies_in_readme() {
+    let readme = repo_file("README.md");
+    let table = section(&readme, "\n## 🧱 Built with");
+    let in_table = |name: &str| {
+        let link = format!("[{name}](");
+        table
+            .lines()
+            .any(|line| line.starts_with('|') && line.contains(&link))
+    };
+    let shipped: Vec<&str> = direct_dependencies()
+        .iter()
+        .filter(|(_, dev)| !dev)
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    let unplaced: Vec<&str> = shipped
+        .iter()
+        .copied()
+        .filter(|name| !in_table(name) && !NOT_IN_README.contains(name))
+        .collect();
+    assert!(
+        unplaced.is_empty(),
+        "{unplaced:?} is a direct dependency and README.md's `Built with` table \
+         neither names it nor is it on NOT_IN_README. Add a row, or add it to the list"
+    );
+
+    let stale: Vec<&str> = NOT_IN_README
+        .into_iter()
+        .filter(|name| in_table(name) || !shipped.contains(name))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "NOT_IN_README lists {stale:?}, which the table names or no manifest declares"
+    );
+}
+
+/// A ready run is never cancelled by the draft run a push made just before it.
+#[test]
+fn ready_run_survives() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    let group = ci
+        .lines()
+        .find(|line| line.trim_start().starts_with("group:"))
+        .expect("ci.yml has a concurrency group");
+    assert!(
+        group.contains("github.event.pull_request.draft"),
+        "the concurrency group is not keyed on the draft flag, so a push and the \
+         ready event cancel each other and the survivor can be the skipped run: {group}"
+    );
+    assert!(
+        group.contains("github.ref == 'refs/heads/main' && github.sha"),
+        "main's commits share a concurrency group, and a group keeps one pending \
+         run, so a burst of merges cancels the ones in the middle: {group}"
+    );
+}
+
+/// The names of the steps in `ci` that run `cargo test` without
+/// `VIGIA_BUDGET_SLACK`, which `support::budget` reads.
+fn unslacked_steps(ci: &str) -> Vec<String> {
+    without_comments(ci)
+        .split("- name:")
+        .skip(1)
+        .filter(|step| {
+            (step.contains("cargo test") || step.contains("cargo nextest"))
+                && !step.contains("VIGIA_BUDGET_SLACK:")
+        })
+        .map(|step| step.lines().next().unwrap_or_default().trim().to_owned())
+        .collect()
+}
+
+/// A wall-clock gate asks for slack through `budget`, and without the variable
+/// the step holds it to the raw bound. `watch.rs` ran that way unnoticed.
+#[test]
+fn ci_tests_get_slack() {
+    let fixture = "      - name: test\n        run: cargo nextest run --workspace\n      \
+                   - name: doctests\n        run: cargo test --workspace --doc\n      \
+                   - name: budgets\n        run: cargo test --test budgets\n        \
+                   env:\n          VIGIA_BUDGET_SLACK: \"3\"\n";
+    assert_eq!(
+        unslacked_steps(fixture),
+        ["test", "doctests"],
+        "the scan missed a test step with no slack"
+    );
+
+    let ci = repo_file(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("cargo test"),
+        "ci.yml runs no `cargo test`, so this gate reads nothing"
+    );
+    let bare = unslacked_steps(&ci);
+    assert!(
+        bare.is_empty(),
+        "ci.yml runs `cargo test` without VIGIA_BUDGET_SLACK in {bare:?}, so every \
+         `budget()` bound those steps reach runs unloosened on a shared runner"
+    );
+}
+
+/// The debug suite runs under nextest, every test and every failure, and the
+/// doctests keep a step of their own.
+///
+/// `cargo test` runs the binaries one after another and stops at the first
+/// that fails. Either of those coming back is a slower step that also says
+/// less when it is red.
+#[test]
+fn nextest_runs_the_suite() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = step_block(&ci, "test");
+    assert!(
+        step.contains("cargo nextest run --workspace --profile ci"),
+        "the test step does not run the workspace under nextest's ci profile: {step}"
+    );
+    assert!(
+        ci.contains("tool: nextest"),
+        "ci.yml installs no nextest binary, so the test step cannot run"
+    );
+    assert!(
+        ci.contains("cargo test --workspace --doc"),
+        "ci.yml runs no doctests, which nextest does not run"
+    );
+
+    let config = repo_file(".config/nextest.toml");
+    let profile = config
+        .split_once("[profile.ci]")
+        .map(|(_, rest)| rest)
+        .expect(".config/nextest.toml declares the ci profile");
+    assert!(
+        profile.contains("fail-fast = false"),
+        "the ci profile stops at the first failure, so a red run hides the rest: {profile}"
+    );
+    assert!(
+        !config.contains("retries"),
+        "the nextest config retries tests, so a flake can report as a pass"
+    );
+}
+
+/// Every cache is written from main only, and the documents job never writes.
+///
+/// A pull request restores main's cache and rebuilds the workspace crates,
+/// which the cache does not hold anyway. A branch that saves spends the
+/// quota on a copy of the same dependencies and evicts the one every branch
+/// reads.
+#[test]
+fn cache_saved_from_main_only() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@v2").skip(1).collect();
+    assert!(
+        uses.len() >= 6,
+        "ci.yml uses rust-cache {} time(s), so this gate reads too little",
+        uses.len()
+    );
+    for (n, block) in uses.iter().enumerate() {
+        let with = block.split("\n      -").next().unwrap_or_default();
+        assert!(
+            with.contains("save-if: ${{ github.ref == 'refs/heads/main' }}")
+                || with.contains("save-if: false"),
+            "rust-cache use {} saves from every branch:\n{with}",
+            n + 1
+        );
+    }
+}
+
+/// Runs `cited-gates.sh` in a scratch repository holding `t/a.rs` with
+/// `fn kept`, over one commit whose body is `message`.
+#[cfg(unix)]
+fn cited_gates(case: &str, message: &str, body: &str) -> (bool, String) {
+    run_in_scratch(
+        case,
+        &[("t/a.rs", "fn kept() {}\nfn kept_more() {}\n")],
+        &[("change", message)],
+        "cited-gates.sh",
+        ("BODY", body),
+    )
+}
+
+/// A commit or PR body that cites a gate the branch does not define fails.
+#[cfg(unix)]
+#[test]
+fn cited_gates_exist() {
+    let (passed, said) = cited_gates("kept", "Gate: `a.rs::kept`.", "");
+    assert!(passed, "a gate the branch defines failed:\n{said}");
+
+    let (passed, said) = cited_gates("prefix", "Gate: `a.rs::kep`.", "");
+    assert!(
+        !passed,
+        "a name that is only a prefix of a gate passed:\n{said}"
+    );
+
+    let (passed, said) = cited_gates("file", "Gate: `b.rs::kept`.", "");
+    assert!(!passed, "a gate cited in the wrong file passed:\n{said}");
+
+    let (passed, said) = cited_gates("body", "No gate.", "Gate: `a.rs::gone`.");
+    assert!(!passed, "a PR body citing a missing gate passed:\n{said}");
+    assert!(
+        said.contains("a.rs::gone"),
+        "the missing gate was not named:\n{said}"
+    );
+}
+
+/// The lint job checks cited gates on pull requests, with the body and history.
+#[test]
+fn ci_runs_cited_gates() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let lint = ci
+        .split_once("\n  lint:")
+        .and_then(|(_, rest)| rest.split_once("\n  test:"))
+        .map(|(lint, _)| lint)
+        .expect("ci.yml has a lint job before its test job");
+    assert!(
+        lint.contains("sh .github/scripts/cited-gates.sh")
+            && lint.contains("github.event.pull_request.body"),
+        "the lint job does not run cited-gates.sh with the PR body:\n{lint}"
+    );
+}
+
+/// The lint job's one network download retries, so a release CDN that answers
+/// 500 once does not turn `main` red.
+#[test]
+fn dist_install_retries() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    let step = step_block(&ci, "the generated release workflow is current");
+    assert!(
+        step.contains("for attempt in") && step.contains("break") && step.contains("|| exit 1"),
+        "the cargo-dist install does not retry and then fail, so one bad download \
+         either fails the build or is swallowed:\n{step}"
     );
 }

@@ -176,6 +176,7 @@ fn chrome() -> Chrome {
         gripped: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         overview: false,
         worktree: "vigia".to_owned(),
@@ -267,6 +268,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -347,6 +349,7 @@ fn one_file() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 3,
         grouped: false,
@@ -516,6 +519,7 @@ fn nothing_changed() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 0,
         grouped: false,
@@ -975,6 +979,7 @@ fn ragged_counts() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 3,
         grouped: false,
@@ -1886,6 +1891,7 @@ fn a_file_with_no_line_diff_says_why() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 3,
         grouped: false,
@@ -1954,6 +1960,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -1986,6 +1993,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -2220,6 +2228,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -2258,6 +2267,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -2317,6 +2327,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -2394,6 +2405,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 2,
         grouped: false,
@@ -2787,6 +2799,7 @@ fn glancing() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 3,
         grouped: false,
@@ -3201,7 +3214,7 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     let pulsing = row_text(&backend, 1);
     assert!(
         pulsing.contains('●'),
-        "the file named by the newest tick carries no pulse: {pulsing:?}"
+        "the file written last carries no pulse: {pulsing:?}"
     );
     for y in [2, 3] {
         let row = row_text(&backend, y);
@@ -3278,7 +3291,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
 }
 
 /// A pane wide enough for the heat strip's widest rung.
-const WHOLE_STRIP_PANE: u16 = 140;
+const WHOLE_STRIP_PANE: u16 = 240;
 
 /// A heat map from `(slice, added, removed)` triples, everything else track.
 fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
@@ -3378,6 +3391,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 3,
         grouped: false,
@@ -3771,6 +3785,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         // A screenful is `shown`, which is what this fixture's name says and what the
         // bar is measured in: `View::list_span` is the complement of the window's
@@ -7382,5 +7397,34 @@ fn the_empty_body_never_reads_as_a_clean_tree_when_a_pattern_emptied_it() {
     assert!(
         body.contains("12 hidden") && !body.contains("no staged or unstaged"),
         "with both runs on and everything hidden the body reads {body:?}"
+    );
+}
+
+/// A theme sets what the caret's row adds to its path, layered on the row's own
+/// ink: a modifier adds to the bold, and a colour recolours the path.
+#[test]
+fn caret_weight_themed() {
+    let (width, height) = (80u16, 24u16);
+    let view = a_stepped_screen();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+
+    let theme = vigia::theme::parse("path_current = italic").expect("a theme");
+    let backend = themed_screen(width, height, &view, &chrome(), &theme);
+    let plain = weight(theme.recency(Recency::Cold));
+    let marked = (plain.0, plain.1 | Modifier::BOLD | Modifier::ITALIC);
+    assert!(
+        path_weights(&backend, laid.list.top, "src/f0.rs")
+            .iter()
+            .all(|w| *w == marked),
+        "the caret's row did not take the theme's modifier on its own ink"
+    );
+
+    let theme = vigia::theme::parse("path_current = cyan").expect("a theme");
+    let backend = themed_screen(width, height, &view, &chrome(), &theme);
+    assert!(
+        path_weights(&backend, laid.list.top, "src/f0.rs")
+            .iter()
+            .all(|w| w.0 == Some(Color::Cyan)),
+        "the caret's row did not take the theme's colour"
     );
 }

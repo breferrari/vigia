@@ -52,7 +52,7 @@ const WIDE_GLYPH_ROWS: u16 = 8;
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
 /// Panes wide enough to reach every rung of the glance ladder.
-const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=200;
+const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=240;
 
 /// The width `assets/preview.svg` is measured from, stated in its own comment.
 const PICTURED_PANE: u16 = 109;
@@ -61,7 +61,13 @@ const PICTURED_PANE: u16 = 109;
 const PICTURED_SLICES: usize = 12;
 
 /// How many slices the heat strip may show, widest rung first.
-const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+const HEAT_RUNGS: [usize; 5] = [
+    HEAT_BUCKETS,
+    HEAT_BUCKETS / 2,
+    HEAT_BUCKETS / 4,
+    HEAT_BUCKETS / 8,
+    0,
+];
 
 /// How many buckets a sparkline may show, widest rung first.
 const SPARK_RUNGS: [usize; 4] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, HISTORY_BUCKETS / 4, 0];
@@ -317,6 +323,7 @@ fn chrome() -> Chrome {
         gripped: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         overview: false,
         worktree: "vigia".to_owned(),
@@ -412,6 +419,7 @@ fn every_row_kind() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -642,6 +650,7 @@ fn awkward() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -681,6 +690,7 @@ fn empty() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 0,
         grouped: false,
@@ -707,6 +717,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 0,
         grouped: false,
@@ -923,6 +934,7 @@ fn glancing() -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 3,
         grouped: false,
@@ -1620,6 +1632,7 @@ fn the_glance_columns_collapse_in_one_order() {
         (59, (true, 12, 12)),
         (139, (true, 24, 12)),
         (169, (true, 24, 24)),
+        (229, (true, 48, 24)),
     ];
     let theme = theme();
     let heats = support::heat_colours(&theme);
@@ -2383,6 +2396,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -2519,6 +2533,7 @@ fn a_clipped_content_line_says_it_continues() {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -2961,7 +2976,7 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
     let widest = reserved(COUNT_HALF * 2 + 1)
         + reserved(PULSE_CELLS)
         + reserved(HEAT_RUNGS[0])
-        + reserved(SPARK_RUNGS[1])
+        + reserved(SPARK_RUNGS[0])
         + reserved(MARK_CELLS);
     let boundary = GENEROUS_WIDTHS
         .clone()
@@ -3549,6 +3564,7 @@ fn overlong(rows: usize) -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -4760,4 +4776,38 @@ fn drawing_both_runs_costs_the_path_no_column_at_any_width() {
         "no width drew the staged run at all, so the grouped screen under test \
          was never actually grouped"
     );
+}
+
+/// A wider pane never shortens the body, but for one step: the width where the
+/// shortest hint first fits takes the footer's second line, and costs one row.
+/// Below that width a second line would hold nothing.
+#[test]
+fn wider_body_rows() {
+    // The shortest hint rung.
+    let first_hint = "f follow".len() as u16;
+    let chrome = chrome();
+    for files in [0usize, 1, 2, 40, 5000] {
+        for height in 1..=60u16 {
+            let mut steps = Vec::new();
+            let mut last: Option<usize> = None;
+            for width in 1..=200u16 {
+                let rows =
+                    body_layout(Rect::new(0, 0, width, height), &chrome, files, files).rows();
+                if let Some(before) = last
+                    && rows < before
+                {
+                    steps.push((width, before - rows));
+                }
+                last = Some(rows);
+            }
+            assert!(
+                steps.len() <= 1
+                    && steps
+                        .iter()
+                        .all(|&(width, lost)| lost == 1 && width >= first_hint),
+                "over {files} files at {height} rows, widening shortened the body at \
+                 (width, rows lost) {steps:?}"
+            );
+        }
+    }
 }

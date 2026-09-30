@@ -110,7 +110,10 @@ impl Depth {
         {
             return Ok(depth);
         }
-        if windows && lookup("WT_SESSION").is_some() {
+        // Windows Terminal exports it into WSL too. A multiplexer keeps it and
+        // may not pass 24-bit through, so there it is not the terminal's word.
+        let multiplexed = lookup("TMUX").is_some() || lookup("STY").is_some();
+        if lookup("WT_SESSION").is_some() && (windows || !multiplexed) {
             return Ok(Self::Truecolor);
         }
 

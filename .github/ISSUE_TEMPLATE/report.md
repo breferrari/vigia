@@ -7,14 +7,14 @@ labels: ''
 
 **What you expected**
 
-**What happened**
+**What vigia drew**
 
 <!--
-Anything below is optional and helps, none of it is required.
+Everything below is optional. Each item helps.
 
 Terminal and version:
 OS:
 vigia --version:
 
-A screenshot, if it is about what the pane looks like.
+If it is about what the pane looks like, add a screenshot.
 -->

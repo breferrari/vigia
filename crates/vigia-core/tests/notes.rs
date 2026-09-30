@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::mpsc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir, budget, files_in, linked_file, note};
+use support::{Scratch, TempDir, budget, files_in, linked_file, note, numbered_lines};
 use vigia_core::{
     Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
     key, resolve,
@@ -286,6 +286,90 @@ fn a_repeated_field_is_a_skip() {
         listing.skipped[0].1
     );
     assert_ne!(listing.skipped[0].1, good.body);
+}
+
+#[test]
+fn a_range_is_read_back_whole_and_half_a_range_is_a_skip() {
+    let (_scratch, _root, store) = store("notes-range");
+    let ranged = Note {
+        first: Some(vigia_core::LineRef {
+            side: vigia_core::Side::Old,
+            line: 2,
+            text: "the first line, removed".to_owned(),
+        }),
+        ..note("good", 4, "the last line", "all of these")
+    };
+    store.put(&ranged).expect("put");
+    assert_eq!(store.get("good").expect("get"), Some(ranged));
+
+    // A range written without its first line's text names half of one.
+    let text = fs::read_to_string(store.dir().join("good.note")).expect("read it back");
+    let at = text.find("first-text ").expect("the range's text block");
+    let end = at + text[at..].find("body ").expect("the body after it");
+    fs::write(
+        store.dir().join("good.note"),
+        format!("{}{}", &text[..at], &text[end..]),
+    )
+    .expect("write half a range");
+    let listing = store.list().expect("list");
+    assert!(listing.notes.is_empty(), "{:?}", listing.notes);
+    assert!(
+        listing.skipped[0].1.contains("first line"),
+        "{}",
+        listing.skipped[0].1
+    );
+}
+
+#[test]
+fn a_range_across_both_sides_is_spelled_as_a_hunk_header_would() {
+    let scratch = Scratch::new("notes-span-label");
+    scratch.write("a.txt", numbered_lines(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line("a.txt", 4, "five, rewritten");
+    let worktree = scratch.worktree();
+    let change = worktree
+        .changes()
+        .expect("enumerate")
+        .next()
+        .expect("one change")
+        .expect("change");
+    let diff = worktree.diff(&change).expect("diff");
+    let (old, new) = (vigia_core::Side::Old, vigia_core::Side::New);
+    assert_eq!(diff.span_label((new, 2), (new, 4)).as_deref(), Some("2-4"));
+    assert_eq!(
+        diff.span_label((new, 3), (new, 6)).as_deref(),
+        Some("-5 +3-6")
+    );
+    assert_eq!(
+        diff.span_label((old, 5), (new, 6)).as_deref(),
+        Some("-5 +5-6")
+    );
+    assert_eq!(
+        diff.span_label((new, 6), (new, 3)),
+        None,
+        "ends out of order"
+    );
+
+    // Without the diff, the stored ends are spelled the same way.
+    let across = Note {
+        first: Some(vigia_core::LineRef {
+            side: old,
+            line: 5,
+            text: "line 5".to_owned(),
+        }),
+        ..note("x", 6, "line 6", "")
+    };
+    assert_eq!(across.label(), "-5 +6");
+    let along = Note {
+        first: Some(vigia_core::LineRef {
+            side: new,
+            line: 3,
+            text: "line 3".to_owned(),
+        }),
+        ..note("x", 6, "line 6", "")
+    };
+    assert_eq!(along.label(), "3-6");
+    assert_eq!(note("x", 6, "line 6", "").label(), "6");
 }
 
 #[test]

@@ -183,9 +183,9 @@ fn one_screenful_costs_the_same_however_much_else_changed() {
         many.cost.measured
     );
     assert!(
-        many.cost.bytes > few.cost.bytes,
-        "the wide fixture read no more than the narrow one, so the counting pass \
-         is not running and none of this proves anything"
+        many.cost.measured_bytes > few.cost.measured_bytes,
+        "the wide fixture counted no more bytes than the narrow one, so the counting \
+         pass is not running and none of this proves anything"
     );
 }
 
@@ -327,11 +327,13 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
         .expect("stat")
         .len();
     let whole = on_disk * FILES as u64;
+    // Everything the screen read, diffed or counted.
+    let read = many.cost.bytes + many.cost.measured_bytes;
     assert!(
-        many.cost.bytes >= whole && many.cost.bytes <= whole * 3,
+        read >= whole && read <= whole * 3,
         "one screen read {} bytes against {FILES} files of {on_disk} bytes each, \
          which is neither their two sides nor anything close to it",
-        many.cost.bytes
+        read
     );
     // And the diffing half is still the window's, which is the claim this gate is
     // named for and the one the narrowing did not touch: one file fills the diff
@@ -1026,12 +1028,21 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     );
     // Bytes are not equal any more and must not be asserted so: I4's narrowing means
     // the height is counted for every changed file, and there are twice as many.
+    // Diffing follows the window, which is the same size in both.
     assert_eq!(
-        large.cost.bytes,
-        small.cost.bytes * 2,
-        "counting four hundred files read {} bytes against {} for two hundred,          so the counting pass is not linear in the changed set and something          else is reading",
-        large.cost.bytes,
-        small.cost.bytes
+        large.cost.bytes, small.cost.bytes,
+        "one screen diffed {} bytes among 400 changed files and {} among 200, so \
+         diffing follows the worktree rather than the window",
+        large.cost.bytes, small.cost.bytes
+    );
+    // And every changed file is read once, diffed or counted, so the whole doubles.
+    assert_eq!(
+        large.cost.bytes + large.cost.measured_bytes,
+        (small.cost.bytes + small.cost.measured_bytes) * 2,
+        "four hundred files read {} bytes against {} for two hundred, so the \
+         counting pass is not linear in the changed set and something else is reading",
+        large.cost.bytes + large.cost.measured_bytes,
+        small.cost.bytes + small.cost.measured_bytes
     );
 
     // And the number is the one the region actually asks for, not merely a

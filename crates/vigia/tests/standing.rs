@@ -1747,6 +1747,7 @@ fn note_on(frame: &mut Frame) -> Vec<vigia_core::Note> {
         side: vigia_core::Side::New,
         line,
         text: text.to_owned(),
+        first: None,
         body: "a question for the agent".to_owned(),
         status: vigia_core::Status::Open,
         reply: None,

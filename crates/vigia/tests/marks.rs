@@ -19,6 +19,9 @@ use vigia_core::{Origin, Reading, Recency};
 /// mark has taken its own.
 const WIDE: u16 = 140;
 
+/// Source buckets to one slice of the 24 that [`WIDE`] draws.
+const WIDE_SLICE: usize = HEAT_BUCKETS / 24;
+
 /// The row the first file is drawn on: the header owns row 0.
 const FIRST: u16 = 1;
 
@@ -40,6 +43,7 @@ fn chrome() -> Chrome {
         gripped: None,
         hovered: None,
         selected: None,
+        noting: None,
         scrolling: None,
         overview: false,
         worktree: "vigia".to_owned(),
@@ -79,6 +83,7 @@ fn one_file(notes: FileNotes, newest: bool) -> View {
         hidden: 0,
         whole: Vec::new(),
         landed: false,
+        ended: false,
         recorded: 0,
         list_span: 1,
         grouped: false,
@@ -320,7 +325,7 @@ fn the_mark_arrives_before_the_pulse_and_outlives_it() {
 fn a_slice_holding_a_note_takes_the_notes_ink_and_keeps_its_glyph() {
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[5] = true;
+    notes.at[5 * WIDE_SLICE] = true;
     let backend = drawn(WIDE, &one_file(notes, false), &theme);
     let inks = strip(&backend, FIRST);
 
@@ -328,7 +333,7 @@ fn a_slice_holding_a_note_takes_the_notes_ink_and_keeps_its_glyph() {
     // would read as a narrower rung, and the ladder gate cannot see that.
     assert_eq!(
         inks.len(),
-        HEAT_BUCKETS,
+        HEAT_BUCKETS / 2,
         "the strip drew {} slices with a note in it",
         inks.len()
     );
@@ -352,8 +357,8 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
     // the two rules draw the same row.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[1] = true;
-    notes.at[11] = true;
+    notes.at[WIDE_SLICE] = true;
+    notes.at[11 * WIDE_SLICE] = true;
     let inks = strip(&drawn(WIDE, &one_file(notes, false), &theme), FIRST);
     let noted = noted_slices(&inks, &theme);
     assert_eq!(noted, vec![1, 11]);
@@ -361,15 +366,15 @@ fn two_notes_ink_their_own_slices_and_nothing_between_them() {
 
 #[test]
 fn a_notes_slice_folds_into_the_rung_the_strip_degrades_to() {
-    // Twenty-four source buckets projected onto twelve: a note in bucket 3 is in
-    // slice 1, and the fold is `any` rather than the counts' `sum`.
+    // A note in slice 1's last source bucket, and the fold is `any` rather
+    // than the counts' `sum`.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let mut notes = FileNotes::default();
-    notes.at[3] = true;
+    notes.at[2 * (HEAT_BUCKETS / 12) - 1] = true;
     let inks = strip(&drawn(109, &one_file(notes, false), &theme), FIRST);
     assert_eq!(
         inks.len(),
-        HEAT_BUCKETS / 2,
+        HEAT_BUCKETS / 4,
         "109 columns is meant to be the twelve-slice rung"
     );
     let noted = noted_slices(&inks, &theme);
