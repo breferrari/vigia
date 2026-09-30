@@ -2344,12 +2344,12 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
                 seen += 1;
                 assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
 
-                // `SHEET_KEEP` is the smallest page, not a keep-set.
+                // `SHEET_FLOOR`, the smallest page worth drawing.
                 let (count, drawn) = read_sheet(&buf, &laid);
                 assert!(
                     count >= KEEP,
                     "a {w}x{h} pane drew a page of {count} gestures, below the \
-                     {KEEP} `SHEET_KEEP` names as the thinnest page worth \
+                     {KEEP} `SHEET_FLOOR` names as the thinnest page worth \
                      drawing:\n{drawn}"
                 );
 
