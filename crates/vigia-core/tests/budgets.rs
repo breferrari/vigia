@@ -6,8 +6,8 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    CLOCK_TICK, Scratch, absolute_gates_apply, budget, delta, highlight_delta, highlight_window,
-    holds_p99, holds_p99_rounds, materialise, settle, time, time_cpu,
+    ATTRIBUTION_FLOOR, CLOCK_TICK, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
+    highlight_window, holds_p99, holds_p99_rounds, materialise, settle, time, time_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -1122,7 +1122,7 @@ fn round_of(fast: (usize, u64, u64), slow: (usize, u64, u64)) -> (Samples, Optio
 }
 
 /// [`holds_p99_rounds`] over the same round twice.
-fn attributes(budget_ms: u64, fast: (usize, u64, u64), slow: (usize, u64, u64)) {
+fn judge_round(budget_ms: u64, fast: (usize, u64, u64), slow: (usize, u64, u64)) {
     let (first, _) = round_of(fast, slow);
     holds_p99_rounds(
         "a fixture round",
@@ -1138,7 +1138,7 @@ fn attributes(budget_ms: u64, fast: (usize, u64, u64), slow: (usize, u64, u64)) 
 fn short_tail_fails() {
     // 247 fast frames bank 24.7ms of off-CPU noise, which would pay for the
     // 24ms three frames of work spend over budget.
-    attributes(10, (247, 5_000, 4_900), (3, 18_000, 18_000));
+    judge_round(10, (247, 5_000, 4_900), (3, 18_000, 18_000));
 }
 
 #[test]
@@ -1147,15 +1147,15 @@ fn coarse_clock_fails() {
     // Three 20ms frames of work, each read as one tick: 13.1ms of deficit
     // against 12ms over, so the clock's rounding would acquit the work.
     let tick = CLOCK_TICK.as_micros() as u64;
-    attributes(16, (97, 15_000, 15_000), (3, 20_000, tick));
+    judge_round(16, (97, 15_000, 15_000), (3, 20_000, tick));
 }
 
 #[test]
 fn floor_edge() {
     // At the floor the clock decides, and a round spent off-CPU is acquitted.
-    let floor = (CLOCK_TICK * 20).as_micros() as u64;
-    attributes(10, (0, 0, 0), (1, floor, 1_000));
-    let under = std::panic::catch_unwind(|| attributes(10, (0, 0, 0), (1, floor - 1, 1_000)));
+    let floor = ATTRIBUTION_FLOOR.as_micros() as u64;
+    judge_round(10, (0, 0, 0), (1, floor, 1_000));
+    let under = std::panic::catch_unwind(|| judge_round(10, (0, 0, 0), (1, floor - 1, 1_000)));
     assert!(
         under.is_err(),
         "a breach one microsecond under the floor was attributed"

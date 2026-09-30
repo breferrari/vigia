@@ -149,7 +149,7 @@ pub const CLOCK_TICK: Duration = Duration::from_micros(15_625);
 /// Breaching wall time below which a CPU clock cannot tell the host from the
 /// work. The coarsest tick on every platform, because below it the fast frames'
 /// off-CPU noise can pay for a short tail of work on any clock.
-const ATTRIBUTION_FLOOR: Duration = CLOCK_TICK.saturating_mul(20);
+pub const ATTRIBUTION_FLOOR: Duration = CLOCK_TICK.saturating_mul(20);
 
 /// [`holds_p99`] where a round is produced whole rather than a sample at a time.
 pub fn holds_p99_rounds(
