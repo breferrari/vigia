@@ -822,18 +822,18 @@ fn excludes_file_followed() {
     scratch.write("a.txt", "x\n");
     scratch.commit_all("initial");
     let excludes = scratch.path_of(".git/ignores");
-    std::fs::write(&excludes, "build/\n").expect("write excludes");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
     let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
     scratch.git(&["config", "core.excludesFile", &excludes]);
-    scratch.write("build/keep", "x\n");
+    scratch.write("vigia-excluded/keep", "x\n");
     let scratch = scratch.settled();
 
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
-    scratch.write("build/a.o", "x\n");
+    scratch.write("vigia-excluded/a.o", "x\n");
     assert!(
         tick_within(&mut watcher, IDLE).is_none(),
-        "the control is wrong: core.excludesFile did not ignore build/"
+        "the control is wrong: core.excludesFile did not ignore vigia-excluded/"
     );
 
     scratch.git(&["config", "--unset", "core.excludesFile"]);
@@ -843,7 +843,7 @@ fn excludes_file_followed() {
     );
     while tick_within(&mut watcher, IDLE).is_some() {}
 
-    scratch.write("build/b.o", "x\n");
+    scratch.write("vigia-excluded/b.o", "x\n");
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "a path the config stopped ignoring never woke the watch"
@@ -855,18 +855,18 @@ fn excludes_file_followed() {
 fn linked_excludes_followed() {
     let scratch = linked_scratch("watch-linked-excludes");
     let excludes = scratch.path_of(".git/ignores");
-    std::fs::write(&excludes, "build/\n").expect("write excludes");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
     let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
     scratch.git(&["config", "core.excludesFile", &excludes]);
-    scratch.write("linked/build/keep", "x\n");
+    scratch.write("linked/vigia-excluded/keep", "x\n");
     let scratch = scratch.settled();
 
     let worktree = linked_watch(&scratch);
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
-    scratch.write("linked/build/a.o", "x\n");
+    scratch.write("linked/vigia-excluded/a.o", "x\n");
     assert!(
         tick_within(&mut watcher, IDLE).is_none(),
-        "the control is wrong: core.excludesFile did not ignore build/"
+        "the control is wrong: core.excludesFile did not ignore vigia-excluded/"
     );
 
     scratch.git(&["config", "--unset", "core.excludesFile"]);
@@ -876,9 +876,63 @@ fn linked_excludes_followed() {
     );
     while tick_within(&mut watcher, IDLE).is_some() {}
 
-    scratch.write("linked/build/b.o", "x\n");
+    scratch.write("linked/vigia-excluded/b.o", "x\n");
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "a path the common config stopped ignoring never woke the watch"
+    );
+}
+
+/// A `core.excludesFile` set after the worktree opened and before the watch
+/// armed sends no event the watch can see, and still applies.
+#[test]
+fn excludes_before_watch() {
+    let scratch = committed_scratch("watch-excludes-early");
+    let worktree = scratch.worktree();
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a config written before the watch armed was never loaded"
+    );
+}
+
+/// A config that fails to load is tried again on the next path judged, without
+/// another config write.
+#[test]
+fn failed_excludes_retried() {
+    let scratch = committed_scratch("watch-excludes-retry");
+    scratch.write("vigia-excluded/keep", "x\n");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    // An include gix fails on, so the reload this config write asks for fails.
+    let excludes = scratch.path_of(".git/ignores");
+    std::fs::write(&excludes, "vigia-excluded/\n").expect("write excludes");
+    let excludes = excludes.to_str().expect("utf-8 path").replace('\\', "/");
+    std::fs::write(scratch.path_of(".git/extra"), "[core\n").expect("write include");
+    scratch.git(&["config", "core.excludesFile", &excludes]);
+    scratch.git(&["config", "include.path", "extra"]);
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    scratch.write("vigia-excluded/a.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the control is wrong: the reload was expected to fail"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    std::fs::write(scratch.path_of(".git/extra"), "").expect("mend include");
+    scratch.write("vigia-excluded/b.o", "x\n");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a failed reload was not tried again on the next path"
     );
 }

@@ -147,8 +147,13 @@ pub struct Watcher<'repo> {
     /// Owned rather than borrowed, so a config write can reload it.
     repo: gix::Repository,
     excludes: gix::worktree::Stack,
+    /// The common dir's config, which `repo` loads.
+    config: PathBuf,
     /// The config's fingerprint when `repo` last loaded it.
     loaded_config: Option<Fingerprint>,
+    /// Set by a config event, and at start so a write before the watch armed is
+    /// not missed. The next path judged reloads.
+    reload_due: bool,
     /// Unused. Keeps `Watcher<'repo>` source-compatible.
     _worktree: PhantomData<&'repo gix::Repository>,
     /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
@@ -237,7 +242,9 @@ impl<'repo> Watcher<'repo> {
             _backend: backend,
             repo: repo.clone(),
             excludes,
+            config: repo.common_dir().join("config"),
             loaded_config: None,
+            reload_due: true,
             _worktree: PhantomData,
             roots,
             git_dir,
@@ -363,9 +370,7 @@ impl<'repo> Watcher<'repo> {
             let watched = if inside == Path::new("index") {
                 self.index.moved()
             } else {
-                if inside == Path::new("config") {
-                    self.reload_excludes(path);
-                }
+                self.reload_due |= inside == Path::new("config");
                 watched_in_git_dir(inside)
             };
             return watched.then_some((Path::new(".git"), false));
@@ -377,9 +382,7 @@ impl<'repo> Watcher<'repo> {
                 || inside.starts_with("info")
                 || inside == Path::new("packed-refs")
                 || inside == Path::new("config");
-            if inside == Path::new("config") {
-                self.reload_excludes(path);
-            }
+            self.reload_due |= inside == Path::new("config");
             return (shared && watched_in_git_dir(inside)).then_some((Path::new(".git"), false));
         }
 
@@ -415,15 +418,21 @@ impl<'repo> Watcher<'repo> {
             return None;
         }
 
+        if self.reload_due {
+            self.reload_excludes();
+        }
         (!self.is_ignored(rela, mode)).then_some((rela, mode == gix::index::entry::Mode::DIR))
     }
 
     /// Reload the config and the rules it names, such as `core.excludesFile`, as
-    /// [`Worktree`](crate::Worktree) reloads its own. A config that does not load
-    /// keeps the rules from before it until its next event.
-    fn reload_excludes(&mut self, config: &Path) {
-        // One write sends several events, and only a moved config reloads.
-        let now = fingerprint(config);
+    /// [`Worktree`](crate::Worktree) reloads its own. One that does not load keeps
+    /// the rules from before it, and the next path judged tries again.
+    fn reload_excludes(&mut self) {
+        let now = fingerprint(&self.config);
+        if now == self.loaded_config {
+            self.reload_due = false;
+            return;
+        }
         if !config_moved(now, self.loaded_config) {
             return;
         }
@@ -432,6 +441,7 @@ impl<'repo> Watcher<'repo> {
         {
             self.excludes = excludes;
             self.loaded_config = now;
+            self.reload_due = false;
         }
     }
 
