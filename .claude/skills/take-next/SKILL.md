@@ -120,9 +120,9 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 
 ## 4. Build
 
-- **Runners: CONTRIBUTING.md, Running things.** `cargo nextest run` for a suite, `cargo test --release --test <gate>` for a release gate, `cargo test --doc` for doctests.
+- **Runners: CONTRIBUTING.md, Running things.** A suite runs under `cargo nextest run --profile ci`, installed if missing, not `cargo test`, which stops at the first red binary.
 - **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First, find a free `../vigia.*` worktree, because its `target/` is warm. Make sure that no other session uses it. Then run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
-- **If the reader is present,** run `vigia` in a side pane on the worktree. A reader who looked at the pane found defects that eleven green gates missed.
+- **If the reader is present,** run `vigia` in a side pane on the worktree. A reader who looked at the pane found defects eleven green gates missed.
 - **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
 - **Open a draft PR early** with `gh pr create --draft`. CI and Copilot skip drafts, so a push costs nothing.
 - **Write the failing test first** for each invariant. Watch it fail, then make it pass.
@@ -154,7 +154,7 @@ The full sequence, in order. Apply what each step finds:
 
 Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
 
-Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Run the review agents on Sonnet.
+Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Review agents run on Sonnet.
 
 Then prove the result:
 
