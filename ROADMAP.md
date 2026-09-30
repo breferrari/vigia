@@ -414,7 +414,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ✅ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
 | ✅ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
-| ⬜ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
+| ✅ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
 | ✅ | The churn band measures how many files were written, not how much changed. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#232](https://github.com/breferrari/vigia/issues/232) |
 | ✅ | A screenful of one-line-paragraph prose costs 117ms with every pattern already compiled | [#261](https://github.com/breferrari/vigia/issues/261) |
 | ✅ | `watch.rs` takes budget slack and CI never gives it any | [#263](https://github.com/breferrari/vigia/issues/263) |
@@ -518,7 +518,6 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | sheet.rs restates constants the table implies ([#393](https://github.com/breferrari/vigia/issues/393)) | #386, 2026-09-03 | Shelf | Test-only. The suite restates the renderer on purpose, so only derivations from its own tables are safe. |
 | watch.rs evicts an arbitrary path ([#368](https://github.com/breferrari/vigia/issues/368)) | 2026-08-28 | Shelf | Has an open PR, #531, from another session. |
 | The caret, the pulse and the elision markers are outside CP437 ([#237](https://github.com/breferrari/vigia/issues/237)) | #159, 2026-08-18 | Shelf | Needs a ruling and evidence from a console font without those glyphs. |
-| A churn sample buys the file size the status walk already paid for ([#233](https://github.com/breferrari/vigia/issues/233)) | #232, 2026-08-18 | Shelf | The cost is off-CPU wait, 2.32ms p50 over 256 paths. Whether gix status can carry the size is unconfirmed. |
 | Under a default tmux a non-active pane may get no mouse events ([#188](https://github.com/breferrari/vigia/issues/188)) | #123, 2026-08-16 | Shelf | Needs a person in tmux to observe it. |
 | 0.1.1: trusted publishing, so the crates.io token stops existing ([#141](https://github.com/breferrari/vigia/issues/141)) | 2026-08-09 | Shelf | Needs the reader to register the trusted publisher on crates.io. |
 | Rename tracking and the non-streaming walk, at ten thousand changed files ([#48](https://github.com/breferrari/vigia/issues/48)) | #34, 2026-07-31 | Shelf | A frame-path redesign measured at a scale no reader has reported. The §10 bullets stay open. |
