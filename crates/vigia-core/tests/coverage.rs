@@ -1305,7 +1305,11 @@ fn dump_base_version_current() {
     let locked = lock
         .split("[[package]]")
         .find(|entry| entry.contains("name = \"two-face\""))
-        .and_then(|entry| entry.lines().find_map(|line| line.trim().strip_prefix("version = ")))
+        .and_then(|entry| {
+            entry
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("version = "))
+        })
         .map(|version| version.trim_matches('"').to_owned())
         .expect("two-face is in the lock file");
     let notice = std::fs::read_to_string(
