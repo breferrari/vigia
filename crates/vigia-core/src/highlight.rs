@@ -946,12 +946,21 @@ impl Highlighter {
         self.quoted_to(id, ordinal, token, path, lines, lines.len())
     }
 
+    /// Whether the block at `at` waits on a grammar the warmer has compiled
+    /// since, or on one its fence no longer names: either way a draw would
+    /// rebuild it.
+    fn stale(&self, at: usize, token: Option<&str>) -> bool {
+        let Some(scope) = self.quotes[at].deferred else {
+            return false;
+        };
+        let named = token.and_then(|token| self.syntaxes.find_syntax_by_token(token));
+        compiled(scope, self.attempted.as_deref())
+            || named.is_some_and(|syntax| syntax.scope != scope)
+    }
+
     /// The demand for a block's grammar, renewed every frame the block still
-    /// waits on one, which is `spans`' own rule and not a flourish: every frame
-    /// after the first hits the cache, so a demand raised only where the parse
-    /// happens is raised once and cleared by the next pass before anything has
-    /// offered it a warmer. Shared with the paths' own dedup, so a grammar both
-    /// want is warmed by whichever the shell serves first rather than twice.
+    /// waits on one: the pass clears it, so one raised where the parse happens
+    /// is gone before a warmer is served.
     fn demand(&mut self, slot: usize, token: Option<&str>, path: &str, lines: &[String]) {
         if let Some(scope) = self.quotes[slot].deferred
             && !lines.is_empty()
@@ -965,9 +974,10 @@ impl Highlighter {
         }
     }
 
-    /// Keeps a block's parse without asking for a line. No digest, so a block
-    /// behind the window costs the frame a lookup, and a rewrite of it is seen
-    /// when it is next drawn.
+    /// Keeps a block's parse without asking for a line. A block behind the
+    /// window costs the frame a lookup, a lock while it waits on a grammar, and
+    /// one rebuild on the frame the grammar arrives; a rewrite of its text is
+    /// seen when it is next drawn.
     fn hold(
         &mut self,
         id: &str,
@@ -980,14 +990,7 @@ impl Highlighter {
             .quotes
             .iter()
             .position(|quote| quote.ordinal == ordinal && quote.id == id);
-        // A block whose grammar has been warmed since is rebuilt, as a draw
-        // would rebuild it.
-        let held = found.filter(|&at| {
-            !self.quotes[at]
-                .deferred
-                .is_some_and(|scope| compiled(scope, self.attempted.as_deref()))
-        });
-        let Some(at) = held else {
+        let Some(at) = found.filter(|&at| !self.stale(at, token)) else {
             self.quoted_to(id, ordinal, token, path, lines, 0);
             return;
         };
@@ -1010,12 +1013,7 @@ impl Highlighter {
             .quotes
             .iter()
             .position(|quote| quote.ordinal == ordinal && quote.id == id);
-        let hit = found.filter(|&at| {
-            let thaw = self.quotes[at]
-                .deferred
-                .is_some_and(|scope| compiled(scope, self.attempted.as_deref()));
-            self.quotes[at].digest == digest && !thaw
-        });
+        let hit = found.filter(|&at| self.quotes[at].digest == digest && !self.stale(at, token));
 
         let slot = match hit {
             Some(at) => at,

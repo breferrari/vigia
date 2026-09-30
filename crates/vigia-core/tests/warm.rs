@@ -1369,7 +1369,7 @@ fn two_blocks_of_one_language_warm_once() {
 /// A block held behind the window keeps asking for its grammar until a warm
 /// answers, and is rebuilt rather than held once one has.
 #[test]
-fn a_held_block_keeps_its_demand() {
+fn held_demand() {
     let mut highlighter = Highlighter::new();
     let lines = vec![
         "if [ -f /etc/hosts ]; then".to_owned(),
@@ -1381,8 +1381,9 @@ fn a_held_block_keeps_its_demand() {
     }
     let demand = highlighter.uncompiled().to_vec();
     assert_eq!(demand.len(), 1, "the block raised no demand: {demand:?}");
+    let begun = highlighter.stats().quoted;
 
-    // Behind the window for two frames: held, not drawn.
+    // Behind the window for two frames: held, not drawn, and not rebuilt.
     for _ in 0..2 {
         let mut pass = highlighter.pass();
         pass.hold("n1", 0, Some("sh"), "src/mod_0.rs", &lines);
@@ -1393,6 +1394,11 @@ fn a_held_block_keeps_its_demand() {
             "a held block stopped asking for its grammar"
         );
     }
+    assert_eq!(
+        highlighter.stats().quoted,
+        begun,
+        "a held block waiting on its grammar was rebuilt rather than held"
+    );
 
     // Warmed while held: the next hold rebuilds the block rather than keeping it
     // deferred, so the demand ends and a draw finds colour.
@@ -1408,6 +1414,11 @@ fn a_held_block_keeps_its_demand() {
         highlighter.uncompiled().is_empty(),
         "a held block kept demanding a grammar already compiled: {:?}",
         highlighter.uncompiled()
+    );
+    assert_eq!(
+        highlighter.stats().quoted,
+        begun + 1,
+        "the warm frame's hold did not rebuild the block once"
     );
     let mut pass = highlighter.pass();
     let coloured = pass
