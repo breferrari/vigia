@@ -149,3 +149,27 @@ fn skipped_driver_undiffable() {
         "the clean driver ran, which is a process per file per frame"
     );
 }
+
+/// Git runs no clean filter on a symlink, so a link under a skipped driver's
+/// pattern still diffs its target.
+#[test]
+fn skipped_driver_keeps_links() {
+    let scratch = Scratch::new("attr-driver-link");
+    scratch.git(&["config", "filter.ptr.clean", "cat >/dev/null; echo pointer"]);
+    scratch.write(".gitattributes", "*.csv filter=ptr\n");
+    if !support::committed_link(&scratch, "one.txt", "l.csv") {
+        return;
+    }
+    std::fs::remove_file(scratch.path_of("l.csv")).expect("remove the link");
+    assert!(support::made_link(&scratch, "two.txt", "l.csv"), "relink");
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes.iter().find(|c| c.path == "l.csv").expect("listed");
+    let diff = worktree.diff(change).expect("diff");
+    assert!(
+        !diff.binary,
+        "a link under a driver's pattern read as binary"
+    );
+    assert_eq!((diff.added, diff.removed), (1, 1));
+}
