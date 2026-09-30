@@ -354,6 +354,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // carries a modifier as part of its meaning: `path_hover` underlines,
         // which is the whole of what keeps it apart from the recency ladder.
         path_hover,
+        // A delta patched onto a path: `ansi` gives it no colour, and any colour
+        // a theme gives it is a path's, so it is read.
+        path_current,
         kind,
         hunk,
         gutter,
@@ -442,6 +445,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("path_live", path_live),
         ("path_cold", path_cold),
         ("path_hover", path_hover),
+        ("path_current", path_current),
         ("gutter", gutter),
         ("kind", kind),
         ("hunk", hunk),
