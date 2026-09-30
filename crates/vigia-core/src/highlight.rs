@@ -946,27 +946,14 @@ impl Highlighter {
         self.quoted_to(id, ordinal, token, path, lines, lines.len())
     }
 
-    /// Keeps a block's parse without asking for a line: its entry is marked live
-    /// where one exists, its demand renewed where its grammar is still
-    /// uncompiled, and an entry started where there is none. No digest, so a
-    /// block behind the window costs the frame a lookup.
-    fn hold(
-        &mut self,
-        id: &str,
-        ordinal: usize,
-        token: Option<&str>,
-        path: &str,
-        lines: &[String],
-    ) {
-        let Some(at) = self
-            .quotes
-            .iter()
-            .position(|quote| quote.ordinal == ordinal && quote.id == id)
-        else {
-            self.quoted_to(id, ordinal, token, path, lines, 0);
-            return;
-        };
-        if let Some(scope) = self.quotes[at].deferred
+    /// The demand for a block's grammar, renewed every frame the block still
+    /// waits on one, which is `spans`' own rule and not a flourish: every frame
+    /// after the first hits the cache, so a demand raised only where the parse
+    /// happens is raised once and cleared by the next pass before anything has
+    /// offered it a warmer. Shared with the paths' own dedup, so a grammar both
+    /// want is warmed by whichever the shell serves first rather than twice.
+    fn demand(&mut self, slot: usize, token: Option<&str>, path: &str, lines: &[String]) {
+        if let Some(scope) = self.quotes[slot].deferred
             && !lines.is_empty()
             && self.demanded.insert(scope)
         {
@@ -976,6 +963,35 @@ impl Highlighter {
                 lines: lines.to_vec(),
             });
         }
+    }
+
+    /// Keeps a block's parse without asking for a line. No digest, so a block
+    /// behind the window costs the frame a lookup, and a rewrite of it is seen
+    /// when it is next drawn.
+    fn hold(
+        &mut self,
+        id: &str,
+        ordinal: usize,
+        token: Option<&str>,
+        path: &str,
+        lines: &[String],
+    ) {
+        let found = self
+            .quotes
+            .iter()
+            .position(|quote| quote.ordinal == ordinal && quote.id == id);
+        // A block whose grammar has been warmed since is rebuilt, as a draw
+        // would rebuild it.
+        let held = found.filter(|&at| {
+            !self.quotes[at]
+                .deferred
+                .is_some_and(|scope| compiled(scope, self.attempted.as_deref()))
+        });
+        let Some(at) = held else {
+            self.quoted_to(id, ordinal, token, path, lines, 0);
+            return;
+        };
+        self.demand(at, token, path, lines);
         self.quotes[at].live = true;
     }
 
@@ -1094,22 +1110,7 @@ impl Highlighter {
             }
         }
 
-        // The demand, renewed every frame it is still true, which is `spans`'
-        // own rule and not a flourish: every frame after the first hits the
-        // cache, so a demand raised only where the parse happens is raised once
-        // and cleared by the next pass before anything has offered it a warmer.
-        // Shared with the paths' own dedup, so a grammar both want is warmed by
-        // whichever the shell serves first rather than twice.
-        if let Some(scope) = self.quotes[slot].deferred
-            && !lines.is_empty()
-            && self.demanded.insert(scope)
-        {
-            self.uncompiled.push(Uncompiled {
-                token: token.map(str::to_owned),
-                path: path.to_owned(),
-                lines: lines.to_vec(),
-            });
-        }
+        self.demand(slot, token, path, lines);
 
         self.quotes[slot].live = true;
         &self.quotes[slot].lines
@@ -1172,9 +1173,8 @@ impl Pass<'_> {
         self.highlighter.quoted(id, ordinal, token, path, lines)
     }
 
-    /// Keeps a block's parse between frames without asking for a line, and
-    /// keeps the demand for its grammar standing where nothing has compiled
-    /// one yet.
+    /// Keeps a block's parse between frames without asking for a line, and its
+    /// demand for a grammar standing. A rewrite is seen when the block is drawn.
     pub fn hold(
         &mut self,
         id: &str,

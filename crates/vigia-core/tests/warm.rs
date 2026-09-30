@@ -1365,3 +1365,58 @@ fn two_blocks_of_one_language_warm_once() {
         .expect("the warmer thread");
     assert_eq!(report.warmed, 1, "one grammar was compiled three times");
 }
+
+/// A block held behind the window keeps asking for its grammar until a warm
+/// answers, and is rebuilt rather than held once one has.
+#[test]
+fn a_held_block_keeps_its_demand() {
+    let mut highlighter = Highlighter::new();
+    let lines = vec![
+        "if [ -f /etc/hosts ]; then".to_owned(),
+        "  exit 0".to_owned(),
+    ];
+    {
+        let mut pass = highlighter.pass();
+        let _ = pass.quoted("n1", 0, Some("sh"), "src/mod_0.rs", &lines);
+    }
+    let demand = highlighter.uncompiled().to_vec();
+    assert_eq!(demand.len(), 1, "the block raised no demand: {demand:?}");
+
+    // Behind the window for two frames: held, not drawn.
+    for _ in 0..2 {
+        let mut pass = highlighter.pass();
+        pass.hold("n1", 0, Some("sh"), "src/mod_0.rs", &lines);
+        drop(pass);
+        assert_eq!(
+            highlighter.uncompiled().to_vec(),
+            demand,
+            "a held block stopped asking for its grammar"
+        );
+    }
+
+    // Warmed while held: the next hold rebuilds the block rather than keeping it
+    // deferred, so the demand ends and a draw finds colour.
+    highlighter
+        .warm_quoted(demand, None)
+        .join()
+        .expect("the warmer thread");
+    {
+        let mut pass = highlighter.pass();
+        pass.hold("n1", 0, Some("sh"), "src/mod_0.rs", &lines);
+    }
+    assert!(
+        highlighter.uncompiled().is_empty(),
+        "a held block kept demanding a grammar already compiled: {:?}",
+        highlighter.uncompiled()
+    );
+    let mut pass = highlighter.pass();
+    let coloured = pass
+        .quoted("n1", 0, Some("sh"), "src/mod_0.rs", &lines)
+        .iter()
+        .flat_map(|line| line.iter().map(|span| span.class))
+        .any(|class| class != Class::Plain);
+    assert!(
+        coloured,
+        "the block drew plain after its grammar was warmed"
+    );
+}
