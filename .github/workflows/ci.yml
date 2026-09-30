@@ -18,7 +18,10 @@ env:
   RUSTFLAGS: -D warnings
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Keyed on the draft flag too: a push made while the PR is a draft and the
+  # `ready_for_review` event after it land in different groups, so the ready
+  # run, the only one whose legs run, is never cancelled by a skipped one.
+  group: ci-${{ github.ref }}-${{ github.event.pull_request.draft }}
   # On a branch, only the newest push is worth checking. On main every commit
   # gets a full run: superseding them means the slowest leg, which is Windows,
   # is the one perpetually cancelled, and a commit nobody verified lands looking
