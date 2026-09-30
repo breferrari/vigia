@@ -21,11 +21,13 @@ concurrency:
   # Keyed on the draft flag too: a push made while the PR is a draft and the
   # `ready_for_review` event after it land in different groups, so the ready
   # run, the only one whose legs run, is never cancelled by a skipped one.
-  group: ci-${{ github.ref }}-${{ github.event.pull_request.draft }}
-  # On a branch, only the newest push is worth checking. On main every commit
-  # gets a full run: superseding them means the slowest leg, which is Windows,
-  # is the one perpetually cancelled, and a commit nobody verified lands looking
-  # like it was.
+  #
+  # On main every commit gets a full run, so each commit is its own group. A
+  # group holds one pending run and cancels the older one whatever
+  # `cancel-in-progress` says, so three merges in a row left the middle one
+  # unrun.
+  group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || github.event.pull_request.draft }}
+  # On a branch, only the newest push is worth checking.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Every job below carries `if: github.event.pull_request.draft != true`, and it

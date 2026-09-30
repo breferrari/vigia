@@ -2912,6 +2912,11 @@ fn ready_run_survives() {
         "the concurrency group is not keyed on the draft flag, so a push and the \
          ready event cancel each other and the survivor can be the skipped run: {group}"
     );
+    assert!(
+        group.contains("github.ref == 'refs/heads/main' && github.sha"),
+        "main's commits share a concurrency group, and a group keeps one pending \
+         run, so a burst of merges cancels the ones in the middle: {group}"
+    );
 }
 
 /// The names of the steps in `ci` that run `cargo test` without
