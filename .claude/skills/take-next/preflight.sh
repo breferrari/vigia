@@ -19,8 +19,14 @@
 # the ref's copies and for the tracker fetch, so a mutation ("delete an
 # invariant row", "flip a row's mark", "hand it a board at the cap") can prove
 # each comparison fires. A drift check that cannot report "no drift" has not
-# been tested, and neither has one that cannot report drift.
+# been tested, and neither has one that cannot report drift. Comparison 8 has
+# two more: PREFLIGHT_REFS_FILE for the worktrees and branches, and
+# PREFLIGHT_COMMENTS_FILE for the issue's comments.
+#
+# Usage: preflight.sh [issue]. Comparison 8 runs only when given the issue.
 set -u
+TAKEN="${1:-}"
+case "$TAKEN" in *[!0-9]*) echo "usage: preflight.sh [issue number]" >&2; exit 2 ;; esac
 REF="${PREFLIGHT_REF:-origin/main}"
 # Five of the seven comparisons read the tracker fetch, so a short one is not
 # one defect but five. Overridable the way REF is, and for the same reason:
@@ -196,5 +202,22 @@ awk -F'\t' '
   }
   !($1 in seen) { printf "  DRIFT #%s has no roadmap mention: %s\n", $1, $4 }' "$tmp/roadmap.md" "$tmp/issues.tsv" > "$tmp/missing.out"
 if [ -s "$tmp/missing.out" ]; then cat "$tmp/missing.out"; findings=$((findings + $(wc -l < "$tmp/missing.out"))); else ok "every issue has a roadmap mention"; fi
+
+# 8 answers "is this issue in flight", not "is anything", so it needs the issue.
+# A session holds an issue before its row says so: step 3 posts the plan on the
+# issue and step 8 flips the row, so no step marks it started.
+if [ -n "$TAKEN" ]; then
+  say "8. in flight — another session's work on #$TAKEN:"
+  if [ -n "${PREFLIGHT_REFS_FILE:-}" ]; then cp "$PREFLIGHT_REFS_FILE" "$tmp/refs.txt"
+  else
+    { git worktree list --porcelain | awk '/^worktree / { w = substr($0, 10) } /^branch refs\/heads\// { print "worktree " w " on " substr($0, 19) }'
+      git branch -a --format='branch %(refname:short)'; } > "$tmp/refs.txt"
+  fi
+  if [ -n "${PREFLIGHT_COMMENTS_FILE:-}" ]; then cp "$PREFLIGHT_COMMENTS_FILE" "$tmp/comments.json"
+  else gh issue view "$TAKEN" --json comments > "$tmp/comments.json" || exit 2; fi
+  grep -E "[^0-9]${TAKEN}([^0-9]|\$)" "$tmp/refs.txt" | sed 's/^/  DRIFT /' > "$tmp/flight.out"
+  jq -r '.comments[] | select(.body | test("^\\W*(approved )?plan\\b"; "i")) | "  DRIFT a plan comment by \(.author.login), \(.createdAt)"' "$tmp/comments.json" | tr -d '\r' >> "$tmp/flight.out"
+  if [ -s "$tmp/flight.out" ]; then cat "$tmp/flight.out"; findings=$((findings + $(wc -l < "$tmp/flight.out"))); else ok "no worktree, branch or plan names #$TAKEN"; fi
+fi
 
 if [ "$findings" -eq 0 ]; then say "pre-flight clean"; else say "$findings finding(s) — fix in this pass, not a note"; exit 1; fi

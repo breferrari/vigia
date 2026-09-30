@@ -264,6 +264,30 @@ jq -n '[{number: 1, state: "CLOSED", milestone: {title: "Phase 8 - look"}, title
 out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | awk '/roadmap mention/ { $1 = $1; print }')
 [ "$out" = "DRIFT #1 has no roadmap mention: I1: the first" ] && ok "a roadmap with no mentions fails every issue" || no "a roadmap with no mentions fails every issue" "#1 has no roadmap mention" "$out"
 
+# Comparison 8, from the case that filed it: a sibling worktree on `single-297`
+# and a plan comment, with `issue-2970`, `issue-1297` and a closing comment beside them.
+printf 'worktree C:/Dev/vigia on main\nworktree C:/Dev/vigia.b on single-297\nbranch single-297\nbranch origin/issue-2970-x\nbranch issue-1297-y\n' > "$FIX/refs.txt"
+jq -n '{comments: [
+  {author: {login: "a"}, createdAt: "t1", body: "Plan (pre-approved for this run): x"},
+  {author: {login: "b"}, createdAt: "t2", body: "Shipped in abc. The plan held."},
+  {author: {login: "c"}, createdAt: "t3", body: "\n**Approved plan, 2026-09-29.**"}]}' > "$FIX/comments.json"
+flight() { # issue -> comparison 8's lines, space-normalised
+  PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" \
+  PREFLIGHT_REFS_FILE="$FIX/refs.txt" PREFLIGHT_COMMENTS_FILE="$FIX/comments.json" PREFLIGHT_ISSUE_LIMIT=10 \
+    sh "$PRE" "$1" 2>&1 | awk '/^8\./ { on = 1; next } on && /^ / { $1 = $1; print }'
+}
+out=$(flight 297)
+want='DRIFT worktree C:/Dev/vigia.b on single-297
+DRIFT branch single-297
+DRIFT a plan comment by a, t1
+DRIFT a plan comment by c, t3'
+[ "$out" = "$want" ] && ok "an issue in flight is reported" || no "an issue in flight is reported" "$want" "$out"
+echo '{"comments": []}' > "$FIX/comments.json"
+out=$(flight 29)
+[ "$out" = "ok no worktree, branch or plan names #29" ] && ok "a free issue reads clean" || no "a free issue reads clean" "ok" "$out"
+out=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap.md" PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_ISSUE_LIMIT=10 sh "$PRE" 2>&1 | grep -c '^8\.')
+[ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
+
 echo "drift:"
 
 present() { # needle, file, name

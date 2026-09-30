@@ -431,6 +431,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
 | ✅ | The pre-flight read a truncated board and called it drift | [#369](https://github.com/breferrari/vigia/issues/369) |
 | ✅ | The pre-flight's cheapest loop is its slowest | [#371](https://github.com/breferrari/vigia/issues/371) |
+| ✅ | `take-next` step 1 cannot see a session already inside its row | [#303](https://github.com/breferrari/vigia/issues/303) |
 | ✅ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |
 | ⬜ | Nothing holds the written layer's two lists against the documents that exist | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Clippy lints one platform, denies for three | [#376](https://github.com/breferrari/vigia/issues/376) |
@@ -475,7 +476,6 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | A two-face bump with no xtask rerun leaves the committed dump stale and every gate green ([#268](https://github.com/breferrari/vigia/issues/268)) | #266, 2026-08-22 | Shelf | **An instrument finding that predates the PR that found it**, so it is shelved rather than filed into a phase. |
 | holds_p99_rounds excused a uniform breach as a host stall ([#269](https://github.com/breferrari/vigia/issues/269)) | #266, 2026-08-22 | **fixed in #266** | An instrument finding is normally shelved, but this one was **taken inside the product pass because that pass was blocked by it**: #261's new prose gate had no way to fail on the defect it exists to catch. |
 | The host-versus-work attribution needs a resolution floor ([#270](https://github.com/breferrari/vigia/issues/270)) | #266, 2026-08-22 | Shelf | The residual of #269. It was split out **after the obvious fix was implemented, found broken on a shipped tier, and reverted**. That is why it is worth a row rather than a note: the next reader will reach for the same fix. |
-| `take-next` step 1 cannot see a session already inside the row it hands you ([#303](https://github.com/breferrari/vigia/issues/303)) | #298, 2026-08-25 | Shelf | Instrument work, so the Shelf rather than a phase: this pass was not blocked by it, it took the next unstarted row and continued. |
 | The sheet's tables are audited, not derived, so the keymap can still drift into them ([#312](https://github.com/breferrari/vigia/issues/312)) | #288, 2026-08-25 | Shelf | Found by #288's `/simplify` round and deeper than that row's own acceptance, which is gate-side by its own words. |
 | The churn band's heights are ungated ([#225](https://github.com/breferrari/vigia/issues/225)) | #159, 2026-08-18 | Shelf | Found by mutation testing during #159's audit, on code that predates it. Three mutations to `band_cell` and the arithmetic feeding it survive the whole suite, because every band gate checks presence, row count and yielding. None reads a drawn column's glyph. |
 | Support every modern language ([#235](https://github.com/breferrari/vigia/issues/235)) | #161, 2026-08-18 | Shelf | Reported from a live pane while this pass was in progress, and confirmed by probing `syntect` directly rather than by reading the code. `load_defaults_newlines` carries 75 syntaxes and none of them is Swift. So `syntax_for` returns `None`, and the file draws as plain text, which is its documented ordinary case. |
@@ -560,6 +560,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | The mutation harness is re-improvised every pass ([#299](https://github.com/breferrari/vigia/issues/299)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, every pass in this run wrote its own loop. `mutate.mjs` is the committed one. |
 | §5.1's departure count contradicts itself ([#156](https://github.com/breferrari/vigia/issues/156)) | Off the Shelf, 2026-09-30 | Shelf triage: the ledger names one open departure, and three sentences elsewhere still counted two or three. |
 | The pre-flight's cheapest-looking loop is not its slow one ([#371](https://github.com/breferrari/vigia/issues/371)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, the run measured 27 seconds. Two awk passes bring it to 5.5. |
+| `take-next` step 1 cannot see a session already inside the row it hands you ([#303](https://github.com/breferrari/vigia/issues/303)) | Off the Shelf, 2026-09-30 | Shelf triage: still real, since unattended runs post no plan and nothing read worktrees or branches. Pre-flight check 8 now does. |
 
 ---
 
