@@ -377,7 +377,7 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | A washed row may be reaching the scrollbar column, or the terminal is | [#81](https://github.com/breferrari/vigia/issues/81) |
 | ⬜ | The row's two fixed runs allocate a byte each, per content row per frame | [#171](https://github.com/breferrari/vigia/issues/171) |
 | ✅ | A steady worktree saturates half the band, because the factor above the mean was never measured on this signal. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#281](https://github.com/breferrari/vigia/issues/281) |
-| ⬜ | A wider pane can take a row off the body, and the diff pays it | [#283](https://github.com/breferrari/vigia/issues/283) |
+| ✅ | A wider pane can take a row off the body, and the diff pays it | [#283](https://github.com/breferrari/vigia/issues/283) |
 | ⬜ | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ✅ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
 | ⬜ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |

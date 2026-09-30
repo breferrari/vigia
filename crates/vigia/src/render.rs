@@ -1664,6 +1664,9 @@ impl<'a> Footer<'a> {
         // state to move up to it, and a body still worth showing underneath.
         let grows = width_of(HINT_RUNGS[HINT_BASELINE]) + gap(bare) > width
             && bare > 0
+            // And a hint to fill the line the state leaves, or the row is spent on
+            // nothing.
+            && !widest_fitting(&HINT_RUNGS, width).is_empty()
             && area.height >= 3 + MIN_BODY;
         let rows = if grows { 2 } else { 1 };
         // Charged the way the second footer line is, against the same floor: one
