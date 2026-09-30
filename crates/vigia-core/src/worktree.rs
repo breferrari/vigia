@@ -644,7 +644,14 @@ impl Worktree {
     /// What `.gitattributes` says about diffing `change`. See
     /// [`Filter::diff_attribute`].
     fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
-        self.with_filter(|filter| filter.diff_attribute(&change.path, change.maybe_symlink))
+        let (diff, cleaned) = self.with_filter(|filter| filter.diff_attribute(&change.path))?;
+        // The blob holds what the skipped driver wrote and the worktree what it
+        // read, so the two do not diff. Git runs no clean filter on a symlink.
+        Ok(if cleaned && !change.maybe_symlink {
+            Some(false)
+        } else {
+            diff
+        })
     }
 
     /// Run `f` on the filter, building it on first use.

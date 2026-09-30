@@ -32,7 +32,9 @@ impl Filter {
             .detach();
 
         let mut options = gix::filter::Pipeline::options(repo).map_err(Error::filter_setup)?;
-        // See the module header. Both of these are rulings, not oversights.
+        // See the module header. Both of these are rulings, not oversights. The
+        // drivers are never run; only their names are kept, to recognise a path
+        // one of them would have cleaned.
         let skipped = std::mem::take(&mut options.drivers)
             .into_iter()
             .filter(|driver| driver.clean.is_some() || driver.process.is_some())
@@ -54,32 +56,30 @@ impl Filter {
         })
     }
 
-    /// Whether `rela_path` diffs as text, or `None` when nothing says.
-    ///
-    /// `Some(false)` when `diff` is unset, as `binary` unsets it, or when a
-    /// skipped driver cleans the path. Git runs no clean filter on a symlink, so
-    /// `link` ignores the driver.
-    pub(crate) fn diff_attribute(&mut self, rela_path: &str, link: bool) -> Result<Option<bool>> {
+    /// What `rela_path`'s attributes say about diffing it: `diff` set, unset or
+    /// silent, and whether a driver this pipeline skips would clean it.
+    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<bool>, bool)> {
         let Filter {
             stack,
             objects,
             skipped,
             ..
         } = self;
-        let mut outcome = stack.selected_attribute_matches(["diff", "filter"]);
+        let names: &[&str] = if skipped.is_empty() {
+            &["diff"]
+        } else {
+            &["diff", "filter"]
+        };
+        let mut outcome = stack.selected_attribute_matches(names.iter().copied());
         let entry = stack
             .at_path(Path::new(rela_path), None, &*objects)
             .map_err(|source| Error::filter(rela_path, source))?;
         entry.matching_attributes(&mut outcome);
-        let mut diff = None;
+        let (mut diff, mut cleaned) = (None, false);
         for found in outcome.iter_selected() {
             match (found.assignment.name.as_str(), found.assignment.state) {
-                // The blob holds what the program wrote and the worktree holds
-                // what it read, so the two do not diff.
-                ("filter", gix::attrs::StateRef::Value(name))
-                    if !link && skipped.iter().any(|driver| driver == name.as_bstr()) =>
-                {
-                    return Ok(Some(false));
+                ("filter", gix::attrs::StateRef::Value(name)) => {
+                    cleaned = skipped.iter().any(|driver| driver == name.as_bstr());
                 }
                 ("diff", gix::attrs::StateRef::Unset) => diff = Some(false),
                 ("diff", gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_)) => {
@@ -88,7 +88,7 @@ impl Filter {
                 _ => {}
             }
         }
-        Ok(diff)
+        Ok((diff, cleaned))
     }
 
     /// `content`, as git would store it for `rela_path`.

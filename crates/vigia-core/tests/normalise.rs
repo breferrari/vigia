@@ -335,8 +335,7 @@ fn an_external_clean_driver_is_never_run() {
     // binary rather than as a diff git would not draw.
     assert!(
         diff.binary && (diff.added, diff.removed) == (0, 0),
-        "reported +{} −{} for a path whose clean driver this pipeline does not \
-         run, so the two sides it compared were never comparable",
+        "reported +{} −{}, not binary",
         diff.added,
         diff.removed
     );

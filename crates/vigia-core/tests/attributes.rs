@@ -109,14 +109,15 @@ fn skipped_driver_undiffable() {
         ".gitattributes",
         "a.csv filter=ptr\nb.csv filter=proc\nplain.txt filter=unset-driver\nsmudged.txt filter=smudger\n",
     );
-    for name in ["a.csv", "b.csv", "plain.txt", "smudged.txt"] {
+    let names = ["a.csv", "b.csv", "plain.txt", "smudged.txt"];
+    for name in names {
         scratch.write(name, numbered_lines(5));
     }
     scratch.commit_all("initial");
     // A process driver alone, the way LFS runs, configured after the commit so
     // git never has to start it.
     scratch.git(&["config", "filter.proc.process", "no-such-filter-process"]);
-    for name in ["a.csv", "b.csv", "plain.txt", "smudged.txt"] {
+    for name in names {
         scratch.write(name, numbered_lines(6));
     }
     std::fs::remove_file(&marker).expect("git ran the driver to store the pointer");
