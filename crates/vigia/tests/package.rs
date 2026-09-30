@@ -1720,6 +1720,16 @@ fn the_bump_writes_the_changelog_it_publishes() {
          bodies, so a PR title always becomes the note: {step}"
     );
     assert!(
+        step.contains("--json labels") && step.contains("\\t%s\\t%s\\n"),
+        "bump.yml's changelog step does not pass each pull request's labels to \
+         the script, so the label cannot decide what the release says: {step}"
+    );
+    assert!(
+        step.contains("commits/${sha}/pulls"),
+        "bump.yml's changelog step does not look a commit up by SHA, so a subject \
+         with no (#n) reaches the script with no pull request: {step}"
+    );
+    assert!(
         step.contains("git describe --tags --abbrev=0"),
         "bump.yml's changelog step does not start the range at the previous \
          release: {step}"
@@ -1749,7 +1759,7 @@ fn the_bump_writes_the_changelog_it_publishes() {
     );
 }
 
-/// Drives the generator against fixed subjects, in a scratch directory of its
+/// Drives the generator against fixed records, in a scratch directory of its
 /// own. Returns whether it passed, the file it left behind, and what it said.
 ///
 /// Read to end rather than waited on, because with the log captured a `wait`
@@ -1796,202 +1806,156 @@ fn changelog_entry(
     )
 }
 
-/// The generator keeps what a reader of the pane can see and drops the rest.
+/// One changelog before any release under test writes to it.
+#[cfg(unix)]
+const CHANGELOG_BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
+
+/// The bullets the generator wrote under `version`.
+#[cfg(unix)]
+fn bullets<'a>(changelog: &'a str, version: &str) -> Vec<&'a str> {
+    let heading = format!("## [{version}]");
+    changelog
+        .lines()
+        .skip_while(|line| !line.starts_with(&heading))
+        .skip(1)
+        .take_while(|line| !line.starts_with("## ["))
+        .filter(|line| line.starts_with("- "))
+        .collect()
+}
+
+/// The label decides, and the subject's wording decides nothing.
 ///
-/// The filter is the only part of the release that decides what a user is
-/// told, and it is a heuristic over commit subjects, so it is driven here
-/// rather than trusted. One subject of each class it sorts on: prefixed
-/// internal work, unprefixed internal work naming a document, a credential
-/// subject the release machinery owns, a subject whose visible half shares a
-/// sentence with an internal word, two naming the pane over a word that would
-/// otherwise drop them, and two changes a reader can observe, whose trailing
-/// references belong to the tracker and come off.
-///
-/// The two naming the pane are the direction this file is least able to be
-/// wrong in. A visible change has no mention anywhere but the section, so the
-/// filter dropping one is invisible to every check downstream, and the words
-/// that drop it match anywhere in the sentence rather than at an anchor.
+/// One subject, twice: the same factory sentence is dropped under `internal`
+/// and written under `release`. The old subject list would have passed it
+/// both times, since it carries no prefix and no word the list knew.
 #[cfg(unix)]
 #[test]
-fn the_changelog_entry_keeps_what_a_reader_can_see() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let subjects = "roadmap: a row moves\n\
-                    The roadmap marks a row done (#449)\n\
-                    The release token is the one that already exists (#146)\n\
-                    `Esc` closes the sheet, and the ruling that said otherwise is revoked (#394)\n\
-                    `w` wraps a long line, capped at two (#272) (#344)\n\
-                    B12: the keymap gets a sheet over the pane, not a longer hint bar (#273)\n\
-                    A click on the position token opens the list (#508)\n\
-                    The pane stops showing what is no longer there (#340) (#341)\n";
-    let (passed, left, _) = changelog_entry("mixed", "0.2.0", subjects, BEFORE);
-    assert!(
-        passed,
-        "the generator refused a section it can write:\n{left}"
-    );
-
-    let written: Vec<&str> = left
-        .lines()
-        .skip_while(|line| !line.starts_with("## [0.2.0]"))
-        .take_while(|line| !line.starts_with("## [0.1.0]"))
-        .filter(|line| line.starts_with("- "))
-        .collect();
+fn label_decides() {
+    let records = "#10\tinternal\tGive each main commit its own CI group (#10)\n\
+                   #11\trelease\tGive each main commit its own CI group (#11)\n\
+                   #12\trelease,bug\tA click on the position token opens the list (#508) (#12)\n";
+    let (passed, left, said) = changelog_entry("label", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a labelled range:\n{said}");
     assert_eq!(
-        written,
+        bullets(&left, "0.2.0"),
         [
-            "- `Esc` closes the sheet, and the ruling that said otherwise is revoked",
-            "- `w` wraps a long line, capped at two",
-            "- B12: the keymap gets a sheet over the pane, not a longer hint bar",
+            "- Give each main commit its own CI group",
             "- A click on the position token opens the list",
-            "- The pane stops showing what is no longer there",
         ],
-        "the generator kept the wrong subjects:\n{left}"
+        "the label did not decide the section:\n{left}"
+    );
+    assert!(
+        said.contains("skipped as internal: #10"),
+        "the log does not name the skipped pull request:\n{said}"
+    );
+    assert!(
+        !said.contains("#11") && !said.contains("#12"),
+        "the log names a kept pull request as skipped:\n{said}"
     );
 
     // A section already written is the better text, so it is not overwritten.
-    // A re-run of a release reaches this, and so does a section written by
-    // hand.
-    let (passed, left, _) = changelog_entry("existing", "0.1.0", "A change (#1)\n", BEFORE);
+    let (passed, left, _) =
+        changelog_entry("existing", "0.1.0", "#1\trelease\tA change (#1)\n", CHANGELOG_BEFORE);
     assert!(
-        !passed && left == BEFORE,
+        !passed && left == CHANGELOG_BEFORE,
         "the generator overwrote a section that was already written:\n{left}"
     );
 }
 
-/// A range the filter empties is reported, not summarised as nothing moving.
-///
-/// A sentence saying nothing moved is a conclusion drawn from a word list's
-/// silence over free prose, and the section is the only place the change was
-/// ever going to be named, so nothing downstream can catch it being wrong. The
-/// range itself is what is honest to write: a reader who can see the change the
-/// filter could not is then looking at it.
-///
-/// The section still has to exist, because a missing one makes `dist` fall back
-/// to the install instructions with no warning anywhere.
+/// A `Release-note:` line is the bullet, not the subject, and `none` on an
+/// `internal` pull request writes nothing.
 #[cfg(unix)]
 #[test]
-fn the_changelog_entry_reports_an_empty_result_rather_than_asserting_it() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let subjects = "The masthead is removed, and the ruling that kept it is revoked (#462)\n\
-                    roadmap: a row moves\n";
-    let (passed, left, _) = changelog_entry("empty", "0.3.0", subjects, BEFORE);
-    assert!(
-        passed,
-        "the generator refused a range it had dropped everything from:\n{left}"
-    );
-    assert!(
-        left.contains("## [0.3.0]"),
-        "a range the filter emptied left no section, so the release would fall \
-         back to the install instructions in silence:\n{left}"
-    );
-
-    for subject in [
-        "The masthead is removed, and the ruling that kept it is revoked",
-        "roadmap: a row moves",
-    ] {
-        assert!(
-            left.contains(subject),
-            "the section does not carry {subject:?}, so a reader is told what the \
-             filter concluded and never shown what it read:\n{left}"
-        );
-    }
-    assert!(
-        !left.contains("Nothing a user of the pane can see moved"),
-        "the section still asserts nothing moved, over a range whose one commit \
-         removed a key and its setting:\n{left}"
-    );
-}
-
-/// The generator names every subject it drops, in the log of the run that drops
-/// it.
-///
-/// A drop is invisible everywhere else. The section is the only place the change
-/// was going to appear, so a range that keeps nine subjects and loses the tenth
-/// reads as a complete section, and the branch above cannot see that case.
-///
-/// The kept subject is asserted absent as well, because a log naming the whole
-/// range would satisfy the other half while reporting no decision at all.
-#[cfg(unix)]
-#[test]
-fn the_changelog_entry_names_every_subject_it_drops() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let subjects = "roadmap: a row moves\n\
-                    The roadmap marks a row done (#449)\n\
-                    The pane stops showing what is no longer there (#340)\n";
-    let (passed, left, said) = changelog_entry("dropped", "0.2.0", subjects, BEFORE);
-    assert!(
-        passed,
-        "the generator refused a section it can write:\n{left}"
-    );
-
-    for dropped in [
-        "roadmap: a row moves",
-        "The roadmap marks a row done (#449)",
-    ] {
-        assert!(
-            said.contains(&format!("filtered as internal: {dropped}")),
-            "the run's log does not name {dropped:?}, so a release that loses one \
-             line out of ten loses it in silence:\n{said}"
-        );
-    }
-    assert!(
-        !said.contains("The pane stops showing"),
-        "the log names a subject the filter kept, so it reports the range rather \
-         than the decision:\n{said}"
-    );
-}
-
-/// A `Release-note:` line is written as it stands, in order, and `none` writes
-/// nothing.
-#[cfg(unix)]
-#[test]
-fn release_note_wins() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let lines = "Release-note: Remember toggles between runs\n\
-                 Release-note: Show the staged count on an empty pane (#9)\n\
-                 roadmap: a row moves\n\
-                 Release-note: none\n\
-                 The pane stops showing what is gone (#1)\n";
-    let (passed, left, said) = changelog_entry("notes", "0.2.0", lines, BEFORE);
-    assert!(
-        passed,
-        "the generator refused a section it can write:\n{left}"
-    );
-    let written: Vec<&str> = left
-        .lines()
-        .skip_while(|line| !line.starts_with("## [0.2.0]"))
-        .take_while(|line| !line.starts_with("## [0.1.0]"))
-        .filter(|line| line.starts_with("- "))
-        .collect();
+fn note_wins() {
+    let records = "#20\trelease\tRelease-note: Paint nothing for idle pointer motion\n\
+                   #21\tinternal\tRelease-note: none\n\
+                   #22\trelease\tRelease-note: Show the staged count on an empty pane (#9)\n\
+                   #23\trelease\tThe pane stops showing what is gone (#23)\n";
+    let (passed, left, said) = changelog_entry("notes", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a noted range:\n{said}");
     assert_eq!(
-        written,
+        bullets(&left, "0.2.0"),
         [
-            "- Remember toggles between runs",
+            "- Paint nothing for idle pointer motion",
             "- Show the staged count on an empty pane",
             "- The pane stops showing what is gone",
         ],
         "notes were not written as they stand, in order:\n{left}"
     );
     assert!(
-        !said.contains("filtered as internal: Release-note"),
-        "the log reports a note as a dropped subject:\n{said}"
+        said.contains("Release-note: none: #21"),
+        "the log does not name the pull request whose note is none:\n{said}"
     );
 }
 
-/// A range of only prefixed internal work or `Release-note: none` is refused,
-/// so the bump stops before a version is cut.
+/// A label and a trailer that disagree fail the bump, and so does a pull
+/// request with no label or both. Every failure in the range is named.
 #[cfg(unix)]
 #[test]
-fn process_only_refused() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let lines = "docs: tidy the README\nchore: move a script\nRelease-note: none\n";
-    let (passed, left, said) = changelog_entry("process", "0.2.0", lines, BEFORE);
+fn intent_conflict_fails() {
+    let records = "#30\trelease\tRelease-note: none\n\
+                   #31\tinternal\tRelease-note: A key moves\n\
+                   #32\t\tRelease-note: A key moves\n\
+                   #33\trelease,internal\tBoth labels (#33)\n\
+                   #34\trelease\tA good one (#34)\n";
+    let (passed, left, said) = changelog_entry("conflict", "0.2.0", records, CHANGELOG_BEFORE);
     assert!(
-        !passed && left == BEFORE,
+        !passed && left == CHANGELOG_BEFORE,
+        "a range with a disagreement cut a version:\n{left}"
+    );
+    for (who, why) in [
+        ("#30", "none and is labelled release"),
+        ("#31", "labelled internal and carries Release-note"),
+        ("#32", "no release label"),
+        ("#33", "both release and internal"),
+    ] {
+        assert!(
+            said.contains(&format!("::error::{who} ")) && said.contains(why),
+            "the refusal does not name {who} ({why}):\n{said}"
+        );
+    }
+    assert!(
+        !said.contains("::error::#34"),
+        "the refusal names a pull request that was right:\n{said}"
+    );
+}
+
+/// A pull request with neither label fails the bump and is named, whatever
+/// its subject says. A commit with no pull request is named by its SHA.
+#[cfg(unix)]
+#[test]
+fn unlabelled_fails() {
+    let records = "#40\trelease\tThe pane draws a thing (#40)\n\
+                   #41\t\tGive each main commit its own CI group (#41)\n\
+                   #42\tbug\tThe pane draws another thing (#42)\n\
+                   abc1234\t\tA direct push\n";
+    let (passed, left, said) = changelog_entry("unlabelled", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE,
+        "an unlabelled pull request cut a version:\n{left}"
+    );
+    for who in ["#41", "#42", "abc1234"] {
+        assert!(
+            said.contains(&format!("::error::{who} is labelled neither release nor internal")),
+            "the refusal does not name {who}:\n{said}"
+        );
+    }
+    assert!(
+        !said.contains("::error::#40"),
+        "the refusal names the labelled pull request:\n{said}"
+    );
+}
+
+/// A range that keeps nothing is refused, so the bump stops before a version
+/// is cut. An empty range is refused the same way.
+#[cfg(unix)]
+#[test]
+fn all_internal_refused() {
+    let records = "#50\tinternal\tdocs: tidy the README (#50)\n\
+                   #51\tinternal\tRelease-note: none\n";
+    let (passed, left, said) = changelog_entry("process", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE,
         "a process-only range cut a version:\n{left}"
     );
     assert!(
@@ -1999,24 +1963,41 @@ fn process_only_refused() {
         "the refusal says nothing:\n{said}"
     );
 
-    // One plain subject is enough to release, trailer or not.
-    let lines = "docs: tidy the README\nThe pane draws a thing (#3)\n";
-    let (passed, left, _) = changelog_entry("one-visible", "0.2.0", lines, BEFORE);
+    let (passed, left, said) = changelog_entry("empty", "0.2.0", "", CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("nothing user-facing"),
+        "an empty range cut a version:\n{said}"
+    );
+
+    // One labelled subject is enough to release, trailer or not.
+    let records = "#52\tinternal\tdocs: tidy the README (#52)\n\
+                   #53\trelease\tThe pane draws a thing (#53)\n";
+    let (passed, left, _) = changelog_entry("one-visible", "0.2.0", records, CHANGELOG_BEFORE);
     assert!(passed, "a range with a visible change was refused:\n{left}");
 }
 
-/// A kept subject in contract phrasing is released with a warning, not refused.
+/// A kept line in contract phrasing is released with a warning, not refused.
 #[cfg(unix)]
 #[test]
 fn dialect_subject_warned() {
-    const BEFORE: &str = "# Changelog\n\n## [0.1.0] - 2026-01-01\n\n- First.\n";
-
-    let lines = "The third word is only, and it is the reading that goes inert (#528)\n";
-    let (passed, left, said) = changelog_entry("dialect", "0.2.0", lines, BEFORE);
+    let records = "#60\trelease\tThe third word is only, and it is the reading that goes inert (#60)\n";
+    let (passed, left, said) = changelog_entry("dialect", "0.2.0", records, CHANGELOG_BEFORE);
     assert!(passed, "a riddle subject blocked the release:\n{left}");
     assert!(
         said.contains("::warning::contract phrasing in the release notes: The third word"),
         "the riddle subject was not named:\n{said}"
+    );
+}
+
+/// A record without its three fields is refused, not read as a subject.
+#[cfg(unix)]
+#[test]
+fn bare_subject_refused() {
+    let records = "The pane draws a thing (#70)\n";
+    let (passed, left, said) = changelog_entry("bare", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("malformed record"),
+        "a bare subject reached the section without a label:\n{said}"
     );
 }
 
@@ -2165,46 +2146,11 @@ fn ci_runs_title_check() {
     );
 }
 
-/// Every config key reaches the filter that decides what a release says.
-///
-/// That filter keeps a subject naming something a reader can press or set, and
-/// it names the settings literally. A key added to the config and not to the
-/// pattern is a change a reader can make in their own file and never be told
-/// about, on any release whose subject also carries an internal word.
-///
-/// The assignment line is read alone rather than the whole script, because the
-/// prose above it names the settings too and would satisfy a search over the
-/// file.
-#[test]
-fn every_config_key_reaches_the_changelog_filter() {
-    let script = repo_file(".github/scripts/changelog-entry.sh");
-    let pattern = script
-        .lines()
-        .find(|line| line.starts_with("visible_subject="))
-        .expect("changelog-entry.sh assigns visible_subject");
-
-    // Split on the alternation's own punctuation, so a key that is merely a
-    // substring of another alternative does not count as named.
-    let named: Vec<&str> = pattern.split(['|', '(', ')']).collect();
-    let missing: Vec<&str> = vigia::config::KEYS
-        .into_iter()
-        .chain(vigia::config::VALUES)
-        .filter(|key| !named.contains(key))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "the release notes filter does not name {}, so a subject changing only \
-         that setting is dropped whenever it shares a sentence with an internal \
-         word:\n{pattern}",
-        missing.join(" or ")
-    );
-}
-
 /// The two documents every session reads first, and the most each may weigh
 /// in bytes. Growing past the ceiling fails the build.
 ///
 /// `CLAUDE.md` gets about 300 bytes over its size on the commit that set this, so
-/// one sentence fits without a raise. The skill sits at its size.
+/// one sentence fits without a raise. The skill gets about 20 bytes.
 ///
 /// `SPEC.md` and `RULINGS.md` carry no byte ceiling. A size cap fails a clearer
 /// sentence and passes a shorter one that dropped an exception, which is the
@@ -2214,7 +2160,7 @@ fn every_config_key_reaches_the_changelog_filter() {
 /// A ledger is not prose and carries no ceiling. [`LEDGERS`] says which and why.
 const WRITTEN_LAYER_BUDGET: [(&str, usize); 2] = [
     ("CLAUDE.md", 17_700),
-    (".claude/skills/take-next/SKILL.md", 20922),
+    (".claude/skills/take-next/SKILL.md", 21_660),
 ];
 
 /// Every invariant id the spec's table declares. One leaving fails the build.

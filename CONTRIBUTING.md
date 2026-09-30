@@ -41,8 +41,8 @@ A first PR is most likely to break these rules.
 - **Pure Rust.** Any dependency that pulls `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows, and CI fails the build if one appears.
 - **Do not hard-wrap prose.** Markdown files, PR bodies and commit message bodies do not wrap at all: one paragraph is one line, because GitHub renders a single newline as a line break.
 - **Titles say what is broken or what to build.** One clause, no "because". The explanation goes in the body.
-- **A title can become a release note.** The release notes are written from the commits merged since the last release. To control the line, put `Release-note: <one sentence>` in a **commit message body** on your branch. It replaces the title in the notes. Pull requests are squash-merged with their commit messages, so a line that is only in the PR body is lost.
-- **A change the pane does not show gets no release note.** Title it `docs: ...` or `chore: ...`, or add `Release-note: none`. If every change since the last release is like that, no version is released.
+- **A title can become a release note.** The release notes list the pull requests labelled `release` since the last release, one line each. To control the line, put `Release-note: <one sentence>` in a **commit message body** on your branch. It replaces the title in the notes. Pull requests are squash-merged with their commit messages, so a line that is only in the PR body is lost.
+- **A change the pane does not show is labelled `internal`.** It gets no release note. Add `Release-note: none` to the commit as well. Every pull request carries one of the two labels, and a release stops on one that carries neither. If every change since the last release is internal, no version is released.
 
 ## Public files and contract files
 

@@ -367,11 +367,19 @@ jobs:
       # identical to the person reading it. That is why this runs here, before
       # the commit, rather than being left to whoever remembers.
       #
-      # Same shape as the raise above and for the same reason: the filtering
-      # that decides what a user is told lives in a script a test can drive.
-      # `--first-parent` is insurance rather than a correction, since every
-      # merge here is squashed and the log is already one subject per pull
-      # request.
+      # Same shape as the raise above and for the same reason: the decision
+      # about what a user is told lives in a script a test can drive. This
+      # step only gathers the facts per commit: which pull request merged it,
+      # that pull request's labels, and its `Release-note:` lines or its
+      # subject, never both. `--first-parent` is insurance rather than a
+      # correction, since every merge here is squashed and the log is already
+      # one subject per pull request.
+      #
+      # A commit whose subject carries no `(#n)` is looked up by SHA. One that
+      # still resolves to no pull request reaches the script with no labels,
+      # and the script refuses it, so a direct push cannot slip into a release
+      # unlabelled. A `gh` failure lands in the same place: the labels stay
+      # empty and the refusal names the pull request.
       - name: write the changelog section
         run: |
           set -euo pipefail
@@ -380,17 +388,36 @@ jobs:
             echo "::error::no tag to write the notes from; a shallow checkout is the usual cause"
             exit 1
           fi
-          # Per commit, its `Release-note:` lines or its subject, never both.
-          # The PR body is a best-effort fallback: squash merges keep commit
-          # messages, so it is usually not on main.
           for sha in $(git log --first-parent --format='%H' "${previous}..HEAD"); do
-            notes=$(git log -1 --format='%B' "$sha" | tr -d '\r' | grep '^Release-note:' || true)
             subject=$(git log -1 --format='%s' "$sha")
             pr=$(printf '%s\n' "$subject" | sed -nE 's/.*\(#([0-9]+)\)[[:space:]]*$/\1/p')
-            if [ -z "$notes" ] && [ -n "$pr" ]; then
-              notes=$(gh pr view "$pr" --json body -q .body 2>/dev/null | tr -d '\r' | grep '^Release-note:' || true)
+            if [ -z "$pr" ]; then
+              pr=$(gh api "repos/{owner}/{repo}/commits/${sha}/pulls" \
+                --jq '[.[] | select(.merged_at != null)][0].number // empty' 2>/dev/null || true)
             fi
-            if [ -n "$notes" ]; then printf '%s\n' "$notes"; else printf '%s\n' "$subject"; fi
+            labels=''
+            body=''
+            if [ -n "$pr" ]; then
+              who="#${pr}"
+              view=$(gh pr view "$pr" --json labels,body 2>/dev/null || echo '{}')
+              labels=$(printf '%s' "$view" | jq -r '[.labels[]?.name] | join(",")')
+              body=$(printf '%s' "$view" | jq -r '.body // ""')
+            else
+              who=$(git rev-parse --short "$sha")
+            fi
+            # The PR body is a fallback only: squash merges keep commit
+            # messages, so a trailer written there is usually not on main.
+            notes=$(git log -1 --format='%B' "$sha" | tr -d '\r' | grep '^Release-note:' || true)
+            if [ -z "$notes" ]; then
+              notes=$(printf '%s\n' "$body" | tr -d '\r' | grep '^Release-note:' || true)
+            fi
+            if [ -n "$notes" ]; then
+              printf '%s\n' "$notes" | while IFS= read -r note; do
+                printf '%s\t%s\t%s\n' "$who" "$labels" "$note"
+              done
+            else
+              printf '%s\t%s\t%s\n' "$who" "$labels" "$subject"
+            fi
           done | sh .github/scripts/changelog-entry.sh \
                 '${{ steps.version.outputs.next }}' "$(date -u +%F)"
         env:
