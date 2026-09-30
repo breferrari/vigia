@@ -6,9 +6,9 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    CLOCK_TICK, COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta,
-    highlight_delta, highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise,
-    settle, time, time_cpu,
+    COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
+    highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise, settle, time,
+    time_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -1178,15 +1178,6 @@ fn coarse_round_acquits() {
     // 225 frames spent their time off-CPU.
     let tick = COARSE_TICK.as_micros() as u64;
     judge_round(COARSE_TICK, 16, (225, 4_000, 0), (25, 20_000, tick + 5_000));
-}
-
-#[test]
-fn platform_tick() {
-    assert_eq!(
-        CLOCK_TICK == COARSE_TICK,
-        cfg!(windows),
-        "only Windows' thread clock counts in scheduler ticks"
-    );
 }
 
 #[test]

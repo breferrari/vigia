@@ -203,8 +203,8 @@ pub fn holds_p99_ticked(
         // A fine clock reads each frame exactly, so only the breaching frames'
         // own off-CPU time may pay for them. A coarse one rounds each frame by up
         // to a tick, which only a whole round of consecutive frames cancels.
-        let deficit = if tick < Duration::from_millis(1) {
-            off_cpu
+        let (deficit, counted) = if tick < Duration::from_millis(1) {
+            (off_cpu, "its breaching frames")
         } else {
             let floor = tick * FLOOR_TICKS;
             if breaching < floor {
@@ -216,19 +216,15 @@ pub fn holds_p99_ticked(
                     detail()
                 );
             }
-            again.total().saturating_sub(cpu.total())
+            (again.total().saturating_sub(cpu.total()), "the round")
         };
-        // What the deficit has to explain: the round's own excess, in the same units as
-        // the deficit.
+        // What the deficit has to explain: the round's excess over budget, summed.
         let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
-        // Both sides are sums over the round, and that is the whole correction, in two
-        // parts. This compared `deficit`, a whole round's off-CPU time, against a
-        // single frame's excess over budget.
         if deficit >= excess {
             eprintln!(
                 "note: {claim} was over the {budget:?} budget on wall clock twice \
-                 ({one} then {two}) and the round spent {deficit:?} **off-CPU**, \
+                 ({one} then {two}) and {counted} spent {deficit:?} **off-CPU**, \
                  which covers the {excess:?} the round spent over budget in total \
                  (p99 alone was {overshoot:?} over), so the overshoot is \
                  time this process was not running rather than work it did. Reported \
@@ -239,7 +235,7 @@ pub fn holds_p99_ticked(
         }
         panic!(
             "{claim} was over the {budget:?} budget twice on wall clock ({one} then \
-             {two}) and the round spent only {deficit:?} off-CPU against {excess:?} \
+             {two}) and {counted} spent only {deficit:?} off-CPU against {excess:?} \
              spent over budget across the round (p99 alone was {overshoot:?} over), \
              so the time went into **work done** and this is \
              the frame path rather than the host: contention cannot inflate a CPU \
