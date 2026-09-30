@@ -5712,20 +5712,16 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
             },
         ] {
             let own = Rect::new(0, 0, buffer.0, buffer.1);
-            let mut buf = Buffer::empty(own);
-            render(&mut buf, area, &view, &theme, Glyphs::default(), &chrome());
-
-            let mut expected = Buffer::empty(own);
-            let inside = own.intersection(area);
-            render(
-                &mut expected,
-                inside,
-                &view,
-                &theme,
-                Glyphs::default(),
-                &chrome(),
+            let draw = |at: Rect| {
+                let mut buf = Buffer::empty(own);
+                render(&mut buf, at, &view, &theme, Glyphs::default(), &chrome());
+                buf
+            };
+            assert_eq!(
+                draw(area),
+                draw(own.intersection(area)),
+                "{area:?} into {buffer:?}"
             );
-            assert_eq!(buf, expected, "{area:?} into {buffer:?}");
         }
     }
 }
