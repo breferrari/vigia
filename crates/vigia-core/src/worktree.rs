@@ -8,7 +8,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
-use crate::frame::{Fingerprint, Frame, config_moved, fingerprint};
+use crate::frame::{Fingerprint, Frame, config_moved, followed_print};
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
 use crate::standing::Standing;
@@ -700,7 +700,8 @@ impl Worktree {
     /// What the files under the git dir that shape the clean filter look like now.
     pub(crate) fn filter_prints(&self) -> [Option<Fingerprint>; 2] {
         let [config, attributes] = &self.filter_sources;
-        [fingerprint(config), fingerprint(attributes)]
+        // Followed, as gix follows a linked config when it reads it.
+        [followed_print(config), followed_print(attributes)]
     }
 
     /// Reload the repository's configuration when `now` differs from the config
