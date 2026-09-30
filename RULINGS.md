@@ -522,7 +522,14 @@ Ruled 2026-09-04, reader ([#374](https://github.com/breferrari/vigia/issues/374)
 
 **No settle check on the two files, unlike the attributes files in the changed set.** A new repository's config is young for its first seconds, so requiring a settled modification time dropped the caches on every tick, and two reuse gates in `tests/frame.rs` failed. The cost is the one change it misses: a rewrite of the same length inside one modification-time granule.
 ## §7 — the attribution floor
+## §7 — how off-CPU time is counted
 
-**Twenty ticks of the coarsest thread clock, on every platform.** Two failures acquit a short tail of real work. Quantisation reads 20ms of work as one 15.625ms tick on Windows. Credit transfer lets the off-CPU noise of many fast frames pay for a few slow ones, and that happens on any clock. A floor in each platform's own tick would be finer on Linux and macOS, and it would let the second failure back in there, so the floor is the coarse one everywhere.
+**Per breaching frame on a fine clock, per round with a floor on a coarse one.** Ruled 2026-09-30, reader ([#270](https://github.com/breferrari/vigia/issues/270)). User-facing: none
 
-**The cost, stated.** A real host stall that breaches both rounds for less than 312.5ms of breaching wall time now fails, where it was acquitted before. Restricting the deficit to the breaching samples and pairing each with its own CPU time, with a per-platform tick, would fix both failures more finely. That was not built in the pass that added the floor. **This departs from two of #270's exit criteria**: the floor does not scale with a finer clock, and a stall under the floor no longer acquits on every tier. Ruled 2026-09-30, session ([#270](https://github.com/breferrari/vigia/issues/270)), pending the reader. User-facing: none
+Two failures acquitted a short tail of real work. Credit transfer let the off-CPU noise of many fast frames pay for a few slow ones. Quantisation read 20ms of work as one 15.625ms tick on Windows.
+
+**Rejected: one floor of twenty Windows ticks on every platform.** It was the first version of this pass. It failed closed on any breach under 312.5ms of breaching wall time, so a real 3-frame host stall on Linux, which the nanosecond clock resolves, failed CI where it had been acquitted. It also missed the issue's criterion that the floor mean the same on a finer clock.
+
+**Rejected: per-sample deficit everywhere, with a one-tick allowance per frame.** On Windows the tick is about the 16ms budget, so a genuine stall frame with a few milliseconds of work sits within one tick of its excess, and nearly every real stall would fail. The whole-round sum is what cancels the rounding there, because consecutive readings telescope and the error totals about two ticks, not one per frame.
+
+**What remains.** On Windows a short real stall, under twenty ticks of breaching wall time, still fails closed. That is the one case the coarse clock cannot resolve.

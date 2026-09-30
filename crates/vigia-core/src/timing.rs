@@ -106,11 +106,16 @@ impl Samples {
             })
     }
 
-    /// The whole of every sample that exceeded `budget`, summed.
-    pub fn wall_over(&self, budget: Duration) -> Duration {
+    /// Over the samples that exceeded `budget`: their whole wall time, and the
+    /// part of it `cpu` did not spend running. `cpu` holds the same frames in the
+    /// same order.
+    pub fn breach_over(&self, cpu: &Samples, budget: Duration) -> (Duration, Duration) {
         self.values[..self.len()]
             .iter()
-            .filter(|each| **each > budget)
-            .sum()
+            .zip(&cpu.values[..cpu.len()])
+            .filter(|(wall, _)| **wall > budget)
+            .fold((Duration::ZERO, Duration::ZERO), |(wall, off), (w, c)| {
+                (wall + *w, off + w.saturating_sub(*c))
+            })
     }
 }

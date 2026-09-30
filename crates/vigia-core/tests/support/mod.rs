@@ -142,14 +142,20 @@ pub fn holds_p99(
     });
 }
 
-/// The coarsest thread clock a tier has: `GetThreadTimes` counts in scheduler
-/// ticks.
-pub const CLOCK_TICK: Duration = Duration::from_micros(15_625);
+/// `GetThreadTimes`' step: Windows counts thread time in scheduler ticks.
+pub const COARSE_TICK: Duration = Duration::from_micros(15_625);
 
-/// Breaching wall time below which a CPU clock cannot tell the host from the
-/// work. The coarsest tick on every platform, because below it the fast frames'
-/// off-CPU noise can pay for a short tail of work on any clock.
-pub const ATTRIBUTION_FLOOR: Duration = CLOCK_TICK.saturating_mul(20);
+/// This platform's thread clock step. Linux and macOS count in nanoseconds and
+/// microseconds.
+pub const CLOCK_TICK: Duration = if cfg!(windows) {
+    COARSE_TICK
+} else {
+    Duration::from_micros(1)
+};
+
+/// Breaching wall time a coarse clock needs before it can tell the host from
+/// the work, in its own ticks.
+pub const FLOOR_TICKS: u32 = 20;
 
 /// [`holds_p99`] where a round is produced whole rather than a sample at a time.
 pub fn holds_p99_rounds(
@@ -158,6 +164,18 @@ pub fn holds_p99_rounds(
     first: &Samples,
     detail: impl Fn() -> String,
     round: impl FnOnce() -> (Samples, Option<Samples>),
+) {
+    holds_p99_ticked(claim, budget, first, detail, round, CLOCK_TICK);
+}
+
+/// [`holds_p99_rounds`] against a thread clock that steps by `tick`.
+pub fn holds_p99_ticked(
+    claim: &str,
+    budget: Duration,
+    first: &Samples,
+    detail: impl Fn() -> String,
+    round: impl FnOnce() -> (Samples, Option<Samples>),
+    tick: Duration,
 ) {
     let one = Shape::of(first);
     if one.p99 <= budget {
@@ -181,18 +199,25 @@ pub fn holds_p99_rounds(
     // *consistent with* a stall and does not establish one; thread CPU time
     // establishes it, because no amount of host contention inflates work done.
     if let Some(cpu) = cpu.as_ref() {
-        // Fails closed: under the floor, rounding or noise can pay for real work.
-        let breaching = again.wall_over(budget);
-        if breaching < ATTRIBUTION_FLOOR {
-            panic!(
-                "{claim} was over the {budget:?} budget twice ({one} then {two}), and \
-                 the breaching frames took {breaching:?} in all, under the \
-                 {ATTRIBUTION_FLOOR:?} a thread clock needs, so it cannot attribute \
-                 them to the host and they are treated as ours. {}",
-                detail()
-            );
-        }
-        let deficit = again.total().saturating_sub(cpu.total());
+        let (breaching, off_cpu) = again.breach_over(cpu, budget);
+        // A fine clock reads each frame exactly, so only the breaching frames'
+        // own off-CPU time may pay for them. A coarse one rounds each frame by up
+        // to a tick, which only a whole round of consecutive frames cancels.
+        let deficit = if tick < Duration::from_millis(1) {
+            off_cpu
+        } else {
+            let floor = tick * FLOOR_TICKS;
+            if breaching < floor {
+                panic!(
+                    "{claim} was over the {budget:?} budget twice ({one} then {two}). \
+                     Its breaching frames took {breaching:?}, under the {floor:?} a \
+                     {tick:?} clock needs, so it cannot attribute them, and they are \
+                     ours. {}",
+                    detail()
+                );
+            }
+            again.total().saturating_sub(cpu.total())
+        };
         // What the deficit has to explain: the round's own excess, in the same units as
         // the deficit.
         let excess = again.excess_over(budget);
