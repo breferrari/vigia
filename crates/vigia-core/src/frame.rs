@@ -384,6 +384,12 @@ impl<'w> Frame<'w> {
         // event brings the walk back.
         self.settles_at = None;
 
+        // Before the walks, which read the config too. No settle check here: a new
+        // repository's config is young for seconds. Missed: a same-length rewrite
+        // inside one mtime granule.
+        let sources = self.worktree.filter_prints();
+        self.worktree.follow_config(sources);
+
         let options = ChangeOptions {
             hide: self.hide.as_ref(),
             ..ChangeOptions::default()
@@ -434,11 +440,7 @@ impl<'w> Frame<'w> {
             .copied()
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
-        // No settle check here: a new repository's config is young for seconds.
-        // Missed: a same-length rewrite inside one mtime granule.
-        let sources = self.worktree.filter_prints();
         let sources_moved = sources != self.filter_sources;
-        self.worktree.follow_config(sources);
         self.filter_sources = sources;
         if !provable || attributes != self.attributes || sources_moved {
             // Credited before the clear, for the reason [`Frame::show_staged`] credits

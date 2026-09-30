@@ -636,3 +636,40 @@ fn late_frame_follows() {
         "a frame built after the change diffed under the config the worktree opened with"
     );
 }
+
+/// A file that differs from its blob only in line endings is listed or not by
+/// the config in force now, in a running frame as in a fresh one.
+#[test]
+fn status_follows_config() {
+    let scratch = Scratch::crlf_worktree("normalise-status-config", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    // The same bytes again, so the index's stat no longer vouches for them and
+    // the walk has to compare content.
+    scratch.write_crlf("a.txt", &numbered_lines(20));
+
+    let listed = |frame: &Frame| frame.files().iter().any(|c| c.path == "a.txt");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        !listed(&frame),
+        "the control is wrong: under core.autocrlf=true a.txt is unchanged"
+    );
+
+    scratch.git(&["config", "core.autocrlf", "false"]);
+    let restarted = scratch.worktree();
+    let mut cold = restarted.frame();
+    cold.advance().expect("advance");
+    assert!(
+        listed(&cold),
+        "the control is wrong: under core.autocrlf=false a.txt is changed"
+    );
+
+    frame.advance().expect("advance");
+    assert!(
+        listed(&frame),
+        "the running frame listed files under the config it was opened with"
+    );
+}
