@@ -113,7 +113,7 @@ jobs:
           dist generate --check
 
   test:
-    name: test and budgets (${{ matrix.os }})
+    name: test (${{ matrix.os }})
     if: github.event.pull_request.draft != true
     runs-on: ${{ matrix.os }}
     strategy:
@@ -156,6 +156,24 @@ jobs:
         run: cargo test --workspace
         env:
           VIGIA_BUDGET_SLACK: "3"
+
+  # The budgets in their own job per platform, beside the test job rather
+  # than after it. They are a separate release build either way, and running
+  # them after the debug suite put three to six minutes on the critical path
+  # of every lane for nothing the ordering bought. Each budget step still runs
+  # in the order it always has: the two budgets binaries, then first paint.
+  budgets:
+    name: budgets (${{ matrix.os }})
+    if: github.event.pull_request.draft != true
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       # Then the budgets, in release, because that is what they were set
       # against. Slack applies to the absolute wall-clock gates only: hosted
@@ -385,7 +403,7 @@ jobs:
   ci-complete:
     name: ci complete
     if: always()
-    needs: [lint, test, benches, pure-rust, musl]
+    needs: [lint, test, budgets, benches, pure-rust, musl]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -397,6 +415,7 @@ jobs:
             '${{ github.event.pull_request.draft }}' \
             '${{ needs.lint.result }}' \
             '${{ needs.test.result }}' \
+            '${{ needs.budgets.result }}' \
             '${{ needs.benches.result }}' \
             '${{ needs.pure-rust.result }}' \
             '${{ needs.musl.result }}'
