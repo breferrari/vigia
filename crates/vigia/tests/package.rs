@@ -1555,7 +1555,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
         "ci.yml does not pass the draft expression to the script, so the gate's draft \
          cases are testing an argument production never sends"
     );
-    for leg in ["lint", "test", "benches", "pure-rust", "musl"] {
+    for leg in ["lint", "test", "budgets", "benches", "pure-rust", "musl"] {
         let arg = format!("needs.{leg}.result");
         assert!(
             ci.contains(&arg),

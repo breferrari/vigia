@@ -217,6 +217,15 @@ signal-hook = { version = "0.4", default-features = false, features = [
     "iterator",
 ] }
 
+# Dependencies are optimised in the dev profile; the workspace crates are not.
+# The debug suite spends most of its time inside syntect and its regex engine,
+# which are an order of magnitude slower unoptimised, and nothing a test asserts
+# depends on a dependency being compiled for debugging. The workspace crates
+# keep debug assertions and fast incremental builds. Every absolute budget is
+# still measured against `release`.
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.
 lto = "thin"
@@ -300,6 +309,10 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
+# The release workflow does not run on pull requests. dist's default runs
+# its plan job on every PR and lists the other six jobs as skipped; the
+# config is checked by `bump and release` with `rehearse=true` instead.
+pr-run-mode = "skip"
 # The grammar attribution rides along in every archive. The binary embeds a few
 # hundred third-party grammars, each under its own licence, and `dist` puts
 # README, LICENSE and CHANGELOG in an archive on its own but knows nothing about
