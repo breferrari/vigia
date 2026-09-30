@@ -778,23 +778,27 @@ fn drive(
                     "the watch thread ended after {frames} frames, so the rest of this window would measure a process with nothing to do"
                 )
             }
-            Ok(paths) => {
-                ticks += 1;
-                // Sampled on the wake, before the walk, exactly where `vigia::run`
-                // samples it.
-                history.record(paths.iter().map(String::as_str), Instant::now());
-                // Advance first, follow second: the path is looked up in the
-                // file list, and before the walk that list is the previous
-                // frame's. `vigia::run` says why.
-                match frame.advance() {
-                    Ok(()) => {
-                        if let Some(path) = paths.last() {
-                            app.follow(path, &frame);
+            // Everything already queued behind it too, and one paint for the lot,
+            // as `vigia::run` drains.
+            Ok(first) => {
+                for paths in std::iter::once(first).chain(rx.try_iter().take(DRAIN_CAP - 1)) {
+                    ticks += 1;
+                    // Sampled on the wake, before the walk, exactly where `vigia::run`
+                    // samples it.
+                    history.record(paths.iter().map(String::as_str), Instant::now());
+                    // Advance first, follow second: the path is looked up in the
+                    // file list, and before the walk that list is the previous
+                    // frame's. `vigia::run` says why.
+                    match frame.advance() {
+                        Ok(()) => {
+                            if let Some(path) = paths.last() {
+                                app.follow(path, &frame);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        failed += 1;
-                        last_error = Some(e.to_string());
+                        Err(e) => {
+                            failed += 1;
+                            last_error = Some(e.to_string());
+                        }
                     }
                 }
             }
@@ -901,6 +905,9 @@ fn drive(
 /// Floors below which this soak proved nothing.
 const MIN_FRAMES: u64 = 40;
 const MIN_ROUNDS: u64 = 50;
+
+/// `vigia::run`'s `DRAIN_CAP`: wakes taken per paint.
+const DRAIN_CAP: usize = 64;
 
 /// Ticks the loop may leave on the channel when the window closes: the ones in
 /// flight, not a queue.
@@ -2344,4 +2351,8 @@ fn backlog_bounded() {
     assert!(kept_up(0), "an empty channel read as a queue");
     assert!(kept_up(MAX_BACKLOG), "ticks in flight read as a queue");
     assert!(!kept_up(MAX_BACKLOG + 1), "a queue past the bound passed");
+    assert!(
+        include_str!("../src/lib.rs").contains(&format!("const DRAIN_CAP: usize = {DRAIN_CAP};")),
+        "the soak drains {DRAIN_CAP} ticks per paint and `vigia::run` no longer does"
+    );
 }
