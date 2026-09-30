@@ -1267,6 +1267,60 @@ fn a_second_base_is_refused_rather_than_silently_winning() {
     theme::parse("# a comment\nbase = dark\n").expect("parses");
 }
 
+/// A lost continuation backslash turns the next line's indentation into spaces
+/// inside the message, and that string is only read when the error is printed.
+/// Every variant is named, so a new one fails to compile until it is listed here.
+/// Listing it does not add a sample to the list below; that has to be done by hand.
+#[test]
+fn theme_error_spacing() {
+    let errors = [
+        ThemeError::UnknownKey {
+            line: 12,
+            key: "foo".to_owned(),
+        },
+        ThemeError::UnknownColour {
+            line: 12,
+            value: "bar".to_owned(),
+        },
+        ThemeError::UnknownModifier {
+            line: 12,
+            value: "baz".to_owned(),
+        },
+        ThemeError::MissingValue { line: 12 },
+        ThemeError::MissingSeparator {
+            line: 12,
+            text: "x".to_owned(),
+        },
+        ThemeError::UnknownBase {
+            line: 12,
+            name: "nope".to_owned(),
+        },
+        ThemeError::RepeatedBase { line: 12 },
+        ThemeError::LateBase { line: 12 },
+        ThemeError::Unreadable {
+            path: std::path::PathBuf::from("/tmp/missing"),
+            why: "no such file".to_owned(),
+        },
+    ];
+    for err in &errors {
+        let msg = match err {
+            ThemeError::UnknownKey { .. }
+            | ThemeError::UnknownColour { .. }
+            | ThemeError::UnknownModifier { .. }
+            | ThemeError::MissingValue { .. }
+            | ThemeError::MissingSeparator { .. }
+            | ThemeError::UnknownBase { .. }
+            | ThemeError::RepeatedBase { .. }
+            | ThemeError::LateBase { .. }
+            | ThemeError::Unreadable { .. } => err.to_string(),
+        };
+        assert!(
+            !msg.contains("  "),
+            "{err:?} renders with a double space: {msg:?}"
+        );
+    }
+}
+
 #[test]
 fn a_theme_file_saved_by_notepad_still_parses() {
     // Notepad's default UTF-8 save writes a BOM, and `str::trim` will not strip one:
