@@ -560,8 +560,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         let began = Instant::now();
         drain(&mut batch, wake, &rx, DRAIN_CAP);
 
-        // Whether any wake in the batch did something a paint could show.
-        let mut touched = false;
+        // Whether any wake in the batch did something a paint could show. A repeat
+        // step applied above is one.
+        let mut touched = repeat.is_some();
         for wake in batch.drain(..) {
             let untouched = !touched;
             touched = true;
@@ -821,8 +822,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             }
         }
 
-        // Nothing to show. A deadline due meanwhile is the timeout's to find.
-        if !touched {
+        // Nothing to show, unless a deadline is due: under steady motion the
+        // timeout never fires, so a due one is settled and painted here.
+        if !touched && shell.patience(&frame, began) != Some(std::time::Duration::ZERO) {
             continue;
         }
 
@@ -3299,9 +3301,8 @@ mod tests {
         );
     }
 
-    /// A batch that asked for nothing and moved no pointer mark paints nothing:
-    /// the no-action arm keeps the batch untouched only while the pointer's marks
-    /// are unchanged, and the paint sits behind that flag.
+    /// Structural, because the loop cannot be driven: a batch that asked for
+    /// nothing and moved no mark skips the paint unless a deadline is due.
     #[test]
     fn idle_motion_paints_nothing() {
         let source = include_str!("lib.rs");
@@ -3328,7 +3329,7 @@ mod tests {
         );
 
         let guard = turns[quiet..]
-            .find("if !touched {")
+            .find("if !touched && shell.patience(")
             .map(|at| quiet + at)
             .expect("the paint is no longer behind the batch's flag");
         let paint = turns[quiet..]
@@ -3338,6 +3339,11 @@ mod tests {
         assert!(
             guard < paint,
             "the batch paints before it asks whether anything happened"
+        );
+        // A repeat step applied before the drain counts as work.
+        assert!(
+            turns.contains("let mut touched = repeat.is_some();"),
+            "a repeat step no longer marks its batch, so motion can swallow its paint"
         );
     }
 }
