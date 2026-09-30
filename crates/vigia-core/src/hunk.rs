@@ -6,7 +6,7 @@ use crate::notes::Side;
 pub const CONTEXT: u32 = 3;
 
 /// How many leading bytes are inspected when deciding if content is binary.
-const BINARY_SNIFF_LEN: usize = 8000;
+pub(crate) const BINARY_SNIFF_LEN: usize = 8000;
 
 /// The role a line plays in a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

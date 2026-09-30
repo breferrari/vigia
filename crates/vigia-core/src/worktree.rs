@@ -561,8 +561,13 @@ impl Worktree {
             return Ok(FileDiff::without_hunks(change.path.clone(), None));
         }
 
-        let (before, after) = self.sides(change, probes)?;
         let diff = self.diff_attribute(&change.path)?;
+        if let Some(read) = self.early_binary(change, diff) {
+            let mut binary = hunk::compute(change.path.clone(), &[], &[], Some(false));
+            binary.bytes = read;
+            return Ok(binary);
+        }
+        let (before, after) = self.sides(change, probes)?;
         Ok(hunk::compute(change.path.clone(), &before, &after, diff))
     }
 
@@ -585,9 +590,36 @@ impl Worktree {
             return Ok(hunk::FileSpan::default());
         }
 
-        let (before, after) = self.sides(change, probes)?;
         let diff = self.diff_attribute(&change.path)?;
+        if let Some(read) = self.early_binary(change, diff) {
+            let mut binary = hunk::measure(&[], &[], Some(false));
+            binary.bytes = read;
+            return Ok(binary);
+        }
+        let (before, after) = self.sides(change, probes)?;
         Ok(hunk::measure(&before, &after, diff))
+    }
+
+    /// The bytes read to learn a change is binary before reading all of it, or
+    /// `None` when that takes the whole change: the attribute unsets `diff`, or
+    /// the working-tree side's first sniff window holds a NUL.
+    fn early_binary(&self, change: &FileChange, diff: Option<bool>) -> Option<u64> {
+        use std::io::Read;
+        match diff {
+            Some(false) => return Some(0),
+            Some(true) => return None,
+            None => {}
+        }
+        // A symlink's bytes are its target, which `read_worktree` handles.
+        if change.after != Some(Side::Worktree) || change.maybe_symlink {
+            return None;
+        }
+        let file = std::fs::File::open(self.workdir.join(&change.path)).ok()?;
+        let mut window = Vec::with_capacity(hunk::BINARY_SNIFF_LEN);
+        file.take(hunk::BINARY_SNIFF_LEN as u64)
+            .read_to_end(&mut window)
+            .ok()?;
+        hunk::is_binary(&window).then_some(window.len() as u64)
     }
 
     /// What `.gitattributes` says about diffing `rela_path`. See
