@@ -569,19 +569,21 @@ const GRADED_PANE: u16 = 140;
 /// A file whose heat profile has a slice in each band.
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
+    // One drawn slice apart: [`GRADED_PANE`] draws twenty-four.
+    let slice = HEAT_BUCKETS / 24;
     heat[0] = HeatBucket {
         added: 12,
         removed: 0,
     };
-    heat[1] = HeatBucket {
+    heat[1 * slice] = HeatBucket {
         added: 7,
         removed: 0,
     };
-    heat[2] = HeatBucket {
+    heat[2 * slice] = HeatBucket {
         added: 4,
         removed: 0,
     };
-    heat[3] = HeatBucket {
+    heat[3 * slice] = HeatBucket {
         added: 3,
         removed: 0,
     };
