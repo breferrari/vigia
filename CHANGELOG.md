@@ -4,6 +4,11 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Each version lists the pull requests labelled `release`, one line each: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. Internal work such as CI, tests and documentation is not listed.
 
+## [1.1.0] - 2026-10-01
+
+- An answer the agent quotes as code no longer freezes the pane for the length of the block when it arrives.
+- Each file's heat strip is projected once per change instead of on every frame.
+
 ## [1.0.1] - 2026-09-30
 
 - An edit to .git/info/exclude or to the core.excludesFile target now changes which files wake the pane without a restart.
