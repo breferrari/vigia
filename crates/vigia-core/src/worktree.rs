@@ -685,12 +685,16 @@ impl Worktree {
             .join(&oid[0..2])
             .join(&oid[2..4])
             .join(oid);
+        // Followed, so a store reached through a link reads, and a fifo is never opened.
+        if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            return None;
+        }
         self.file_side(&path, false, named, cost)
     }
 
-    /// A file's side, read through its header and never past [`picture::HEAD_LIMIT`].
-    /// A pointer is followed to its LFS object when `follow` is set, and an object
-    /// is never followed.
+    /// A file's side, read through its header with at most the last of
+    /// [`picture::HEAD_LIMITS`] read. A pointer is followed to its LFS object when
+    /// `follow` is set, and an object is never followed.
     fn file_side(
         &self,
         path: &Path,
@@ -698,23 +702,32 @@ impl Worktree {
         named: Option<Format>,
         cost: &mut u64,
     ) -> Option<ImageSide> {
-        use std::io::Read;
-        let file = std::fs::File::open(path).ok()?;
-        let length = file.metadata().ok()?.len();
-        let mut reader = std::io::BufReader::new(picture::Capped::new(file));
-        if length >= picture::POINTER_MAX as u64 {
+        use std::io::BufRead;
+        for limit in picture::HEAD_LIMITS {
+            let file = std::fs::File::open(path).ok()?;
+            let length = file.metadata().ok()?.len();
+            // Small, because a seek outside the buffer drops it and reads again.
+            let mut reader =
+                std::io::BufReader::with_capacity(512, picture::Capped::new(file, limit));
+            if length < picture::POINTER_MAX as u64
+                && let Some(oid) = reader.fill_buf().ok().and_then(picture::lfs_oid)
+            {
+                let oid = oid.to_owned();
+                *cost += reader.get_ref().total;
+                return if follow {
+                    self.lfs_side(&oid, named, cost)
+                } else {
+                    None
+                };
+            }
             let side = picture::side_of(&mut reader, length, named);
-            *cost += reader.get_ref().total;
-            return side;
+            let total = reader.get_ref().total;
+            *cost += total;
+            if side.is_some() || total < limit {
+                return side;
+            }
         }
-        let mut head = Vec::new();
-        let read = reader.read_to_end(&mut head);
-        *cost += reader.get_ref().total;
-        read.ok()?;
-        match picture::lfs_oid(&head) {
-            Some(oid) if follow => self.lfs_side(oid, named, cost),
-            _ => picture::side_of(std::io::Cursor::new(&head), length, named),
-        }
+        None
     }
 
     /// How tall one change's diff is, without building any of it.

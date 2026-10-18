@@ -365,14 +365,10 @@ fn worktree_image_reads_header_only() {
     let small = png(8, 8, 1);
     scratch.write("big.png", &small);
     scratch.commit_all("initial");
-    // Noise, because a smooth image compresses too small to tell.
-    let noise = RgbaImage::from_fn(512, 512, |x, y| {
-        let n =
-            (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)).wrapping_mul(2_246_822_519);
-        image::Rgba(n.to_le_bytes())
-    });
     let mut big = Cursor::new(Vec::new());
-    noise.write_to(&mut big, ImageFormat::Png).expect("encode");
+    noise(512)
+        .write_to(&mut big, ImageFormat::Png)
+        .expect("encode");
     let big = big.into_inner();
     assert!(big.len() > 256 * 1024, "the fixture is too small to tell");
     scratch.write("big.png", &big);
@@ -440,32 +436,33 @@ fn missing_blob_stays_binary() {
     assert_eq!(diff.picture, None, "a missing blob read as a picture");
 }
 
-/// A JPEG whose metadata comes before its size reads, and costs its first MiB
-/// at most.
+/// A 1024 square JPEG with `segments` APP1 blocks of 60000 NULs before its frame
+/// header, the way a camera's EXIF sits.
+fn jpeg_after(segments: usize) -> Vec<u8> {
+    let mut body = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(noise(1024))
+        .to_rgb8()
+        .write_to(&mut body, ImageFormat::Jpeg)
+        .expect("encode");
+    let body = body.into_inner();
+    let mut jpeg = body[..2].to_vec();
+    for _ in 0..segments {
+        jpeg.extend_from_slice(&[0xff, 0xe1]);
+        jpeg.extend_from_slice(&60_002u16.to_be_bytes());
+        jpeg.extend(std::iter::repeat_n(0u8, 60_000));
+    }
+    jpeg.extend_from_slice(&body[2..]);
+    jpeg
+}
+
+/// A JPEG with ordinary metadata reads in the first step.
 #[test]
 fn jpeg_metadata_first() {
     let scratch = Scratch::new("picture-jpeg-metadata");
     let small = encoded(ImageFormat::Jpeg, 8, 8, 1);
     scratch.write("a.jpg", &small);
     scratch.commit_all("initial");
-    let noise = RgbaImage::from_fn(1024, 1024, |x, y| {
-        let n =
-            (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)).wrapping_mul(2_246_822_519);
-        image::Rgba(n.to_le_bytes())
-    });
-    let mut body = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(noise)
-        .to_rgb8()
-        .write_to(&mut body, ImageFormat::Jpeg)
-        .expect("encode");
-    let body = body.into_inner();
-    // An APP1 segment of 60000 bytes straight after the start marker, the way
-    // a camera's EXIF block sits before the frame header.
-    let mut big = body[..2].to_vec();
-    big.extend_from_slice(&[0xff, 0xe1]);
-    big.extend_from_slice(&60_002u16.to_be_bytes());
-    big.extend(std::iter::repeat_n(0u8, 60_000));
-    big.extend_from_slice(&body[2..]);
+    let big = jpeg_after(1);
     assert!(big.len() > 512 * 1024, "the fixture is too small to tell");
     scratch.write("a.jpg", &big);
 
@@ -476,10 +473,44 @@ fn jpeg_metadata_first() {
         Some((1024, 1024))
     );
     assert!(
-        diff.bytes <= small.len() as u64 + 1024 * 1024 + 8000,
+        diff.bytes <= small.len() as u64 + 64 * 1024 + 8000,
         "reading a {} byte JPEG's size compared {} bytes",
         big.len(),
         diff.bytes
+    );
+}
+
+/// A JPEG whose size comes after more than a MiB of metadata stays binary.
+#[test]
+fn jpeg_metadata_limit() {
+    let scratch = Scratch::new("picture-jpeg-limit");
+    scratch.write("a.jpg", encoded(ImageFormat::Jpeg, 8, 8, 1));
+    scratch.commit_all("initial");
+    scratch.write("a.jpg", jpeg_after(20));
+
+    let diff = diff_of(&scratch, "a.jpg");
+    assert!(
+        diff.binary && diff.picture.is_none(),
+        "a JPEG past the limit read"
+    );
+}
+
+/// An LFS store reached through a link reads.
+#[cfg(unix)]
+#[test]
+fn lfs_store_linked() {
+    let old = png(24, 40, 1);
+    let (scratch, oid) = lfs_repo("picture-lfs-linked", &old, &png(24, 40, 2));
+    let elsewhere = scratch.root().with_extension("lfs-store");
+    let _ = std::fs::remove_dir_all(&elsewhere);
+    store(&elsewhere, &oid, &old);
+    std::os::unix::fs::symlink(&elsewhere, scratch.root().join(".git").join("lfs"))
+        .expect("link the store");
+
+    let picture = diff_of(&scratch, "a.png").picture;
+    assert!(
+        picture.is_some_and(|picture| picture.before.is_some()),
+        "a linked store was not read"
     );
 }
 
@@ -528,7 +559,7 @@ fn tiff_directory_last() {
 /// A large file that only starts like an image costs what its decoder read
 /// before it gave up, not the read limit.
 #[test]
-fn false_start_is_cheap() {
+fn false_start_cost() {
     let scratch = Scratch::new("picture-false-start");
     let mut junk = b"BM".to_vec();
     junk.extend(std::iter::repeat_n(0u8, 4 * 1024 * 1024));

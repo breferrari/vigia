@@ -1417,9 +1417,6 @@ fn noted(kind: &ChangeKind, diff: &FileDiff) -> bool {
 
 /// The one-line stand-in for a file with no line-level diff, if it needs one.
 fn note_for(kind: &ChangeKind, diff: &FileDiff) -> Option<String> {
-    if !noted(kind, diff) {
-        return None;
-    }
     match kind {
         ChangeKind::Conflict => Some("unresolved conflict".to_owned()),
         ChangeKind::TypeChange => Some("type changed".to_owned()),
