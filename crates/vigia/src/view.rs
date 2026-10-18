@@ -1,11 +1,12 @@
 //! One screenful, and nothing more than one screenful.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use vigia_core::{
-    ChangeKind, Churn, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind,
-    LineRef, Note, Origin, Pass, Placement, Recency, Result, SPARK_GROUPS, Side, Span, Status,
-    first_of, resolve, run_of,
+    ChangeKind, Churn, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, ImageSide,
+    LineKind, LineRef, Note, Origin, Pass, Picture, Placement, Recency, Result, SPARK_GROUPS, Side,
+    Span, Status, first_of, resolve, run_of,
 };
 
 use crate::quote::{Chunk, CodeRow, Run};
@@ -1408,14 +1409,59 @@ fn letter(kind: &ChangeKind) -> char {
 }
 
 /// The one-line stand-in for a file with no line-level diff, if it needs one.
-fn note_for<'a>(kind: &ChangeKind, diff: &'a FileDiff) -> Option<&'a str> {
+fn note_for<'a>(kind: &ChangeKind, diff: &'a FileDiff) -> Option<Cow<'a, str>> {
     match kind {
-        ChangeKind::Conflict => Some("unresolved conflict"),
-        ChangeKind::TypeChange => Some("type changed"),
+        ChangeKind::Conflict => Some(Cow::Borrowed("unresolved conflict")),
+        ChangeKind::TypeChange => Some(Cow::Borrowed("type changed")),
         _ => diff
             .unreadable
             .as_deref()
-            .or_else(|| diff.binary.then_some("binary")),
+            .map(Cow::Borrowed)
+            .or_else(|| {
+                diff.picture
+                    .as_ref()
+                    .map(|picture| Cow::Owned(size_line(picture)))
+            })
+            .or_else(|| diff.binary.then_some(Cow::Borrowed("binary"))),
+    }
+}
+
+/// What a changed image is, in one line: `PNG 1242×2688 · 731 KiB → 748 KiB`.
+/// A part the two sides share is said once.
+fn size_line(picture: &Picture) -> String {
+    let size = |side: &ImageSide| format!("{}×{}", side.width, side.height);
+    let shape = |side: &ImageSide| format!("{} {}", side.format, size(side));
+    let either = |old: String, new: String| {
+        if old == new {
+            old
+        } else {
+            format!("{old} → {new}")
+        }
+    };
+    match (&picture.before, &picture.after) {
+        (Some(old), Some(new)) => {
+            let shapes = if old.format == new.format {
+                format!("{} {}", new.format, either(size(old), size(new)))
+            } else {
+                format!("{} → {}", shape(old), shape(new))
+            };
+            format!(
+                "{shapes} · {}",
+                either(weight(old.bytes), weight(new.bytes))
+            )
+        }
+        (Some(one), None) | (None, Some(one)) => format!("{} · {}", shape(one), weight(one.bytes)),
+        (None, None) => "binary".to_owned(),
+    }
+}
+
+/// A file's length in the binary units the status bar's memory readout uses.
+fn weight(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    match bytes {
+        0..KIB => format!("{bytes} B"),
+        KIB..1_048_576 => format!("{} KiB", (bytes + KIB / 2) / KIB),
+        _ => format!("{:.1} MiB", bytes as f64 / 1_048_576.0),
     }
 }
 
@@ -2801,7 +2847,7 @@ impl View {
         'block: {
             if let Some(reason) = note_for(kind, diff) {
                 if n >= skip && self.rows.len() < height {
-                    self.rows.push(Row::Reason(reason.to_owned()));
+                    self.rows.push(Row::Reason(reason.into_owned()));
                 }
                 n += 1;
                 break 'block;
@@ -3179,7 +3225,41 @@ mod tests {
             lines,
             first_line: None,
             bytes: 0,
+            picture: None,
         }
+    }
+
+    fn image(format: vigia_core::Format, width: u32, height: u32, bytes: u64) -> ImageSide {
+        ImageSide {
+            format,
+            width,
+            height,
+            bytes,
+        }
+    }
+
+    #[test]
+    fn size_line_shapes() {
+        use vigia_core::Format::{Jpeg, Png};
+        let line = |before, after| size_line(&Picture { before, after });
+        let old = image(Png, 1242, 2688, 748_544);
+        assert_eq!(
+            line(Some(old), Some(image(Png, 1242, 2688, 765_952))),
+            "PNG 1242×2688 · 731 KiB → 748 KiB"
+        );
+        assert_eq!(
+            line(Some(old), Some(image(Png, 1179, 2556, 748_544))),
+            "PNG 1242×2688 → 1179×2556 · 731 KiB"
+        );
+        assert_eq!(
+            line(Some(old), Some(image(Jpeg, 1242, 2688, 2_200_000))),
+            "PNG 1242×2688 → JPEG 1242×2688 · 731 KiB → 2.1 MiB"
+        );
+        assert_eq!(
+            line(None, Some(image(Png, 16, 12, 900))),
+            "PNG 16×12 · 900 B"
+        );
+        assert_eq!(line(Some(old), None), "PNG 1242×2688 · 731 KiB");
     }
 
     /// A hunk starting at working-tree line `new_start` with these line kinds.

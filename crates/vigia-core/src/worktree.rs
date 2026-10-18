@@ -11,6 +11,7 @@ use crate::filter::Filter;
 use crate::frame::{Fingerprint, Frame, config_moved, followed_print};
 use crate::hidden::Hidden;
 use crate::hunk::{self, FileDiff};
+use crate::picture::{self, ImageSide, Picture};
 use crate::standing::Standing;
 use crate::watch::{WatchOptions, Watcher};
 
@@ -587,13 +588,145 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
-        if let Some(read) = self.early_binary(change, diff) {
+        if let Some(window) = self.early_binary(change, diff) {
             let mut binary = hunk::compute(change.path.clone(), &[], &[], Some(false));
-            binary.bytes = read;
+            binary.bytes = window.len() as u64;
+            binary.picture = self.early_picture(change, &window, &mut binary.bytes)?;
             return Ok(binary);
         }
         let (before, after) = self.sides(change, probes)?;
-        Ok(hunk::compute(change.path.clone(), &before, &after, diff))
+        let mut diff = hunk::compute(change.path.clone(), &before, &after, diff);
+        if diff.binary {
+            let before = change.before.map(|_| self.held_side(&before));
+            let after = change.after.map(|_| self.held_side(&after));
+            diff.picture = self.picture_from(before, after, &mut diff.bytes);
+        }
+        Ok(diff)
+    }
+
+    /// The picture of a change found binary before its sides were read. The new
+    /// side goes first, and the old side is read only when the new one is an
+    /// image, so a binary that is not one costs its sniff `window` alone.
+    fn early_picture(
+        &self,
+        change: &FileChange,
+        window: &[u8],
+        bytes: &mut u64,
+    ) -> Result<Option<Picture>> {
+        let after = match change.after {
+            Some(Side::Worktree) => {
+                // Empty when the attribute decided and nothing was sniffed.
+                if !window.is_empty() && !picture::may_be(window) {
+                    return Ok(None);
+                }
+                Some(self.worktree_side(change))
+            }
+            Some(Side::Blob(id)) => {
+                let held = self.blob(id, &change.path)?;
+                *bytes += held.len() as u64;
+                Some(self.held_side(&held))
+            }
+            None => None,
+        };
+        if matches!(after, Some((None, _))) {
+            *bytes += after.map_or(0, |(_, read)| read);
+            return Ok(None);
+        }
+        let before = match change.before {
+            Some(id) => {
+                let held = self.blob(id, &change.path)?;
+                *bytes += held.len() as u64;
+                Some(self.held_side(&held))
+            }
+            None => None,
+        };
+        Ok(self.picture_from(before, after, bytes))
+    }
+
+    /// A picture when every side that exists read as an image, counting what
+    /// the reads cost into `bytes`.
+    fn picture_from(
+        &self,
+        before: Option<(Option<ImageSide>, u64)>,
+        after: Option<(Option<ImageSide>, u64)>,
+        bytes: &mut u64,
+    ) -> Option<Picture> {
+        *bytes += [&before, &after]
+            .into_iter()
+            .flatten()
+            .map(|(_, read)| read)
+            .sum::<u64>();
+        let side = |side: Option<(Option<ImageSide>, u64)>| match side {
+            Some((Some(image), _)) => Ok(Some(image)),
+            Some((None, _)) => Err(()),
+            None => Ok(None),
+        };
+        match (side(before), side(after)) {
+            (Ok(None), Ok(None)) | (Err(()), _) | (_, Err(())) => None,
+            (Ok(before), Ok(after)) => Some(Picture { before, after }),
+        }
+    }
+
+    /// One side already in memory, or the LFS object it points at. The second
+    /// value is what reading the object cost, since the held bytes are counted.
+    fn held_side(&self, bytes: &[u8]) -> (Option<ImageSide>, u64) {
+        match picture::lfs_oid(bytes) {
+            Some(oid) => self.lfs_side(oid),
+            None => (
+                picture::side_of(std::io::Cursor::new(bytes), bytes.len() as u64),
+                0,
+            ),
+        }
+    }
+
+    /// The worktree side, read no further than its header.
+    fn worktree_side(&self, change: &FileChange) -> (Option<ImageSide>, u64) {
+        Self::file_side(&self.workdir.join(&change.path), |oid| self.lfs_side(oid))
+    }
+
+    /// The object an LFS pointer names, from this repository's local store.
+    fn lfs_side(&self, oid: &str) -> (Option<ImageSide>, u64) {
+        let repo = self.repo();
+        let common = repo.common_dir();
+        let store = match repo.config_snapshot().trusted_path("lfs.storage") {
+            Ok(Some(path)) => common.join(path),
+            _ => common.join("lfs"),
+        };
+        let path = store
+            .join("objects")
+            .join(&oid[0..2])
+            .join(&oid[2..4])
+            .join(oid);
+        drop(repo);
+        // A store pointing at a pointer is not followed again.
+        Self::file_side(&path, |_| (None, 0))
+    }
+
+    /// A file's side, read through its header, with a pointer handed to `lfs`.
+    fn file_side(
+        path: &Path,
+        lfs: impl FnOnce(&str) -> (Option<ImageSide>, u64),
+    ) -> (Option<ImageSide>, u64) {
+        use std::io::Read;
+        let Ok(file) = std::fs::File::open(path) else {
+            return (None, 0);
+        };
+        let length = file.metadata().map_or(0, |meta| meta.len());
+        let mut reader = std::io::BufReader::new(picture::Counted::new(file));
+        if length >= picture::POINTER_MAX as u64 {
+            let side = picture::side_of(&mut reader, length);
+            return (side, reader.get_ref().read);
+        }
+        let mut head = Vec::new();
+        let read_ok = reader.read_to_end(&mut head).is_ok();
+        let read = reader.get_ref().read;
+        match picture::lfs_oid(&head) {
+            Some(oid) if read_ok => {
+                let (side, more) = lfs(oid);
+                (side, read + more)
+            }
+            _ => (picture::side_of(std::io::Cursor::new(&head), length), read),
+        }
     }
 
     /// How tall one change's diff is, without building any of it.
@@ -616,9 +749,9 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
-        if let Some(read) = self.early_binary(change, diff) {
+        if let Some(window) = self.early_binary(change, diff) {
             let mut binary = hunk::measure(&[], &[], Some(false));
-            binary.bytes = read;
+            binary.bytes = window.len() as u64;
             return Ok(binary);
         }
         let (before, after) = self.sides(change, probes)?;
@@ -626,12 +759,12 @@ impl Worktree {
     }
 
     /// The bytes read to learn a change is binary before reading all of it, or
-    /// `None` when that takes the whole change: the attribute unsets `diff`, or
-    /// the working-tree side's first sniff window holds a NUL.
-    fn early_binary(&self, change: &FileChange, diff: Option<bool>) -> Option<u64> {
+    /// `None` when that takes the whole change: the attribute unsets `diff`, and
+    /// nothing is read, or the working-tree side's first sniff window holds a NUL.
+    fn early_binary(&self, change: &FileChange, diff: Option<bool>) -> Option<Vec<u8>> {
         use std::io::Read;
         match diff {
-            Some(false) => return Some(0),
+            Some(false) => return Some(Vec::new()),
             Some(true) => return None,
             None => {}
         }
@@ -644,7 +777,7 @@ impl Worktree {
         file.take(hunk::BINARY_SNIFF_LEN as u64)
             .read_to_end(&mut window)
             .ok()?;
-        hunk::is_binary(&window).then_some(window.len() as u64)
+        hunk::is_binary(&window).then_some(window)
     }
 
     /// What `.gitattributes` says about diffing `change`. See

@@ -803,6 +803,56 @@ fn a_binary_file_adds_nothing_and_says_nothing() {
     );
 }
 
+/// A PNG of `width` by `height`, its pixels from `seed`.
+fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(width, height, image::Rgba([seed, 0, 0, 255]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .expect("encode the fixture");
+    bytes.into_inner()
+}
+
+#[test]
+fn image_size_line() {
+    let scratch = Scratch::new("shell-rows-image");
+    scratch.write("assets/home.png", png(24, 40, 1));
+    scratch.commit_all("baseline");
+    scratch.write("assets/home.png", png(30, 50, 2));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let view = app
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(ALL_ROWS),
+        )
+        .expect("view");
+
+    let Some(Row::Reason(line)) = view.rows.get(1) else {
+        panic!(
+            "an image drew {:?} where its size line should be",
+            view.rows.get(1)
+        );
+    };
+    assert!(
+        line.starts_with("PNG 24×40 → 30×50 · ") && line.ends_with(" B"),
+        "the size line reads {line:?}"
+    );
+    assert_eq!(view.rows.len(), 2, "an image drew extra rows");
+    let churn = frame.churn().expect("churn").expect("a churn");
+    assert_eq!(
+        churn.binary, 1,
+        "the header stopped counting an image as binary"
+    );
+}
+
 #[test]
 fn a_binary_file_gets_a_reason_instead_of_hunks() {
     // Otherwise it draws as a heading with nothing under it, which reads as a

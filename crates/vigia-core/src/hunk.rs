@@ -1,6 +1,7 @@
 use gix::diff::blob::{Algorithm, InternedInput, diff_with_slider_heuristics};
 
 use crate::notes::Side;
+use crate::picture::Picture;
 
 /// Lines of unchanged context kept on each side of a change.
 pub const CONTEXT: u32 = 3;
@@ -109,6 +110,9 @@ pub struct FileDiff {
     pub first_line: Option<String>,
     /// Bytes compared: index-side content plus worktree-side content.
     pub bytes: u64,
+    /// The format and size of each side, for a binary change whose every side
+    /// is an image the pane reads. `None` for any other change.
+    pub picture: Option<Picture>,
 }
 
 impl FileDiff {
@@ -192,6 +196,7 @@ impl FileDiff {
             lines: 0,
             first_line: None,
             bytes: 0,
+            picture: None,
         }
     }
 }
@@ -356,6 +361,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8], diff: Option<bo
             // from them.
             first_line: None,
             bytes,
+            picture: None,
         };
     }
 
@@ -452,6 +458,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8], diff: Option<bo
         lines: after_len,
         first_line,
         bytes,
+        picture: None,
     }
 }
 

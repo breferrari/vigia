@@ -36,6 +36,7 @@ mod highlight;
 mod history;
 mod hunk;
 mod notes;
+mod picture;
 mod session;
 mod standing;
 mod timing;
@@ -60,6 +61,7 @@ pub use notes::{
     First, LineRef, Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, first_of, key,
     names_a_record, resolve, run_of,
 };
+pub use picture::{Format, ImageSide, Picture};
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};
 pub use timing::{FrameTiming, Samples};

@@ -713,6 +713,7 @@ fn rows_on_numbers_each_side_the_way_the_gutter_does() {
         lines: 60,
         first_line: None,
         bytes: 0,
+        picture: None,
     };
 
     assert_eq!(
