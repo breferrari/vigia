@@ -5,29 +5,8 @@ mod support;
 use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
-use support::{Scratch, changes_sorted};
+use support::{Scratch, changes_sorted, encoded, png};
 use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture};
-
-/// An image of `width` by `height` in `format`, every pixel from `seed`.
-fn encoded(format: ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
-    let image = RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
-    });
-    let mut bytes = Cursor::new(Vec::new());
-    match format {
-        // JPEG has no alpha channel to encode.
-        ImageFormat::Jpeg => image::DynamicImage::ImageRgba8(image)
-            .to_rgb8()
-            .write_to(&mut bytes, format),
-        _ => image.write_to(&mut bytes, format),
-    }
-    .expect("encode the fixture");
-    bytes.into_inner()
-}
-
-fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
-    encoded(ImageFormat::Png, width, height, seed)
-}
 
 /// The diff of the one change at `rela`.
 fn diff_of(scratch: &Scratch, rela: &str) -> FileDiff {
@@ -114,44 +93,93 @@ fn added_and_deleted_images() {
     );
 }
 
-/// JPEG, GIF and WebP read as themselves, and a format change reads both.
+/// Every format reads as itself, TGA by its name, and a format change reads both.
 #[test]
 fn every_format_reads() {
     let scratch = Scratch::new("picture-formats");
     let cases = [
-        ("a.jpg", ImageFormat::Jpeg, Format::Jpeg),
-        ("a.gif", ImageFormat::Gif, Format::Gif),
-        ("a.webp", ImageFormat::WebP, Format::Webp),
-        ("swap.img", ImageFormat::Png, Format::Png),
+        (
+            "a.jpg",
+            ImageFormat::Jpeg,
+            ImageFormat::Jpeg,
+            Format::Jpeg,
+            Format::Jpeg,
+        ),
+        (
+            "a.gif",
+            ImageFormat::Gif,
+            ImageFormat::Gif,
+            Format::Gif,
+            Format::Gif,
+        ),
+        (
+            "a.webp",
+            ImageFormat::WebP,
+            ImageFormat::WebP,
+            Format::Webp,
+            Format::Webp,
+        ),
+        (
+            "a.bmp",
+            ImageFormat::Bmp,
+            ImageFormat::Bmp,
+            Format::Bmp,
+            Format::Bmp,
+        ),
+        (
+            "a.ico",
+            ImageFormat::Ico,
+            ImageFormat::Ico,
+            Format::Ico,
+            Format::Ico,
+        ),
+        (
+            "a.tiff",
+            ImageFormat::Tiff,
+            ImageFormat::Tiff,
+            Format::Tiff,
+            Format::Tiff,
+        ),
+        (
+            "a.qoi",
+            ImageFormat::Qoi,
+            ImageFormat::Qoi,
+            Format::Qoi,
+            Format::Qoi,
+        ),
+        (
+            "a.TGA",
+            ImageFormat::Tga,
+            ImageFormat::Tga,
+            Format::Tga,
+            Format::Tga,
+        ),
+        (
+            "swap.img",
+            ImageFormat::Png,
+            ImageFormat::Jpeg,
+            Format::Png,
+            Format::Jpeg,
+        ),
     ];
-    for (name, format, _) in cases {
-        scratch.write(name, encoded(format, 20, 10, 1));
+    for (name, old, ..) in cases {
+        scratch.write(name, encoded(old, 20, 10, 1));
     }
     scratch.commit_all("initial");
-    for (name, format, _) in cases {
-        let format = if name == "swap.img" {
-            ImageFormat::Jpeg
-        } else {
-            format
-        };
-        scratch.write(name, encoded(format, 20, 10, 9));
+    for (name, _, new, ..) in cases {
+        scratch.write(name, encoded(new, 20, 10, 9));
     }
 
-    for (name, _, read) in cases {
+    for (name, _, _, before, after) in cases {
         let picture = diff_of(&scratch, name)
             .picture
             .unwrap_or_else(|| panic!("{name} read no picture"));
-        let after = if name == "swap.img" {
-            Format::Jpeg
-        } else {
-            read
-        };
         assert_eq!(
             (
                 picture.before.map(|side| side.format),
                 picture.after.map(|side| side.format)
             ),
-            (Some(read), Some(after)),
+            (Some(before), Some(after)),
             "{name}"
         );
     }

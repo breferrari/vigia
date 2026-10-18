@@ -1270,3 +1270,24 @@ impl Scratch {
         scratch
     }
 }
+
+/// An image of `width` by `height` in `format`, every pixel from `seed`.
+pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(width, height, |x, y| {
+        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
+    });
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    match format {
+        // JPEG has no alpha channel to encode.
+        image::ImageFormat::Jpeg => image::DynamicImage::ImageRgba8(image)
+            .to_rgb8()
+            .write_to(&mut bytes, format),
+        _ => image.write_to(&mut bytes, format),
+    }
+    .expect("encode the fixture");
+    bytes.into_inner()
+}
+
+pub fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
+    encoded(image::ImageFormat::Png, width, height, seed)
+}

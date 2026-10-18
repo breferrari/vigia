@@ -60,8 +60,8 @@ gix = { version = "0.88", default-features = false, features = [
     "revision",
 ] }
 # Header reads and decoding for a changed image. The defaults add rayon and an
-# AVIF encoder that builds C, so only the four formats SPEC.md §11.1 draws.
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# AVIF encoder that builds C, so only the nine formats SPEC.md §11.1 draws.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "qoi", "tga"] }
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
 # Under the `ratatui` organisation, and it schedules nothing: the host passes the
 # elapsed duration in, so I1's clock stays this program's. The `dsl` feature is

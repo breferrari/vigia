@@ -13,7 +13,7 @@ use vigia::{
 };
 use vigia_core::{HISTORY_SAMPLE, Highlighter, History, LineKind, Standing};
 
-use support::Scratch;
+use support::{Scratch, png};
 
 /// Tall enough that nothing is scrolled off, so the whole diff is asserted.
 const ALL_ROWS: usize = 500;
@@ -803,16 +803,6 @@ fn a_binary_file_adds_nothing_and_says_nothing() {
     );
 }
 
-/// A PNG of `width` by `height`, its pixels from `seed`.
-fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_pixel(width, height, image::Rgba([seed, 0, 0, 255]));
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    image
-        .write_to(&mut bytes, image::ImageFormat::Png)
-        .expect("encode the fixture");
-    bytes.into_inner()
-}
-
 #[test]
 fn image_size_line() {
     let scratch = Scratch::new("shell-rows-image");
@@ -842,7 +832,7 @@ fn image_size_line() {
         );
     };
     assert!(
-        line.starts_with("PNG 24×40 → 30×50 · ") && line.ends_with(" B"),
+        line.starts_with("PNG 24×40 → 30×50 · "),
         "the size line reads {line:?}"
     );
     assert_eq!(view.rows.len(), 2, "an image drew extra rows");

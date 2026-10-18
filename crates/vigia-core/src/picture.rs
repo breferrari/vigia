@@ -14,17 +14,40 @@ pub enum Format {
     Gif,
     /// WebP.
     Webp,
+    /// Windows bitmap.
+    Bmp,
+    /// Windows icon.
+    Ico,
+    /// TIFF.
+    Tiff,
+    /// Quite OK Image.
+    Qoi,
+    /// Truevision TGA, the one format with no signature, so it is known by its
+    /// `.tga` name and then by its header.
+    Tga,
 }
 
 impl Format {
     fn of(format: image::ImageFormat) -> Option<Self> {
-        match format {
-            image::ImageFormat::Png => Some(Self::Png),
-            image::ImageFormat::Jpeg => Some(Self::Jpeg),
-            image::ImageFormat::Gif => Some(Self::Gif),
-            image::ImageFormat::WebP => Some(Self::Webp),
-            _ => None,
-        }
+        use image::ImageFormat as F;
+        Some(match format {
+            F::Png => Self::Png,
+            F::Jpeg => Self::Jpeg,
+            F::Gif => Self::Gif,
+            F::WebP => Self::Webp,
+            F::Bmp => Self::Bmp,
+            F::Ico => Self::Ico,
+            F::Tiff => Self::Tiff,
+            F::Qoi => Self::Qoi,
+            F::Tga => Self::Tga,
+            _ => return None,
+        })
+    }
+
+    /// The format a path's name stands for when its bytes cannot say: TGA alone.
+    pub(crate) fn named(path: &str) -> Option<Self> {
+        let (_, extension) = path.rsplit_once('.')?;
+        extension.eq_ignore_ascii_case("tga").then_some(Self::Tga)
     }
 }
 
@@ -35,6 +58,11 @@ impl fmt::Display for Format {
             Self::Jpeg => "JPEG",
             Self::Gif => "GIF",
             Self::Webp => "WebP",
+            Self::Bmp => "BMP",
+            Self::Ico => "ICO",
+            Self::Tiff => "TIFF",
+            Self::Qoi => "QOI",
+            Self::Tga => "TGA",
         })
     }
 }
@@ -63,11 +91,19 @@ pub struct Picture {
 }
 
 /// One side read from `source`, which is `bytes` long: `None` unless the first
-/// bytes are one of the four formats and the header after them holds.
+/// bytes are a format the pane reads, or `named` says TGA, and the header after
+/// them holds.
 ///
 /// Reads the header and nothing past it.
-pub(crate) fn side_of(source: impl BufRead + Seek, bytes: u64) -> Option<ImageSide> {
-    let reader = image::ImageReader::new(source).with_guessed_format().ok()?;
+pub(crate) fn side_of(
+    source: impl BufRead + Seek,
+    bytes: u64,
+    named: Option<Format>,
+) -> Option<ImageSide> {
+    let mut reader = image::ImageReader::new(source).with_guessed_format().ok()?;
+    if reader.format().is_none() && named == Some(Format::Tga) {
+        reader.set_format(image::ImageFormat::Tga);
+    }
     let format = Format::of(reader.format()?)?;
     let (width, height) = reader.into_dimensions().ok()?;
     Some(ImageSide {
@@ -78,12 +114,14 @@ pub(crate) fn side_of(source: impl BufRead + Seek, bytes: u64) -> Option<ImageSi
     })
 }
 
-/// Whether a file starting with `head` can be an image the pane reads.
-pub(crate) fn may_be(head: &[u8]) -> bool {
-    image::guess_format(head)
-        .ok()
-        .and_then(Format::of)
-        .is_some()
+/// Whether a file starting with `head`, or named as `named` says, can be an
+/// image the pane reads.
+pub(crate) fn may_be(head: &[u8], named: Option<Format>) -> bool {
+    named.is_some()
+        || image::guess_format(head)
+            .ok()
+            .and_then(Format::of)
+            .is_some()
 }
 
 /// The longest text git-lfs writes as a pointer.
