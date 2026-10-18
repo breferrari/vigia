@@ -486,16 +486,18 @@ fn jpeg_metadata_long() {
     let scratch = Scratch::new("picture-jpeg-long");
     scratch.write("a.jpg", encoded(ImageFormat::Jpeg, 8, 8, 1));
     scratch.commit_all("initial");
-    scratch.write("a.jpg", jpeg_after(4));
-
-    let after = diff_of(&scratch, "a.jpg")
-        .picture
-        .and_then(|picture| picture.after);
-    assert_eq!(
-        after.map(|side| (side.width, side.height)),
-        Some((1024, 1024)),
-        "a JPEG with 240 KB of metadata did not read"
-    );
+    // 240 KB, and 1020 KB: the second needs the whole of the second step.
+    for segments in [4, 17] {
+        scratch.write("a.jpg", jpeg_after(segments));
+        let after = diff_of(&scratch, "a.jpg")
+            .picture
+            .and_then(|picture| picture.after);
+        assert_eq!(
+            after.map(|side| (side.width, side.height)),
+            Some((1024, 1024)),
+            "a JPEG with {segments} metadata segments did not read"
+        );
+    }
 }
 
 /// A false start no longer than the first step is read once.
