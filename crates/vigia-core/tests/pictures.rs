@@ -495,23 +495,66 @@ fn jpeg_metadata_limit() {
     );
 }
 
-/// An LFS store reached through a link reads.
+/// An LFS store reached through a link reads, and so does an object that is a
+/// link itself.
 #[cfg(unix)]
 #[test]
 fn lfs_store_linked() {
     let old = png(24, 40, 1);
     let (scratch, oid) = lfs_repo("picture-lfs-linked", &old, &png(24, 40, 2));
-    let elsewhere = scratch.root().with_extension("lfs-store");
+    let elsewhere = scratch.root().join("..").join("picture-lfs-linked-store");
     let _ = std::fs::remove_dir_all(&elsewhere);
     store(&elsewhere, &oid, &old);
-    std::os::unix::fs::symlink(&elsewhere, scratch.root().join(".git").join("lfs"))
-        .expect("link the store");
+    let lfs = scratch.root().join(".git").join("lfs");
+    std::os::unix::fs::symlink(&elsewhere, &lfs).expect("link the store");
+    let linked_store = diff_of(&scratch, "a.png").picture;
 
-    let picture = diff_of(&scratch, "a.png").picture;
-    assert!(
-        picture.is_some_and(|picture| picture.before.is_some()),
-        "a linked store was not read"
-    );
+    std::fs::remove_file(&lfs).expect("unlink the store");
+    let object = object_path(&lfs, &oid);
+    std::fs::create_dir_all(object.parent().expect("a parent")).expect("make the store");
+    std::os::unix::fs::symlink(object_path(&elsewhere, &oid), &object).expect("link the object");
+    let linked_object = diff_of(&scratch, "a.png").picture;
+    let _ = std::fs::remove_dir_all(&elsewhere);
+
+    for (what, picture) in [("store", linked_store), ("object", linked_object)] {
+        assert!(
+            picture.is_some_and(|picture| picture.before.is_some()),
+            "a linked {what} was not read"
+        );
+    }
+}
+
+/// A fifo where an LFS object should be is never opened.
+#[cfg(unix)]
+#[test]
+fn lfs_object_fifo() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (scratch, oid) = lfs_repo("picture-lfs-fifo", &png(24, 40, 1), &png(24, 40, 2));
+    let object = object_path(&scratch.root().join(".git").join("lfs"), &oid);
+    std::fs::create_dir_all(object.parent().expect("a parent")).expect("make the store");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&object)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !made {
+        return;
+    }
+
+    let root = scratch.root().to_path_buf();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let worktree = vigia_core::Worktree::discover(&root).expect("discover");
+        let changes = changes_sorted(&worktree);
+        let change = changes.iter().find(|c| c.path == "a.png").expect("listed");
+        let _ = tx.send(worktree.diff(change).expect("diff").picture);
+    });
+    // Detached on purpose: a thread parked in `open` never returns.
+    let picture = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the diff is still inside an open of the fifo");
+    assert_eq!(picture, None, "a fifo in the store read as a picture");
 }
 
 /// Noise, which no encoder can shrink.

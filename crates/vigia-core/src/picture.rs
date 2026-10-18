@@ -159,16 +159,16 @@ pub(crate) fn lfs_oid(bytes: &[u8]) -> Option<&str> {
     (oid.len() == 64 && oid.bytes().all(|b| b.is_ascii_hexdigit())).then_some(oid)
 }
 
-/// How much of a file a header read may read, tried in order. Seeks are free, so
-/// a TIFF whose directory sits at its end still reads. `image`'s JPEG decoder
-/// reads to the end of what it is given, so the first step is what one usually
-/// costs, and the second is for one whose metadata runs long.
+/// The most a header read may read in all, raised one step at a time. A seek
+/// skips without reading, but it drops the reader's buffer, so each one costs a
+/// refill. `image`'s JPEG decoder reads to the end of what it is given, so the
+/// first step is what one usually costs.
 pub(crate) const HEAD_LIMITS: [u64; 2] = [64 * 1024, 1024 * 1024];
 
 /// A reader that ends after `limit` bytes, and totals what it read.
 pub(crate) struct Capped<R> {
     inner: R,
-    limit: u64,
+    pub(crate) limit: u64,
     pub(crate) total: u64,
 }
 
@@ -184,7 +184,7 @@ impl<R> Capped<R> {
 
 impl<R: Read> Read for Capped<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let room = (self.limit - self.total).min(buf.len() as u64) as usize;
+        let room = self.limit.saturating_sub(self.total).min(buf.len() as u64) as usize;
         let n = self.inner.read(&mut buf[..room])?;
         self.total += n as u64;
         Ok(n)

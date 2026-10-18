@@ -702,32 +702,41 @@ impl Worktree {
         named: Option<Format>,
         cost: &mut u64,
     ) -> Option<ImageSide> {
-        use std::io::BufRead;
+        use std::io::{Read, Seek};
+        let file = std::fs::File::open(path).ok()?;
+        let meta = file.metadata().ok()?;
+        if !meta.is_file() {
+            return None;
+        }
+        let length = meta.len();
+        if length < picture::POINTER_MAX as u64 {
+            let mut head = Vec::new();
+            let read = (&file)
+                .take(picture::POINTER_MAX as u64)
+                .read_to_end(&mut head);
+            *cost += head.len() as u64;
+            read.ok()?;
+            return match picture::lfs_oid(&head) {
+                Some(oid) if follow => self.lfs_side(oid, named, cost),
+                Some(_) => None,
+                None => picture::side_of(std::io::Cursor::new(&head), length, named),
+            };
+        }
+        // Small, because every seek drops the buffer and the refill is read again.
+        let mut reader = std::io::BufReader::with_capacity(512, picture::Capped::new(file, 0));
+        let mut side = None;
         for limit in picture::HEAD_LIMITS {
-            let file = std::fs::File::open(path).ok()?;
-            let length = file.metadata().ok()?.len();
-            // Small, because a seek outside the buffer drops it and reads again.
-            let mut reader =
-                std::io::BufReader::with_capacity(512, picture::Capped::new(file, limit));
-            if length < picture::POINTER_MAX as u64
-                && let Some(oid) = reader.fill_buf().ok().and_then(picture::lfs_oid)
-            {
-                let oid = oid.to_owned();
-                *cost += reader.get_ref().total;
-                return if follow {
-                    self.lfs_side(&oid, named, cost)
-                } else {
-                    None
-                };
+            reader.get_mut().limit = limit;
+            if reader.rewind().is_err() {
+                break;
             }
-            let side = picture::side_of(&mut reader, length, named);
-            let total = reader.get_ref().total;
-            *cost += total;
-            if side.is_some() || total < limit {
-                return side;
+            side = picture::side_of(&mut reader, length, named);
+            if side.is_some() || reader.get_ref().total < limit || length <= limit {
+                break;
             }
         }
-        None
+        *cost += reader.get_ref().total;
+        side
     }
 
     /// How tall one change's diff is, without building any of it.
