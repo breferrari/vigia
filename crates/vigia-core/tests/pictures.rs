@@ -440,8 +440,8 @@ fn missing_blob_stays_binary() {
     assert_eq!(diff.picture, None, "a missing blob read as a picture");
 }
 
-/// A JPEG whose metadata comes before its size is read to its size, and no
-/// further.
+/// A JPEG whose metadata comes before its size reads, and costs its first MiB
+/// at most.
 #[test]
 fn jpeg_metadata_first() {
     let scratch = Scratch::new("picture-jpeg-metadata");
@@ -476,9 +476,75 @@ fn jpeg_metadata_first() {
         Some((1024, 1024))
     );
     assert!(
-        diff.bytes <= small.len() as u64 + 256 * 1024 + 8000,
+        diff.bytes <= small.len() as u64 + 1024 * 1024 + 8000,
         "reading a {} byte JPEG's size compared {} bytes",
         big.len(),
+        diff.bytes
+    );
+}
+
+/// Noise, which no encoder can shrink.
+fn noise(side: u32) -> RgbaImage {
+    RgbaImage::from_fn(side, side, |x, y| {
+        let n =
+            (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)).wrapping_mul(2_246_822_519);
+        image::Rgba(n.to_le_bytes())
+    })
+}
+
+/// A TIFF whose directory sits after its pixels, past the read limit, reads by
+/// seeking there.
+#[test]
+fn tiff_directory_last() {
+    let scratch = Scratch::new("picture-tiff-last");
+    let small = encoded(ImageFormat::Tiff, 8, 8, 1);
+    scratch.write("a.tiff", &small);
+    scratch.commit_all("initial");
+    let mut big = Cursor::new(Vec::new());
+    noise(1024)
+        .write_to(&mut big, ImageFormat::Tiff)
+        .expect("encode");
+    let big = big.into_inner();
+    assert!(
+        big.len() > 2 * 1024 * 1024,
+        "the fixture is too small to tell"
+    );
+    scratch.write("a.tiff", &big);
+
+    let diff = diff_of(&scratch, "a.tiff");
+    let after = diff.picture.and_then(|picture| picture.after);
+    assert_eq!(
+        after.map(|side| (side.width, side.height)),
+        Some((1024, 1024))
+    );
+    assert!(
+        diff.bytes <= small.len() as u64 + 64 * 1024,
+        "reading a {} byte TIFF's size compared {} bytes",
+        big.len(),
+        diff.bytes
+    );
+}
+
+/// A large file that only starts like an image costs what its decoder read
+/// before it gave up, not the read limit.
+#[test]
+fn false_start_is_cheap() {
+    let scratch = Scratch::new("picture-false-start");
+    let mut junk = b"BM".to_vec();
+    junk.extend(std::iter::repeat_n(0u8, 4 * 1024 * 1024));
+    scratch.write("a.bin", &junk);
+    scratch.commit_all("initial");
+    junk[3] = 7;
+    scratch.write("a.bin", &junk);
+
+    let diff = diff_of(&scratch, "a.bin");
+    assert!(
+        diff.binary && diff.picture.is_none(),
+        "the junk read as a picture"
+    );
+    assert!(
+        diff.bytes <= 64 * 1024,
+        "a false start compared {} bytes",
         diff.bytes
     );
 }

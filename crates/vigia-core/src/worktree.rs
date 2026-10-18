@@ -628,15 +628,24 @@ impl Worktree {
                 return None;
             }
             Some(Side::Worktree) => {
-                Some(self.file_side(&self.workdir.join(&change.path), true, named, cost))
+                let path = self.workdir.join(&change.path);
+                // A link's bytes are its target, and a fifo blocks whoever opens it.
+                if change.maybe_symlink
+                    && !std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file())
+                {
+                    return None;
+                }
+                Some(self.file_side(&path, true, named, cost))
             }
-            Some(Side::Blob(id)) => Some(self.blob_side(id, named, cost)),
+            Some(Side::Blob(id)) => Some(self.blob_side(id, &change.path, named, cost)),
             None => None,
         };
         if after == Some(None) {
             return None;
         }
-        let before = change.before.map(|id| self.blob_side(id, named, cost));
+        let before = change
+            .before
+            .map(|id| self.blob_side(id, &change.path, named, cost));
         Picture::of(before, after)
     }
 
@@ -645,12 +654,11 @@ impl Worktree {
     fn blob_side(
         &self,
         id: gix::ObjectId,
+        path: &str,
         named: Option<Format>,
         cost: &mut u64,
     ) -> Option<ImageSide> {
-        let repo = self.repo();
-        let held = repo.find_object(id).ok()?.try_into_blob().ok()?.take_data();
-        drop(repo);
+        let held = self.blob(id, path).ok()?;
         *cost += held.len() as u64;
         self.held_side(&held, named, cost)
     }
@@ -680,8 +688,9 @@ impl Worktree {
         self.file_side(&path, false, named, cost)
     }
 
-    /// A file's side, read from its head in bounded steps. A pointer is followed
-    /// to its LFS object when `follow` is set, and an object is never followed.
+    /// A file's side, read through its header and never past [`picture::HEAD_LIMIT`].
+    /// A pointer is followed to its LFS object when `follow` is set, and an object
+    /// is never followed.
     fn file_side(
         &self,
         path: &Path,
@@ -690,30 +699,21 @@ impl Worktree {
         cost: &mut u64,
     ) -> Option<ImageSide> {
         use std::io::Read;
-        // A fifo blocks whoever opens it, and a link's bytes are its target.
-        let meta = std::fs::symlink_metadata(path).ok()?;
-        if !meta.is_file() {
-            return None;
-        }
         let file = std::fs::File::open(path).ok()?;
+        let length = file.metadata().ok()?.len();
+        let mut reader = std::io::BufReader::new(picture::Capped::new(file));
+        if length >= picture::POINTER_MAX as u64 {
+            let side = picture::side_of(&mut reader, length, named);
+            *cost += reader.get_ref().total;
+            return side;
+        }
         let mut head = Vec::new();
-        let side = 'read: {
-            for limit in picture::HEAD_READS {
-                let take = limit - head.len() as u64;
-                if (&file).take(take).read_to_end(&mut head).is_err() {
-                    break 'read None;
-                }
-                let side = picture::side_of(std::io::Cursor::new(&head), meta.len(), named);
-                if side.is_some() || (head.len() as u64) < limit {
-                    break 'read side;
-                }
-            }
-            None
-        };
-        *cost += head.len() as u64;
+        let read = reader.read_to_end(&mut head);
+        *cost += reader.get_ref().total;
+        read.ok()?;
         match picture::lfs_oid(&head) {
-            Some(oid) if follow && side.is_none() => self.lfs_side(oid, named, cost),
-            _ => side,
+            Some(oid) if follow => self.lfs_side(oid, named, cost),
+            _ => picture::side_of(std::io::Cursor::new(&head), length, named),
         }
     }
 

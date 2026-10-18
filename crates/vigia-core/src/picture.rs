@@ -1,7 +1,7 @@
 //! What a changed image is on each side: its format, its size and its bytes.
 
 use std::fmt;
-use std::io::{BufRead, Seek};
+use std::io::{BufRead, Read, Seek};
 
 /// The image formats the pane reads. Any other is a binary file like the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,9 +159,37 @@ pub(crate) fn lfs_oid(bytes: &[u8]) -> Option<&str> {
     (oid.len() == 64 && oid.bytes().all(|b| b.is_ascii_hexdigit())).then_some(oid)
 }
 
-/// How far into a file its header is looked for: most formats answer in the
-/// first step, and a JPEG whose metadata precedes its size needs the second.
-pub(crate) const HEAD_READS: [u64; 2] = [16 * 1024, 256 * 1024];
+/// The most of a file a header read may read. Seeks are free, so a TIFF whose
+/// directory sits at the end still reads. `image`'s JPEG decoder reads to the end
+/// of what it is given, so this is what one costs.
+pub(crate) const HEAD_LIMIT: u64 = 1024 * 1024;
+
+/// A reader that ends after [`HEAD_LIMIT`] bytes, and totals what it read.
+pub(crate) struct Capped<R> {
+    inner: R,
+    pub(crate) total: u64,
+}
+
+impl<R> Capped<R> {
+    pub(crate) fn new(inner: R) -> Self {
+        Self { inner, total: 0 }
+    }
+}
+
+impl<R: Read> Read for Capped<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let room = (HEAD_LIMIT - self.total).min(buf.len() as u64) as usize;
+        let n = self.inner.read(&mut buf[..room])?;
+        self.total += n as u64;
+        Ok(n)
+    }
+}
+
+impl<R: Seek> Seek for Capped<R> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
 
 #[cfg(test)]
 mod tests {
