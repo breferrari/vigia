@@ -402,3 +402,85 @@ fn spaced_path_reads() {
         "a spaced path read no picture"
     );
 }
+
+/// A path the attribute marks binary that is now a fifo reads no picture, and
+/// opening it never blocks.
+#[test]
+fn fifo_reads_nothing() {
+    let scratch = Scratch::new("picture-fifo");
+    scratch.write(".gitattributes", "*.png binary\n");
+    scratch.write("a.png", png(24, 40, 1));
+    scratch.commit_all("initial");
+    scratch.remove("a.png");
+    if !support::made_fifo(&scratch, "a.png") {
+        return;
+    }
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let Some(change) = changes.iter().find(|c| c.path == "a.png") else {
+        return;
+    };
+    let diff = worktree.diff(change).expect("diff");
+    assert_eq!(diff.picture, None, "a fifo read as a picture");
+}
+
+/// An old side that cannot be read costs the size line, never the diff.
+#[test]
+fn missing_blob_stays_binary() {
+    let scratch = Scratch::new("picture-missing-blob");
+    scratch.write("a.png", png(24, 40, 1));
+    scratch.commit_all("initial");
+    scratch.write("a.png", png(24, 40, 2));
+    scratch.point_at_a_missing_blob("a.png");
+
+    let diff = diff_of(&scratch, "a.png");
+    assert!(
+        diff.binary,
+        "a PNG with a missing blob stopped counting as binary"
+    );
+    assert_eq!(diff.picture, None, "a missing blob read as a picture");
+}
+
+/// A JPEG whose metadata comes before its size is read to its size, and no
+/// further.
+#[test]
+fn jpeg_metadata_first() {
+    let scratch = Scratch::new("picture-jpeg-metadata");
+    let small = encoded(ImageFormat::Jpeg, 8, 8, 1);
+    scratch.write("a.jpg", &small);
+    scratch.commit_all("initial");
+    let noise = RgbaImage::from_fn(1024, 1024, |x, y| {
+        let n =
+            (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)).wrapping_mul(2_246_822_519);
+        image::Rgba(n.to_le_bytes())
+    });
+    let mut body = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(noise)
+        .to_rgb8()
+        .write_to(&mut body, ImageFormat::Jpeg)
+        .expect("encode");
+    let body = body.into_inner();
+    // An APP1 segment of 60000 bytes straight after the start marker, the way
+    // a camera's EXIF block sits before the frame header.
+    let mut big = body[..2].to_vec();
+    big.extend_from_slice(&[0xff, 0xe1]);
+    big.extend_from_slice(&60_002u16.to_be_bytes());
+    big.extend(std::iter::repeat_n(0u8, 60_000));
+    big.extend_from_slice(&body[2..]);
+    assert!(big.len() > 512 * 1024, "the fixture is too small to tell");
+    scratch.write("a.jpg", &big);
+
+    let diff = diff_of(&scratch, "a.jpg");
+    let after = diff.picture.and_then(|picture| picture.after);
+    assert_eq!(
+        after.map(|side| (side.width, side.height)),
+        Some((1024, 1024))
+    );
+    assert!(
+        diff.bytes <= small.len() as u64 + 256 * 1024 + 8000,
+        "reading a {} byte JPEG's size compared {} bytes",
+        big.len(),
+        diff.bytes
+    );
+}

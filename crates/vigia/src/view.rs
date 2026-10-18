@@ -1447,10 +1447,15 @@ fn size_line(picture: &Picture) -> Option<String> {
             } else {
                 format!("{} → {}", shape(old), shape(new))
             };
-            format!(
-                "{shapes} · {}",
-                either(file_size(old.bytes), file_size(new.bytes))
-            )
+            let sizes = match (file_size(old.bytes), file_size(new.bytes)) {
+                _ if old.bytes == new.bytes => file_size(new.bytes),
+                // Rounding would hide the change, so the bytes are said exactly.
+                (rounded, again) if rounded == again => {
+                    format!("{} B → {} B", old.bytes, new.bytes)
+                }
+                (old, new) => format!("{old} → {new}"),
+            };
+            format!("{shapes} · {sizes}")
         }
         (Some(one), None) | (None, Some(one)) => {
             format!("{} · {}", shape(one), file_size(one.bytes))
@@ -1463,9 +1468,10 @@ fn size_line(picture: &Picture) -> Option<String> {
 fn file_size(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * KIB;
+    let kib = (bytes + KIB / 2) / KIB;
     match bytes {
         0..KIB => format!("{bytes} B"),
-        KIB..MIB => format!("{} KiB", (bytes + KIB / 2) / KIB),
+        _ if kib < KIB => format!("{kib} KiB"),
         _ => format!("{:.1} MiB", bytes as f64 / MIB as f64),
     }
 }
@@ -2850,8 +2856,11 @@ impl View {
 
         // A labelled block so the block's closing gap has one push site.
         'block: {
-            if let Some(reason) = note_for(kind, diff) {
-                if n >= skip && self.rows.len() < height {
+            if noted(kind, diff) {
+                if n >= skip
+                    && self.rows.len() < height
+                    && let Some(reason) = note_for(kind, diff)
+                {
                     self.rows.push(Row::Reason(reason));
                 }
                 n += 1;
@@ -3265,6 +3274,19 @@ mod tests {
             "PNG 16×12 · 900 B"
         );
         assert_eq!(line(Some(old), None), "PNG 1242×2688 · 731 KiB");
+        assert_eq!(
+            line(Some(old), Some(image(Png, 1242, 2688, 748_600))),
+            "PNG 1242×2688 · 748544 B → 748600 B"
+        );
+    }
+
+    #[test]
+    fn file_size_units() {
+        assert_eq!(file_size(1023), "1023 B");
+        assert_eq!(file_size(1024), "1 KiB");
+        assert_eq!(file_size(1_048_000), "1023 KiB");
+        assert_eq!(file_size(1_048_100), "1.0 MiB");
+        assert_eq!(file_size(2_200_000), "2.1 MiB");
     }
 
     /// A hunk starting at working-tree line `new_start` with these line kinds.

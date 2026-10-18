@@ -593,7 +593,7 @@ impl Worktree {
             binary.bytes = window.len() as u64;
             // Nothing was sniffed when the attribute decided.
             let sniffed = (diff != Some(false)).then_some(window.as_slice());
-            binary.picture = self.early_picture(change, sniffed, &mut binary.bytes)?;
+            binary.picture = self.early_picture(change, sniffed, &mut binary.bytes);
             return Ok(binary);
         }
         let (before, after) = self.sides(change, probes)?;
@@ -621,39 +621,38 @@ impl Worktree {
         change: &FileChange,
         window: Option<&[u8]>,
         cost: &mut u64,
-    ) -> Result<Option<Picture>> {
+    ) -> Option<Picture> {
         let named = Format::named(&change.path);
         let after = match change.after {
             Some(Side::Worktree) if window.is_some_and(|head| !picture::may_be(head, named)) => {
-                return Ok(None);
+                return None;
             }
             Some(Side::Worktree) => {
                 Some(self.file_side(&self.workdir.join(&change.path), true, named, cost))
             }
-            Some(Side::Blob(id)) => Some(self.blob_side(id, &change.path, named, cost)?),
+            Some(Side::Blob(id)) => Some(self.blob_side(id, named, cost)),
             None => None,
         };
         if after == Some(None) {
-            return Ok(None);
+            return None;
         }
-        let before = match change.before {
-            Some(id) => Some(self.blob_side(id, &change.path, named, cost)?),
-            None => None,
-        };
-        Ok(Picture::of(before, after))
+        let before = change.before.map(|id| self.blob_side(id, named, cost));
+        Picture::of(before, after)
     }
 
     /// A blob's side, read whole because the object database has no partial read.
+    /// A blob that cannot be read only costs the size line, never the diff.
     fn blob_side(
         &self,
         id: gix::ObjectId,
-        path: &str,
         named: Option<Format>,
         cost: &mut u64,
-    ) -> Result<Option<ImageSide>> {
-        let held = self.blob(id, path)?;
+    ) -> Option<ImageSide> {
+        let repo = self.repo();
+        let held = repo.find_object(id).ok()?.try_into_blob().ok()?.take_data();
+        drop(repo);
         *cost += held.len() as u64;
-        Ok(self.held_side(&held, named, cost))
+        self.held_side(&held, named, cost)
     }
 
     /// One side already in memory, or the LFS object it points at.
@@ -681,8 +680,8 @@ impl Worktree {
         self.file_side(&path, false, named, cost)
     }
 
-    /// A file's side, read through its header. A pointer is followed to its LFS
-    /// object when `follow` is set, and an object is never followed again.
+    /// A file's side, read from its head in bounded steps. A pointer is followed
+    /// to its LFS object when `follow` is set, and an object is never followed.
     fn file_side(
         &self,
         path: &Path,
@@ -691,21 +690,30 @@ impl Worktree {
         cost: &mut u64,
     ) -> Option<ImageSide> {
         use std::io::Read;
-        let file = std::fs::File::open(path).ok()?;
-        let length = file.metadata().map_or(0, |meta| meta.len());
-        let mut reader = std::io::BufReader::new(picture::Counted::new(file));
-        if length >= picture::POINTER_MAX as u64 {
-            let side = picture::side_of(&mut reader, length, named);
-            *cost += reader.get_ref().total;
-            return side;
+        // A fifo blocks whoever opens it, and a link's bytes are its target.
+        let meta = std::fs::symlink_metadata(path).ok()?;
+        if !meta.is_file() {
+            return None;
         }
+        let file = std::fs::File::open(path).ok()?;
         let mut head = Vec::new();
-        let read = reader.read_to_end(&mut head);
-        *cost += reader.get_ref().total;
-        read.ok()?;
+        let side = 'read: {
+            for limit in picture::HEAD_READS {
+                let take = limit - head.len() as u64;
+                if (&file).take(take).read_to_end(&mut head).is_err() {
+                    break 'read None;
+                }
+                let side = picture::side_of(std::io::Cursor::new(&head), meta.len(), named);
+                if side.is_some() || (head.len() as u64) < limit {
+                    break 'read side;
+                }
+            }
+            None
+        };
+        *cost += head.len() as u64;
         match picture::lfs_oid(&head) {
-            Some(oid) if follow => self.lfs_side(oid, named, cost),
-            _ => picture::side_of(std::io::Cursor::new(&head), length, named),
+            Some(oid) if follow && side.is_none() => self.lfs_side(oid, named, cost),
+            _ => side,
         }
     }
 
