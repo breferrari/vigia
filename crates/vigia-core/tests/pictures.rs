@@ -403,26 +403,24 @@ fn spaced_path_reads() {
     );
 }
 
-/// A path the attribute marks binary that is now a fifo reads no picture, and
-/// opening it never blocks.
+/// A link the attribute marks binary reads no picture: git compares the link's
+/// target text, not the image it points at.
 #[test]
-fn fifo_reads_nothing() {
-    let scratch = Scratch::new("picture-fifo");
+fn link_reads_nothing() {
+    let scratch = Scratch::new("picture-link");
     scratch.write(".gitattributes", "*.png binary\n");
-    scratch.write("a.png", png(24, 40, 1));
+    scratch.write("real.png", png(24, 40, 1));
     scratch.commit_all("initial");
-    scratch.remove("a.png");
-    if !support::made_fifo(&scratch, "a.png") {
+    if !support::made_link(&scratch, "real.png", "link.png") {
         return;
     }
+    scratch.git(&["add", "-N", "link.png"]);
 
-    let worktree = scratch.worktree();
-    let changes = changes_sorted(&worktree);
-    let Some(change) = changes.iter().find(|c| c.path == "a.png") else {
-        return;
-    };
-    let diff = worktree.diff(change).expect("diff");
-    assert_eq!(diff.picture, None, "a fifo read as a picture");
+    let diff = diff_of(&scratch, "link.png");
+    assert_eq!(
+        diff.picture, None,
+        "a link read as the picture it points at"
+    );
 }
 
 /// An old side that cannot be read costs the size line, never the diff.
