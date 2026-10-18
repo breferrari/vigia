@@ -8,10 +8,8 @@ members = ["crates/vigia-core", "crates/vigia", "xtask"]
 # Independent versions would buy nothing and cost a second tag format.
 version = "1.1.0"
 edition = "2024"
-# 1.89 rather than 1.85 because `graviola` declares it, and no release of it
-# satisfies `rustls-graviola` 0.4 at anything lower. Nothing else here needs
-# it; leaving 1.85 written down would be a claim that does not build.
-rust-version = "1.89"
+# The latest stable, which is what CI builds with. See SPEC.md §6.
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/breferrari/vigia"
 # The same URL as `repository`, which is a duplicate and is kept deliberately.

@@ -92,7 +92,7 @@ vigia ~/code/some-repo                       # or any path
 vigia --version                              # or -V. It is the only option there is
 ```
 
-Every [release](https://github.com/breferrari/vigia/releases) carries archives for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc. From source needs Rust 1.89 or newer.
+Every [release](https://github.com/breferrari/vigia/releases) carries archives for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc. From source needs the latest stable Rust, 1.99 or newer.
 
 **No C toolchain, on any of those paths.** Every dependency is pure Rust, and CI asserts it on each shipped target rather than claiming it: a `cc`, `cmake` or `bindgen` entering the dependency graph fails the build.
 

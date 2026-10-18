@@ -315,6 +315,14 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 **Every PR in this phase carries a screenshot, and the bar is sized to the surface.** Feel is vetoed by eye or it is not vetoed at all.
 
+## Phase 9 — pictures
+
+Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
+
+| | Task | Issue |
+|---|---|---|
+| ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
+
 ## Shelf
 
 Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5)

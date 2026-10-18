@@ -51,7 +51,7 @@ impl Drop for Permit {
 #[must_use]
 pub fn permit() -> Option<Permit> {
     IN_FLIGHT
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |out| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |out| {
             (out < IN_FLIGHT_MAX).then_some(out + 1)
         })
         .ok()
