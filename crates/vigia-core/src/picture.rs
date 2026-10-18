@@ -190,7 +190,7 @@ impl<R> Capped<R> {
 
 impl<R: Read> Read for Capped<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let room = (self.limit - self.total).min(buf.len() as u64) as usize;
+        let room = self.limit.saturating_sub(self.total).min(buf.len() as u64) as usize;
         let n = self.inner.read(&mut buf[..room])?;
         self.total += n as u64;
         Ok(n)

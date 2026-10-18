@@ -692,8 +692,8 @@ impl Worktree {
         self.file_side(&path, false, named, cost)
     }
 
-    /// A file's side, read through its header with at most the last of
-    /// [`picture::HEAD_LIMITS`] read. A pointer is followed to its LFS object when
+    /// A file's side, read through its header in the steps of
+    /// [`picture::HEAD_LIMITS`], so at most their sum is read. A pointer is followed to its LFS object when
     /// `follow` is set, and an object is never followed.
     fn file_side(
         &self,
