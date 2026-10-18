@@ -726,12 +726,13 @@ impl Worktree {
         let mut reader = std::io::BufReader::with_capacity(512, picture::Capped::new(file, 0));
         let mut side = None;
         for limit in picture::HEAD_LIMITS {
-            reader.get_mut().limit = limit;
+            *cost += reader.get_mut().restart(limit);
             if reader.rewind().is_err() {
                 break;
             }
             side = picture::side_of(&mut reader, length, named);
-            if side.is_some() || reader.get_ref().total < limit {
+            // A file within the limit was read whole, so a larger one cannot help.
+            if side.is_some() || reader.get_ref().total < limit || length <= limit {
                 break;
             }
         }

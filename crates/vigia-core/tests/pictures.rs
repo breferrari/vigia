@@ -480,6 +480,45 @@ fn jpeg_metadata_first() {
     );
 }
 
+/// A JPEG whose metadata outruns the first step reads in the second.
+#[test]
+fn jpeg_metadata_long() {
+    let scratch = Scratch::new("picture-jpeg-long");
+    scratch.write("a.jpg", encoded(ImageFormat::Jpeg, 8, 8, 1));
+    scratch.commit_all("initial");
+    scratch.write("a.jpg", jpeg_after(4));
+
+    let after = diff_of(&scratch, "a.jpg")
+        .picture
+        .and_then(|picture| picture.after);
+    assert_eq!(
+        after.map(|side| (side.width, side.height)),
+        Some((1024, 1024)),
+        "a JPEG with 240 KB of metadata did not read"
+    );
+}
+
+/// A false start no longer than the first step is read once.
+#[test]
+fn false_start_short() {
+    let scratch = Scratch::new("picture-false-start-short");
+    // A JPEG's start, because its decoder reads to the end of what it is given.
+    let mut junk = vec![0xff, 0xd8, 0xff];
+    junk.resize(64 * 1024, 0);
+    scratch.write("a.bin", &junk);
+    scratch.commit_all("initial");
+    junk[3] = 7;
+    scratch.write("a.bin", &junk);
+
+    let diff = diff_of(&scratch, "a.bin");
+    assert!(diff.picture.is_none(), "the junk read as a picture");
+    assert!(
+        diff.bytes <= 64 * 1024 + 8000,
+        "a 64 KiB false start compared {} bytes",
+        diff.bytes
+    );
+}
+
 /// A JPEG whose size comes after more than a MiB of metadata stays binary.
 #[test]
 fn jpeg_metadata_limit() {
@@ -502,7 +541,9 @@ fn jpeg_metadata_limit() {
 fn lfs_store_linked() {
     let old = png(24, 40, 1);
     let (scratch, oid) = lfs_repo("picture-lfs-linked", &old, &png(24, 40, 2));
-    let elsewhere = scratch.root().join("..").join("picture-lfs-linked-store");
+    let mut name = scratch.root().file_name().expect("a name").to_os_string();
+    name.push("-store");
+    let elsewhere = scratch.root().with_file_name(name);
     let _ = std::fs::remove_dir_all(&elsewhere);
     store(&elsewhere, &oid, &old);
     let lfs = scratch.root().join(".git").join("lfs");
@@ -551,9 +592,15 @@ fn lfs_object_fifo() {
         let _ = tx.send(worktree.diff(change).expect("diff").picture);
     });
     // Detached on purpose: a thread parked in `open` never returns.
-    let picture = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("the diff is still inside an open of the fifo");
+    let picture = match rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(picture) => picture,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            panic!("the diff is still inside an open of the fifo")
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("the diff panicked; see its output above")
+        }
+    };
     assert_eq!(picture, None, "a fifo in the store read as a picture");
 }
 
