@@ -608,7 +608,7 @@ impl Worktree {
                 .after
                 .map(|_| self.held_side(&after, named, &mut cost));
             diff.bytes += cost;
-            diff.picture = picture_from(before, after);
+            diff.picture = Picture::of(before, after);
         }
         Ok(diff)
     }
@@ -640,7 +640,7 @@ impl Worktree {
             Some(id) => Some(self.blob_side(id, &change.path, named, cost)?),
             None => None,
         };
-        Ok(picture_from(before, after))
+        Ok(Picture::of(before, after))
     }
 
     /// A blob's side, read whole because the object database has no partial read.
@@ -696,12 +696,12 @@ impl Worktree {
         let mut reader = std::io::BufReader::new(picture::Counted::new(file));
         if length >= picture::POINTER_MAX as u64 {
             let side = picture::side_of(&mut reader, length, named);
-            *cost += reader.get_ref().read;
+            *cost += reader.get_ref().total;
             return side;
         }
         let mut head = Vec::new();
         let read = reader.read_to_end(&mut head);
-        *cost += reader.get_ref().read;
+        *cost += reader.get_ref().total;
         read.ok()?;
         match picture::lfs_oid(&head) {
             Some(oid) if follow => self.lfs_side(oid, named, cost),
@@ -1459,21 +1459,6 @@ pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
             .then_with(|| left.extension.cmp(&right.extension))
     });
     ranked
-}
-
-/// A picture when every side that exists read as an image. The outer `None` is
-/// a side the change does not have; the inner one is a side that is not an image.
-fn picture_from(
-    before: Option<Option<ImageSide>>,
-    after: Option<Option<ImageSide>>,
-) -> Option<Picture> {
-    if before == Some(None) || after == Some(None) || (before.is_none() && after.is_none()) {
-        return None;
-    }
-    Some(Picture {
-        before: before.flatten(),
-        after: after.flatten(),
-    })
 }
 
 #[cfg(test)]

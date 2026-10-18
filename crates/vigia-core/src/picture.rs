@@ -4,13 +4,13 @@ use std::fmt;
 use std::io::{BufRead, Read, Seek};
 
 /// The image formats the pane reads. Any other is a binary file like the rest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     /// Portable Network Graphics.
     Png,
     /// JPEG.
     Jpeg,
-    /// GIF, of which only the first frame is ever drawn.
+    /// GIF.
     Gif,
     /// WebP.
     Webp,
@@ -90,6 +90,24 @@ pub struct Picture {
     pub after: Option<ImageSide>,
 }
 
+impl Picture {
+    /// A picture when every side that exists read as an image. The outer `None`
+    /// is a side the change does not have; the inner one is a side that is not
+    /// an image.
+    pub(crate) fn of(
+        before: Option<Option<ImageSide>>,
+        after: Option<Option<ImageSide>>,
+    ) -> Option<Self> {
+        if before == Some(None) || after == Some(None) || (before.is_none() && after.is_none()) {
+            return None;
+        }
+        Some(Self {
+            before: before.flatten(),
+            after: after.flatten(),
+        })
+    }
+}
+
 /// One side read from `source`, which is `bytes` long: `None` unless the first
 /// bytes are a format the pane reads, or `named` says TGA, and the header after
 /// them holds.
@@ -141,22 +159,22 @@ pub(crate) fn lfs_oid(bytes: &[u8]) -> Option<&str> {
     (oid.len() == 64 && oid.bytes().all(|b| b.is_ascii_hexdigit())).then_some(oid)
 }
 
-/// A reader that counts what it hands out, so a header read can report its cost.
+/// A reader that totals what it hands out, so a header read can report its cost.
 pub(crate) struct Counted<R> {
     inner: R,
-    pub(crate) read: u64,
+    pub(crate) total: u64,
 }
 
 impl<R> Counted<R> {
     pub(crate) fn new(inner: R) -> Self {
-        Self { inner, read: 0 }
+        Self { inner, total: 0 }
     }
 }
 
 impl<R: Read> Read for Counted<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
-        self.read += n as u64;
+        self.total += n as u64;
         Ok(n)
     }
 }

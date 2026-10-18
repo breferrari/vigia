@@ -1449,16 +1449,18 @@ fn size_line(picture: &Picture) -> Option<String> {
             };
             format!(
                 "{shapes} · {}",
-                either(weight(old.bytes), weight(new.bytes))
+                either(file_size(old.bytes), file_size(new.bytes))
             )
         }
-        (Some(one), None) | (None, Some(one)) => format!("{} · {}", shape(one), weight(one.bytes)),
+        (Some(one), None) | (None, Some(one)) => {
+            format!("{} · {}", shape(one), file_size(one.bytes))
+        }
         (None, None) => return None,
     })
 }
 
 /// A file's length in binary units: `900 B`, `731 KiB`, `2.1 MiB`.
-fn weight(bytes: u64) -> String {
+fn file_size(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * KIB;
     match bytes {
