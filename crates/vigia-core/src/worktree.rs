@@ -731,7 +731,7 @@ impl Worktree {
                 break;
             }
             side = picture::side_of(&mut reader, length, named);
-            if side.is_some() || reader.get_ref().total < limit || length <= limit {
+            if side.is_some() || reader.get_ref().total < limit {
                 break;
             }
         }
