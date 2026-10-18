@@ -622,3 +622,38 @@ fn false_start_cost() {
         diff.bytes
     );
 }
+
+/// A worktree pointer with extension lines before its oid, longer than one read
+/// buffer, still resolves. The worktree holds pointers where git-lfs is not
+/// installed.
+#[test]
+fn lfs_long_pointer() {
+    let old = png(24, 40, 1);
+    let new = png(30, 50, 2);
+    let (scratch, old_oid) = lfs_repo("picture-lfs-long", &old, b"placeholder");
+    let lfs = scratch.root().join(".git").join("lfs");
+    store(&lfs, &old_oid, &old);
+    let new_oid = "cd".repeat(32);
+    store(&lfs, &new_oid, &new);
+    let extensions: String = (0..6)
+        .map(|n| format!("ext-{n}-name sha256:{}\n", "ef".repeat(32)))
+        .collect();
+    let text = format!(
+        "version https://git-lfs.github.com/spec/v1\n{extensions}oid sha256:{new_oid}\nsize {}\n",
+        new.len()
+    );
+    assert!(
+        text.len() > 512 && text.len() < 1024,
+        "the fixture is the wrong length"
+    );
+    scratch.write("a.png", &text);
+
+    let after = diff_of(&scratch, "a.png")
+        .picture
+        .and_then(|picture| picture.after);
+    assert_eq!(
+        after.map(|side| (side.width, side.height)),
+        Some((30, 50)),
+        "a long worktree pointer did not resolve"
+    );
+}
