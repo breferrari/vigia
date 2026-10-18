@@ -319,8 +319,14 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 
+**Filter: does it show what a changed picture looks like, in any terminal, without the pane stopping being a monitor?** Asked by the reader for app assets and snapshot-test references. SPEC §11.2 B23 is the ruling.
+
 | | Task | Issue |
 |---|---|---|
+| 🔨 | A changed image draws pictures instead of the word binary. **Split into the three below** | [#632](https://github.com/breferrari/vigia/issues/632) |
+| 🔨 | Image size line | [#633](https://github.com/breferrari/vigia/issues/633) |
+| ⬜ | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
+| ⬜ | Real-pixel image protocols | [#635](https://github.com/breferrari/vigia/issues/635) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 
 ## Shelf
