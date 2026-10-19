@@ -477,7 +477,8 @@ static DECODES: AtomicU64 = AtomicU64::new(0);
 static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 /// The worker thread's name, which is how a decode knows where it runs and how
 /// the panic hook knows to leave a panic to the worker's own catch.
-pub(crate) const WORKER: &str = "vigia-pictures";
+#[doc(hidden)]
+pub const WORKER: &str = "vigia-pictures";
 
 /// Where a test has asked the next picture to panic, or [`ARMED_NONE`].
 static ARMED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(ARMED_NONE);
@@ -494,7 +495,8 @@ pub enum Stage {
 }
 
 /// Make the next picture panic at `stage`, as a malformed file would. A test
-/// seam: in release it costs one relaxed load per stage per picture.
+/// seam: in release it costs one relaxed load per decoded side and per encoded
+/// panel.
 #[doc(hidden)]
 pub fn panic_next(stage: Stage) {
     ARMED.store(stage as u8, Ordering::Relaxed);

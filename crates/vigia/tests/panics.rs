@@ -153,7 +153,7 @@ fn panic_child() {
     vigia::install_panic_hook();
     if which == "worker" {
         let caught = std::thread::Builder::new()
-            .name("vigia-pictures".to_owned())
+            .name(pictures::WORKER.to_owned())
             .spawn(|| std::panic::catch_unwind(|| panic!("a worker on purpose")).is_err())
             .expect("spawn")
             .join()
