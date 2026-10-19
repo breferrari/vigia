@@ -849,7 +849,16 @@ impl Worktree {
     /// The picture of a changed PDF when every side it has gives a size. Each
     /// side is read whole, up to [`picture::PDF_LIMIT`].
     fn pdf_picture(&self, change: &FileChange, cost: &mut u64) -> Option<Picture> {
-        let blob = |id, cost: &mut u64| {
+        use std::io::Read;
+        let blob = |id: gix::ObjectId, cost: &mut u64| {
+            // Its size from the object's header, without inflating it.
+            let length = self.repo().find_header(id).ok()?.size();
+            if length > picture::PDF_LIMIT {
+                return None;
+            }
+            if length > picture::PDF_SIZED_HERE {
+                return Some(picture::pdf_unsized(length));
+            }
             let held = self.blob(id, &change.path).ok()?;
             *cost += held.len() as u64;
             picture::pdf_side(held)
@@ -862,9 +871,21 @@ impl Worktree {
                 if !meta.is_file() || meta.len() > picture::PDF_LIMIT {
                     return None;
                 }
-                let bytes = std::fs::read(&path).ok()?;
-                *cost += bytes.len() as u64;
-                Some(picture::pdf_side(bytes))
+                if meta.len() > picture::PDF_SIZED_HERE {
+                    // Only its header here; the worker reads the rest.
+                    let mut head = Vec::new();
+                    std::fs::File::open(&path)
+                        .ok()?
+                        .take(1024)
+                        .read_to_end(&mut head)
+                        .ok()?;
+                    *cost += head.len() as u64;
+                    Some(picture::pdf_headed(&head).then(|| picture::pdf_unsized(meta.len())))
+                } else {
+                    let bytes = std::fs::read(&path).ok()?;
+                    *cost += bytes.len() as u64;
+                    Some(picture::pdf_side(bytes))
+                }
             }
             Some(Side::Blob(id)) => Some(blob(id, cost)),
             None => None,

@@ -472,6 +472,12 @@ fn svg_first_paint() {
     );
 }
 
+/// The same with a changed PDF first.
+#[test]
+fn pdf_first_paint() {
+    picture_first_paint("a.pdf", support::icon_pdf(1), support::icon_pdf(200));
+}
+
 /// I7 with a changed picture first: `path` committed as `old` and rewritten
 /// as `new`, and the first frame decodes nothing.
 fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {

@@ -2167,6 +2167,20 @@ impl Shell {
             Ok(view) => {
                 self.screen = view;
                 self.pictures.attach(&mut self.screen.rows, frame);
+                // A size the worker found lays its file out again, in this frame.
+                let learned = self.pictures.learned();
+                if !learned.is_empty() {
+                    for (stamp, width, height) in learned {
+                        frame.learn_size(stamp, width, height);
+                    }
+                    if let Ok(view) =
+                        self.app
+                            .view(frame, &mut self.highlighter, &self.history, body)
+                    {
+                        self.screen = view;
+                        self.pictures.attach(&mut self.screen.rows, frame);
+                    }
+                }
             }
             // The wash goes too: this frame resolved nothing, and keeping the last
             // frame's answer would leave one standing over rows it no longer covers.

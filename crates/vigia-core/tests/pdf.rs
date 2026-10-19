@@ -221,8 +221,8 @@ fn resident() -> Option<u64> {
     Some(kib / 1024)
 }
 
-/// A PDF whose one object holds a gigabyte of zeros behind `dict`, read on
-/// the frame path: it keeps `binary`, and memory stays where it was.
+/// A PDF whose one object holds a bomb behind `dict`, read on the frame
+/// path: it keeps `binary`, and memory stays where it was.
 fn bomb_refused(name: &str, bomb: &[u8]) {
     let before = resident();
     let diff = changed(name, &icon_pdf(1), bomb);
@@ -242,7 +242,12 @@ const GIB: u64 = 1024 * 1024 * 1024;
 
 #[test]
 fn pdf_object_stream_bomb() {
-    let zeros = zlib_zeros(GIB);
+    // Under the 1 MiB the frame path reads itself, and 140 MiB decoded.
+    let zeros = zlib_zeros(140 << 20);
+    assert!(
+        zeros.len() < 1 << 20,
+        "the bomb is past what the frame reads"
+    );
     for (name, dict, eol) in [
         (
             "plain",

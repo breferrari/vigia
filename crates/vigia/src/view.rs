@@ -1491,6 +1491,20 @@ fn size_line(picture: &Picture) -> Option<String> {
         format!("{}×{}{unit}", side.width, side.height)
     };
     let shape = |side: &ImageSide| format!("{} {}", side.format, size(side));
+    // A side the worker has yet to size: the kind and the bytes alone.
+    let waiting = [&picture.before, &picture.after]
+        .into_iter()
+        .flatten()
+        .find(|side| side.width == 0);
+    if let Some(side) = waiting {
+        let sizes = match (&picture.before, &picture.after) {
+            (Some(old), Some(new)) if old.bytes != new.bytes => {
+                format!("{} → {}", file_size(old.bytes), file_size(new.bytes))
+            }
+            _ => file_size(side.bytes),
+        };
+        return Some(format!("{} · {sizes}", side.format));
+    }
     let either = |old: String, new: String| {
         if old == new {
             old

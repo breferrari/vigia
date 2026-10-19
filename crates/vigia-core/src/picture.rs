@@ -105,6 +105,28 @@ pub struct Picture {
 /// is at its end, so it is read whole or not at all.
 pub(crate) const PDF_LIMIT: u64 = 16 * 1024 * 1024;
 
+/// The largest PDF the frame path reads and sizes itself. A larger one is
+/// sized on the worker, and its line names only its bytes until then.
+pub(crate) const PDF_SIZED_HERE: u64 = 1024 * 1024;
+
+/// A PDF side the worker sizes: its bytes known, its size not yet.
+pub(crate) fn pdf_unsized(bytes: u64) -> ImageSide {
+    ImageSide {
+        format: Format::Pdf,
+        width: 0,
+        height: 0,
+        bytes,
+        stamp: 0,
+    }
+}
+
+/// Whether `head`, a file's first bytes, starts a PDF.
+pub(crate) fn pdf_headed(head: &[u8]) -> bool {
+    head[..head.len().min(1024)]
+        .windows(5)
+        .any(|w| w == b"%PDF-")
+}
+
 /// Whether `path` is named as a PDF.
 pub(crate) fn pdf_named(path: &str) -> bool {
     path.rsplit_once('.')
@@ -115,11 +137,7 @@ pub(crate) fn pdf_named(path: &str) -> bool {
 /// for one that is not a PDF, needs a password, or does not parse.
 pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
     let length = bytes.len() as u64;
-    if length > PDF_LIMIT
-        || !bytes[..bytes.len().min(1024)]
-            .windows(5)
-            .any(|w| w == b"%PDF-")
-    {
+    if length > PDF_LIMIT || !pdf_headed(&bytes) {
         return None;
     }
     // Before the parser, which decodes object and xref streams whole.

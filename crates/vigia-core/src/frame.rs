@@ -113,6 +113,24 @@ impl Taken {
     }
 }
 
+/// Give each unsized side of `picture` the size `sizes` holds for its stamp,
+/// and say whether any was given.
+fn learned(sizes: &HashMap<u64, (u32, u32)>, picture: &mut crate::Picture) -> bool {
+    let mut given = false;
+    for side in [picture.before.as_mut(), picture.after.as_mut()]
+        .into_iter()
+        .flatten()
+    {
+        if side.width == 0
+            && let Some(&(width, height)) = sizes.get(&side.stamp)
+        {
+            (side.width, side.height) = (width, height);
+            given = true;
+        }
+    }
+    given
+}
+
 /// One cache, split by which run a change came from.
 #[derive(Debug)]
 struct Cache<T> {
@@ -356,6 +374,9 @@ pub struct Frame<'w> {
     staged: bool,
     /// Whether a changed SVG is drawn as pictures rather than diffed as text.
     svg: bool,
+    /// The sizes the worker found for sides the frame path left unsized, by
+    /// their stamp.
+    sizes: HashMap<u64, (u32, u32)>,
     /// Where in the history this frame is standing.
     standing: Standing,
     /// Paths the reader asked to keep out of the pane, and how many the last walk
@@ -399,6 +420,7 @@ impl<'w> Frame<'w> {
             failure: None,
             staged: false,
             svg: true,
+            sizes: HashMap::new(),
             standing: Standing::default(),
             hide: None,
             hidden: 0,
@@ -580,6 +602,24 @@ impl<'w> Frame<'w> {
         self.cached.clear();
         self.spans.clear();
         self.settles_at = None;
+    }
+
+    /// Give an unsized picture side the size the worker found for it, by its
+    /// stamp. What was derived from its diff goes, so its rows are laid out
+    /// again.
+    pub fn learn_size(&mut self, stamp: u64, width: u32, height: u32) {
+        // Kept bounded: an old version's stamp is never asked for again.
+        if self.sizes.len() >= 4096 {
+            self.sizes.clear();
+        }
+        self.sizes.insert(stamp, (width, height));
+        for cached in self.cached.runs.iter_mut().flat_map(HashMap::values_mut) {
+            if let Some(picture) = cached.diff.picture.as_mut()
+                && learned(&self.sizes, picture)
+            {
+                cached.derived = None;
+            }
+        }
     }
 
     /// Draw a changed SVG as pictures, or diff it as text, as a pane that can
@@ -891,7 +931,12 @@ impl<'w> Frame<'w> {
         let computed = self.worktree.diff_counted(change, self.svg, &mut probes);
         self.stats.probes += probes;
         let diff = match computed {
-            Ok(diff) => diff,
+            Ok(mut diff) => {
+                if let Some(picture) = diff.picture.as_mut() {
+                    learned(&self.sizes, picture);
+                }
+                diff
+            }
             // One path's own failure costs that path a note and nothing else: held
             // as an error it would end the whole comparison, and a frame the shell
             // keeps because the next one failed is a pane that looks quiet and is

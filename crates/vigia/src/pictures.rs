@@ -144,6 +144,18 @@ pub fn shape(picture: &Picture, width: u16, rows: u16, truecolour: bool) -> Opti
     if !truecolour {
         return None;
     }
+    // A side the worker has yet to size reserves nothing, and still asks it.
+    if [picture.before, picture.after]
+        .iter()
+        .flatten()
+        .any(|side| side.width == 0)
+    {
+        return Some(Shape {
+            kind: Kind::New,
+            rows: 0,
+            slots: Vec::new(),
+        });
+    }
     let third = width.saturating_sub(2 * GAP) / 3;
     let one = |kind: Kind, side: &ImageSide| {
         // The bar takes the slot's first column.
@@ -230,6 +242,8 @@ pub struct Built {
     pub kitty: Vec<u32>,
     /// Which page of a PDF was drawn, and whether the page count changed.
     pub page: Option<String>,
+    /// The sizes found for sides the frame path left unsized, by their stamp.
+    pub sizes: Vec<(u64, u32, u32)>,
 }
 
 impl Built {
@@ -462,6 +476,8 @@ pub struct Pictures {
     picker: Option<mpsc::Sender<Picker>>,
     /// How many images this cache's worker has decoded.
     decoded: Arc<AtomicU64>,
+    /// Sizes the worker found since [`Pictures::learned`] last took them.
+    learned: Vec<(u64, u32, u32)>,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -507,6 +523,7 @@ fn undecoded() -> Built {
         profiles_differ: false,
         kitty: Vec::new(),
         page: None,
+        sizes: Vec::new(),
     }
 }
 
@@ -568,7 +585,15 @@ impl Pictures {
             tmux: false,
             picker: Some(picked),
             decoded,
+            learned: Vec::new(),
         }
+    }
+
+    /// The sizes the worker found for sides the frame path left unsized, by
+    /// stamp, since the last call. The frame takes them with
+    /// [`vigia_core::Frame::learn_size`].
+    pub fn learned(&mut self) -> Vec<(u64, u32, u32)> {
+        std::mem::take(&mut self.learned)
     }
 
     /// How many images this cache's worker has decoded, every picture it has
@@ -622,6 +647,7 @@ impl Pictures {
         while let Ok((key, built)) = self.done.try_recv() {
             self.pending.remove(&key);
             if let Some(built) = built {
+                self.learned.extend(&built.sizes);
                 self.built.insert(key, Ready(Arc::new(built)));
             }
         }
@@ -1380,6 +1406,31 @@ fn chosen_page(old: Option<&[u64]>, new: Option<&[u64]>) -> (usize, Option<Strin
     (page, (!said.is_empty()).then(|| said.join(" · ")))
 }
 
+/// Only the first page's size of each side, in points rounded up, for a
+/// picture the frame path left unsized. Nothing is rendered.
+fn pdf_sized(job: &Job) -> Built {
+    let size = |source: &Option<Source>, stamp: Option<u64>| -> Option<Option<(u64, u32, u32)>> {
+        let Some(pdf) = open_pdf(source)? else {
+            return Some(None);
+        };
+        let (width, height) = pdf.pages().first()?.render_dimensions();
+        let side = |length: f32| (length.is_finite() && length > 0.0).then(|| length.ceil() as u32);
+        Some(Some((stamp?, side(width)?, side(height)?)))
+    };
+    // Every side there is must size, or the picture cannot be drawn.
+    let (Some(old), Some(new)) = (
+        size(&job.sources.before, job.key.before),
+        size(&job.sources.after, job.key.after),
+    ) else {
+        return undecoded();
+    };
+    Built {
+        verdict: Verdict::Uncompared,
+        sizes: [old, new].into_iter().flatten().collect(),
+        ..undecoded()
+    }
+}
+
 /// Each side of a changed PDF drawn at its first changed page, fitted inside
 /// its first page's shape, both at one long side; with what the line says
 /// about the page.
@@ -1687,6 +1738,9 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         _ => None,
     };
     let vector = |format| job.formats.0 == Some(format) || job.formats.1 == Some(format);
+    if vector(Format::Pdf) && job.key.shape.slots.is_empty() {
+        return pdf_sized(job);
+    }
     let mut page = None;
     let sides = if vector(Format::Svg) {
         svg_sides(job)
@@ -1771,6 +1825,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         profiles_differ,
         kitty,
         page,
+        sizes: Vec::new(),
     }
 }
 
@@ -2386,6 +2441,7 @@ mod tests {
             profiles_differ,
             kitty: Vec::new(),
             page: None,
+            sizes: Vec::new(),
         };
         assert_eq!(
             built(

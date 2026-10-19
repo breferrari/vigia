@@ -58,6 +58,9 @@ struct Drawn {
     said: Option<String>,
     /// Picture rows before the build, and after.
     rows: (usize, usize),
+    /// The size line before the build, and whether the worker sized a side.
+    first: Option<String>,
+    learned: bool,
     decodes: u64,
 }
 
@@ -85,12 +88,28 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
     let mut app = App::new();
     app.draw_pictures(true);
     let mut pictures = Pictures::new(INKS, Picker::halfblocks(), Box::new(|| {}));
-    let before = picture_rows(&view_of(&mut app, &mut pictures, &mut frame));
-    assert!(
-        pictures.settle(Duration::from_secs(120)),
-        "the pictures were not built"
-    );
-    let view = view_of(&mut app, &mut pictures, &mut frame);
+    let first = view_of(&mut app, &mut pictures, &mut frame);
+    let before = picture_rows(&first);
+    let first_line = sized_line(&first);
+    // As the shell does: a size the worker found is given to the frame, and
+    // the pictures it then reserves are built.
+    let mut learned = false;
+    let view = loop {
+        assert!(
+            pictures.settle(Duration::from_secs(120)),
+            "the pictures were not built"
+        );
+        let view = view_of(&mut app, &mut pictures, &mut frame);
+        let sizes = pictures.learned();
+        if sizes.is_empty() {
+            break view;
+        }
+        learned = true;
+        for (stamp, width, height) in sizes {
+            frame.learn_size(stamp, width, height);
+        }
+        view_of(&mut app, &mut pictures, &mut frame);
+    };
     let after = picture_rows(&view);
     let decodes = pictures.decodes();
     view.rows
@@ -105,11 +124,20 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
                 verdict: ready.as_ref().map(|ready| ready.0.verdict),
                 said: ready.as_ref().and_then(|ready| ready.0.suffix()),
                 rows: (before, after),
+                first: first_line.clone(),
+                learned,
                 decodes,
             }),
             _ => None,
         })
         .expect("a size line")
+}
+
+fn sized_line(view: &View) -> Option<String> {
+    view.rows.iter().find_map(|row| match row {
+        Row::Sized { line, .. } => Some(line.clone()),
+        _ => None,
+    })
 }
 
 fn changed(verdict: Option<Verdict>) -> bool {
@@ -366,4 +394,57 @@ fn pdf_many_streams_bounded() {
         &imaged(20, (2_000, 2_500), 20_000_000),
     );
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+}
+
+#[test]
+fn pdf_large_sized_on_worker() {
+    // Past what the frame path reads itself: sized on the worker.
+    let mut ops = icon_ops(200);
+    ops.push(b'\n');
+    while ops.len() < 4 << 20 {
+        ops.extend_from_slice(b"0.5 0.5 0.5 rg 1 1 3 3 re f\n");
+    }
+    let large = pdf(&[(24, 24, &ops)]);
+    let drawn = drawn("pdf-large", Some(&icon_pdf(1)), &large);
+    assert_eq!(
+        drawn.first.as_deref(),
+        Some("PDF · 505 B → 4.0 MiB"),
+        "the line did not wait for the worker's size: {drawn:?}"
+    );
+    assert_eq!(
+        drawn.rows.0, 0,
+        "rows were reserved before the size was known"
+    );
+    assert!(drawn.learned, "the worker did not size the large side");
+    assert!(drawn.line.starts_with("PDF 24×24 pt"), "{drawn:?}");
+    assert!(drawn.rows.1 > 0, "no rows once the size arrived: {drawn:?}");
+    assert!(changed(drawn.verdict), "{drawn:?}");
+}
+
+#[test]
+fn pdf_large_bomb_undecoded() {
+    // Past what the frame path reads, an object stream that inflates to a
+    // gigabyte: the worker measures it before it parses, and refuses it.
+    let before = resident();
+    let mut object = format!(
+        "<< /Type /ObjStm /N 1 /First 0 /Filter /FlateDecode /Length {} >>\nstream\n",
+        zlib_zeros(1 << 30).len()
+    )
+    .into_bytes();
+    object.extend_from_slice(&zlib_zeros(1 << 30));
+    object.extend_from_slice(b"\nendstream");
+    let bomb = pdf_doc(&[(24, 24, &icon_ops(200))], "", 1, &[&object], "");
+    assert!(
+        bomb.len() > 1 << 20,
+        "the bomb is small enough for the frame path"
+    );
+    let drawn = drawn("pdf-large-bomb", Some(&icon_pdf(1)), &bomb);
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+    assert!(!drawn.learned, "a side holding a bomb was sized");
+    if let (Some(before), Some(after)) = (before, resident()) {
+        assert!(
+            after < before + 128,
+            "memory went from {before} MiB to {after} MiB"
+        );
+    }
 }

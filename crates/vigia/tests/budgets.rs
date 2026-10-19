@@ -3371,9 +3371,9 @@ fn heaviest_pdf(seed: u8) -> Vec<u8> {
     )
 }
 
-/// I9 while five PDFs of about 16 MiB each are changed on screen: each is
-/// read and measured for its version, and once more when it settles, and
-/// never per frame.
+/// I9 while five PDFs of about 16 MiB each are changed on screen: the frame
+/// that first sees them reads their headers alone, and no frame after it
+/// reads them at all.
 #[test]
 fn pdf_frame_read() {
     use vigia::pictures::{Inks, Pictures};
@@ -3436,13 +3436,19 @@ fn pdf_frame_read() {
         sized >= 1,
         "no PDF drew a size line, so this would time nothing"
     );
-    eprintln!("note: the first frame read and sized {sized} PDFs of 16 MiB in {cold:?}");
+    eprintln!("note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold:?}");
     // Read once more when they settle, as every file read inside the margin is.
     settle(&mut frame);
 
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
+    // Each is sized on the worker, so the frame that first sees them reads
+    // only their headers.
+    assert!(
+        cold < budget(I9_FRAME),
+        "I9: the first frame with five changed 16 MiB PDFs on screen took {cold:?}"
+    );
     let _timed = exclusively_timed();
     let mut timed = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
         time_cpu(|| {
@@ -3598,4 +3604,3 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         || timed(&mut frame, &mut app, &mut highlighter, &mut pictures),
     );
 }
-
