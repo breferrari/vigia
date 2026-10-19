@@ -75,15 +75,9 @@ fn stream_start(bytes: &[u8], at: usize) -> Option<usize> {
     if *before != b'>' {
         return None;
     }
-    match bytes.get(at + 6..at + 8) {
-        Some([b'\r', b'\n']) => Some(at + 8),
-        Some([b'\n', _]) | Some([b'\r', _]) => Some(at + 7),
-        _ if bytes
-            .get(at + 6)
-            .is_some_and(|byte| matches!(byte, b'\n' | b'\r')) =>
-        {
-            Some(at + 7)
-        }
+    match bytes.get(at + 6)? {
+        b'\r' if bytes.get(at + 7) == Some(&b'\n') => Some(at + 8),
+        b'\r' | b'\n' => Some(at + 7),
         _ => None,
     }
 }

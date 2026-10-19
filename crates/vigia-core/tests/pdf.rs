@@ -285,4 +285,15 @@ fn pdf_image_stream_sized() {
         diff.picture.is_some(),
         "an image the frame path skips kept the file binary"
     );
+    // A comment between the name and its value does not hide the image.
+    let commented = pdf_holding(
+        "/Type /XObject /Subtype % an image\n /Image /Width 8 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode",
+        b"\n",
+        &zlib_zeros(GIB),
+    );
+    let diff = changed("pdf-image-commented", &icon_pdf(1), &commented);
+    assert!(
+        diff.picture.is_some(),
+        "a comment hid an image from the frame path"
+    );
 }
