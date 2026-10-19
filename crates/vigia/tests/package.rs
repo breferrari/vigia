@@ -16,10 +16,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 33;
+const ESCAPING_FILES: usize = 34;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "thirty-three";
+const ESCAPING_FILES_SPELLED: &str = "thirty-four";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -3487,7 +3487,7 @@ fn named_versions<'a>(spec: &'a str, crate_name: &str) -> Vec<&'a str> {
         .split(&format!("`{crate_name}` "))
         .nth(1)
         .map(|rest| {
-            rest.split(|c| c == ',' || c == '`')
+            rest.split([',', '`'])
                 .next()
                 .unwrap_or_default()
                 .split(" and ")

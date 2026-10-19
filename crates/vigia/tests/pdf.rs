@@ -3,7 +3,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
@@ -56,7 +56,6 @@ struct Drawn {
     said: Option<String>,
     /// Picture rows before the build, and after.
     rows: (usize, usize),
-    took: Duration,
     decodes: u64,
 }
 
@@ -85,12 +84,10 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
     app.draw_pictures(true);
     let mut pictures = Pictures::new(INKS, Picker::halfblocks(), Box::new(|| {}));
     let before = picture_rows(&view_of(&mut app, &mut pictures, &mut frame));
-    let began = Instant::now();
     assert!(
         pictures.settle(Duration::from_secs(120)),
         "the pictures were not built"
     );
-    let took = began.elapsed();
     let view = view_of(&mut app, &mut pictures, &mut frame);
     let after = picture_rows(&view);
     let decodes = pictures.decodes();
@@ -106,7 +103,6 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
                 verdict: ready.as_ref().map(|ready| ready.0.verdict),
                 said: ready.as_ref().and_then(|ready| ready.0.suffix()),
                 rows: (before, after),
-                took,
                 decodes,
             }),
             _ => None,

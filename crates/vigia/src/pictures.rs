@@ -1186,10 +1186,10 @@ fn page_print(page: &hayro::hayro_syntax::page::Page<'_>, budget: &mut usize) ->
         let into = |value: MaybeRef<Object<'_>>, hasher: &mut _, seen: &mut HashSet<_>| match value
         {
             MaybeRef::Ref(reference) => {
-                if seen.insert((reference.obj_number, reference.gen_number)) {
-                    if let Some(object) = xref.get::<Object<'_>>(reference.into()) {
-                        return walk(object, xref, hasher, seen);
-                    }
+                if seen.insert((reference.obj_number, reference.gen_number))
+                    && let Some(object) = xref.get::<Object<'_>>(reference.into())
+                {
+                    return walk(object, xref, hasher, seen);
                 }
                 Some(())
             }
@@ -1246,7 +1246,7 @@ fn page_prints(pdf: &hayro::hayro_syntax::Pdf) -> Option<Vec<u64>> {
     let mut budget = PDF_DECODED;
     pdf.pages()
         .iter()
-        .map(|page| page_print(&page, &mut budget))
+        .map(|page| page_print(page, &mut budget))
         .collect()
 }
 
@@ -2280,6 +2280,7 @@ mod tests {
             verdict,
             profiles_differ,
             kitty: Vec::new(),
+            page: None,
         };
         assert_eq!(
             built(
