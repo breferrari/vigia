@@ -324,13 +324,23 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | | Task | Issue |
 |---|---|---|
 | 🔨 | A changed image draws pictures instead of the word binary. **Split into the rows below** | [#632](https://github.com/breferrari/vigia/issues/632) |
-| 🔨 | Image size line | [#633](https://github.com/breferrari/vigia/issues/633) |
-| ⬜ | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
+| ✅ | Image size line | [#633](https://github.com/breferrari/vigia/issues/633) |
+| 🔨 | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
 | ⬜ | Real-pixel image protocols | [#635](https://github.com/breferrari/vigia/issues/635) |
 | ⬜ | SVG image panels | [#637](https://github.com/breferrari/vigia/issues/637) |
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ⬜ | LFS fetch leaves binary. **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
+
+## Phase 10 — current Rust
+
+Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11)
+
+**Filter: does it make the code use what the latest stable Rust offers, where that is simpler, faster or more exact?** The workspace tracks the latest stable, ruled by the reader on 2026-10-19 (SPEC §6).
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | Adopt Rust 1.99 features | [#642](https://github.com/breferrari/vigia/issues/642) |
 
 ## Shelf
 
