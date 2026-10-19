@@ -338,6 +338,7 @@ fn wait_limit(palette: bool, begun: bool, timeout: std::time::Duration) -> std::
 /// and sixteen entries too, waiting at most `timeout` for a first answer. The
 /// raw reply.
 #[cfg(unix)]
+#[doc(hidden)]
 pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
     let mut reply = Vec::with_capacity(if palette { 512 } else { 64 });
     let Some((input, output)) = query_stdio() else {
@@ -392,6 +393,7 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
 
 /// The Windows half: no query, no answer, today's posture.
 #[cfg(not(unix))]
+#[doc(hidden)]
 pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
     Vec::new()
 }
@@ -410,6 +412,7 @@ pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
 /// through `ratatui-image`'s own query, or with `ask` false give the half-blocks
 /// answer without asking. Called in raw mode: the crate leaves its own on when
 /// its query times out, and only the session's exit undoes it.
+#[doc(hidden)]
 pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
     use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
     let unknown = || (Picker::halfblocks(), crate::pictures::Answer::default());

@@ -140,7 +140,7 @@ fn asked_after(answer: Option<&[u8]>, late: Duration) -> String {
         pty::Script {
             marker: "[5n",
             answer,
-            late,
+            delay: late,
             piped: false,
         },
     )

@@ -125,7 +125,7 @@ fn asked(ask: Ask) -> String {
         pty::Script {
             marker: "]11;?",
             answer: ask.answer,
-            late: Duration::ZERO,
+            delay: Duration::ZERO,
             piped: ask.piped,
         },
     )

@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 pub struct Script<'a> {
     /// What the query ends with, which says it has arrived.
     pub marker: &'a str,
-    /// Sent once the query arrives, after `late`, or nothing.
+    /// Sent once the query arrives, after `delay`, or nothing.
     pub answer: Option<&'a [u8]>,
     /// How long after the query the answer goes.
-    pub late: Duration,
+    pub delay: Duration,
     /// The child's stdin is not the terminal.
     pub piped: bool,
 }
@@ -54,7 +54,7 @@ pub fn run(mut command: Command, script: Script<'_>) -> String {
             script.marker,
             Duration::from_secs(20),
         );
-        std::thread::sleep(script.late);
+        std::thread::sleep(script.delay);
         master.write_all(answer).expect("answer the query");
     }
     read_until(&mut master, &mut seen, "asked ", Duration::from_secs(20));
