@@ -334,7 +334,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ⬜ | LFS fetch leaves binary. **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
-| ⬜ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
+| ✅ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ⬜ | Kitty image lost on reattach. **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
 | ⬜ | Cell size fixed at startup. **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
 
