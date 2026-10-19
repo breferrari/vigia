@@ -459,6 +459,62 @@ pub fn zlib_zeros(length: u64) -> Vec<u8> {
     bits.out
 }
 
+/// `length` zeros as zlib that flate2 refuses and a lenient inflater reads: a
+/// stored block whose length check is wrong comes before the data.
+pub fn zlib_zeros_lenient(length: u64) -> Vec<u8> {
+    let whole = zlib_zeros(length);
+    [&whole[..2], &[0x00, 0x00, 0x00, 0x01, 0x00], &whole[2..]].concat()
+}
+
+/// `length` zeros, rounded up to whole runs, as LZW with the early change:
+/// each code after the first repeats the last one and one zero more.
+pub fn lzw_zeros(length: u64) -> Vec<u8> {
+    let (mut out, mut held, mut count) = (Vec::new(), 0u64, 0u32);
+    let mut push = |code: u64, bits: u32| {
+        held = (held << bits) | code;
+        count += bits;
+        while count >= 8 {
+            count -= 8;
+            out.push((held >> count) as u8);
+        }
+    };
+    let width = |size: u64| match size + 1 {
+        ..512 => 9,
+        ..1024 => 10,
+        ..2048 => 11,
+        _ => 12,
+    };
+    let mut written = 0;
+    while written < length {
+        push(256, 9);
+        push(0, 9);
+        written += 1;
+        let mut size = 258;
+        while size < 4096 && written < length {
+            push(size, width(size));
+            written += size - 256;
+            size += 1;
+        }
+        push(256, width(size));
+    }
+    push(257, 9);
+    // Enough padding to flush what is left of the end code.
+    push(0, 7);
+    out
+}
+
+/// `length` zeros, rounded up to whole runs, as RunLength: 128 a run.
+pub fn run_length_zeros(length: u64) -> Vec<u8> {
+    let mut out = [129u8, 0].repeat(length.div_ceil(128) as usize);
+    out.push(128);
+    out
+}
+
+/// `rows` all-white rows in CCITT Group 4, one bit each.
+pub fn ccitt_white(rows: usize) -> Vec<u8> {
+    vec![0xff; rows.div_ceil(8)]
+}
+
 /// An icon PDF that also holds, as its own object, a stream whose dictionary
 /// is `dict` and whose data, after `stream` and `eol`, is `data`.
 pub fn pdf_holding(dict: &str, eol: &[u8], data: &[u8]) -> Vec<u8> {

@@ -9,7 +9,8 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
 use support::{
-    Scratch, icon_ops, icon_pdf, label_pdf, open_locked_pdf, pdf, pdf_doc, pdf_with, zlib_zeros,
+    Scratch, ccitt_white, icon_ops, icon_pdf, label_pdf, lzw_zeros, open_locked_pdf, pdf, pdf_doc,
+    pdf_with, run_length_zeros, zlib_zeros, zlib_zeros_lenient,
 };
 use vigia::pictures::{Inks, Kind, Pictures, Verdict};
 use vigia::{App, Pointing, Row, View, body_layout};
@@ -432,6 +433,82 @@ fn imaged(images: usize, (width, height): (u32, u32), zeros: u64) -> Vec<u8> {
         &extras,
         "",
     )
+}
+
+/// A page drawing one image whose dictionary is `dict` and whose data is
+/// `data`.
+fn image_page(dict: &str, data: &[u8]) -> Vec<u8> {
+    let mut image = format!(
+        "<< /Type /XObject /Subtype /Image {dict} /Length {} >>\nstream\n",
+        data.len()
+    )
+    .into_bytes();
+    image.extend_from_slice(data);
+    image.extend_from_slice(b"\nendstream");
+    pdf_doc(
+        &[(24, 24, b"q 24 0 0 24 0 0 cm /Im0 Do Q")],
+        "/XObject << /Im0 5 0 R >>",
+        1,
+        &[&image],
+        "",
+    )
+}
+
+/// `bomb` reads "could not be decoded", within the worker's limit and what
+/// holding it costs.
+fn bounded(name: &str, bomb: &[u8]) {
+    let before = resident();
+    let drawn = drawn(name, Some(&icon_pdf(1)), bomb);
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+    if let (Some(before), Some(after)) = (before, resident()) {
+        assert!(
+            after < before + 384,
+            "memory went from {before} MiB to {after} MiB"
+        );
+    }
+}
+
+/// A grey 8 by 8 image, which every bomb below claims to be.
+const GREY: &str = "/Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 8";
+
+#[test]
+fn pdf_lenient_flate_bomb() {
+    let data = zlib_zeros_lenient(1 << 30);
+    bounded(
+        "pdf-lenient-flate",
+        &image_page(&format!("{GREY} /Filter /FlateDecode"), &data),
+    );
+}
+
+#[test]
+fn pdf_lzw_bomb() {
+    let data = lzw_zeros(1 << 30);
+    bounded(
+        "pdf-lzw",
+        &image_page(&format!("{GREY} /Filter /LZWDecode"), &data),
+    );
+}
+
+#[test]
+fn pdf_run_length_bomb() {
+    let data = run_length_zeros(768 << 20);
+    bounded(
+        "pdf-run-length",
+        &image_page(&format!("{GREY} /Filter /RunLengthDecode"), &data),
+    );
+}
+
+#[test]
+fn pdf_ccitt_bomb() {
+    // A row of a million white pixels costs one bit.
+    let data = ccitt_white(1024);
+    bounded(
+        "pdf-ccitt",
+        &image_page(
+            "/Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns 1000000 /Rows 1024 >>",
+            &data,
+        ),
+    );
 }
 
 /// This process's resident memory, in MiB, where the platform says.
