@@ -17,9 +17,12 @@ fn silent_child() {
     if std::env::var_os(CHILD).is_none() {
         return;
     }
+    // Inside raw mode and left after, as the session holds it in `run`.
+    ratatui::crossterm::terminal::enable_raw_mode().expect("raw mode");
     let began = Instant::now();
     let (picker, answer) = vigia::picker(true);
     let waited = began.elapsed();
+    ratatui::crossterm::terminal::disable_raw_mode().expect("leave raw mode");
     // SAFETY: a zeroed termios is a valid out-parameter for tcgetattr.
     let mut modes: libc::termios = unsafe { std::mem::zeroed() };
     // SAFETY: stdin is this child's terminal, and `modes` is owned here.

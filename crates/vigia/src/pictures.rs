@@ -340,32 +340,44 @@ pub fn protocol_of(
     answer: Answer,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> Result<ProtocolType, PicturesError> {
-    if let Some((raw, value)) = crate::colour::override_of(&lookup, PICTURES_VAR) {
-        match value.as_str() {
-            "kitty" => return Ok(ProtocolType::Kitty),
-            "sixel" => return Ok(ProtocolType::Sixel),
-            "iterm2" => return Ok(ProtocolType::Iterm2),
-            "halfblocks" => return Ok(ProtocolType::Halfblocks),
-            "auto" => {}
-            _ => return Err(PicturesError { value: raw }),
-        }
+    Ok(forced(&lookup)?.unwrap_or_else(|| detected(answer, &lookup)))
+}
+
+/// The protocol [`PICTURES_VAR`] names, or `None` for `auto` or unset.
+pub fn forced(
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<ProtocolType>, PicturesError> {
+    let Some((raw, value)) = crate::colour::override_of(lookup, PICTURES_VAR) else {
+        return Ok(None);
+    };
+    match value.as_str() {
+        "kitty" => Ok(Some(ProtocolType::Kitty)),
+        "sixel" => Ok(Some(ProtocolType::Sixel)),
+        "iterm2" => Ok(Some(ProtocolType::Iterm2)),
+        "halfblocks" => Ok(Some(ProtocolType::Halfblocks)),
+        "auto" => Ok(None),
+        _ => Err(PicturesError { value: raw }),
     }
+}
+
+/// The protocol the answer and the table give, without the override.
+pub fn detected(answer: Answer, lookup: &impl Fn(&str) -> Option<String>) -> ProtocolType {
     if answer.kitty {
-        return Ok(ProtocolType::Kitty);
+        return ProtocolType::Kitty;
     }
     if answer.sixel {
-        return Ok(ProtocolType::Sixel);
+        return ProtocolType::Sixel;
     }
     // A protocol drawn at a guessed cell size spills past its slot.
     if !answer.cell {
-        return Ok(ProtocolType::Halfblocks);
+        return ProtocolType::Halfblocks;
     }
-    Ok(match protocol_by_name(&lookup) {
+    match protocol_by_name(lookup) {
         // Kitty and Sixel answer for themselves; only iTerm2 images cannot.
         Some(ProtocolType::Kitty | ProtocolType::Sixel) if answer.heard => ProtocolType::Halfblocks,
         Some(protocol) => protocol,
         None => ProtocolType::Halfblocks,
-    })
+    }
 }
 
 /// Whether pictures are drawn at all: a half-block is a background, which is
@@ -555,6 +567,11 @@ impl Pictures {
         });
     }
 
+    /// Retire every kept picture, for a pane about to leave the terminal.
+    pub fn retire_all(&mut self) {
+        self.keep(&HashSet::new());
+    }
+
     /// The Kitty deletes owed since the last call, to write before the next
     /// frame. Empty for any other protocol.
     pub fn retired(&mut self) -> String {
@@ -659,12 +676,10 @@ impl Pictures {
             let done = self.pending.is_empty();
             if done || std::time::Instant::now() >= until {
                 // A picture that left the screen while it was built is not kept.
-                let shown = self
-                    .shown
-                    .lock()
-                    .map(|shown| shown.clone())
-                    .unwrap_or_default();
-                self.keep(&shown);
+                let shared = Arc::clone(&self.shown);
+                if let Ok(shown) = shared.lock() {
+                    self.keep(&shown);
+                }
                 return done;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));

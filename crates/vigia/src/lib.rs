@@ -352,7 +352,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Only the override is read here, so a value it refuses is reported on a
     // terminal the reader can still read. The query itself waits for the first
     // paint.
-    pictures::protocol_of(pictures::Answer::default(), |key| std::env::var(key).ok())?;
+    let forced = pictures::forced(&|key: &str| std::env::var(key).ok())?;
 
     // Here rather than inside `App` for the palette's reason: a config file that
     // does not parse has to be reported on a terminal the reader can still read.
@@ -499,15 +499,18 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // keys. `SPEC.md` §11.1.
     let (mut picker, answer) = terminal::picker(!reply.is_empty());
     picker.set_protocol_type(
-        pictures::protocol_of(answer, |key| std::env::var(key).ok())
-            .unwrap_or(ratatui_image::picker::ProtocolType::Halfblocks),
+        forced.unwrap_or_else(|| pictures::detected(answer, &|key: &str| std::env::var(key).ok())),
     );
-    let drawn = pictures::drawn(truecolour, picker.protocol_type());
+    shell
+        .app
+        .draw_pictures(pictures::drawn(truecolour, picker.protocol_type()));
     shell.pictures.pick(picker);
-    if drawn != truecolour {
-        shell.app.draw_pictures(drawn);
-        shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
+    // Drawn again whatever it answered: the query took any resize that came in
+    // during it, and on Windows, which asks blind, it may have printed.
+    if cfg!(windows) {
+        let _ = shell.session.screen().clear();
     }
+    shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
 
     // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
@@ -903,6 +906,19 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // A release then `q` copies and leaves, and every arm ending the loop does so before
     // the batch reaches its send. `InputLost` returns, and carries its own.
     shell.settle_send(Instant::now());
+
+    // The terminal keeps a Kitty image until told, past this process.
+    shell.pictures.retire_all();
+    let retired = shell.pictures.retired();
+    if !retired.is_empty() {
+        use std::io::Write;
+        let _ = shell
+            .session
+            .screen()
+            .backend_mut()
+            .write_all(retired.as_bytes());
+        let _ = shell.session.screen().backend_mut().flush();
+    }
 
     Ok(())
 }

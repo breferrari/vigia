@@ -324,7 +324,6 @@ fn answered(reply: &[u8], palette: bool) -> bool {
 }
 
 /// How long a terminal that has begun answering the palette is given to finish.
-#[cfg(any(unix, test))]
 const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How long [`ask`] waits in all. A terminal that has begun answering the
@@ -400,10 +399,10 @@ pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
 
 /// How long the picture query waits for the terminal's status answer, which
 /// ends it. On Unix it asks only a terminal that answered the background query,
-/// so it waits as [`ask`] waits for one that has begun answering. Windows asks
-/// blind, so it waits the background query's first wait.
+/// so it gives it [`ANSWERING`], the wait a palette answer that has begun gets.
+/// Windows asks blind, so it waits the background query's first wait.
 pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
-    std::time::Duration::from_secs(1)
+    ANSWERING
 } else {
     std::time::Duration::from_millis(150)
 };
@@ -414,7 +413,6 @@ pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
 /// nothing would cost a second wait. Windows sends no other query, so it always
 /// asks.
 pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
-    use ratatui::crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
     use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
     let unknown = || (Picker::halfblocks(), crate::pictures::Answer::default());
     if cfg!(unix) && !answered {
@@ -426,15 +424,9 @@ pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures
         stdio: query_stdio(),
         ..QueryStdioOptions::default()
     };
-    // Raw through crossterm, which restores what it saved: the crate leaves its
-    // own raw mode on when its query times out.
-    let raw = is_raw_mode_enabled().unwrap_or(false);
-    let entered = !raw && enable_raw_mode().is_ok();
-    let picker = Picker::from_query_stdio_with_options(options);
-    if entered {
-        let _ = disable_raw_mode();
-    }
-    let Ok(picker) = picker else {
+    // Inside the session's raw mode, which restores the terminal on exit: the
+    // crate leaves its own on when its query times out.
+    let Ok(picker) = Picker::from_query_stdio_with_options(options) else {
         return unknown();
     };
     let font = picker.font_size();
@@ -445,15 +437,14 @@ pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures
     // The terminal's own size in pixels, which the crate's fallback reads too.
     let sized = ratatui::crossterm::terminal::window_size()
         .is_ok_and(|size| size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0);
+    let heard = caps
+        .iter()
+        .any(|cap| matches!(cap, Capability::CellSize(Some(_))));
     let answer = crate::pictures::Answer {
         kitty: caps.contains(&Capability::Kitty),
         sixel: caps.contains(&Capability::Sixel),
-        cell: sized
-            || caps
-                .iter()
-                .any(|cap| matches!(cap, Capability::CellSize(Some(_)))),
-        // The crate keeps no capability from an answer without a cell size.
-        heard: !caps.is_empty(),
+        cell: sized || heard,
+        heard,
     };
     (picker, answer)
 }
