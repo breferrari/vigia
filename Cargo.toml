@@ -66,6 +66,11 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # defaults pull libchafa through pkg-config and turn image's defaults back on.
 # Pinned to the release candidate whose terminal query fits; see SPEC.md §6.
 ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features = ["crossterm"] }
+# A changed SVG's pictures: `SPEC.md` section 6 names the four features, and
+# why `memmap-fonts` is not optional.
+resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }
+# An SVG root's size for the size line, without parsing the document.
+svgtypes = "0.16.1"
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
 # Under the `ratatui` organisation, and it schedules nothing: the host passes the
 # elapsed duration in, so I1's clock stays this program's. The `dsl` feature is

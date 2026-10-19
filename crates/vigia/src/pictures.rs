@@ -700,8 +700,8 @@ const MAX_SIDE: u32 = 16_384;
 /// The most one decode may allocate.
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
 
-fn image_format(format: Format) -> ImageFormat {
-    match format {
+fn image_format(format: Format) -> Option<ImageFormat> {
+    Some(match format {
         Format::Png => ImageFormat::Png,
         Format::Jpeg => ImageFormat::Jpeg,
         Format::Gif => ImageFormat::Gif,
@@ -711,7 +711,69 @@ fn image_format(format: Format) -> ImageFormat {
         Format::Tiff => ImageFormat::Tiff,
         Format::Qoi => ImageFormat::Qoi,
         Format::Tga => ImageFormat::Tga,
+        Format::Svg => return None,
+    })
+}
+
+/// The long side an SVG is rendered at, which every panel is shrunk from.
+const SVG_LONG_SIDE: f32 = 1024.0;
+
+/// References an SVG asked for that were refused, since the process started.
+static REFUSED: AtomicU64 = AtomicU64::new(0);
+
+/// How many references to other files SVGs have asked for and been refused.
+pub fn hrefs_refused() -> u64 {
+    REFUSED.load(Ordering::Relaxed)
+}
+
+/// The system's fonts, loaded once on the worker for the first SVG with text.
+fn fonts() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
+    static FONTS: std::sync::OnceLock<std::sync::Arc<resvg::usvg::fontdb::Database>> =
+        std::sync::OnceLock::new();
+    FONTS
+        .get_or_init(|| {
+            let mut fonts = resvg::usvg::fontdb::Database::new();
+            fonts.load_system_fonts();
+            std::sync::Arc::new(fonts)
+        })
+        .clone()
+}
+
+/// One SVG side rendered, its long side at [`SVG_LONG_SIDE`].
+fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
+    use resvg::usvg::{ImageHrefResolver, Options, Tree};
+    let mut options = Options {
+        // Only what the document carries: a reference to any other file is
+        // refused, so a changed SVG cannot make the pane open one.
+        image_href_resolver: ImageHrefResolver {
+            resolve_data: ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| {
+                REFUSED.fetch_add(1, Ordering::Relaxed);
+                None
+            }),
+        },
+        ..Options::default()
+    };
+    if bytes.windows(5).any(|window| window == b"<text") {
+        options.fontdb = fonts();
     }
+    let tree = Tree::from_data(bytes, &options).ok()?;
+    let size = tree.size();
+    let scale = SVG_LONG_SIDE / size.width().max(size.height());
+    let width = (size.width() * scale).ceil().max(1.0) as u32;
+    let height = (size.height() * scale).ceil().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let mut image = RgbaImage::new(width, height);
+    for (pixel, drawn) in image.pixels_mut().zip(pixmap.pixels()) {
+        let colour = drawn.demultiply();
+        pixel.0 = [colour.red(), colour.green(), colour.blue(), colour.alpha()];
+    }
+    Some(image)
 }
 
 /// One side decoded, with its colour profile. The first frame only.
@@ -723,8 +785,11 @@ fn decode(source: &Source, format: Format) -> Option<(RgbaImage, Option<Vec<u8>>
     if std::thread::current().name() != Some(WORKER) {
         OFF_WORKER.fetch_add(1, Ordering::Relaxed);
     }
+    let Some(raster) = image_format(format) else {
+        return Some((render_svg(&bytes)?, None));
+    };
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes));
-    reader.set_format(image_format(format));
+    reader.set_format(raster);
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_SIDE);
     limits.max_image_height = Some(MAX_SIDE);

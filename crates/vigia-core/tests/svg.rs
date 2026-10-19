@@ -1,0 +1,164 @@
+//! What a changed SVG reads as on the frame path: its size from the root tag,
+//! or its text diff. `SPEC.md` §11.1.
+
+mod support;
+
+use support::{Scratch, changes_sorted};
+use vigia_core::{FileDiff, Format};
+
+fn diff_of(scratch: &Scratch, rela: &str) -> FileDiff {
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == rela)
+        .unwrap_or_else(|| panic!("{rela} is not listed"));
+    worktree.diff(change).expect("diff")
+}
+
+fn icon(root: &str, fill: &str) -> String {
+    format!(r#"{root}<circle cx="12" cy="12" r="10" fill="{fill}"/></svg>"#)
+}
+
+/// One SVG changed from `old` to `new`, as its diff.
+fn changed(name: &str, old: &str, new: &str) -> FileDiff {
+    let scratch = Scratch::new(name);
+    scratch.write("icon.svg", old);
+    scratch.commit_all("initial");
+    scratch.write("icon.svg", new);
+    diff_of(&scratch, "icon.svg")
+}
+
+/// A side's format and size.
+type Size = Option<(Format, u32, u32)>;
+
+/// Each side's format and size.
+fn sizes(diff: &FileDiff) -> Option<(Size, Size)> {
+    let picture = diff.picture?;
+    let size = |side: Option<vigia_core::ImageSide>| side.map(|s| (s.format, s.width, s.height));
+    Some((size(picture.before), size(picture.after)))
+}
+
+#[test]
+fn svg_size_line() {
+    for (root, want) in [
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#,
+            (24, 24),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="48px" height="16px">"#,
+            (48, 16),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 20">"#,
+            (32, 20),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 10 30">"#,
+            (10, 30),
+        ),
+        (
+            r#"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7.5 3'>"#,
+            (8, 3),
+        ),
+    ] {
+        let diff = changed("svg-size", &icon(root, "red"), &icon(root, "blue"));
+        let side = Some((Format::Svg, want.0, want.1));
+        assert_eq!(sizes(&diff), Some((side, side)), "{root}");
+        assert!(
+            diff.binary && diff.hunks.is_empty(),
+            "a drawn SVG kept its text: {root}"
+        );
+    }
+}
+
+#[test]
+fn svg_prolog_skipped() {
+    let root = concat!(
+        "\u{feff}<?xml version=\"1.0\"?>\r\n",
+        "<!-- an icon -->\r\n",
+        "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"x\" [ <!ENTITY a \"b>c\"> ]>\r\n",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"\r\n width=\"24\" height=\"24\">"
+    );
+    let diff = changed("svg-prolog", &icon(root, "red"), &icon(root, "blue"));
+    let side = Some((Format::Svg, 24, 24));
+    assert_eq!(
+        sizes(&diff),
+        Some((side, side)),
+        "a prolog, comment or doctype hid the root"
+    );
+}
+
+#[test]
+fn svg_unparsable_keeps_text() {
+    for root in [
+        "<svg width=\"24\">",
+        "<html><svg width=\"24\" height=\"24\">",
+        "<svg width=\"0\" height=\"24\">",
+        "<svg width=\"24\" height=\"24\"",
+        "<svgx width=\"24\" height=\"24\">",
+    ] {
+        let diff = changed("svg-unparsable", &icon(root, "red"), &icon(root, "blue"));
+        assert!(
+            diff.picture.is_none() && !diff.binary && !diff.hunks.is_empty(),
+            "an SVG with no size from its root did not keep its text diff: {root}"
+        );
+    }
+}
+
+#[test]
+fn svg_attribute_keeps_text() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let scratch = Scratch::new("svg-attribute");
+    scratch.write(".gitattributes", "*.svg diff\n");
+    scratch.write("icon.svg", icon(root, "red"));
+    scratch.commit_all("initial");
+    scratch.write("icon.svg", icon(root, "blue"));
+    let diff = diff_of(&scratch, "icon.svg");
+    assert!(
+        diff.picture.is_none() && !diff.hunks.is_empty(),
+        "a diff attribute did not keep the text diff"
+    );
+}
+
+#[test]
+fn svgz_stays_binary() {
+    let scratch = Scratch::new("svgz");
+    scratch.write("icon.svgz", [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 1, 2, 0]);
+    scratch.commit_all("initial");
+    scratch.write("icon.svgz", [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 4, 5, 0]);
+    let diff = diff_of(&scratch, "icon.svgz");
+    assert!(diff.binary && diff.picture.is_none(), "an svgz was drawn");
+}
+
+#[test]
+fn svg_root_tag_only() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let body: String = (0..60_000)
+        .map(|i| format!(r#"<rect x="{}" y="1" width="1" height="1"/>"#, i % 24))
+        .collect();
+    let big = format!("{root}{body}</svg>");
+    assert!(big.len() > 2 * 1024 * 1024, "the fixture is not large");
+    let scratch = Scratch::new("svg-large");
+    scratch.write("big.svg", &big);
+    let diff = diff_of(&scratch, "big.svg");
+    assert_eq!(sizes(&diff), Some((None, Some((Format::Svg, 24, 24)))));
+    assert!(
+        diff.bytes <= 64 * 1024,
+        "the frame path read {} bytes of a large SVG for its size",
+        diff.bytes
+    );
+}
+
+#[test]
+fn svg_counted_binary() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let diff = changed("svg-counted", &icon(root, "red"), &icon(root, "blue"));
+    assert!(diff.binary, "a drawn SVG is not counted as binary");
+    assert_eq!(
+        (diff.added, diff.removed),
+        (0, 0),
+        "a drawn SVG's lines count toward the total"
+    );
+}

@@ -588,6 +588,13 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
+        if let Some((mut picture, cost)) = self.drawn_svg(change, diff) {
+            let mut drawn = hunk::compute(change.path.clone(), &[], &[], Some(false));
+            drawn.bytes = cost;
+            self.stamp(change, &mut picture);
+            drawn.picture = Some(picture);
+            return Ok(drawn);
+        }
         if let Some(window) = self.early_binary(change, diff) {
             let mut binary = hunk::compute(change.path.clone(), &[], &[], Some(false));
             binary.bytes = window.len() as u64;
@@ -652,6 +659,51 @@ impl Worktree {
         let before = change
             .before
             .map(|id| self.blob_side(id, &change.path, named, cost));
+        Picture::of(before, after)
+    }
+
+    /// The picture of a changed SVG drawn in place of its text, and the bytes
+    /// read to learn it: none when an attribute says how to diff it, or a side
+    /// gives no size.
+    fn drawn_svg(&self, change: &FileChange, diff: Option<bool>) -> Option<(Picture, u64)> {
+        if diff.is_some() || !picture::svg_named(&change.path) {
+            return None;
+        }
+        let mut cost = 0;
+        self.svg_picture(change, &mut cost)
+            .map(|picture| (picture, cost))
+    }
+
+    /// The picture of a changed SVG when every side it has gives a size. Reads
+    /// the start of a worktree side only, and a blob whole.
+    fn svg_picture(&self, change: &FileChange, cost: &mut u64) -> Option<Picture> {
+        use std::io::Read;
+        let blob = |id, cost: &mut u64| {
+            let held = self.blob(id, &change.path).ok()?;
+            *cost += held.len() as u64;
+            picture::svg_side(&held, held.len() as u64)
+        };
+        let after = match change.after {
+            Some(Side::Worktree) => {
+                let path = self.workdir.join(&change.path);
+                let meta = std::fs::symlink_metadata(&path).ok()?;
+                // A link's bytes are its target, and a fifo blocks whoever opens it.
+                if !meta.is_file() {
+                    return None;
+                }
+                let mut head = Vec::new();
+                std::fs::File::open(&path)
+                    .ok()?
+                    .take(picture::SVG_HEAD)
+                    .read_to_end(&mut head)
+                    .ok()?;
+                *cost += head.len() as u64;
+                Some(picture::svg_side(&head, meta.len()))
+            }
+            Some(Side::Blob(id)) => Some(blob(id, cost)),
+            None => None,
+        };
+        let before = change.before.map(|id| blob(id, cost));
         Picture::of(before, after)
     }
 
@@ -817,6 +869,11 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
+        if let Some((_, cost)) = self.drawn_svg(change, diff) {
+            let mut drawn = hunk::measure(&[], &[], Some(false));
+            drawn.bytes = cost;
+            return Ok(drawn);
+        }
         if let Some(window) = self.early_binary(change, diff) {
             let mut binary = hunk::measure(&[], &[], Some(false));
             binary.bytes = window.len() as u64;

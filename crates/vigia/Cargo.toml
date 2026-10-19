@@ -12,11 +12,11 @@ authors.workspace = true
 keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
-# `SPEC.md` section 9 counts thirty-two *files* here that read outside this
-# package: twenty-nine reach `vigia-core/tests/support` by `#[path]`, and five read
+# `SPEC.md` section 9 counts thirty-three *files* here that read outside this
+# package: thirty reach `vigia-core/tests/support` by `#[path]`, and five read
 # repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
-# `sheet.rs` are in both groups, which is what makes the total thirty-two rather
-# than thirty-four. No destination is inside this directory, so a packaged copy
+# `sheet.rs` are in both groups, which is what makes the total thirty-three rather
+# than thirty-five. No destination is inside this directory, so a packaged copy
 # carries a test suite that cannot compile.
 #
 # Excluding the tests is section 9's own resolution, and the direction is the
@@ -35,6 +35,7 @@ exclude = ["tests/**"]
 image.workspace = true
 ratatui.workspace = true
 ratatui-image.workspace = true
+resvg.workspace = true
 ratatui-textarea.workspace = true
 serde_json.workspace = true
 tachyonfx.workspace = true
