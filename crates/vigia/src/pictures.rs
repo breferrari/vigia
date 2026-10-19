@@ -434,6 +434,8 @@ pub struct Pictures {
     retired: Vec<u32>,
     /// Whether a delete has to pass through tmux.
     tmux: bool,
+    /// Where the picker goes, until it has been given.
+    picker: Option<mpsc::Sender<Picker>>,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -487,15 +489,26 @@ impl Pictures {
     /// A cache whose worker builds in `inks`, encodes for `picker`, and calls
     /// `wake` after each picture.
     pub fn new(inks: Inks, picker: Picker, wake: Box<dyn Fn() + Send>) -> Self {
-        let tmux = picker.tmux_detected();
+        let mut pictures = Self::unpicked(inks, wake);
+        pictures.pick(picker);
+        pictures
+    }
+
+    /// A cache whose worker holds every job until [`Pictures::pick`] says how
+    /// to encode, so nothing is built twice.
+    pub fn unpicked(inks: Inks, wake: Box<dyn Fn() + Send>) -> Self {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
+        let (picked, picker) = mpsc::channel::<Picker>();
         let shown = Arc::new(Mutex::new(HashSet::new()));
         let still = Arc::clone(&shown);
         // Detached: it ends when the cache, and with it the sender, is dropped.
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
             .spawn(move || {
+                let Ok(picker) = picker.recv() else {
+                    return;
+                };
                 for job in inbox {
                     let wanted = still.lock().map_or(
                         true,
@@ -517,7 +530,16 @@ impl Pictures {
             jobs,
             done,
             retired: Vec::new(),
-            tmux,
+            tmux: false,
+            picker: Some(picked),
+        }
+    }
+
+    /// Say how pictures are encoded, which starts the held jobs. Once only.
+    pub fn pick(&mut self, picker: Picker) {
+        if let Some(picked) = self.picker.take() {
+            self.tmux = picker.tmux_detected();
+            let _ = picked.send(picker);
         }
     }
 

@@ -1060,3 +1060,38 @@ fn protocol_hidden_under_sheet() {
         );
     }
 }
+
+#[test]
+fn built_after_pick() {
+    let scratch = changed(
+        "pictures-unpicked",
+        "screen.png",
+        &png(120, 260, 1),
+        &png(120, 260, 2),
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut pane = Pane::new(100, 30);
+    pane.pictures = Pictures::unpicked(INKS, Box::new(|| {}));
+    let first = pane.view(&mut frame);
+    assert!(
+        !picture_rows(&first).is_empty(),
+        "no rows were held for the pictures"
+    );
+    assert!(
+        !pane.pictures.settle(Duration::from_millis(300)),
+        "a picture was built before the picker was given"
+    );
+    assert_eq!(
+        pane.pictures.kept(),
+        0,
+        "a picture was kept before the picker was given"
+    );
+    pane.pictures.pick(Picker::halfblocks());
+    let view = pane.settled(&mut frame);
+    assert!(
+        picture_rows(&view).iter().all(|(_, built)| *built),
+        "the held picture was not built once the picker was given"
+    );
+}

@@ -349,13 +349,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // environment anything. An unrecognised value is refused, not defaulted.
     let glyphs = Glyphs::detect()?;
 
-    // Beside the background query and before the event reader, which would
-    // read the answer as keys. `SPEC.md` §11.1.
-    let (mut picker, answer) = terminal::picker(!reply.is_empty());
-    picker.set_protocol_type(pictures::protocol_of(answer, |key| {
-        std::env::var(key).ok()
-    })?);
-    let protocol = picker.protocol_type();
+    // Only the override is read here, so a value it refuses is reported on a
+    // terminal the reader can still read. The query itself waits for the first
+    // paint.
+    pictures::protocol_of(pictures::Answer::default(), |key| std::env::var(key).ok())?;
 
     // Here rather than inside `App` for the palette's reason: a config file that
     // does not parse has to be reported on a terminal the reader can still read.
@@ -395,13 +392,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let armed = signal::forward(tx.clone());
 
     let pictured = tx.clone();
-    let pictures = pictures::Pictures::new(
+    let pictures = pictures::Pictures::unpicked(
         pictures::Inks::of(
             &theme,
             colours.as_ref().map(|colours| colours.background),
             terminal::background_of(&reply) == Some(Background::Light),
         ),
-        picker,
         Box::new(move || {
             let _ = pictured.send(Wake::Pictured);
         }),
@@ -459,9 +455,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         effects_ran: false,
     };
 
-    shell
-        .app
-        .draw_pictures(pictures::drawn(depth == Depth::Truecolor, protocol));
+    // Half-blocks until the picture query has answered, after the first paint.
+    let truecolour = depth == Depth::Truecolor;
+    shell.app.draw_pictures(truecolour);
 
     // The arming from above, reported now that there is somewhere to report it. A
     // signal that arrived before this point is not lost: it waits in the channel
@@ -497,6 +493,21 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // opening is one mechanism rather than two statements in a row that a future edit
     // can separate.
     shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
+
+    // After the first paint, so a terminal slow to answer delays only the
+    // pictures, and before the input thread, which would read the answer as
+    // keys. `SPEC.md` §11.1.
+    let (mut picker, answer) = terminal::picker(!reply.is_empty());
+    picker.set_protocol_type(
+        pictures::protocol_of(answer, |key| std::env::var(key).ok())
+            .unwrap_or(ratatui_image::picker::ProtocolType::Halfblocks),
+    );
+    let drawn = pictures::drawn(truecolour, picker.protocol_type());
+    shell.pictures.pick(picker);
+    if drawn != truecolour {
+        shell.app.draw_pictures(drawn);
+        shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
+    }
 
     // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
@@ -3229,6 +3240,36 @@ mod tests {
             wrote < posted,
             "`commit_box` posts before it writes, so a socket could take a note \
              the store then refuses"
+        );
+    }
+
+    #[test]
+    fn picture_query_after_paint() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let first_paint = code
+            .find("shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?")
+            .expect("`run` no longer paints before the loop");
+        let query = code
+            .find("terminal::picker(")
+            .expect("`run` no longer asks for the picture protocol");
+        let input = code
+            .find("spawn_input(tx.clone())")
+            .expect("`run` no longer spawns the input thread");
+        assert!(
+            first_paint < query && query < input,
+            "the picture query runs before the first paint, which it would delay, \
+             or after the input thread, which would read its answer as keys"
+        );
+        assert_eq!(
+            code.matches("terminal::picker(").count(),
+            1,
+            "the picture query is asked more than once"
         );
     }
 

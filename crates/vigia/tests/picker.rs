@@ -116,6 +116,28 @@ fn late_answer_read() {
     );
 }
 
+#[test]
+fn key_during_silent_query() {
+    // A key and no answer, partway into the wait of a terminal silent to the
+    // query. The key is the query's to drop; the one after it is the reader's.
+    let text = asked_after(Some(b"k"), vigia::PICTURES_WAIT / 3);
+    assert!(
+        text.contains("got z"),
+        "the key after the query was lost: {text}"
+    );
+    let line = asked_line(&text);
+    let waited: f64 = line
+        .split("asked ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(f64::MAX);
+    assert!(
+        line.contains("Halfblocks") && waited < vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 200.0,
+        "a key typed into a silent query stalled it or chose a protocol: {line}"
+    );
+}
+
 /// [`asked_in_pty`] with the answer sent `late` after the query arrives.
 fn asked_after(answer: Option<&[u8]>, late: Duration) -> String {
     let (mut master, slave) = {
