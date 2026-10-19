@@ -181,3 +181,186 @@ pub fn claimed_png(width: u32, height: u32) -> Vec<u8> {
     bytes.extend(chunk(b"IEND", &[]));
     bytes
 }
+
+/// A PDF whose pages are `width` by `height` points and draw `content`, with
+/// `trailer` added to its trailer dictionary.
+pub fn pdf_with(pages: &[(u32, u32, &[u8])], trailer: &str) -> Vec<u8> {
+    let mut out = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n".to_vec();
+    let mut offsets = Vec::new();
+    let object = |out: &mut Vec<u8>, body: &[u8], offsets: &mut Vec<usize>| {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n", offsets.len()).as_bytes());
+        out.extend(body);
+        out.extend(b"\nendobj\n");
+    };
+    let kids: Vec<String> = (0..pages.len())
+        .map(|page| format!("{} 0 R", 3 + 2 * page))
+        .collect();
+    object(&mut out, b"<< /Type /Catalog /Pages 2 0 R >>", &mut offsets);
+    object(
+        &mut out,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            kids.join(" "),
+            pages.len()
+        )
+        .as_bytes(),
+        &mut offsets,
+    );
+    for (page, (width, height, content)) in pages.iter().enumerate() {
+        object(
+            &mut out,
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents {} 0 R >>",
+                4 + 2 * page
+            )
+            .as_bytes(),
+            &mut offsets,
+        );
+        let mut stream = format!("<< /Length {} >>\nstream\n", content.len()).into_bytes();
+        stream.extend_from_slice(content);
+        stream.extend_from_slice(b"\nendstream");
+        object(&mut out, &stream, &mut offsets);
+    }
+    let xref = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    for offset in &offsets {
+        out.extend(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R {trailer}>>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+/// A PDF of `pages`, each `width` by `height` points drawing `content`.
+pub fn pdf(pages: &[(u32, u32, &[u8])]) -> Vec<u8> {
+    pdf_with(pages, "")
+}
+
+/// The drawing of an icon-shaped page: a filled square in a colour from
+/// `seed`, and a stroked check mark.
+pub fn icon_ops(seed: u8) -> Vec<u8> {
+    format!(
+        "{:.3} 0.4 0.9 rg 2 2 20 20 re f 1 1 1 RG 2 w 7 12 m 10 15 l 17 8 l S",
+        f32::from(seed) / 255.0
+    )
+    .into_bytes()
+}
+
+/// A 24 by 24 point icon PDF, its colour from `seed`.
+pub fn icon_pdf(seed: u8) -> Vec<u8> {
+    pdf(&[(24, 24, &icon_ops(seed))])
+}
+
+/// A PDF that needs a password to open.
+pub fn locked_pdf() -> Vec<u8> {
+    pdf_with(
+        &[(24, 24, &icon_ops(1))],
+        "/Encrypt << /Filter /Standard /V 2 /R 3 /O (xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx) /U (yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy) /P -4 /Length 128 >> /ID [(abc)(abc)] ",
+    )
+}
+
+/// MD5, for the key an encrypted PDF fixture needs.
+fn md5(input: &[u8]) -> [u8; 16] {
+    const S: [u32; 64] = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
+        9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
+        15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    ];
+    let k: Vec<u32> = (0..64)
+        .map(|i| ((i as f64 + 1.0).sin().abs() * 4_294_967_296.0) as u32)
+        .collect();
+    let mut message = input.to_vec();
+    message.push(0x80);
+    while message.len() % 64 != 56 {
+        message.push(0);
+    }
+    message.extend_from_slice(&((input.len() as u64) * 8).to_le_bytes());
+    let mut state = [0x6745_2301u32, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
+    for block in message.chunks(64) {
+        let words: Vec<u32> = block
+            .chunks(4)
+            .map(|word| u32::from_le_bytes(word.try_into().expect("four bytes")))
+            .collect();
+        let [mut a, mut b, mut c, mut d] = state;
+        for i in 0..64 {
+            let (f, g) = match i / 16 {
+                0 => ((b & c) | (!b & d), i),
+                1 => ((d & b) | (!d & c), (5 * i + 1) % 16),
+                2 => (b ^ c ^ d, (3 * i + 5) % 16),
+                _ => (c ^ (b | !d), (7 * i) % 16),
+            };
+            let rotated = a
+                .wrapping_add(f)
+                .wrapping_add(k[i])
+                .wrapping_add(words[g])
+                .rotate_left(S[i]);
+            (a, d, c, b) = (d, c, b, b.wrapping_add(rotated));
+        }
+        for (held, new) in state.iter_mut().zip([a, b, c, d]) {
+            *held = held.wrapping_add(new);
+        }
+    }
+    let mut out = [0u8; 16];
+    for (chunk, word) in out.chunks_mut(4).zip(state) {
+        chunk.copy_from_slice(&word.to_le_bytes());
+    }
+    out
+}
+
+/// RC4 of `data` under `key`.
+fn rc4(key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut s: Vec<u8> = (0..=255).collect();
+    let mut j = 0u8;
+    for i in 0..256 {
+        j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+        s.swap(i, usize::from(j));
+    }
+    let (mut i, mut j) = (0u8, 0u8);
+    data.iter()
+        .map(|byte| {
+            i = i.wrapping_add(1);
+            j = j.wrapping_add(s[usize::from(i)]);
+            s.swap(usize::from(i), usize::from(j));
+            byte ^ s[usize::from(s[usize::from(i)].wrapping_add(s[usize::from(j)]))]
+        })
+        .collect()
+}
+
+/// A one-page icon PDF encrypted with RC4 and an empty user password, as a
+/// document protected only by an owner password is: any viewer opens it.
+pub fn open_locked_pdf(seed: u8) -> Vec<u8> {
+    const PAD: [u8; 32] = [
+        0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01,
+        0x08, 0x2e, 0x2e, 0x00, 0xb6, 0xd0, 0x68, 0x3e, 0x80, 0x2f, 0x0c, 0xa9, 0xfe, 0x64, 0x53,
+        0x69, 0x7a,
+    ];
+    let (id, permissions) = (b"vigia-fixture-id", -4i32);
+    let owner = rc4(&md5(&PAD)[..5], &PAD);
+    let mut seeded = PAD.to_vec();
+    seeded.extend_from_slice(&owner);
+    seeded.extend_from_slice(&permissions.to_le_bytes());
+    seeded.extend_from_slice(id);
+    let key = md5(&seeded)[..5].to_vec();
+    let user = rc4(&key, &PAD);
+    // The content stream is object 4, generation 0.
+    let mut object_key = key.clone();
+    object_key.extend_from_slice(&[4, 0, 0, 0, 0]);
+    let content = rc4(&md5(&object_key)[..10], &icon_ops(seed));
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    pdf_with(
+        &[(24, 24, &content)],
+        &format!(
+            "/Encrypt << /Filter /Standard /V 1 /R 2 /O <{}> /U <{}> /P {permissions} >> /ID [<{}> <{}>] ",
+            hex(&owner),
+            hex(&user),
+            hex(id),
+            hex(id)
+        ),
+    )
+}

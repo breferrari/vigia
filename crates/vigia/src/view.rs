@@ -1481,7 +1481,15 @@ fn note_for(kind: &ChangeKind, diff: &FileDiff) -> Option<String> {
 /// What a changed image is, in one line: `PNG 1242×2688 · 731 KiB → 748 KiB`.
 /// A part the two sides share is said once.
 fn size_line(picture: &Picture) -> Option<String> {
-    let size = |side: &ImageSide| format!("{}×{}", side.width, side.height);
+    let size = |side: &ImageSide| {
+        // A PDF's size is its page's, in points.
+        let unit = if side.format == vigia_core::Format::Pdf {
+            " pt"
+        } else {
+            ""
+        };
+        format!("{}×{}{unit}", side.width, side.height)
+    };
     let shape = |side: &ImageSide| format!("{} {}", side.format, size(side));
     let either = |old: String, new: String| {
         if old == new {

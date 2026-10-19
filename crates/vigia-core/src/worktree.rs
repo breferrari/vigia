@@ -832,12 +832,45 @@ impl Worktree {
         svg: bool,
         diff: Option<bool>,
     ) -> Option<(Picture, u64)> {
-        if !svg || diff.is_some() || !picture::svg_named(&change.path) {
+        if !svg || diff.is_some() {
             return None;
         }
         let mut cost = 0;
-        self.svg_picture(change, &mut cost)
-            .map(|picture| (picture, cost))
+        let picture = if picture::svg_named(&change.path) {
+            self.svg_picture(change, &mut cost)
+        } else if picture::pdf_named(&change.path) {
+            self.pdf_picture(change, &mut cost)
+        } else {
+            return None;
+        };
+        picture.map(|picture| (picture, cost))
+    }
+
+    /// The picture of a changed PDF when every side it has gives a size. Each
+    /// side is read whole, up to [`picture::PDF_LIMIT`].
+    fn pdf_picture(&self, change: &FileChange, cost: &mut u64) -> Option<Picture> {
+        let blob = |id, cost: &mut u64| {
+            let held = self.blob(id, &change.path).ok()?;
+            *cost += held.len() as u64;
+            picture::pdf_side(held)
+        };
+        let after = match change.after {
+            Some(Side::Worktree) => {
+                let path = self.workdir.join(&change.path);
+                let meta = std::fs::symlink_metadata(&path).ok()?;
+                // A link's bytes are its target, and a fifo blocks whoever opens it.
+                if !meta.is_file() || meta.len() > picture::PDF_LIMIT {
+                    return None;
+                }
+                let bytes = std::fs::read(&path).ok()?;
+                *cost += bytes.len() as u64;
+                Some(picture::pdf_side(bytes))
+            }
+            Some(Side::Blob(id)) => Some(blob(id, cost)),
+            None => None,
+        };
+        let before = change.before.map(|id| blob(id, cost));
+        Picture::of(before, after)
     }
 
     /// The picture of a changed SVG when every side it has gives a size. Reads

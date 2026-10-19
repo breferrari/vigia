@@ -228,11 +228,22 @@ pub struct Built {
     pub profiles_differ: bool,
     /// The ids of its Kitty images, which the terminal holds until told to drop them.
     pub kitty: Vec<u32>,
+    /// Which page of a PDF was drawn, and whether the page count changed.
+    pub page: Option<String>,
 }
 
 impl Built {
     /// What the size line adds once the comparison is done.
     pub fn suffix(&self) -> Option<String> {
+        let found = self.found();
+        match (&self.page, found) {
+            (Some(page), Some(found)) => Some(format!("{page} · {found}")),
+            (page, found) => page.clone().or(found),
+        }
+    }
+
+    /// What the comparison found, without the page it was found on.
+    fn found(&self) -> Option<String> {
         if self.profiles_differ {
             return Some("colour profile changed".to_owned());
         }
@@ -495,6 +506,7 @@ fn undecoded() -> Built {
         verdict: Verdict::Undecoded,
         profiles_differ: false,
         kitty: Vec::new(),
+        page: None,
     }
 }
 
@@ -721,7 +733,7 @@ fn image_format(format: Format) -> Option<ImageFormat> {
         Format::Tiff => ImageFormat::Tiff,
         Format::Qoi => ImageFormat::Qoi,
         Format::Tga => ImageFormat::Tga,
-        Format::Svg => return None,
+        Format::Svg | Format::Pdf => return None,
     })
 }
 
@@ -1107,6 +1119,215 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
     Some((render(old)?, render(new)?))
 }
 
+/// The long side a PDF page is rendered at, unless its content costs more
+/// than [`PDF_BUDGET`] there.
+const PDF_LONG_SIDE: f32 = 1024.0;
+/// What one PDF page may cost, in bytes of content stream times pixels on
+/// the long side. 1.4 MiB at 1024 pixels, about 250ms.
+const PDF_BUDGET: f64 = 1.4 * 1024.0 * 1024.0 * 1024.0;
+/// The most objects one page's resources are read through to fingerprint it.
+const PDF_OBJECTS: usize = 10_000;
+
+/// One PDF side, opened.
+fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>> {
+    match source {
+        Some(source) => {
+            let bytes = read_counted(source)?;
+            hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes))
+                .ok()
+                .map(Some)
+        }
+        None => Some(None),
+    }
+}
+
+/// A page's fingerprint: its content and every object its resources reach,
+/// or `None` when an image it holds is larger than any image may decode.
+fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
+    use hayro::hayro_syntax::object::{MaybeRef, Object};
+    use std::hash::{Hash, Hasher};
+    fn walk(
+        object: Object<'_>,
+        xref: &hayro::hayro_syntax::xref::XRef,
+        hasher: &mut std::collections::hash_map::DefaultHasher,
+        seen: &mut HashSet<(i32, i32)>,
+    ) -> Option<()> {
+        if seen.len() > PDF_OBJECTS {
+            return Some(());
+        }
+        let into = |value: MaybeRef<Object<'_>>, hasher: &mut _, seen: &mut HashSet<_>| match value
+        {
+            MaybeRef::Ref(reference) => {
+                if seen.insert((reference.obj_number, reference.gen_number)) {
+                    if let Some(object) = xref.get::<Object<'_>>(reference.into()) {
+                        return walk(object, xref, hasher, seen);
+                    }
+                }
+                Some(())
+            }
+            MaybeRef::NotRef(object) => walk(object, xref, hasher, seen),
+        };
+        match object {
+            Object::Dict(dict) => {
+                for (name, value) in dict.entries() {
+                    // The page tree, which every page reaches and none owns.
+                    if name.as_ref() == b"Parent" {
+                        continue;
+                    }
+                    name.as_ref().hash(hasher);
+                    into(value, hasher, seen)?;
+                }
+            }
+            Object::Array(array) => {
+                for value in array.raw_iter() {
+                    into(value, hasher, seen)?;
+                }
+            }
+            Object::Stream(stream) => {
+                let dict = stream.dict();
+                if dict
+                    .get::<hayro::hayro_syntax::object::Name<'_>>(b"Subtype")
+                    .is_some_and(|subtype| subtype.as_ref() == b"Image")
+                {
+                    let side = |key: &[u8]| dict.get::<u32>(key).unwrap_or(0);
+                    let (width, height) = (side(b"Width"), side(b"Height"));
+                    if width > MAX_SIDE
+                        || height > MAX_SIDE
+                        || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC
+                    {
+                        return None;
+                    }
+                }
+                stream.raw_data().hash(hasher);
+                walk(Object::Dict(dict.clone()), xref, hasher, seen)?;
+            }
+            other => format!("{other}").hash(hasher),
+        }
+        Some(())
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    page.page_stream().unwrap_or_default().hash(&mut hasher);
+    if let Some(resources) = page.raw().get::<Object<'_>>(b"Resources") {
+        walk(resources, page.xref(), &mut hasher, &mut HashSet::new())?;
+    }
+    Some(hasher.finish())
+}
+
+/// Every page's fingerprint, or `None` when one holds an image too large.
+fn page_prints(pdf: &hayro::hayro_syntax::Pdf) -> Option<Vec<u64>> {
+    pdf.pages().iter().map(|page| page_print(&page)).collect()
+}
+
+/// Which page both sides draw, and what the line says about it.
+fn chosen_page(old: Option<&[u64]>, new: Option<&[u64]>) -> (usize, Option<String>) {
+    let (Some(old), Some(new)) = (old, new) else {
+        return (0, None);
+    };
+    let differs = old.iter().zip(new).position(|(a, b)| a != b);
+    let mut said = Vec::new();
+    if old.len() != new.len() {
+        said.push(format!("{} → {} pages", old.len(), new.len()));
+    }
+    let page = match differs {
+        Some(page) => {
+            if new.len() > 1 {
+                said.insert(0, format!("page {} of {}", page + 1, new.len()));
+            }
+            page
+        }
+        None => {
+            if old.len() == new.len() {
+                said.push("no page changed".to_owned());
+            }
+            0
+        }
+    };
+    (page, (!said.is_empty()).then(|| said.join(" · ")))
+}
+
+/// Each side of a changed PDF drawn at its first changed page, fitted inside
+/// its first page's shape, both at one long side; with what the line says
+/// about the page.
+fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<String>)> {
+    let (old, new) = (
+        open_pdf(&job.sources.before)?,
+        open_pdf(&job.sources.after)?,
+    );
+    let prints = |pdf: &Option<hayro::hayro_syntax::Pdf>| match pdf {
+        Some(pdf) => page_prints(pdf).map(Some),
+        None => Some(None),
+    };
+    let (old_prints, new_prints) = (prints(&old)?, prints(&new)?);
+    let (index, note) = chosen_page(old_prints.as_deref(), new_prints.as_deref());
+    let cost = [&old, &new]
+        .into_iter()
+        .flatten()
+        .filter_map(|pdf| pdf.pages().get(index).or_else(|| pdf.pages().first()))
+        .map(|page| page.page_stream().map_or(0, <[u8]>::len))
+        .max()
+        .unwrap_or(0);
+    let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(PDF_LONG_SIDE)) as f32;
+    if long < SVG_SHORTEST {
+        return None;
+    }
+    let render = |pdf: Option<hayro::hayro_syntax::Pdf>| -> Option<Option<Decoded>> {
+        let Some(pdf) = pdf else {
+            return Some(None);
+        };
+        let pages = pdf.pages();
+        let first = pages.first()?;
+        let page = pages.get(index).unwrap_or(first);
+        Some(Some((render_page(first, page, long)?, None)))
+    };
+    Some((render(old)?, render(new)?, note))
+}
+
+/// `page` rendered and centred in a canvas of `first`'s shape, its long side
+/// at `long`, so it fills the rows the first page reserved.
+fn render_page(
+    first: &hayro::hayro_syntax::page::Page<'_>,
+    page: &hayro::hayro_syntax::page::Page<'_>,
+    long: f32,
+) -> Option<RgbaImage> {
+    use hayro::hayro_interpret::InterpreterSettings;
+    let (width, height) = first.render_dimensions();
+    let canvas_scale = long / width.max(height);
+    let canvas = (
+        (width * canvas_scale).ceil().max(1.0) as u32,
+        (height * canvas_scale).ceil().max(1.0) as u32,
+    );
+    let (page_width, page_height) = page.render_dimensions();
+    let scale = (canvas.0 as f32 / page_width).min(canvas.1 as f32 / page_height);
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let pixmap = hayro::render(
+        page,
+        &hayro::RenderCache::new(),
+        &InterpreterSettings::default(),
+        &hayro::RenderSettings::default(),
+        &hayro::PixmapSettings {
+            x_scale: scale,
+            y_scale: scale,
+            ..Default::default()
+        },
+    );
+    let (drawn_width, drawn_height) = (u32::from(pixmap.width()), u32::from(pixmap.height()));
+    let drawn = RgbaImage::from_raw(
+        drawn_width,
+        drawn_height,
+        pixmap.take_rgba8(hayro::vello_cpu::peniko::ImageAlphaType::Alpha),
+    )?;
+    let mut fitted = RgbaImage::new(canvas.0, canvas.1);
+    image::imageops::overlay(
+        &mut fitted,
+        &drawn,
+        i64::from(canvas.0.saturating_sub(drawn_width) / 2),
+        i64::from(canvas.1.saturating_sub(drawn_height) / 2),
+    );
+    Some(fitted)
+}
+
 /// A side decoded, and its colour profile.
 type Decoded = (RgbaImage, Option<Vec<u8>>);
 
@@ -1323,8 +1544,15 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         (None, None) => Some(None),
         _ => None,
     };
-    let sides = if job.formats.0 == Some(Format::Svg) || job.formats.1 == Some(Format::Svg) {
+    let vector = |format| job.formats.0 == Some(format) || job.formats.1 == Some(format);
+    let mut page = None;
+    let sides = if vector(Format::Svg) {
         svg_sides(job)
+    } else if vector(Format::Pdf) {
+        pdf_sides(job).map(|(old, new, note)| {
+            page = note;
+            (old, new)
+        })
     } else {
         side(&job.sources.before, job.formats.0).zip(side(&job.sources.after, job.formats.1))
     };
@@ -1400,6 +1628,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         verdict,
         profiles_differ,
         kitty,
+        page,
     }
 }
 

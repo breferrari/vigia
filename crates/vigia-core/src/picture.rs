@@ -27,6 +27,9 @@ pub enum Format {
     Tga,
     /// An SVG document, known by its `.svg` name and its root `<svg>` tag.
     Svg,
+    /// A PDF document, known by its `.pdf` name and its `%PDF-` header, and
+    /// sized in points.
+    Pdf,
 }
 
 impl Format {
@@ -66,6 +69,7 @@ impl fmt::Display for Format {
             Self::Qoi => "QOI",
             Self::Tga => "TGA",
             Self::Svg => "SVG",
+            Self::Pdf => "PDF",
         })
     }
 }
@@ -95,6 +99,49 @@ pub struct Picture {
     pub before: Option<ImageSide>,
     /// The worktree side, or the index's in the staged run.
     pub after: Option<ImageSide>,
+}
+
+/// The most of a PDF the frame path reads, whole, for its size. A PDF's index
+/// is at its end, so it is read whole or not at all.
+pub(crate) const PDF_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// Whether `path` is named as a PDF.
+pub(crate) fn pdf_named(path: &str) -> bool {
+    path.rsplit_once('.')
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("pdf"))
+}
+
+/// One PDF side, held whole: its first page's size in points, or `None`
+/// for one that is not a PDF, needs a password, or does not parse.
+pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
+    let length = bytes.len() as u64;
+    if length > PDF_LIMIT
+        || !bytes[..bytes.len().min(1024)]
+            .windows(5)
+            .any(|w| w == b"%PDF-")
+    {
+        return None;
+    }
+    // A document an agent wrote must not be able to close the pane.
+    let (width, height) = crate::caught(|| pdf_size(bytes)).flatten()?;
+    Some(ImageSide {
+        format: Format::Pdf,
+        width,
+        height,
+        bytes: length,
+        stamp: 0,
+    })
+}
+
+/// The first page's size in points, rounded up.
+fn pdf_size(bytes: Vec<u8>) -> Option<(u32, u32)> {
+    crate::armed(crate::Stage::Header);
+    let pdf = hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).ok()?;
+    let (width, height) = pdf.pages().first()?.render_dimensions();
+    let side = |length: f32| {
+        (length.is_finite() && length > 0.0).then(|| length.ceil().min(u32::MAX as f32) as u32)
+    };
+    Some((side(width)?, side(height)?))
 }
 
 /// How much of a worktree SVG the frame path reads for its size.
