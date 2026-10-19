@@ -756,34 +756,60 @@ fn landing_on_heading() {
 #[test]
 fn worker_skips_hidden() {
     let scratch = Scratch::new("pictures-skip");
-    let names: Vec<String> = (0..12).map(|n| format!("s{n:02}.png")).collect();
+    let names: Vec<String> = (0..6).map(|n| format!("s{n}.png")).collect();
     for (n, name) in names.iter().enumerate() {
-        scratch.write(name, support::screen_png(n as u8));
+        scratch.write(name, png(120, 260, n as u8));
     }
     scratch.commit_all("baseline");
     for (n, name) in names.iter().enumerate() {
-        scratch.write(name, support::screen_png(100 + n as u8));
+        scratch.write(name, png(120, 260, 100 + n as u8));
     }
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     // Tall enough for every picture to be queued at once.
     let mut pane = Pane::new(100, 400);
+    // The worker waits after its first picture until the screen has been cleared.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = std::sync::Mutex::new(held);
+    pane.pictures = Pictures::new(
+        INKS,
+        Box::new(move || {
+            let _ = held.lock().map(|held| held.recv());
+        }),
+    );
     let decoded = pictures::decodes();
-    pane.view(&mut frame);
-    // And then nothing on screen, at once.
+    let queued = pane.view(&mut frame);
+    let shown = queued
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Sized { .. }))
+        .count();
+    assert_eq!(
+        shown,
+        names.len(),
+        "the fixture did not put every picture on screen"
+    );
+    let started = std::time::Instant::now();
+    while pictures::decodes() - decoded < 2 {
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "the first picture was never built"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let mut nothing: Vec<Row> = Vec::new();
     pane.pictures.attach(&mut nothing, &frame);
+    drop(release);
     assert!(
-        pane.pictures.settle(Duration::from_secs(120)),
+        pane.pictures.settle(Duration::from_secs(60)),
         "the worker never finished"
     );
 
-    let decodes = pictures::decodes() - decoded;
-    assert!(
-        decodes < 2 * names.len() as u64,
-        "{decodes} sides were decoded for {} pictures nobody could see",
-        names.len()
+    assert_eq!(
+        pictures::decodes() - decoded,
+        2,
+        "pictures nobody could see were decoded"
     );
     assert_eq!(pane.pictures.kept(), 0, "a picture off screen was kept");
 }

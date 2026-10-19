@@ -112,14 +112,62 @@ impl Picture {
     }
 }
 
-/// Where one side of a changed image can be read from, for a reader on another
-/// thread: a blob already in memory, or a file to open.
+/// Where one side of a changed image can be read from, by a reader on another
+/// thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// A blob's bytes.
-    Bytes(Vec<u8>),
-    /// A working-tree file, or the LFS object a pointer names.
+    /// A blob in the repository at `git_dir`. One that is an LFS pointer is read
+    /// from `store` instead.
+    Blob {
+        /// The repository's git directory.
+        git_dir: std::path::PathBuf,
+        /// The blob.
+        id: gix::ObjectId,
+        /// The repository's LFS store.
+        store: std::path::PathBuf,
+    },
+    /// A working-tree file, or the LFS object a pointer in it names.
     File(std::path::PathBuf),
+}
+
+impl Source {
+    /// This side's bytes, read on the calling thread. `None` when they cannot be.
+    pub fn read(&self) -> Option<Vec<u8>> {
+        match self {
+            Self::File(path) => read_file(path),
+            Self::Blob { git_dir, id, store } => {
+                let repo = gix::open_opts(git_dir, gix::open::Options::isolated()).ok()?;
+                let bytes = repo
+                    .find_object(*id)
+                    .ok()?
+                    .try_into_blob()
+                    .ok()?
+                    .take_data();
+                match lfs_oid(&bytes) {
+                    Some(oid) => read_file(&lfs_object(store, oid)),
+                    None => Some(bytes),
+                }
+            }
+        }
+    }
+}
+
+/// Where the LFS object `oid` is kept in `store`.
+pub(crate) fn lfs_object(store: &std::path::Path, oid: &str) -> std::path::PathBuf {
+    store
+        .join("objects")
+        .join(&oid[0..2])
+        .join(&oid[2..4])
+        .join(oid)
+}
+
+/// A regular file's bytes. Followed, so a link to one reads, and a fifo is never
+/// opened.
+fn read_file(path: &std::path::Path) -> Option<Vec<u8>> {
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file())
+        .then(|| std::fs::read(path).ok())
+        .flatten()
 }
 
 /// Both sides of a changed image, as [`Source`]s.

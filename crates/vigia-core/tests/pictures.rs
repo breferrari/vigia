@@ -6,7 +6,7 @@ use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
 use support::{Scratch, changes_sorted, encoded, png};
-use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture, Source};
+use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture};
 
 /// The diff of the one change at `rela`.
 fn diff_of(scratch: &Scratch, rela: &str) -> FileDiff {
@@ -754,12 +754,13 @@ fn stamps_follow_content() {
     );
 }
 
-/// The sources of a changed image: the blob as bytes, the worktree as its path,
-/// and an LFS pointer as its object's path.
+/// The sources of a changed image read back what each side holds: a blob, a
+/// worktree file, and an LFS pointer's object.
 #[test]
 fn image_sources() {
     let old = png(24, 40, 1);
-    let (scratch, oid) = lfs_repo("picture-sources", &old, &png(24, 40, 2));
+    let new = png(24, 40, 2);
+    let (scratch, oid) = lfs_repo("picture-sources", &old, &new);
     store(&scratch.root().join(".git").join("lfs"), &oid, &old);
     scratch.write("plain.img", png(8, 8, 1));
     scratch.git(&["add", "plain.img"]);
@@ -768,22 +769,22 @@ fn image_sources() {
 
     let worktree = scratch.worktree();
     let changes = changes_sorted(&worktree);
-    let sources = |path: &str| {
+    let read = |path: &str| {
         let change = changes.iter().find(|c| c.path == path).expect("listed");
-        worktree.image_sources(change).expect("sources")
+        let sources = worktree.image_sources(change);
+        (
+            sources.before.and_then(|source| source.read()),
+            sources.after.and_then(|source| source.read()),
+        )
     };
-    let lfs = sources("a.png");
     assert_eq!(
-        lfs.before,
-        Some(Source::File(object_path(
-            &scratch.root().join(".git").join("lfs"),
-            &oid
-        )))
+        read("a.png"),
+        (Some(old), Some(new)),
+        "the LFS pair read back wrong"
     );
-    assert_eq!(lfs.after, Some(Source::File(scratch.path_of("a.png"))));
-    let plain_sources = sources("plain.img");
-    assert!(
-        matches!(plain_sources.before, Some(Source::Bytes(ref bytes)) if bytes == &png(8, 8, 1)),
-        "the blob side is not its bytes"
+    assert_eq!(
+        read("plain.img"),
+        (Some(png(8, 8, 1)), Some(png(8, 8, 2))),
+        "the plain pair read back wrong"
     );
 }

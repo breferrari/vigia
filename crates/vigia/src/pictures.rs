@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
-use image::{DynamicImage, ImageFormat, Rgb, RgbImage, RgbaImage};
+use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
 use ratatui::layout::Size;
 use ratatui_image::protocol::halfblocks::Halfblocks;
 use ratatui_image::sliced::SlicedProtocol;
@@ -277,7 +277,16 @@ impl Inks {
     /// The pane's colour as the terminal said it is, or as dark or light as it
     /// said, and the theme's removed bar.
     pub fn of(theme: &crate::Theme, pane: Option<(u8, u8, u8)>, light: bool) -> Self {
-        let canvas = pane.unwrap_or(if light { (255, 255, 255) } else { (0, 0, 0) });
+        // Unanswered, the palette says which: a light one washes rows light.
+        let washed_light = matches!(
+            theme.removed_row.bg,
+            Some(ratatui::style::Color::Rgb(r, g, b)) if u16::from(r) + u16::from(g) + u16::from(b) > 382
+        );
+        let canvas = pane.unwrap_or(if light || washed_light {
+            (255, 255, 255)
+        } else {
+            (0, 0, 0)
+        });
         let changed = match theme.removed_bar.bg {
             Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
             _ => (0xf8, 0x51, 0x49),
@@ -371,7 +380,9 @@ impl Pictures {
     fn collect(&mut self) {
         while let Ok((key, built)) = self.done.try_recv() {
             self.pending.remove(&key);
-            if let Some(built) = built {
+            // A picture that left the screen while it was built is not kept.
+            let shown = self.shown.lock().map_or(true, |shown| shown.contains(&key));
+            if let Some(built) = built.filter(|_| shown) {
                 self.built.insert(key, Ready(Arc::new(built)));
             }
         }
@@ -409,33 +420,29 @@ impl Pictures {
         }
         let shown: HashSet<Arc<Key>> = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
         self.built.retain(|key, _| shown.contains(key));
+        // Before any job is sent, or the worker can skip one as not on screen.
+        if let Ok(mut on_screen) = self.shown.lock() {
+            on_screen.clone_from(&shown);
+        }
         for (key, file, picture) in hung {
             if self.built.contains_key(&**key) || self.pending.contains(&**key) {
                 continue;
             }
-            match frame.image_sources(file) {
-                Ok(sources) => {
-                    let formats = (
-                        picture.before.map(|side| side.format),
-                        picture.after.map(|side| side.format),
-                    );
-                    self.pending.insert(Arc::clone(key));
-                    let _ = self.jobs.send(Job {
-                        key: Arc::clone(key),
-                        sources,
-                        formats,
-                    });
-                }
-                // Remembered, so a side that cannot be read is not read again
-                // every frame.
-                Err(_) => {
-                    self.built
-                        .insert(Arc::clone(key), Ready(Arc::new(undecoded())));
-                }
+            let job = Job {
+                key: Arc::clone(key),
+                sources: frame.image_sources(file),
+                formats: (
+                    picture.before.map(|side| side.format),
+                    picture.after.map(|side| side.format),
+                ),
+            };
+            if self.jobs.send(job).is_ok() {
+                self.pending.insert(Arc::clone(key));
+            } else {
+                // No worker to build it, so it is drawn as one that failed.
+                self.built
+                    .insert(Arc::clone(key), Ready(Arc::new(undecoded())));
             }
-        }
-        if let Ok(mut on_screen) = self.shown.lock() {
-            *on_screen = shown;
         }
         for row in rows.iter_mut() {
             if let Row::Sized { key, ready, .. } | Row::Picture { key, ready, .. } = row {
@@ -487,23 +494,15 @@ fn image_format(format: Format) -> ImageFormat {
     }
 }
 
-/// One side decoded and laid over the pane, with its colour profile. The first
-/// frame only.
-fn decode(
-    source: &Source,
-    format: Format,
-    canvas: (u8, u8, u8),
-) -> Option<(RgbImage, Option<Vec<u8>>)> {
+/// One side decoded, with its colour profile. The first frame only.
+fn decode(source: &Source, format: Format) -> Option<(RgbaImage, Option<Vec<u8>>)> {
     use image::ImageDecoder;
-    let bytes = match source {
-        Source::Bytes(bytes) => std::borrow::Cow::Borrowed(bytes.as_slice()),
-        Source::File(path) => std::borrow::Cow::Owned(std::fs::read(path).ok()?),
-    };
+    let bytes = source.read()?;
     DECODES.fetch_add(1, Ordering::Relaxed);
     if std::thread::current().name() != Some(WORKER) {
         OFF_WORKER.fetch_add(1, Ordering::Relaxed);
     }
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes.as_ref()));
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes));
     reader.set_format(image_format(format));
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_SIDE);
@@ -512,37 +511,29 @@ fn decode(
     reader.limits(limits);
     let mut decoder = reader.into_decoder().ok()?;
     let profile = decoder.icc_profile().ok().flatten();
-    let image = DynamicImage::from_decoder(decoder).ok()?.to_rgba8();
-    // Over the pane, so a transparent pixel shows what is behind it.
+    let image = DynamicImage::from_decoder(decoder).ok()?.into_rgba8();
+    Some((image, profile))
+}
+
+/// `image` laid over the pane in place, so a transparent pixel shows what is
+/// behind it.
+fn flatten(image: &mut RgbaImage, canvas: (u8, u8, u8)) {
     let (r, g, b) = canvas;
-    let mut flat =
-        RgbaImage::from_pixel(image.width(), image.height(), image::Rgba([r, g, b, 255]));
-    image::imageops::overlay(&mut flat, &image, 0, 0);
-    Some((DynamicImage::ImageRgba8(flat).to_rgb8(), profile))
+    let under = [r, g, b].map(u16::from);
+    for pixel in image.pixels_mut() {
+        let alpha = u16::from(pixel.0[3]);
+        for (channel, under) in pixel.0.iter_mut().zip(under) {
+            *channel = ((u16::from(*channel) * alpha + under * (255 - alpha)) / 255) as u8;
+        }
+        pixel.0[3] = 255;
+    }
 }
 
-/// pixelmatch's colour distance, squared, in YIQ; 35215 is its largest.
-fn distance(a: Rgb<u8>, b: Rgb<u8>) -> f32 {
-    let yiq = |p: Rgb<u8>| {
-        let [r, g, b] = p.0.map(f32::from);
-        (
-            r * 0.298_895 + g * 0.586_622 + b * 0.114_482,
-            r * 0.595_978 - g * 0.274_176 - b * 0.321_802,
-            r * 0.211_470 - g * 0.522_617 + b * 0.311_147,
-        )
-    };
-    let ((ya, ia, qa), (yb, ib, qb)) = (yiq(a), yiq(b));
-    0.5053 * (ya - yb).powi(2) + 0.299 * (ia - ib).powi(2) + 0.1957 * (qa - qb).powi(2)
-}
-
-/// pixelmatch's default threshold of 0.1, on the squared distance.
-const THRESHOLD: f32 = 0.1 * 0.1 * 35_215.0;
-
-/// Which pixels differ between two images of one size.
-fn changed(old: &RgbImage, new: &RgbImage) -> Vec<bool> {
+/// Which pixels differ between two images of one size, alpha included.
+fn changed(old: &RgbaImage, new: &RgbaImage) -> Vec<bool> {
     old.pixels()
         .zip(new.pixels())
-        .map(|(a, b)| a != b && distance(*a, *b) > THRESHOLD)
+        .map(|(a, b)| a != b)
         .collect()
 }
 
@@ -615,7 +606,13 @@ fn painted(mut image: RgbImage, hit: Option<&[bool]>, paint: Paint, inks: Inks) 
             }
             Paint::Mask => {
                 let light = (p[0] * 0.299 + p[1] * 0.587 + p[2] * 0.114) / 255.0;
-                canvas.map(|c| (c + light * toward).clamp(0.0, 255.0) as u8)
+                // Light stays light and dark stays dark on either pane.
+                let step = if toward < 0.0 {
+                    (1.0 - light) * toward
+                } else {
+                    light * toward
+                };
+                canvas.map(|c| (c + step).clamp(0.0, 255.0) as u8)
             }
         };
     }
@@ -626,7 +623,7 @@ fn painted(mut image: RgbImage, hit: Option<&[bool]>, paint: Paint, inks: Inks) 
 /// panel. A side that does not decode builds nothing to draw.
 fn build(job: &Job, inks: Inks) -> Built {
     let side = |source: &Option<Source>, format: Option<Format>| match (source, format) {
-        (Some(source), Some(format)) => decode(source, format, inks.canvas).map(Some),
+        (Some(source), Some(format)) => decode(source, format).map(Some),
         (None, None) => Some(None),
         _ => None,
     };
@@ -637,11 +634,14 @@ fn build(job: &Job, inks: Inks) -> Built {
         return undecoded();
     };
     let profiles_differ = matches!((&old, &new), (Some((_, a)), Some((_, b))) if a != b);
-    let (old, new) = (old.map(|(image, _)| image), new.map(|(image, _)| image));
+    let (mut old, mut new) = (old.map(|(image, _)| image), new.map(|(image, _)| image));
     let mask = match (&old, &new) {
         (Some(old), Some(new)) if old.dimensions() == new.dimensions() => Some(changed(old, new)),
         _ => None,
     };
+    for image in [old.as_mut(), new.as_mut()].into_iter().flatten() {
+        flatten(image, inks.canvas);
+    }
     let verdict = match &mask {
         Some(mask) => match mask.iter().filter(|hit| **hit).count() as u64 {
             0 => Verdict::Unchanged,
@@ -675,7 +675,8 @@ fn build(job: &Job, inks: Inks) -> Built {
                 } else {
                     image::imageops::FilterType::Nearest
                 };
-                image::imageops::resize(image, to.0, to.1, filter)
+                DynamicImage::ImageRgba8(image::imageops::resize(image, to.0, to.1, filter))
+                    .to_rgb8()
             })
             .clone();
         let hit = match (paint, &mask) {
@@ -697,6 +698,7 @@ fn build(job: &Job, inks: Inks) -> Built {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::Rgb;
 
     fn side(width: u32, height: u32) -> ImageSide {
         ImageSide {
@@ -790,15 +792,49 @@ mod tests {
 
     #[test]
     fn one_pixel_lights() {
-        let old = RgbImage::from_pixel(1000, 1000, Rgb([255, 255, 255]));
+        let old = RgbaImage::from_pixel(1000, 1000, image::Rgba([255, 255, 255, 255]));
         let mut new = old.clone();
-        new.put_pixel(503, 497, Rgb([0, 0, 0]));
+        new.put_pixel(503, 497, image::Rgba([0, 0, 0, 255]));
         let mask = changed(&old, &new);
         let hit = shrink_mask(&mask, new.dimensions(), (20, 20));
         assert_eq!(
             hit.iter().filter(|hit| **hit).count(),
             1,
             "one changed pixel lit no cell, or more than one"
+        );
+    }
+
+    #[test]
+    fn every_change_counts() {
+        let old = RgbaImage::from_pixel(3, 1, image::Rgba([100, 100, 100, 255]));
+        let mut new = old.clone();
+        new.put_pixel(0, 0, image::Rgba([101, 100, 100, 255]));
+        new.put_pixel(1, 0, image::Rgba([100, 100, 100, 0]));
+        assert_eq!(
+            changed(&old, &new),
+            [true, true, false],
+            "a one-step shade or an alpha-only change went uncounted"
+        );
+    }
+
+    #[test]
+    fn mask_keeps_polarity() {
+        let light = Inks {
+            canvas: (255, 255, 255),
+            changed: (0xcf, 0x22, 0x2e),
+        };
+        let image = RgbImage::from_fn(2, 1, |x, _| {
+            if x == 0 {
+                Rgb([255, 255, 255])
+            } else {
+                Rgb([0, 0, 0])
+            }
+        });
+        let mask = painted(image, None, Paint::Mask, light);
+        let (white, black) = (mask.get_pixel(0, 0).0[0], mask.get_pixel(1, 0).0[0]);
+        assert!(
+            white > black,
+            "on a light pane the mask drew white as {white} and black as {black}"
         );
     }
 

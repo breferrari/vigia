@@ -799,14 +799,10 @@ impl<'w> Frame<'w> {
     /// Where both sides of the changed image at `index` can be read from, for a
     /// reader on another thread. See [`Worktree::image_sources`].
     ///
-    /// # Errors
-    ///
-    /// As [`Worktree::image_sources`].
-    ///
     /// # Panics
     ///
     /// If `index` is out of range.
-    pub fn image_sources(&self, index: usize) -> Result<crate::Sources> {
+    pub fn image_sources(&self, index: usize) -> crate::Sources {
         self.worktree.image_sources(&self.files[index])
     }
 

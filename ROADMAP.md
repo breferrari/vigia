@@ -332,6 +332,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ⬜ | LFS fetch leaves binary. **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ⬜ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
+| ⬜ | Decoder panic stops the pane. **Found by review on #643** | [#645](https://github.com/breferrari/vigia/issues/645) |
 
 ## Phase 10 — current Rust
 

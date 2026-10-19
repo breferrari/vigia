@@ -686,41 +686,33 @@ impl Worktree {
     /// Where the LFS object `oid` is stored, when it is a file there. Followed, so
     /// a store reached through a link reads, and a fifo is never opened.
     fn lfs_path(&self, oid: &str) -> Option<PathBuf> {
-        let repo = self.repo();
-        let common = repo.common_dir();
-        let store = match repo.config_snapshot().trusted_path("lfs.storage") {
-            Ok(Some(path)) => common.join(path),
-            _ => common.join("lfs"),
-        };
-        drop(repo);
-        let path = store
-            .join("objects")
-            .join(&oid[0..2])
-            .join(&oid[2..4])
-            .join(oid);
+        let path = picture::lfs_object(&self.lfs_store(), oid);
         std::fs::metadata(&path)
             .is_ok_and(|meta| meta.is_file())
             .then_some(path)
     }
 
-    /// Where both sides of a changed image can be read from on another thread:
-    /// blobs read now, files and LFS objects left for the reader to open.
-    ///
-    /// # Errors
-    ///
-    /// A blob the index or a tree names is not in the object database.
-    pub fn image_sources(&self, change: &FileChange) -> Result<Sources> {
-        let held =
-            |bytes: Vec<u8>| match picture::lfs_oid(&bytes).and_then(|oid| self.lfs_path(oid)) {
-                Some(path) => Source::File(path),
-                None => Source::Bytes(bytes),
-            };
-        let before = match change.before {
-            Some(id) => Some(held(self.blob(id, &change.path)?)),
-            None => None,
+    /// This repository's LFS store: `lfs.storage`, or `lfs` under the common
+    /// git directory.
+    fn lfs_store(&self) -> PathBuf {
+        let repo = self.repo();
+        let common = repo.common_dir();
+        match repo.config_snapshot().trusted_path("lfs.storage") {
+            Ok(Some(path)) => common.join(path),
+            _ => common.join("lfs"),
+        }
+    }
+
+    /// Where both sides of a changed image can be read from on another thread.
+    /// Nothing is read here but a short worktree file that may be an LFS pointer.
+    pub fn image_sources(&self, change: &FileChange) -> Sources {
+        let blob = |id| Source::Blob {
+            git_dir: self.repo().git_dir().to_owned(),
+            id,
+            store: self.lfs_store(),
         };
         let after = match change.after {
-            Some(Side::Blob(id)) => Some(held(self.blob(id, &change.path)?)),
+            Some(Side::Blob(id)) => Some(blob(id)),
             Some(Side::Worktree) => {
                 let path = self.workdir.join(&change.path);
                 let pointer = std::fs::metadata(&path)
@@ -732,7 +724,10 @@ impl Worktree {
             }
             None => None,
         };
-        Ok(Sources { before, after })
+        Sources {
+            before: change.before.map(blob),
+            after,
+        }
     }
 
     /// Fill each side's stamp: the blob's id, or the worktree file's `stat`.
