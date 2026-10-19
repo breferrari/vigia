@@ -61,8 +61,7 @@ pub struct Worktree {
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
-    /// LFS files compared with their local object, for the gate that holds the
-    /// compare to once per timestamp.
+    /// LFS files compared with their local object.
     lfs_compares: Cell<u64>,
     /// Whether the configuration names Git LFS, read with it.
     lfs: Cell<bool>,
@@ -151,14 +150,8 @@ impl Worktree {
         Ok(Changes::over(inner, options.hide))
     }
 
-    /// The working tree against the index.
-    ///
-    /// A rename pairs a deletion with an addition, so a walk that finds no
-    /// deletion reads the same with tracking off. Tracking is what costs: `gix`
-    /// reads and hashes every untracked file as a candidate whether or not
-    /// anything was deleted, which is most of a walk over many. So the walk runs
-    /// without it first, sorted as the tracking walk sorts, and again with it only
-    /// when a deletion turned up.
+    /// The working tree against the index, less the LFS files whose bytes are
+    /// their object.
     fn unstaged(&self, track_renames: bool) -> Result<Inner> {
         let walked = self.unstaged_walk(track_renames)?;
         if !self.lfs.get() {
@@ -166,9 +159,11 @@ impl Worktree {
         }
         let walked: Vec<FileChange> = walked.collect::<Result<_>>()?;
         // A pane open for days keeps no verdict for a file the walk stopped flagging.
+        let flagged: std::collections::HashSet<&str> =
+            walked.iter().map(|change| change.path.as_str()).collect();
         self.lfs_verdicts
             .borrow_mut()
-            .retain(|path, _| walked.iter().any(|change| change.path == *path));
+            .retain(|path, _| flagged.contains(path.as_str()));
         let kept: Vec<FileChange> = walked
             .into_iter()
             .filter(|change| !self.lfs_unchanged(change))
@@ -199,7 +194,7 @@ impl Worktree {
         {
             return same;
         }
-        let pointer = self.lfs_pointer_of(id, &change.path);
+        let pointer = self.stored_pointer(id, &change.path);
         // A larger compare would cost the frame its budget, and belongs off the
         // paint.
         let candidate = pointer.as_ref().filter(|(_, size)| {
@@ -227,7 +222,7 @@ impl Worktree {
 
     /// The object and size the blob `id` names when it is an LFS pointer, with no
     /// read of a blob too large to be one.
-    fn lfs_pointer_of(&self, id: gix::ObjectId, path: &str) -> Option<(String, u64)> {
+    fn stored_pointer(&self, id: gix::ObjectId, path: &str) -> Option<(String, u64)> {
         let small = self
             .repo()
             .find_header(id)
@@ -236,6 +231,14 @@ impl Worktree {
         picture::lfs_pointer(&blob).map(|(oid, size)| (oid.to_owned(), size))
     }
 
+    /// The working tree against the index.
+    ///
+    /// A rename pairs a deletion with an addition, so a walk that finds no
+    /// deletion reads the same with tracking off. Tracking is what costs: `gix`
+    /// reads and hashes every untracked file as a candidate whether or not
+    /// anything was deleted, which is most of a walk over many. So the walk runs
+    /// without it first, sorted as the tracking walk sorts, and again with it only
+    /// when a deletion turned up.
     fn unstaged_walk(&self, track_renames: bool) -> Result<Inner> {
         if !track_renames {
             return Ok(Inner::Streamed(self.walk(Walk::Streamed)?));
