@@ -2849,15 +2849,10 @@ const GRAVIOLA_MIRRORED: &str = "0.4.1";
 #[test]
 fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
     let lock = repo_file("Cargo.lock");
-    let resolved = lock
-        .split("[[package]]")
-        .find(|block| block.contains("name = \"graviola\""))
-        .and_then(|block| {
-            block
-                .lines()
-                .find_map(|line| line.trim().strip_prefix("version = "))
-        })
-        .map(|version| version.trim_matches('"').to_owned())
+    let resolved = lock_packages(&lock)
+        .find_map(|(name, version)| (name == "graviola").then_some(version))
+        .flatten()
+        .map(str::to_owned)
         .expect("Cargo.lock resolves graviola");
 
     assert_eq!(
@@ -3361,12 +3356,8 @@ fn threaded_codecs(lock: &str) -> Vec<String> {
     const CODECS: [&str; 10] = [
         "png", "jpeg", "jpg", "gif", "webp", "tiff", "avif", "heif", "dav1d", "turbo",
     ];
-    lock.split("[[package]]")
-        .filter_map(|block| {
-            let name = block
-                .lines()
-                .find_map(|line| line.strip_prefix("name = \""))?
-                .trim_end_matches('"');
+    lock_packages(lock)
+        .filter_map(|(name, _)| {
             let native = name.ends_with("-sys") && CODECS.iter().any(|codec| name.contains(codec));
             (name == "rayon" || native).then(|| name.to_owned())
         })
@@ -3390,14 +3381,25 @@ fn codecs_on_worker() {
     );
 }
 
+/// Each package in a lock, by name and version.
+fn lock_packages(lock: &str) -> impl Iterator<Item = (&str, Option<&str>)> {
+    lock.split("[[package]]").filter_map(|block| {
+        let field = |key: &str| {
+            block.lines().find_map(|line| {
+                line.trim()
+                    .strip_prefix(key)?
+                    .strip_prefix(" = ")
+                    .map(|value| value.trim_matches('"'))
+            })
+        };
+        Some((field("name")?, field("version")))
+    })
+}
+
 /// How many copies of `crate_name` the lock resolves.
 fn copies_of(lock: &str, crate_name: &str) -> usize {
-    lock.split("[[package]]")
-        .filter(|block| {
-            block
-                .lines()
-                .any(|line| line == format!("name = \"{crate_name}\""))
-        })
+    lock_packages(lock)
+        .filter(|(name, _)| *name == crate_name)
         .count()
 }
 

@@ -776,19 +776,11 @@ const MONO: &[&str] = &[
 ];
 
 /// Point `serif`, `sans-serif` and `monospace`, where one names no installed
-/// face, at one that is installed and draws Latin text. usvg falls back to
+/// face or one that draws no Latin text, at one that does. usvg falls back to
 /// `serif`, Times New Roman, so without one a label draws nothing. A cursive
 /// or fantasy label falls through to `serif`.
 fn fallback_families(fonts: &mut resvg::usvg::fontdb::Database) {
-    use resvg::usvg::fontdb::{Database, Family, Query};
-    let missing = |fonts: &Database, family: Family| {
-        fonts
-            .query(&Query {
-                families: &[family],
-                ..Query::default()
-            })
-            .is_none()
-    };
+    use resvg::usvg::fontdb::{Family, Query};
     let wanted: [Generic; 3] = [
         (Family::Serif, SERIF, serif_hint, |fonts, name| {
             fonts.set_serif_family(name)
@@ -800,15 +792,30 @@ fn fallback_families(fonts: &mut resvg::usvg::fontdb::Database) {
             fonts.set_monospace_family(name)
         }),
     ];
-    for (family, known, hinted, set) in wanted {
-        if !missing(fonts, family) {
-            continue;
-        }
-        let faces = faces_of(fonts);
-        let latin = |face: &FaceInfo| fonts.with_face_data(face.id, covers_latin).unwrap_or(false);
-        if let Some(name) = fallback(&faces, known, hinted, latin) {
-            set(fonts, name);
-        }
+    let faces = faces_of(fonts);
+    // Read once per face: a face is mapped to read it.
+    let read = std::cell::RefCell::new(HashMap::new());
+    let latin = |id| {
+        *read
+            .borrow_mut()
+            .entry(id)
+            .or_insert_with(|| fonts.with_face_data(id, covers_latin).unwrap_or(false))
+    };
+    let chosen: Vec<_> = wanted
+        .into_iter()
+        .filter(|(family, ..)| {
+            let resolved = fonts.query(&Query {
+                families: &[*family],
+                ..Query::default()
+            });
+            !resolved.is_some_and(latin)
+        })
+        .filter_map(|(_, known, hinted, set)| {
+            Some((set, fallback(&faces, known, hinted, |face| latin(face.id))?))
+        })
+        .collect();
+    for (set, name) in chosen {
+        set(fonts, name);
     }
 }
 
@@ -822,11 +829,12 @@ type Generic = (
 );
 
 fn serif_hint(face: &FaceInfo) -> bool {
-    face.name.contains("Serif") && !face.name.contains("Sans")
+    let mut words = face.name.split_whitespace();
+    words.clone().any(|word| word == "Serif") && !words.any(|word| word == "Sans")
 }
 
 fn sans_hint(face: &FaceInfo) -> bool {
-    face.name.contains("Sans") && !face.monospaced
+    face.name.split_whitespace().any(|word| word == "Sans") && !face.monospaced
 }
 
 fn mono_hint(face: &FaceInfo) -> bool {
@@ -875,14 +883,18 @@ fn fallback(
         .map(|face| face.name.clone())
 }
 
-/// Whether the face at `index` in `data` has a glyph for every ASCII letter
-/// and digit.
+/// Whether the face at `index` in `data` maps every ASCII letter and digit
+/// to a glyph of its own.
 fn covers_latin(data: &[u8], index: u32) -> bool {
     use skrifa::MetadataProvider;
     let Ok(font) = skrifa::FontRef::from_index(data, index) else {
         return false;
     };
     let charmap = font.charmap();
+    // A symbol map puts its pictures where the ASCII letters would be.
+    if charmap.is_symbol() {
+        return false;
+    }
     ('a'..='z')
         .chain('A'..='Z')
         .chain('0'..='9')
@@ -1487,28 +1499,92 @@ mod tests {
         );
         let mut fonts = resvg::usvg::fontdb::Database::new();
         fonts.load_system_fonts();
-        let any = fonts
-            .faces()
-            .any(|face| fonts.with_face_data(face.id, covers_latin).unwrap_or(false));
         if fonts.is_empty() {
             eprintln!("note: this system has no fonts, so the coverage test proves less here");
             return;
         }
-        assert!(any, "no installed face reads as covering Latin");
-        // Emoji faces map digits but no letters.
-        let emoji: Vec<_> = faces_of(&fonts)
-            .into_iter()
-            .filter(|face| matches!(face.name.as_str(), "Apple Color Emoji" | "Noto Color Emoji"))
-            .collect();
-        if emoji.is_empty() {
-            eprintln!("note: no emoji face here, so a face without Latin is not read");
+        let read = |face: &FaceInfo| fonts.with_face_data(face.id, covers_latin);
+        let faces = faces_of(&fonts);
+        assert!(
+            faces.iter().any(|face| read(face) == Some(true)),
+            "no installed face reads as covering Latin"
+        );
+        // Emoji faces map digits but no letters; symbol faces map pictures
+        // onto the letters.
+        let named = |names: &[&str]| -> Vec<&FaceInfo> {
+            faces
+                .iter()
+                .filter(|face| names.contains(&face.name.as_str()))
+                .collect()
+        };
+        for (kind, names) in [
+            (
+                "emoji",
+                &["Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji"][..],
+            ),
+            (
+                "symbol",
+                &["Wingdings", "Webdings", "Symbol", "OpenSymbol", "D050000L"][..],
+            ),
+        ] {
+            let found = named(names);
+            if found.is_empty() {
+                eprintln!("note: no {kind} face here");
+            }
+            for face in found {
+                assert_eq!(
+                    read(face),
+                    Some(false),
+                    "{} reads as covering Latin",
+                    face.name
+                );
+            }
         }
-        for face in emoji {
-            assert!(
-                !fonts.with_face_data(face.id, covers_latin).unwrap_or(true),
-                "{} reads as covering Latin",
-                face.name
+    }
+
+    #[test]
+    fn generics_fall_back() {
+        use resvg::usvg::fontdb::{Database, Family, Query};
+        let mut fonts = Database::new();
+        fonts.load_system_fonts();
+        if fonts.is_empty() {
+            eprintln!("note: this system has no fonts, so the fallback test proves nothing here");
+            return;
+        }
+        // As on a system without the defaults, and with serif on a face that
+        // draws no Latin.
+        let emoji = faces_of(&fonts)
+            .into_iter()
+            .find(|face| face.name.contains("Emoji"))
+            .map_or("No Such Family".to_owned(), |face| face.name);
+        fonts.set_serif_family(emoji);
+        fonts.set_sans_serif_family("No Such Family");
+        fonts.set_monospace_family("No Such Family");
+        fallback_families(&mut fonts);
+        for (family, monospaced) in [
+            (Family::Serif, None),
+            (Family::SansSerif, Some(false)),
+            (Family::Monospace, Some(true)),
+        ] {
+            let id = fonts
+                .query(&Query {
+                    families: &[family],
+                    ..Query::default()
+                })
+                .unwrap_or_else(|| panic!("{family:?} names no installed face"));
+            assert_eq!(
+                fonts.with_face_data(id, covers_latin),
+                Some(true),
+                "{family:?} names a face that draws no Latin"
             );
+            if let Some(monospaced) = monospaced {
+                let face = fonts.face(id).expect("face");
+                assert_eq!(
+                    face.monospaced, monospaced,
+                    "{family:?} points at {}",
+                    face.families[0].0
+                );
+            }
         }
     }
 
