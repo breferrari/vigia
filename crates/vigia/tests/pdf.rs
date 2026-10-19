@@ -457,12 +457,17 @@ fn image_page(dict: &str, data: &[u8]) -> Vec<u8> {
 /// `bomb` reads "could not be decoded", within the worker's limit and what
 /// holding it costs.
 fn bounded(name: &str, bomb: &[u8]) {
-    let before = resident();
+    bounded_within(name, bomb, 384);
+}
+
+/// [`bounded`], its peak no more than `mib` above where it started.
+fn bounded_within(name: &str, bomb: &[u8], mib: u64) {
+    let before = support::peak_resident();
     let drawn = drawn(name, Some(&icon_pdf(1)), bomb);
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
-    if let (Some(before), Some(after)) = (before, resident()) {
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
-            after < before + 384,
+            after < before + mib,
             "memory went from {before} MiB to {after} MiB"
         );
     }
@@ -511,23 +516,119 @@ fn pdf_ccitt_bomb() {
     );
 }
 
-/// This process's resident memory, in MiB, where the platform says.
-fn resident() -> Option<u64> {
-    vigia::memory::resident().map(|bytes| bytes >> 20)
+/// An 8 by 8 JPEG whose header claims `side` by `side`.
+fn jpeg_claiming(side: u16) -> Vec<u8> {
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+        .encode(&[128; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)
+        .expect("a JPEG");
+    let frame = jpeg
+        .windows(2)
+        .position(|marker| marker == [0xff, 0xc0])
+        .expect("a baseline frame");
+    jpeg[frame + 5..frame + 9].copy_from_slice(&[side.to_be_bytes(), side.to_be_bytes()].concat());
+    jpeg
+}
+
+/// A JPEG 2000 codestream of one grey `side` by `side` tile with no data.
+fn jpx_claiming(side: u32) -> Vec<u8> {
+    let side = side.to_be_bytes();
+    let zero = 0u32.to_be_bytes();
+    [
+        &[0xff, 0x4f][..],
+        // The image and tile size, one 8-bit component.
+        &[0xff, 0x51, 0x00, 0x29, 0x00, 0x00],
+        &side,
+        &side,
+        &zero,
+        &zero,
+        &side,
+        &side,
+        &zero,
+        &zero,
+        &[0x00, 0x01, 0x07, 0x01, 0x01],
+        // One layer, no decomposition, 64 by 64 code blocks, reversible.
+        &[
+            0xff, 0x52, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x04, 0x04, 0x00, 0x01,
+        ],
+        &[0xff, 0x5c, 0x00, 0x04, 0x40, 0x40],
+        // One tile part, its packet empty.
+        &[
+            0xff, 0x90, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x01,
+        ],
+        &[0xff, 0x93, 0x00],
+        &[0xff, 0xd9],
+    ]
+    .concat()
+}
+
+#[test]
+fn pdf_jpx_bomb() {
+    // Refused from its header, before a sample is decoded.
+    bounded_within(
+        "pdf-jpx",
+        &image_page(
+            "/Width 8 /Height 8 /Filter /JPXDecode",
+            &jpx_claiming(11_000),
+        ),
+        128,
+    );
+}
+
+/// A JBIG2 page of `side` by `side` with nothing on it.
+fn jbig2_claiming(side: u32) -> Vec<u8> {
+    let side = side.to_be_bytes();
+    [
+        // Segment 0: page information, 19 bytes, on page 1.
+        &[0, 0, 0, 0, 48, 0, 1, 0, 0, 0, 19][..],
+        &side,
+        &side,
+        &[0; 8],
+        &[0, 0, 0],
+        // Segment 1: the end of the page.
+        &[0, 0, 0, 1, 49, 0, 1, 0, 0, 0, 0],
+    ]
+    .concat()
+}
+
+#[test]
+fn pdf_jbig2_bomb() {
+    // Refused from its page size, before a pixel is decoded.
+    bounded_within(
+        "pdf-jbig2",
+        &image_page(
+            "/Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode",
+            &jbig2_claiming(40_000),
+        ),
+        128,
+    );
+}
+
+#[test]
+fn pdf_jpeg_bomb() {
+    // Refused from its header, before a pixel is decoded.
+    bounded_within(
+        "pdf-jpeg",
+        &image_page(
+            "/Width 11500 /Height 11500 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode",
+            &jpeg_claiming(11_500),
+        ),
+        128,
+    );
 }
 
 #[test]
 fn pdf_flate_bomb_undecoded() {
     // About 7 MB of file that inflates to a gigabyte, as an image the frame
     // path skips and the worker must not decode.
-    let before = resident();
+    let before = support::peak_resident();
     let drawn = drawn(
         "pdf-flate-bomb",
         Some(&icon_pdf(1)),
         &imaged(1, (8_000, 8_000), 1 << 30),
     );
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
-    if let (Some(before), Some(after)) = (before, resident()) {
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         // The worker's limit, 256 MiB, and what holding it costs.
         assert!(
             after < before + 384,
@@ -540,14 +641,14 @@ fn pdf_flate_bomb_undecoded() {
 fn pdf_small_image_bomb() {
     // An image that claims 8 by 8 pixels and inflates to a gigabyte: only the
     // inflate itself can stop it.
-    let before = resident();
+    let before = support::peak_resident();
     let drawn = drawn(
         "pdf-small-image-bomb",
         Some(&icon_pdf(1)),
         &imaged(1, (8, 8), 1 << 30),
     );
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
-    if let (Some(before), Some(after)) = (before, resident()) {
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
             after < before + 384,
             "memory went from {before} MiB to {after} MiB"
@@ -595,7 +696,7 @@ fn pdf_large_sized_on_worker() {
 fn pdf_unread_bomb_drawn() {
     // Past what the frame path reads, an object that would inflate to a
     // gigabyte and that nothing refers to: nothing decodes it.
-    let before = resident();
+    let before = support::peak_resident();
     let mut object = format!(
         "<< /Type /ObjStm /N 1 /First 0 /Filter /FlateDecode /Length {} >>\nstream\n",
         zlib_zeros(1 << 30).len()
@@ -610,7 +711,7 @@ fn pdf_unread_bomb_drawn() {
     );
     let drawn = drawn("pdf-unread-bomb", Some(&icon_pdf(1)), &doc);
     assert!(changed(drawn.verdict), "{drawn:?}");
-    if let (Some(before), Some(after)) = (before, resident()) {
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
             after < before + 64,
             "memory went from {before} MiB to {after} MiB"
@@ -621,7 +722,7 @@ fn pdf_unread_bomb_drawn() {
 #[test]
 fn pdf_content_bomb_undecoded() {
     // A page whose content inflates to a gigabyte.
-    let before = resident();
+    let before = support::peak_resident();
     let zeros = zlib_zeros(1 << 30);
     let mut content = format!(
         "<< /Filter /FlateDecode /Length {} >>\nstream\n",
@@ -633,7 +734,7 @@ fn pdf_content_bomb_undecoded() {
     let doc = pdf_doc(&[(24, 24, b"")], "", 1, &[&content], "").replace_contents("4 0 R", "5 0 R");
     let drawn = drawn("pdf-content-bomb", Some(&icon_pdf(1)), &doc);
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
-    if let (Some(before), Some(after)) = (before, resident()) {
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
             after < before + 384,
             "memory went from {before} MiB to {after} MiB"

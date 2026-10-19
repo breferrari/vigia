@@ -201,16 +201,6 @@ impl ReplaceBytes for Vec<u8> {
     }
 }
 
-/// This process's resident memory, in MiB, where `ps` can say.
-fn resident() -> Option<u64> {
-    let out = std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-    Some(kib / 1024)
-}
-
 const GIB: u64 = 1024 * 1024 * 1024;
 
 #[test]
@@ -223,13 +213,13 @@ fn pdf_xref_stream_bomb() {
         bomb.len() < 1 << 20,
         "the bomb is past what the frame reads"
     );
-    let before = resident();
+    let before = support::peak_resident();
     let diff = changed("pdf-xref-bomb", &icon_pdf(1), &bomb);
     assert!(
         diff.picture.is_none(),
         "a PDF whose index decodes past the limit was sized"
     );
-    if let (Some(before), Some(after)) = (before, resident()) {
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         // The limit, 16 MiB, and what holding it costs.
         assert!(
             after < before + 64,
