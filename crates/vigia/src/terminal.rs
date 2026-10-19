@@ -1190,9 +1190,19 @@ mod tests {
             );
 
             for skips in ["process::exit", "process::abort", "mem::forget"] {
-                assert!(
-                    !shipped.contains(skips),
+                // One abort is the panic path's own, and it runs after the hook
+                // has restored the terminal, as `panic = "abort"` did.
+                let allowed = usize::from(name == "terminal.rs" && skips == "process::abort");
+                assert_eq!(
+                    shipped.matches(skips).count(),
+                    allowed,
                     "{name} calls {skips}, which skips the Drop that restores the terminal"
+                );
+            }
+            if name == "terminal.rs" {
+                assert!(
+                    shipped.contains("        || std::process::abort(),\n    );"),
+                    "the one abort is not the panic hook's end step"
                 );
             }
         }
