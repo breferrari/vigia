@@ -3389,3 +3389,30 @@ fn codecs_on_worker() {
         "the check no longer sees a thread pool or a native codec"
     );
 }
+
+/// How many copies of `crate_name` the lock resolves.
+fn copies_of(lock: &str, crate_name: &str) -> usize {
+    lock.split("[[package]]")
+        .filter(|block| {
+            block
+                .lines()
+                .any(|line| line == format!("name = \"{crate_name}\""))
+        })
+        .count()
+}
+
+#[test]
+fn one_skrifa() {
+    // `vigia` takes the requirement `usvg` declares, so the two unify.
+    assert_eq!(
+        copies_of(&repo_file("Cargo.lock"), "skrifa"),
+        1,
+        "vigia's skrifa and usvg's no longer resolve to one copy"
+    );
+    let split = "[[package]]\nname = \"skrifa\"\nversion = \"0.44.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.45.0\"\n";
+    assert_eq!(
+        copies_of(split, "skrifa"),
+        2,
+        "the check no longer sees a second copy"
+    );
+}

@@ -751,25 +751,37 @@ fn fonts() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
         .clone()
 }
 
-/// Point each generic family that names no installed face at one that is
-/// installed. usvg falls back to `serif`, which is Times New Roman, and a
-/// system without it would draw no text at all.
+/// Stand-ins for the faces usvg's generic families name, metric-compatible
+/// first: Times New Roman, Arial and Courier New.
+const SERIF: &[&str] = &[
+    "Liberation Serif",
+    "Tinos",
+    "Nimbus Roman",
+    "DejaVu Serif",
+    "Noto Serif",
+];
+const SANS: &[&str] = &[
+    "Liberation Sans",
+    "Arimo",
+    "Nimbus Sans",
+    "DejaVu Sans",
+    "Noto Sans",
+];
+const MONO: &[&str] = &[
+    "Liberation Mono",
+    "Cousine",
+    "Nimbus Mono PS",
+    "DejaVu Sans Mono",
+    "Noto Sans Mono",
+];
+
+/// Point `serif`, `sans-serif` and `monospace`, where one names no installed
+/// face, at one that is installed and draws Latin text. usvg falls back to
+/// `serif`, Times New Roman, so without one a label draws nothing. A cursive
+/// or fantasy label falls through to `serif`.
 fn fallback_families(fonts: &mut resvg::usvg::fontdb::Database) {
-    use resvg::usvg::fontdb::{Family, Query};
-    let mut names: Vec<String> = fonts
-        .faces()
-        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
-        .collect();
-    names.sort();
-    names.dedup();
-    let pick = |wants: &dyn Fn(&str) -> bool| {
-        names
-            .iter()
-            .find(|name| wants(name))
-            .or(names.first())
-            .cloned()
-    };
-    let missing = |fonts: &resvg::usvg::fontdb::Database, family: Family| {
+    use resvg::usvg::fontdb::{Database, Family, Query};
+    let missing = |fonts: &Database, family: Family| {
         fonts
             .query(&Query {
                 families: &[family],
@@ -777,31 +789,101 @@ fn fallback_families(fonts: &mut resvg::usvg::fontdb::Database) {
             })
             .is_none()
     };
-    if missing(fonts, Family::Serif)
-        && let Some(name) = pick(&|name| name.contains("Serif") && !name.contains("Sans"))
-    {
-        fonts.set_serif_family(name);
+    let wanted: [Generic; 3] = [
+        (
+            Family::Serif,
+            SERIF,
+            |face| face.name.contains("Serif") && !face.name.contains("Sans"),
+            |fonts, name| fonts.set_serif_family(name),
+        ),
+        (
+            Family::SansSerif,
+            SANS,
+            |face| face.name.contains("Sans") && !face.monospaced,
+            |fonts, name| fonts.set_sans_serif_family(name),
+        ),
+        (
+            Family::Monospace,
+            MONO,
+            |face| face.monospaced,
+            |fonts, name| fonts.set_monospace_family(name),
+        ),
+    ];
+    for (family, known, hinted, set) in wanted {
+        if !missing(fonts, family) {
+            continue;
+        }
+        let faces = faces_of(fonts);
+        let latin = |face: &FaceInfo| fonts.with_face_data(face.id, covers_latin).unwrap_or(false);
+        if let Some(name) = fallback(&faces, known, hinted, latin) {
+            set(fonts, name);
+        }
     }
-    if missing(fonts, Family::SansSerif)
-        && let Some(name) = pick(&|name| name.contains("Sans") && !name.contains("Mono"))
-    {
-        fonts.set_sans_serif_family(name);
-    }
-    if missing(fonts, Family::Monospace)
-        && let Some(name) = pick(&|name| name.contains("Mono"))
-    {
-        fonts.set_monospace_family(name);
-    }
-    if missing(fonts, Family::Cursive)
-        && let Some(name) = pick(&|_| false)
-    {
-        fonts.set_cursive_family(name);
-    }
-    if missing(fonts, Family::Fantasy)
-        && let Some(name) = pick(&|_| false)
-    {
-        fonts.set_fantasy_family(name);
-    }
+}
+
+/// A generic family, its known stand-ins, the faces its name hints at, and
+/// how to point it.
+type Generic = (
+    resvg::usvg::fontdb::Family<'static>,
+    &'static [&'static str],
+    fn(&FaceInfo) -> bool,
+    fn(&mut resvg::usvg::fontdb::Database, String),
+);
+
+/// What choosing a fallback reads of one installed face.
+struct FaceInfo {
+    id: resvg::usvg::fontdb::ID,
+    name: String,
+    monospaced: bool,
+}
+
+/// Every installed face, sorted by name.
+fn faces_of(fonts: &resvg::usvg::fontdb::Database) -> Vec<FaceInfo> {
+    let mut faces: Vec<FaceInfo> = fonts
+        .faces()
+        .filter_map(|face| {
+            Some(FaceInfo {
+                id: face.id,
+                name: face.families.first()?.0.clone(),
+                monospaced: face.monospaced,
+            })
+        })
+        .collect();
+    faces.sort_by(|a, b| a.name.cmp(&b.name));
+    faces
+}
+
+/// The face to fall back to: the first of `known` installed, else one that
+/// `hinted` picks, else any. Only a face `latin` passes is taken, and it is
+/// read only when reached.
+fn fallback(
+    faces: &[FaceInfo],
+    known: &[&str],
+    hinted: impl Fn(&FaceInfo) -> bool,
+    latin: impl Fn(&FaceInfo) -> bool,
+) -> Option<String> {
+    let by_name = known
+        .iter()
+        .flat_map(|name| faces.iter().filter(move |face| face.name == *name));
+    by_name
+        .chain(faces.iter().filter(|face| hinted(face)))
+        .chain(faces.iter())
+        .find(|face| latin(face))
+        .map(|face| face.name.clone())
+}
+
+/// Whether the face at `index` in `data` has a glyph for every ASCII letter
+/// and digit.
+fn covers_latin(data: &[u8], index: u32) -> bool {
+    use skrifa::MetadataProvider;
+    let Ok(font) = skrifa::FontRef::from_index(data, index) else {
+        return false;
+    };
+    let charmap = font.charmap();
+    ('a'..='z')
+        .chain('A'..='Z')
+        .chain('0'..='9')
+        .all(|ch| charmap.map(ch).is_some())
 }
 
 /// The most encoded bytes one SVG's embedded images may hold, every `<use>`
@@ -1320,6 +1402,81 @@ mod tests {
             found.is_some(),
             "serif names no installed face, so a label draws nothing"
         );
+    }
+
+    fn face(name: &str, monospaced: bool) -> FaceInfo {
+        FaceInfo {
+            id: resvg::usvg::fontdb::ID::dummy(),
+            name: name.to_owned(),
+            monospaced,
+        }
+    }
+
+    #[test]
+    fn fallback_draws_latin() {
+        let faces = [
+            face("Abyssinica SIL", false),
+            face("Noto Sans Symbols", false),
+            face("Ubuntu Sans", false),
+        ];
+        let latin =
+            |face: &FaceInfo| face.name != "Noto Sans Symbols" && face.name != "Abyssinica SIL";
+        let sans = |face: &FaceInfo| face.name.contains("Sans") && !face.monospaced;
+        assert_eq!(
+            fallback(&faces, SANS, sans, latin).as_deref(),
+            Some("Ubuntu Sans"),
+            "a face with no Latin glyphs was chosen, so a label draws nothing"
+        );
+        assert_eq!(
+            fallback(&faces[..2], SANS, sans, latin),
+            None,
+            "a face with no Latin glyphs was chosen as the last resort"
+        );
+    }
+
+    #[test]
+    fn fallback_prefers_known() {
+        let faces = [
+            face("DejaVu Serif", false),
+            face("Liberation Serif", false),
+            face("Monoton", false),
+            face("Noto Sans Mono", true),
+        ];
+        let serif = |face: &FaceInfo| face.name.contains("Serif") && !face.name.contains("Sans");
+        assert_eq!(
+            fallback(&faces, SERIF, serif, |_| true).as_deref(),
+            Some("Liberation Serif"),
+            "Times New Roman's metric stand-in was passed over"
+        );
+        assert_eq!(
+            fallback(
+                &faces[2..],
+                &[],
+                |face: &FaceInfo| face.monospaced,
+                |_| true
+            )
+            .as_deref(),
+            Some("Noto Sans Mono"),
+            "monospace fell back to a face that is not monospaced"
+        );
+    }
+
+    #[test]
+    fn latin_coverage_read() {
+        assert!(
+            !covers_latin(b"not a font", 0),
+            "garbage read as a Latin face"
+        );
+        let mut fonts = resvg::usvg::fontdb::Database::new();
+        fonts.load_system_fonts();
+        let any = fonts
+            .faces()
+            .any(|face| fonts.with_face_data(face.id, covers_latin).unwrap_or(false));
+        if fonts.is_empty() {
+            eprintln!("note: this system has no fonts, so the coverage test proves less here");
+            return;
+        }
+        assert!(any, "no installed face reads as covering Latin");
     }
 
     fn side(width: u32, height: u32) -> ImageSide {
