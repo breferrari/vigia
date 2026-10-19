@@ -399,7 +399,7 @@ pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
 
 /// How long the picture query waits for the terminal's status answer, which
 /// ends it. On Unix it asks only a terminal that answered the background query,
-/// so it gives it [`ANSWERING`], the wait a palette answer that has begun gets.
+/// so it gives it `ANSWERING`, the wait a palette answer that has begun gets.
 /// Windows asks blind, so it waits the background query's first wait.
 pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
     ANSWERING
