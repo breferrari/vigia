@@ -208,6 +208,12 @@ pub(crate) fn side_of(
     bytes: u64,
     named: Option<Format>,
 ) -> Option<ImageSide> {
+    // A header an agent wrote must not be able to close the pane.
+    crate::caught(|| header_of(source, bytes, named)).flatten()
+}
+
+fn header_of(source: impl BufRead + Seek, bytes: u64, named: Option<Format>) -> Option<ImageSide> {
+    crate::armed(crate::Stage::Header);
     let mut reader = image::ImageReader::new(source).with_guessed_format().ok()?;
     if reader.format().is_none() && named == Some(Format::Tga) {
         reader.set_format(image::ImageFormat::Tga);

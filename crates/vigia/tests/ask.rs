@@ -193,6 +193,7 @@ fn asked(ask: Ask) -> String {
             delay: Duration::ZERO,
             piped: ask.piped,
             detached: ask.detached,
+            quiet: false,
         },
     )
 }

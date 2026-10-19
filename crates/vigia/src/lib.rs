@@ -83,7 +83,7 @@ pub use render::{
 pub use state::state_root;
 pub use terminal::{
     ANSWERING, BACKGROUND_WAIT, Background, Colours, PICTURES_WAIT, Screen, Session, ask,
-    background_of, colours_of, install_panic_hook, picker,
+    background_of, colours_of, install_abort_hook, install_panic_hook, picker,
 };
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};

@@ -23,6 +23,8 @@ pub struct Script<'a> {
     /// The child has the terminal on stdio but not as its controlling
     /// terminal, so `/dev/tty` does not open.
     pub detached: bool,
+    /// The child's stderr goes nowhere, so the terminal shows stdout alone.
+    pub quiet: bool,
 }
 
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
@@ -55,7 +57,11 @@ pub fn start(mut command: Command, script: &Script<'_>) -> (Reaped, File) {
     let (terminal, slave) = open();
     command
         .stdout(Stdio::from(slave.try_clone().expect("dup")))
-        .stderr(Stdio::from(slave.try_clone().expect("dup")));
+        .stderr(if script.quiet {
+            Stdio::null()
+        } else {
+            Stdio::from(slave.try_clone().expect("dup"))
+        });
     if script.piped {
         command.stdin(Stdio::null());
     } else {
@@ -123,14 +129,32 @@ fn open() -> (File, OwnedFd) {
 pub struct Reaped(Child);
 
 impl Reaped {
-    /// How the child ended, waiting up to `limit`.
-    pub fn status(&mut self, limit: Duration) -> Option<std::process::ExitStatus> {
+    /// How the child ended, waiting up to `limit` and reading `master` into
+    /// `seen` meanwhile: a child exiting on a terminal waits for its output to
+    /// be read.
+    pub fn finish(
+        &mut self,
+        master: &mut File,
+        seen: &mut Vec<u8>,
+        limit: Duration,
+    ) -> Option<std::process::ExitStatus> {
         let until = Instant::now() + limit;
         while Instant::now() < until {
             if let Ok(Some(status)) = self.0.try_wait() {
                 return Some(status);
             }
-            std::thread::sleep(Duration::from_millis(10));
+            let mut fds = libc::pollfd {
+                fd: master.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: one valid pollfd.
+            if unsafe { libc::poll(&mut fds, 1, 10) } > 0 {
+                let mut buffer = [0u8; 4096];
+                if let Ok(read) = master.read(&mut buffer) {
+                    seen.extend_from_slice(&buffer[..read]);
+                }
+            }
         }
         None
     }

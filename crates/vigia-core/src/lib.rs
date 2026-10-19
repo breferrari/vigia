@@ -26,6 +26,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod catch;
 mod change;
 mod emphasis;
 mod error;
@@ -43,6 +44,7 @@ mod timing;
 mod watch;
 mod worktree;
 
+pub use catch::{Stage, armed, catching, caught, panic_next};
 pub use change::{ChangeKind, FileChange, Origin};
 pub use emphasis::{Emphasis, mark};
 pub use error::{Error, Result};

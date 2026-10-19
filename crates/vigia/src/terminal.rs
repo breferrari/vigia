@@ -193,11 +193,7 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
 
 /// Chain a restore onto the panic hook, once per process.
 fn install_hook() {
-    install_hook_in(
-        &HOOK,
-        || restore_everything(&mut Crossterm::on_stdout()),
-        || std::process::abort(),
-    );
+    install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
 }
 
 /// Give back the whole of [`TAKEOVER`], whatever was actually taken.
@@ -205,25 +201,34 @@ fn restore_everything<C: Console>(console: &mut C) {
     give_back_all(console, TAKEOVER.len());
 }
 
-/// Chain `restore` and then `end` onto the panic hook, at most once per `once`.
-/// The picture worker's panics are left to its own catch.
-fn install_hook_in(
-    once: &Once,
-    restore: impl Fn() + Send + Sync + 'static,
-    end: impl Fn() + Send + Sync + 'static,
-) {
+/// Chain `restore` onto the panic hook, at most once per `once`. A panic a
+/// picture's catch is waiting for is left to it.
+fn install_hook_in(once: &Once, restore: impl Fn() + Send + Sync + 'static) {
     once.call_once(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if std::thread::current().name() == Some(crate::pictures::WORKER) {
+            if vigia_core::catching() {
                 return;
             }
             on_panic(&restore, &previous, info);
-            // The release build unwinds for the worker's sake. Anywhere else
-            // a thread that died quietly would leave a pane that looks alive.
-            end();
         }));
     });
+}
+
+/// The panic hook every mode starts with: report the panic, then end the
+/// process, unless a picture's catch is waiting for it. The release build
+/// unwinds only for those catches; a thread that died quietly would leave a
+/// process that looks alive. It writes nothing to stdout, which `vigia mcp`
+/// speaks JSON on.
+pub fn install_abort_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if vigia_core::catching() {
+            return;
+        }
+        previous(info);
+        std::process::abort();
+    }));
 }
 
 /// The panic hook `run` installs, for a test that needs it in a child.
@@ -911,15 +916,11 @@ mod tests {
         let once = Once::new();
         for _ in 0..2 {
             let restores = Arc::clone(&restores);
-            install_hook_in(
-                &once,
-                move || {
-                    if std::thread::current().id() == me {
-                        *restores.lock().expect("count") += 1;
-                    }
-                },
-                || {},
-            );
+            install_hook_in(&once, move || {
+                if std::thread::current().id() == me {
+                    *restores.lock().expect("count") += 1;
+                }
+            });
         }
 
         let panicked = std::panic::catch_unwind(|| panic!("on purpose")).is_err();
@@ -1190,8 +1191,8 @@ mod tests {
             );
 
             for skips in ["process::exit", "process::abort", "mem::forget"] {
-                // One abort is the panic path's own, and it runs after the hook
-                // has restored the terminal, as `panic = "abort"` did.
+                // One abort is the base panic hook's, which the pane's hook runs
+                // only after it has restored the terminal.
                 let allowed = usize::from(name == "terminal.rs" && skips == "process::abort");
                 assert_eq!(
                     shipped.matches(skips).count(),
@@ -1200,15 +1201,14 @@ mod tests {
                 );
             }
             if name == "terminal.rs" {
+                let hook = shipped
+                    .split("pub fn install_abort_hook()")
+                    .nth(1)
+                    .and_then(|rest| rest.split("\n}\n").next())
+                    .expect("install_abort_hook");
                 assert!(
-                    shipped.contains("        || std::process::abort(),\n    );"),
-                    "the one abort is not the panic hook's end step"
-                );
-                let restore = shipped.find("on_panic(&restore, &previous, info);");
-                let end = shipped.find("            end();");
-                assert!(
-                    matches!((restore, end), (Some(restore), Some(end)) if restore < end),
-                    "the panic hook does not restore the terminal before its end step"
+                    hook.contains("process::abort"),
+                    "the one abort is not in the base panic hook"
                 );
             }
         }
