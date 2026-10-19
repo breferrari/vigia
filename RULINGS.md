@@ -546,7 +546,7 @@ Two failures acquitted a short tail of real work. Credit transfer let the off-CP
 
 **What remains.** On Windows a short real stall, under twenty ticks of breaching wall time, still fails closed. That is the one case the coarse clock cannot resolve.
 
-## #645 — a decoder panic, and the two ways not taken
+## #645 — decoder panic
 
 Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose decoder panics used to abort the process, because the release profile set `panic = "abort"` and the picture worker decodes whatever bytes an agent writes. The rust-fuzz trophy case lists past `image` panics found by fuzzing, and a truncated write in the middle of an edit is ordinary input here. The ruling is to unwind, catch the panic on the worker, and keep aborting everywhere else (SPEC §11.1).
 
@@ -554,5 +554,5 @@ Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose de
 
 **Accepting the risk was not taken.** It is free, and it leaves a pane meant to run for days with nothing pressed able to close on ordinary agent output.
 
-**What unwinding costs, measured 2026-10-19 on cbece20, release, macOS aarch64:** 14,553,056 bytes against 16,976,000, +2,422,944 (+16.6%).
+**What unwinding costs, measured 2026-10-19 on cbece20, release, macOS aarch64:** 14,553,056 bytes against 16,976,000, +2,422,944 (+16.6%). User-facing: a malformed image that crashes its decoder no longer closes the pane.
 
