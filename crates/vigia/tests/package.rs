@@ -1652,6 +1652,16 @@ fn change_class_decides() {
             "docs",
         ),
         (".claude/scripts/mutate.mjs\n", "full"),
+        // #651's three prose paths, which once ran the whole matrix.
+        (
+            ".claude/take-next/rules.md\nCONTRIBUTING.md\nROADMAP.md\n",
+            "docs",
+        ),
+        (
+            "docs/research/318-drawing-vocabulary.md\ndocs/research/assets/321-washes.png\n",
+            "docs",
+        ),
+        ("docs/research/assets/probe.py\n", "full"),
         (
             ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
             "docs",
