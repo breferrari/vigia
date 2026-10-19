@@ -402,13 +402,13 @@ pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
 pub const PICTURES_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Ask the terminal which image protocol it draws and its cell size in pixels,
-/// through `ratatui-image`'s own query. `asked` is false when the background
+/// through `ratatui-image`'s own query. `answered` is false when the background
 /// query went unanswered, which on Unix skips this one: a terminal that answers
 /// nothing would cost a second wait. Windows sends no other query, so it always
 /// asks.
-pub fn picker(asked: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
+pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
     use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
-    if cfg!(unix) && !asked {
+    if cfg!(unix) && !answered {
         return (Picker::halfblocks(), crate::pictures::Answer::default());
     }
     let options = QueryStdioOptions {

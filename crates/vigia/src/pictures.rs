@@ -714,12 +714,11 @@ fn pixels_of(slot: Slot, (width, height): (u32, u32), picker: &Picker) -> (u32, 
         u32::from(slot.width) * u32::from(font.width),
         u32::from(slot.rows) * u32::from(font.height),
     );
-    // The side that binds is the room exactly, so the crate's own fit sees a
-    // whole number of cells and does not resize again.
-    // `side` scaled by `to / by`, at most `cap`.
     let scaled = |side: u32, to: u32, by: u32, cap: u32| {
         ((u64::from(side) * u64::from(to) / u64::from(by)) as u32).clamp(1, cap)
     };
+    // The side that binds is the room exactly, so the crate's own fit sees a
+    // whole number of cells and does not resize again.
     if u64::from(room.0) * u64::from(height) <= u64::from(room.1) * u64::from(width) {
         (room.0, scaled(height, room.0, width, room.1))
     } else {

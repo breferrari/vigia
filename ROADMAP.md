@@ -333,7 +333,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ⬜ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ⬜ | Decoder panic stops the pane. **Found by review on #643** | [#645](https://github.com/breferrari/vigia/issues/645) |
-| ⬜ | Background query blocks on macOS. **Found while building #635** | [#646](https://github.com/breferrari/vigia/issues/646) |
+| ⬜ | macOS background query blocks. **Found while building #635** | [#646](https://github.com/breferrari/vigia/issues/646) |
 
 ## Phase 10 — current Rust
 

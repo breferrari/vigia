@@ -65,6 +65,17 @@ fn kitty_answer_read() {
     );
 }
 
+#[test]
+fn status_only_halfblocks() {
+    let text = asked_in_pty(Some(b"\x1b[0n"));
+    assert!(text.contains("got z"), "the typed byte was eaten: {text}");
+    let line = asked_line(&text);
+    assert!(
+        line.contains("Halfblocks") && line.contains("cell: false"),
+        "a terminal that answered only its status chose a protocol: {line}"
+    );
+}
+
 fn asked_line(text: &str) -> &str {
     text.lines()
         .find(|line| line.contains("asked "))

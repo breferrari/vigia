@@ -2,7 +2,7 @@
 
 Everything `vigia` reads to decide how the pane is drawn and what it opens as. Nothing here is required: the defaults are what the pane ships with, and the [README](../README.md) covers the two settings most people ever touch.
 
-Three independent settings decide how the pane is **drawn**, and most confusion here comes from reading any two as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three must allow a thing before it appears. **Pictures** is how a changed image is drawn. Another decides what the pane **starts as**, and a fifth is not about drawing at all.
+Three independent settings decide how the pane is **drawn**, and most confusion here comes from reading any two as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three must allow a thing before it appears. A fourth, **pictures**, is how a changed image is drawn. A fifth decides what the pane **starts as**, and a sixth is not about drawing at all.
 
 | | First answer wins |
 |---|---|
