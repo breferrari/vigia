@@ -1992,3 +1992,57 @@ fn shrink_under_step() {
         "the diff shrank under a stepped top and the screen was left short"
     );
 }
+
+#[test]
+fn page_up_span() {
+    // Three files of different spans, so a top the page up moves out of the first
+    // file is clamped against the wrong one if the bar keeps the first one's span.
+    let height = body();
+    let scratch = Scratch::new("scroll-note-span");
+    scratch.write("a.rs", "a0\n");
+    scratch.write("b.rs", "b0\nb1\nb2\n");
+    scratch.write("c.rs", "c0\n");
+    scratch.commit_all("base");
+    scratch.write("a.rs", "A0\n");
+    scratch.write("b.rs", "B0\nB1\nB2\n");
+    scratch.write("c.rs", "C0\n");
+    let mut app = App::new();
+    app.set_notes(vec![vigia_core::Note {
+        id: "span".to_owned(),
+        path: "b.rs".to_owned(),
+        side: vigia_core::Side::New,
+        line: 3,
+        text: "B2".to_owned(),
+        first: None,
+        body: (0..height * 2)
+            .map(|row| format!("row {row}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        status: vigia_core::Status::Open,
+        reply: None,
+        written: std::time::SystemTime::now(),
+    }]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(2));
+    let up = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(-1));
+    assert_eq!(
+        (up.top.file, up.top.row),
+        (1, 7),
+        "the page up did not open inside the second file's note: {:?}",
+        up.top
+    );
+    assert!(
+        up.top.under > 0,
+        "the page up opened on the noted line itself"
+    );
+    // The first file's block is its heading, hunk header, two lines and the gap.
+    assert_eq!(
+        up.rows_above,
+        5 + 7,
+        "the bar clamped the second file's row against the first file's span"
+    );
+}
