@@ -485,7 +485,19 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
 
 **Phase 8 — look and feel.** Layout, colour, keys and chrome. It comes after distribution on purpose: the minimal real thing ships first, and polish lands as post-release momentum guided by the real-use evidence rather than ahead of it. **Missing from this list until 2026-08-09**, when [#12](https://github.com/breferrari/vigia/issues/12) corrected the README's phase table and found the same gap here. That is the drift the parenthetical below already records, one phase later: this section is the shape and `ROADMAP.md` is the authority on numbering, so a phase that exists there and not here means this file is behind again.
 
-**The Shelf** (milestone `Shelf`, titled "Phase 5" until 2026-08-06): work found mid-phase and consciously shelved, taken only by deliberate choice, never "next". It holds no place in the sequence at all. That is why the phase number was retired: a number claims a place.
+**Phase 9 — pictures.** A changed image, SVG or PDF shows what changed, in any terminal, without the pane stopping being a monitor. Ships in 1.2.0.
+
+**Phase 10 — current Rust.** The code uses what the latest stable Rust offers, where that is simpler, faster or more exact. Ships in 1.2.0.
+
+**Phase 11 — off the paint.** Work whose cost grows with a file's or the repository's size moves off the frame path, and every number is measured on a real repository. Ships in 1.3.0.
+
+**Phase 12 — correct at the edges.** Every file, path, terminal, theme and note a reader meets is drawn and reported right. Ships in 1.4.0.
+
+**Phase 13 — testable by construction.** Every gesture, table and status seam can be tested and is derived rather than audited. Internal.
+
+**Phase 14 — the instruments.** The take-order, the workflow gates and publishing hold by mechanism, not by reading. Internal.
+
+**There is no shelf.** The milestone `Shelf` (titled "Phase 5" until 2026-08-06) held work found mid-phase and taken only by deliberate choice. It is closed, and every open item on it sits in Phases 11 to 14, so the take-order reaches all of it. *Ruled 2026-10-19, reader.* User-facing: none.
 
 *(This list said "Phase 4 — distribution, Phase 5 — deferred items" until 2026-08-05, a whole phase-numbering behind the roadmap it defers to. The pre-flight cannot see this file's own phase prose, because it compares invariant tokens and milestone titles. So the drift sat here across two renumberings. This section is the shape. `ROADMAP.md` is the state and the authority on numbering.)*
 
