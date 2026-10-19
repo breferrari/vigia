@@ -327,13 +327,13 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ✅ | Image size line | [#633](https://github.com/breferrari/vigia/issues/633) |
 | ✅ | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
 | ✅ | Real-pixel image protocols | [#635](https://github.com/breferrari/vigia/issues/635) |
+| 🔨 | macOS background query blocks. **Found while building #635; first, because every macOS start in a silent terminal waits for a key** | [#646](https://github.com/breferrari/vigia/issues/646) |
+| ⬜ | Decoder panic stops the pane. **Found by review on #643; before #637 and #638, which each add a decoder** | [#645](https://github.com/breferrari/vigia/issues/645) |
 | ⬜ | SVG image panels | [#637](https://github.com/breferrari/vigia/issues/637) |
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ⬜ | LFS fetch leaves binary. **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ⬜ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
-| ⬜ | Decoder panic stops the pane. **Found by review on #643** | [#645](https://github.com/breferrari/vigia/issues/645) |
-| ⬜ | macOS background query blocks. **Found while building #635** | [#646](https://github.com/breferrari/vigia/issues/646) |
 | ⬜ | Kitty image lost on reattach. **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
 | ⬜ | Cell size fixed at startup. **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
 
