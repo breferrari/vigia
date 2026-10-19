@@ -111,14 +111,19 @@ pub fn animated_gif(frames: &[image::RgbaImage]) -> Vec<u8> {
 }
 
 /// A PNG whose chunks are whole, checksums included, and whose compressed
-/// pixel data is garbled, so its header reads and its pixels do not. The
-/// fixture's sizes fit one data chunk.
+/// pixel data is garbled, so its header reads and its pixels do not. Only a
+/// size whose pixels fit one data chunk is taken.
 pub fn corrupt_png(width: u32, height: u32, seed: u8) -> Vec<u8> {
     let mut bytes = png(width, height, seed);
     let at = bytes
         .windows(4)
         .position(|window| window == b"IDAT")
         .expect("a PNG has pixel data");
+    assert_eq!(
+        bytes.windows(4).filter(|window| *window == b"IDAT").count(),
+        1,
+        "a {width}x{height} PNG spans several data chunks, and only one is garbled"
+    );
     let length = u32::from_be_bytes(bytes[at - 4..at].try_into().expect("four bytes")) as usize;
     for byte in &mut bytes[at + 4..at + 4 + length] {
         *byte ^= 0x5a;

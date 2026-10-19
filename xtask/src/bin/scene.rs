@@ -32,7 +32,13 @@ fn main() -> ExitCode {
         eprintln!("scene: no `git` on PATH, and the bed is a git repository");
         return ExitCode::FAILURE;
     }
-    let dir = fresh_dir();
+    let dir = match fresh_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("scene: cannot make a directory under the temp dir: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let scene = Scene::new(&dir);
     scene.baseline();
     println!("vigia {}", dir.display());
@@ -40,7 +46,9 @@ fn main() -> ExitCode {
     if replay {
         println!("Start vigia there, then press Enter to begin.");
         let mut enter = String::new();
-        let _ = std::io::stdin().read_line(&mut enter);
+        if !matches!(std::io::stdin().read_line(&mut enter), Ok(read) if read > 0) {
+            println!("(stdin is closed, so it begins now)");
+        }
         scene.replay(1.0, |line| println!("{line}"));
     } else {
         scene.changes();
@@ -52,7 +60,7 @@ fn main() -> ExitCode {
 }
 
 /// A directory under the system temp dir that did not exist before.
-fn fresh_dir() -> PathBuf {
+fn fresh_dir() -> std::io::Result<PathBuf> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
@@ -60,9 +68,9 @@ fn fresh_dir() -> PathBuf {
     for n in 0.. {
         let dir = base.join(format!("vigia-scene-{}-{stamp}-{n}", std::process::id()));
         match std::fs::create_dir(&dir) {
-            Ok(()) => return dir,
+            Ok(()) => return Ok(dir),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => panic!("scene: cannot make {}: {error}", dir.display()),
+            Err(error) => return Err(error),
         }
     }
     unreachable!("the counter does not end")
@@ -304,10 +312,7 @@ impl Scene {
             self.write(&raster.file("resized"), assets::encoded(format, 48, 32, 30));
             self.write(&raster.file("before"), assets::encoded(format, 96, 64, 40));
         }
-        self.write(
-            "png/one-pixel.png",
-            assets::encoded(ImageFormat::Png, 96, 64, 50),
-        );
+        self.write("png/one-pixel.png", assets::png(96, 64, 50));
         self.write(
             "png/profile.png",
             assets::profiled_png(96, 64, 60, b"profile one"),
@@ -373,10 +378,7 @@ impl Scene {
         self.write("broken/truncated-header.png", &whole[..20]);
         self.write("broken/corrupt.png", assets::corrupt_png(48, 32, 81));
         self.write("broken/too-large.png", assets::claimed_png(20_000, 20_000));
-        self.write(
-            "lfs/pointer.png",
-            assets::encoded(ImageFormat::Png, 96, 64, 0xcd),
-        );
+        self.write("lfs/pointer.png", assets::png(96, 64, 0xcd));
         self.write("bin/blob.dat", blob(2));
         self.write("svg/icon.svg", assets::icon_svg(2));
         self.write("svg/label.svg", assets::labelled_svg("Load"));
@@ -394,10 +396,7 @@ impl Scene {
         }
         pause(3.0);
         say("png/modified.png rewritten");
-        self.write(
-            "png/modified.png",
-            assets::encoded(ImageFormat::Png, 96, 64, 25),
-        );
+        self.write("png/modified.png", assets::png(96, 64, 25));
         pause(3.0);
         say("svg/new.svg added");
         self.write("svg/new.svg", assets::icon_svg(4));
@@ -437,12 +436,17 @@ mod tests {
         added: u32,
     }
 
-    /// A scene's directory, removed when the test ends, passing or not.
+    /// A scene's directory, removed when its test passes and kept when it
+    /// fails.
     struct Cleaned(PathBuf);
 
     impl Drop for Cleaned {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            if std::thread::panicking() {
+                eprintln!("the scene is kept for a look: {}", self.0.display());
+            } else {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
         }
     }
 
@@ -454,7 +458,7 @@ mod tests {
     }
 
     fn cleaned() -> Cleaned {
-        Cleaned(fresh_dir())
+        Cleaned(fresh_dir().expect("a scene directory"))
     }
 
     /// The static scene, built in a fresh directory.
@@ -875,29 +879,29 @@ mod tests {
     #[test]
     fn scene_temp_only() {
         let dir = cleaned();
-        assert!(
-            dir.starts_with(std::env::temp_dir()),
-            "{} is not under the temp dir",
-            dir.display()
-        );
         let scene = Scene::new(&dir);
-        for escape in [
-            "../outside.txt",
-            "/etc/outside.txt",
-            "png/../../outside.txt",
-        ] {
-            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                scene.write(escape, "x");
-            }));
-            assert!(refused.is_err(), "{escape} was written");
-            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                scene.remove(escape);
-            }));
-            assert!(refused.is_err(), "{escape} was removed");
-            assert!(
-                !dir.join(escape).exists(),
-                "{escape} exists after its write was refused"
-            );
+        // A real file beside the scene, which no escape may write or remove.
+        let name = format!(
+            "{}-outside.txt",
+            dir.file_name().expect("a name").to_string_lossy()
+        );
+        let outside = dir.parent().expect("under the temp dir").join(&name);
+        std::fs::write(&outside, "kept").expect("write beside the scene");
+        let absolute = outside.to_string_lossy().into_owned();
+        for escape in [format!("../{name}"), format!("png/../../{name}"), absolute] {
+            for (verb, touch) in [
+                ("written", &(|| scene.write(&escape, "x")) as &dyn Fn()),
+                ("removed", &|| scene.remove(&escape)),
+            ] {
+                let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(touch));
+                assert!(refused.is_err(), "{escape} was {verb}");
+                assert_eq!(
+                    std::fs::read_to_string(&outside).ok().as_deref(),
+                    Some("kept"),
+                    "{escape} was {verb}"
+                );
+            }
         }
+        let _ = std::fs::remove_file(&outside);
     }
 }
