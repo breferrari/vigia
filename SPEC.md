@@ -349,7 +349,7 @@ A `stat` on its own is not proof. The gap is the one git calls *racily clean*: `
 
 **The rule that closes it has to account for flooring.** A filesystem stamps a modification time by truncating the current time to its own granularity. So a write that lands *after* a read can record a time *before* it. "Older than the read" therefore proves nothing, because the granule can still be open. Measured on NTFS, that mistake serves a stale diff on about one same-length rewrite in four hundred, and on a 1s-granule volume it would go wrong on most of them. So a fingerprint is trusted only once a **full granule** passes between the stamp and the read. The margin is a constant that must be an upper bound on real granularity: **2 seconds**, since FAT and exFAT quantise to 2s and HFS+ to 1s, where NTFS, ext4 and APFS are milliseconds or finer. That trades redundant diffs of files written in the last two seconds, which are files that just changed, for never showing a stale one. **It is a table lookup rather than a measurement because measuring the right filesystem would need a probe write.** §11.1 carries "the monitor writes nothing" as a rule rather than as an accident of what this code happens to do. The whole case for the margin rests on that rule, so the two have to be one decision.
 
-**What it still cannot see** is a writer that restores a modification time it did not advance: `cp -p`, `rsync -t`, `unzip`, `touch -r`. Git carries the inode change time to catch those. `std` exposes no equivalent on Windows, so closing the gap is a dependency decision rather than an implementation detail. It is tracked on the deferral shelf and not assumed away.
+**What it still cannot see** is a writer that restores a modification time it did not advance: `cp -p`, `rsync -t`, `unzip`, `touch -r`. Git carries the inode change time to catch those. `std` exposes no equivalent on Windows, so closing the gap is a dependency decision rather than an implementation detail. It is tracked by [#16](https://github.com/breferrari/vigia/issues/16) and not assumed away.
 
 **And it assumes the local clock stamps the modification time.** The margin compares a filesystem timestamp against the clock of this process. On a network filesystem the skew of the server subtracts directly from the margin: a server two seconds behind consumes the whole margin, and the flooring problem returns. Local worktrees are unaffected, and a monitor beside an agent watches local worktrees.
 
@@ -485,19 +485,19 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
 
 **Phase 8 — look and feel.** Layout, colour, keys and chrome. It comes after distribution on purpose: the minimal real thing ships first, and polish lands as post-release momentum guided by the real-use evidence rather than ahead of it. **Missing from this list until 2026-08-09**, when [#12](https://github.com/breferrari/vigia/issues/12) corrected the README's phase table and found the same gap here. That is the drift the parenthetical below already records, one phase later: this section is the shape and `ROADMAP.md` is the authority on numbering, so a phase that exists there and not here means this file is behind again.
 
-**Phase 9 — pictures.** A changed image, SVG or PDF shows what changed, in any terminal, without the pane stopping being a monitor. Ships in 1.2.0.
+**Phase 9 — pictures.** A changed image, SVG or PDF shows what changed, in any terminal, without the pane stopping being a monitor.
 
-**Phase 10 — current Rust.** The code uses what the latest stable Rust offers, where that is simpler, faster or more exact. Ships in 1.2.0.
+**Phase 10 — current Rust.** The code uses what the latest stable Rust offers, where that is simpler, faster or more exact.
 
-**Phase 11 — off the paint.** Work whose cost grows with a file's or the repository's size moves off the frame path, and every number is measured on a real repository. Ships in 1.3.0.
+**Phase 11 — off the paint.** Work whose cost grows with a file's or the repository's size moves off the frame path, and every number is measured on a real repository.
 
-**Phase 12 — correct at the edges.** Every file, path, terminal, theme and note a reader meets is drawn and reported right. Ships in 1.4.0.
+**Phase 12 — correct at the edges.** Every file, path, terminal, theme and note a reader meets is drawn and reported right.
 
-**Phase 13 — testable by construction.** Every gesture, table and status seam can be tested and is derived rather than audited. Internal.
+**Phase 13 — testable by construction.** Every gesture, table and status seam can be tested and is derived rather than audited.
 
-**Phase 14 — the instruments.** The take-order, the workflow gates and publishing hold by mechanism, not by reading. Internal.
+**Phase 14 — the instruments.** The take-order, the workflow gates and publishing hold by mechanism, not by reading.
 
-**There is no shelf.** The milestone `Shelf` (titled "Phase 5" until 2026-08-06) held work found mid-phase and taken only by deliberate choice. It is closed, and every open item on it sits in Phases 11 to 14, so the take-order reaches all of it. *Ruled 2026-10-19, reader.* User-facing: none.
+**Every open issue sits in a phase**, so the take-order reaches all of it. `ROADMAP.md` says which release ships each phase. *Ruled 2026-10-19, reader.* User-facing: none.
 
 *(This list said "Phase 4 — distribution, Phase 5 — deferred items" until 2026-08-05, a whole phase-numbering behind the roadmap it defers to. The pre-flight cannot see this file's own phase prose, because it compares invariant tokens and milestone titles. So the drift sat here across two renumberings. This section is the shape. `ROADMAP.md` is the state and the authority on numbering.)*
 
@@ -547,7 +547,7 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
 Two narrower gaps travel with this one. File handles can be counted only from `/proc`, so the descriptor gate has never run on the reference machine. CI on Linux exercises it for the first time, and it reports **9 descriptors at the first sample and 9 at the most**. And the measured window deliberately contains no index writes, because the loop reaches mass eviction by reverting files. So nothing soaks staging over a long run.
 
 
-**The changed set is nothing like the fixtures, and that is the headline for the shelf.** The measurement ran on the reference machine, on this repository (93 tracked files, a 5.0 GiB `target/`), with an agent building and writing to it. It used four windows plus a `git status --porcelain` sampler at 1s: **3,960 samples across 4,942 seconds**. The maximum was **3** changed files and the mean was 0.85. There was a **clean tree 41.3%** of the time, and at most **one** file inside the settle margin at any sample. Every deferred cost on the shelf is a function of that count, and the fixtures that they were argued against are 100 and 2000 and ten thousand. What it does **not** license is a narrower budget: this is one agent on one small repository, and a `git reset`, a rebase or a formatter sweep are each one command away from four figures. It is evidence about likelihood, which is what [#19](https://github.com/breferrari/vigia/issues/19), [#16](https://github.com/breferrari/vigia/issues/16), [#48](https://github.com/breferrari/vigia/issues/48) and [#73](https://github.com/breferrari/vigia/issues/73) were deferred on.
+**The changed set is nothing like the fixtures, and that is the headline for the shelf.** The measurement ran on the reference machine, on this repository (93 tracked files, a 5.0 GiB `target/`), with an agent building and writing to it. It used four windows plus a `git status --porcelain` sampler at 1s: **3,960 samples across 4,942 seconds**. The maximum was **3** changed files and the mean was 0.85. There was a **clean tree 41.3%** of the time, and at most **one** file inside the settle margin at any sample. Every cost Phase 11 holds is a function of that count, and the fixtures that they were argued against are 100 and 2000 and ten thousand. What it does **not** license is a narrower budget: this is one agent on one small repository, and a `git reset`, a rebase or a formatter sweep are each one command away from four figures. It is evidence about likelihood, which is what [#19](https://github.com/breferrari/vigia/issues/19), [#16](https://github.com/breferrari/vigia/issues/16), [#48](https://github.com/breferrari/vigia/issues/48) and [#73](https://github.com/breferrari/vigia/issues/73) were deferred on.
 
 
 **I1 is doing the most visible work in the report, and no fixture would have shown it.** The watch took **91,449 wakeups and filtered 91,252 of them, 99.8%, to produce 55 ticks**. That is a 5.0 GiB `target/` under a running build, and a synthetic worktree has no such thing. For the first **530 seconds** there were **zero frames** while tens of thousands of events arrived and were discarded.
@@ -1253,7 +1253,7 @@ The count covers *configuration* only, and the amendments depend on that. `VIGIA
 **B7 — Does the monitor write an observation log?** *Ruled 2026-08-05, session: no. See §11.1.* ([#117](https://github.com/breferrari/vigia/issues/117).) The proposal was `VIGIA_OBSERVE=<path>`, off by default. It appended per-tick aggregates to a file outside the worktree, so that the week of real use [#72](https://github.com/breferrari/vigia/issues/72) needs would leave numbers instead of memories. It is B6's pressure, arriving with a candidate behind it.
 
 
-**The case for adopting it is not weak, and it is recorded because it will be raised again.** Every deferred cost on the shelf is a function of the changed-file count over time. Four shelf entries are ranked today on judgement, not on numbers. This document's own method says a claim without a measurement is a wish, and that argues for instruments. The nearest precedent went the other way: refusing the footer's memory readout on a similar economy argument was overruled in [#41](https://github.com/breferrari/vigia/issues/41), correctly.
+**The case for adopting it is not weak, and it is recorded because it will be raised again.** Every cost Phase 11 holds is a function of the changed-file count over time. Four of its rows are ranked today on judgement, not on numbers. This document's own method says a claim without a measurement is a wish, and that argues for instruments. The nearest precedent went the other way: refusing the footer's memory readout on a similar economy argument was overruled in [#41](https://github.com/breferrari/vigia/issues/41), correctly.
 
 
 **It was declined on four points that were checked, not argued.**
