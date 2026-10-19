@@ -171,7 +171,8 @@ fn states() -> Vec<(String, &'static str)> {
                 "pdf/page-three.pdf",
                 "page 3 of 12 drawn, the page that changed",
             ),
-            ("pdf/pages.pdf", "12 → 13 pages"),
+            ("pdf/pages.pdf", "12 → 13 pages: page 13 alone, as added"),
+            ("pdf/fewer.pdf", "13 → 12 pages: page 13 alone, as removed"),
             ("pdf/cut.pdf", "cut short: binary"),
             ("pdf/locked.pdf", "needs a password: binary"),
             (
@@ -388,6 +389,7 @@ impl Scene {
         }
         self.write("pdf/page-three.pdf", twelve_pages(3, 30));
         self.write("pdf/pages.pdf", repeated_pages(12));
+        self.write("pdf/fewer.pdf", repeated_pages(13));
         // Committed as text before the attribute exists, so no filter runs.
         let object = lfs_object();
         let (oid, pointer) = assets::lfs_pointer(&object, LFS_SEED);
@@ -464,6 +466,7 @@ impl Scene {
         self.remove("pdf/deleted.pdf");
         self.write("pdf/page-three.pdf", twelve_pages(3, 250));
         self.write("pdf/pages.pdf", repeated_pages(13));
+        self.write("pdf/fewer.pdf", repeated_pages(12));
         let whole = assets::icon_pdf(2);
         // Each with a few NULs past its end, as a real PDF's streams carry.
         self.write("pdf/cut.pdf", [&whole[..60], b"\0\0\0"].concat());
@@ -684,6 +687,7 @@ mod tests {
             "pdf/modified.pdf",
             "pdf/page-three.pdf",
             "pdf/pages.pdf",
+            "pdf/fewer.pdf",
             "pdf/heavy.pdf",
             "pdf/large.pdf",
         ] {
@@ -962,6 +966,7 @@ mod tests {
                 "pdf/modified.pdf",
                 "pdf/page-three.pdf",
                 "pdf/pages.pdf",
+                "pdf/fewer.pdf",
                 "pdf/large.pdf",
             ] {
                 assert!(
@@ -975,9 +980,14 @@ mod tests {
                 at("pdf/page-three.pdf")
             );
             assert!(
-                said("pdf/pages.pdf").contains("12 → 13 pages"),
+                said("pdf/pages.pdf").starts_with("page 13 of 13 added · 12 → 13 pages"),
                 "{:?}",
                 at("pdf/pages.pdf")
+            );
+            assert!(
+                said("pdf/fewer.pdf").starts_with("page 13 of 13 removed · 13 → 12 pages"),
+                "{:?}",
+                at("pdf/fewer.pdf")
             );
             assert_eq!(
                 said("pdf/heavy.pdf"),
