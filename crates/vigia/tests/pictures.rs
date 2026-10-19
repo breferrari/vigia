@@ -1377,3 +1377,37 @@ fn resize_clamps_under() {
         "a resize that shrank the picture kept an offset past its rows"
     );
 }
+
+#[test]
+fn step_up_from_end() {
+    let scratch = Scratch::new("pictures-end-step");
+    scratch.write("a.txt", support::numbered_lines(10));
+    scratch.write(
+        "z.png",
+        encode(&screen_like(120, 260, [40, 90, 200]), ImageFormat::Png),
+    );
+    scratch.commit_all("baseline");
+    scratch.write("a.txt", support::numbered_lines(16));
+    scratch.write(
+        "z.png",
+        encode(&screen_like(120, 260, [200, 90, 40]), ImageFormat::Png),
+    );
+    let mut pane = Pane::new(100, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.settled(&mut frame);
+    pane.scroll(&mut frame, 200);
+    let end = pane.settled(&mut frame);
+    assert!(end.ended, "the setup did not reach the end of the diff");
+    assert!(
+        picture_rows(&end).len() > 3,
+        "the end of the diff is not the picture"
+    );
+    pane.scroll(&mut frame, -1);
+    let up = pane.settled(&mut frame);
+    assert_eq!(
+        up.rows[1], end.rows[0],
+        "one step up from the end of the diff did not move the screen one row"
+    );
+}

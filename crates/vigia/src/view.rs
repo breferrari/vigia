@@ -2077,6 +2077,7 @@ impl View {
                     file: index,
                     first: skip,
                     start: before,
+                    span,
                 });
                 let asked = skip.min(span);
                 let mut file_notes = notes_at(change, index, &pinned);
@@ -2431,6 +2432,24 @@ impl View {
             let gutter = crate::render::gutter_width(&self.rows, width);
             crate::render::content_width(gutter, width)
         };
+        let pieces = |row: &Row| match row {
+            Row::Line { text, .. } if wrap && content > 0 => {
+                crate::render::breaks_of(text, content, height).len()
+            }
+            _ => 0,
+        };
+        if aim.under == 0 && aim.rise.is_none() {
+            let mut under: usize = if drawn {
+                walked.pins.iter().map(|pin| pin.count(content)).sum()
+            } else {
+                0
+            };
+            if let Some(boxed) = &walked.boxed {
+                under += box_rows(boxed, content).0.len();
+            }
+            under += walked.hung.iter().map(|hung| hung.rows).sum::<usize>();
+            return under + self.rows.iter().map(|row| 1 + pieces(row)).sum::<usize>();
+        }
         let mut under = vec![0usize; self.rows.len()];
         if drawn {
             for pin in &walked.pins {
@@ -2447,12 +2466,7 @@ impl View {
             .rows
             .iter()
             .zip(under)
-            .map(|(row, under)| match row {
-                Row::Line { text, .. } if wrap && content > 0 => {
-                    (crate::render::breaks_of(text, content, height).len(), under)
-                }
-                _ => (0, under),
-            })
+            .map(|(row, under)| (pieces(row), under))
             .collect();
         let total: usize = costs.iter().map(|(pieces, under)| pieces + 1 + under).sum();
         total.saturating_sub(skipped(&costs, &walked.blocks, aim))
@@ -2617,11 +2631,19 @@ impl View {
             above -= cost(from);
             from += 1;
         }
-        if aiming && from < breaks.len() {
+        // A trim over hung rows names the step it opens on, so a step up from
+        // the end moves one row; over wrapped lines alone it moves nothing stored.
+        let trims_hung =
+            (0..from).any(|at| costs[at].1 > 0) || above > costs.get(from).map_or(0, |c| c.0);
+        let stored = (aiming || trims_hung) && from < breaks.len();
+        if stored {
             self.top = Position {
                 under: above.saturating_sub(breaks[from].len()),
                 ..position_of(blocks, from)
             };
+            if let Some(block) = blocks.iter().find(|block| block.file == self.top.file) {
+                self.current_span = block.span;
+            }
         }
 
         let texts: HashMap<&str, (&str, Option<&str>)> = pins
@@ -2829,8 +2851,8 @@ impl View {
                     .map(|row| (row, path.clone(), *origin))
             })
             .collect();
-        // An aimed top already names the first logical row drawn.
-        if aiming { 0 } else { from }
+        // A stored top already names the first logical row drawn.
+        if stored { 0 } else { from }
     }
 
     /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed
@@ -3167,6 +3189,8 @@ struct Block {
     first: usize,
     /// The logical row that one landed on.
     start: usize,
+    /// Rows its block has.
+    span: usize,
 }
 
 /// The position of logical row `at` of a walk.
@@ -3180,6 +3204,7 @@ fn position_of(blocks: &[Block], at: usize) -> Position {
             file: 0,
             first: 0,
             start: 0,
+            span: 0,
         });
     Position {
         file: block.file,
@@ -3192,8 +3217,8 @@ fn position_of(blocks: &[Block], at: usize) -> Position {
 fn logical_of(blocks: &[Block], rows: usize, position: Position) -> Option<usize> {
     blocks.iter().enumerate().find_map(|(n, block)| {
         let end = blocks.get(n + 1).map_or(rows, |next| next.start);
-        let at = (block.start + position.row).checked_sub(block.first)?;
-        (block.file == position.file && position.row >= block.first && at < end).then_some(at)
+        let at = block.start + position.row.checked_sub(block.first)?;
+        (block.file == position.file && at < end).then_some(at)
     })
 }
 
@@ -3203,12 +3228,12 @@ fn skipped(costs: &[(usize, usize)], blocks: &[Block], aim: Aim) -> usize {
     let Some(&(_, first)) = costs.first() else {
         return 0;
     };
-    let rise = aim
-        .rise
-        .and_then(|(anchor, by)| Some((logical_of(blocks, costs.len(), anchor)?, by)));
+    let rise = aim.rise.and_then(|(anchor, by)| {
+        let at = logical_of(blocks, costs.len(), anchor)?;
+        Some((at, anchor.under.min(costs[at].1), by))
+    });
     let (at, under) = match rise {
-        Some((mut at, by)) => {
-            let mut under = 0;
+        Some((mut at, mut under, by)) => {
             for _ in 0..by {
                 if under > 0 {
                     under -= 1;

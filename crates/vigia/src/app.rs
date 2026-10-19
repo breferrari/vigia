@@ -174,12 +174,17 @@ pub struct App {
     note_count: NoteCount,
     /// Where the last frame stood when it drew the diff's last row.
     end: Option<Position>,
+    /// Logical rows the last frame drew, which the bar's travel is measured in.
+    shown: usize,
     /// Where each step the last frame drew opens, from its top. A page step is
     /// measured in them: the display height walks over unwrapped content.
     steps: Vec<Position>,
     /// A step up the next collect resolves: the top it left, the steps owed
     /// above it, and the position it left behind.
     rise: Option<(Position, usize, Position)>,
+    /// Where the last frame a step up opened stands, which later frames keep
+    /// rather than trim back to the end of the diff.
+    risen: Option<Position>,
     /// Whether the reader has asked for the staged run (`a`).
     staged: bool,
     /// Where the reader has asked the pane to stand, which `b` toggles and a row
@@ -264,8 +269,10 @@ impl Default for App {
             note_box: None,
             note_count: NoteCount::default(),
             end: None,
+            shown: 0,
             steps: Vec::new(),
             rise: None,
+            risen: None,
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
             links: true,
@@ -310,8 +317,10 @@ impl App {
             overview: config.overview,
             wrap: config.wrap,
             notes_shown: config.notes,
+            shown: 0,
             steps: Vec::new(),
             rise: None,
+            risen: None,
             staged: config.staged,
             following: config.follow,
             icons: config.icons,
@@ -488,6 +497,7 @@ impl App {
     /// press that resolved nothing has moved the reader nowhere.
     pub fn stood(&mut self) {
         self.position = Position::default();
+        self.rise = None;
     }
 
     /// Replace the notes the next collect places, with what the store lists.
@@ -853,6 +863,13 @@ impl App {
 
     /// Apply one intention.
     pub fn apply(&mut self, action: Action, frame: &mut Frame, height: usize) -> Result<bool> {
+        // A step up is owed only to the steps that follow it.
+        if !matches!(
+            action,
+            Action::Scroll(_) | Action::Page(_) | Action::HalfPage(_)
+        ) {
+            self.rise = None;
+        }
         // Once, above the match, rather than repeated in each arm that moves the view.
         if action.is_manual_scroll() {
             self.following = false;
@@ -1151,12 +1168,12 @@ impl App {
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
-                self.step_by(pages, self.screenful(height).saturating_sub(1), frame)?;
+                self.step_by(pages, self.page(height).saturating_sub(1), frame)?;
             }
             // And a half page keeps none, which is not an inconsistency with the arm
             // above.
             Action::HalfPage(halves) => {
-                self.step_by(halves, self.screenful(height) / 2, frame)?;
+                self.step_by(halves, self.page(height) / 2, frame)?;
             }
             // The first row of what the reader can reach, which is the first changed
             // file unpinned and the pinned file's own heading under B16.
@@ -1200,6 +1217,7 @@ impl App {
     /// Put the viewport at the top of `file`, which is what a jump means.
     fn jump_to(&mut self, file: usize) {
         self.anchored = false;
+        self.rise = None;
         self.position = Position {
             file,
             row: 0,
@@ -1381,6 +1399,14 @@ impl App {
                 self.sheet = Some(page.min(pages - 1));
             }
         }
+        // Owed only to the position the step left, so anything that moved the
+        // viewport since drops it.
+        let rise = self
+            .rise
+            .take()
+            .filter(|(_, _, left)| *left == self.position)
+            .map(|(anchor, by, _)| (anchor, by))
+            .or_else(|| (self.risen == Some(self.position)).then_some((self.position, 0)));
         let view = View::collect_noted(
             frame,
             highlighter,
@@ -1417,13 +1443,7 @@ impl App {
                 // [`Self::paint`].
                 highlight: self.paint != Paint::Never,
                 pictures: self.pictures,
-                // Owed only to the position the step left, so anything that moved
-                // the viewport since drops it.
-                rise: self
-                    .rise
-                    .take()
-                    .filter(|(_, _, left)| *left == self.position)
-                    .map(|(anchor, by, _)| (anchor, by)),
+                rise,
             },
             &self.notes,
             self.notes_shown,
@@ -1471,7 +1491,9 @@ impl App {
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
+        self.shown = view.shown();
         self.steps.clone_from(&view.steps);
+        self.risen = rise.map(|_| view.top);
         Ok(view)
     }
 
@@ -1486,15 +1508,25 @@ impl App {
     }
 
     /// Rows of the diff one screenful holds, which is not `height` when lines wrap,
-    /// and is what the bar's travel and a page step are both measured in. Read off
+    /// and is what the bar's travel is measured in. Read off
     /// the last frame rather than [`Self::wrap`]: the loop paints once per batch, so
     /// turning wrap off would otherwise grow the step under a screen that held less.
     fn screenful(&self, height: usize) -> usize {
-        if !self.steps.is_empty() {
+        if self.shown > 0 {
             // Clamped by the pane this step is being taken in.
-            self.steps.len().min(height)
+            self.shown.min(height)
         } else {
             height
+        }
+    }
+
+    /// Steps one page moves: the last frame's, which count a note's and a
+    /// picture's rows where [`Self::screenful`] does not.
+    fn page(&self, height: usize) -> usize {
+        if self.steps.is_empty() {
+            height
+        } else {
+            self.steps.len().min(height)
         }
     }
 }
