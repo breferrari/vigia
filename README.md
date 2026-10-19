@@ -514,6 +514,7 @@ NO_COLOR=1 vigia                # every ladder collapses to something readable
 | [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol |
 | [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures |
 | [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line |
+| [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text |
 
 Three of those earn their place by what they *do not* add. `fancy-regex` is already in the graph under `syntect`, so the `hide` pattern costs the binary nothing. `tachyonfx` schedules nothing, which is what keeps *no polling timer* this program's own rule to keep rather than a dependency's. `two-face` builds the grammar dump at compile time and is absent from every shipped graph.
 
