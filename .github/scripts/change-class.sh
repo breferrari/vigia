@@ -40,13 +40,16 @@ if [ -z "$paths" ]; then
     exit 0
 fi
 
+img='(jpg|jpeg|png|svg|gif)'
+
 code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^[^/]+\.md$' \
     -e '^docs/[^/]+\.md$' \
-    -e '^docs/research/.*\.(md|png|jpg|jpeg|gif|svg)$' \
+    -e '^docs/research/.*\.md$' \
+    -e "^docs/research/.*\\.$img\$" \
     -e '^\.github/PULL_REQUEST_TEMPLATE\.md$' \
     -e '^\.claude/skills/' \
-    -e '^\.claude/take-next/' \
+    -e '^\.claude/take-next/.*\.md$' \
     -e '^\.claude/settings\.json$' \
     -e '^LICENSE$' \
     -e '^\.github/ISSUE_TEMPLATE/' \
@@ -54,7 +57,7 @@ code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^\.github/release\.yml$' \
     -e '^\.github/FUNDING\.yml$' \
     -e '^\.gitignore$' \
-    -e '^assets/[^/]+\.(jpg|jpeg|png|svg|gif)$' \
+    -e "^assets/[^/]+\\.$img\$" \
     || true)
 
 if [ -n "$code" ]; then

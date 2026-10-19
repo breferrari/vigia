@@ -176,7 +176,7 @@ Watch the run, not `gh pr checks`. List only the runs that started after the rea
 
 **A docs-only rebase merges without fresh CI.** A PR that was green on its previous head may merge right after a rebase with no fresh CI, if the rebase changed only `ROADMAP.md` or `CHANGELOG.md` and `git range-diff` shows its own commits otherwise unchanged. Then watch main's CI on the merge commit, and fix forward if it goes red. Ruled 2026-10-19, reader. User-facing: none.
 
-No external review is configured; once the post-ready run is green on the head, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
+No external review is configured: read and answer any review comment a person left, then, once the post-ready run is green on the head or a docs-only rebase allows it, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 
 ## 8. Close the loop
 

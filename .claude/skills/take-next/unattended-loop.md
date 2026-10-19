@@ -10,7 +10,7 @@ The reader invoked `/take-next unattended-loop`. That invocation is plan approva
 
 ## Merging
 
-- Merge a PR when the `ci` run on its **head** is green. Then remove its worktree and local branch in the same step.
+- Merge a PR when the `ci` run on its **head** is green, or after a docs-only rebase as step 7 allows. Then remove its worktree and local branch in the same step.
 - A red run stops merging. Fix it before the next pass starts.
 - When `main` moves under an open PR, rebase it. On a conflict in `crates/vigia/tests/package.rs`, take `main`'s side. On a `ROADMAP.md` conflict, keep both sides' rows. Then rerun `cargo test -p vigia --test register --test package`. A docs-only rebase merges without fresh CI, per step 7.
 

@@ -1661,6 +1661,8 @@ fn change_class_decides() {
             "docs",
         ),
         ("docs/research/assets/probe.py\n", "full"),
+        ("docs/research/assets/a.svg\ndocs/research/b.jpeg\n", "docs"),
+        (".claude/take-next/check.sh\n", "full"),
         (
             ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
             "docs",
