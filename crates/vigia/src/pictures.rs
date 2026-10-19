@@ -745,9 +745,63 @@ fn fonts() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
         .get_or_init(|| {
             let mut fonts = resvg::usvg::fontdb::Database::new();
             fonts.load_system_fonts();
+            fallback_families(&mut fonts);
             std::sync::Arc::new(fonts)
         })
         .clone()
+}
+
+/// Point each generic family that names no installed face at one that is
+/// installed. usvg falls back to `serif`, which is Times New Roman, and a
+/// system without it would draw no text at all.
+fn fallback_families(fonts: &mut resvg::usvg::fontdb::Database) {
+    use resvg::usvg::fontdb::{Family, Query};
+    let mut names: Vec<String> = fonts
+        .faces()
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    let pick = |wants: &dyn Fn(&str) -> bool| {
+        names
+            .iter()
+            .find(|name| wants(name))
+            .or(names.first())
+            .cloned()
+    };
+    let missing = |fonts: &resvg::usvg::fontdb::Database, family: Family| {
+        fonts
+            .query(&Query {
+                families: &[family],
+                ..Query::default()
+            })
+            .is_none()
+    };
+    if missing(fonts, Family::Serif)
+        && let Some(name) = pick(&|name| name.contains("Serif") && !name.contains("Sans"))
+    {
+        fonts.set_serif_family(name);
+    }
+    if missing(fonts, Family::SansSerif)
+        && let Some(name) = pick(&|name| name.contains("Sans") && !name.contains("Mono"))
+    {
+        fonts.set_sans_serif_family(name);
+    }
+    if missing(fonts, Family::Monospace)
+        && let Some(name) = pick(&|name| name.contains("Mono"))
+    {
+        fonts.set_monospace_family(name);
+    }
+    if missing(fonts, Family::Cursive)
+        && let Some(name) = pick(&|_| false)
+    {
+        fonts.set_cursive_family(name);
+    }
+    if missing(fonts, Family::Fantasy)
+        && let Some(name) = pick(&|_| false)
+    {
+        fonts.set_fantasy_family(name);
+    }
 }
 
 /// The most encoded bytes one SVG's embedded images may hold, every `<use>`
@@ -1245,6 +1299,28 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
 mod tests {
     use super::*;
     use image::Rgb;
+
+    #[test]
+    fn missing_family_falls_back() {
+        use resvg::usvg::fontdb::{Database, Family, Query};
+        let mut fonts = Database::new();
+        fonts.load_system_fonts();
+        if fonts.is_empty() {
+            eprintln!("note: this system has no fonts, so the fallback test proves nothing here");
+            return;
+        }
+        // As on a system without Times New Roman.
+        fonts.set_serif_family("No Such Family");
+        fallback_families(&mut fonts);
+        let found = fonts.query(&Query {
+            families: &[Family::Serif],
+            ..Query::default()
+        });
+        assert!(
+            found.is_some(),
+            "serif names no installed face, so a label draws nothing"
+        );
+    }
 
     fn side(width: u32, height: u32) -> ImageSide {
         ImageSide {
