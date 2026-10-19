@@ -790,24 +790,15 @@ fn fallback_families(fonts: &mut resvg::usvg::fontdb::Database) {
             .is_none()
     };
     let wanted: [Generic; 3] = [
-        (
-            Family::Serif,
-            SERIF,
-            |face| face.name.contains("Serif") && !face.name.contains("Sans"),
-            |fonts, name| fonts.set_serif_family(name),
-        ),
-        (
-            Family::SansSerif,
-            SANS,
-            |face| face.name.contains("Sans") && !face.monospaced,
-            |fonts, name| fonts.set_sans_serif_family(name),
-        ),
-        (
-            Family::Monospace,
-            MONO,
-            |face| face.monospaced,
-            |fonts, name| fonts.set_monospace_family(name),
-        ),
+        (Family::Serif, SERIF, serif_hint, |fonts, name| {
+            fonts.set_serif_family(name)
+        }),
+        (Family::SansSerif, SANS, sans_hint, |fonts, name| {
+            fonts.set_sans_serif_family(name)
+        }),
+        (Family::Monospace, MONO, mono_hint, |fonts, name| {
+            fonts.set_monospace_family(name)
+        }),
     ];
     for (family, known, hinted, set) in wanted {
         if !missing(fonts, family) {
@@ -829,6 +820,18 @@ type Generic = (
     fn(&FaceInfo) -> bool,
     fn(&mut resvg::usvg::fontdb::Database, String),
 );
+
+fn serif_hint(face: &FaceInfo) -> bool {
+    face.name.contains("Serif") && !face.name.contains("Sans")
+}
+
+fn sans_hint(face: &FaceInfo) -> bool {
+    face.name.contains("Sans") && !face.monospaced
+}
+
+fn mono_hint(face: &FaceInfo) -> bool {
+    face.monospaced
+}
 
 /// What choosing a fallback reads of one installed face.
 struct FaceInfo {
@@ -1421,14 +1424,13 @@ mod tests {
         ];
         let latin =
             |face: &FaceInfo| face.name != "Noto Sans Symbols" && face.name != "Abyssinica SIL";
-        let sans = |face: &FaceInfo| face.name.contains("Sans") && !face.monospaced;
         assert_eq!(
-            fallback(&faces, SANS, sans, latin).as_deref(),
+            fallback(&faces, SANS, sans_hint, latin).as_deref(),
             Some("Ubuntu Sans"),
             "a face with no Latin glyphs was chosen, so a label draws nothing"
         );
         assert_eq!(
-            fallback(&faces[..2], SANS, sans, latin),
+            fallback(&faces[..2], SANS, sans_hint, latin),
             None,
             "a face with no Latin glyphs was chosen as the last resort"
         );
@@ -1436,27 +1438,43 @@ mod tests {
 
     #[test]
     fn fallback_prefers_known() {
-        let faces = [
-            face("DejaVu Serif", false),
-            face("Liberation Serif", false),
-            face("Monoton", false),
-            face("Noto Sans Mono", true),
-        ];
-        let serif = |face: &FaceInfo| face.name.contains("Serif") && !face.name.contains("Sans");
+        let faces = [face("DejaVu Serif", false), face("Liberation Serif", false)];
         assert_eq!(
-            fallback(&faces, SERIF, serif, |_| true).as_deref(),
+            fallback(&faces, SERIF, serif_hint, |_| true).as_deref(),
             Some("Liberation Serif"),
             "Times New Roman's metric stand-in was passed over"
         );
+    }
+
+    #[test]
+    fn fallback_follows_hints() {
+        let serif = [face("Arimo", false), face("Gentium Serif", false)];
+        assert_eq!(
+            fallback(&serif, &[], serif_hint, |_| true).as_deref(),
+            Some("Gentium Serif"),
+            "serif fell back to a face its name does not call serif"
+        );
+        let sans = [face("Fira Sans Mono", true), face("Fira Sans", false)];
+        assert_eq!(
+            fallback(&sans, &[], sans_hint, |_| true).as_deref(),
+            Some("Fira Sans"),
+            "sans-serif fell back to a monospaced face"
+        );
+        let mono = [face("Hack", true), face("Monoton", false)];
+        assert_eq!(
+            fallback(&mono[1..], &[], mono_hint, |_| true).as_deref(),
+            Some("Monoton"),
+            "with no monospaced face, monospace found nothing"
+        );
         assert_eq!(
             fallback(
-                &faces[2..],
+                &[face("Monoton", false), face("Hack", true)],
                 &[],
-                |face: &FaceInfo| face.monospaced,
+                mono_hint,
                 |_| true
             )
             .as_deref(),
-            Some("Noto Sans Mono"),
+            Some("Hack"),
             "monospace fell back to a face that is not monospaced"
         );
     }
