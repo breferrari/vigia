@@ -337,16 +337,17 @@ impl Scene {
         );
         self.git(&["add", ".gitattributes"]);
         self.git(&["commit", "-q", "-m", "lfs attribute"]);
-        self.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
         self.write(
             &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
             object,
         );
         // The index is refreshed after the clock has passed the commit, so no
         // file reads as racily clean and status never asks the LFS filter
-        // (#659, whose fix removes this).
+        // (#659, whose fix removes this). Before the driver is named: git
+        // runs it for a racily clean file too, and this one cannot start.
         std::thread::sleep(Duration::from_millis(1100));
         self.git(&["update-index", "-q", "--refresh"]);
+        self.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
     }
 
     /// Every change of `static`, written at once.
