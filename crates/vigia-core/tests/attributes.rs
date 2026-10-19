@@ -424,6 +424,10 @@ fn racy_lfs_unsettled() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
+    assert!(
+        frame.settles_in(std::time::SystemTime::now()).is_some(),
+        "a verdict on an unsettled fingerprint armed no wake for when it settles"
+    );
     frame.advance().expect("advance again");
     assert_eq!(
         worktree.lfs_compares(),
@@ -503,9 +507,15 @@ fn lfs_walk_budget() {
         1,
         "one walk compared more than its 16 MiB budget"
     );
-    frame.advance().expect("advance again");
+    let now = std::time::SystemTime::now();
+    assert_eq!(
+        frame.settles_in(now),
+        Some(std::time::Duration::ZERO),
+        "a file the walk could not afford armed no wake to compare it"
+    );
+    frame.advance_if_settled(now).expect("the wake's walk");
     assert!(
         frame.files().is_empty(),
-        "the file the first walk could not afford was not compared on the next"
+        "the wake did not compare the file the first walk could not afford"
     );
 }

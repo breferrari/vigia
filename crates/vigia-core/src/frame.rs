@@ -73,7 +73,7 @@ struct Observed {
 
 /// How far in the past a modification time has to sit before it identifies the
 /// bytes that were read.
-const SETTLE_MARGIN: Duration = Duration::from_secs(2);
+pub(crate) const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
 /// identifies the bytes that read returned.
@@ -435,9 +435,16 @@ impl<'w> Frame<'w> {
         let mut files = Vec::with_capacity(self.files.len());
         // Bound rather than consumed in place: what a walk hid is only knowable
         // once it has been drained.
+        // The clean filter is rebuilt by the walk's first read rather than kept for
+        // the life of the process, so a walk and the draw after it share one.
+        self.worktree.invalidate_filter();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
             files.push(change?);
+        }
+        // An LFS file the walk could not decide yet is asked again when it can be.
+        if let Some(until) = self.worktree.lfs_wait() {
+            self.settles_at = Some(self.settles_at.map_or(until, |at| at.max(until)));
         }
         let mut hidden = walk.hidden();
         // Unstaged first, then staged, and the order is the product.
@@ -456,10 +463,6 @@ impl<'w> Frame<'w> {
 
         // Nothing above this line mutated the frame's picture of the worktree, which
         // is what makes a failed walk leave the previous frame intact.
-
-        // The clean filter is rebuilt by the next read rather than kept for the life of
-        // the process.
-        self.worktree.invalidate_filter();
 
         // And what was computed under the old rules goes with it.
         let taken_at = SystemTime::now();

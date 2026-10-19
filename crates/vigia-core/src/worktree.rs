@@ -72,6 +72,9 @@ pub struct Worktree {
     lfs_pointers: RefCell<HashMap<gix::ObjectId, Option<(String, u64)>>>,
     /// Bytes the current walk may still compare.
     lfs_budget: Cell<u64>,
+    /// When the last walk's undecided LFS files can be decided: a print that
+    /// settles, or at once for a file the walk could not afford.
+    lfs_wait: Cell<Option<std::time::SystemTime>>,
 }
 
 impl Worktree {
@@ -79,8 +82,9 @@ impl Worktree {
     ///
     /// # Errors
     ///
-    /// `path` is not inside a git repository, or the repository it finds is bare and has no
-    /// worktree to compare against.
+    /// `path` is not inside a git repository, the repository it finds is bare and has no
+    /// worktree to compare against, or its configuration cannot be read without its
+    /// filter drivers.
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let repo = gix::discover(path).map_err(|e| Error::Discover(Box::new(e)))?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
@@ -103,6 +107,7 @@ impl Worktree {
             lfs_verdicts: RefCell::new(HashMap::new()),
             lfs_pointers: RefCell::new(HashMap::new()),
             lfs_budget: Cell::new(LFS_COMPARE_MAX),
+            lfs_wait: Cell::new(None),
             lfs: Cell::new(lfs),
         })
     }
@@ -176,9 +181,8 @@ impl Worktree {
         self.lfs_pointers
             .borrow_mut()
             .retain(|id, _| blobs.contains(id));
-        // The attributes are read as they stand now, not as the last frame drew.
-        self.invalidate_filter();
         self.lfs_budget.set(LFS_COMPARE_MAX);
+        self.lfs_wait.set(None);
         let kept: Vec<FileChange> = walked
             .into_iter()
             .filter(|change| !self.lfs_unchanged(change))
@@ -204,9 +208,18 @@ impl Worktree {
             return false;
         };
         let path = self.workdir.join(&change.path);
+        let started = std::time::SystemTime::now();
         let Some(print) = followed_print(&path) else {
             return false;
         };
+        // The attribute is asked fresh, and before a compare, so a file it no
+        // longer names spends nothing; the cache holds only what the bytes say.
+        if !self
+            .with_filter(|filter| filter.diff_attribute(&change.path))
+            .is_ok_and(|(_, lfs)| lfs)
+        {
+            return false;
+        }
         let key = (print, id);
         let cached = self
             .lfs_verdicts
@@ -214,31 +227,29 @@ impl Worktree {
             .get(&change.path)
             .filter(|(seen, _)| *seen == key)
             .map(|&(_, same)| same);
-        let same = match cached {
-            Some(same) => same,
-            None => {
-                let Some(same) = self.lfs_compare(&path, &oid, size, print) else {
-                    return false;
-                };
-                // A print still inside the settle margin can hide a same-length
-                // rewrite, so its verdict holds for this walk only.
-                if settled(print.mtime(), std::time::SystemTime::now()) {
-                    self.lfs_verdicts
-                        .borrow_mut()
-                        .insert(change.path.clone(), (key, same));
-                }
-                same
-            }
+        if let Some(same) = cached {
+            return same;
+        }
+        let Some(same) = self.lfs_compare(&path, &oid, size, print) else {
+            return false;
         };
-        // Bytes are a fact about the file; the attribute can change under them.
-        same && self
-            .with_filter(|filter| filter.diff_attribute(&change.path))
-            .is_ok_and(|(_, lfs)| lfs)
+        // A print still inside the settle margin can hide a same-length rewrite,
+        // so its verdict holds for this walk, and the walk after it settles asks
+        // again.
+        if settled(print.mtime(), started) {
+            self.lfs_verdicts
+                .borrow_mut()
+                .insert(change.path.clone(), (key, same));
+        } else {
+            self.lfs_wait_until(print.mtime() + crate::frame::SETTLE_MARGIN);
+        }
+        same
     }
 
     /// Whether the worktree file at `path`, of fingerprint `print`, holds the LFS
     /// object `oid` of `size` bytes, or `None` when that cannot be decided this
-    /// walk: the object is not fetched, or the walk's compare budget is spent.
+    /// walk: the object is not fetched, the walk's compare budget is spent, or a
+    /// read failed.
     fn lfs_compare(&self, path: &Path, oid: &str, size: u64, print: Fingerprint) -> Option<bool> {
         if print.len() != size {
             return Some(false);
@@ -246,12 +257,13 @@ impl Worktree {
         // A larger compare would cost the frame its budget, and belongs off the
         // paint.
         if size > self.lfs_budget.get() {
+            self.lfs_wait_until(std::time::SystemTime::now());
             return None;
         }
         let object = self.lfs_path(oid)?;
         self.lfs_budget.set(self.lfs_budget.get() - size);
         self.lfs_compares.set(self.lfs_compares.get() + 1);
-        Some(same_bytes(path, &object, size))
+        same_bytes(path, &object, size)
     }
 
     /// The object and size the blob `id` names when it is an LFS pointer, read
@@ -1126,16 +1138,29 @@ impl Worktree {
         };
         // `reload` replaces the repository only once the open succeeds, and the
         // walk's copy only once its drivers are gone.
-        if repo.reload().is_ok()
-            && let Ok(bare) = without_drivers(&repo)
-        {
-            *status = bare;
+        if repo.reload().is_ok() {
+            // A copy that cannot be stripped keeps the last one, which has no
+            // drivers either.
+            if let Ok(bare) = without_drivers(&repo) {
+                *status = bare;
+            }
             self.lfs.set(lfs_configured(&repo));
             self.lfs_verdicts.borrow_mut().clear();
             self.loaded_config.set(now);
             self.reloads.set(self.reloads.get() + 1);
             self.invalidate_filter();
         }
+    }
+
+    /// When the last walk's undecided LFS files can be decided, if any are.
+    pub(crate) fn lfs_wait(&self) -> Option<std::time::SystemTime> {
+        self.lfs_wait.get()
+    }
+
+    /// Hold the next walk to `until` at the latest.
+    fn lfs_wait_until(&self, until: std::time::SystemTime) {
+        let wait = self.lfs_wait.get().map_or(until, |at| at.min(until));
+        self.lfs_wait.set(Some(wait));
     }
 
     /// How many LFS files this worktree has compared with their local object.
@@ -1955,7 +1980,7 @@ mod composing {
 /// stored blob.
 type LfsKey = (Fingerprint, gix::ObjectId);
 
-/// The largest LFS file the status walk compares with its object.
+/// Bytes one status walk may compare between LFS files and their objects.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
 /// `repo` with every `filter` section removed from its configuration.
@@ -1985,21 +2010,22 @@ fn lfs_configured(repo: &gix::Repository) -> bool {
 }
 
 /// Whether two regular files of `len` bytes each hold the same bytes, read side
-/// by side and stopped at the first chunk that differs.
-fn same_bytes(a: &Path, b: &Path, len: u64) -> bool {
+/// by side and stopped at the first chunk that differs, or `None` when a read
+/// failed and nothing is known.
+fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
     use std::io::Read;
-    let open = |path: &Path| {
-        let file = std::fs::File::open(path).ok()?;
-        let meta = file.metadata().ok()?;
-        (meta.is_file() && meta.len() == len).then_some(file)
-    };
-    // A regular file checked by its path first, so a fifo is never opened.
+    // Checked by path first, so a fifo is never opened.
     let regular = |path: &Path| std::fs::metadata(path).is_ok_and(|meta| meta.is_file());
     if !regular(a) || !regular(b) {
-        return false;
+        return Some(false);
     }
-    let (Some(mut a), Some(mut b)) = (open(a), open(b)) else {
-        return false;
+    let open = |path: &Path| -> Option<Option<std::fs::File>> {
+        let file = std::fs::File::open(path).ok()?;
+        let meta = file.metadata().ok()?;
+        Some((meta.is_file() && meta.len() == len).then_some(file))
+    };
+    let (Some(mut a), Some(mut b)) = (open(a)?, open(b)?) else {
+        return Some(false);
     };
     let (mut left, mut right) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
     let mut remaining = len;
@@ -2007,13 +2033,12 @@ fn same_bytes(a: &Path, b: &Path, len: u64) -> bool {
         let chunk = left
             .len()
             .min(usize::try_from(remaining).unwrap_or(usize::MAX));
-        if a.read_exact(&mut left[..chunk]).is_err()
-            || b.read_exact(&mut right[..chunk]).is_err()
-            || left[..chunk] != right[..chunk]
-        {
-            return false;
+        a.read_exact(&mut left[..chunk]).ok()?;
+        b.read_exact(&mut right[..chunk]).ok()?;
+        if left[..chunk] != right[..chunk] {
+            return Some(false);
         }
         remaining -= chunk as u64;
     }
-    true
+    Some(true)
 }
