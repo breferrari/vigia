@@ -41,7 +41,6 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 `next.sh` selects the earliest eligible milestone:
 
 - **Order is the phase number at the start of the title.** Due dates are null, and a null sort returns API order. A title without `Phase <n>` sorts last and does not disappear. So a renamed milestone goes last, silently. Pre-flight check 6 finds this.
-- **A description that starts with `Shelf:` is never selected.** No shelf exists (retired 2026-10-19). The rule keeps one from becoming next.
 - **A milestone with no open issues is skipped.** Thus a finished phase that is still open is never selected. An empty answer means that the rest is finished or empty: find out which.
 
 After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. When you finish the last issue in a milestone, close the milestone.
@@ -50,7 +49,7 @@ After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/
 
 ### Pre-flight
 
-`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4 and 6 to 8. Fix each of those hits in this pass. Checks 0, 5 and 9 are advisory: read them and act as they say.
+`preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4 and 6 to 8. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say.
 
 First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1 and hides real drift from 2, 4 and 7. Then it runs these checks:
 
@@ -60,10 +59,9 @@ First, the script makes sure that the whole board arrived. A truncated fetch cau
 3. The mark on each roadmap row agrees with the state of its issue, and the issue exists.
 4. Each open issue has a milestone, or `next.sh` never sees it.
 5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
-6. The answer from `next.sh` agrees with the section order in the roadmap. Each open milestone with work has a `## Phase <n>` section, unless its description starts with `Shelf:`.
+6. The answer from `next.sh` agrees with the section order in the roadmap. Each open milestone with work has a `## Phase <n>` section.
 7. Each issue, open or closed, has a roadmap row.
 8. Given an issue number, no worktree, branch or plan comment names it.
-9. Open rows of a `## Deferral shelf` table whose reason cites a closed issue, retired invariant or closed phase. Reread each reason. No such table exists now.
 
 A false positive means that the check is wrong: fix it, never skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the filing rule in step 4 does not apply.
 

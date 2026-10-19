@@ -6,9 +6,8 @@
 # so sorted nothing. A title not beginning `Phase <n>` sorts last rather than
 # vanishing, which is what the `// "9999"` fallback holds: with it removed,
 # `scan` fails loudly where `capture` would drop the row in silence, so `scan`
-# is the form to keep. A milestone whose description begins `Shelf:` is never
-# selected, and a milestone with no open issues is not a place to look, so a
-# finished phase left open cannot answer.
+# is the form to keep. A milestone with no open issues is not a place to look,
+# so a finished phase left open cannot answer.
 #
 # Usage: next.sh [--ranked]
 #   --ranked  print every eligible milestone in take order, not only the first
@@ -19,7 +18,6 @@ set -eu
 
 SELECT='[ .[]
     | select(.open_issues > 0)
-    | select((.description // "") | startswith("Shelf:") | not)
     | { order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }
   ] | sort_by(.order, .title) | .[].title'
 

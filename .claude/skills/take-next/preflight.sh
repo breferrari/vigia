@@ -161,21 +161,14 @@ if [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
   step1=$(NEXT_MILESTONES_FILE="$tmp/ms.json" sh "$(dirname "$0")/next.sh" | sed -n 's/^milestone: //p' | tr -d '\r')
   grep -oE '^## Phase [0-9]+.*' "$tmp/roadmap.md" | sed 's/^## //' | tr -d '\r' > "$tmp/order.txt"
   jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/withwork.txt"
-  jq -r '.[] | select(.open_issues > 0) | select((.description // "") | startswith("Shelf:")) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/shelved.txt"
   roadmap_says=""
   while IFS= read -r s; do
     grep -qxF "$s" "$tmp/withwork.txt" || continue
-    grep -qxF "$s" "$tmp/shelved.txt" && continue
     roadmap_says="$s"; break
   done < "$tmp/order.txt"
   if [ "$step1" = "$roadmap_says" ]; then ok "step 1 and the roadmap agree: ${step1:-<no eligible work>}"
   else hit "step 1 says '${step1:-<empty>}', roadmap section order says '${roadmap_says:-<empty>}'"; fi
-  # Shelved milestones are exempt from the section check: a shelf holds no
-  # place in the take-order, so it owes the file no `## Phase <n>` section —
-  # the Shelf milestone (titled "Phase 5" until 2026-08-06) is the standing case.
-  LC_ALL=C sort "$tmp/withwork.txt" > "$tmp/ww.all"
-  LC_ALL=C sort "$tmp/shelved.txt" > "$tmp/sh.s"
-  LC_ALL=C comm -23 "$tmp/ww.all" "$tmp/sh.s" > "$tmp/ww.s"
+  LC_ALL=C sort "$tmp/withwork.txt" > "$tmp/ww.s"
   LC_ALL=C sort "$tmp/order.txt" > "$tmp/or.s"
   LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/or.s" > "$tmp/ms-orphans.out"
   if [ -s "$tmp/ms-orphans.out" ]; then
@@ -219,39 +212,5 @@ if [ -n "$TAKEN" ]; then
   jq -r '.comments[] | select(.body | test("^\\W*(approved )?plan\\b"; "i")) | "  DRIFT a plan comment by \(.author.login), \(.createdAt)"' "$tmp/comments.json" | tr -d '\r' >> "$tmp/flight.out"
   if [ -s "$tmp/flight.out" ]; then cat "$tmp/flight.out"; findings=$((findings + $(wc -l < "$tmp/flight.out"))); else ok "no worktree, branch or plan names #$TAKEN"; fi
 fi
-
-# 9 cannot say a reason is false, only that it names something that changed
-# since: a closed issue, a retired invariant, a phase with no open milestone.
-# Only the Why cell counts. The Surfaced cell names where the row came from,
-# which is closed by the time anyone reads it.
-say "9. stale reasons — open shelf rows whose reason names what has since changed (read these):"
-if [ -s "$tmp/ms.json" ]; then jq -r '.[].title' "$tmp/ms.json" | tr -d '\r' > "$tmp/open-ms.txt"; else : > "$tmp/open-ms.txt"; fi
-awk '/^## Deferral shelf/ { on = 1; next } /^## / { on = 0 } on && /^\| [^-|]/' "$tmp/roadmap.md" |
-awk -F'\t' '
-  FILENAME == ARGV[1] { state[$1] = $2; next }
-  FILENAME == ARGV[2] { declared[$1] = 1; next }
-  FILENAME == ARGV[3] { phases = 1; if (match($0, /^Phase [0-9]+/)) open[substr($0, 1, RLENGTH)] = 1; next }
-  {
-    split($0, cell, "|")
-    if (!match(cell[2], /\[#[0-9]+\]/)) next
-    own = substr(cell[2], RSTART + 2, RLENGTH - 3)
-    if (state[own] != "OPEN") next
-    why = cell[5]; out = ""
-    split(cell[3], surfaced, ",")
-    for (w = why; match(w, /#[0-9]+/); w = substr(w, RSTART + RLENGTH)) {
-      m = substr(w, RSTART + 1, RLENGTH - 1)
-      if (state[m] == "CLOSED" && surfaced[1] !~ ("#" m "$") && index(out, " #" m " ") == 0) out = out " #" m " (closed),"
-    }
-    for (w = why; match(w, /I[0-9]+[a-z]?/); w = substr(w, RSTART + RLENGTH)) {
-      t = substr(w, RSTART, RLENGTH)
-      if (substr(w, RSTART + RLENGTH, 1) !~ /[A-Za-z0-9]/ && substr(w, RSTART - 1, 1) !~ /[A-Za-z0-9]/ && !(t in declared)) out = out " " t " (retired),"
-    }
-    for (w = why; phases && match(w, /Phase [0-9]+/); w = substr(w, RSTART + RLENGTH)) {
-      p = substr(w, RSTART, RLENGTH)
-      if (!(p in open) && index(out, " " p " ") == 0) out = out " " p " (closed),"
-    }
-    if (out != "") { sub(/,$/, "", out); printf "  read  #%s: its reason cites%s\n", own, out }
-  }' "$tmp/issues.tsv" "$tmp/spec-invariants.txt" "$tmp/open-ms.txt" - > "$tmp/stale.out"
-if [ -s "$tmp/stale.out" ]; then cat "$tmp/stale.out"; else ok "no open shelf reason names a closed issue, retired invariant or closed phase"; fi
 
 if [ "$findings" -eq 0 ]; then say "pre-flight clean"; else say "$findings finding(s) — fix in this pass, not a note"; exit 1; fi

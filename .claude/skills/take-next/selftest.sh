@@ -37,19 +37,10 @@ case_is() { # name, expected, json
 
 echo "selection:"
 
-# The live shape at the time of #83: the shelf carries the marker and sits
-# numerically below both phases that must be taken. Answer must be Phase 6.
-case_is "shelf is skipped even when its number is lowest" \
-  "Phase 6 - measured" \
-  '[{"title":"Phase 5 - deferred","description":"Shelf: never next. Work found mid-phase","open_issues":28},
-    {"title":"Phase 6 - measured","description":"A claim that outruns its evidence","open_issues":4},
-    {"title":"Phase 7 - distribution","description":"Filter: does this ship","open_issues":1}]'
-
 # #83's own stated correct answer, from when Phase 4 was still open.
 case_is "lowest eligible phase number wins" \
   "Phase 4 - artifacts" \
   '[{"title":"Phase 4 - artifacts","description":"","open_issues":7},
-    {"title":"Phase 5 - deferred","description":"Shelf: never next.","open_issues":28},
     {"title":"Phase 6 - measured","description":"","open_issues":4}]'
 
 # The bug: a milestone with no open issues must not be selected, which is the
@@ -58,11 +49,6 @@ case_is "a milestone with no open issues is not selected" \
   "Phase 7 - distribution" \
   '[{"title":"Phase 6 - measured","description":"","open_issues":0},
     {"title":"Phase 7 - distribution","description":"","open_issues":1}]'
-
-# Rule 3: only shelved work left is empty output, not an answer.
-case_is "only shelved work remaining gives empty" \
-  "" \
-  '[{"title":"Phase 5 - deferred","description":"Shelf: never next.","open_issues":28}]'
 
 case_is "an empty board gives empty" "" '[]'
 
@@ -102,20 +88,14 @@ case_is "a tie breaks on title, given the other" \
   '[{"title":"Phase 6 - alpha","description":"","open_issues":1},
     {"title":"Phase 6 - zulu","description":"","open_issues":1}]'
 
-# Rule 2 is a prefix rule. "Shelf:" further in is prose, not a marker.
-case_is "Shelf: mid-description does not exclude" \
-  "Phase 6 - measured" \
-  '[{"title":"Phase 6 - measured","description":"Not a Shelf: this is real work","open_issues":1}]'
-
 # A null description must not throw, which is what `// ""` is for. GitHub
 # returns null rather than "" for a milestone created without one.
 case_is "a null description is handled" \
   "Phase 6 - measured" \
   '[{"title":"Phase 6 - measured","description":null,"open_issues":1}]'
 
-# --ranked shows the whole order the answer came from, shelf excluded.
+# --ranked shows the whole order the answer came from.
 printf '%s' '[{"title":"Phase 7 - distribution","description":"","open_issues":1},
-  {"title":"Phase 5 - deferred","description":"Shelf: never next.","open_issues":28},
   {"title":"Phase 6 - measured","description":"","open_issues":4}]' > "$FIX/ms.json"
 ranked=$(NEXT_MILESTONES_FILE="$FIX/ms.json" sh "$NEXT" --ranked 2>&1 | tr -d '\r' | paste -sd '|' -)
 [ "$ranked" = "Phase 6 - measured|Phase 7 - distribution" ] && ok "--ranked lists every eligible milestone in take order" \
@@ -293,39 +273,16 @@ out=$(flight 29)
 out=$(pre 2>&1 | grep -c '^8\.')
 [ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
 
-# Comparison 9 reads only an open row's Why cell. #4 cites closed #1 and a
-# retired I9, #5 cites open #4 and a declared I1 and names #7 outside its Why
-# cell, #6 names #1 only where it
-# surfaced, and #7 is closed.
-cat > "$FIX/roadmap.md" <<'ROW'
-## Deferral shelf
-| Item | Surfaced | Moved to | Why |
-|---|---|---|---|
-| four ([#4](https://example.invalid/4)) | #2, 2026-01-01 | Shelf | waits on #1 and I9, then #1 again |
-| five ([#5](https://example.invalid/5)) | #2, 2026-01-01 | Shelf, after #7 | waits on #4 and I1 |
-| six ([#6](https://example.invalid/6)) | #1, 2026-01-01 | Shelf | found in #1 |
-| seven ([#7](https://example.invalid/7)) | #2, 2026-01-01 | Shelf | waits on #1 |
-## Pull-forward log
-| eight ([#8](https://example.invalid/8)) | #2 | Shelf | waits on #1 |
-ROW
-jq -n '[range(1; 9) | {number: ., milestone: {title: "Shelf"}, title: "issue \(.)",
-  state: (if . == 1 or . == 7 then "CLOSED" else "OPEN" end)}]' > "$FIX/issues.json"
-out=$(pre 2>&1 | awk '/^9\./ { on = 1; next } on && /^ / { $1 = $1; print }')
-want='read #4: its reason cites #1 (closed), I9 (retired)'
-[ "$out" = "$want" ] && ok "a shelf reason naming a closed issue is surfaced" || no "a shelf reason naming a closed issue is surfaced" "$want" "$out"
-
 echo "drift:"
 
 present() { # needle, file, name
   grep -qF "$1" "$2" 2>/dev/null && ok "$3" || no "$3" "$1" "absent"
 }
 
-# One filter, three callers. The skill sends a session to the script, the
-# pre-flight compares the script's answer against the roadmap, and the shelf is
-# identified by a description prefix in the one place that decides it.
+# One filter, two callers. The skill sends a session to the script, and the
+# pre-flight compares the script's answer against the roadmap.
 present 'sh .claude/skills/take-next/next.sh' "$SKILL" "SKILL.md sends a session to next.sh"
 present 'next.sh' "$PRE" "preflight.sh compares the roadmap against next.sh"
-present 'startswith("Shelf:")' "$NEXT" "next.sh identifies the shelf by prefix"
 
 # The limit is the one thing the cases above cannot check about themselves: they
 # run at a small override, so nothing there would notice the shipped default

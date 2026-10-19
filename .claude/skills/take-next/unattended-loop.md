@@ -17,7 +17,7 @@ The reader invoked `/take-next unattended-loop`. That invocation is plan approva
 ## The queue
 
 1. `next.sh`, in its own order.
-2. When it is dry, stop. There is no shelf: the reader retired it on 2026-10-19, moving its items into Phases 11 to 14, and the loop takes those phases in order like any other. This replaces the 2026-09-30 ruling on which shelf items the loop takes. A pass that concludes an item should be declined still stops that item and reports it, per stop 4 of `SKILL.md`.
+2. When it is dry, stop. A pass that concludes an item should be declined still stops that item and reports it, per stop 4 of `SKILL.md`.
 3. Re-read an item's dated reason on its issue before taking it. A reason that still holds, or an item that needs a refactor across many call sites, goes to the report with one line, and the loop moves on.
 4. Read the queue again when a pass ends and before calling it dry: issues are filed while the loop runs. When nothing is eligible, tell the reader, with one line per skipped item and its reason.
 
