@@ -3252,6 +3252,7 @@ mod tests {
             width,
             height,
             bytes,
+            stamp: 0,
         }
     }
 

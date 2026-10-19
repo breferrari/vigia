@@ -6,7 +6,7 @@ use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
 use support::{Scratch, changes_sorted, encoded, png};
-use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture};
+use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture, Source};
 
 /// The diff of the one change at `rela`.
 fn diff_of(scratch: &Scratch, rela: &str) -> FileDiff {
@@ -25,7 +25,17 @@ fn side(format: Format, width: u32, height: u32, bytes: &[u8]) -> ImageSide {
         width,
         height,
         bytes: bytes.len() as u64,
+        stamp: 0,
     }
+}
+
+/// A picture with its stamps cleared, for comparing what was read.
+fn plain(picture: Option<Picture>) -> Option<Picture> {
+    let clear = |side: Option<ImageSide>| side.map(|side| ImageSide { stamp: 0, ..side });
+    picture.map(|picture| Picture {
+        before: clear(picture.before),
+        after: clear(picture.after),
+    })
 }
 
 /// A modified PNG reads both sides' format, size and bytes.
@@ -41,7 +51,7 @@ fn image_size_line() {
     let diff = diff_of(&scratch, "a.png");
     assert!(diff.binary, "a PNG stopped counting as binary");
     assert_eq!(
-        diff.picture,
+        plain(diff.picture),
         Some(Picture {
             before: Some(side(Format::Png, 24, 40, &old)),
             after: Some(side(Format::Png, 24, 40, &new)),
@@ -78,14 +88,14 @@ fn added_and_deleted_images() {
     scratch.git(&["add", "-N", "added.png"]);
 
     assert_eq!(
-        diff_of(&scratch, "added.png").picture,
+        plain(diff_of(&scratch, "added.png").picture),
         Some(Picture {
             before: None,
             after: Some(side(Format::Png, 16, 12, &added)),
         })
     );
     assert_eq!(
-        diff_of(&scratch, "gone.png").picture,
+        plain(diff_of(&scratch, "gone.png").picture),
         Some(Picture {
             before: Some(side(Format::Png, 8, 8, &gone)),
             after: None,
@@ -323,7 +333,7 @@ fn lfs_pointer_resolves() {
     let diff = diff_of(&scratch, "a.png");
     assert!(diff.binary, "a pointer against its content diffed as text");
     assert_eq!(
-        diff.picture,
+        plain(diff.picture),
         Some(Picture {
             before: Some(side(Format::Png, 24, 40, &old)),
             after: Some(side(Format::Png, 30, 50, &new)),
@@ -706,5 +716,74 @@ fn lfs_long_pointer() {
         after.map(|side| (side.width, side.height)),
         Some((30, 50)),
         "a long worktree pointer did not resolve"
+    );
+}
+
+/// A side's stamp moves with its content and stands still without it.
+#[test]
+fn stamps_follow_content() {
+    let scratch = Scratch::new("picture-stamps");
+    scratch.write("a.png", png(24, 40, 1));
+    scratch.commit_all("initial");
+    scratch.write("a.png", png(24, 40, 2));
+    let first = diff_of(&scratch, "a.png").picture.expect("a picture");
+    let again = diff_of(&scratch, "a.png").picture.expect("a picture");
+    // A second apart, so the file's time moves even where it counts in seconds.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    scratch.write("a.png", png(24, 40, 3));
+    let moved = diff_of(&scratch, "a.png").picture.expect("a picture");
+
+    let stamps = |picture: Picture| {
+        picture
+            .before
+            .zip(picture.after)
+            .map(|(b, a)| (b.stamp, a.stamp))
+    };
+    let (old, new) = stamps(first).expect("both sides");
+    assert_ne!(old, 0, "the blob side has no stamp");
+    assert_eq!(
+        stamps(again),
+        Some((old, new)),
+        "a stamp moved without its content"
+    );
+    let (old_again, newer) = stamps(moved).expect("both sides");
+    assert_eq!(old_again, old, "the blob side's stamp moved");
+    assert_ne!(
+        newer, new,
+        "the worktree side's stamp stood still while it changed"
+    );
+}
+
+/// The sources of a changed image: the blob as bytes, the worktree as its path,
+/// and an LFS pointer as its object's path.
+#[test]
+fn image_sources() {
+    let old = png(24, 40, 1);
+    let (scratch, oid) = lfs_repo("picture-sources", &old, &png(24, 40, 2));
+    store(&scratch.root().join(".git").join("lfs"), &oid, &old);
+    scratch.write("plain.img", png(8, 8, 1));
+    scratch.git(&["add", "plain.img"]);
+    scratch.git(&["commit", "-q", "-m", "plain"]);
+    scratch.write("plain.img", png(8, 8, 2));
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let sources = |path: &str| {
+        let change = changes.iter().find(|c| c.path == path).expect("listed");
+        worktree.image_sources(change).expect("sources")
+    };
+    let lfs = sources("a.png");
+    assert_eq!(
+        lfs.before,
+        Some(Source::File(object_path(
+            &scratch.root().join(".git").join("lfs"),
+            &oid
+        )))
+    );
+    assert_eq!(lfs.after, Some(Source::File(scratch.path_of("a.png"))));
+    let plain_sources = sources("plain.img");
+    assert!(
+        matches!(plain_sources.before, Some(Source::Bytes(ref bytes)) if bytes == &png(8, 8, 1)),
+        "the blob side is not its bytes"
     );
 }

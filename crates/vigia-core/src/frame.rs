@@ -796,6 +796,20 @@ impl<'w> Frame<'w> {
         Ok(())
     }
 
+    /// Where both sides of the changed image at `index` can be read from, for a
+    /// reader on another thread. See [`Worktree::image_sources`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Worktree::image_sources`].
+    ///
+    /// # Panics
+    ///
+    /// If `index` is out of range.
+    pub fn image_sources(&self, index: usize) -> Result<crate::Sources> {
+        self.worktree.image_sources(&self.files[index])
+    }
+
     /// The change at `index` and its diff, computed now or reused from an
     /// earlier frame.
     /// # Panics
