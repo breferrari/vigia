@@ -4,7 +4,8 @@
 mod support;
 
 use support::{
-    Scratch, changes_sorted, icon_ops, icon_pdf, locked_pdf, open_locked_pdf, pdf, pdf_with,
+    Scratch, changes_sorted, icon_ops, icon_pdf, locked_pdf, open_locked_pdf, pdf, pdf_holding,
+    pdf_updated, pdf_with, zlib_zeros,
 };
 use vigia_core::{FileDiff, Format};
 
@@ -197,4 +198,91 @@ impl ReplaceBytes for Vec<u8> {
             .expect("the text to replace");
         [&self[..at], to.as_bytes(), &self[at + from.len()..]].concat()
     }
+}
+
+#[test]
+fn zlib_zeros_decode() {
+    for length in [1, 258, 259, 1_000, 100_000] {
+        assert_eq!(
+            vigia_core::inflated_length(&support::zlib_zeros(length), u64::MAX),
+            Some(length),
+            "{length} zeros"
+        );
+    }
+}
+
+/// This process's resident memory, in MiB, where `ps` can say.
+fn resident() -> Option<u64> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    Some(kib / 1024)
+}
+
+/// A PDF whose one object holds a gigabyte of zeros behind `dict`, read on
+/// the frame path: it keeps `binary`, and memory stays where it was.
+fn bomb_refused(name: &str, bomb: &[u8]) {
+    let before = resident();
+    let diff = changed(name, &icon_pdf(1), bomb);
+    assert!(
+        diff.picture.is_none(),
+        "{name}: a PDF holding a bomb was sized"
+    );
+    if let (Some(before), Some(after)) = (before, resident()) {
+        assert!(
+            after < before + 128,
+            "{name}: memory went from {before} MiB to {after} MiB"
+        );
+    }
+}
+
+const GIB: u64 = 1024 * 1024 * 1024;
+
+#[test]
+fn pdf_object_stream_bomb() {
+    let zeros = zlib_zeros(GIB);
+    for (name, dict, eol) in [
+        (
+            "plain",
+            "/Type /ObjStm /N 1 /First 0 /Filter /FlateDecode",
+            &b"\n"[..],
+        ),
+        (
+            "escaped",
+            "/Type/Obj#53tm /N 1 /First 0 /Filter/FlateDecode",
+            b"\n",
+        ),
+        (
+            "commented",
+            "/Type % a note\n /ObjStm /N 1 /First 0 /Filter /FlateDecode",
+            b"\n",
+        ),
+        (
+            "carriage",
+            "/Type /ObjStm /N 1 /First 0 /Filter /FlateDecode",
+            b"\r",
+        ),
+        ("untyped", "/Filter /FlateDecode", b"\r\n"),
+    ] {
+        bomb_refused(&format!("pdf-bomb-{name}"), &pdf_holding(dict, eol, &zeros));
+    }
+    let updated = pdf_updated(&icon_pdf(2), "/Type /XRef /Filter /FlateDecode", &zeros);
+    bomb_refused("pdf-bomb-update", &updated);
+}
+
+#[test]
+fn pdf_image_stream_sized() {
+    // An image the frame path never decodes: it is not measured there.
+    let image = pdf_holding(
+        "/Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode",
+        b"\n",
+        &zlib_zeros(GIB),
+    );
+    let diff = changed("pdf-image-sized", &icon_pdf(1), &image);
+    assert!(
+        diff.picture.is_some(),
+        "an image the frame path skips kept the file binary"
+    );
 }

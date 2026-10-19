@@ -1127,9 +1127,9 @@ const PDF_LONG_SIDE: f32 = 1024.0;
 const PDF_BUDGET: f64 = 1.4 * 1024.0 * 1024.0 * 1024.0;
 /// The most objects one page's resources are read through to fingerprint it.
 const PDF_OBJECTS: usize = 10_000;
-/// The most content stream one document may decode, every page counted,
-/// before it is refused. A short file can list one stream many times.
-const PDF_DECODED: usize = 256 * 1024 * 1024;
+/// The most one page's content and images may decode to, together, before
+/// it is refused.
+const PDF_DECODED: u64 = 256 * 1024 * 1024;
 
 /// Each content stream of `page`, decoded one at a time, with `budget`
 /// spent on each; `None` once the budget is spent.
@@ -1156,11 +1156,15 @@ fn page_contents<'a>(
     Some(())
 }
 
-/// One PDF side, opened.
+/// One PDF side, opened once its streams are known to decode within the
+/// frame path's budget: parsing decodes some of them whole.
 fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>> {
     match source {
         Some(source) => {
             let bytes = read_counted(source)?;
+            if !vigia_core::streams_fit(&bytes, vigia_core::PDF_FRAME_BUDGET) {
+                return None;
+            }
             hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes))
                 .ok()
                 .map(Some)
@@ -1169,85 +1173,184 @@ fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>>
     }
 }
 
-/// A page's fingerprint: its content and every object its resources reach,
-/// or `None` when an image it holds is larger than any image may decode.
-fn page_print(page: &hayro::hayro_syntax::page::Page<'_>, budget: &mut usize) -> Option<u64> {
+/// What walking a page's objects meets, in order.
+enum Met<'a, 'b> {
+    Name(&'b [u8]),
+    /// An object met before, by its number.
+    Again(i32, i32),
+    Leaf(String),
+    Stream(&'b hayro::hayro_syntax::object::Stream<'a>),
+}
+
+/// Every object `object` reaches, each once, but the page tree's parent
+/// link. `None` when `meet` says so.
+fn walk<'a>(
+    object: hayro::hayro_syntax::object::Object<'a>,
+    xref: &'a hayro::hayro_syntax::xref::XRef,
+    seen: &mut HashSet<(i32, i32)>,
+    meet: &mut dyn FnMut(Met<'a, '_>) -> Option<()>,
+) -> Option<()> {
     use hayro::hayro_syntax::object::{MaybeRef, Object};
-    use std::hash::{Hash, Hasher};
-    fn walk(
-        object: Object<'_>,
-        xref: &hayro::hayro_syntax::xref::XRef,
-        hasher: &mut std::collections::hash_map::DefaultHasher,
-        seen: &mut HashSet<(i32, i32)>,
-    ) -> Option<()> {
-        if seen.len() > PDF_OBJECTS {
-            return Some(());
-        }
-        let into = |value: MaybeRef<Object<'_>>, hasher: &mut _, seen: &mut HashSet<_>| match value
-        {
+    let into = |value: MaybeRef<Object<'a>>,
+                seen: &mut HashSet<(i32, i32)>,
+                meet: &mut dyn FnMut(Met<'a, '_>) -> Option<()>| {
+        match value {
             MaybeRef::Ref(reference) => {
-                if seen.insert((reference.obj_number, reference.gen_number))
-                    && let Some(object) = xref.get::<Object<'_>>(reference.into())
-                {
-                    return walk(object, xref, hasher, seen);
+                let id = (reference.obj_number, reference.gen_number);
+                if seen.len() > PDF_OBJECTS || !seen.insert(id) {
+                    return meet(Met::Again(id.0, id.1));
                 }
-                Some(())
-            }
-            MaybeRef::NotRef(object) => walk(object, xref, hasher, seen),
-        };
-        match object {
-            Object::Dict(dict) => {
-                for (name, value) in dict.entries() {
-                    // The page tree, which every page reaches and none owns.
-                    if name.as_ref() == b"Parent" {
-                        continue;
-                    }
-                    name.as_ref().hash(hasher);
-                    into(value, hasher, seen)?;
+                match xref.get::<Object<'a>>(reference.into()) {
+                    Some(object) => walk(object, xref, seen, meet),
+                    None => Some(()),
                 }
             }
-            Object::Array(array) => {
-                for value in array.raw_iter() {
-                    into(value, hasher, seen)?;
+            MaybeRef::NotRef(object) => walk(object, xref, seen, meet),
+        }
+    };
+    match object {
+        Object::Dict(dict) => {
+            for (name, value) in dict.entries() {
+                // The page tree, which every page reaches and none owns.
+                if name.as_ref() == b"Parent" {
+                    continue;
                 }
+                meet(Met::Name(name.as_ref()))?;
+                into(value, seen, meet)?;
             }
-            Object::Stream(stream) => {
-                let dict = stream.dict();
-                if dict
-                    .get::<hayro::hayro_syntax::object::Name<'_>>(b"Subtype")
-                    .is_some_and(|subtype| subtype.as_ref() == b"Image")
-                {
-                    let side = |key: &[u8]| dict.get::<u32>(key).unwrap_or(0);
-                    let (width, height) = (side(b"Width"), side(b"Height"));
-                    if width > MAX_SIDE
-                        || height > MAX_SIDE
-                        || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC
+        }
+        Object::Array(array) => {
+            for value in array.raw_iter() {
+                into(value, seen, meet)?;
+            }
+        }
+        Object::Stream(stream) => {
+            meet(Met::Stream(&stream))?;
+            walk(Object::Dict(stream.dict().clone()), xref, seen, meet)?;
+        }
+        other => meet(Met::Leaf(format!("{other}")))?,
+    }
+    Some(())
+}
+
+/// What a page draws from: its contents and its resources.
+fn page_roots<'a>(
+    page: &hayro::hayro_syntax::page::Page<'a>,
+) -> impl Iterator<Item = hayro::hayro_syntax::object::Object<'a>> {
+    use hayro::hayro_syntax::object::Object;
+    let raw = page.raw();
+    [b"Contents".as_slice(), b"Resources"]
+        .into_iter()
+        .filter_map(move |key| raw.get::<Object<'a>>(key))
+}
+
+/// The names of a stream's filters, in order.
+fn filters_of(stream: &hayro::hayro_syntax::object::Stream<'_>) -> Vec<Vec<u8>> {
+    use hayro::hayro_syntax::object::{Array, Name};
+    let dict = stream.dict();
+    if let Some(name) = dict.get::<Name<'_>>(b"Filter") {
+        return vec![name.as_ref().to_vec()];
+    }
+    dict.get::<Array<'_>>(b"Filter")
+        .map_or_else(Vec::new, |array| {
+            array
+                .iter::<Name<'_>>()
+                .map(|name| name.as_ref().to_vec())
+                .collect()
+        })
+}
+
+/// An image's width and height as its dictionary claims them, when it is one.
+fn image_size(stream: &hayro::hayro_syntax::object::Stream<'_>) -> Option<(u32, u32)> {
+    let dict = stream.dict();
+    dict.get::<hayro::hayro_syntax::object::Name<'_>>(b"Subtype")
+        .is_some_and(|subtype| subtype.as_ref() == b"Image")
+        .then(|| {
+            let side = |key: &[u8]| dict.get::<u32>(key).unwrap_or(0);
+            (side(b"Width"), side(b"Height"))
+        })
+}
+
+/// A page's fingerprint, from the encoded bytes of every object it draws
+/// from, or `None` when an image it holds is larger than any image may
+/// decode. Nothing is decoded.
+fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut seen = HashSet::new();
+    for root in page_roots(page) {
+        walk(root, page.xref(), &mut seen, &mut |met| {
+            match met {
+                Met::Name(name) => name.hash(&mut hasher),
+                Met::Again(number, generation) => (number, generation).hash(&mut hasher),
+                Met::Leaf(leaf) => leaf.hash(&mut hasher),
+                Met::Stream(stream) => {
+                    if let Some((width, height)) = image_size(stream)
+                        && (width > MAX_SIDE
+                            || height > MAX_SIDE
+                            || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC)
                     {
                         return None;
                     }
+                    stream.raw_data().hash(&mut hasher);
                 }
-                stream.raw_data().hash(hasher);
-                walk(Object::Dict(dict.clone()), xref, hasher, seen)?;
             }
-            other => format!("{other}").hash(hasher),
-        }
-        Some(())
-    }
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    page_contents(page, budget, |stream| stream.hash(&mut hasher))?;
-    if let Some(resources) = page.raw().get::<Object<'_>>(b"Resources") {
-        walk(resources, page.xref(), &mut hasher, &mut HashSet::new())?;
+            Some(())
+        })?;
     }
     Some(hasher.finish())
 }
 
 /// Every page's fingerprint, or `None` when one holds an image too large.
 fn page_prints(pdf: &hayro::hayro_syntax::Pdf) -> Option<Vec<u64>> {
-    let mut budget = PDF_DECODED;
-    pdf.pages()
-        .iter()
-        .map(|page| page_print(page, &mut budget))
-        .collect()
+    pdf.pages().iter().map(page_print).collect()
+}
+
+/// How much the images `page` reaches decode to, together, or `None` past
+/// `budget`. A Flate image is measured through a sink; any other is held to
+/// its claimed size, which its decoder does not pass.
+fn images_decoded(page: &hayro::hayro_syntax::page::Page<'_>, budget: u64) -> Option<u64> {
+    let mut spent = 0u64;
+    let mut seen = HashSet::new();
+    for root in page_roots(page) {
+        walk(root, page.xref(), &mut seen, &mut |met| {
+            let Met::Stream(stream) = met else {
+                return Some(());
+            };
+            let Some((width, height)) = image_size(stream) else {
+                return Some(());
+            };
+            let left = budget.checked_sub(spent)?;
+            let claimed = u64::from(width) * u64::from(height) * 4;
+            let decoded = match filters_of(stream).as_slice() {
+                [] => stream.raw_data().len() as u64,
+                [flate] if matches!(flate.as_slice(), b"FlateDecode" | b"Fl") => {
+                    vigia_core::inflated_length(&stream.raw_data(), left)?
+                }
+                // An image codec decodes to no more than the size it claims.
+                [codec]
+                    if matches!(
+                        codec.as_slice(),
+                        b"DCTDecode"
+                            | b"DCT"
+                            | b"JPXDecode"
+                            | b"JBIG2Decode"
+                            | b"CCITTFaxDecode"
+                            | b"CCF"
+                    ) =>
+                {
+                    claimed
+                }
+                // A chain, or a filter that can expand without a bound.
+                _ => return None,
+            };
+            spent = spent
+                .checked_add(decoded)
+                .filter(|spent| *spent <= budget)?;
+            Some(())
+        })?;
+    }
+    Some(spent)
 }
 
 /// Which page both sides draw, and what the line says about it.
@@ -1301,7 +1404,9 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
         };
         let mut budget = refused;
         page_contents(page, &mut budget, |_| {})?;
-        cost = cost.max(refused - budget);
+        let content = refused - budget;
+        images_decoded(page, PDF_DECODED.checked_sub(content as u64)?)?;
+        cost = cost.max(content);
     }
     let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(PDF_LONG_SIDE)) as f32;
     if long < SVG_SHORTEST {

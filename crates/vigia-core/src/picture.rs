@@ -122,6 +122,10 @@ pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
     {
         return None;
     }
+    // Before the parser, which decodes object and xref streams whole.
+    if !crate::pdf::streams_fit(&bytes, crate::pdf::FRAME_BUDGET) {
+        return None;
+    }
     // A document an agent wrote must not be able to close the pane.
     let (width, height) = crate::caught(|| pdf_size(bytes)).flatten()?;
     Some(ImageSide {

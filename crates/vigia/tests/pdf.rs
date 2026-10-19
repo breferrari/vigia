@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
-use support::{Scratch, icon_ops, icon_pdf, label_pdf, open_locked_pdf, pdf, pdf_doc, pdf_with};
+use support::{
+    Scratch, icon_ops, icon_pdf, label_pdf, open_locked_pdf, pdf, pdf_doc, pdf_with, zlib_zeros,
+};
 use vigia::pictures::{Inks, Kind, Pictures, Verdict};
 use vigia::{App, Pointing, Row, View, body_layout};
 use vigia_core::{Frame, Highlighter, History, Standing};
@@ -291,5 +293,77 @@ fn pdf_image_refused() {
         "",
     );
     let drawn = drawn("pdf-image-bomb", Some(&icon_pdf(1)), &page);
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+}
+
+/// A page drawing `images`, each a `width` by `height` image whose Flate data
+/// decodes to `zeros` bytes.
+fn imaged(images: usize, (width, height): (u32, u32), zeros: u64) -> Vec<u8> {
+    let data = zlib_zeros(zeros);
+    let objects: Vec<Vec<u8>> = (0..images)
+        .map(|_| {
+            let mut object = format!(
+                "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length {} >>\nstream\n",
+                data.len()
+            )
+            .into_bytes();
+            object.extend_from_slice(&data);
+            object.extend_from_slice(b"\nendstream");
+            object
+        })
+        .collect();
+    let names: Vec<String> = (0..images)
+        .map(|n| format!("/Im{n} {} 0 R", 5 + n))
+        .collect();
+    let draws: String = (0..images)
+        .map(|n| format!("q 24 0 0 24 0 0 cm /Im{n} Do Q "))
+        .collect();
+    let extras: Vec<&[u8]> = objects.iter().map(Vec::as_slice).collect();
+    pdf_doc(
+        &[(24, 24, draws.as_bytes())],
+        &format!("/XObject << {} >>", names.join(" ")),
+        1,
+        &extras,
+        "",
+    )
+}
+
+/// This process's resident memory, in MiB, where `ps` can say.
+fn resident() -> Option<u64> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()?;
+    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    Some(kib / 1024)
+}
+
+#[test]
+fn pdf_flate_bomb_undecoded() {
+    // About 7 MB of file that inflates to a gigabyte, as an image the frame
+    // path skips and the worker must not decode.
+    let before = resident();
+    let drawn = drawn(
+        "pdf-flate-bomb",
+        Some(&icon_pdf(1)),
+        &imaged(1, (8_000, 8_000), 1 << 30),
+    );
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+    if let (Some(before), Some(after)) = (before, resident()) {
+        assert!(
+            after < before + 128,
+            "memory went from {before} MiB to {after} MiB"
+        );
+    }
+}
+
+#[test]
+fn pdf_many_streams_bounded() {
+    // Twenty images of 20 MB each: each fits, and together they do not.
+    let drawn = drawn(
+        "pdf-many-streams",
+        Some(&icon_pdf(1)),
+        &imaged(20, (2_000, 2_500), 20_000_000),
+    );
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
 }

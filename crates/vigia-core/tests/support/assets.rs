@@ -395,3 +395,115 @@ pub fn open_locked_pdf(seed: u8) -> Vec<u8> {
         ),
     )
 }
+
+/// A zlib stream that decodes to `length` zero bytes from about one
+/// two-hundredth of that: one fixed-Huffman block of a literal and then
+/// runs of 258 copied from one back. A decompression bomb, without a
+/// compressor.
+pub fn zlib_zeros(length: u64) -> Vec<u8> {
+    struct Bits {
+        out: Vec<u8>,
+        held: u64,
+        count: u32,
+    }
+    impl Bits {
+        fn push(&mut self, value: u64, bits: u32) {
+            self.held |= value << self.count;
+            self.count += bits;
+            while self.count >= 8 {
+                self.out.push(self.held as u8);
+                self.held >>= 8;
+                self.count -= 8;
+            }
+        }
+        /// A Huffman code, which deflate packs from its top bit.
+        fn code(&mut self, code: u64, bits: u32) {
+            for bit in (0..bits).rev() {
+                self.push((code >> bit) & 1, 1);
+            }
+        }
+    }
+    let mut bits = Bits {
+        out: vec![0x78, 0x01],
+        held: 0,
+        count: 0,
+    };
+    // The last block, with the fixed codes.
+    bits.push(1, 1);
+    bits.push(1, 2);
+    // A literal 0 is code 0x30 in eight bits.
+    bits.code(0x30, 8);
+    let mut written = 1u64;
+    while written < length {
+        let run = (length - written).min(258);
+        // Length codes from 257 (seven bits from 0 for 256..279, eight from
+        // 0xc0 for 280..287); runs under 258 end the stream with literals.
+        if run == 258 {
+            bits.code(0xc5, 8);
+            bits.code(0, 5);
+        } else {
+            for _ in 0..run {
+                bits.code(0x30, 8);
+            }
+        }
+        written += run;
+    }
+    // End of block.
+    bits.code(0, 7);
+    if bits.count > 0 {
+        bits.push(0, 8 - bits.count);
+    }
+    // Adler-32 of all zeros: the low sum stays 1, the high is the length.
+    let adler = ((length % 65_521) << 16) | 1;
+    bits.out.extend_from_slice(&(adler as u32).to_be_bytes());
+    bits.out
+}
+
+/// An icon PDF that also holds, as its own object, a stream whose dictionary
+/// is `dict` and whose data, after `stream` and `eol`, is `data`.
+pub fn pdf_holding(dict: &str, eol: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut object = format!("<< {dict} /Length {} >>\nstream", data.len()).into_bytes();
+    object.extend_from_slice(eol);
+    object.extend_from_slice(data);
+    object.extend_from_slice(b"\nendstream");
+    pdf_doc(&[(24, 24, &icon_ops(2))], "", 1, &[&object], "")
+}
+
+/// `base` with an incremental update appended: one more object, a stream
+/// whose dictionary is `dict` and whose data is `data`, in a second xref
+/// section whose trailer points back at the first.
+pub fn pdf_updated(base: &[u8], dict: &str, data: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(base);
+    let previous: usize = text
+        .rsplit("startxref\n")
+        .next()
+        .and_then(|tail| tail.lines().next())
+        .and_then(|line| line.trim().parse().ok())
+        .expect("a startxref");
+    let size: usize = text
+        .split("/Size ")
+        .nth(1)
+        .and_then(|tail| tail.split_whitespace().next())
+        .and_then(|size| size.parse().ok())
+        .expect("a trailer size");
+    let mut out = base.to_vec();
+    let offset = out.len();
+    out.extend(
+        format!(
+            "{size} 0 obj\n<< {dict} /Length {} >>\nstream\n",
+            data.len()
+        )
+        .as_bytes(),
+    );
+    out.extend_from_slice(data);
+    out.extend_from_slice(b"\nendstream\nendobj\n");
+    let xref = out.len();
+    out.extend(
+        format!(
+            "xref\n{size} 1\n{offset:010} 00000 n \ntrailer\n<< /Size {} /Root 1 0 R /Prev {previous} >>\nstartxref\n{xref}\n%%EOF\n",
+            size + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
