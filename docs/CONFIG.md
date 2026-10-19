@@ -176,6 +176,6 @@ Same shape as the theme file: one key per line, `#` for a comment, and a key it 
 
 **`links` and `notes` are the two keys that start on**, so both are written above as the off switches they are. Every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor. A terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected. And a note you left for the agent draws its own rows under the line it is on, which `notes = off` turns down to the mark alone, the way `c` does for a session.
 
-**`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
+**`follow = off` starts the pane without following.** Following the newest change is what makes the pane correct without being touched, so it is on unless the file says otherwise, and `f` turns it on or off for a session.
 
 ---

@@ -24,7 +24,7 @@ Not "later". Never. Listed so the debate does not have to recur.
 
 - **Staging, committing, rebasing.** Reviewer-class, and each, if built, costs an invariant. Use a git client.
 - **AI features of any kind.** The tool watches files, and it carries the reader's own words to the agent beside it. It never calls a model, and it does not summarise, explain or judge what it watches.
-- **Remote operations.** No fetch, no push, no network.
+- **Remote git operations.** No fetch, no push.
 - **A GUI.** Terminal only.
 
 ## Releases

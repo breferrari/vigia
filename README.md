@@ -31,7 +31,7 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 | 🕰️ **Look back without leaving** | `B` stands the pane anywhere in the branch's history, and back |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle. Under 5% memory drift over 24 hours |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
-| ⌨️ **Nothing to learn first** | `?` draws every gesture, `m` every setting. `~/.config/vigia/config` decides what it opens as |
+| ⌨️ **Nothing to learn first** | `?` draws every gesture, `m` every on/off setting. `~/.config/vigia/config` decides what it opens as |
 
 > [!NOTE]
 > **A monitor, not a reviewer.** It can browse history and send your notes to the agent, but it asks nothing of you. A reviewer is something you launch, work through and finish. `vigia` is already open, correct before you touch it, and still correct if you never do.
@@ -62,7 +62,7 @@ The note goes to the agent anchored to that file and that line. Its answer arriv
 
 **4. Look back when you need to.** `B` opens a list of every place the pane can stand: the live tree, the branch point, or any commit behind it. Pick one and the whole pane, counts and all, moves there. `Esc` and you are back.
 
-**5. Forget the rest.** Press `?` and every gesture is on screen. Press `m` and every setting is. Neither moves a row.
+**5. Forget the rest.** Press `?` and every gesture is on screen. Press `m` and every on/off setting is. Neither moves a row.
 
 <a id="other-installs"></a>
 
@@ -92,7 +92,7 @@ vigia ~/code/some-repo                       # or any path
 vigia --version                              # or -V. It is the only option there is
 ```
 
-Every [release](https://github.com/breferrari/vigia/releases) carries archives for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc. From source needs the latest stable Rust, 1.99 or newer.
+Every [release](https://github.com/breferrari/vigia/releases) carries archives for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc. `cargo install vigia` (1.1.0) needs Rust 1.89 or newer. Building `main` needs the latest stable, 1.99 or newer.
 
 **No C toolchain, on any of those paths.** Every dependency is pure Rust, and CI asserts it on each shipped target rather than claiming it: a `cc`, `cmake` or `bindgen` entering the dependency graph fails the build.
 
@@ -113,7 +113,7 @@ cargo install vigia
 
 A running process follows its image through a rename, so the servers keep answering and the notes they hold are untouched. **You are not accumulating copies.** The name is always the same one, so an upgrade recycles it rather than adding to it, and `vigia` deletes it the next time one starts and finds nothing holding it, which is the next pane you open or the next session your agent starts. Windows keeps it alive only for as long as a process that began before the upgrade is still running.
 
-**Do not stop the processes instead.** That frees the same path and splits every session that is open: the socket rung goes on delivering your notes, the MCP half does not come back, and the agent reads a note it no longer has the tools to answer. A failed upgrade tells you what is wrong. That does not.
+**Do not stop the processes instead.** That frees the same path and splits every session that is open: live delivery into the session keeps working, but the agent's MCP server does not come back, and the agent reads a note it no longer has the tools to answer. A failed upgrade tells you what is wrong. That does not.
 
 </details>
 
@@ -136,11 +136,11 @@ A running process follows its image through a rename, so the servers keep answer
    status  │  q quit · f follow · m config · ? keys   3.1ms frame  25MiB  follow ▶  1/3
 ```
 
-The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 139 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 139 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
+The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 139 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 139 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is the default at every width.
 
 Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
 
-Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row draws its status letter in green so the two never blur together. The mark costs no width, so asking for the staged run never shortens a filename. It exists because an agent that stages its own work used to empty the pane: `vigia` shows the working tree against the index, so a fully staged worktree had nothing to show and said so, which reads exactly like a clean one. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane now says where the work went: `no unstaged changes · 3 staged`.
+Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row draws its status letter in green so the two never blur together. The mark costs no width, so asking for the staged run never shortens a filename. It exists because `vigia` shows the working tree against the index, so an agent that stages its own work would otherwise leave the pane empty, which reads exactly like a clean tree. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane says where the work went: `no unstaged changes · 3 staged`.
 
 Every file gets the same row in both regions:
 
@@ -174,7 +174,7 @@ The column is kept on every row whether or not the file has a note, so nothing s
 
 <br>
 
-Cut the file into equal slices, top to bottom, twelve of them on an ordinary pane and twenty-four on one wide enough to spare the columns, and colour each one by what happened inside it: **green** for lines added, **red** for removed, and a third colour where both. It is a map of the file you are *not* looking at, so a strip lit only at its right end says the change is at the bottom and you have not scrolled there yet. Brighter means more lines in that slice.
+Cut the file into equal slices, top to bottom, twelve of them on an ordinary pane, and twenty-four or forty-eight on one wide enough to spare the columns, and colour each one by what happened inside it: **green** for lines added, **red** for removed, and a third colour where both. It is a map of the file you are *not* looking at, so a strip lit only at its right end says the change is at the bottom and you have not scrolled there yet. Brighter means more lines in that slice.
 
 A slice nothing touched is still drawn, in a dark track colour, because a strip with holes in it would be a different shape per file and you could not compare two at a glance. On a narrow pane adjacent slices are summed and reclassified rather than dropped, so it stays a whole file at every width.
 
@@ -187,7 +187,7 @@ A slice nothing touched is still drawn, in a dark track colour, because a strip 
 
 Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds, and a busier one is a hotter colour: on a terminal with 24-bit colour the height and the ink climb the same ramp together, so the shape reads at a glance and the colour confirms it. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
 
-**Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means. The mockup drew these as waves before the first commit, and drawing the events raw was the defect.
+**Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means.
 
 It is scaled **across every tracked file**, not against the row's own maximum, and that is the whole point: a row scaled to itself would draw full height the moment it was the busiest thing *it* had ever been, and you could not tell the file an agent is hammering from the file it touched once. A column with no writes draws a flat track `_` rather than nothing, for the same reason the heat strip draws its empty slices.
 
@@ -219,15 +219,15 @@ The grammars are `bat`'s curated collection, which is the same set that tool hig
 
 **Five steps decide the language**, in order, because an extension alone gets a surprising number of files wrong:
 
-1. **A written rule**, where one extension has more than one honest answer. `.h` is Objective-C, whose grammar is a superset of C, so C headers colour fully and only C++-only constructs go plain. `.m` is Objective-C over MATLAB, `.v` is V over Verilog, `.jsx` borrows the TSX grammar, and `.sass` is Sass, which it was not: it used to resolve to Ruby Haml, which is a confidently wrong colour rather than a missing one.
-2. **The whole file name**, so `Dockerfile`, `CMakeLists.txt` and `go.mod` are found by name. This runs *before* the extension, which is what fixes `CMakeLists.txt`: the CMake grammar registers it whole, and looking up `txt` first handed it to plain text.
+1. **A written rule**, where one extension has more than one honest answer. `.h` is Objective-C, whose grammar is a superset of C, so C headers colour fully and only C++-only constructs go plain. `.m` is Objective-C over MATLAB, `.v` is V over Verilog, `.jsx` borrows the TSX grammar, and `.sass` is Sass.
+2. **The whole file name**, so `Dockerfile`, `CMakeLists.txt` and `go.mod` are found by name. This runs *before* the extension, so `CMakeLists.txt` is CMake rather than plain text.
 3. **The extension**, with a leading-dot retry so `.gitignore` finds a grammar registered as `gitignore`.
 4. **The nearest grammar**, for the four formats below.
 5. **The first line**, which is how an extensionless script with a `#!` gets a language at all, and how a `.ts` file that is really a Qt translation file gets read as the XML it is instead of as TypeScript.
 
 **Four formats have no grammar this stack can carry**, and they draw as their nearest relative rather than as nothing: `.astro` as HTML and `.bicep` as JavaScript, because both upstreams are written in a Sublime Text 4 dialect `syntect` does not implement and both extend exactly those; `.mdx` as Markdown and `.mojo` as Python, which they are supersets of. Carbon has no grammar anywhere in this format, so it draws plain. That step runs *after* the four above, so the day a real grammar lands it wins without anything being deleted.
 
-A file type nothing recognises is not an error. It draws exactly as it did before there was highlighting at all, because a monitor that refused a file it could not colour would have inverted its own job.
+A file type nothing recognises is not an error. It draws as plain diff text, because a monitor that refused a file it could not colour would have inverted its own job.
 
 </details>
 
@@ -265,7 +265,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | `w` | wrap a long line onto the row below, or clip it |
 | `c` | show or hide note rows |
 | `Enter` `Esc` | in a box: send, or cancel |
-| `m` `Esc` | every setting, in one box |
+| `m` `Esc` | every on/off setting, in one box |
 | `?` `Esc` | all of this, on screen |
 | `q` `Ctrl+C` | quit |
 
@@ -286,10 +286,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 | just point | it marks itself |
 | `Shift`+drag | your terminal selects text |
 
-**`m` opens every setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `Save settings` keeps what you flip for next time, and `Reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
-
-> [!TIP]
-> Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every other key still means what it meant. On a pane too small to hold the whole table, `?` again turns the page and the last one closes it; the title bar says how many of them you are looking at.
+**`m` opens every on/off setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `Save settings` keeps what you flip for next time, and `Reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
 
 <details>
 <summary><b>The small print on the keys</b></summary>
@@ -304,7 +301,7 @@ All three are backgrounds, so they need 24-bit colour and they leave together be
 
 The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
 
-It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. `a` adds what is *staged* beside it, as a second run, so an agent that stages its own work does not empty the pane. With nothing to show it says so, and says where the work went if it went to the index.
+It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and says where the work went if it went to the index.
 
 </details>
 
@@ -389,7 +386,7 @@ The resource is `vigia://notes`, and the server announces every change to the st
 
 `vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line and **noted** when nothing live did, so the note is waiting in the store. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
 
-`vigia mcp pending` is the rung that needs no socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
+`vigia mcp pending` works without a socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
 
 <details>
 <summary><b>Both steps in one command, if you already use <code>mcs</code></b></summary>
@@ -455,7 +452,7 @@ The server and `pending` work with any agent. The live push does not.
 
 ## ⚡ Promises
 
-Budgets, not hopes. Each one has a test that fails when it is missed, and a regression past any of them **fails the build**.
+Budgets, not hopes. Each one has a test that fails when it is missed. Every regression **fails the build** except memory drift, which a scheduled soak checks.
 
 | | | |
 |---|---|---|
@@ -487,14 +484,14 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 
 ## 🎨 Make it yours
 
-A palette, a colour depth, which drawing glyphs your font carries, how a changed image is drawn, what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
+A palette, a colour depth, which drawing glyphs your font carries, how a changed image is drawn (from 1.2.0, unreleased), what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
 
 ```sh
 VIGIA_THEME=dark vigia          # ansi, dark, light or system, or a path to your own
 NO_COLOR=1 vigia                # every ladder collapses to something readable
 ```
 
-**[`docs/CONFIG.md`](docs/CONFIG.md)** is the whole of it: the six ladders and what wins at each rung, the config file and its keys, and how to write a theme. **[`docs/THEME.md`](docs/THEME.md)** names every colour the pane draws.
+**[`docs/CONFIG.md`](docs/CONFIG.md)** is the whole of it: the six ladders (the pictures one from 1.2.0, unreleased) and what wins at each rung, the config file and its keys, and how to write a theme. **[`docs/THEME.md`](docs/THEME.md)** names every colour the pane draws.
 
 ---
 
@@ -510,11 +507,13 @@ NO_COLOR=1 vigia                # every ladder collapses to something readable
 | [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a note or a message can be seen arriving |
 | [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text, its caret, its undo |
 | [fancy-regex](https://github.com/fancy-regex/fancy-regex) | The `hide` pattern |
-| [image](https://github.com/image-rs/image) | Reads a changed image's format and size: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, QOI and TGA |
-| [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol |
-| [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures |
-| [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line |
-| [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text |
+| [image](https://github.com/image-rs/image) | Reads a changed image's format and size: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, QOI and TGA (from 1.2.0, unreleased) |
+| [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol (from 1.2.0, unreleased) |
+| [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures (from 1.2.0, unreleased) |
+| [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line (from 1.2.0, unreleased) |
+| [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text (from 1.2.0, unreleased) |
+
+The last rows draw changed images, which arrives in 1.2.0.
 
 Three of those earn their place by what they *do not* add. `fancy-regex` is already in the graph under `syntect`, so the `hide` pattern costs the binary nothing. `tachyonfx` schedules nothing, which is what keeps *no polling timer* this program's own rule to keep rather than a dependency's. `two-face` builds the grammar dump at compile time and is absent from every shipped graph.
 
@@ -548,9 +547,9 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 <br>
 
-**It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header with its position token, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, the note box open on a line, and the status bar.
+**It is a mockup drawn with `VIGIA_THEME=dark`, not a screenshot**, and everything in it draws in the real pane: the header with its position token, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, the note box open on a line, and the status bar.
 
-**The picture is part of the specification.** Where it and the binary disagree, one of them has a bug, unless the difference is written down. One difference is written down: the header shows the worktree's name rather than `vigia`, because at 40 columns the name of the tree is the useful fact.
+One difference: the real header shows your worktree's name where the picture says `vigia`, because at 40 columns the tree's name is the useful fact.
 
 </details>
 
@@ -562,6 +561,10 @@ Both readings are the tool. It watches, and it is the window you watch through.
 
 It is also the verb, third person. So `vigia .` reads as a sentence.
 
+## 🤝 Contributing
+
+Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging, committing and rebasing, AI features of its own, git remote operations, or a GUI. [`ROADMAP.md`](ROADMAP.md#non-goals-permanent) lists them.
+
 ---
 
 <div align="center">
@@ -569,7 +572,3 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 **MIT** · Built in the open · [SPEC](SPEC.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [Issues](https://github.com/breferrari/vigia/issues)
 
 </div>
-
-## 🤝 Contributing
-
-Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging and committing, branch browsing, comment threads or a GUI. [`ROADMAP.md`](ROADMAP.md#non-goals-permanent) lists them.
