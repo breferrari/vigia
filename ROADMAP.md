@@ -422,7 +422,7 @@ Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Interna
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Class every prose path as docs and merge docs-only rebases without fresh CI **Asked by the reader; taken before #659** | [#667](https://github.com/breferrari/vigia/issues/667) |
+| ✅ | Class every prose path as docs and merge docs-only rebases without fresh CI. **Asked by the reader; taken before #659** | [#667](https://github.com/breferrari/vigia/issues/667) |
 | ⬜ | Read the take-order from ROADMAP.md, not milestone titles | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ⬜ | Harden the bump.yml gates against reindents, echoes and env values | [#145](https://github.com/breferrari/vigia/issues/145) |
 | ⬜ | Publish to crates.io by trusted publishing and delete the registry token | [#141](https://github.com/breferrari/vigia/issues/141) |
