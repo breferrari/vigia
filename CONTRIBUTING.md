@@ -88,7 +88,7 @@ cargo run -p xtask --bin scene -- replay   # the same states written in bursts, 
 
 Each run makes a new repository under your temp directory and touches nothing else.
 
-PDF pictures are behind the `pdf` feature. The release binaries have it on. A plain `cargo build` or `cargo install` leaves it off, and then a changed PDF shows as it did before PDFs were drawn. To try them from a checkout, run `cargo run -p vigia --features pdf`.
+PDF pictures are behind the `pdf` feature. The release binaries have it on, and `cargo install vigia` leaves it off, so a changed PDF shows as binary there. The feature builds only from a checkout, because it needs the patched `hayro-syntax` in `vendor/`. In a checkout, a command over the whole workspace turns it on, because the scene bed depends on it. `cargo build -p vigia` and `cargo run -p vigia` leave it off; add `--features pdf` to draw PDFs.
 
 The suites run under nextest with its `ci` profile, which runs every test and reports every failure in one pass; `cargo test`, and nextest without that profile, stop at the first failure. The release gates run under `cargo test`, as CI runs them. CI sets `VIGIA_BUDGET_SLACK=3` on every step, because its shared runners are slow.
 

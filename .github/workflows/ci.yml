@@ -191,6 +191,10 @@ jobs:
       # code is not compiled on Linux, so one run there lints a third of what
       # the deny above covers.
       - run: cargo clippy --all-targets
+      # The workspace turns PDFs on through the scene bed, so the build
+      # without them is linted on its own.
+      - name: clippy without PDFs
+        run: cargo clippy -p vigia -p vigia-core --all-targets
 
       # Correctness first, in debug, where the structural budget gates still
       # apply and the absolute ones report that they are skipped.
