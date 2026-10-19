@@ -82,7 +82,7 @@ pub use render::{
 };
 pub use state::state_root;
 pub use terminal::{
-    Background, Colours, PICTURES_WAIT, Screen, Session, background_of, colours_of, picker,
+    Background, Colours, PICTURES_WAIT, Screen, Session, ask, background_of, colours_of, picker,
 };
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};

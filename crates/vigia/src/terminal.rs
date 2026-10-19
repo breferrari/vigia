@@ -339,15 +339,8 @@ fn wait_limit(palette: bool, begun: bool, timeout: std::time::Duration) -> std::
 /// raw reply.
 #[cfg(unix)]
 pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
-    use std::io::{Read, Write};
-    use std::os::fd::AsFd;
-
     let mut reply = Vec::with_capacity(if palette { 512 } else { 64 });
-    let Ok(mut tty) = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-    else {
+    let Some((input, output)) = query_stdio() else {
         return reply;
     };
     let raw = ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
@@ -355,8 +348,11 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
         return reply;
     }
     let _ = (|| {
-        tty.write_all(&query(palette)).ok()?;
-        tty.flush().ok()?;
+        let query = query(palette);
+        let mut sent = 0;
+        while sent < query.len() {
+            sent += rustix::io::write(&output, &query[sent..]).ok()?;
+        }
         let start = std::time::Instant::now();
         loop {
             let deadline = start + wait_limit(palette, !reply.is_empty(), timeout);
@@ -364,9 +360,8 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             if now >= deadline {
                 return Some(());
             }
-            let fd = tty.as_fd();
             let mut fds = [rustix::event::PollFd::new(
-                &fd,
+                &input,
                 rustix::event::PollFlags::IN,
             )];
             let waited =
@@ -374,8 +369,13 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             if waited == 0 {
                 continue;
             }
+            // `POLLNVAL` from `/dev/tty` on macOS, or a hangup: nothing will
+            // come, and a read would wait for a key.
+            if !fds[0].revents().contains(rustix::event::PollFlags::IN) {
+                return Some(());
+            }
             let mut buffer = [0u8; 256];
-            let read = tty.read(&mut buffer).ok()?;
+            let read = rustix::io::read(&input, &mut buffer).ok()?;
             if read == 0 {
                 return Some(());
             }
@@ -450,9 +450,9 @@ pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Ans
     (picker, answer)
 }
 
-/// The descriptors the picture query reads and writes: the terminal's own when
+/// The descriptors the startup queries read and write: the terminal's own when
 /// both ends are one, else `/dev/tty`. macOS answers `poll` on `/dev/tty` with
-/// `POLLNVAL`, so there the query reads nothing through it.
+/// `POLLNVAL`, so there a query gets nothing through it.
 #[cfg(unix)]
 fn query_stdio() -> Option<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
     use std::os::fd::AsFd;
