@@ -715,8 +715,17 @@ fn image_format(format: Format) -> Option<ImageFormat> {
     })
 }
 
-/// The long side an SVG is rendered at, which every panel is shrunk from.
+/// The long side an SVG is rendered at, which every panel is shrunk from,
+/// unless its filters cost more than [`FILTER_BUDGET`] there.
 const SVG_LONG_SIDE: f32 = 1024.0;
+/// The shortest long side an SVG is rendered at before it is refused.
+const SVG_SHORTEST: f32 = 64.0;
+/// What one SVG's filters may cost, in kernel cells times pixels. Sixty-four
+/// blurs at 256 pixels a side, about 250ms.
+const FILTER_BUDGET: f64 = 1024.0 * 256.0 * 256.0;
+/// What a filter primitive other than a convolution costs, in kernel cells.
+/// A blur measured at about twenty.
+const PRIMITIVE_CELLS: u64 = 16;
 
 /// SVG references to other files refused, since the process started.
 static REFUSED: AtomicU64 = AtomicU64::new(0);
@@ -742,10 +751,6 @@ fn fonts() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
 /// The most encoded bytes one SVG's embedded images may hold, every `<use>`
 /// copy counted, before the document is refused.
 const EMBEDDED_BUDGET: u64 = 32 * 1024 * 1024;
-/// The most groups one SVG may filter: each is drawn again for every copy.
-const MAX_FILTERED: usize = 64;
-/// The most cells a convolution matrix may hold: its cost is per pixel.
-const MAX_KERNEL: u32 = 32 * 32;
 
 /// An embedded image, as usvg reads it, once its share of `budget` and its
 /// size are known to fit. A nested SVG has no raster size, so it is refused
@@ -785,43 +790,53 @@ fn embedded(
     (resvg::usvg::ImageHrefResolver::default_data_resolver())(mime, data, options)
 }
 
-/// Whether `group` asks more of the render than one picture may take: too
-/// many filtered groups, or a convolution too large.
-fn too_heavy(tree: &resvg::usvg::Tree) -> bool {
+/// What `tree`'s filters cost per pixel, in kernel cells, every `<use>` copy
+/// counted.
+fn filter_cost(tree: &resvg::usvg::Tree) -> u64 {
     use resvg::usvg::{Group, Node, filter::Kind};
-    fn weigh(group: &Group, filtered: &mut usize, kernel: &mut u32) {
-        if !group.filters().is_empty() {
-            *filtered += 1;
-        }
-        for filter in group.filters() {
-            for primitive in filter.primitives() {
-                if let Kind::ConvolveMatrix(convolve) = primitive.kind() {
+    fn weigh(group: &Group, cost: &mut u64) {
+        for primitive in group
+            .filters()
+            .iter()
+            .flat_map(|filter| filter.primitives())
+        {
+            *cost = cost.saturating_add(match primitive.kind() {
+                Kind::ConvolveMatrix(convolve) => {
                     let matrix = convolve.matrix();
-                    *kernel = (*kernel).max(matrix.columns().saturating_mul(matrix.rows()));
+                    u64::from(matrix.columns()) * u64::from(matrix.rows())
                 }
-            }
+                _ => PRIMITIVE_CELLS,
+            });
         }
         for node in group.children() {
             if let Node::Group(child) = node {
-                weigh(child, filtered, kernel);
+                weigh(child, cost);
             }
-            node.subroots(|root| weigh(root, filtered, kernel));
+            node.subroots(|root| weigh(root, cost));
         }
     }
-    let (mut filtered, mut kernel) = (0, 0);
-    weigh(tree.root(), &mut filtered, &mut kernel);
-    filtered > MAX_FILTERED || kernel > MAX_KERNEL
+    let mut cost = 0;
+    weigh(tree.root(), &mut cost);
+    cost
 }
 
-/// One SVG side rendered, its long side at [`SVG_LONG_SIDE`].
-fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
+/// The long side to render at for filters costing `cost`, or `None` when
+/// even [`SVG_SHORTEST`] costs too much.
+fn long_side(cost: u64) -> Option<f32> {
+    let side = (FILTER_BUDGET / cost.max(1) as f64).sqrt() as f32;
+    let side = side.min(SVG_LONG_SIDE).floor();
+    (side >= SVG_SHORTEST).then_some(side)
+}
+
+/// One SVG side parsed, with only what the document carries.
+fn svg_tree(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
     use resvg::usvg::{ImageHrefResolver, Options, Tree};
     let budget = std::sync::Arc::new(AtomicU64::new(EMBEDDED_BUDGET));
     let over = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (spent, refused) = (std::sync::Arc::clone(&budget), std::sync::Arc::clone(&over));
     let mut options = Options {
-        // Only what the document carries: a reference to any other file is
-        // refused, so a changed SVG cannot make the pane open one.
+        // A reference to any other file is refused, so a changed SVG cannot
+        // make the pane open one.
         image_href_resolver: ImageHrefResolver {
             resolve_data: Box::new(move |mime, data, options| {
                 embedded(mime, data, options, &spent, &refused)
@@ -839,34 +854,59 @@ fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
         options.fontdb = fonts();
     }
     let tree = Tree::from_data(bytes, &options).ok()?;
-    if over.load(Ordering::Relaxed) || too_heavy(&tree) {
-        return None;
-    }
+    (!over.load(Ordering::Relaxed)).then_some(tree)
+}
+
+/// One SVG side rendered, its long side at `long`.
+fn render_svg(tree: &resvg::usvg::Tree, long: f32) -> Option<RgbaImage> {
     let size = tree.size();
-    let scale = SVG_LONG_SIDE / size.width().max(size.height());
+    let scale = long / size.width().max(size.height());
     let width = (size.width() * scale).ceil().max(1.0) as u32;
     let height = (size.height() * scale).ceil().max(1.0) as u32;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
     resvg::render(
-        &tree,
+        tree,
         resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
     RgbaImage::from_raw(width, height, pixmap.take_demultiplied())
 }
 
-/// One side decoded, with its colour profile. The first frame only.
-fn decode(source: &Source, format: Format) -> Option<(RgbaImage, Option<Vec<u8>>)> {
-    use image::ImageDecoder;
+/// Each side of a changed SVG rendered at one long side, so the two compare,
+/// or `None` when either cannot be drawn.
+fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
+    let tree = |source: &Option<Source>| match source {
+        Some(source) => svg_tree(&read_counted(source)?).map(Some),
+        None => Some(None),
+    };
+    let (old, new) = (tree(&job.sources.before)?, tree(&job.sources.after)?);
+    let cost = [&old, &new].into_iter().flatten().map(filter_cost).max();
+    let long = long_side(cost.unwrap_or(0))?;
+    let render = |tree: Option<resvg::usvg::Tree>| match tree {
+        Some(tree) => render_svg(&tree, long).map(|image| Some((image, None))),
+        None => Some(None),
+    };
+    Some((render(old)?, render(new)?))
+}
+
+/// A side decoded, and its colour profile.
+type Decoded = (RgbaImage, Option<Vec<u8>>);
+
+/// A side's bytes, counted as one decode.
+fn read_counted(source: &Source) -> Option<Vec<u8>> {
     let bytes = source.read()?;
     vigia_core::armed(Stage::Decode);
     DECODES.fetch_add(1, Ordering::Relaxed);
     if std::thread::current().name() != Some(WORKER) {
         OFF_WORKER.fetch_add(1, Ordering::Relaxed);
     }
-    let Some(raster) = image_format(format) else {
-        return Some((render_svg(&bytes)?, None));
-    };
+    Some(bytes)
+}
+
+/// One side decoded, with its colour profile. The first frame only.
+fn decode(source: &Source, raster: ImageFormat) -> Option<Decoded> {
+    use image::ImageDecoder;
+    let bytes = read_counted(source)?;
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes));
     reader.set_format(raster);
     let mut limits = image::Limits::default();
@@ -1060,14 +1100,16 @@ fn painted(mut image: RgbImage, hit: Option<&Hits>, paint: Paint, inks: Inks) ->
 /// panel. A side that does not decode builds nothing to draw.
 fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
     let side = |source: &Option<Source>, format: Option<Format>| match (source, format) {
-        (Some(source), Some(format)) => decode(source, format).map(Some),
+        (Some(source), Some(format)) => decode(source, image_format(format)?).map(Some),
         (None, None) => Some(None),
         _ => None,
     };
-    let (Some(old), Some(new)) = (
-        side(&job.sources.before, job.formats.0),
-        side(&job.sources.after, job.formats.1),
-    ) else {
+    let sides = if job.formats.0 == Some(Format::Svg) || job.formats.1 == Some(Format::Svg) {
+        svg_sides(job)
+    } else {
+        side(&job.sources.before, job.formats.0).zip(side(&job.sources.after, job.formats.1))
+    };
+    let Some((old, new)) = sides else {
         return undecoded();
     };
     let profiles_differ = matches!((&old, &new), (Some((_, a)), Some((_, b))) if a != b);

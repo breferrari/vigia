@@ -357,32 +357,72 @@ fn svg_nested_svg_refused() {
     );
 }
 
+/// How many pixels each side was rendered with, when the two compared.
+fn rendered(verdict: Option<Verdict>) -> Option<u64> {
+    match verdict {
+        Some(Verdict::Changed { total, .. }) => Some(total),
+        _ => None,
+    }
+}
+
+const BLUR: &str = r#"<filter id="blur"><feGaussianBlur stdDeviation="1"/></filter>"#;
+
 #[test]
-fn svg_filter_copies_bounded() {
-    let filter = r#"<filter id="blur"><feGaussianBlur stdDeviation="1"/></filter>"#;
-    let leaf =
-        format!(r#"{filter}<g id="l0" filter="url(#blur)"><rect width="2" height="2"/></g>"#);
+fn svg_filters_scaled() {
+    let leaf = format!(r#"{BLUR}<g id="l0" filter="url(#blur)"><rect width="2" height="2"/></g>"#);
+    let total = rendered(verdict_of("svg-filters", &fanned(&leaf, 10, 2)));
+    // A hundred blurs at 16 cells each: sqrt(2^26 / 1600) is 204 a side.
     assert_eq!(
-        verdict_of("svg-filters", &fanned(&leaf, 10, 2)),
-        Some(Verdict::Undecoded),
-        "a hundred filtered copies were drawn"
+        total,
+        Some(204 * 204),
+        "a hundred blurs were not rendered smaller"
     );
-    let few = format!(r#"{filter}<g filter="url(#blur)"><rect width="8" height="8"/></g>"#);
-    assert!(
-        changed(verdict_of("svg-filter-one", &few)),
-        "one filtered group was refused"
+    let one = format!(r#"{BLUR}<g filter="url(#blur)"><rect width="8" height="8"/></g>"#);
+    assert_eq!(
+        rendered(verdict_of("svg-filter-one", &one)),
+        Some(1024 * 1024),
+        "one blur was rendered smaller"
     );
 }
 
 #[test]
+fn svg_filters_refused() {
+    let leaf = format!(r#"{BLUR}<g id="l0" filter="url(#blur)"><rect width="2" height="2"/></g>"#);
+    assert_eq!(
+        verdict_of("svg-filters-many", &fanned(&leaf, 10, 4)),
+        Some(Verdict::Undecoded),
+        "ten thousand filtered copies were drawn"
+    );
+}
+
+#[test]
+fn svg_filter_side_compared() {
+    // Only the new side is filtered, and both are rendered at its size.
+    let leaf = format!(r#"{BLUR}<g id="l0" filter="url(#blur)"><rect width="2" height="2"/></g>"#);
+    let drawn = drawn(
+        "svg-filter-side",
+        Some(&svg(r#"<rect width="2" height="2"/>"#)),
+        &svg(&fanned(&leaf, 10, 2)),
+    );
+    assert!(changed(drawn.verdict), "the two sides were not compared");
+}
+
+#[test]
 fn svg_convolve_bounded() {
-    let kernel = vec!["1"; 33 * 33].join(" ");
-    let body = format!(
-        r#"<filter id="big"><feConvolveMatrix order="33" kernelMatrix="{kernel}"/></filter><rect width="8" height="8" filter="url(#big)"/>"#
+    let convolve = |order: usize| {
+        let kernel = vec!["1"; order * order].join(" ");
+        format!(
+            r#"<filter id="big"><feConvolveMatrix order="{order}" kernelMatrix="{kernel}"/></filter><rect width="8" height="8" filter="url(#big)"/>"#
+        )
+    };
+    assert_eq!(
+        rendered(verdict_of("svg-convolve", &convolve(32))),
+        Some(256 * 256),
+        "a 32x32 convolution was not rendered at 256 a side"
     );
     assert_eq!(
-        verdict_of("svg-convolve", &body),
+        verdict_of("svg-convolve-huge", &convolve(129)),
         Some(Verdict::Undecoded),
-        "a 33x33 convolution was drawn"
+        "a 129x129 convolution was drawn"
     );
 }
