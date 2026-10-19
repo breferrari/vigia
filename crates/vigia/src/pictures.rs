@@ -226,6 +226,8 @@ pub struct Built {
     pub verdict: Verdict,
     /// Whether the two sides carry different colour profiles.
     pub profiles_differ: bool,
+    /// The ids of its Kitty images, which the terminal holds until told to drop them.
+    pub kitty: Vec<u32>,
 }
 
 impl Built {
@@ -428,6 +430,29 @@ pub struct Pictures {
     jobs: mpsc::Sender<Job>,
     /// Each finished job, with `None` for one skipped.
     done: mpsc::Receiver<(Arc<Key>, Option<Built>)>,
+    /// Kitty images whose picture is gone, waiting to be deleted.
+    retired: Vec<u32>,
+    /// Whether a delete has to pass through tmux.
+    tmux: bool,
+}
+
+/// A Kitty image id no other picture, nor another pane on the same terminal,
+/// is likely to hold. Never 0, which the protocol does not accept.
+fn kitty_id() -> u32 {
+    use std::hash::{BuildHasher, Hasher};
+    static NEXT: std::sync::OnceLock<std::sync::atomic::AtomicU32> = std::sync::OnceLock::new();
+    let next = NEXT.get_or_init(|| {
+        let seed = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        std::sync::atomic::AtomicU32::new(seed as u32)
+    });
+    loop {
+        let id = next.fetch_add(1, Ordering::Relaxed);
+        if id != 0 {
+            return id;
+        }
+    }
 }
 
 /// Pictures decoded since the process started, on any thread.
@@ -454,6 +479,7 @@ fn undecoded() -> Built {
         panels: Vec::new(),
         verdict: Verdict::Undecoded,
         profiles_differ: false,
+        kitty: Vec::new(),
     }
 }
 
@@ -461,6 +487,7 @@ impl Pictures {
     /// A cache whose worker builds in `inks`, encodes for `picker`, and calls
     /// `wake` after each picture.
     pub fn new(inks: Inks, picker: Picker, wake: Box<dyn Fn() + Send>) -> Self {
+        let tmux = picker.tmux_detected();
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
         let shown = Arc::new(Mutex::new(HashSet::new()));
@@ -489,7 +516,36 @@ impl Pictures {
             shown,
             jobs,
             done,
+            retired: Vec::new(),
+            tmux,
         }
+    }
+
+    /// Keep the pictures in `shown`, and retire the Kitty images of the rest.
+    fn keep(&mut self, shown: &HashSet<Arc<Key>>) {
+        let retired = &mut self.retired;
+        self.built.retain(|key, ready| {
+            let kept = shown.contains(key);
+            if !kept {
+                retired.extend(&ready.0.kitty);
+            }
+            kept
+        });
+    }
+
+    /// The Kitty deletes owed since the last call, to write before the next
+    /// frame. Empty for any other protocol.
+    pub fn retired(&mut self) -> String {
+        use ratatui_image::picker::cap_parser::Parser;
+        let (start, escape, end) = Parser::tmux_start_escape_end(self.tmux);
+        let mut deletes = String::new();
+        for id in self.retired.drain(..) {
+            // `q=2`: an answer would reach the event reader as keys.
+            deletes.push_str(&format!(
+                "{start}{escape}_Ga=d,d=I,i={id},q=2{escape}\\{end}"
+            ));
+        }
+        deletes
     }
 
     /// Take in what the worker finished since the last call.
@@ -533,7 +589,7 @@ impl Pictures {
             }
         }
         let shown: HashSet<Arc<Key>> = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
-        self.built.retain(|key, _| shown.contains(key));
+        self.keep(&shown);
         // Before any job is sent, or the worker can skip one as not on screen.
         if let Ok(mut on_screen) = self.shown.lock() {
             *on_screen = shown;
@@ -581,9 +637,12 @@ impl Pictures {
             let done = self.pending.is_empty();
             if done || std::time::Instant::now() >= until {
                 // A picture that left the screen while it was built is not kept.
-                if let Ok(shown) = self.shown.lock() {
-                    self.built.retain(|key, _| shown.contains(key));
-                }
+                let shown = self
+                    .shown
+                    .lock()
+                    .map(|shown| shown.clone())
+                    .unwrap_or_default();
+                self.keep(&shown);
                 return done;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -693,16 +752,35 @@ fn panel(
     paint: Paint,
     inks: Inks,
     picker: &Picker,
-) -> Option<SlicedProtocol> {
+) -> Option<(SlicedProtocol, Option<u32>)> {
     let image = DynamicImage::ImageRgb8(painted(image, hit, paint, inks));
     let size = Size::new(slot.width, slot.rows);
     // Direct, because the picker's fit would read the grid as font pixels.
     if picker.protocol_type() == ProtocolType::Halfblocks {
-        return Some(SlicedProtocol::Halfblocks(
-            Halfblocks::new(image, size).ok()?,
+        return Some((
+            SlicedProtocol::Halfblocks(Halfblocks::new(image, size).ok()?),
+            None,
         ));
     }
-    SlicedProtocol::new_with_resize(picker, image, size, ratatui_image::Resize::Fit(None)).ok()
+    if picker.protocol_type() == ProtocolType::Kitty {
+        // Built here rather than by the picker, so the id is known for its delete.
+        let id = kitty_id();
+        let cells = ratatui_image::Resize::natural_size(&image, picker.font_size());
+        let kitty = ratatui_image::protocol::kitty::Kitty::new(
+            image,
+            cells,
+            id,
+            picker.tmux_detected(),
+            false,
+            false,
+        )
+        .ok()?;
+        return Some((SlicedProtocol::Kitty(kitty), Some(id)));
+    }
+    let sliced =
+        SlicedProtocol::new_with_resize(picker, image, size, ratatui_image::Resize::Fit(None))
+            .ok()?;
+    Some((sliced, None))
 }
 
 /// A slot's half-block grid: two pixels to a cell's height.
@@ -824,6 +902,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
     // share one pass.
     let mut shrunk: HashMap<(Side, u32, u32), RgbImage> = HashMap::new();
     let mut panels = Vec::new();
+    let mut kitty = Vec::new();
     for (&slot, &(side, paint)) in job.key.shape.slots.iter().zip(job.key.shape.kind.paints()) {
         let image = match side {
             Side::Old => old.as_ref(),
@@ -858,15 +937,17 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
             }
             _ => None,
         };
-        let Some(protocol) = panel(small, hit.as_ref(), slot, paint, inks, picker) else {
+        let Some((protocol, id)) = panel(small, hit.as_ref(), slot, paint, inks, picker) else {
             return undecoded();
         };
+        kitty.extend(id);
         panels.push((slot, protocol));
     }
     Built {
         panels,
         verdict,
         profiles_differ,
+        kitty,
     }
 }
 
@@ -1275,6 +1356,7 @@ mod tests {
             panels: Vec::new(),
             verdict,
             profiles_differ,
+            kitty: Vec::new(),
         };
         assert_eq!(
             built(

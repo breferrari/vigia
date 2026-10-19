@@ -2165,6 +2165,17 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
+        // Before the draw, so the terminal drops the Kitty images of pictures that
+        // left the screen. A failed write leaves them to the terminal's own quota.
+        let retired = self.pictures.retired();
+        if !retired.is_empty() {
+            use std::io::Write;
+            let _ = self
+                .session
+                .screen()
+                .backend_mut()
+                .write_all(retired.as_bytes());
+        }
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.

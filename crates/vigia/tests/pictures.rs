@@ -105,9 +105,12 @@ impl Pane {
     }
 
     fn draw(&self, view: &View) -> TestBackend {
+        self.draw_with(view, &self.chrome())
+    }
+
+    fn draw_with(&self, view: &View, chrome: &vigia::Chrome) -> TestBackend {
         let mut terminal =
             Terminal::new(TestBackend::new(self.width, self.height)).expect("terminal");
-        let chrome = self.chrome();
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -117,7 +120,7 @@ impl Pane {
                     view,
                     &Theme::dark(),
                     Glyphs::default(),
-                    &chrome,
+                    chrome,
                 );
             })
             .expect("draw");
@@ -985,4 +988,75 @@ fn sized_slots(view: &View) -> Vec<(usize, usize)> {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+/// The id a Kitty transmit names, from its `i=` key.
+fn kitty_ids(backend: &TestBackend) -> Vec<u32> {
+    backend
+        .buffer()
+        .content()
+        .iter()
+        .filter_map(|cell| {
+            let at = cell.symbol().find("a=T")?;
+            let head = &cell.symbol()[..at];
+            head.rsplit("i=").next()?.split(',').next()?.parse().ok()
+        })
+        .collect()
+}
+
+#[test]
+fn kitty_deleted_on_leave() {
+    let (scratch, mut pane) = protocol_pane("pictures-kitty-leave", ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let sent = kitty_ids(&pane.draw(&view));
+    assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
+    assert_eq!(
+        pane.pictures.retired(),
+        "",
+        "a delete was owed while on screen"
+    );
+
+    // The image is reverted, so its picture leaves the pane.
+    scratch.checkout("screen.png");
+    frame.advance().expect("advance");
+    pane.view(&mut frame);
+    let deletes = pane.pictures.retired();
+    for id in &sent {
+        assert!(
+            deletes.contains(&format!("a=d,d=I,i={id},q=2")),
+            "image {id} was not deleted: {deletes:?}"
+        );
+    }
+    assert_eq!(pane.pictures.retired(), "", "a delete was owed twice");
+}
+
+#[test]
+fn protocol_hidden_under_sheet() {
+    for (protocol, sequence) in [
+        (ProtocolType::Kitty, "\x1b_G"),
+        (ProtocolType::Sixel, "\x1bP"),
+    ] {
+        let (scratch, mut pane) = protocol_pane(&format!("pictures-sheet-{protocol:?}"), protocol);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let view = pane.settled(&mut frame);
+        let mut chrome = pane.chrome();
+        chrome.sheet = Some(0);
+        let covered = pane.draw_with(&view, &chrome);
+        assert_eq!(
+            cells_with(&covered, sequence),
+            0,
+            "a {protocol:?} image was drawn under the sheet, which cannot hide it"
+        );
+        let open = pane.draw(&view);
+        assert_eq!(
+            cells_with(&open, sequence),
+            3,
+            "the {protocol:?} images were not drawn once the sheet closed"
+        );
+    }
 }

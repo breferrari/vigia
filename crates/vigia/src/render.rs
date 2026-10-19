@@ -4765,6 +4765,15 @@ impl Painter<'_> {
                 continue;
             }
             let room = Rect { x, width, ..area };
+            // An image drawn by the terminal is not cells, so an overlay drawn
+            // over it would not hide it, and a Kitty image sent under one is lost.
+            let real = !matches!(
+                protocol,
+                ratatui_image::sliced::SlicedProtocol::Halfblocks(_)
+            );
+            if real && self.covered.is_some_and(|over| over.intersects(room)) {
+                continue;
+            }
             SlicedImage::new(protocol, (0, -above).into()).render(room, self.buf);
         }
         let bar = key.shape.kind.bar().map(|bar| match bar {
