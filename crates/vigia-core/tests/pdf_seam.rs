@@ -1,5 +1,6 @@
 //! A changed PDF whose size read panics draws what it drew before. One test,
 //! because the seam is process-wide. `SPEC.md` §11.1.
+#![cfg(feature = "pdf")]
 
 mod support;
 

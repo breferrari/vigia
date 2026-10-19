@@ -1,4 +1,5 @@
 //! A changed PDF draws pictures of its first changed page. `SPEC.md` §11.1.
+#![cfg(feature = "pdf")]
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;

@@ -1,5 +1,6 @@
 //! What a changed PDF reads as on the frame path: its first page's size, or
 //! what it drew before. `SPEC.md` §11.1.
+#![cfg(feature = "pdf")]
 
 mod support;
 

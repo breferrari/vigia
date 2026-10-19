@@ -3332,6 +3332,7 @@ fn pictures_frame_svg() {
 }
 
 /// The same with a changed PDF's pictures on screen.
+#[cfg(feature = "pdf")]
 #[test]
 fn pictures_frame_pdf() {
     pictures_frame_of(
@@ -3345,6 +3346,7 @@ fn pictures_frame_pdf() {
 /// The worker draws a page of 20 MB of content within its bound: priced by
 /// its length, it renders small. Measured 2026-10-19 on macOS, release:
 /// 0.29 to 0.51 seconds from 3 to 20 MB, the longest at 20.
+#[cfg(feature = "pdf")]
 #[test]
 fn pdf_stream_bound() {
     use vigia::pictures::{Inks, Pictures};
@@ -3400,6 +3402,7 @@ fn pdf_stream_bound() {
 /// A PDF of about 16 MiB, the most the frame path reads: an image's worth of
 /// bytes it skips, and a content stream that inflates to 15 MiB, which it
 /// measures.
+#[cfg(feature = "pdf")]
 fn heaviest_pdf(seed: u8) -> Vec<u8> {
     let image_bytes: Vec<u8> = (0..15u32 << 20).map(|n| (n as u8) ^ seed).collect();
     let mut image = format!(
@@ -3429,6 +3432,7 @@ fn heaviest_pdf(seed: u8) -> Vec<u8> {
 /// I9 while five PDFs of about 16 MiB each are changed on screen: the frame
 /// that first sees them reads their headers alone, and no frame after it
 /// reads them at all.
+#[cfg(feature = "pdf")]
 #[test]
 fn pdf_frame_read() {
     use vigia::pictures::{Inks, Pictures};

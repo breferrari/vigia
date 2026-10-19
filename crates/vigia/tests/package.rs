@@ -3520,3 +3520,34 @@ fn font_copies_named() {
         "the check no longer sees every copy"
     );
 }
+
+/// PDFs ship in the release binaries and stay out of a `cargo install`
+/// build, whose `hayro-syntax` lacks the patched decode limit. CI tests both.
+#[test]
+fn pdf_feature_shipped() {
+    let root = without_comments(&repo_file("Cargo.toml"));
+    let dist = root
+        .split_once("[workspace.metadata.dist]")
+        .map(|(_, rest)| rest.split("\n[").next().unwrap_or(rest))
+        .expect("Cargo.toml has a dist section");
+    assert!(
+        dist.contains("features = [\"pdf\"]"),
+        "the release binaries are built without PDFs: {dist}"
+    );
+    for manifest in ["crates/vigia/Cargo.toml", "crates/vigia-core/Cargo.toml"] {
+        let manifest = without_comments(&repo_file(manifest));
+        assert!(
+            manifest.contains("\npdf = [") && !manifest.contains("\ndefault = ["),
+            "a default feature set would put the unpatched PDF reader in a crates.io build"
+        );
+    }
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    assert!(
+        step_block(&ci, "test").contains("--features vigia/pdf"),
+        "the test step runs without PDFs"
+    );
+    assert!(
+        step_block(&ci, "without PDFs, as cargo install builds").contains("--test pdf_off"),
+        "no step tests a build without PDFs"
+    );
+}

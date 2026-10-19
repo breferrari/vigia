@@ -31,12 +31,18 @@ categories = ["command-line-utilities", "development-tools"]
 # somebody's `cargo install`.
 exclude = ["tests/**"]
 
+# Off for `cargo install`: PDFs are drawn through a patched `hayro-syntax`
+# that only a checkout carries, so a crates.io build shows them as binary.
+# The release binaries turn it on, in `[workspace.metadata.dist]`.
+[features]
+pdf = ["dep:hayro", "vigia-core/pdf"]
+
 [dependencies]
 image.workspace = true
 ratatui.workspace = true
 ratatui-image.workspace = true
 resvg.workspace = true
-hayro.workspace = true
+hayro = { workspace = true, optional = true }
 skrifa.workspace = true
 ratatui-textarea.workspace = true
 serde_json.workspace = true

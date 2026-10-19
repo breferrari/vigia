@@ -473,6 +473,7 @@ fn svg_first_paint() {
 }
 
 /// The same with a changed PDF first.
+#[cfg(feature = "pdf")]
 #[test]
 fn pdf_first_paint() {
     picture_first_paint("a.pdf", support::icon_pdf(1), support::icon_pdf(200));

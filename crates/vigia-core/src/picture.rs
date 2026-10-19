@@ -115,6 +115,7 @@ pub(crate) const PDF_LIMIT: u64 = 16 * 1024 * 1024;
 
 /// The most stream data the frame path lets one PDF decode while it sizes
 /// it.
+#[cfg(feature = "pdf")]
 const PDF_DECODED_HERE: u64 = 16 * 1024 * 1024;
 
 /// The largest PDF the frame path reads and sizes itself. A larger one is
@@ -142,9 +143,9 @@ pub(crate) fn pdf_headed(head: &[u8]) -> bool {
         .any(|w| w == b"%PDF-")
 }
 
-/// Whether `path` is named as a PDF.
+/// Whether `path` is named as a PDF, in a build that draws PDFs.
 pub(crate) fn pdf_named(path: &str) -> bool {
-    named(path, "pdf")
+    cfg!(feature = "pdf") && named(path, "pdf")
 }
 
 /// Whether `path` ends in `.extension`, in any case.
@@ -172,6 +173,7 @@ pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
 }
 
 /// The first page's size in points, rounded up.
+#[cfg(feature = "pdf")]
 fn pdf_size(bytes: Vec<u8>) -> Option<(u32, u32)> {
     crate::armed(crate::Stage::Header);
     // Parsing decodes object and xref streams, each held whole.
@@ -182,6 +184,11 @@ fn pdf_size(bytes: Vec<u8>) -> Option<(u32, u32)> {
     .ok()??;
     let side = |length: f32| (length.is_finite() && length > 0.0).then(|| length.ceil() as u32);
     Some((side(width)?, side(height)?))
+}
+
+#[cfg(not(feature = "pdf"))]
+fn pdf_size(_: Vec<u8>) -> Option<(u32, u32)> {
+    None
 }
 
 /// How much of a worktree SVG the frame path reads for its size.
