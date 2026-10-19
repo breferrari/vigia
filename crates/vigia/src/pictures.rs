@@ -1517,7 +1517,8 @@ mod tests {
             faces.iter().any(|face| read(face) == Some(true)),
             "no installed face reads as covering Latin"
         );
-        // Emoji faces map digits but no letters; symbol faces map pictures
+        // These emoji faces map digits but no letters (Segoe UI Emoji maps
+        // both); symbol faces map pictures
         // onto the letters.
         let named = |names: &[&str]| -> Vec<&FaceInfo> {
             faces
@@ -1526,10 +1527,7 @@ mod tests {
                 .collect()
         };
         for (kind, names) in [
-            (
-                "emoji",
-                &["Apple Color Emoji", "Noto Color Emoji", "Segoe UI Emoji"][..],
-            ),
+            ("emoji", &["Apple Color Emoji", "Noto Color Emoji"][..]),
             (
                 "symbol",
                 &["Wingdings", "Webdings", "Symbol", "OpenSymbol", "D050000L"][..],

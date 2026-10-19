@@ -3333,6 +3333,9 @@ fn pictures_frame_svg() {
 
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
     use vigia::pictures::{self, Inks, Pictures};
+    // From the start: the decode count is the process's, and another picture
+    // test building beside this one would move it.
+    let _timed = exclusively_timed();
 
     let scratch = Scratch::new(&format!("i9-pictures-{protocol:?}"));
     scratch.write(path, &old);
@@ -3438,7 +3441,6 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
-    let _timed = exclusively_timed();
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
         frames.push(timed(&mut frame, &mut app, &mut highlighter, &mut pictures).0);
