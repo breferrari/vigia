@@ -3214,9 +3214,9 @@ fn logical_of(blocks: &[Block], rows: usize, position: Position) -> Option<usize
 /// Display rows above the step `aim` opens on, among walked rows of
 /// `(pieces, hung)` each.
 fn skipped(costs: &[(usize, usize)], blocks: &[Block], aim: Aim) -> usize {
-    let Some(&(_, first)) = costs.first() else {
+    if costs.is_empty() {
         return 0;
-    };
+    }
     let rise = aim.rise.and_then(|(anchor, by)| {
         let at = logical_of(blocks, costs.len(), anchor)?;
         Some((at, anchor.under.min(costs[at].1), by))
@@ -3235,7 +3235,7 @@ fn skipped(costs: &[(usize, usize)], blocks: &[Block], aim: Aim) -> usize {
             }
             (at, under)
         }
-        None => (0, aim.under.min(first)),
+        None => (0, aim.under),
     };
     let above: usize = costs[..at]
         .iter()
