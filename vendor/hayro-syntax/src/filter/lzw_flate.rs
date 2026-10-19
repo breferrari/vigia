@@ -744,10 +744,6 @@ impl PredictorParams {
     fn bits_per_pixel(&self) -> u8 {
         self.bits_per_component * self.colors
     }
-
-    fn row_length_in_bytes(&self) -> usize {
-        (self.columns * self.bits_per_pixel() as usize).div_ceil(8)
-    }
 }
 
 impl Default for PredictorParams {
@@ -780,7 +776,13 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
         i => {
             let is_png_predictor = i >= 10;
 
-            let row_len = params.row_length_in_bytes();
+            // `/Columns` is the file's to claim, so the row is sized with a
+            // check, and a row longer than the data, which yields nothing, is
+            // never allocated.
+            let row_len = params
+                .columns
+                .checked_mul(params.bits_per_pixel() as usize)?
+                .div_ceil(8);
 
             let total_row_len = if is_png_predictor {
                 // + 1 Because each row must start with the predictor that is used for PNG predictors.
@@ -788,6 +790,10 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
             } else {
                 row_len
             };
+
+            if total_row_len > data.len() {
+                return Some(Vec::new());
+            }
 
             let num_rows = data.len() / total_row_len;
 

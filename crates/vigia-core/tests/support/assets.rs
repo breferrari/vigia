@@ -401,6 +401,12 @@ pub fn open_locked_pdf(seed: u8) -> Vec<u8> {
 /// runs of 258 copied from one back. A decompression bomb, without a
 /// compressor.
 pub fn zlib_zeros(length: u64) -> Vec<u8> {
+    zlib_filled(0, length)
+}
+
+/// [`zlib_zeros`] of `byte`, which must be under 144 to take an eight-bit
+/// literal code.
+pub fn zlib_filled(byte: u8, length: u64) -> Vec<u8> {
     struct Bits {
         out: Vec<u8>,
         held: u64,
@@ -431,8 +437,9 @@ pub fn zlib_zeros(length: u64) -> Vec<u8> {
     // The last block, with the fixed codes.
     bits.push(1, 1);
     bits.push(1, 2);
-    // A literal 0 is code 0x30 in eight bits.
-    bits.code(0x30, 8);
+    // A literal under 144 is code 0x30 on, in eight bits.
+    let literal = 0x30 + u64::from(byte);
+    bits.code(literal, 8);
     let mut written = 1u64;
     while written < length {
         let run = (length - written).min(258);
@@ -443,7 +450,7 @@ pub fn zlib_zeros(length: u64) -> Vec<u8> {
             bits.code(0, 5);
         } else {
             for _ in 0..run {
-                bits.code(0x30, 8);
+                bits.code(literal, 8);
             }
         }
         written += run;
@@ -453,8 +460,12 @@ pub fn zlib_zeros(length: u64) -> Vec<u8> {
     if bits.count > 0 {
         bits.push(0, 8 - bits.count);
     }
-    // Adler-32 of all zeros: the low sum stays 1, the high is the length.
-    let adler = ((length % 65_521) << 16) | 1;
+    // Adler-32 of one byte repeated: the low sum after k bytes is 1 + k*b,
+    // and the high sum adds those up.
+    let (n, b) = (u128::from(length), u128::from(byte));
+    let low = (1 + n * b) % 65_521;
+    let high = (n + b * n * (n + 1) / 2) % 65_521;
+    let adler = ((high << 16) | low) as u64;
     bits.out.extend_from_slice(&(adler as u32).to_be_bytes());
     bits.out
 }
@@ -567,6 +578,11 @@ pub fn pdf_updated(base: &[u8], dict: &str, data: &[u8]) -> Vec<u8> {
 /// An icon PDF whose cross-reference is a stream, compressed as `data`, as
 /// PDF 1.5 writes one: a reader decodes it before anything else.
 pub fn pdf_xref_stream(data: &[u8]) -> Vec<u8> {
+    pdf_xref_stream_with(data, "")
+}
+
+/// [`pdf_xref_stream`] with `extra` in the stream's dictionary.
+pub fn pdf_xref_stream_with(data: &[u8], extra: &str) -> Vec<u8> {
     let doc = pdf(&[(24, 24, &icon_ops(2))]);
     // Everything before the table, which the stream takes the place of.
     let body = &doc[..memchr_xref(&doc)];
@@ -574,7 +590,7 @@ pub fn pdf_xref_stream(data: &[u8]) -> Vec<u8> {
     let offset = out.len();
     out.extend(
         format!(
-            "5 0 obj\n<< /Type /XRef /Size 6 /W [1 4 2] /Root 1 0 R /Filter /FlateDecode /Length {} >>\nstream\n",
+            "5 0 obj\n<< /Type /XRef /Size 6 /W [1 4 2] /Root 1 0 R /Filter /FlateDecode {extra}/Length {} >>\nstream\n",
             data.len()
         )
         .as_bytes(),

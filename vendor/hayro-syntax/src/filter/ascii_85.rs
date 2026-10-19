@@ -77,6 +77,10 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
             b'z' => {
                 flush_group(&mut group, &mut decoded)?;
                 decoded.extend_from_slice(&[0, 0, 0, 0]);
+                // Four bytes from one, within the decode limit.
+                if !crate::limit::admits(decoded.len() as u64) {
+                    return None;
+                }
             }
             b'~' => {
                 // Technically requires a '>', but there is a PDF where it isn't

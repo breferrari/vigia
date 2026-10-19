@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
 use support::{
     Scratch, ccitt_white, icon_ops, icon_pdf, label_pdf, lzw_zeros, open_locked_pdf, pdf, pdf_doc,
-    pdf_with, run_length_zeros, zlib_zeros, zlib_zeros_lenient,
+    pdf_with, run_length_zeros, zlib_filled, zlib_zeros, zlib_zeros_lenient,
 };
 use vigia::pictures::{Inks, Kind, Pictures, Verdict};
 use vigia::{App, Pointing, Row, View, body_layout};
@@ -326,6 +326,142 @@ fn pdf_inherited_font_found() {
     );
 }
 
+/// `doc` with every `from` replaced by `to`.
+fn swapped_all(doc: &[u8], from: &str, to: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = doc;
+    while let Some(at) = rest.windows(from.len()).position(|w| w == from.as_bytes()) {
+        out.extend_from_slice(&rest[..at]);
+        out.extend_from_slice(to.as_bytes());
+        rest = &rest[at + from.len()..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+#[test]
+fn pdf_shared_resource_found() {
+    // Both images sit in the page tree's resources; page 2 alone draws B.
+    let doc = |grey: u8| {
+        let image = |value: u8| {
+            let mut image = b"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\n".to_vec();
+            image.push(value);
+            image.extend_from_slice(b"\nendstream");
+            image
+        };
+        let (a, b) = (image(64), image(grey));
+        let doc = pdf_doc(
+            &[
+                (24, 24, b"q 24 0 0 24 0 0 cm /A Do Q"),
+                (24, 24, b"q 24 0 0 24 0 0 cm /B Do Q"),
+            ],
+            "",
+            1,
+            &[&a, &b],
+            "",
+        );
+        let doc = swapped_all(&doc, "/Resources <<  >> ", "");
+        swapped(
+            &doc,
+            "/Type /Pages ",
+            "/Type /Pages /Resources << /XObject << /A 7 0 R /B 8 0 R >> >> ",
+        )
+    };
+    let drawn = drawn("pdf-shared-resource", Some(&doc(32)), &doc(224));
+    assert!(
+        drawn
+            .said
+            .as_deref()
+            .is_some_and(|said| said.starts_with("page 2 of 2 · ")),
+        "{drawn:?}"
+    );
+}
+
+/// `pages` pages, each naming `each` graphics states of its own, the last
+/// page in a colour from `seed`.
+fn many_objects(pages: usize, each: usize, seed: u8) -> Vec<u8> {
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    let mut object = |out: &mut Vec<u8>, body: &[u8]| {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n", offsets.len()).as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    };
+    let per_page = 2 + each;
+    let kids: Vec<String> = (0..pages)
+        .map(|page| format!("{} 0 R", 3 + page * per_page))
+        .collect();
+    object(&mut out, b"<< /Type /Catalog /Pages 2 0 R >>");
+    object(
+        &mut out,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            kids.join(" ")
+        )
+        .as_bytes(),
+    );
+    for page in 0..pages {
+        let first = 3 + page * per_page;
+        let states: String = (0..each)
+            .map(|n| format!("/G{n} {} 0 R ", first + 2 + n))
+            .collect();
+        object(
+            &mut out,
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 24 24] /Resources << /ExtGState << {states}>> >> /Contents {} 0 R >>",
+                first + 1
+            )
+            .as_bytes(),
+        );
+        let mut content: String = (0..each).map(|n| format!("/G{n} gs ")).collect();
+        let colour = if page + 1 == pages { seed } else { 1 };
+        content.push_str(&String::from_utf8(icon_ops(colour)).expect("ASCII"));
+        object(
+            &mut out,
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len()
+            )
+            .as_bytes(),
+        );
+        for _ in 0..each {
+            object(&mut out, b"<< /Type /ExtGState /CA 1 >>");
+        }
+    }
+    let xref = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    for offset in &offsets {
+        out.extend(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn pdf_objects_per_page() {
+    // 105,000 objects before the last page, which changed: the bound is a
+    // page's, not the document's.
+    let drawn = drawn(
+        "pdf-objects",
+        Some(&many_objects(700, 150, 30)),
+        &many_objects(700, 150, 250),
+    );
+    assert!(
+        drawn
+            .said
+            .as_deref()
+            .is_some_and(|said| said.starts_with("page 700 of 700 · ")),
+        "{drawn:?}"
+    );
+}
+
 #[test]
 fn pdf_other_aspect_rows() {
     // A portrait first page, and a landscape third page that changed.
@@ -514,6 +650,35 @@ fn pdf_ccitt_bomb() {
             &data,
         ),
     );
+}
+
+#[test]
+fn pdf_ascii85_bomb() {
+    // 200 MiB of `z` inflates within the limit, and each `z` is four zeros.
+    let data = zlib_filled(b'z', 200 << 20);
+    bounded(
+        "pdf-ascii85",
+        &image_page(
+            &format!("{GREY} /Filter [/FlateDecode /ASCII85Decode]"),
+            &data,
+        ),
+    );
+}
+
+#[test]
+fn pdf_predictor_row() {
+    // A row two TiB long, over 64 bytes of data: the pane draws on.
+    let drawn = drawn(
+        "pdf-predictor",
+        Some(&icon_pdf(1)),
+        &image_page(
+            &format!(
+                "{GREY} /Filter /FlateDecode /DecodeParms << /Predictor 2 /BitsPerComponent 16 /Colors 1 /Columns 2199023255552 >>"
+            ),
+            &zlib_zeros(64),
+        ),
+    );
+    assert!(drawn.verdict.is_some(), "{drawn:?}");
 }
 
 /// An 8 by 8 JPEG whose header claims `side` by `side`.

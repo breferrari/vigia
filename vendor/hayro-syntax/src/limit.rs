@@ -16,26 +16,39 @@ std::thread_local! {
 pub struct DecodeLimitExceeded;
 
 /// Run `work` with at most `bytes` of decoded stream data allowed on this
-/// thread, counted across every stream it decodes, and restore the limit
-/// that was set before, if any. An error when any decode inside it would
-/// have passed the limit, since the document then reads as if that stream
-/// were missing.
+/// thread, counted across every stream it decodes. An error when any decode
+/// inside it would have passed the limit, since the document then reads as if
+/// that stream were missing. Inside another limit, the smaller of the two
+/// holds, and what `work` decodes is spent from the outer one too.
 #[cfg(feature = "std")]
 pub fn with_decode_limit<T>(
     bytes: u64,
     work: impl FnOnce() -> T,
 ) -> Result<T, DecodeLimitExceeded> {
-    struct Restore(Option<u64>, bool);
+    struct Restore {
+        outer: Option<u64>,
+        passed: bool,
+        start: u64,
+        clamped: bool,
+    }
     impl Drop for Restore {
         fn drop(&mut self) {
-            LEFT.with(|left| left.set(self.0));
-            PASSED.with(|passed| passed.set(self.1));
+            let end = LEFT.with(core::cell::Cell::get).unwrap_or(0);
+            let spent = self.start - end;
+            let inner_passed = PASSED.with(core::cell::Cell::get);
+            LEFT.with(|left| left.set(self.outer.map(|outer| outer - spent)));
+            PASSED.with(|passed| passed.set(self.passed || (self.clamped && inner_passed)));
         }
     }
-    let _restore = Restore(
-        LEFT.with(|left| left.replace(Some(bytes))),
-        PASSED.with(|passed| passed.replace(false)),
-    );
+    let outer = LEFT.with(core::cell::Cell::get);
+    let start = outer.map_or(bytes, |outer| outer.min(bytes));
+    let _restore = Restore {
+        outer,
+        passed: PASSED.with(|passed| passed.replace(false)),
+        start,
+        clamped: outer.is_some_and(|outer| outer < bytes),
+    };
+    LEFT.with(|left| left.set(Some(start)));
     let done = work();
     if PASSED.with(core::cell::Cell::get) {
         Err(DecodeLimitExceeded)

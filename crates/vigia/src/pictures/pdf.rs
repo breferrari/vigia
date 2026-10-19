@@ -28,31 +28,6 @@ const PDF_OBJECTS: usize = 100_000;
 /// together, while it sizes, fingerprints and draws them.
 const PDF_DECODED: u64 = 256 * 1024 * 1024;
 
-/// Each content stream of `page`, decoded one at a time, its length taken
-/// from the one `budget`; `None` once the budget is spent.
-fn page_contents<'a>(
-    page: &hayro::hayro_syntax::page::Page<'a>,
-    budget: &mut usize,
-    mut each: impl FnMut(&[u8]),
-) -> Option<()> {
-    use hayro::hayro_syntax::object::{Array, Stream};
-    let mut take = |stream: Stream<'_>| -> Option<()> {
-        let decoded = stream.decoded().ok()?;
-        *budget = budget.checked_sub(decoded.len())?;
-        each(&decoded);
-        Some(())
-    };
-    let raw = page.raw();
-    if let Some(stream) = raw.get::<Stream<'_>>(b"Contents") {
-        take(stream)?;
-    } else if let Some(array) = raw.get::<Array<'_>>(b"Contents") {
-        for stream in array.iter::<Stream<'_>>() {
-            take(stream)?;
-        }
-    }
-    Some(())
-}
-
 /// One PDF side, opened.
 fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>> {
     match source {
@@ -75,13 +50,15 @@ enum Met<'a, 'b> {
     Stream(&'b hayro::hayro_syntax::object::Stream<'a>),
 }
 
-/// Every object `object` reaches, each once, but the page tree's parent
-/// link. `None` when `meet` says so, or past [`PDF_OBJECTS`]. A stack of its
-/// own, not the thread's: a chain of references can be as long as a file.
+/// Every object `value` reaches, each once, but the page tree's parent
+/// link. `None` when `meet` says so, or once `seen` holds `cap` objects. A
+/// stack of its own, not the thread's: a chain of references can be as long
+/// as a file.
 fn walk<'a>(
-    object: hayro::hayro_syntax::object::Object<'a>,
+    value: hayro::hayro_syntax::object::MaybeRef<hayro::hayro_syntax::object::Object<'a>>,
     xref: &'a hayro::hayro_syntax::xref::XRef,
     seen: &mut HashSet<(i32, i32)>,
+    cap: usize,
     meet: &mut dyn FnMut(Met<'a, '_>) -> Option<()>,
 ) -> Option<()> {
     use hayro::hayro_syntax::object::{MaybeRef, Name, Object};
@@ -90,7 +67,7 @@ fn walk<'a>(
         Value(MaybeRef<Object<'a>>),
         Name(Name<'a>),
     }
-    let mut tasks = vec![Task::Object(object)];
+    let mut tasks = vec![Task::Value(value)];
     while let Some(task) = tasks.pop() {
         let object = match task {
             Task::Name(name) => {
@@ -105,7 +82,7 @@ fn walk<'a>(
                     continue;
                 }
                 // Past it, a change could go unread, so the page is refused.
-                if seen.len() > PDF_OBJECTS {
+                if seen.len() > cap {
                     return None;
                 }
                 match xref.get::<Object<'a>>(reference.into()) {
@@ -140,29 +117,50 @@ fn walk<'a>(
     Some(())
 }
 
-/// What a page draws from, each under its name: its contents and its
-/// resources, those it inherits among them.
+/// What a page draws from, each under its name: its contents, and each
+/// resource its content names, those it inherits among them. A resource it
+/// does not name is left out, so a change to one another page draws does
+/// not count here.
 fn page_roots<'a>(
     page: &hayro::hayro_syntax::page::Page<'a>,
-) -> impl Iterator<Item = (&'static [u8], hayro::hayro_syntax::object::Object<'a>)> {
-    use hayro::hayro_syntax::object::Object;
+) -> Vec<(
+    &'static [u8],
+    hayro::hayro_syntax::object::MaybeRef<hayro::hayro_syntax::object::Object<'a>>,
+)> {
+    use hayro::hayro_syntax::object::{MaybeRef, Object};
+    let mut named: HashSet<Vec<u8>> = HashSet::new();
+    let mut operations = page.operations();
+    while let Some(operation) = operations.next() {
+        for operand in operation.operands() {
+            if let Object::Name(name) = operand {
+                named.insert(name.as_ref().to_vec());
+            }
+        }
+    }
     let resources = page.resources();
-    let contents = page.raw().get::<Object<'a>>(b"Contents");
-    contents
-        .map(|contents| (b"Contents".as_slice(), contents))
+    let mut roots: Vec<_> = page
+        .raw()
+        .get::<Object<'a>>(b"Contents")
+        .map(|contents| (b"Contents".as_slice(), MaybeRef::NotRef(contents)))
         .into_iter()
-        .chain(
-            [
-                (b"ExtGState".as_slice(), &resources.ext_g_states),
-                (b"Font", &resources.fonts),
-                (b"Properties", &resources.properties),
-                (b"ColorSpace", &resources.color_spaces),
-                (b"XObject", &resources.x_objects),
-                (b"Pattern", &resources.patterns),
-                (b"Shading", &resources.shadings),
-            ]
-            .map(|(key, dict)| (key, Object::Dict(dict.clone()))),
-        )
+        .collect();
+    for (key, dict) in [
+        (b"ExtGState".as_slice(), &resources.ext_g_states),
+        (b"Font", &resources.fonts),
+        (b"Properties", &resources.properties),
+        (b"ColorSpace", &resources.color_spaces),
+        (b"XObject", &resources.x_objects),
+        (b"Pattern", &resources.patterns),
+        (b"Shading", &resources.shadings),
+    ] {
+        for (name, value) in dict.entries() {
+            if named.contains(name.as_ref()) {
+                roots.push((key, MaybeRef::NotRef(Object::Name(name))));
+                roots.push((key, value));
+            }
+        }
+    }
+    roots
 }
 
 /// An image's width and height as its dictionary claims them, when it is one.
@@ -178,8 +176,9 @@ fn image_size(stream: &hayro::hayro_syntax::object::Stream<'_>) -> Option<(u32, 
 
 /// A page's fingerprint, from its boxes, its rotation and the encoded bytes
 /// of every object it draws from, or `None` when an image it holds is larger
-/// than any image may decode. Nothing is decoded. An object an earlier page
-/// reached, in `seen`, counts by its number alone.
+/// than any image may decode, or it reaches more than [`PDF_OBJECTS`] new
+/// objects. Only its content is decoded, to read the resources it names. An
+/// object an earlier page reached, in `seen`, counts by its number alone.
 fn page_print(
     page: &hayro::hayro_syntax::page::Page<'_>,
     seen: &mut HashSet<(i32, i32)>,
@@ -193,9 +192,10 @@ fn page_print(
         page.rotation()
     )
     .hash(&mut hasher);
+    let cap = seen.len() + PDF_OBJECTS;
     for (key, root) in page_roots(page) {
         key.hash(&mut hasher);
-        walk(root, page.xref(), seen, &mut |met| {
+        walk(root, page.xref(), seen, cap, &mut |met| {
             match met {
                 Met::Name(name) => name.hash(&mut hasher),
                 Met::Again(number, generation) => (number, generation).hash(&mut hasher),
@@ -228,15 +228,6 @@ fn page_print(
     Some(hasher.finish())
 }
 
-/// Every page's fingerprint, or `None` when one holds an image too large.
-fn page_prints(pdf: &hayro::hayro_syntax::Pdf) -> Option<Vec<u64>> {
-    let mut seen = HashSet::new();
-    pdf.pages()
-        .iter()
-        .map(|page| page_print(page, &mut seen))
-        .collect()
-}
-
 /// Which page of a changed PDF is drawn.
 #[derive(Clone, Copy)]
 enum Chosen {
@@ -248,13 +239,27 @@ enum Chosen {
     Removed(usize),
 }
 
-/// Which page both sides draw, and what the line says about it.
-fn chosen_page(old: Option<&[u64]>, new: Option<&[u64]>) -> (Chosen, Option<String>) {
+/// Which page both sides draw, and what the line says about it, from the
+/// first page whose fingerprint differs; `None` when a page reached before it
+/// is refused. Pages past that one are not read.
+fn chosen_page(
+    old: Option<&hayro::hayro_syntax::Pdf>,
+    new: Option<&hayro::hayro_syntax::Pdf>,
+) -> Option<(Chosen, Option<String>)> {
     let (Some(old), Some(new)) = (old, new) else {
-        return (Chosen::Both(0), None);
+        return Some((Chosen::Both(0), None));
     };
+    let (old, new) = (old.pages(), new.pages());
+    let (mut old_seen, mut new_seen) = (HashSet::new(), HashSet::new());
+    let mut differs = None;
+    for (page, (a, b)) in old.iter().zip(new.iter()).enumerate() {
+        if page_print(a, &mut old_seen)? != page_print(b, &mut new_seen)? {
+            differs = Some(page);
+            break;
+        }
+    }
     let count = (old.len() != new.len()).then(|| format!("{} → {} pages", old.len(), new.len()));
-    let (chosen, said) = match old.iter().zip(new).position(|(a, b)| a != b) {
+    let (chosen, said) = match differs {
         Some(page) => (
             Chosen::Both(page),
             (page > 0).then(|| format!("page {} of {}", page + 1, new.len())),
@@ -270,7 +275,7 @@ fn chosen_page(old: Option<&[u64]>, new: Option<&[u64]>) -> (Chosen, Option<Stri
         None => (Chosen::Both(0), Some("no page changed".to_owned())),
     };
     let note: Vec<String> = [said, count].into_iter().flatten().collect();
-    (chosen, (!note.is_empty()).then(|| note.join(" · ")))
+    Some((chosen, (!note.is_empty()).then(|| note.join(" · "))))
 }
 
 /// Only the first page's size of each side, in points rounded up, for a
@@ -306,12 +311,7 @@ fn drawn_within(job: &Job) -> Option<PdfDrawn> {
         open_pdf(&job.sources.before)?,
         open_pdf(&job.sources.after)?,
     );
-    let prints = |pdf: &Option<hayro::hayro_syntax::Pdf>| match pdf {
-        Some(pdf) => page_prints(pdf).map(Some),
-        None => Some(None),
-    };
-    let (old_prints, new_prints) = (prints(&old)?, prints(&new)?);
-    let (chosen, note) = chosen_page(old_prints.as_deref(), new_prints.as_deref());
+    let (chosen, note) = chosen_page(old.as_ref(), new.as_ref())?;
     let index = match chosen {
         Chosen::Both(page) | Chosen::Added(page) | Chosen::Removed(page) => page,
     };
@@ -321,7 +321,7 @@ fn drawn_within(job: &Job) -> Option<PdfDrawn> {
         Chosen::Added(_) => (None, new, Some(Bar::Added)),
         Chosen::Removed(_) => (old, None, Some(Bar::Removed)),
     };
-    // Past the length the floor refuses, a page is not decoded further.
+    // Past this length a page needs a long side under the floor.
     let refused = (PDF_BUDGET / f64::from(SHORTEST_SIDE)) as usize;
     let mut cost = 0;
     for pdf in [&old, &new].into_iter().flatten() {
@@ -329,9 +329,12 @@ fn drawn_within(job: &Job) -> Option<PdfDrawn> {
         let Some(page) = pages.get(index).or_else(|| pages.first()) else {
             continue;
         };
-        let mut budget = refused;
-        page_contents(page, &mut budget, |_| {})?;
-        cost = cost.max(refused - budget);
+        // Decoded once: the render reads the same page's copy.
+        let length = page.page_stream().map_or(0, <[u8]>::len);
+        if length > refused {
+            return None;
+        }
+        cost = cost.max(length);
     }
     let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(LONG_SIDE)) as f32;
     if long < SHORTEST_SIDE {

@@ -128,8 +128,15 @@ fn thread_cpu() -> Option<Duration> {
 
 /// The most this process has held resident so far, in MiB, or `None` where
 /// the platform cannot say. A peak, so memory a decode freed still counts.
-#[cfg(unix)]
+/// Only nextest gives each test a process of its own; under `cargo test`
+/// another test's peak would answer, so this is `None` there.
 pub fn peak_resident() -> Option<u64> {
+    let own = std::env::var("NEXTEST_EXECUTION_MODE").is_ok_and(|mode| mode == "process-per-test");
+    own.then(process_peak).flatten()
+}
+
+#[cfg(unix)]
+fn process_peak() -> Option<u64> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
     // SAFETY: `getrusage` fills the struct through the pointer, which points at
     // a live local of exactly that type, and reads nothing else.
@@ -145,7 +152,7 @@ pub fn peak_resident() -> Option<u64> {
 }
 
 #[cfg(windows)]
-pub fn peak_resident() -> Option<u64> {
+fn process_peak() -> Option<u64> {
     use windows_sys::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
     };
@@ -163,7 +170,7 @@ pub fn peak_resident() -> Option<u64> {
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn peak_resident() -> Option<u64> {
+fn process_peak() -> Option<u64> {
     None
 }
 

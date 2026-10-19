@@ -31,8 +31,17 @@ pub(crate) fn decode(data: &[u8], params: &ImageDecodeParams) -> Option<FilterRe
 
     let width = image.width();
     let height = image.height();
-    // Its pixels, at no more than eight bytes each, within the decode limit.
-    if !crate::limit::admits(u64::from(width) * u64::from(height) * 8) {
+    // Its samples, at no more than eight bytes each while they decode,
+    // within the decode limit.
+    let channels = u64::from(match image.color_space() {
+        ColorSpace::Gray => 1,
+        ColorSpace::RGB => 3,
+        ColorSpace::CMYK => 4,
+        ColorSpace::Unknown { num_channels } | ColorSpace::Icc { num_channels, .. } => {
+            *num_channels
+        }
+    }) + u64::from(image.has_alpha());
+    if !crate::limit::admits(u64::from(width) * u64::from(height) * channels * 8) {
         return None;
     }
     let bpc = params.bpc.unwrap_or(image.original_bit_depth());

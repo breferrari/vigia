@@ -6,7 +6,7 @@ mod support;
 
 use support::{
     Scratch, changes_sorted, icon_ops, icon_pdf, locked_pdf, open_locked_pdf, pdf, pdf_holding,
-    pdf_with, pdf_xref_stream, zlib_zeros,
+    pdf_with, pdf_xref_stream, pdf_xref_stream_with, zlib_zeros,
 };
 use vigia_core::{FileDiff, Format};
 
@@ -251,5 +251,34 @@ fn pdf_image_stream_sized() {
     assert!(
         diff.picture.is_some(),
         "a comment hid an image from the frame path"
+    );
+}
+
+#[test]
+fn pdf_predictor_row_frame() {
+    // An index stream whose rows claim two TiB each: the frame path goes on.
+    let bomb = pdf_xref_stream_with(
+        &zlib_zeros(64),
+        "/DecodeParms << /Predictor 2 /BitsPerComponent 16 /Colors 1 /Columns 2199023255552 >> ",
+    );
+    let diff = changed("pdf-predictor-frame", &icon_pdf(1), &bomb);
+    assert!(diff.binary, "{diff:?}");
+}
+
+#[test]
+fn pdf_nested_limits() {
+    // Three parses of 4 MiB of index each, inside one limit of 10 MiB.
+    let doc = pdf_xref_stream(&zlib_zeros(4 << 20));
+    let parse = || hayro_syntax::Pdf::new(std::sync::Arc::new(doc.clone())).is_ok();
+    let inner = || hayro_syntax::with_decode_limit(64 << 20, parse);
+    let outer = hayro_syntax::with_decode_limit(10 << 20, || [inner(), inner(), inner()]);
+    assert!(
+        outer.is_err(),
+        "the inner limits did not count toward the outer one"
+    );
+    let parses = hayro_syntax::with_decode_limit(64 << 20, || [inner(), inner(), inner()]);
+    assert!(
+        parses.is_ok_and(|parses| parses.iter().all(Result::is_ok)),
+        "the parses fail on their own"
     );
 }

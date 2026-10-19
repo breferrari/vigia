@@ -29,9 +29,11 @@ pub(crate) fn decode(
         .set_max_height(u16::MAX as usize);
     let mut decoder = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(&*data), options);
     decoder.decode_headers().ok()?;
-    // Its pixels, at no more than four bytes each, within the decode limit.
+    // Each component's samples, a byte out and two for a progressive file's
+    // coefficients, within the decode limit.
     let (width, height) = decoder.dimensions()?;
-    if !crate::limit::admits(width as u64 * height as u64 * 4) {
+    let components = u64::from(decoder.info()?.components);
+    if !crate::limit::admits(width as u64 * height as u64 * components * 3) {
         return None;
     }
 
