@@ -462,11 +462,11 @@ impl Pictures {
         let until = std::time::Instant::now() + limit;
         loop {
             self.collect();
+            // A picture that left the screen while it was built is not kept.
+            if let Ok(shown) = self.shown.lock() {
+                self.built.retain(|key, _| shown.contains(key));
+            }
             if self.pending.is_empty() {
-                // A picture that left the screen while it was built is not kept.
-                if let Ok(shown) = self.shown.lock() {
-                    self.built.retain(|key, _| shown.contains(key));
-                }
                 return true;
             }
             if std::time::Instant::now() >= until {

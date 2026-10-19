@@ -136,15 +136,15 @@ impl Source {
         match self {
             Self::File(path) => read_file(path),
             Self::Blob { git_dir, id, store } => {
-                let bytes = with_repo(git_dir, |repo| {
-                    Some(
-                        repo.find_object(*id)
-                            .ok()?
-                            .try_into_blob()
-                            .ok()?
-                            .take_data(),
-                    )
-                })?;
+                // Opened per read and dropped, so no pack stays mapped for a `git gc`
+                // in the next pane to trip over.
+                let repo = gix::open(git_dir).ok()?;
+                let bytes = repo
+                    .find_object(*id)
+                    .ok()?
+                    .try_into_blob()
+                    .ok()?
+                    .take_data();
                 match lfs_oid(&bytes) {
                     Some(oid) => read_file(&lfs_object(store, oid)),
                     None => Some(bytes),
@@ -152,27 +152,6 @@ impl Source {
             }
         }
     }
-}
-
-std::thread_local! {
-    /// The repositories this thread has read blobs from, opened once each.
-    static OPENED: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, gix::Repository>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
-/// `read` run against the repository at `git_dir`, opened on first use by this
-/// thread and kept.
-fn with_repo<T>(
-    git_dir: &std::path::Path,
-    read: impl FnOnce(&gix::Repository) -> Option<T>,
-) -> Option<T> {
-    OPENED.with(|opened| {
-        let mut opened = opened.borrow_mut();
-        if !opened.contains_key(git_dir) {
-            opened.insert(git_dir.to_owned(), gix::open(git_dir).ok()?);
-        }
-        read(opened.get(git_dir)?)
-    })
 }
 
 /// Where the LFS object `oid` is kept in `store`.
