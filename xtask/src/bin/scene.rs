@@ -38,6 +38,9 @@ fn main() -> ExitCode {
     println!("vigia {}", dir.display());
     println!();
     if replay {
+        println!("Start vigia there, then press Enter to begin.");
+        let mut enter = String::new();
+        let _ = std::io::stdin().read_line(&mut enter);
         scene.replay(1.0, |line| println!("{line}"));
     } else {
         scene.changes();
@@ -56,8 +59,10 @@ fn fresh_dir() -> PathBuf {
     let base = std::env::temp_dir();
     for n in 0.. {
         let dir = base.join(format!("vigia-scene-{}-{stamp}-{n}", std::process::id()));
-        if std::fs::create_dir(&dir).is_ok() {
-            return dir;
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return dir,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => panic!("scene: cannot make {}: {error}", dir.display()),
         }
     }
     unreachable!("the counter does not end")
@@ -158,20 +163,12 @@ fn states() -> Vec<(String, &'static str)> {
     states
 }
 
-/// An image `width` by `height` in `format`, with the pixel at `changed`
+/// A PNG `width` by `height` from `seed`, with the pixel at `(x, y)`
 /// recoloured.
-fn image_with(
-    format: ImageFormat,
-    width: u32,
-    height: u32,
-    seed: u8,
-    changed: Option<(u32, u32)>,
-) -> Vec<u8> {
+fn png_with_pixel(width: u32, height: u32, seed: u8, (x, y): (u32, u32)) -> Vec<u8> {
     let mut image = assets::gradient(width, height, seed);
-    if let Some((x, y)) = changed {
-        image.put_pixel(x, y, image::Rgba([255, 0, 255, 255]));
-    }
-    assets::encode_image(&image, format)
+    image.put_pixel(x, y, image::Rgba([255, 0, 255, 255]));
+    assets::encode_image(&image, ImageFormat::Png)
 }
 
 /// Source text of `count` numbered lines, each tagged by `tag_of` its number.
@@ -198,7 +195,7 @@ const LFS_SEED: u8 = 0xab;
 
 /// The LFS object the committed pointer names.
 fn lfs_object() -> Vec<u8> {
-    image_with(ImageFormat::Png, 96, 64, LFS_SEED, None)
+    assets::png(96, 64, LFS_SEED)
 }
 
 /// A two-frame GIF whose first frame comes from `seed`.
@@ -228,22 +225,14 @@ struct Scene {
 }
 
 impl Scene {
-    /// A new repository at `dir`, configured as `Scratch` configures one, so
-    /// nothing of the reader's own git config changes what it shows.
+    /// A new repository at `dir`, configured as every fixture repository is,
+    /// so nothing of the reader's own git config changes what it shows.
     fn new(dir: &Path) -> Self {
         let scene = Self {
             dir: dir.to_path_buf(),
         };
         scene.git(&["init", "-q", "-b", "main"]);
-        for (key, value) in [
-            ("core.autocrlf", "false"),
-            ("core.safecrlf", "false"),
-            ("core.fsmonitor", "false"),
-            ("core.untrackedCache", "false"),
-            ("commit.gpgsign", "false"),
-            ("user.email", "scene@example.invalid"),
-            ("user.name", "vigia scene"),
-        ] {
+        for (key, value) in assets::GIT_CONFIG {
             scene.git(&["config", key, value]);
         }
         scene
@@ -293,9 +282,9 @@ impl Scene {
     fn rename_then_change(&self, raster: &Raster) {
         let (before, after) = (raster.file("before"), raster.file("after"));
         self.remove(&before);
-        self.write(&after, image_with(raster.format, 96, 64, 40, None));
+        self.write(&after, assets::encoded(raster.format, 96, 64, 40));
         self.git(&["add", "--", &before, &after]);
-        self.write(&after, image_with(raster.format, 96, 64, 41, None));
+        self.write(&after, assets::encoded(raster.format, 96, 64, 41));
     }
 
     /// Every file the changes start from, committed.
@@ -307,23 +296,17 @@ impl Scene {
         self.write("src/feature.rs", "");
         for raster in &RASTERS {
             let format = raster.format;
-            self.write(
-                &raster.file("deleted"),
-                image_with(format, 96, 64, 10, None),
-            );
+            self.write(&raster.file("deleted"), assets::encoded(format, 96, 64, 10));
             self.write(
                 &raster.file("modified"),
-                image_with(format, 96, 64, 20, None),
+                assets::encoded(format, 96, 64, 20),
             );
-            self.write(
-                &raster.file("resized"),
-                image_with(format, 48, 32, 30, None),
-            );
-            self.write(&raster.file("before"), image_with(format, 96, 64, 40, None));
+            self.write(&raster.file("resized"), assets::encoded(format, 48, 32, 30));
+            self.write(&raster.file("before"), assets::encoded(format, 96, 64, 40));
         }
         self.write(
             "png/one-pixel.png",
-            image_with(ImageFormat::Png, 96, 64, 50, None),
+            assets::encoded(ImageFormat::Png, 96, 64, 50),
         );
         self.write(
             "png/profile.png",
@@ -370,22 +353,16 @@ impl Scene {
         self.write("src/large.rs", edited(80, 20, 40));
         for raster in &RASTERS {
             let format = raster.format;
-            self.write(&raster.file("added"), image_with(format, 96, 64, 15, None));
+            self.write(&raster.file("added"), assets::encoded(format, 96, 64, 15));
             self.remove(&raster.file("deleted"));
             self.write(
                 &raster.file("modified"),
-                image_with(format, 96, 64, 25, None),
+                assets::encoded(format, 96, 64, 25),
             );
-            self.write(
-                &raster.file("resized"),
-                image_with(format, 64, 40, 30, None),
-            );
+            self.write(&raster.file("resized"), assets::encoded(format, 64, 40, 30));
             self.rename_then_change(raster);
         }
-        self.write(
-            "png/one-pixel.png",
-            image_with(ImageFormat::Png, 96, 64, 50, Some((40, 30))),
-        );
+        self.write("png/one-pixel.png", png_with_pixel(96, 64, 50, (40, 30)));
         self.write(
             "png/profile.png",
             assets::profiled_png(96, 64, 60, b"profile two"),
@@ -398,7 +375,7 @@ impl Scene {
         self.write("broken/too-large.png", assets::claimed_png(20_000, 20_000));
         self.write(
             "lfs/pointer.png",
-            image_with(ImageFormat::Png, 96, 64, 0xcd, None),
+            assets::encoded(ImageFormat::Png, 96, 64, 0xcd),
         );
         self.write("bin/blob.dat", blob(2));
         self.write("svg/icon.svg", assets::icon_svg(2));
@@ -419,7 +396,7 @@ impl Scene {
         say("png/modified.png rewritten");
         self.write(
             "png/modified.png",
-            image_with(ImageFormat::Png, 96, 64, 25, None),
+            assets::encoded(ImageFormat::Png, 96, 64, 25),
         );
         pause(3.0);
         say("svg/new.svg added");
@@ -460,9 +437,29 @@ mod tests {
         added: u32,
     }
 
+    /// A scene's directory, removed when the test ends, passing or not.
+    struct Cleaned(PathBuf);
+
+    impl Drop for Cleaned {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for Cleaned {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    fn cleaned() -> Cleaned {
+        Cleaned(fresh_dir())
+    }
+
     /// The static scene, built in a fresh directory.
-    fn built() -> PathBuf {
-        let dir = fresh_dir();
+    fn built() -> Cleaned {
+        let dir = cleaned();
         let scene = Scene::new(&dir);
         scene.baseline();
         scene.changes();
@@ -579,7 +576,6 @@ mod tests {
                 "{path} is not plain binary: {listed:?}"
             );
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// What the pane drew for one file, over every view that showed it.
@@ -835,12 +831,11 @@ mod tests {
             );
             assert!(drawn.picture_rows > 0, "{key} drew no picture");
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn scene_replay_ends() {
-        let dir = fresh_dir();
+        let dir = cleaned();
         let scene = Scene::new(&dir);
         scene.baseline();
         let mut said = Vec::new();
@@ -875,12 +870,11 @@ mod tests {
         let flaky = at("broken/flaky.png");
         assert!(flaky.after, "the fixed image does not size: {flaky:?}");
         assert_eq!(at("gif/animated.gif").kind, ChangeKind::Modified);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn scene_temp_only() {
-        let dir = fresh_dir();
+        let dir = cleaned();
         assert!(
             dir.starts_with(std::env::temp_dir()),
             "{} is not under the temp dir",
@@ -896,11 +890,14 @@ mod tests {
                 scene.write(escape, "x");
             }));
             assert!(refused.is_err(), "{escape} was written");
+            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scene.remove(escape);
+            }));
+            assert!(refused.is_err(), "{escape} was removed");
             assert!(
                 !dir.join(escape).exists(),
                 "{escape} exists after its write was refused"
             );
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

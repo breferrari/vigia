@@ -1,5 +1,39 @@
-//! Images and SVGs generated in code, for the tests and for the scene bed in
-//! `xtask`. Depends on `image` alone, so both can include it.
+//! Images and SVGs generated in code, and the git config a fixture repository
+//! takes, for the tests and for the scene bed in `xtask`. Depends on `image`
+//! alone, so both can include it.
+
+/// The config every fixture repository sets. Each one stops a developer's
+/// global config from changing what is measured: autocrlf in particular is
+/// commonly true on Windows and would rewrite line endings. **The fsmonitor
+/// pair is for `crates/vigia/tests/writes.rs`**, which asserts that nothing
+/// under the worktree moves while `vigia` runs: with `core.fsmonitor` on, a
+/// `git add` spawns a `git-fsmonitor--daemon` that outlives the command and
+/// keeps writing inside `.git`.
+pub const GIT_CONFIG: [(&str, &str); 7] = [
+    ("core.autocrlf", "false"),
+    ("core.safecrlf", "false"),
+    ("user.email", "test@example.invalid"),
+    ("user.name", "vigia tests"),
+    ("commit.gpgsign", "false"),
+    ("core.fsmonitor", "false"),
+    ("core.untrackedCache", "false"),
+];
+
+/// The CRC that closes a PNG chunk of `kind` holding `data`.
+fn chunk_crc(kind: &[u8], data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for byte in kind.iter().chain(data) {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
 
 /// `image` encoded as `format`. JPEG has no alpha channel to encode.
 pub fn encode_image(image: &image::RgbaImage, format: image::ImageFormat) -> Vec<u8> {
@@ -76,8 +110,9 @@ pub fn animated_gif(frames: &[image::RgbaImage]) -> Vec<u8> {
     bytes
 }
 
-/// A PNG whose chunks are whole and whose pixel data is garbled, so its
-/// header reads and its pixels do not.
+/// A PNG whose chunks are whole, checksums included, and whose compressed
+/// pixel data is garbled, so its header reads and its pixels do not. The
+/// fixture's sizes fit one data chunk.
 pub fn corrupt_png(width: u32, height: u32, seed: u8) -> Vec<u8> {
     let mut bytes = png(width, height, seed);
     let at = bytes
@@ -88,6 +123,8 @@ pub fn corrupt_png(width: u32, height: u32, seed: u8) -> Vec<u8> {
     for byte in &mut bytes[at + 4..at + 4 + length] {
         *byte ^= 0x5a;
     }
+    let crc = chunk_crc(b"IDAT", &bytes[at + 4..at + 4 + length]);
+    bytes[at + 4 + length..at + 8 + length].copy_from_slice(&crc.to_be_bytes());
     bytes
 }
 
@@ -123,18 +160,7 @@ pub fn claimed_png(width: u32, height: u32) -> Vec<u8> {
         let mut out = (data.len() as u32).to_be_bytes().to_vec();
         out.extend_from_slice(kind);
         out.extend_from_slice(data);
-        let mut crc = !0u32;
-        for byte in kind.iter().chain(data) {
-            crc ^= u32::from(*byte);
-            for _ in 0..8 {
-                crc = if crc & 1 == 1 {
-                    (crc >> 1) ^ 0xedb8_8320
-                } else {
-                    crc >> 1
-                };
-            }
-        }
-        out.extend_from_slice(&(!crc).to_be_bytes());
+        out.extend_from_slice(&chunk_crc(kind, data).to_be_bytes());
         out
     }
     let mut header = width.to_be_bytes().to_vec();

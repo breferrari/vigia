@@ -735,21 +735,9 @@ impl Scratch {
 
         let scratch = Scratch { path };
         scratch.git(&["init", "-q", "-b", "main"]);
-        // Every one of these exists to stop a developer's global config from
-        // changing what the test measures. autocrlf in particular is commonly
-        // true on Windows and would rewrite line endings under us.
-        scratch.git(&["config", "core.autocrlf", "false"]);
-        scratch.git(&["config", "core.safecrlf", "false"]);
-        scratch.git(&["config", "user.email", "test@example.invalid"]);
-        scratch.git(&["config", "user.name", "vigia tests"]);
-        scratch.git(&["config", "commit.gpgsign", "false"]);
-        // **These two are here for `crates/vigia/tests/writes.rs`, which asserts
-        // that nothing under the worktree moves while `vigia` runs.** With
-        // `core.fsmonitor` on, a `git add` spawns a `git-fsmonitor--daemon` that
-        // outlives the command and keeps writing inside `.git`, including a
-        // `cookies/` directory it creates and deletes to synchronise with clients.
-        scratch.git(&["config", "core.fsmonitor", "false"]);
-        scratch.git(&["config", "core.untrackedCache", "false"]);
+        for (key, value) in GIT_CONFIG {
+            scratch.git(&["config", key, value]);
+        }
         scratch
     }
 
