@@ -329,6 +329,8 @@ impl Scene {
         let object = lfs_object();
         let (oid, pointer) = assets::lfs_pointer(&object, LFS_SEED);
         self.write("lfs/pointer.png", pointer);
+        let (_, unchanged) = assets::lfs_pointer(&assets::png(32, 32, 0x11), 0x11);
+        self.write("lfs/unchanged.png", &unchanged);
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", "baseline"]);
         self.write(
@@ -341,13 +343,10 @@ impl Scene {
             &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
             object,
         );
-        // The index is refreshed after the clock has passed the commit, so no
-        // file reads as racily clean and status never asks the LFS filter
-        // (#659, whose fix removes this). Before the driver is named: git
-        // runs it for a racily clean file too, and this one cannot start.
-        std::thread::sleep(Duration::from_millis(1100));
-        self.git(&["update-index", "-q", "--refresh"]);
         self.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+        // The same bytes after the index, so status reads it again and must
+        // neither start the driver nor list it.
+        self.write("lfs/unchanged.png", unchanged);
     }
 
     /// Every change of `static`, written at once.
@@ -782,6 +781,10 @@ mod tests {
                     "{path} drew no picture at {width}x{height}"
                 );
             }
+            assert!(
+                !found.contains_key("lfs/unchanged.png"),
+                "an unchanged LFS pointer the walk read again was listed at {width}x{height}"
+            );
             // Old and new both drawn, so the old side came from the object.
             assert!(
                 matches!(sized("lfs/pointer.png").1, Kind::Three | Kind::Mask),
