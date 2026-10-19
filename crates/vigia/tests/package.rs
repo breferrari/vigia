@@ -1652,7 +1652,6 @@ fn change_class_decides() {
             "docs",
         ),
         (".claude/scripts/mutate.mjs\n", "full"),
-        // Prose paths that once ran the whole matrix.
         (
             ".claude/take-next/rules.md\nCONTRIBUTING.md\nROADMAP.md\n",
             "docs",
