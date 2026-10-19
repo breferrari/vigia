@@ -1760,3 +1760,37 @@ fn a_drag_to_the_end_of_the_bar_reaches_the_end_when_the_density_varies() {
         rows.join("\n")
     );
 }
+
+#[test]
+fn wrapped_line_one_step() {
+    let scratch = tall("shell-wrap-one-step", 40);
+    let (mut highlighter, history) = (Highlighter::eager(), History::new());
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = wrapped(&mut frame);
+    let body = diff_height(PANE, &chrome_of(&app), 1, 1);
+    app.apply(Action::Top, &mut frame, body).expect("apply");
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+    // The heading, the hunk header and the removed `seed`, onto a wrapped line.
+    app.apply(Action::Scroll(3), &mut frame, body)
+        .expect("apply");
+    let (on, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert!(
+        on.rows.get(1).is_some_and(Row::is_wrap),
+        "the setup did not open on a wrapped line: {:?}",
+        on.rows.first()
+    );
+    app.apply(Action::Scroll(1), &mut frame, body)
+        .expect("apply");
+    let (past, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        (past.top.row, past.top.under),
+        (on.top.row + 1, 0),
+        "one step did not pass the wrapped line whole"
+    );
+    assert!(
+        !past.rows[0].is_wrap(),
+        "one step opened the screen on a continuation"
+    );
+}

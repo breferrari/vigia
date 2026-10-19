@@ -1114,3 +1114,258 @@ fn kitty_deleted_on_quit() {
         );
     }
 }
+
+/// A changed image above a changed text file, settled in `protocol`.
+fn stacked(name: &str, protocol: ProtocolType, height: u16) -> (Scratch, Pane) {
+    let scratch = Scratch::new(name);
+    scratch.write(
+        "a.png",
+        encode(&screen_like(120, 260, [40, 90, 200]), ImageFormat::Png),
+    );
+    scratch.write("z.txt", support::numbered_lines(10));
+    scratch.commit_all("baseline");
+    scratch.write(
+        "a.png",
+        encode(&screen_like(120, 260, [200, 90, 40]), ImageFormat::Png),
+    );
+    // Long enough that the bottom clamp never reaches the picture.
+    scratch.write("z.txt", support::numbered_lines(90));
+    (scratch, Pane::drawn_by(100, height, protocol))
+}
+
+#[test]
+fn picture_rows_step() {
+    let (scratch, mut pane) = stacked("pictures-step", ProtocolType::Halfblocks, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let whole = pane.settled(&mut frame);
+    let rows = picture_rows(&whole).len();
+    assert!(rows > 3, "the picture holds {rows} rows");
+    // The heading, then the size line.
+    pane.scroll(&mut frame, 1);
+    for part in 0..3u16 {
+        pane.scroll(&mut frame, 1);
+        let view = pane.settled(&mut frame);
+        assert_eq!(
+            view.top.under,
+            usize::from(part) + 1,
+            "step {part} did not move one row into the picture"
+        );
+        assert!(
+            matches!(view.rows[0], Row::Picture { part: at, .. } if at == part),
+            "step {part} did not open the screen on picture row {part}: {:?}",
+            view.rows[0]
+        );
+    }
+}
+
+#[test]
+fn picture_rows_step_back() {
+    let (scratch, mut pane) = stacked("pictures-step-back", ProtocolType::Halfblocks, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let whole = pane.settled(&mut frame);
+    let rows = picture_rows(&whole).len();
+    let height = pane.body(&frame).diff;
+    pane.app
+        .apply(Action::File(1), &mut frame, height)
+        .expect("next file");
+    pane.settled(&mut frame);
+    // The image's gap, then the picture's last row.
+    pane.scroll(&mut frame, -1);
+    pane.settled(&mut frame);
+    pane.scroll(&mut frame, -1);
+    let view = pane.settled(&mut frame);
+    assert_eq!(view.top.under, rows, "a step up passed over the picture");
+    let last = u16::try_from(rows - 1).expect("rows");
+    assert!(
+        matches!(view.rows[0], Row::Picture { part, .. } if part == last),
+        "a step up did not open on the picture's last row: {:?}",
+        view.rows[0]
+    );
+}
+
+/// The pane drawn whole from the size line, and drawn again cut by the top by
+/// `cut` picture rows, with the screen row the diff starts on.
+fn cut_by_top(
+    name: &str,
+    protocol: ProtocolType,
+    cut: u16,
+) -> (TestBackend, TestBackend, View, u16) {
+    let (scratch, mut pane) = stacked(name, protocol, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.settled(&mut frame);
+    // The heading, then onto the size line.
+    pane.scroll(&mut frame, 1);
+    let whole = pane.settled(&mut frame);
+    let uncut = pane.draw(&whole);
+    pane.scroll(&mut frame, isize::from(u8::try_from(cut).expect("cut")) + 1);
+    let view = pane.settled(&mut frame);
+    assert!(
+        matches!(view.rows[0], Row::Picture { part, .. } if part == cut),
+        "the screen does not open on picture row {cut}: {:?}",
+        view.rows[0]
+    );
+    // The size line opens the uncut screen, so its row is the diff's first.
+    let top = (0..uncut.buffer().area.height)
+        .find(|&y| row_of(&uncut, y).concat().contains("PNG 120"))
+        .expect("the size line is drawn");
+    (uncut, pane.draw(&view), view, top)
+}
+
+/// Screen row `y` of a drawing, as its cells' symbols, short of the scrollbar,
+/// whose thumb moves with the scroll.
+fn row_of(backend: &TestBackend, y: u16) -> Vec<String> {
+    let width = backend.buffer().area.width - 2;
+    (0..width)
+        .map(|x| backend.buffer()[(x, y)].symbol().to_owned())
+        .collect()
+}
+
+/// The screen rows whose cells hold `needle`.
+fn rows_with(backend: &TestBackend, needle: &str) -> Vec<u16> {
+    let area = backend.buffer().area;
+    (0..area.height)
+        .filter(|&y| row_of(backend, y).iter().any(|cell| cell.contains(needle)))
+        .collect()
+}
+
+#[test]
+fn picture_cut_by_top_halfblocks() {
+    let (uncut, cut, view, top) =
+        cut_by_top("pictures-cut-halfblocks", ProtocolType::Halfblocks, 2);
+    let shown = picture_rows(&view).len();
+    // Uncut, the size line is on `top` and picture row `p` on `top + 1 + p`.
+    for at in 0..shown {
+        let at = u16::try_from(at).expect("rows");
+        assert_eq!(
+            row_of(&cut, top + at),
+            row_of(&uncut, top + 1 + 2 + at),
+            "screen row {at} of the cut picture is not picture row {} drawn whole",
+            2 + at
+        );
+    }
+}
+
+#[test]
+fn picture_cut_by_top_kitty() {
+    let (_, cut, view, top) = cut_by_top("pictures-cut-kitty", ProtocolType::Kitty, 2);
+    let placed = rows_with(&cut, &PLACEHOLDER.to_string());
+    let shown = picture_rows(&view).len();
+    assert_eq!(
+        placed,
+        (top..top + u16::try_from(shown).expect("rows")).collect::<Vec<_>>(),
+        "the cut picture's placeholders are not on the rows its parts hold"
+    );
+}
+
+/// The raster height a Sixel sequence declares, from `"Pan;Pad;Ph;Pv`.
+fn sixel_heights(backend: &TestBackend) -> Vec<u32> {
+    backend
+        .buffer()
+        .content()
+        .iter()
+        .filter_map(|cell| {
+            let symbol = cell.symbol();
+            let at = symbol.find("\x1bP")?;
+            let raster = &symbol[at..][symbol[at..].find('"')? + 1..];
+            raster
+                .split(';')
+                .nth(3)?
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .ok()
+        })
+        .collect()
+}
+
+#[test]
+fn picture_cut_by_top_sixel() {
+    let cut_rows = 2u16;
+    let (uncut, cut, _, top) = cut_by_top("pictures-cut-sixel", ProtocolType::Sixel, cut_rows);
+    assert_eq!(
+        rows_with(&cut, "\x1bP"),
+        vec![top],
+        "the cut picture's sequences are not on the diff's first row"
+    );
+    let (whole, part) = (sixel_heights(&uncut), sixel_heights(&cut));
+    assert_eq!(
+        (whole.len(), part.len()),
+        (3, 3),
+        "not one sequence per panel"
+    );
+    // The test picker's cell is 20 pixels tall.
+    let skipped = u32::from(cut_rows) * 20;
+    for (whole, part) in whole.iter().zip(&part) {
+        let lost = whole - part;
+        assert!(
+            (skipped..=skipped + 5).contains(&lost),
+            "a panel {whole}px tall drew {part}px cut by {cut_rows} rows, losing {lost}px \
+             where its six-row bands allow {skipped} to {}",
+            skipped + 5
+        );
+    }
+}
+
+#[test]
+fn picture_cut_by_top_iterm2() {
+    let (uncut, cut, view, top) = cut_by_top("pictures-cut-iterm2", ProtocolType::Iterm2, 2);
+    let shown = u16::try_from(picture_rows(&view).len()).expect("rows");
+    let drawn = rows_with(&cut, "1337;File=");
+    assert_eq!(
+        drawn.first(),
+        Some(&top),
+        "the cut picture does not start on the diff's first row"
+    );
+    assert!(
+        drawn.iter().all(|&y| y < top + shown),
+        "the cut picture drew below its rows: {drawn:?}"
+    );
+    // Row `p` of a cut picture is the same image row `p` was drawn whole.
+    for &y in &drawn {
+        assert_eq!(
+            row_of(&cut, y),
+            row_of(&uncut, y + 1 + 2),
+            "screen row {y} of the cut picture is not the row two below it drawn whole"
+        );
+    }
+}
+
+#[test]
+fn under_clamped_on_resize() {
+    let (scratch, mut pane) = stacked("pictures-resize", ProtocolType::Halfblocks, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let tall = pane.settled(&mut frame);
+    let rows = picture_rows(&tall).len();
+    pane.scroll(&mut frame, isize::try_from(rows).expect("rows") + 1);
+    let deep = pane.settled(&mut frame);
+    assert_eq!(
+        deep.top.under, rows,
+        "the setup did not reach the picture's last row"
+    );
+    pane.height = 20;
+    let short = pane.settled(&mut frame);
+    let Some(Row::Picture { part, .. }) = short.rows.first() else {
+        panic!(
+            "the resized screen does not open on the picture: {:?}",
+            short.rows.first()
+        );
+    };
+    assert_eq!(
+        short.top.under,
+        usize::from(*part) + 1,
+        "the offset and the row the screen opens on disagree"
+    );
+    assert!(
+        short.top.under < rows,
+        "a resize that shrank the picture kept an offset past its rows"
+    );
+}

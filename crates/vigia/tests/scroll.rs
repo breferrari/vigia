@@ -1720,3 +1720,68 @@ fn under_clamped_when_note_shrinks() {
         after.rows[0]
     );
 }
+
+#[test]
+fn page_up_overlap_counts_display_rows() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-page-up", 0, height * 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let below = stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    let after = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(-1));
+    assert_eq!(after.rows.len(), height, "the screen was not full");
+    assert_eq!(
+        after.rows[height - 1],
+        below.rows[0],
+        "a page up over a long note did not keep exactly one display row of overlap"
+    );
+    assert_eq!(
+        after.steps.len(),
+        height,
+        "the page up did not open the screen inside the note"
+    );
+    assert!(
+        after.top.row == 3 && after.top.under > 0,
+        "the page up opened on {:?}, not inside the note",
+        after.top
+    );
+}
+
+#[test]
+fn keys_between_frames() {
+    let (scratch, mut app) = noted("scroll-note-keys", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let whole = note_rows(&stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Top,
+    ));
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(3));
+    app.apply(Action::Scroll(1), &mut frame, body())
+        .expect("apply");
+    let down = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(1));
+    assert_eq!(
+        down.top.under, 2,
+        "two steps down before a frame did not move two rows into the note"
+    );
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("apply");
+    let up = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    assert_eq!(
+        up.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: whole.len()
+        },
+        "two steps up before a frame passed over the note"
+    );
+}

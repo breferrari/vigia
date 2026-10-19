@@ -1248,19 +1248,20 @@ impl App {
         }
     }
 
-    /// Step down from the last frame's steps. Past them, or off a frame that drew
-    /// somewhere else, the rest are logical rows.
+    /// Step down through the last frame's steps, from wherever among them the
+    /// position is, since several keys can land between two frames. Past them,
+    /// or off them, the rest are logical rows.
     fn down(&mut self, by: usize) {
-        if self.steps.first() != Some(&self.position) {
+        let Some(at) = self.steps.iter().position(|step| *step == self.position) else {
             self.position.row = self.position.row.saturating_add(by);
             self.position.under = 0;
             return;
-        }
-        if let Some(&step) = self.steps.get(by) {
+        };
+        if let Some(&step) = self.steps.get(at + by) {
             self.position = step;
         } else if let Some(&last) = self.steps.last() {
             self.position = Position {
-                row: last.row.saturating_add(by + 1 - self.steps.len()),
+                row: last.row.saturating_add(at + by + 1 - self.steps.len()),
                 under: 0,
                 ..last
             };
@@ -1279,9 +1280,14 @@ impl App {
             under: 0,
             ..self.position
         };
-        self.position = anchor;
+        // A rise no frame has resolved yet is owed from its own anchor.
+        let (anchor, owed) = match self.rise {
+            Some((before, owed, at)) if at == self.position => (before, owed),
+            _ => (anchor, 0),
+        };
+        self.position.under = 0;
         self.up(left, frame)?;
-        self.rise = Some((anchor, left, self.position));
+        self.rise = Some((anchor, owed + left, self.position));
         Ok(())
     }
 
