@@ -132,6 +132,7 @@ fn asked_after(answer: Option<&[u8]>, late: Duration) -> String {
             answer,
             delay: late,
             piped: false,
+            detached: false,
         },
     )
 }

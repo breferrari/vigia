@@ -36,9 +36,13 @@ fn ask_child() {
         String::from_utf8_lossy(&reply).escape_debug()
     );
     std::io::stdout().flush().expect("flush");
-    let mut tty = std::fs::File::open("/dev/tty").expect("the child has a terminal");
     let mut byte = [0u8; 1];
-    tty.read_exact(&mut byte).expect("read the byte");
+    // Without a controlling terminal, the terminal is stdin.
+    match std::fs::File::open("/dev/tty") {
+        Ok(mut tty) => tty.read_exact(&mut byte),
+        Err(_) => std::io::stdin().read_exact(&mut byte),
+    }
+    .expect("read the byte");
     println!("got {}", byte[0] as char);
 }
 
@@ -88,6 +92,21 @@ fn piped_answered_ask() {
 }
 
 #[test]
+fn detached_answered_ask() {
+    // As under `setsid`: the terminal on stdio, and no `/dev/tty` to open.
+    let text = asked(Ask {
+        answer: Some(b"\x1b]11;rgb:0000/0000/0000\x1b\\"),
+        detached: true,
+        ..Ask::default()
+    });
+    assert_typed(&text);
+    assert!(
+        pty::asked_line(&text).contains("]11;rgb:"),
+        "an answer on stdin was not read without a controlling terminal: {text}"
+    );
+}
+
+#[test]
 fn partial_palette_ask() {
     // The background and no more: the palette has begun and never ends.
     let text = asked(Ask {
@@ -108,6 +127,8 @@ struct Ask {
     palette: bool,
     /// The child's stdin is not the terminal.
     piped: bool,
+    /// The child has no controlling terminal.
+    detached: bool,
 }
 
 fn assert_typed(text: &str) {
@@ -142,6 +163,7 @@ fn asked(ask: Ask) -> String {
             answer: ask.answer,
             delay: Duration::ZERO,
             piped: ask.piped,
+            detached: ask.detached,
         },
     )
 }

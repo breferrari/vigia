@@ -19,6 +19,9 @@ pub struct Script<'a> {
     pub delay: Duration,
     /// The child's stdin is not the terminal.
     pub piped: bool,
+    /// The child has the terminal on stdio but not as its controlling
+    /// terminal, so `/dev/tty` does not open.
+    pub detached: bool,
 }
 
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
@@ -33,11 +36,12 @@ pub fn run(mut command: Command, script: Script<'_>) -> String {
     } else {
         command.stdin(Stdio::from(slave.try_clone().expect("dup")));
     }
+    let detached = script.detached;
     // SAFETY: only async-signal-safe calls between fork and exec. The terminal
     // is taken through stdout, which is it in every case here.
     unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() < 0 || libc::ioctl(1, libc::TIOCSCTTY as _, 0) < 0 {
+        command.pre_exec(move || {
+            if libc::setsid() < 0 || (!detached && libc::ioctl(1, libc::TIOCSCTTY as _, 0) < 0) {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())
