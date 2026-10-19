@@ -180,6 +180,12 @@ fn panic_child() {
     };
     let which = which.to_string_lossy().into_owned();
     vigia::install_abort_hook();
+    if which == "caught-base" {
+        // The base hook alone, as in every mode before the pane's goes on.
+        let caught = vigia_core::caught(|| panic!("a caught panic on purpose")).is_none();
+        println!("survived caught={caught}");
+        return;
+    }
     if which == "thread" {
         // As in `vigia mcp`: the base hook alone, on a thread of its own.
         let _ = std::thread::spawn(|| panic!("a server thread on purpose")).join();
@@ -272,6 +278,16 @@ fn caught_panic_keeps_screen() {
     assert!(
         !text.contains("\x1b[?1049l") && !text.contains("a caught panic on purpose"),
         "a caught panic restored the terminal or printed over the pane: {text}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn caught_panic_base_hook() {
+    let (text, status) = ran("caught-base", pty::Script::default());
+    assert!(
+        text.contains("survived caught=true") && status.success(),
+        "the base hook ended the process on a panic a catch was waiting for: {status:?} {text}"
     );
 }
 
