@@ -16,8 +16,8 @@
 # A markdown file under `crates/` is code too: `NOTICE.md` ships in the archive
 # and a test reads it. `.claude/scripts` are the guards that run on every
 # commit and publish, and they are code. `.claude/take-next` holds the
-# rules the skill reads, and `docs/research` holds notes and their images;
-# no build or code suite reads either, but a script beside the images is code.
+# take-next rules and `docs/research` notes and their images; a script beside
+# those images is code.
 #
 # `CI_FULL=true` in the environment answers full whatever the paths, for a
 # pull request that carries the `full-ci` label. A partial run that turns out

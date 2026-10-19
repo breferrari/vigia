@@ -174,11 +174,9 @@ gh run view <id> --json conclusion --jq .conclusion
 
 Watch the run, not `gh pr checks`. List only the runs that started after the ready call. The run of the draft has the same `headSha`, a green conclusion and no jobs run. If the list is empty, the ready run is not in the queue yet. List again. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
 
-No external review is configured; once the post-ready run is green on the head, merge.
-
 **A docs-only rebase merges without fresh CI.** A PR that was green on its previous head may merge right after a rebase with no fresh CI, if the rebase changed only `ROADMAP.md` or `CHANGELOG.md` and `git range-diff` shows its own commits otherwise unchanged. Then watch main's CI on the merge commit, and fix forward if it goes red.
 
-When the latest run is green on the PR head, merge with `gh pr merge <n> --squash --delete-branch`. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
+No external review is configured; once the post-ready run is green on the head, merge with `gh pr merge <n> --squash --delete-branch`. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 
 ## 8. Close the loop
 
