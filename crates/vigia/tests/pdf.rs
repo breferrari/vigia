@@ -459,6 +459,25 @@ fn pdf_flate_bomb_undecoded() {
 }
 
 #[test]
+fn pdf_small_image_bomb() {
+    // An image that claims 8 by 8 pixels and inflates to a gigabyte: only the
+    // inflate itself can stop it.
+    let before = resident();
+    let drawn = drawn(
+        "pdf-small-image-bomb",
+        Some(&icon_pdf(1)),
+        &imaged(1, (8, 8), 1 << 30),
+    );
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+    if let (Some(before), Some(after)) = (before, resident()) {
+        assert!(
+            after < before + 384,
+            "memory went from {before} MiB to {after} MiB"
+        );
+    }
+}
+
+#[test]
 fn pdf_many_streams_bounded() {
     // Twenty images of 20 MB each: each fits, and together they do not.
     let drawn = drawn(
