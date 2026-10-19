@@ -64,8 +64,10 @@ pub struct Worktree {
     /// LFS files compared with their local object, for the gate that holds the
     /// compare to once per timestamp.
     lfs_compares: Cell<u64>,
-    /// Each LFS file's last compare, by its length and modification time.
-    lfs_verdicts: RefCell<HashMap<String, (LfsPrint, bool)>>,
+    /// Whether the configuration names Git LFS, read with it.
+    lfs: Cell<bool>,
+    /// Each LFS file's last verdict, by its fingerprint and its stored blob.
+    lfs_verdicts: RefCell<HashMap<String, (LfsKey, bool)>>,
 }
 
 impl Worktree {
@@ -83,6 +85,7 @@ impl Worktree {
             common.join("config"),
             common.join("info").join("attributes"),
         ];
+        let lfs = lfs_configured(&repo);
         Ok(Self {
             status: RefCell::new(without_drivers(&repo)),
             live: RefCell::new(repo),
@@ -94,6 +97,7 @@ impl Worktree {
             deleted: Cell::new(false),
             lfs_compares: Cell::new(0),
             lfs_verdicts: RefCell::new(HashMap::new()),
+            lfs: Cell::new(lfs),
         })
     }
 
@@ -157,30 +161,25 @@ impl Worktree {
     /// when a deletion turned up.
     fn unstaged(&self, track_renames: bool) -> Result<Inner> {
         let walked = self.unstaged_walk(track_renames)?;
-        if !self.lfs_configured() {
+        if !self.lfs.get() {
             return Ok(walked);
         }
-        let kept = walked
-            .filter(|change| {
-                !change
-                    .as_ref()
-                    .is_ok_and(|change| self.lfs_unchanged(change))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let walked: Vec<FileChange> = walked.collect::<Result<_>>()?;
+        // A pane open for days keeps no verdict for a file the walk stopped flagging.
+        self.lfs_verdicts
+            .borrow_mut()
+            .retain(|path, _| walked.iter().any(|change| change.path == *path));
+        let kept: Vec<FileChange> = walked
+            .into_iter()
+            .filter(|change| !self.lfs_unchanged(change))
+            .collect();
         Ok(Inner::Collected(kept.into_iter()))
-    }
-
-    /// Whether this repository configures Git LFS, whose files the walk reads as
-    /// raw bytes and so may flag when only their timestamp moved.
-    fn lfs_configured(&self) -> bool {
-        let repo = self.repo();
-        let config = repo.config_snapshot();
-        config.string("filter.lfs.process").is_some() || config.string("filter.lfs.clean").is_some()
     }
 
     /// Whether `change` is an LFS file whose worktree bytes are the object its
     /// stored pointer names, which the walk flagged only because their timestamp
-    /// moved.
+    /// moved. The checks run cheapest first, and only a missing object goes
+    /// uncached, since a fetch can bring it while the timestamp stands.
     fn lfs_unchanged(&self, change: &FileChange) -> bool {
         if change.kind != ChangeKind::Modified
             || change.after != Some(Side::Worktree)
@@ -191,47 +190,50 @@ impl Worktree {
         let Some(id) = change.before else {
             return false;
         };
-        if !self
-            .with_filter(|filter| filter.diff_attribute(&change.path))
-            .is_ok_and(|(_, lfs)| lfs)
-        {
-            return false;
-        }
-        let Ok(pointer) = self.blob(id, &change.path) else {
-            return false;
-        };
-        let (Some(oid), Some(size)) = (picture::lfs_oid(&pointer), picture::lfs_size(&pointer))
-        else {
-            return false;
-        };
         let path = self.workdir.join(&change.path);
-        let Ok(meta) = std::fs::metadata(&path) else {
+        let Some(print) = followed_print(&path) else {
             return false;
         };
+        if let Some(&(seen, same)) = self.lfs_verdicts.borrow().get(&change.path)
+            && seen == (print, id)
+        {
+            return same;
+        }
+        let pointer = self.lfs_pointer_of(id, &change.path);
         // A larger compare would cost the frame its budget, and belongs off the
         // paint.
-        if meta.len() != size || size > LFS_COMPARE_MAX {
-            return false;
-        }
-        let Ok(mtime) = meta.modified() else {
-            return false;
+        let candidate = pointer.as_ref().filter(|(_, size)| {
+            *size == print.len()
+                && *size <= LFS_COMPARE_MAX
+                && self
+                    .with_filter(|filter| filter.diff_attribute(&change.path))
+                    .is_ok_and(|(_, lfs)| lfs)
+        });
+        let same = match candidate {
+            None => false,
+            Some((oid, size)) => {
+                let Some(object) = self.lfs_path(oid) else {
+                    return false;
+                };
+                self.lfs_compares.set(self.lfs_compares.get() + 1);
+                same_bytes(&path, &object, *size)
+            }
         };
-        let print = (meta.len(), mtime);
-        if let Some((seen, same)) = self.lfs_verdicts.borrow().get(&change.path)
-            && *seen == print
-        {
-            return *same;
-        }
-        // Not cached: a fetch can bring the object while the timestamp stands.
-        let Some(object) = self.lfs_path(oid) else {
-            return false;
-        };
-        self.lfs_compares.set(self.lfs_compares.get() + 1);
-        let same = same_bytes(&path, &object);
         self.lfs_verdicts
             .borrow_mut()
-            .insert(change.path.clone(), (print, same));
+            .insert(change.path.clone(), ((print, id), same));
         same
+    }
+
+    /// The object and size the blob `id` names when it is an LFS pointer, with no
+    /// read of a blob too large to be one.
+    fn lfs_pointer_of(&self, id: gix::ObjectId, path: &str) -> Option<(String, u64)> {
+        let small = self
+            .repo()
+            .find_header(id)
+            .is_ok_and(|header| header.size() < picture::POINTER_MAX as u64);
+        let blob = small.then(|| self.blob(id, path).ok()).flatten()?;
+        picture::lfs_pointer(&blob).map(|(oid, size)| (oid.to_owned(), size))
     }
 
     fn unstaged_walk(&self, track_renames: bool) -> Result<Inner> {
@@ -1079,6 +1081,7 @@ impl Worktree {
         // `reload` replaces the repository only once the open succeeds.
         if repo.reload().is_ok() {
             *self.status.borrow_mut() = without_drivers(&repo);
+            self.lfs.set(lfs_configured(&repo));
             self.loaded_config.set(now);
             self.reloads.set(self.reloads.get() + 1);
             self.invalidate_filter();
@@ -1884,8 +1887,9 @@ mod composing {
     }
 }
 
-/// An LFS file's length and modification time, which key its last compare.
-type LfsPrint = (u64, std::time::SystemTime);
+/// What an LFS verdict holds for: the worktree file's fingerprint and its
+/// stored blob.
+type LfsKey = (Fingerprint, gix::ObjectId);
 
 /// The largest LFS file the status walk compares with its object.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
@@ -1911,33 +1915,35 @@ fn without_drivers(repo: &gix::Repository) -> gix::Repository {
     bare
 }
 
-/// Whether two files hold the same bytes, read side by side and stopped at the
-/// first chunk that differs.
-fn same_bytes(a: &Path, b: &Path) -> bool {
+/// Whether the configuration names Git LFS as a filter.
+fn lfs_configured(repo: &gix::Repository) -> bool {
+    let config = repo.config_snapshot();
+    config.string("filter.lfs.process").is_some() || config.string("filter.lfs.clean").is_some()
+}
+
+/// Whether two files of `len` bytes each hold the same bytes, read side by side
+/// and stopped at the first chunk that differs.
+fn same_bytes(a: &Path, b: &Path, len: u64) -> bool {
     use std::io::Read;
-    fn fill(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
-        let mut filled = 0;
-        while filled < buf.len() {
-            match file.read(&mut buf[filled..])? {
-                0 => break,
-                read => filled += read,
-            }
-        }
-        Ok(filled)
-    }
     let (Ok(mut a), Ok(mut b)) = (std::fs::File::open(a), std::fs::File::open(b)) else {
         return false;
     };
-    let (mut left, mut right) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
-    loop {
-        let (Ok(read), Ok(other)) = (fill(&mut a, &mut left), fill(&mut b, &mut right)) else {
-            return false;
-        };
-        if left[..read] != right[..other] {
-            return false;
-        }
-        if read == 0 {
-            return true;
-        }
+    if b.metadata().map_or(true, |meta| meta.len() != len) {
+        return false;
     }
+    let (mut left, mut right) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    let mut remaining = len;
+    while remaining > 0 {
+        let chunk = left
+            .len()
+            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        if a.read_exact(&mut left[..chunk]).is_err()
+            || b.read_exact(&mut right[..chunk]).is_err()
+            || left[..chunk] != right[..chunk]
+        {
+            return false;
+        }
+        remaining -= chunk as u64;
+    }
+    true
 }

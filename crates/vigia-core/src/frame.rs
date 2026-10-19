@@ -43,6 +43,13 @@ pub(crate) struct Fingerprint {
     mtime: SystemTime,
 }
 
+impl Fingerprint {
+    /// The file's length.
+    pub(crate) fn len(self) -> u64 {
+        self.len
+    }
+}
+
 /// Whether a config at `now` asks for a reload over the one loaded at `loaded`.
 /// Missing or empty is a writer between two steps, not a config.
 pub(crate) fn config_moved(now: Option<Fingerprint>, loaded: Option<Fingerprint>) -> bool {

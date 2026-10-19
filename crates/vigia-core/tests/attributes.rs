@@ -375,3 +375,32 @@ fn racy_lfs_compare_cached() {
         "an unchanged fingerprint compared the file again"
     );
 }
+
+#[test]
+fn driver_after_reload() {
+    let scratch = Scratch::new("attr-driver-reload");
+    let marker = scratch.root().join("ran");
+    scratch.write(".gitattributes", "*.csv filter=marker\n");
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // Named after the walk opened, so only a reloaded walk could start it.
+    scratch.git(&[
+        "config",
+        "filter.marker.clean",
+        &format!("touch '{}'; cat", marker.display()),
+    ]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(4));
+    frame.advance().expect("advance after the config changed");
+    let paths: Vec<&str> = frame.files().iter().map(|c| c.path.as_str()).collect();
+    assert_eq!(paths, ["notes.txt"], "the walk listed the wrong files");
+    assert!(
+        !marker.exists(),
+        "a driver named after the walk opened ran on the reloaded walk"
+    );
+}

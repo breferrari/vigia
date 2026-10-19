@@ -1233,7 +1233,7 @@ fn lfs_compare_repo(name: &str, content: bool) -> Scratch {
     if content {
         scratch.write("big.bin", &object);
     } else {
-        scratch.write("big.bin", &pointer);
+        scratch.write("big.bin", pointer.as_bytes());
     }
     scratch
 }
