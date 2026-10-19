@@ -244,6 +244,9 @@ pub struct Built {
     pub page_note: Option<String>,
     /// The sizes found for sides the frame path left unsized, by their stamp.
     pub sizes: Vec<(u64, u32, u32)>,
+    /// A bar the picture draws in place of its shape's: a PDF page one side
+    /// added or removed.
+    pub bar: Option<Bar>,
 }
 
 impl Built {
@@ -524,6 +527,7 @@ fn undecoded() -> Built {
         kitty: Vec::new(),
         page_note: None,
         sizes: Vec::new(),
+        bar: None,
     }
 }
 
@@ -1156,8 +1160,8 @@ const PDF_BUDGET: f64 = 1.4 * 1024.0 * 1024.0 * 1024.0;
 /// The most objects one page may reach before it is refused: the walk that
 /// fingerprints it reads each.
 const PDF_OBJECTS: usize = 100_000;
-/// The most one page's content and images may decode to, together, before
-/// it is refused.
+/// The most stream data the worker lets one PDF decode, its two sides
+/// together, while it sizes, fingerprints and draws them.
 const PDF_DECODED: u64 = 256 * 1024 * 1024;
 
 /// Each content stream of `page`, decoded one at a time, its length taken
@@ -1185,15 +1189,11 @@ fn page_contents<'a>(
     Some(())
 }
 
-/// One PDF side, opened once its streams are known to decode within the
-/// frame path's budget: parsing decodes some of them whole.
+/// One PDF side, opened.
 fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>> {
     match source {
         Some(source) => {
             let bytes = read_counted(source)?;
-            if !vigia_core::streams_fit(&bytes, vigia_core::PDF_FRAME_BUDGET) {
-                return None;
-            }
             hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes))
                 .ok()
                 .map(Some)
@@ -1212,85 +1212,93 @@ enum Met<'a, 'b> {
 }
 
 /// Every object `object` reaches, each once, but the page tree's parent
-/// link. `None` when `meet` says so.
+/// link. `None` when `meet` says so, or past [`PDF_OBJECTS`]. A stack of its
+/// own, not the thread's: a chain of references can be as long as a file.
 fn walk<'a>(
     object: hayro::hayro_syntax::object::Object<'a>,
     xref: &'a hayro::hayro_syntax::xref::XRef,
     seen: &mut HashSet<(i32, i32)>,
     meet: &mut dyn FnMut(Met<'a, '_>) -> Option<()>,
 ) -> Option<()> {
-    use hayro::hayro_syntax::object::{MaybeRef, Object};
-    let into = |value: MaybeRef<Object<'a>>,
-                seen: &mut HashSet<(i32, i32)>,
-                meet: &mut dyn FnMut(Met<'a, '_>) -> Option<()>| {
-        match value {
-            MaybeRef::Ref(reference) => {
+    use hayro::hayro_syntax::object::{MaybeRef, Name, Object};
+    enum Task<'a> {
+        Object(Object<'a>),
+        Value(MaybeRef<Object<'a>>),
+        Name(Name<'a>),
+    }
+    let mut tasks = vec![Task::Object(object)];
+    while let Some(task) = tasks.pop() {
+        let object = match task {
+            Task::Name(name) => {
+                meet(Met::Name(name.as_ref()))?;
+                continue;
+            }
+            Task::Value(MaybeRef::NotRef(object)) | Task::Object(object) => object,
+            Task::Value(MaybeRef::Ref(reference)) => {
                 let id = (reference.obj_number, reference.gen_number);
                 if !seen.insert(id) {
-                    return meet(Met::Again(id.0, id.1));
+                    meet(Met::Again(id.0, id.1))?;
+                    continue;
                 }
                 // Past it, a change could go unread, so the page is refused.
                 if seen.len() > PDF_OBJECTS {
                     return None;
                 }
                 match xref.get::<Object<'a>>(reference.into()) {
-                    Some(object) => walk(object, xref, seen, meet),
-                    None => Some(()),
+                    Some(object) => object,
+                    None => continue,
                 }
             }
-            MaybeRef::NotRef(object) => walk(object, xref, seen, meet),
-        }
-    };
-    match object {
-        Object::Dict(dict) => {
-            for (name, value) in dict.entries() {
-                // The page tree, which every page reaches and none owns.
-                if name.as_ref() == b"Parent" {
-                    continue;
+        };
+        match object {
+            Object::Dict(dict) => {
+                let entries: Vec<_> = dict
+                    .entries()
+                    // The page tree, which every page reaches and none owns.
+                    .filter(|(name, _)| name.as_ref() != b"Parent")
+                    .collect();
+                for (name, value) in entries.into_iter().rev() {
+                    tasks.push(Task::Value(value));
+                    tasks.push(Task::Name(name));
                 }
-                meet(Met::Name(name.as_ref()))?;
-                into(value, seen, meet)?;
             }
-        }
-        Object::Array(array) => {
-            for value in array.raw_iter() {
-                into(value, seen, meet)?;
+            Object::Array(array) => {
+                let values: Vec<_> = array.raw_iter().collect();
+                tasks.extend(values.into_iter().rev().map(Task::Value));
             }
+            Object::Stream(stream) => {
+                meet(Met::Stream(&stream))?;
+                tasks.push(Task::Object(Object::Dict(stream.dict().clone())));
+            }
+            other => meet(Met::Leaf(&other))?,
         }
-        Object::Stream(stream) => {
-            meet(Met::Stream(&stream))?;
-            walk(Object::Dict(stream.dict().clone()), xref, seen, meet)?;
-        }
-        other => meet(Met::Leaf(&other))?,
     }
     Some(())
 }
 
-/// What a page draws from: its contents and its resources.
+/// What a page draws from, each under its name: its contents and its
+/// resources, those it inherits among them.
 fn page_roots<'a>(
     page: &hayro::hayro_syntax::page::Page<'a>,
-) -> impl Iterator<Item = hayro::hayro_syntax::object::Object<'a>> {
+) -> impl Iterator<Item = (&'static [u8], hayro::hayro_syntax::object::Object<'a>)> {
     use hayro::hayro_syntax::object::Object;
-    let raw = page.raw();
-    [b"Contents".as_slice(), b"Resources"]
+    let resources = page.resources();
+    let contents = page.raw().get::<Object<'a>>(b"Contents");
+    contents
+        .map(|contents| (b"Contents".as_slice(), contents))
         .into_iter()
-        .filter_map(move |key| raw.get::<Object<'a>>(key))
-}
-
-/// The names of a stream's filters, in order.
-fn filters_of(stream: &hayro::hayro_syntax::object::Stream<'_>) -> Vec<Vec<u8>> {
-    use hayro::hayro_syntax::object::{Array, Name};
-    let dict = stream.dict();
-    if let Some(name) = dict.get::<Name<'_>>(b"Filter") {
-        return vec![name.as_ref().to_vec()];
-    }
-    dict.get::<Array<'_>>(b"Filter")
-        .map_or_else(Vec::new, |array| {
-            array
-                .iter::<Name<'_>>()
-                .map(|name| name.as_ref().to_vec())
-                .collect()
-        })
+        .chain(
+            [
+                (b"ExtGState".as_slice(), &resources.ext_g_states),
+                (b"Font", &resources.fonts),
+                (b"Properties", &resources.properties),
+                (b"ColorSpace", &resources.color_spaces),
+                (b"XObject", &resources.x_objects),
+                (b"Pattern", &resources.patterns),
+                (b"Shading", &resources.shadings),
+            ]
+            .map(|(key, dict)| (key, Object::Dict(dict.clone()))),
+        )
 }
 
 /// An image's width and height as its dictionary claims them, when it is one.
@@ -1304,15 +1312,26 @@ fn image_size(stream: &hayro::hayro_syntax::object::Stream<'_>) -> Option<(u32, 
         })
 }
 
-/// A page's fingerprint, from the encoded bytes of every object it draws
-/// from, or `None` when an image it holds is larger than any image may
-/// decode. Nothing is decoded.
-fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
+/// A page's fingerprint, from its boxes, its rotation and the encoded bytes
+/// of every object it draws from, or `None` when an image it holds is larger
+/// than any image may decode. Nothing is decoded. An object an earlier page
+/// reached, in `seen`, counts by its number alone.
+fn page_print(
+    page: &hayro::hayro_syntax::page::Page<'_>,
+    seen: &mut HashSet<(i32, i32)>,
+) -> Option<u64> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let mut seen = HashSet::new();
-    for root in page_roots(page) {
-        walk(root, page.xref(), &mut seen, &mut |met| {
+    format!(
+        "{:?} {:?} {:?}",
+        page.media_box(),
+        page.crop_box(),
+        page.rotation()
+    )
+    .hash(&mut hasher);
+    for (key, root) in page_roots(page) {
+        key.hash(&mut hasher);
+        walk(root, page.xref(), seen, &mut |met| {
             match met {
                 Met::Name(name) => name.hash(&mut hasher),
                 Met::Again(number, generation) => (number, generation).hash(&mut hasher),
@@ -1347,81 +1366,47 @@ fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
 
 /// Every page's fingerprint, or `None` when one holds an image too large.
 fn page_prints(pdf: &hayro::hayro_syntax::Pdf) -> Option<Vec<u64>> {
-    pdf.pages().iter().map(page_print).collect()
+    let mut seen = HashSet::new();
+    pdf.pages()
+        .iter()
+        .map(|page| page_print(page, &mut seen))
+        .collect()
 }
 
-/// How much the images `page` reaches decode to, together, or `None` past
-/// `budget`. A Flate image is measured through a sink; any other is held to
-/// its claimed size, which its decoder does not pass.
-fn images_decoded(page: &hayro::hayro_syntax::page::Page<'_>, budget: u64) -> Option<u64> {
-    let mut spent = 0u64;
-    let mut seen = HashSet::new();
-    for root in page_roots(page) {
-        walk(root, page.xref(), &mut seen, &mut |met| {
-            let Met::Stream(stream) = met else {
-                return Some(());
-            };
-            let Some((width, height)) = image_size(stream) else {
-                return Some(());
-            };
-            let left = budget.checked_sub(spent)?;
-            let claimed = u64::from(width) * u64::from(height) * 4;
-            let decoded = match filters_of(stream).as_slice() {
-                [] => stream.raw_data().len() as u64,
-                [flate] if matches!(flate.as_slice(), b"FlateDecode" | b"Fl") => {
-                    vigia_core::inflated_length(&stream.raw_data(), left)?
-                }
-                // An image codec decodes to no more than the size it claims.
-                [codec]
-                    if matches!(
-                        codec.as_slice(),
-                        b"DCTDecode"
-                            | b"DCT"
-                            | b"JPXDecode"
-                            | b"JBIG2Decode"
-                            | b"CCITTFaxDecode"
-                            | b"CCF"
-                    ) =>
-                {
-                    claimed
-                }
-                // A chain, or a filter that can expand without a bound.
-                _ => return None,
-            };
-            spent = spent
-                .checked_add(decoded)
-                .filter(|spent| *spent <= budget)?;
-            Some(())
-        })?;
-    }
-    Some(spent)
+/// Which page of a changed PDF is drawn.
+#[derive(Clone, Copy)]
+enum Chosen {
+    /// The same page on both sides.
+    Both(usize),
+    /// The first page the new side added, alone.
+    Added(usize),
+    /// The first page the new side removed, alone.
+    Removed(usize),
 }
 
 /// Which page both sides draw, and what the line says about it.
-fn chosen_page(old: Option<&[u64]>, new: Option<&[u64]>) -> (usize, Option<String>) {
+fn chosen_page(old: Option<&[u64]>, new: Option<&[u64]>) -> (Chosen, Option<String>) {
     let (Some(old), Some(new)) = (old, new) else {
-        return (0, None);
+        return (Chosen::Both(0), None);
     };
-    let differs = old.iter().zip(new).position(|(a, b)| a != b);
-    let mut said = Vec::new();
-    if old.len() != new.len() {
-        said.push(format!("{} → {} pages", old.len(), new.len()));
-    }
-    let page = match differs {
-        Some(page) => {
-            if new.len() > 1 {
-                said.insert(0, format!("page {} of {}", page + 1, new.len()));
-            }
-            page
-        }
-        None => {
-            if old.len() == new.len() {
-                said.push("no page changed".to_owned());
-            }
-            0
-        }
+    let count = (old.len() != new.len()).then(|| format!("{} → {} pages", old.len(), new.len()));
+    let (chosen, said) = match old.iter().zip(new).position(|(a, b)| a != b) {
+        Some(page) => (
+            Chosen::Both(page),
+            (page > 0).then(|| format!("page {} of {}", page + 1, new.len())),
+        ),
+        None if new.len() > old.len() => (
+            Chosen::Added(old.len()),
+            Some(format!("page {} of {} added", old.len() + 1, new.len())),
+        ),
+        None if new.len() < old.len() => (
+            Chosen::Removed(new.len()),
+            Some(format!("page {} of {} removed", new.len() + 1, old.len())),
+        ),
+        None => (Chosen::Both(0), Some("no page changed".to_owned())),
     };
-    (page, (!said.is_empty()).then(|| said.join(" · ")))
+    let note: Vec<String> = [said, count].into_iter().flatten().collect();
+    (chosen, (!note.is_empty()).then(|| note.join(" · ")))
 }
 
 /// Only the first page's size of each side, in points rounded up, for a
@@ -1452,7 +1437,7 @@ fn pdf_sized(job: &Job) -> Built {
 /// Each side of a changed PDF drawn at its first changed page, fitted inside
 /// its first page's shape, both at one long side; with what the line says
 /// about the page.
-fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<String>)> {
+fn pdf_sides(job: &Job) -> Option<PdfDrawn> {
     let (old, new) = (
         open_pdf(&job.sources.before)?,
         open_pdf(&job.sources.after)?,
@@ -1462,7 +1447,16 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
         None => Some(None),
     };
     let (old_prints, new_prints) = (prints(&old)?, prints(&new)?);
-    let (index, note) = chosen_page(old_prints.as_deref(), new_prints.as_deref());
+    let (chosen, note) = chosen_page(old_prints.as_deref(), new_prints.as_deref());
+    let index = match chosen {
+        Chosen::Both(page) | Chosen::Added(page) | Chosen::Removed(page) => page,
+    };
+    // A page one side added or removed is drawn on that side alone.
+    let (old, new, alone) = match chosen {
+        Chosen::Both(_) => (old, new, None),
+        Chosen::Added(_) => (None, new, Some(Bar::Added)),
+        Chosen::Removed(_) => (old, None, Some(Bar::Removed)),
+    };
     // Past the length the floor refuses, a page is not decoded further.
     let refused = (PDF_BUDGET / f64::from(SHORTEST_SIDE)) as usize;
     let mut cost = 0;
@@ -1473,9 +1467,7 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
         };
         let mut budget = refused;
         page_contents(page, &mut budget, |_| {})?;
-        let content = refused - budget;
-        images_decoded(page, PDF_DECODED.checked_sub(content as u64)?)?;
-        cost = cost.max(content);
+        cost = cost.max(refused - budget);
     }
     let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(LONG_SIDE)) as f32;
     if long < SHORTEST_SIDE {
@@ -1490,7 +1482,22 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
         let page = pages.get(index).unwrap_or(first);
         Some(Some((render_page(first, page, long)?, None)))
     };
-    Some((render(old)?, render(new)?, note))
+    Some(PdfDrawn {
+        old: render(old)?,
+        new: render(new)?,
+        note,
+        alone,
+    })
+}
+
+/// What the worker draws of a changed PDF.
+struct PdfDrawn {
+    old: Option<Decoded>,
+    new: Option<Decoded>,
+    /// What the line says about the page.
+    note: Option<String>,
+    /// The bar of a page one side added or removed, drawn alone.
+    alone: Option<Bar>,
 }
 
 /// `page` rendered and centred in a canvas of `first`'s shape, its long side
@@ -1756,16 +1763,24 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         _ => None,
     };
     let vector = |format| job.formats.0 == Some(format) || job.formats.1 == Some(format);
+    // Every stream a PDF's parse, fingerprint and render decode is held
+    // whole, so they share one limit.
+    let limited = |work: &dyn Fn() -> Option<PdfDrawn>| {
+        hayro::hayro_syntax::with_decode_limit(PDF_DECODED, work)
+            .ok()
+            .flatten()
+    };
     if vector(Format::Pdf) && job.key.shape.slots.is_empty() {
-        return pdf_sized(job);
+        return hayro::hayro_syntax::with_decode_limit(PDF_DECODED, || pdf_sized(job))
+            .unwrap_or_else(|_| undecoded());
     }
-    let mut page = None;
+    let (mut page, mut alone) = (None, None);
     let sides = if vector(Format::Svg) {
         svg_sides(job)
     } else if vector(Format::Pdf) {
-        pdf_sides(job).map(|(old, new, note)| {
-            page = note;
-            (old, new)
+        limited(&|| pdf_sides(job)).map(|drawn| {
+            (page, alone) = (drawn.note, drawn.alone);
+            (drawn.old, drawn.new)
         })
     } else {
         side(&job.sources.before, job.formats.0).zip(side(&job.sources.after, job.formats.1))
@@ -1797,7 +1812,24 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
     let mut shrunk: HashMap<(Side, u32, u32), RgbImage> = HashMap::new();
     let mut panels = Vec::new();
     let mut kitty = Vec::new();
-    for (&slot, &(side, paint)) in job.key.shape.slots.iter().zip(job.key.shape.kind.paints()) {
+    // A page drawn alone takes the first slot, after its bar, as an added or
+    // deleted image does.
+    let (slots, paints): (Vec<Slot>, &[(Side, Paint)]) = match (alone, job.key.shape.slots.first())
+    {
+        (Some(bar), Some(first)) => (
+            vec![Slot {
+                x: first.x + 1,
+                width: first.width.saturating_sub(1),
+                rows: first.rows,
+            }],
+            match bar {
+                Bar::Added => Kind::Added.paints(),
+                Bar::Removed => Kind::Deleted.paints(),
+            },
+        ),
+        _ => (job.key.shape.slots.clone(), job.key.shape.kind.paints()),
+    };
+    for (&slot, &(side, paint)) in slots.iter().zip(paints) {
         let image = match side {
             Side::Old => old.as_ref(),
             Side::New => new.as_ref(),
@@ -1844,6 +1876,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         kitty,
         page_note: page,
         sizes: Vec::new(),
+        bar: alone,
     }
 }
 
@@ -2460,6 +2493,7 @@ mod tests {
             kitty: Vec::new(),
             page_note: None,
             sizes: Vec::new(),
+            bar: None,
         };
         assert_eq!(
             built(

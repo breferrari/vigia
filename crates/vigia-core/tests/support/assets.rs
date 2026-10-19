@@ -507,3 +507,29 @@ pub fn pdf_updated(base: &[u8], dict: &str, data: &[u8]) -> Vec<u8> {
     );
     out
 }
+
+/// An icon PDF whose cross-reference is a stream, compressed as `data`, as
+/// PDF 1.5 writes one: a reader decodes it before anything else.
+pub fn pdf_xref_stream(data: &[u8]) -> Vec<u8> {
+    let doc = pdf(&[(24, 24, &icon_ops(2))]);
+    // Everything before the table, which the stream takes the place of.
+    let body = &doc[..memchr_xref(&doc)];
+    let mut out = body.to_vec();
+    let offset = out.len();
+    out.extend(
+        format!(
+            "5 0 obj\n<< /Type /XRef /Size 6 /W [1 4 2] /Root 1 0 R /Filter /FlateDecode /Length {} >>\nstream\n",
+            data.len()
+        )
+        .as_bytes(),
+    );
+    out.extend_from_slice(data);
+    out.extend(format!("\nendstream\nendobj\nstartxref\n{offset}\n%%EOF\n").as_bytes());
+    out
+}
+
+fn memchr_xref(doc: &[u8]) -> usize {
+    doc.windows(5)
+        .rposition(|window| window == b"xref\n")
+        .expect("a cross-reference table")
+}

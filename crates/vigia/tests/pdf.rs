@@ -58,6 +58,8 @@ struct Drawn {
     said: Option<String>,
     /// Picture rows before the build, and after.
     rows: (usize, usize),
+    /// The bar the built picture draws in place of its shape's.
+    bar: Option<vigia::pictures::Bar>,
     /// The size line before the build, and whether the worker sized a side.
     first: Option<String>,
     learned: bool,
@@ -123,6 +125,7 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
                 panels: ready.as_ref().map_or(0, |ready| ready.0.panels.len()),
                 verdict: ready.as_ref().map(|ready| ready.0.verdict),
                 said: ready.as_ref().and_then(|ready| ready.0.suffix()),
+                bar: ready.as_ref().and_then(|ready| ready.0.bar),
                 rows: (before, after),
                 first: first_line.clone(),
                 learned,
@@ -252,6 +255,75 @@ fn pdf_metadata_only() {
     );
 }
 
+/// `doc` with the last `from` replaced by `to`. Its offsets go stale, which
+/// the reader repairs.
+fn swapped(doc: &[u8], from: &str, to: &str) -> Vec<u8> {
+    let at = doc
+        .windows(from.len())
+        .rposition(|window| window == from.as_bytes())
+        .expect("the text to replace");
+    [&doc[..at], to.as_bytes(), &doc[at + from.len()..]].concat()
+}
+
+#[test]
+fn pdf_first_page_unnamed() {
+    let drawn = drawn("pdf-first-page", Some(&twelve(1, 250)), &twelve(1, 30));
+    assert!(
+        drawn
+            .said
+            .as_deref()
+            .is_some_and(|said| !said.contains("page")),
+        "page 1 was named: {drawn:?}"
+    );
+}
+
+#[test]
+fn pdf_box_change_found() {
+    let ops = icon_ops(1);
+    let old = pdf(&[(24, 24, &ops), (24, 24, &ops)]);
+    let new = swapped(
+        &old,
+        "/MediaBox [0 0 24 24]",
+        "/MediaBox [0 0 24 24] /Rotate 90",
+    );
+    let drawn = drawn("pdf-box", Some(&old), &new);
+    assert!(
+        drawn
+            .said
+            .as_deref()
+            .is_some_and(|said| said.starts_with("page 2 of 2 · ")),
+        "{drawn:?}"
+    );
+}
+
+#[test]
+fn pdf_inherited_font_found() {
+    // The page tree holds the font, and the page holds no resources.
+    let doc = |font: &str| {
+        let label = label_pdf("Ag");
+        let label = swapped(
+            &label,
+            &format!("/Resources << {} >> ", support::HELVETICA),
+            "",
+        );
+        swapped(
+            &label,
+            "/Type /Pages ",
+            &format!(
+                "/Type /Pages /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /{font} >> >> >> "
+            ),
+        )
+    };
+    let drawn = drawn("pdf-inherited", Some(&doc("Helvetica")), &doc("Courier"));
+    assert!(
+        drawn
+            .said
+            .as_deref()
+            .is_some_and(|said| !said.contains("no page changed")),
+        "the font change went unseen: {drawn:?}"
+    );
+}
+
 #[test]
 fn pdf_other_aspect_rows() {
     // A portrait first page, and a landscape third page that changed.
@@ -378,8 +450,9 @@ fn pdf_flate_bomb_undecoded() {
     );
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
     if let (Some(before), Some(after)) = (before, resident()) {
+        // The worker's limit, 256 MiB, and what holding it costs.
         assert!(
-            after < before + 128,
+            after < before + 384,
             "memory went from {before} MiB to {after} MiB"
         );
     }
@@ -422,9 +495,9 @@ fn pdf_large_sized_on_worker() {
 }
 
 #[test]
-fn pdf_large_bomb_undecoded() {
-    // Past what the frame path reads, an object stream that inflates to a
-    // gigabyte: the worker measures it before it parses, and refuses it.
+fn pdf_unread_bomb_drawn() {
+    // Past what the frame path reads, an object that would inflate to a
+    // gigabyte and that nothing refers to: nothing decodes it.
     let before = resident();
     let mut object = format!(
         "<< /Type /ObjStm /N 1 /First 0 /Filter /FlateDecode /Length {} >>\nstream\n",
@@ -433,18 +506,95 @@ fn pdf_large_bomb_undecoded() {
     .into_bytes();
     object.extend_from_slice(&zlib_zeros(1 << 30));
     object.extend_from_slice(b"\nendstream");
-    let bomb = pdf_doc(&[(24, 24, &icon_ops(200))], "", 1, &[&object], "");
+    let doc = pdf_doc(&[(24, 24, &icon_ops(200))], "", 1, &[&object], "");
     assert!(
-        bomb.len() > 1 << 20,
-        "the bomb is small enough for the frame path"
+        doc.len() > 1 << 20,
+        "the file is small enough for the frame path"
     );
-    let drawn = drawn("pdf-large-bomb", Some(&icon_pdf(1)), &bomb);
-    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
-    assert!(!drawn.learned, "a side holding a bomb was sized");
+    let drawn = drawn("pdf-unread-bomb", Some(&icon_pdf(1)), &doc);
+    assert!(changed(drawn.verdict), "{drawn:?}");
     if let (Some(before), Some(after)) = (before, resident()) {
         assert!(
-            after < before + 128,
+            after < before + 64,
             "memory went from {before} MiB to {after} MiB"
         );
     }
+}
+
+#[test]
+fn pdf_content_bomb_undecoded() {
+    // A page whose content inflates to a gigabyte.
+    let before = resident();
+    let zeros = zlib_zeros(1 << 30);
+    let mut content = format!(
+        "<< /Filter /FlateDecode /Length {} >>\nstream\n",
+        zeros.len()
+    )
+    .into_bytes();
+    content.extend_from_slice(&zeros);
+    content.extend_from_slice(b"\nendstream");
+    let doc = pdf_doc(&[(24, 24, b"")], "", 1, &[&content], "").replace_contents("4 0 R", "5 0 R");
+    let drawn = drawn("pdf-content-bomb", Some(&icon_pdf(1)), &doc);
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
+    if let (Some(before), Some(after)) = (before, resident()) {
+        assert!(
+            after < before + 384,
+            "memory went from {before} MiB to {after} MiB"
+        );
+    }
+}
+
+/// Byte replacement in a generated PDF.
+trait Replace {
+    fn replace_contents(self, from: &str, to: &str) -> Vec<u8>;
+}
+
+impl Replace for Vec<u8> {
+    fn replace_contents(self, from: &str, to: &str) -> Vec<u8> {
+        let at = self
+            .windows(from.len())
+            .position(|window| window == from.as_bytes())
+            .expect("the text to replace");
+        [&self[..at], to.as_bytes(), &self[at + from.len()..]].concat()
+    }
+}
+
+#[test]
+fn pdf_page_appended() {
+    let ops = icon_ops(1);
+    let mut pages = vec![(24, 24, ops.as_slice()); 12];
+    let old = pdf(&pages);
+    let added = icon_ops(250);
+    pages.push((24, 24, added.as_slice()));
+    let drawn = drawn("pdf-appended", Some(&old), &pdf(&pages));
+    assert_eq!(
+        drawn.said.as_deref(),
+        Some("page 13 of 13 added · 12 → 13 pages"),
+        "{drawn:?}"
+    );
+    assert_eq!(
+        drawn.panels, 1,
+        "the added page is not drawn alone: {drawn:?}"
+    );
+    assert_eq!(drawn.bar, Some(vigia::pictures::Bar::Added), "{drawn:?}");
+}
+
+#[test]
+fn pdf_page_removed() {
+    let ops = icon_ops(1);
+    let gone = icon_ops(250);
+    let mut pages = vec![(24, 24, ops.as_slice()); 12];
+    let new = pdf(&pages);
+    pages.push((24, 24, gone.as_slice()));
+    let drawn = drawn("pdf-removed", Some(&pdf(&pages)), &new);
+    assert_eq!(
+        drawn.said.as_deref(),
+        Some("page 13 of 13 removed · 13 → 12 pages"),
+        "{drawn:?}"
+    );
+    assert_eq!(
+        drawn.panels, 1,
+        "the removed page is not drawn alone: {drawn:?}"
+    );
+    assert_eq!(drawn.bar, Some(vigia::pictures::Bar::Removed), "{drawn:?}");
 }

@@ -37,7 +37,6 @@ mod highlight;
 mod history;
 mod hunk;
 mod notes;
-mod pdf;
 mod picture;
 mod session;
 mod standing;
@@ -64,7 +63,6 @@ pub use notes::{
     First, LineRef, Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, first_of, key,
     names_a_record, resolve, run_of,
 };
-pub use pdf::{FRAME_BUDGET as PDF_FRAME_BUDGET, inflated_length, streams_fit};
 pub use picture::{Format, ImageSide, Picture, Source, Sources};
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};

@@ -5,7 +5,7 @@ mod support;
 
 use support::{
     Scratch, changes_sorted, icon_ops, icon_pdf, locked_pdf, open_locked_pdf, pdf, pdf_holding,
-    pdf_updated, pdf_with, zlib_zeros,
+    pdf_with, pdf_xref_stream, zlib_zeros,
 };
 use vigia_core::{FileDiff, Format};
 
@@ -200,17 +200,6 @@ impl ReplaceBytes for Vec<u8> {
     }
 }
 
-#[test]
-fn zlib_zeros_decode() {
-    for length in [1, 258, 259, 1_000, 100_000] {
-        assert_eq!(
-            vigia_core::inflated_length(&support::zlib_zeros(length), u64::MAX),
-            Some(length),
-            "{length} zeros"
-        );
-    }
-}
-
 /// This process's resident memory, in MiB, where `ps` can say.
 fn resident() -> Option<u64> {
     let out = std::process::Command::new("ps")
@@ -221,60 +210,31 @@ fn resident() -> Option<u64> {
     Some(kib / 1024)
 }
 
-/// A PDF whose one object holds a bomb behind `dict`, read on the frame
-/// path: it keeps `binary`, and memory stays where it was.
-fn bomb_refused(name: &str, bomb: &[u8]) {
-    let before = resident();
-    let diff = changed(name, &icon_pdf(1), bomb);
-    assert!(
-        diff.picture.is_none(),
-        "{name}: a PDF holding a bomb was sized"
-    );
-    if let (Some(before), Some(after)) = (before, resident()) {
-        assert!(
-            after < before + 128,
-            "{name}: memory went from {before} MiB to {after} MiB"
-        );
-    }
-}
-
 const GIB: u64 = 1024 * 1024 * 1024;
 
 #[test]
-fn pdf_object_stream_bomb() {
-    // Under the 1 MiB the frame path reads itself, and 140 MiB decoded.
+fn pdf_xref_stream_bomb() {
+    // A cross-reference stream a reader decodes while it loads the file,
+    // decoding to a gigabyte from under 1 MiB, past the frame path's limit.
     let zeros = zlib_zeros(140 << 20);
+    let bomb = pdf_xref_stream(&zeros);
     assert!(
-        zeros.len() < 1 << 20,
+        bomb.len() < 1 << 20,
         "the bomb is past what the frame reads"
     );
-    for (name, dict, eol) in [
-        (
-            "plain",
-            "/Type /ObjStm /N 1 /First 0 /Filter /FlateDecode",
-            &b"\n"[..],
-        ),
-        (
-            "escaped",
-            "/Type/Obj#53tm /N 1 /First 0 /Filter/FlateDecode",
-            b"\n",
-        ),
-        (
-            "commented",
-            "/Type % a note\n /ObjStm /N 1 /First 0 /Filter /FlateDecode",
-            b"\n",
-        ),
-        (
-            "carriage",
-            "/Type /ObjStm /N 1 /First 0 /Filter /FlateDecode",
-            b"\r",
-        ),
-        ("untyped", "/Filter /FlateDecode", b"\r\n"),
-    ] {
-        bomb_refused(&format!("pdf-bomb-{name}"), &pdf_holding(dict, eol, &zeros));
+    let before = resident();
+    let diff = changed("pdf-xref-bomb", &icon_pdf(1), &bomb);
+    assert!(
+        diff.picture.is_none(),
+        "a PDF whose index decodes past the limit was sized"
+    );
+    if let (Some(before), Some(after)) = (before, resident()) {
+        // The limit, 16 MiB, and what holding it costs.
+        assert!(
+            after < before + 64,
+            "memory went from {before} MiB to {after} MiB"
+        );
     }
-    let updated = pdf_updated(&icon_pdf(2), "/Type /XRef /Filter /FlateDecode", &zeros);
-    bomb_refused("pdf-bomb-update", &updated);
 }
 
 #[test]

@@ -1898,8 +1898,6 @@ checksum = "885c5ef0654933139a9b9546fc2c69e18d37f38aa2520f079092b1be18f1fcaa"
 [[package]]
 name = "hayro-syntax"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cdc818d8d265dcb42081d488f7599df4f73fb79e9d347ecedcd3c23809d2026"
 dependencies = [
  "flate2",
  "hayro-ccitt",
@@ -3722,12 +3720,10 @@ version = "1.1.0"
 dependencies = [
  "criterion",
  "fancy-regex 0.19.2",
- "flate2",
  "gix",
  "hayro-syntax",
  "image",
  "libc",
- "memchr",
  "notify",
  "svgtypes",
  "syntect",

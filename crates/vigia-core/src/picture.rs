@@ -113,6 +113,10 @@ pub struct Picture {
 /// is at its end, so it is read whole or not at all.
 pub(crate) const PDF_LIMIT: u64 = 16 * 1024 * 1024;
 
+/// The most stream data the frame path lets one PDF decode while it sizes
+/// it.
+const PDF_DECODED_HERE: u64 = 16 * 1024 * 1024;
+
 /// The largest PDF the frame path reads and sizes itself. A larger one is
 /// sized on the worker, and its line names only its bytes until then.
 pub(crate) const PDF_SIZED_HERE: u64 = 1024 * 1024;
@@ -156,10 +160,6 @@ pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
     if length > PDF_LIMIT || !pdf_headed(&bytes) {
         return None;
     }
-    // Before the parser, which decodes object and xref streams whole.
-    if !crate::pdf::streams_fit(&bytes, crate::pdf::FRAME_BUDGET) {
-        return None;
-    }
     // A document an agent wrote must not be able to close the pane.
     let (width, height) = crate::caught(|| pdf_size(bytes)).flatten()?;
     Some(ImageSide {
@@ -174,8 +174,12 @@ pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
 /// The first page's size in points, rounded up.
 fn pdf_size(bytes: Vec<u8>) -> Option<(u32, u32)> {
     crate::armed(crate::Stage::Header);
-    let pdf = hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).ok()?;
-    let (width, height) = pdf.pages().first()?.render_dimensions();
+    // Parsing decodes object and xref streams, each held whole.
+    let (width, height) = hayro_syntax::with_decode_limit(PDF_DECODED_HERE, || {
+        let pdf = hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).ok()?;
+        Some(pdf.pages().first()?.render_dimensions())
+    })
+    .ok()??;
     let side = |length: f32| (length.is_finite() && length > 0.0).then(|| length.ceil() as u32);
     Some((side(width)?, side(height)?))
 }
