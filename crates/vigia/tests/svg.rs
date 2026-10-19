@@ -426,3 +426,20 @@ fn svg_convolve_bounded() {
         "a 129x129 convolution was drawn"
     );
 }
+
+#[test]
+fn svg_masked_filters_refused() {
+    // The filtered copies are reached only through the mask.
+    let leaf = format!(
+        r#"{BLUR}<g id="l0" filter="url(#blur)"><rect width="2" height="2" fill="white"/></g>"#
+    );
+    let body = format!(
+        r##"{}<mask id="m"><use xlink:href="#l4"/></mask><rect width="8" height="8" mask="url(#m)"/>"##,
+        fanned(&leaf, 10, 4).replace(r##"<use xlink:href="#l4"/>"##, "")
+    );
+    assert_eq!(
+        verdict_of("svg-masked-filters", &body),
+        Some(Verdict::Undecoded),
+        "ten thousand filtered copies inside a mask were drawn"
+    );
+}
