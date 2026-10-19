@@ -77,23 +77,23 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 
 /// A file, a hunk, and one line of each kind, in a known order.
 fn three_kinds() -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        steps: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "src/a.rs".to_owned(),
@@ -117,13 +117,14 @@ fn three_kinds() -> View {
             line(LineKind::Removed, 2, "let c = 3;"),
             // Below the changed rows, and that placement is the whole reason it exists.
             line(LineKind::Context, 3, "let d = 4;"),
-        ],
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+        ];
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
@@ -589,23 +590,23 @@ fn graded_heat() -> View {
         added: 3,
         removed: 0,
     };
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        steps: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![Row::file(FileEntry {
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![Row::file(FileEntry {
             origin: Origin::Unstaged,
             path: "src/a.rs".to_owned(),
             from: None,
@@ -616,13 +617,14 @@ fn graded_heat() -> View {
             newest: false,
             heat,
             notes: FileNotes::default(),
-        })],
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+        })];
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
@@ -708,8 +710,9 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
 
 /// One file whose eight buckets climb, so every stop of the ramp is on one row.
 fn climbing() -> View {
-    View {
-        rows: vec![Row::file(FileEntry {
+    {
+        let mut view = View::default();
+        view.rows = vec![Row::file(FileEntry {
             origin: Origin::Unstaged,
             path: "src/a.rs".to_owned(),
             from: None,
@@ -722,12 +725,12 @@ fn climbing() -> View {
             newest: false,
             notes: FileNotes::default(),
             heat: [HeatBucket::default(); HEAT_BUCKETS],
-        })],
-        files: 1,
-        scale: Scale::spread(12),
-        gutter: None,
-        notes: Default::default(),
-        ..View::default()
+        })];
+        view.files = 1;
+        view.scale = Scale::spread(12);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 

@@ -46,8 +46,9 @@ fn row_allocations() {
         "",
     );
     let paint = |rows: u32| {
-        let view = View {
-            rows: (1..=rows)
+        let view = {
+            let mut view = View::default();
+            view.rows = (1..=rows)
                 .map(|number| Row::Line {
                     kind: LineKind::Added,
                     number,
@@ -55,9 +56,9 @@ fn row_allocations() {
                     spans: Vec::new(),
                     emph: Vec::new(),
                 })
-                .collect(),
-            files: 1,
-            ..View::default()
+                .collect();
+            view.files = 1;
+            view
         };
         let area = Rect::new(0, 0, 80, 60);
         let theme = Theme::default();

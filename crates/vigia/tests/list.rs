@@ -123,10 +123,11 @@ fn each_region_reports_its_own_bar_column() {
     // bar at all, so the two assertions above are about a drawn bar rather than
     // about a field that is always `Some`. The one row it claims is drawn, because
     // a bar is decided from the rows on screen against the total.
-    let bare = View {
-        rows: vec![Row::Gap],
-        total_rows: 1,
-        ..View::default()
+    let bare = {
+        let mut view = View::default();
+        view.rows = vec![Row::Gap];
+        view.total_rows = 1;
+        view
     };
     let none = regions(area, &chrome, &bare);
     assert_eq!(

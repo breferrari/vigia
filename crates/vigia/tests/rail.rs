@@ -120,47 +120,49 @@ const LONG: &str = "crates/vigia-core/src/engine/incremental/watch.rs";
 /// A screen with both regions carrying a file heading, which is the only screen
 /// this file is about.
 fn beside() -> View {
-    View {
-        list_span: 3,
-        grouped: false,
-        list: vec![
+    {
+        let mut view = View::default();
+        view.list_span = 3;
+        view.grouped = false;
+        view.list = vec![
             entry(LONG).into(),
             entry("Cargo.toml").into(),
             entry("src/main.rs").into(),
-        ],
-        list_top: 0,
-        files: 3,
-        top: Position {
+        ];
+        view.list_top = 0;
+        view.files = 3;
+        view.top = Position {
             file: 0,
             row: 0,
             under: 0,
-        },
-        rows: vec![
+        };
+        view.rows = vec![
             Row::file(entry(LONG)),
             Row::file(entry("Cargo.toml")),
             Row::file(entry("src/main.rs")),
-        ],
-        total_rows: 3,
-        rows_above: 0,
-        current_span: 3,
-        ..View::default()
+        ];
+        view.total_rows = 3;
+        view.rows_above = 0;
+        view.current_span = 3;
+        view
     }
 }
 
 /// The same screen with no pinned entries, so no rail can be drawn whatever the
 /// pane is wide enough for.
 fn streamed() -> View {
-    View {
-        list_span: 0,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        top: Position {
+    {
+        let mut view = beside();
+        view.list_span = 0;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.top = Position {
             file: 0,
             row: 0,
             under: 0,
-        },
-        ..beside()
+        };
+        view
     }
 }
 
