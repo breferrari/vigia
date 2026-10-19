@@ -369,8 +369,7 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             if waited == 0 {
                 continue;
             }
-            // `POLLNVAL` from `/dev/tty` on macOS, or a hangup: nothing will
-            // come, and a read would wait for a key.
+            // `POLLNVAL` or a hangup: a read would wait for a key.
             if !fds[0].revents().contains(rustix::event::PollFlags::IN) {
                 return Some(());
             }

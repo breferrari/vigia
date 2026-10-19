@@ -2,10 +2,11 @@
 //! halfway. `SPEC.md` §11.1.
 #![cfg(unix)]
 
+#[path = "pty/mod.rs"]
+mod pty;
+
 use std::io::{Read, Write};
-use std::os::fd::{FromRawFd, OwnedFd};
-use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// Set in the child this test starts inside a fresh terminal.
@@ -56,7 +57,7 @@ fn answered_ask() {
     });
     assert_typed(&text);
     assert!(
-        asked_line(&text).contains("]11;rgb:"),
+        pty::asked_line(&text).contains("]11;rgb:"),
         "the answer was not read: {text}"
     );
 }
@@ -102,126 +103,30 @@ fn assert_typed(text: &str) {
 }
 
 fn assert_within(text: &str, bound: Duration) {
-    let line = asked_line(text);
-    let waited: f64 = line
-        .split("asked ")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|w| w.parse().ok())
-        .unwrap_or(f64::MAX);
+    let waited = pty::waited_ms(text);
     assert!(
         waited < (bound + SLACK).as_secs_f64() * 1000.0,
-        "the query waited {waited}ms, past its {bound:?}: {line}"
+        "the query waited {waited}ms, past its {bound:?}: {}",
+        pty::asked_line(text)
     );
 }
 
-fn asked_line(text: &str) -> &str {
-    text.lines()
-        .find(|line| line.contains("asked "))
-        .unwrap_or_else(|| panic!("the child never finished asking: {text}"))
-}
-
-/// Run the child in a fresh terminal behaving as `ask` says, then type a byte;
-/// everything the terminal showed.
+/// Run the child in a fresh terminal behaving as `ask` says.
 fn asked(ask: Ask) -> String {
-    let (mut master, slave) = {
-        let (mut master, mut slave) = (0, 0);
-        // SAFETY: both out-pointers are valid; the rest may be null.
-        let opened = unsafe {
-            libc::openpty(
-                &mut master,
-                &mut slave,
-                std::ptr::null_mut(),
-                // `*const` on Linux and `*mut` on macOS.
-                std::ptr::null_mut::<libc::termios>() as _,
-                std::ptr::null_mut::<libc::winsize>() as _,
-            )
-        };
-        assert_eq!(opened, 0, "openpty failed");
-        // SAFETY: openpty handed back two open descriptors this test owns.
-        unsafe {
-            (
-                std::fs::File::from(OwnedFd::from_raw_fd(master)),
-                OwnedFd::from_raw_fd(slave),
-            )
-        }
-    };
     let mut child = Command::new(std::env::current_exe().expect("this test"));
     child
         .args(["--exact", "ask_child", "--nocapture", "--test-threads=1"])
-        .env(CHILD, "1")
-        .stdout(Stdio::from(slave.try_clone().expect("dup")))
-        .stderr(Stdio::null());
+        .env(CHILD, "1");
     if ask.palette {
         child.env(PALETTE, "1");
     }
-    if ask.piped {
-        child.stdin(Stdio::null());
-    } else {
-        child.stdin(Stdio::from(slave.try_clone().expect("dup")));
-    }
-    // SAFETY: only async-signal-safe calls between fork and exec. The terminal
-    // is taken through stdout, which is it in every case here.
-    unsafe {
-        child.pre_exec(|| {
-            if libc::setsid() < 0 || libc::ioctl(1, libc::TIOCSCTTY as _, 0) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let _running = Reaped(child.spawn().expect("spawn the child"));
-    drop(slave);
-
-    let mut seen = Vec::new();
-    if let Some(answer) = ask.answer {
-        read_until(&mut master, &mut seen, "]11;?", Duration::from_secs(20));
-        master.write_all(answer).expect("answer the query");
-    }
-    read_until(&mut master, &mut seen, "asked ", Duration::from_secs(20));
-    read_until(&mut master, &mut seen, "\n", Duration::from_secs(5));
-    // The child reads its terminal in line mode, so the byte needs its line.
-    master.write_all(b"z\n").expect("type a byte");
-    read_until(&mut master, &mut seen, "got z", Duration::from_secs(10));
-    String::from_utf8_lossy(&seen).into_owned()
-}
-
-/// A child that is killed and reaped when the test is done with it, failed or
-/// not: one blocked on its terminal never exits by itself.
-struct Reaped(std::process::Child);
-
-impl Drop for Reaped {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-/// Read the terminal into `seen` until it holds `needle`, failing after `limit`.
-fn read_until(master: &mut std::fs::File, seen: &mut Vec<u8>, needle: &str, limit: Duration) {
-    use std::os::fd::AsRawFd;
-    let deadline = Instant::now() + limit;
-    while !String::from_utf8_lossy(seen).contains(needle) {
-        let left = deadline.saturating_duration_since(Instant::now());
-        assert!(
-            !left.is_zero(),
-            "no {needle:?} from the child: {}",
-            String::from_utf8_lossy(seen)
-        );
-        let mut fds = libc::pollfd {
-            fd: master.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: one valid pollfd.
-        let ready = unsafe { libc::poll(&mut fds, 1, left.as_millis() as libc::c_int) };
-        if ready <= 0 {
-            continue;
-        }
-        let mut buffer = [0u8; 4096];
-        match master.read(&mut buffer) {
-            Ok(0) | Err(_) => break,
-            Ok(read) => seen.extend_from_slice(&buffer[..read]),
-        }
-    }
+    pty::run(
+        child,
+        pty::Script {
+            marker: "]11;?",
+            answer: ask.answer,
+            late: Duration::ZERO,
+            piped: ask.piped,
+        },
+    )
 }
